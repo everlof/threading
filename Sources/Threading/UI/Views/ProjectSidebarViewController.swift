@@ -60,6 +60,16 @@ final class ProjectSidebarViewController: NSViewController {
     /// without reading or mutating the user's projects.
     let projectStore: ProjectStore
 
+    /// Whether the first tree waits for its host to finish establishing window geometry.
+    ///
+    /// `MainWindowController` attaches native chrome and restores the saved frame before the
+    /// window can be shown. Mounting cells while those transient sizes pass through AppKit made
+    /// the same visible rows lay out once under toolbar installation and again at their final
+    /// width. Standalone sidebars keep the ordinary eager behavior; the main window explicitly
+    /// crosses this boundary after its final frame is in force.
+    private let defersInitialTreeMount: Bool
+    private var hasMountedInitialTree = false
+
     /// Retained so settings mode can mark it as the open page.
     private lazy var settingsButton: ThemedButton = {
         let button = ThemedButton()
@@ -227,8 +237,12 @@ final class ProjectSidebarViewController: NSViewController {
 
     // MARK: - Lifecycle
 
-    init(projectStore: ProjectStore = .shared) {
+    init(
+        projectStore: ProjectStore = .shared,
+        defersInitialTreeMount: Bool = false
+    ) {
         self.projectStore = projectStore
+        self.defersInitialTreeMount = defersInitialTreeMount
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -251,7 +265,9 @@ final class ProjectSidebarViewController: NSViewController {
         setupEmptyState()
         observeStoreChanges()
         applySidebarSurface()
-        reload()
+        if !defersInitialTreeMount {
+            mountInitialTreeIfNeeded()
+        }
         // Selection is restored by the window controller once the terminal pane exists.
     }
 
@@ -448,6 +464,16 @@ private extension ProjectSidebarViewController {
 // MARK: - Public Methods
 
 extension ProjectSidebarViewController {
+
+    /// Installs the persisted tree exactly once, after a host that requested deferral has put
+    /// its permanent geometry in force. Idempotence lets a host state the lifecycle point
+    /// directly without coupling it to whether AppKit happened to load the view earlier.
+    func mountInitialTreeIfNeeded() {
+        _ = view
+        guard !hasMountedInitialTree else { return }
+        hasMountedInitialTree = true
+        reload()
+    }
 
     /// Shows a receipt for something the list just did, with the way back on it.
     ///
@@ -993,6 +1019,8 @@ extension ProjectSidebarViewController {
     /// Aggregate outline state used by the deterministic sidebar workload. Keeping this seam
     /// here lets the test use the production data source, delegate, row reuse and layout path
     /// without exposing the outline view itself.
+    var initialTreeIsMounted: Bool { hasMountedInitialTree }
+
     var outlineRowCount: Int { outlineView.numberOfRows }
 
     var instantiatedRowCount: Int {

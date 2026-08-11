@@ -246,6 +246,22 @@ final class SQLiteDatabase {
             return String(cString: pointer)
         }
 
+        /// Returns a column's bytes without first materializing a Swift `String`.
+        ///
+        /// JSON payloads are stored in SQLite `TEXT` columns, but `JSONDecoder` consumes `Data`.
+        /// Reading them through `text(_:)` therefore copied the payload into a `String` and then
+        /// copied it again through UTF-8 on every launch. SQLite permits `sqlite3_column_blob` for
+        /// a text value and returns the same database-encoded bytes, which lets the caller make the
+        /// one owned copy it actually needs. Checking the type first preserves the distinction
+        /// between SQL `NULL` and an empty string; both otherwise expose a nil byte pointer.
+        func data(_ column: Int32) -> Data? {
+            guard sqlite3_column_type(activeHandle, column) != SQLITE_NULL else { return nil }
+            let count = Int(sqlite3_column_bytes(activeHandle, column))
+            guard count > 0 else { return Data() }
+            guard let pointer = sqlite3_column_blob(activeHandle, column) else { return Data() }
+            return Data(bytes: pointer, count: count)
+        }
+
         func int(_ column: Int32) -> Int {
             Int(sqlite3_column_int64(activeHandle, column))
         }

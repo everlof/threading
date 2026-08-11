@@ -23,6 +23,25 @@ final class ComposerHandoffTests: XCTestCase {
         super.tearDown()
     }
 
+    /// The first pane is a placeholder while a stored selection is restored. Hooking up the
+    /// coordinator must not construct the complete hidden composer behind that placeholder.
+    func testContainerDefersTheComposerUntilAComposerRouteRequestsIt() {
+        var constructionCount = 0
+        let container = TerminalContainerViewController(
+            recovery: false,
+            sessionComposerFactory: {
+                constructionCount += 1
+                return SessionComposerViewController(customizationLookup: { _ in .empty })
+            }
+        )
+
+        XCTAssertEqual(constructionCount, 0)
+        _ = container.composerViewController
+        XCTAssertEqual(constructionCount, 1)
+        _ = container.composerViewController
+        XCTAssertEqual(constructionCount, 1, "the requested composer was rebuilt")
+    }
+
     // MARK: - The Animator
 
     /// Reduce Motion collapses the token to zero, and the honest reduced form of a move is the

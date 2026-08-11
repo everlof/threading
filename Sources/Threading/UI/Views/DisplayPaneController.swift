@@ -96,13 +96,11 @@ final class DisplayPaneController: NSViewController {
     return bar
   }()
   private lazy var imageView = ThemedImagePreview()
-  private lazy var webView: WKWebView = {
-    let webView = WKWebView()
-    webView.translatesAutoresizingMaskIntoConstraints = false
-    webView.navigationDelegate = self
-    webView.underPageBackgroundColor = Design.Surface.ground
-    return webView
-  }()
+  /// The document renderer exists only after an HTML tab is actually shown. Constructing a
+  /// `WKWebView` launches WebKit services; doing that from `viewDidLoad` made the first reveal of
+  /// an empty pane pay ~46 ms for a renderer and a blank page it did not use.
+  private var documentWebView: WKWebView?
+  private var documentWebViewHasContent = false
   private lazy var hostedView: NSView = {
     let hosted = NSView()
     hosted.translatesAutoresizingMaskIntoConstraints = false
@@ -489,7 +487,6 @@ final class DisplayPaneController: NSViewController {
     // `.fittingSizeCompression` they truncate instead of pushing, and the panel goes on
     // costing the window its own chrome and nothing else.
     view.addSubview(imageView)
-    view.addSubview(webView)
     view.addSubview(captionLabel)
     view.addSubview(contentMenuButton)
     view.addSubview(placeholderLabel)
@@ -577,13 +574,6 @@ final class DisplayPaneController: NSViewController {
       imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: padding),
       imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -padding),
       imageView.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -padding),
-
-      // The web view occupies the same region, minus the padding: an HTML document
-      // brings its own margins and inset it twice looks like a mistake.
-      webView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
-      webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      webView.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -padding),
 
       // A live surface fills the whole content region, over the caption footer, since it
       // carries its own chrome and needs no caption beneath it.
@@ -1855,11 +1845,13 @@ final class DisplayPaneController: NSViewController {
         imageView.image = image
         imageView.fileURL = url
         imageView.isHidden = false
-        webView.isHidden = true
+        hideHTML()
       case .html(let html):
         imageView.image = nil
         imageView.isHidden = true
+        let webView = installDocumentWebViewIfNeeded()
         webView.isHidden = false
+        documentWebViewHasContent = true
         webView.loadHTMLString(Self.themed(html), baseURL: nil)
       case .chart(let spec):
         // The chart draws its own caption, so the panel's is stood down — but the content menu
@@ -2032,8 +2024,36 @@ final class DisplayPaneController: NSViewController {
   /// Hides the shared web view and drops its page, so a switched-away document is not still
   /// running its timers and animations behind the tab now on screen.
   private func hideHTML() {
-    webView.isHidden = true
-    webView.loadHTMLString("", baseURL: nil)
+    guard let documentWebView else { return }
+    documentWebView.isHidden = true
+    guard documentWebViewHasContent else { return }
+    documentWebViewHasContent = false
+    documentWebView.loadHTMLString("", baseURL: nil)
+  }
+
+  /// Installs the one shared HTML renderer at the same z-position and geometry the former eager
+  /// child occupied. A document brings its own margins, so unlike the image preview it reaches
+  /// the pane edges; the caption footer remains below it.
+  private func installDocumentWebViewIfNeeded() -> WKWebView {
+    if let documentWebView { return documentWebView }
+
+    let webView = WKWebView()
+    webView.translatesAutoresizingMaskIntoConstraints = false
+    webView.navigationDelegate = self
+    webView.underPageBackgroundColor = Design.Surface.ground
+    view.addSubview(webView, positioned: .below, relativeTo: hostedView)
+
+    NSLayoutConstraint.activate([
+      webView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
+      webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      webView.bottomAnchor.constraint(
+        equalTo: captionLabel.topAnchor,
+        constant: -DisplayPaneDefaults.padding
+      ),
+    ])
+    documentWebView = webView
+    return webView
   }
 
   /// Parents (or clears) a live tab's view controller into the host, reusing the installed one

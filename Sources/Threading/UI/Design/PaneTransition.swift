@@ -16,6 +16,16 @@ import AppKit
 @MainActor
 enum PaneTransition {
 
+#if DEBUG
+    struct SynchronousPhaseDurations {
+        var changesNanoseconds: UInt64 = 0
+        var layoutNanoseconds: UInt64 = 0
+        var animationGroupNanoseconds: UInt64 = 0
+    }
+
+    private(set) static var lastSynchronousPhaseDurations = SynchronousPhaseDurations()
+#endif
+
     /// How far past its floor a divider must be pushed before the pane shuts instead of
     /// stopping dead.
     ///
@@ -62,14 +72,36 @@ enum PaneTransition {
         changes: () -> Void,
         completion: (@MainActor @Sendable () -> Void)? = nil
     ) {
+#if DEBUG
+        let runStarted = DispatchTime.now().uptimeNanoseconds
+        var changesNanoseconds: UInt64 = 0
+        var layoutNanoseconds: UInt64 = 0
+#endif
         guard animated, view.window?.isVisible == true else {
             // Still a group, so a caller's `animator()` proxy applies its change immediately
             // instead of reaching for AppKit's default quarter second.
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = Design.Motion.immediate
+#if DEBUG
+                let changesStarted = DispatchTime.now().uptimeNanoseconds
+#endif
                 changes()
+#if DEBUG
+                changesNanoseconds = DispatchTime.now().uptimeNanoseconds - changesStarted
+                let layoutStarted = DispatchTime.now().uptimeNanoseconds
+#endif
                 view.layoutSubtreeIfNeeded()
+#if DEBUG
+                layoutNanoseconds = DispatchTime.now().uptimeNanoseconds - layoutStarted
+#endif
             }
+#if DEBUG
+            lastSynchronousPhaseDurations = SynchronousPhaseDurations(
+                changesNanoseconds: changesNanoseconds,
+                layoutNanoseconds: layoutNanoseconds,
+                animationGroupNanoseconds: DispatchTime.now().uptimeNanoseconds - runStarted
+            )
+#endif
             if let completion { settle(completion) }
             return
         }
@@ -78,11 +110,28 @@ enum PaneTransition {
             context.duration = Design.Motion.standard
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             context.allowsImplicitAnimation = true
+#if DEBUG
+            let changesStarted = DispatchTime.now().uptimeNanoseconds
+#endif
             changes()
+#if DEBUG
+            changesNanoseconds = DispatchTime.now().uptimeNanoseconds - changesStarted
+            let layoutStarted = DispatchTime.now().uptimeNanoseconds
+#endif
             view.layoutSubtreeIfNeeded()
+#if DEBUG
+            layoutNanoseconds = DispatchTime.now().uptimeNanoseconds - layoutStarted
+#endif
         }, completionHandler: completion.map { completion in
             { @Sendable in settle(completion) }
         })
+#if DEBUG
+        lastSynchronousPhaseDurations = SynchronousPhaseDurations(
+            changesNanoseconds: changesNanoseconds,
+            layoutNanoseconds: layoutNanoseconds,
+            animationGroupNanoseconds: DispatchTime.now().uptimeNanoseconds - runStarted
+        )
+#endif
     }
 
     /// The deferred turn, through the main *queue* rather than a main-actor `Task`. AppKit

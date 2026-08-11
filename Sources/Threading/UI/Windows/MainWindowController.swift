@@ -5,11 +5,21 @@ import ThreadingRemoteKit
 /// The application's single window: a project sidebar beside the active session's terminal.
 final class MainWindowController: ThemedWindowController, RemoteWorkspaceProviding {
 
+#if DEBUG
+    struct DisplayPaneRequestPhaseDurations {
+        var preparationNanoseconds: UInt64 = 0
+        var collapseNanoseconds: UInt64 = 0
+        var toolbarNanoseconds: UInt64 = 0
+    }
+#endif
+
     // MARK: - Properties
 
     /// Not private: the toolbar delegate needs the split view for its tracking separator.
     private(set) lazy var splitViewController = SidebarSplitViewController()
-    private lazy var sidebarViewController = ProjectSidebarViewController()
+    private lazy var sidebarViewController = ProjectSidebarViewController(
+        defersInitialTreeMount: true
+    )
     private lazy var workspaceSidebarViewController = WorkspaceSidebarContainerViewController(
         nativeController: sidebarViewController,
         routing: ExtensionManager.shared,
@@ -135,6 +145,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Store-change observations, released with the window.
     private let appEvents = AppEventObservations()
     private var lastBlockedInputToastAt = Date.distantPast
+#if DEBUG
+    private(set) var lastDisplayPaneRequestPhaseDurations = DisplayPaneRequestPhaseDurations()
+#endif
 
     /// Paces the startup relaunch of the sessions that were running at the last quit.
     /// Retained for the stagger's duration; it retires its own timer when the plan is spent.
@@ -225,6 +238,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     var effectiveWorkspaceNavigatorSelection: WorkspaceNavigatorSelection {
         workspaceSidebarViewController.effectiveSelection
+    }
+
+    /// The startup lifecycle seam, exposed beside the sidebar's other aggregate test state so
+    /// a regression cannot silently move viewport construction back ahead of divider restore.
+    var initialSidebarTreeIsMounted: Bool {
+        sidebarViewController.initialTreeIsMounted
     }
 
 
@@ -446,7 +465,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         containerViewController.delegate = self
 
-        containerViewController.composerViewController.delegate = sessionCoordinator
+        containerViewController.composerDelegate = sessionCoordinator
         pageTabView.onClose = { [weak self] in self?.closeActivePageTab() }
         pageTabView.onSelect = { [weak self] in self?.revealActivePageInSidebar() }
         // The header shows exactly one page, and it is always the current one.
@@ -503,13 +522,17 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
 
         // The toolbar was installed a moment ago and has not laid its items out yet, so the
-        // sidebar's floor is claimed on the next turn of the run loop — before the window is on
-        // screen, and well before a divider can be dragged. The stored width follows in the same
-        // turn, once there is a floor for it to be clamped against.
+        // sidebar's floor is claimed on the next turn of the run loop — before the first display
+        // cycle, and well before a divider can be dragged. The stored width follows in the same
+        // turn, once there is a floor for it to be clamped against. Only then can the sidebar
+        // mount its persisted tree: doing that after the window frame but before this width
+        // restoration laid out every visible row at the default divider and immediately laid it
+        // out again at the user's divider.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.updateSidebarMinimumThickness()
             self.restoreSidebarWidth()
+            self.sidebarViewController.mountInitialTreeIfNeeded()
         }
     }
 
@@ -978,6 +1001,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         _ visible: Bool,
         animated: Bool = true
     ) {
+#if DEBUG
+        let requestStarted = DispatchTime.now().uptimeNanoseconds
+#endif
         if !visible {
             displayPaneController.hideCurrentTheme()
         }
@@ -985,25 +1011,37 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return
         }
 
-        // A split-view animation otherwise turns every intermediate terminal width into an
-        // emulator reflow, PTY resize, SIGWINCH, and full-screen Codex/Claude repaint. Keep the
-        // current grid for the 200 ms motion and commit the stable width once at its completion.
-        // Immediate/offscreen routes already make one grid change and need no hold.
-        let terminal = animated && Design.Motion.standard > 0 && splitView.window?.isVisible == true
-            ? containerViewController.activeTerminalSession?.terminalView
-            : nil
-        terminal?.beginDeferringFrameGridChanges()
+        // AppKit's implicit split animation synchronously commits the window's whole backing
+        // layer tree before its first frame. Beside a live TUI that means repainting SwiftTerm,
+        // laying out every intermediate width, and provoking SIGWINCH-driven Codex/Claude
+        // redraws for motion whose only useful result is the final divider position. Measured
+        // cold on the CLI fixture: ~297 ms animated versus ~111 ms at one stable width. Native
+        // conversation surfaces keep the standard pane motion; a terminal commits once.
+        let activeTerminal = containerViewController.activeTerminalSession?.terminalView
+        let animatesGeometry = animated && activeTerminal == nil
 
         guard visible else {
+#if DEBUG
+            let collapseStarted = DispatchTime.now().uptimeNanoseconds
+#endif
             splitViewController.setCollapsed(
                 true,
                 on: displayItem,
-                animated: animated,
-                completion: {
-                    terminal?.endDeferringFrameGridChanges()
-                }
+                animated: animatesGeometry,
+                completion: nil
             )
+#if DEBUG
+            let collapseEnded = DispatchTime.now().uptimeNanoseconds
+#endif
             updateToolbarControlStates()
+#if DEBUG
+            let toolbarEnded = DispatchTime.now().uptimeNanoseconds
+            lastDisplayPaneRequestPhaseDurations = DisplayPaneRequestPhaseDurations(
+                preparationNanoseconds: collapseStarted - requestStarted,
+                collapseNanoseconds: collapseEnded - collapseStarted,
+                toolbarNanoseconds: toolbarEnded - collapseEnded
+            )
+#endif
             return
         }
 
@@ -1014,23 +1052,22 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // therefore still the full content width.
         let target = DisplayPaneWidth.opening(in: splitView.bounds.width)
         isRestoringDisplayPaneWidth = true
+#if DEBUG
+        let collapseStarted = DispatchTime.now().uptimeNanoseconds
+#endif
         splitViewController.setCollapsed(
             false,
             on: displayItem,
-            animated: animated,
+            animated: animatesGeometry,
             geometryChanges: { [weak self] in
                 self?.applyDisplayPaneWidth(target)
             }
         ) { [weak self] in
-            guard let self else {
-                terminal?.endDeferringFrameGridChanges()
-                return
-            }
+            guard let self else { return }
             guard !self.displayItem.isCollapsed else {
                 // Closed again mid-reveal: there is no width to restore, and the flag must not
                 // outlive the reveal it was guarding or no width is ever recorded again.
                 self.isRestoringDisplayPaneWidth = false
-                terminal?.endDeferringFrameGridChanges()
                 return
             }
 
@@ -1038,9 +1075,19 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             // group, so there is one motion from shut to target rather than a reveal to the
             // chrome floor followed by a second 200 ms width restoration.
             self.isRestoringDisplayPaneWidth = false
-            terminal?.endDeferringFrameGridChanges()
         }
+#if DEBUG
+        let collapseEnded = DispatchTime.now().uptimeNanoseconds
+#endif
         updateToolbarControlStates()
+#if DEBUG
+        let toolbarEnded = DispatchTime.now().uptimeNanoseconds
+        lastDisplayPaneRequestPhaseDurations = DisplayPaneRequestPhaseDurations(
+            preparationNanoseconds: collapseStarted - requestStarted,
+            collapseNanoseconds: collapseEnded - collapseStarted,
+            toolbarNanoseconds: toolbarEnded - collapseEnded
+        )
+#endif
     }
 
     /// Opens the panel at the width it was last left at.

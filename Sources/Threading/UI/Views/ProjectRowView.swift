@@ -76,13 +76,15 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         symbolName: SidebarRowDefaults.createSymbol,
         accessibility: L10n.string("New chat"),
         target: .inline,
-        inkSource: .chrome
+        inkSource: .chrome,
+        glyphMaterialization: .deferred
     )
     private let hoverButton = ThemedIconButton(
         symbolName: SidebarRowDefaults.actionSymbol,
         accessibility: L10n.string("Project actions"),
         target: .inline,
-        inkSource: .chrome
+        inkSource: .chrome,
+        glyphMaterialization: .deferred
     )
     private let hoverControls = NSStackView()
     private var trailingWidthConstraint: NSLayoutConstraint?
@@ -720,6 +722,11 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// visibility, and both permanently installed, so hovering never re-lays out the row.
     private func setHoverButtonVisible(_ visible: Bool, animated: Bool) {
         guard showsHoverButton else { return }
+
+        if visible {
+            if !createButton.isHidden { createButton.materializeGlyphIfNeeded() }
+            if !hoverButton.isHidden { hoverButton.materializeGlyphIfNeeded() }
+        }
 
         guard animated else {
             hoverControls.alphaValue = visible ? 1 : 0

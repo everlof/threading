@@ -3,6 +3,54 @@ import SwiftTerm
 import ThreadingExtensionKit
 import ThreadingRemoteKit
 
+/// Opt-in phase clock for the noninteractive cold-launch capture.
+///
+/// Kept outside `PerformanceRecorder`: the first timestamp is taken before `NSApplication`
+/// exists, while the recorder's always-on `app.launch` span remains the semantic interval that
+/// Instruments correlates after the delegate begins.
+private struct StartupProfileMeasurement: Sendable {
+    let processMainEntryNanoseconds: UInt64
+    let delegateEntryNanoseconds: UInt64
+    var stateReadyNanoseconds: UInt64 = 0
+    var preAppearanceReadyNanoseconds: UInt64 = 0
+    var appearanceReadyNanoseconds: UInt64 = 0
+    var menuReadyNanoseconds: UInt64 = 0
+    var windowConstructedNanoseconds: UInt64 = 0
+    var windowOrderedNanoseconds: UInt64 = 0
+
+    func writeResult(
+        firstReadyTurnNanoseconds: UInt64,
+        mode: String,
+        projectCount: Int,
+        sessionCount: Int
+    ) {
+#if DEBUG
+        let configuration = "debug"
+#else
+        let configuration = "release"
+#endif
+        let line = "THREADING_PERF app-startup "
+            + "configuration=\(configuration) mode=\(mode) "
+            + "projects=\(projectCount) sessions=\(sessionCount) "
+            + "main_to_delegate_ms=\(milliseconds(processMainEntryNanoseconds, delegateEntryNanoseconds)) "
+            + "state_ms=\(milliseconds(delegateEntryNanoseconds, stateReadyNanoseconds)) "
+            + "preappearance_ms=\(milliseconds(stateReadyNanoseconds, preAppearanceReadyNanoseconds)) "
+            + "appearance_ms=\(milliseconds(preAppearanceReadyNanoseconds, appearanceReadyNanoseconds)) "
+            + "menu_ms=\(milliseconds(appearanceReadyNanoseconds, menuReadyNanoseconds)) "
+            + "window_construct_ms=\(milliseconds(menuReadyNanoseconds, windowConstructedNanoseconds)) "
+            + "window_order_ms=\(milliseconds(windowConstructedNanoseconds, windowOrderedNanoseconds)) "
+            + "first_turn_ms=\(milliseconds(windowOrderedNanoseconds, firstReadyTurnNanoseconds)) "
+            + "delegate_to_ready_ms=\(milliseconds(delegateEntryNanoseconds, firstReadyTurnNanoseconds)) "
+            + "total_ms=\(milliseconds(processMainEntryNanoseconds, firstReadyTurnNanoseconds))\n"
+        try? FileHandle.standardOutput.write(contentsOf: Data(line.utf8))
+    }
+
+    private func milliseconds(_ start: UInt64, _ end: UInt64) -> String {
+        let elapsed = end >= start ? end - start : 0
+        return String(format: "%.3f", Double(elapsed) / 1_000_000)
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
 
@@ -10,6 +58,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     static var shared: AppDelegate? {
         NSApp.delegate as? AppDelegate
+    }
+
+    private let processMainEntryNanoseconds: UInt64
+    private var runsStartupProfile = false
+
+    override init() {
+        processMainEntryNanoseconds = DispatchTime.now().uptimeNanoseconds
+        super.init()
+    }
+
+    init(processMainEntryNanoseconds: UInt64) {
+        self.processMainEntryNanoseconds = processMainEntryNanoseconds
+        super.init()
     }
 
     // MARK: - Properties
@@ -111,6 +172,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // startup then: the tests exercise types directly and must not spawn agents, start the MCP
         // server, or touch the user's stores.
         if NSClassFromString("XCTestCase") != nil { return }
+
+        var startupProfile = ProcessInfo.processInfo.environment["THREADING_STARTUP_PROFILE"] == "1"
+            ? StartupProfileMeasurement(
+                processMainEntryNanoseconds: processMainEntryNanoseconds,
+                delegateEntryNanoseconds: DispatchTime.now().uptimeNanoseconds
+            )
+            : nil
+        runsStartupProfile = startupProfile != nil
 
         configureSwiftTermDiagnostics()
 
@@ -216,6 +285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 ? StartupCheckpointDefaults.migrationRan
                 : StartupCheckpointDefaults.migrationSkippedInRecovery
         ])
+        startupProfile?.stateReadyNanoseconds = DispatchTime.now().uptimeNanoseconds
 
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.willPowerOffNotification,
@@ -247,6 +317,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // bail-out and the single-instance lock, and a launch that owns neither must not signal
         // processes another one is using.
         OrphanedAgentChildSweep.run()
+        startupProfile?.preAppearanceReadyNanoseconds = DispatchTime.now().uptimeNanoseconds
 
         // Before the first window is built, so everything is created already themed and nothing
         // has to be repainted at launch. `AppThemeRefresh` exists for the *later* changes.
@@ -272,8 +343,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // After the restore, so the first Dock tile is the theme the user actually launched
         // into rather than System's for one frame.
         AppIconPresenter.install()
+        startupProfile?.appearanceReadyNanoseconds = DispatchTime.now().uptimeNanoseconds
 
         setupMenuBar()
+        startupProfile?.menuReadyNanoseconds = DispatchTime.now().uptimeNanoseconds
 
         // Optional MCP systems are installed at the composition root. The MCP server itself
         // knows only its replaceable provider seam and works unchanged when this remains nil —
@@ -289,6 +362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let mainWindowController = MainWindowController()
         self.mainWindowController = mainWindowController
         LaunchLedger.shared.record(.mainWindowConstructed)
+        startupProfile?.windowConstructedNanoseconds = DispatchTime.now().uptimeNanoseconds
         // The bridge's only client is the remote server, which recovery never starts, and it is
         // the seam a phone drives this window through.
         if plan.startsBackgroundServices {
@@ -309,11 +383,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         } else {
             mainWindowController.showWindow(nil)
         }
+        startupProfile?.windowOrderedNanoseconds = DispatchTime.now().uptimeNanoseconds
         noteFirstWindowVisible(armsStability: plan.armsStabilityCheckpoint)
         if plan.isRecovery {
             presentRecoveryMode(on: mainWindowController)
         }
         MainThreadStallMonitor.shared.start()
+
+        // A command-line startup capture measures the normal path through the first usable
+        // window, then stops before session restoration, extension processes, polling and other
+        // post-visible services can mutate the workspace or keep the fixture alive. The next
+        // main-queue turn is the same readiness proof the launch ledger uses above. Terminating
+        // through AppKit records a clean launch; it does not leave a crash marker behind.
+        if let startupProfile {
+            let projects = ProjectStore.shared.projects
+            let projectCount = projects.count
+            let sessionCount = projects.reduce(0) { $0 + $1.sessions.count }
+            DispatchQueue.main.async {
+                startupProfile.writeResult(
+                    firstReadyTurnNanoseconds: DispatchTime.now().uptimeNanoseconds,
+                    mode: plan.isRecovery ? "recovery" : "normal",
+                    projectCount: projectCount,
+                    sessionCount: sessionCount
+                )
+                NSApp.terminate(nil)
+            }
+            return
+        }
 
         // After the window exists, so a clicked notification always has somewhere to land.
         // Never under tests: only `start()` touches `UNUserNotificationCenter`.
@@ -498,6 +594,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // clean quit — so `EventLog` enforces that one too, by refusing to end a launch this
         // process never began.
         guard ownsSingleInstanceLock else { return .terminateNow }
+
+        // The startup fixture returns before any agent, extension or background service is
+        // started. Running their ordinary shutdown graph would construct idle singletons and
+        // wait on stop paths solely to exit a measurement process. Close only the launch facts
+        // it did open; AppKit still performs an orderly process termination and releases the
+        // single-instance lock.
+        if runsStartupProfile {
+            MainThreadStallMonitor.shared.stop()
+            MetricKitDiagnostics.shared.stop()
+            EventLog.shared.endLaunch(detail: ["runningSessions": "0"])
+            LaunchLedger.shared.endLaunch(.clean, systemInitiated: false)
+            return .terminateNow
+        }
 
         guard confirmQuitIfAgentsRunning() else { return .terminateCancel }
 

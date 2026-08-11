@@ -684,6 +684,46 @@ final class StateManagerTests: XCTestCase {
         )
     }
 
+    /// Attachment validation is lazy for the same startup reason as panel validation, but a
+    /// writer must not be able to race first access and replace a future document.
+    func testAttachmentFromANewerBuildIsProtectedBeforeItsFirstRead() throws {
+        let databaseURL = testDirectory.appendingPathComponent(SQLiteDefaults.databaseName)
+        let sessionID = SessionID()
+        let futureAttachments = #"{"formatVersion":99,"entries":[]}"#
+        do {
+            let database = try ProjectDatabase(url: databaseURL)
+            try database.save(ProjectsState(projects: [
+                Project(name: "Keep me", folderURL: URL(fileURLWithPath: "/tmp/keep-me"))
+            ]))
+            try database.saveAttachmentsPayload(futureAttachments, for: sessionID)
+        }
+
+        let manager = makeManager()
+        guard case .loaded(let state) = manager.loadProjectsState() else {
+            return XCTFail("An unopened attachment list must not delay or fail project loading")
+        }
+        XCTAssertEqual(state.projects.map(\.name), ["Keep me"])
+
+        manager.saveAttachmentsPayload(
+            #"{"formatVersion":2,"entries":[]}"#,
+            for: sessionID
+        )
+        XCTAssertNil(manager.loadAttachmentsPayload(for: sessionID))
+
+        let stored = try SQLiteDatabase(path: databaseURL.path)
+        let payload = try stored.prepare(
+            "SELECT data FROM \(ProjectDatabaseSchema.attachmentsTable) WHERE session_id = ?"
+        )
+        defer { payload.finalize() }
+        payload.bind(1, sessionID.uuidString)
+        XCTAssertTrue(try payload.step())
+        XCTAssertEqual(
+            payload.text(0),
+            futureAttachments,
+            "a first write must validate and preserve an existing future-format row"
+        )
+    }
+
     /// Quarantine has to leave something behind, and it must not split a live SQLite bundle.
     ///
     /// In WAL mode another reader can pin committed rows in `-wal`. Renaming the main file and log
@@ -818,7 +858,9 @@ final class StateManagerTests: XCTestCase {
         let manager = makeManager()
         let existingID = SessionID()
         let legacyID = SessionID()
-        manager.savePanelPayload(#"{"source":"database"}"#, for: existingID)
+        let existingPayload = #"{"formatVersion":1,"tabs":[],"observedSignature":"database"}"#
+        let legacyPayload = #"{"formatVersion":1,"tabs":[],"observedSignature":"legacy"}"#
+        manager.savePanelPayload(existingPayload, for: existingID)
 
         let panels = testDirectory.appendingPathComponent(
             DisplayPaneStoreDefaults.rootDirectory,
@@ -828,10 +870,10 @@ final class StateManagerTests: XCTestCase {
         let legacy = panels
             .appendingPathComponent(legacyID.uuidString)
             .appendingPathExtension(DisplayPaneStoreDefaults.layoutExtension)
-        try #"{"source":"legacy"}"#.write(to: legacy, atomically: true, encoding: .utf8)
+        try legacyPayload.write(to: legacy, atomically: true, encoding: .utf8)
 
-        XCTAssertEqual(manager.loadPanelPayload(for: legacyID), #"{"source":"legacy"}"#)
-        XCTAssertEqual(manager.loadPanelPayload(for: existingID), #"{"source":"database"}"#)
+        XCTAssertEqual(manager.loadPanelPayload(for: legacyID), legacyPayload)
+        XCTAssertEqual(manager.loadPanelPayload(for: existingID), existingPayload)
         XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
         XCTAssertTrue(
             FileManager.default.fileExists(

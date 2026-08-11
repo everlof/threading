@@ -20,7 +20,12 @@ final class SessionStatusIndicator: NSView {
 
     // MARK: - Properties
 
-    private let spinner = ThemedSpinner()
+    /// The layer-backed spinner exists only after this session has actually worked or loaded.
+    ///
+    /// Most stored sessions are idle when the sidebar first mounts. `ThemedSpinner` owns a
+    /// shape layer, a theme observer and an accessibility-display observer, so constructing one
+    /// for every visible idle row made an invisible working state part of cold launch.
+    private var spinner: ThemedSpinner?
     private let attentionDot = NSView()
     private let limitMark = ThemedWarningMark()
 
@@ -32,7 +37,7 @@ final class SessionStatusIndicator: NSView {
     var hostGround: InkSource? {
         didSet {
             guard hostGround != oldValue else { return }
-            spinner.hostGround = hostGround
+            spinner?.hostGround = hostGround
             limitMark.hostGround = hostGround
             applyDotSurface()
         }
@@ -72,9 +77,6 @@ final class SessionStatusIndicator: NSView {
     // MARK: - Setup
 
     private func setupViews() {
-        spinner.translatesAutoresizingMaskIntoConstraints = false
-        spinner.setAccessibilityLabel(L10n.string("Session working"))
-
         applyDotSurface()
         attentionDot.isHidden = true
         attentionDot.translatesAutoresizingMaskIntoConstraints = false
@@ -86,16 +88,10 @@ final class SessionStatusIndicator: NSView {
         limitMark.translatesAutoresizingMaskIntoConstraints = false
         limitMark.setAccessibilityLabel(L10n.string("Session stopped at its usage limit"))
 
-        addSubview(spinner)
         addSubview(attentionDot)
         addSubview(limitMark)
 
         NSLayoutConstraint.activate([
-            spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
-            spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
-            spinner.widthAnchor.constraint(equalToConstant: StatusIndicatorDefaults.spinnerSize),
-            spinner.heightAnchor.constraint(equalToConstant: StatusIndicatorDefaults.spinnerSize),
-
             attentionDot.centerXAnchor.constraint(equalTo: centerXAnchor),
             attentionDot.centerYAnchor.constraint(equalTo: centerYAnchor),
             attentionDot.widthAnchor.constraint(equalToConstant: StatusIndicatorDefaults.dotSize),
@@ -125,29 +121,31 @@ final class SessionStatusIndicator: NSView {
         if isLoading {
             attentionDot.isHidden = true
             limitMark.isHidden = true
+            let spinner = ensureSpinner()
             spinner.setAccessibilityLabel(L10n.string("Loading session"))
             spinner.isAnimating = true
             return
         }
 
-        spinner.setAccessibilityLabel(L10n.string("Session working"))
+        spinner?.setAccessibilityLabel(L10n.string("Session working"))
         limitMark.isHidden = activity != .limitReached
 
         switch activity {
         case .working:
             attentionDot.isHidden = true
+            let spinner = ensureSpinner()
             spinner.isAnimating = true
 
         case .limitReached:
             // No fade. The other two marks are faded in because they mean something *just*
             // happened and the eye should catch it; this one is read minutes or hours later,
             // when the user comes back wondering why a session went quiet.
-            spinner.isAnimating = false
+            spinner?.isAnimating = false
             attentionDot.isHidden = true
             limitMark.alphaValue = 1
 
         case .awaitingUser, .needsAttention:
-            spinner.isAnimating = false
+            spinner?.isAnimating = false
             dotStyle = activity == .awaitingUser ? .blocked : .unread
             attentionDot.setAccessibilityLabel(
                 activity == .awaitingUser
@@ -160,12 +158,33 @@ final class SessionStatusIndicator: NSView {
             showAttentionDot(animated: !isFirstUpdate)
 
         case .idle, .dormant:
-            spinner.isAnimating = false
+            spinner?.isAnimating = false
             attentionDot.isHidden = true
         }
     }
 
     // MARK: - Private Methods
+
+    /// Materializes the one expensive status mark only for states that can draw it. The spinner
+    /// remains a sibling overlay just as before; attention and limit states hide it by stopping
+    /// its animation.
+    private func ensureSpinner() -> ThemedSpinner {
+        if let spinner { return spinner }
+
+        let spinner = ThemedSpinner()
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.setAccessibilityLabel(L10n.string("Session working"))
+        spinner.hostGround = hostGround
+        addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
+            spinner.widthAnchor.constraint(equalToConstant: StatusIndicatorDefaults.spinnerSize),
+            spinner.heightAnchor.constraint(equalToConstant: StatusIndicatorDefaults.spinnerSize)
+        ])
+        self.spinner = spinner
+        return spinner
+    }
 
     /// Through `applySurface` rather than straight onto the layer: a `cgColor` resolves once,
     /// and the mark would keep the previous theme's colour until the session changed state.

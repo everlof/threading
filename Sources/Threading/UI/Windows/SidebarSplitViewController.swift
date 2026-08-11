@@ -10,6 +10,16 @@ import AppKit
 /// the same motion, as one shut any other.
 final class SidebarSplitViewController: NSSplitViewController {
 
+#if DEBUG
+    struct CollapseStatePhaseDurations {
+        var itemNanoseconds: UInt64 = 0
+        var notificationNanoseconds: UInt64 = 0
+        var geometryNanoseconds: UInt64 = 0
+    }
+
+    private(set) var lastCollapseStatePhaseDurations = CollapseStatePhaseDurations()
+#endif
+
     /// Reports an item's model-state change immediately, before the visual transition
     /// finishes. Controls whose value represents visibility use this callback; geometry
     /// consumers use `paneTransitionDidComplete` below, after AppKit has committed the final
@@ -170,9 +180,26 @@ final class SidebarSplitViewController: NSSplitViewController {
             in: splitView,
             animated: animated,
             changes: {
+#if DEBUG
+                let itemStarted = DispatchTime.now().uptimeNanoseconds
+#endif
                 item.isCollapsed = collapsed
+#if DEBUG
+                let itemEnded = DispatchTime.now().uptimeNanoseconds
+#endif
                 paneCollapseStateDidChange?(item, collapsed)
+#if DEBUG
+                let notificationEnded = DispatchTime.now().uptimeNanoseconds
+#endif
                 geometryChanges?()
+#if DEBUG
+                let geometryEnded = DispatchTime.now().uptimeNanoseconds
+                self.lastCollapseStatePhaseDurations = CollapseStatePhaseDurations(
+                    itemNanoseconds: itemEnded - itemStarted,
+                    notificationNanoseconds: notificationEnded - itemEnded,
+                    geometryNanoseconds: geometryEnded - notificationEnded
+                )
+#endif
             },
             completion: { [weak self] in
                 guard let self else {

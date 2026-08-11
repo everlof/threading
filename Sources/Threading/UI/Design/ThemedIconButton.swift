@@ -15,6 +15,18 @@ import AppKit
 /// serve the toolbar — floating over the terminal's own palette — and a tab inside the chrome.
 final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
 
+    /// When the symbol backing the control becomes an `NSImage`.
+    ///
+    /// A hidden sidebar action still needs its real control shell from first paint: keyboard
+    /// traversal and VoiceOver can reach it without a pointer. Its SF Symbol is presentation,
+    /// though, and resolving every hidden row glyph made CoreUI part of cold launch. Deferred
+    /// controls keep their geometry, action and accessibility contract, then resolve the latest
+    /// symbol or custom image when first drawn or explicitly revealed.
+    enum GlyphMaterialization {
+        case immediate
+        case deferred
+    }
+
     /// What an icon button is for, which is what decides how big it is and how much air the glyph
     /// gets. Padding is the difference between the two, so stating both here is what makes it a
     /// system rule instead of arithmetic repeated at each call site.
@@ -214,6 +226,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// and that needs its name back.
     private var symbolName: String?
     private var customImage: NSImage?
+    private(set) var hasMaterializedGlyph = false
 
     private var widthConstraint: NSLayoutConstraint?
     private var heightConstraint: NSLayoutConstraint?
@@ -260,7 +273,8 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         accessibility: String,
         target: Target = .toolbar,
         isEmphasized: Bool = false,
-        inkSource: InkSource = .backdrop
+        inkSource: InkSource = .backdrop,
+        glyphMaterialization: GlyphMaterialization = .immediate
     ) {
         self.accessibilityName = accessibility
         self.isEmphasized = isEmphasized
@@ -269,7 +283,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         drawnGlyph = target.glyph
         drawnGlyphPointSize = target.glyphPointSize
         super.init(frame: .zero, inkSource: inkSource)
-        setup(symbolName: symbolName)
+        setup(symbolName: symbolName, glyphMaterialization: glyphMaterialization)
     }
 
     @available(*, unavailable)
@@ -277,7 +291,10 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private func setup(symbolName: String) {
+    private func setup(
+        symbolName: String,
+        glyphMaterialization: GlyphMaterialization
+    ) {
         translatesAutoresizingMaskIntoConstraints = false
 
         self.symbolName = symbolName
@@ -299,7 +316,9 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
             iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
-        renderSlot()
+        if glyphMaterialization == .immediate {
+            materializeGlyphIfNeeded()
+        }
     }
 
     override var intrinsicContentSize: NSSize { drawnSize }
@@ -312,6 +331,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
 
     /// Draws whatever the slot holds at the size the slot currently is.
     private func renderSlot() {
+        hasMaterializedGlyph = true
         if let customImage {
             // The slot cap is what keeps foreign artwork honest: an installed app's icon
             // arrives at whatever size LaunchServices holds, and a symbol's fitted
@@ -327,6 +347,13 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         }
     }
 
+    /// Crosses the presentation-only lazy boundary for a control that is about to be shown.
+    /// Idempotent so both an explicit reveal and AppKit's first draw can safely ask.
+    func materializeGlyphIfNeeded() {
+        guard !hasMaterializedGlyph else { return }
+        renderSlot()
+    }
+
     /// Re-points the button at a different action, keeping its size and padding.
     ///
     /// One slot, two roles: a project row's `⋯` and a branch heading's gear are the same control
@@ -337,7 +364,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         // in the app has — configured to fit, never squeezed to.
         self.symbolName = symbolName
         customImage = nil
-        renderSlot()
+        if hasMaterializedGlyph { renderSlot() }
         accessibilityName = accessibility
         setAccessibilityTitle(accessibility)
     }
@@ -354,7 +381,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     func setImage(_ image: NSImage?, accessibility: String) {
         customImage = image
         symbolName = nil
-        renderSlot()
+        if hasMaterializedGlyph { renderSlot() }
         accessibilityName = accessibility
         setAccessibilityTitle(accessibility)
     }
@@ -365,6 +392,8 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        materializeGlyphIfNeeded()
+
         // Half of a split control draws no surface of its own: the plate underneath is one
         // shape, and a second one raised inside it is the seam `SplitIconButtonView` removes.
         // The ring still needs a silhouette to follow, so it takes the one that was not drawn.
@@ -586,7 +615,7 @@ extension ThemedIconButton: ControlRowMember {
         drawnGlyphPointSize = metrics.glyphPointSize
         widthConstraint?.constant = size.width
         heightConstraint?.constant = size.height
-        renderSlot()
+        if hasMaterializedGlyph { renderSlot() }
         invalidateIntrinsicContentSize()
         needsDisplay = true
     }

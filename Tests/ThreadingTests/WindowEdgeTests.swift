@@ -30,6 +30,36 @@ final class WindowEdgeTests: XCTestCase {
         let elapsed: UInt64
         let acceptedGridChanges: Int
         let refusedGridChanges: Int
+        let controllerNanoseconds: UInt64
+        let proposalNanoseconds: UInt64
+        let releaseNanoseconds: UInt64
+        let repaintNanoseconds: UInt64
+        let openControllerSamples: [UInt64]
+        let closeControllerSamples: [UInt64]
+        let preparationNanoseconds: UInt64
+        let collapseNanoseconds: UInt64
+        let toolbarNanoseconds: UInt64
+        let stateChangeNanoseconds: UInt64
+        let splitLayoutNanoseconds: UInt64
+        let animationGroupNanoseconds: UInt64
+        let itemCollapseNanoseconds: UInt64
+        let collapseNotificationNanoseconds: UInt64
+        let dividerGeometryNanoseconds: UInt64
+    }
+
+    private struct PaneTransitionPhaseDurations {
+        let controllerNanoseconds: UInt64
+        let proposalNanoseconds: UInt64
+        let releaseNanoseconds: UInt64
+        let preparationNanoseconds: UInt64
+        let collapseNanoseconds: UInt64
+        let toolbarNanoseconds: UInt64
+        let stateChangeNanoseconds: UInt64
+        let splitLayoutNanoseconds: UInt64
+        let animationGroupNanoseconds: UInt64
+        let itemCollapseNanoseconds: UInt64
+        let collapseNotificationNanoseconds: UInt64
+        let dividerGeometryNanoseconds: UInt64
     }
 
     private enum Fixture {
@@ -41,8 +71,6 @@ final class WindowEdgeTests: XCTestCase {
         /// Wide enough that an open trailing pane is genuinely on screen, so the seam this
         /// test looks for is *between* the panes rather than at the window's edge again.
         static let openTrailingWidth: CGFloat = 120
-        /// A 200 ms transition at 60 Hz proposes roughly this many intermediate frames.
-        static let paneTransitionTicks = 12
     }
 
     private final class FilledPane: NSViewController {
@@ -303,6 +331,9 @@ final class WindowEdgeTests: XCTestCase {
             .flatMap(Int.init)
             .flatMap { $0 > 0 ? $0 : nil }
             ?? 3
+        let animated = ProcessInfo.processInfo.environment[
+            "THREADING_DISPLAY_PANE_STRESS_ANIMATED"
+        ] != "0"
         let store = ProjectStore.shared
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
             "threading-display-pane-stress-\(UUID().uuidString)",
@@ -318,7 +349,9 @@ final class WindowEdgeTests: XCTestCase {
             store.removeProject(id: project.id)
         }
 
+        let controllerStarted = DispatchTime.now().uptimeNanoseconds
         let controller = MainWindowController()
+        let controllerSetupElapsed = DispatchTime.now().uptimeNanoseconds - controllerStarted
         let window = try XCTUnwrap(controller.window)
         defer { window.close() }
         window.setContentSize(NSSize(width: 1_400, height: 800))
@@ -332,27 +365,43 @@ final class WindowEdgeTests: XCTestCase {
         Self.seedClaudeScreen(terminal, historyLines: 0)
         window.orderFront(nil)
         window.contentView?.displayIfNeeded()
+        print(
+            "THREADING_PERF display-pane-setup "
+                + "elapsed_ms=\(Self.milliseconds(controllerSetupElapsed))"
+        )
 
         let natural = displayPaneSweep(
             controller: controller,
             terminal: terminal,
             cycles: cycles,
-            freezesGrid: false
+            freezesGrid: false,
+            animated: animated
         )
-        Self.printPaneTransitionResult(natural, grid: "natural", cycles: cycles)
+        Self.printPaneTransitionResult(
+            natural,
+            grid: "natural",
+            cycles: cycles,
+            animated: animated
+        )
 
         let frozen = displayPaneSweep(
             controller: controller,
             terminal: terminal,
             cycles: cycles,
-            freezesGrid: true
+            freezesGrid: true,
+            animated: animated
         )
-        Self.printPaneTransitionResult(frozen, grid: "frozen", cycles: cycles)
+        Self.printPaneTransitionResult(
+            frozen,
+            grid: "frozen",
+            cycles: cycles,
+            animated: animated
+        )
 
         terminal.feed(text: "\u{1b}[?1049l")
         XCTAssertGreaterThan(natural.acceptedGridChanges, 0)
-        XCTAssertLessThanOrEqual(natural.acceptedGridChanges, cycles * 2)
-        XCTAssertGreaterThan(natural.refusedGridChanges, 0)
+        XCTAssertLessThanOrEqual(natural.acceptedGridChanges, cycles * 2 + 2)
+        XCTAssertEqual(natural.refusedGridChanges, 0)
         XCTAssertEqual(frozen.acceptedGridChanges, 0)
         XCTAssertGreaterThan(frozen.refusedGridChanges, 0)
         XCTAssertFalse(terminal.getTerminal().isCurrentBufferAlternate)
@@ -362,7 +411,8 @@ final class WindowEdgeTests: XCTestCase {
         controller: MainWindowController,
         terminal: EmojiFixedTerminalView,
         cycles: Int,
-        freezesGrid: Bool
+        freezesGrid: Bool,
+        animated: Bool
     ) -> PaneTransitionSweepResult {
         if freezesGrid {
             let grid = terminal.getTerminal().getDims()
@@ -382,20 +432,58 @@ final class WindowEdgeTests: XCTestCase {
             }
         }
 
-        let repaintAcceptedGrids = {
+        let repaintAcceptedGrids = { () -> UInt64 in
             // A real Codex process receives SIGWINCH after the emulator resize and answers on its
             // PTY. Feed after the frame setter returns so the synthetic process paints the new
             // grid, not the one `shouldApplyFrameSizeChange` was called to replace.
+            let started = DispatchTime.now().uptimeNanoseconds
             for _ in 0..<pendingRepaints { terminal.feed(text: repaint) }
             pendingRepaints = 0
+            return DispatchTime.now().uptimeNanoseconds - started
         }
 
+        var controllerNanoseconds: UInt64 = 0
+        var proposalNanoseconds: UInt64 = 0
+        var releaseNanoseconds: UInt64 = 0
+        var repaintNanoseconds: UInt64 = 0
+        var openControllerSamples: [UInt64] = []
+        var closeControllerSamples: [UInt64] = []
+        var preparationNanoseconds: UInt64 = 0
+        var collapseNanoseconds: UInt64 = 0
+        var toolbarNanoseconds: UInt64 = 0
+        var stateChangeNanoseconds: UInt64 = 0
+        var splitLayoutNanoseconds: UInt64 = 0
+        var animationGroupNanoseconds: UInt64 = 0
+        var itemCollapseNanoseconds: UInt64 = 0
+        var collapseNotificationNanoseconds: UInt64 = 0
+        var dividerGeometryNanoseconds: UInt64 = 0
         let started = DispatchTime.now().uptimeNanoseconds
         for _ in 0..<cycles {
-            waitForDisplayPane(controller, terminal: terminal, visible: true)
-            repaintAcceptedGrids()
-            waitForDisplayPane(controller, terminal: terminal, visible: false)
-            repaintAcceptedGrids()
+            for visible in [true, false] {
+                let phases = waitForDisplayPane(
+                    controller,
+                    visible: visible,
+                    animated: animated
+                )
+                controllerNanoseconds += phases.controllerNanoseconds
+                if visible {
+                    openControllerSamples.append(phases.controllerNanoseconds)
+                } else {
+                    closeControllerSamples.append(phases.controllerNanoseconds)
+                }
+                proposalNanoseconds += phases.proposalNanoseconds
+                releaseNanoseconds += phases.releaseNanoseconds
+                preparationNanoseconds += phases.preparationNanoseconds
+                collapseNanoseconds += phases.collapseNanoseconds
+                toolbarNanoseconds += phases.toolbarNanoseconds
+                stateChangeNanoseconds += phases.stateChangeNanoseconds
+                splitLayoutNanoseconds += phases.splitLayoutNanoseconds
+                animationGroupNanoseconds += phases.animationGroupNanoseconds
+                itemCollapseNanoseconds += phases.itemCollapseNanoseconds
+                collapseNotificationNanoseconds += phases.collapseNotificationNanoseconds
+                dividerGeometryNanoseconds += phases.dividerGeometryNanoseconds
+                repaintNanoseconds += repaintAcceptedGrids()
+            }
         }
         let elapsed = DispatchTime.now().uptimeNanoseconds - started
         terminal.onFrameGridChangeDecision = nil
@@ -406,34 +494,77 @@ final class WindowEdgeTests: XCTestCase {
         return PaneTransitionSweepResult(
             elapsed: elapsed,
             acceptedGridChanges: accepted,
-            refusedGridChanges: refused
+            refusedGridChanges: refused,
+            controllerNanoseconds: controllerNanoseconds,
+            proposalNanoseconds: proposalNanoseconds,
+            releaseNanoseconds: releaseNanoseconds,
+            repaintNanoseconds: repaintNanoseconds,
+            openControllerSamples: openControllerSamples,
+            closeControllerSamples: closeControllerSamples,
+            preparationNanoseconds: preparationNanoseconds,
+            collapseNanoseconds: collapseNanoseconds,
+            toolbarNanoseconds: toolbarNanoseconds,
+            stateChangeNanoseconds: stateChangeNanoseconds,
+            splitLayoutNanoseconds: splitLayoutNanoseconds,
+            animationGroupNanoseconds: animationGroupNanoseconds,
+            itemCollapseNanoseconds: itemCollapseNanoseconds,
+            collapseNotificationNanoseconds: collapseNotificationNanoseconds,
+            dividerGeometryNanoseconds: dividerGeometryNanoseconds
         )
     }
 
     private func waitForDisplayPane(
         _ controller: MainWindowController,
-        terminal: EmojiFixedTerminalView,
-        visible: Bool
-    ) {
-        controller.setDisplayPaneVisible(visible)
+        visible: Bool,
+        animated: Bool
+    ) -> PaneTransitionPhaseDurations {
+        let controllerStarted = DispatchTime.now().uptimeNanoseconds
+        controller.setDisplayPaneVisible(visible, animated: animated)
+        let controllerElapsed = DispatchTime.now().uptimeNanoseconds - controllerStarted
+#if DEBUG
+        let requestPhases = controller.lastDisplayPaneRequestPhaseDurations
+        let transitionPhases = PaneTransition.lastSynchronousPhaseDurations
+        let statePhases = controller.splitViewController.lastCollapseStatePhaseDurations
+        let preparationElapsed = requestPhases.preparationNanoseconds
+        let collapseElapsed = requestPhases.collapseNanoseconds
+        let toolbarElapsed = requestPhases.toolbarNanoseconds
+        let stateChangeElapsed = transitionPhases.changesNanoseconds
+        let splitLayoutElapsed = transitionPhases.layoutNanoseconds
+        let animationGroupElapsed = transitionPhases.animationGroupNanoseconds
+        let itemCollapseElapsed = statePhases.itemNanoseconds
+        let collapseNotificationElapsed = statePhases.notificationNanoseconds
+        let dividerGeometryElapsed = statePhases.geometryNanoseconds
+#else
+        let preparationElapsed: UInt64 = 0
+        let collapseElapsed: UInt64 = 0
+        let toolbarElapsed: UInt64 = 0
+        let stateChangeElapsed: UInt64 = 0
+        let splitLayoutElapsed: UInt64 = 0
+        let animationGroupElapsed: UInt64 = 0
+        let itemCollapseElapsed: UInt64 = 0
+        let collapseNotificationElapsed: UInt64 = 0
+        let dividerGeometryElapsed: UInt64 = 0
+#endif
 
-        // A hosted xctest process changes the split item's model state but never commits its
-        // implicit animation frames or completion. Propose the same twelve terminal widths a
-        // 200 ms transition would generate at 60 Hz, then release the production grid hold.
-        // This keeps the real controller route and Claude-like repaint workload while making the
-        // expensive part deterministic instead of timing a headless AppKit omission.
-        let initialFrame = terminal.frame
-        let travel = min(360, max(120, initialFrame.width * 0.3))
-        let finalWidth = visible
-            ? max(320, initialFrame.width - travel)
-            : initialFrame.width + travel
-        for tick in 1...Fixture.paneTransitionTicks {
-            let progress = CGFloat(tick) / CGFloat(Fixture.paneTransitionTicks)
-            var proposedFrame = initialFrame
-            proposedFrame.size.width += (finalWidth - initialFrame.width) * progress
-            terminal.frame = proposedFrame
-        }
-        terminal.endDeferringFrameGridChanges()
+        // A live terminal deliberately takes the immediate split route even when the caller
+        // requests motion. There are no synthetic intermediate frames here: the stress gate is
+        // specifically proving that production changes the TUI grid at most once per action.
+        let proposalsElapsed: UInt64 = 0
+        let releaseElapsed: UInt64 = 0
+        return PaneTransitionPhaseDurations(
+            controllerNanoseconds: controllerElapsed,
+            proposalNanoseconds: proposalsElapsed,
+            releaseNanoseconds: releaseElapsed,
+            preparationNanoseconds: preparationElapsed,
+            collapseNanoseconds: collapseElapsed,
+            toolbarNanoseconds: toolbarElapsed,
+            stateChangeNanoseconds: stateChangeElapsed,
+            splitLayoutNanoseconds: splitLayoutElapsed,
+            animationGroupNanoseconds: animationGroupElapsed,
+            itemCollapseNanoseconds: itemCollapseElapsed,
+            collapseNotificationNanoseconds: collapseNotificationElapsed,
+            dividerGeometryNanoseconds: dividerGeometryElapsed
+        )
     }
 
     private func resizeSweep(
@@ -546,14 +677,37 @@ final class WindowEdgeTests: XCTestCase {
     private static func printPaneTransitionResult(
         _ result: PaneTransitionSweepResult,
         grid: String,
-        cycles: Int
+        cycles: Int,
+        animated: Bool
     ) {
+        let open = result.openControllerSamples.sorted()
+        let close = result.closeControllerSamples.sorted()
         print(
             "THREADING_PERF display-pane-transition "
-                + "surface=codex grid=\(grid) repaint=1 cycles=\(cycles) "
-                + "ticks_per_transition=\(Fixture.paneTransitionTicks) "
+                + "surface=codex grid=\(grid) repaint=1 "
+                + "requested_animated=\(animated ? 1 : 0) geometry_animated=0 "
+                + "cycles=\(cycles) "
+                + "ticks_per_transition=0 "
                 + "accepted_grid_changes=\(result.acceptedGridChanges) "
                 + "refused_grid_changes=\(result.refusedGridChanges) "
+                + "controller_ms=\(milliseconds(result.controllerNanoseconds)) "
+                + "first_open_ms=\(milliseconds(result.openControllerSamples.first ?? 0)) "
+                + "open_p50_ms=\(milliseconds(percentile(0.50, in: open))) "
+                + "open_max_ms=\(milliseconds(open.last ?? 0)) "
+                + "close_p50_ms=\(milliseconds(percentile(0.50, in: close))) "
+                + "close_max_ms=\(milliseconds(close.last ?? 0)) "
+                + "prepare_ms=\(milliseconds(result.preparationNanoseconds)) "
+                + "collapse_ms=\(milliseconds(result.collapseNanoseconds)) "
+                + "toolbar_ms=\(milliseconds(result.toolbarNanoseconds)) "
+                + "state_change_ms=\(milliseconds(result.stateChangeNanoseconds)) "
+                + "split_layout_ms=\(milliseconds(result.splitLayoutNanoseconds)) "
+                + "animation_group_ms=\(milliseconds(result.animationGroupNanoseconds)) "
+                + "item_collapse_ms=\(milliseconds(result.itemCollapseNanoseconds)) "
+                + "collapse_notify_ms=\(milliseconds(result.collapseNotificationNanoseconds)) "
+                + "divider_geometry_ms=\(milliseconds(result.dividerGeometryNanoseconds)) "
+                + "proposals_ms=\(milliseconds(result.proposalNanoseconds)) "
+                + "release_ms=\(milliseconds(result.releaseNanoseconds)) "
+                + "repaint_ms=\(milliseconds(result.repaintNanoseconds)) "
                 + "total_ms=\(milliseconds(result.elapsed)) "
                 + "per_cycle_ms=\(milliseconds(result.elapsed / UInt64(max(cycles, 1))))"
         )

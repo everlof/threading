@@ -24,6 +24,7 @@
 #   scripts/profile_threading.sh attachment-format-stress
 #   scripts/profile_threading.sh window-resize-stress
 #   scripts/profile_threading.sh display-pane-stress
+#   scripts/profile_threading.sh startup
 #   scripts/profile_threading.sh sample [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh trace "Time Profiler" [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh full [seconds] [process-name-or-pid]
@@ -47,7 +48,7 @@ performance_directory="${THREADING_PROFILE_OUTPUT:-/tmp/threading-profiles}"
 built_in_directory="${HOME}/Library/Application Support/Threading/Performance"
 
 usage() {
-  sed -n '3,37p' "$0"
+  sed -n '3,38p' "$0"
 }
 
 resolve_pid() {
@@ -1536,6 +1537,149 @@ run_display_pane_stress() {
   ) 2>&1 | tee "${output_directory}/display-pane-stress.log"
 }
 
+prepare_startup_profile_home() {
+  local profile_identifier="$1"
+  local profile_home="$2"
+  local source_home="${HOME}"
+  local source_support="${source_home}/Library/Application Support/Threading"
+  local profile_support_parent="${profile_home}/Library/Application Support"
+  local profile_support="${profile_support_parent}/Threading"
+  local source_preferences="${source_home}/Library/Preferences/codes.threading.plist"
+  local profile_preferences="${profile_home}/Library/Preferences/${profile_identifier}.plist"
+
+  mkdir -p "${profile_support_parent}" "${profile_home}/Library/Preferences"
+  if [[ -d "${source_support}" ]]; then
+    # This is an APFS clone, not a second 2.6 GB copy. It gives every non-database startup store
+    # its real shape while ensuring launch markers, logs, extension state and icon reads cannot
+    # mutate the running app's directory. Atomic JSON replacements remain complete in the clone.
+    /bin/cp -cR "${source_support}" "${profile_support}"
+
+    # Cloning the three live SQLite files independently could pair a database page with the wrong
+    # WAL generation. Replace that family with one SQLite-owned snapshot taken through the live
+    # reader API; the source remains untouched and may continue serving the installed app.
+    if [[ -f "${source_support}/threading.db" ]]; then
+      rm -f \
+        "${profile_support}/threading.db" \
+        "${profile_support}/threading.db-wal" \
+        "${profile_support}/threading.db-shm"
+      /usr/bin/sqlite3 \
+        "${source_support}/threading.db" \
+        ".timeout 5000" \
+        ".backup '${profile_support}/threading.db'"
+    fi
+  else
+    mkdir -p "${profile_support}"
+  fi
+
+  # The measured app has a throwaway bundle id so LaunchServices cannot redirect xctrace to the
+  # installed build. Give that domain the real preferences too; otherwise a profile of a themed,
+  # resized window silently measures factory defaults instead.
+  if [[ -f "${source_preferences}" ]]; then
+    /bin/cp -c "${source_preferences}" "${profile_preferences}"
+  fi
+}
+
+clone_startup_profile_home() {
+  local template_home="$1"
+  local run_home="$2"
+  /bin/cp -cR "${template_home}" "${run_home}"
+}
+
+run_startup_profile() (
+  local output_directory="$1"
+  local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
+  local runs="${THREADING_STARTUP_PROFILE_RUNS:-3}"
+  local configuration="${THREADING_STARTUP_PROFILE_CONFIGURATION:-Debug}"
+  local architecture="${THREADING_STARTUP_PROFILE_ARCH:-$(uname -m)}"
+  local derived_data="${THREADING_STARTUP_PROFILE_DERIVED_DATA:-${output_directory}/derived-data}"
+  local direct_log="${output_directory}/startup-runs.log"
+  local trace_stdout="${output_directory}/startup-trace.stdout.log"
+  local trace_path="${output_directory}/App-Launch.trace"
+
+  [[ "${runs}" =~ ^[1-9][0-9]*$ ]] || {
+    echo "THREADING_STARTUP_PROFILE_RUNS must be a positive integer." >&2
+    return 2
+  }
+
+  echo "Building the ${configuration} macOS app for cold-launch profiling…"
+  (
+    cd "${repository_directory}"
+    xcodebuild \
+      -project Threading.xcodeproj \
+      -scheme Threading \
+      -configuration "${configuration}" \
+      -destination "platform=macOS,arch=${architecture}" \
+      -derivedDataPath "${derived_data}" \
+      -jobs "${jobs}" \
+      -quiet \
+      build
+  ) 2>&1 | tee "${output_directory}/startup-build.log"
+
+  local app="${derived_data}/Build/Products/${configuration}/Threading.app"
+  [[ -d "${app}" ]] || {
+    echo "Built app not found at ${app}." >&2
+    return 1
+  }
+
+  # LaunchServices can redirect xctrace to an installed app with the same bundle identity.
+  # Give the measured copy an isolated identity and ad-hoc signature so the trace always owns
+  # the binary built above. The direct repetitions use that same copy.
+  local profile_app="${output_directory}/ThreadingStartupProfile.app"
+  local profile_identifier="codes.threading.startup-profile.run$(date +%s)$$"
+  /usr/bin/ditto "${app}" "${profile_app}"
+  /usr/bin/plutil -replace CFBundleIdentifier -string "${profile_identifier}" \
+    "${profile_app}/Contents/Info.plist"
+  /usr/bin/plutil -replace CFBundleName -string "ThreadingStartupProfile" \
+    "${profile_app}/Contents/Info.plist"
+  /usr/bin/codesign --force --deep --sign - "${profile_app}"
+
+  # Each measured process receives the same pristine snapshot. Besides making the command safe
+  # while Threading is open, this prevents run 2 from inheriting run 1's launch-ledger writes.
+  local snapshot_root
+  snapshot_root="$(mktemp -d "${TMPDIR:-/tmp}/threading-startup-state.XXXXXX")"
+  trap 'rm -rf -- "${snapshot_root}"' EXIT HUP INT TERM
+  local template_home="${snapshot_root}/template"
+  echo "Snapshotting startup state without disturbing the running app…"
+  prepare_startup_profile_home "${profile_identifier}" "${template_home}"
+
+  local executable="${profile_app}/Contents/MacOS/Threading"
+  echo "Running ${runs} direct cold-launch measurements…"
+  local run
+  for ((run = 1; run <= runs; run += 1)); do
+    echo "Startup run ${run}/${runs}"
+    local run_home="${snapshot_root}/direct-${run}"
+    clone_startup_profile_home "${template_home}" "${run_home}"
+    CFFIXED_USER_HOME="${run_home}" \
+      THREADING_STARTUP_PROFILE=1 \
+      "${executable}" 2>&1 | tee -a "${direct_log}"
+  done
+
+  local metric_count
+  metric_count="$(rg -c '^THREADING_PERF app-startup ' "${direct_log}" || true)"
+  [[ "${metric_count}" == "${runs}" ]] || {
+    echo "Expected ${runs} startup metrics, found ${metric_count:-0}." >&2
+    return 1
+  }
+
+  echo "Recording one isolated App Launch trace…"
+  local trace_home="${snapshot_root}/trace"
+  clone_startup_profile_home "${template_home}" "${trace_home}"
+  xcrun xctrace record \
+    --template "App Launch" \
+    --time-limit 3s \
+    --output "${trace_path}" \
+    --target-stdout "${trace_stdout}" \
+    --env THREADING_STARTUP_PROFILE=1 \
+    --env CFFIXED_USER_HOME="${trace_home}" \
+    --no-prompt \
+    --launch -- "${profile_app}"
+
+  rg '^THREADING_PERF app-startup ' "${trace_stdout}" || {
+    echo "The App Launch trace produced no startup metric." >&2
+    return 1
+  }
+)
+
 command="${1:-}"
 case "${command}" in
   git-stress)
@@ -1646,6 +1790,11 @@ case "${command}" in
   display-pane-stress)
     output_directory="$(new_run_directory display-pane-stress)"
     run_display_pane_stress "${output_directory}"
+    ;;
+
+  startup)
+    output_directory="$(new_run_directory startup)"
+    run_startup_profile "${output_directory}"
     ;;
 
   sample)

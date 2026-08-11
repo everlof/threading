@@ -2766,6 +2766,40 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(button.accessibilityValue() as? Bool, true)
     }
 
+    /// A hidden row action keeps its real control and interaction contract, but resolving its SF
+    /// Symbol is presentation work and must wait until the action can contribute pixels.
+    func testADeferredIconButtonKeepsItsInteractionShellAndLoadsTheLatestGlyphOnDemand() {
+        let button = ThemedIconButton(
+            symbolName: "ellipsis",
+            accessibility: "Actions",
+            target: .inline,
+            glyphMaterialization: .deferred
+        )
+        var presses = 0
+        button.onPress = { presses += 1 }
+
+        XCTAssertFalse(button.hasMaterializedGlyph)
+        XCTAssertEqual(button.accessibilityRole(), .button)
+        XCTAssertEqual(button.accessibilityTitle(), "Actions")
+        XCTAssertTrue(button.accessibilityPerformPress())
+        XCTAssertEqual(presses, 1)
+        XCTAssertFalse(
+            button.hasMaterializedGlyph,
+            "pointerless activation paid for a glyph that was still not visible"
+        )
+
+        button.setSymbol("gearshape", accessibility: "Settings")
+        XCTAssertFalse(button.hasMaterializedGlyph, "changing a hidden symbol crossed the boundary")
+
+        button.materializeGlyphIfNeeded()
+        XCTAssertTrue(button.hasMaterializedGlyph)
+        XCTAssertEqual(button.accessibilityTitle(), "Settings")
+        XCTAssertNotNil(
+            descendants(in: button).compactMap { ($0 as? GlyphView)?.image }.first,
+            "the latest deferred symbol was not rendered on first reveal"
+        )
+    }
+
     /// An icon button that performs an action still acts on the release, and lets go of the press
     /// when the pointer leaves it — the change-your-mind affordance `ThemedButton` has always had
     /// and this one did not. Without it the press was decided at the release and shown nowhere: a

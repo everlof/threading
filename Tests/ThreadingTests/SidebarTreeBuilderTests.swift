@@ -87,6 +87,42 @@ final class SidebarTreeBuilderTests: XCTestCase {
         }
     }
 
+    /// The main window passes through toolbar and saved-frame layouts before it is shown. A
+    /// deferred sidebar must remain a real, laid-out surface during those passes without asking
+    /// AppKit to construct rows until the host says its final geometry is ready.
+    func testADeferredInitialTreeMountBuildsRowsOnlyAfterTheHostCrossesTheBoundary() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "threading-sidebar-deferred-mount-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let manager = StateManager(appSupportDirectory: directory)
+        defer { manager.closeDatabase() }
+        let stored = project("Deferred", sessions: [session("Visible")])
+        XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [stored])))
+
+        let controller = ProjectSidebarViewController(
+            projectStore: ProjectStore(stateManager: manager),
+            defersInitialTreeMount: true
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 320, height: 720)
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(controller.outlineRowCount, 0)
+        XCTAssertEqual(controller.instantiatedRowCount, 0)
+
+        controller.mountInitialTreeIfNeeded()
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(controller.outlineRowCount, 2)
+        XCTAssertGreaterThan(controller.instantiatedRowCount, 0)
+
+        controller.mountInitialTreeIfNeeded()
+        XCTAssertEqual(controller.outlineRowCount, 2, "a repeated lifecycle signal remounted the tree")
+    }
+
     // MARK: - Earning a level
 
     /// One checkout is a plain project row. The repository level exists to tell *several*

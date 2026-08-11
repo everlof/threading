@@ -9,6 +9,8 @@ final class TerminalContainerViewController: NSViewController {
 
     // MARK: - Properties
 
+    typealias SessionComposerFactory = @MainActor () -> SessionComposerViewController
+
     private let placeholderView = SessionPlaceholderView()
     private let appEvents = AppEventObservations()
 
@@ -24,7 +26,30 @@ final class TerminalContainerViewController: NSViewController {
     private var recoveryView: RecoveryModeView?
 
     /// Shown when a project rather than a session is selected.
-    let composerViewController = SessionComposerViewController()
+    ///
+    /// A launch with stored projects opens on the placeholder and then restores its selected
+    /// session. The composer owns chips, a prompt surface and footer controls, so constructing
+    /// that whole hidden form here made it part of every launch even when no composer route was
+    /// visited. Keep the factory and the delegate intent; materialize the controller only when
+    /// `showComposer` (or a focused test) asks for it.
+    private let sessionComposerFactory: SessionComposerFactory
+    private var storedComposerViewController: SessionComposerViewController?
+    var composerViewController: SessionComposerViewController {
+        if let storedComposerViewController {
+            installComposerIfNeeded(storedComposerViewController)
+            return storedComposerViewController
+        }
+
+        let controller = sessionComposerFactory()
+        controller.delegate = composerDelegate
+        storedComposerViewController = controller
+        installComposerIfNeeded(controller)
+        return controller
+    }
+
+    weak var composerDelegate: SessionComposerViewControllerDelegate? {
+        didSet { storedComposerViewController?.delegate = composerDelegate }
+    }
 
     private var currentChild: AgentSessionViewController?
     private var currentConversation: ConversationViewController?
@@ -187,8 +212,14 @@ final class TerminalContainerViewController: NSViewController {
 
     // MARK: - Lifecycle
 
-    init(recovery: Bool = RecoveryMode.isActive) {
+    init(
+        recovery: Bool = RecoveryMode.isActive,
+        sessionComposerFactory: @escaping SessionComposerFactory = {
+            SessionComposerViewController()
+        }
+    ) {
         isRecovery = recovery
+        self.sessionComposerFactory = sessionComposerFactory
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -207,8 +238,10 @@ final class TerminalContainerViewController: NSViewController {
         setupHeader()
         setupDrawer()
         setupPlaceholder()
-        setupComposer()
         setupGitStatusOverlay()
+        if let storedComposerViewController {
+            installComposerIfNeeded(storedComposerViewController)
+        }
         showEmptyState()
 
         // A theme change repaints the terminal but not the pane behind it, so the seam would
@@ -504,14 +537,19 @@ final class TerminalContainerViewController: NSViewController {
         set { headerLeadingConstraint?.constant = newValue }
     }
 
-    /// The composer sits alongside the placeholder, hidden until a project is selected.
-    private func setupComposer() {
-        addChild(composerViewController)
+    /// Installs a composer that has actually been requested. Merely hiding or replacing a pane
+    /// never crosses this boundary, which is what keeps a session-restoring launch from building
+    /// an unused form.
+    private func installComposerIfNeeded(_ controller: SessionComposerViewController) {
+        guard isViewLoaded, controller.parent == nil else { return }
 
-        let composer = composerViewController.view
+        addChild(controller)
+        let composer = controller.view
         composer.translatesAutoresizingMaskIntoConstraints = false
         composer.isHidden = true
-        view.addSubview(composer)
+        // This matches the original eager hierarchy: the composer sits above the static pane
+        // surfaces but below the status overlay, even when it materializes much later.
+        view.addSubview(composer, positioned: .below, relativeTo: gitStatusOverlay)
 
         NSLayoutConstraint.activate([
             composer.topAnchor.constraint(equalTo: contentTopAnchor),
@@ -519,6 +557,11 @@ final class TerminalContainerViewController: NSViewController {
             composer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composer.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
+    }
+
+    private func hideComposerIfLoaded() {
+        guard let controller = storedComposerViewController, controller.isViewLoaded else { return }
+        controller.view.isHidden = true
     }
 
     /// Shows the composer for a project — or for none, the choose-a-project mode a store with
@@ -553,6 +596,7 @@ final class TerminalContainerViewController: NSViewController {
         applyDrawer(for: nil)
 
         placeholderView.isHidden = true
+        let composerViewController = composerViewController
         composerViewController.view.isHidden = false
         applyPaneBackground(.chrome)
         composerViewController.show(projectID: projectID)
@@ -617,7 +661,7 @@ final class TerminalContainerViewController: NSViewController {
             currentTerminalID = nil
             currentSessionID = nil
             placeholderView.isHidden = true
-            composerViewController.view.isHidden = true
+            hideComposerIfLoaded()
             applyPaneBackground(.chrome)
             // The session's shell goes with the session — see `showComposer`.
             applyDrawer(for: nil)
@@ -1122,7 +1166,7 @@ final class TerminalContainerViewController: NSViewController {
 
         currentChild = controller
         placeholderView.isHidden = true
-        composerViewController.view.isHidden = true
+        hideComposerIfLoaded()
 
         // The terminal is inset below the toolbar, so the strip above it is the pane's own
         // background. Matching it to the terminal's colour keeps that strip — and the window's
@@ -1148,7 +1192,7 @@ final class TerminalContainerViewController: NSViewController {
 
         currentProjectTerminal = controller
         placeholderView.isHidden = true
-        composerViewController.view.isHidden = true
+        hideComposerIfLoaded()
         applyPaneBackground(.terminal(controller.paneBackgroundColor))
         refreshTerminalTextVisibilityNotice()
         controller.focus()
@@ -1175,14 +1219,21 @@ final class TerminalContainerViewController: NSViewController {
         guard let pending = pendingComposerHandoffSessionID else { return false }
         pendingComposerHandoffSessionID = nil
         guard pending == sessionID else { return false }
-        return !composerViewController.view.isHidden
+        guard let controller = storedComposerViewController, controller.isViewLoaded else {
+            return false
+        }
+        return !controller.view.isHidden
     }
 
     private func composerHandoffSnapshot() -> ComposerHandoffAnimator.Snapshot? {
+        guard let controller = storedComposerViewController, controller.isViewLoaded else {
+            return nil
+        }
+        let composer = controller.view
         view.layoutSubtreeIfNeeded()
         return ComposerHandoffAnimator.snapshot(
-            composer: composerViewController.view,
-            box: composerViewController.promptHandoffView,
+            composer: composer,
+            box: controller.promptHandoffView,
             in: view
         )
     }
@@ -1267,7 +1318,7 @@ final class TerminalContainerViewController: NSViewController {
 
         currentConversation = conversation
         placeholderView.isHidden = true
-        composerViewController.view.isHidden = true
+        hideComposerIfLoaded()
 
         // A conversation outlives its time on screen — `AgentRuntime` keeps it for a dormant
         // session — and the theme sweep walks *windows*, so a detached surface is in none. Its
@@ -1377,7 +1428,7 @@ final class TerminalContainerViewController: NSViewController {
         currentComposerProjectID = nil
         currentSettingsPageID = nil
         currentTerminalID = nil
-        composerViewController.view.isHidden = true
+        hideComposerIfLoaded()
         placeholderView.isHidden = false
         applyPaneBackground(.chrome)
         placeholderView.configure(
@@ -1423,7 +1474,7 @@ final class TerminalContainerViewController: NSViewController {
         detachCurrentChild()
         currentComposerProjectID = nil
         currentSettingsPageID = nil
-        composerViewController.view.isHidden = true
+        hideComposerIfLoaded()
         placeholderView.isHidden = true
         recoveryView.isHidden = false
         applyPaneBackground(.chrome)
@@ -1442,7 +1493,7 @@ final class TerminalContainerViewController: NSViewController {
     /// sentence this moment needs. No action button — there is nothing here to press.
     private func showRecoveryState(for sessionID: SessionID?) {
         recoveryView?.isHidden = true
-        composerViewController.view.isHidden = true
+        hideComposerIfLoaded()
         placeholderView.isHidden = false
         currentComposerProjectID = nil
         currentSettingsPageID = nil
@@ -1467,7 +1518,7 @@ final class TerminalContainerViewController: NSViewController {
             return
         }
 
-        composerViewController.view.isHidden = true
+        hideComposerIfLoaded()
         placeholderView.isHidden = false
         applyPaneBackground(.chrome)
         placeholderView.configure(
@@ -1497,7 +1548,7 @@ final class TerminalContainerViewController: NSViewController {
             return
         }
 
-        composerViewController.view.isHidden = true
+        hideComposerIfLoaded()
         placeholderView.isHidden = false
         applyPaneBackground(.chrome)
         placeholderView.configure(

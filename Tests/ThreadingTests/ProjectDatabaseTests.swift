@@ -66,6 +66,36 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertFalse(database.hasOpenStatements)
     }
 
+    func testStatementReadsTextPayloadBytesWithoutLosingNullOrEmptyValues() throws {
+        let database = try SQLiteDatabase(
+            path: directory.appendingPathComponent("payload-bytes.db").path
+        )
+        try database.execute("CREATE TABLE sample (position INTEGER, value TEXT)")
+        try database.prepare("INSERT INTO sample (position, value) VALUES (?, ?)")
+            .bind(1, 0)
+            .bind(2, Optional<String>.none)
+            .run()
+        try database.prepare("INSERT INTO sample (position, value) VALUES (?, ?)")
+            .bind(1, 1)
+            .bind(2, "")
+            .run()
+        let unicodePayload = #"{"title":"Räksmörgås 🦐"}"#
+        try database.prepare("INSERT INTO sample (position, value) VALUES (?, ?)")
+            .bind(1, 2)
+            .bind(2, unicodePayload)
+            .run()
+
+        let statement = try database.prepare("SELECT value FROM sample ORDER BY position")
+        defer { statement.finalize() }
+        XCTAssertTrue(try statement.step())
+        XCTAssertNil(statement.data(0))
+        XCTAssertTrue(try statement.step())
+        XCTAssertEqual(statement.data(0), Data())
+        XCTAssertTrue(try statement.step())
+        XCTAssertEqual(statement.data(0), Data(unicodePayload.utf8))
+        XCTAssertFalse(try statement.step())
+    }
+
     // MARK: - Round Trip
 
     func testEmptyDatabaseIsEmpty() throws {
@@ -355,7 +385,7 @@ final class ProjectDatabaseTests: XCTestCase {
     /// database — so one display panel written by a build a format version ahead took the whole
     /// store with it. The panel is a pane that rebuilds itself from nothing; the sessions beside
     /// it are the only copy of anything.
-    func testMalformedPanelIsReportedRatherThanFailingTheLoad() throws {
+    func testMalformedPanelDoesNotEnterTheAuthoritativeStartupDecode() throws {
         let database = try makeDatabase()
         let sessionID = SessionID()
         try database.save(ProjectsState(projects: [makeProject("alpha")]))
@@ -364,7 +394,10 @@ final class ProjectDatabaseTests: XCTestCase {
         let load = try database.load()
 
         XCTAssertEqual(load.state.projects.map(\.name), ["alpha"])
-        XCTAssertEqual(load.unreadable.panelLayouts.sessions, [sessionID])
+        XCTAssertTrue(
+            load.unreadable.panelLayouts.sessions.isEmpty,
+            "payload validity belongs to the first feature access, not project-graph startup"
+        )
         XCTAssertFalse(load.unreadable.panelLayouts.containsUnkeyedRows)
         XCTAssertTrue(load.unreadable.sessionAttachments.isEmpty)
         XCTAssertEqual(
@@ -375,7 +408,7 @@ final class ProjectDatabaseTests: XCTestCase {
     }
 
     /// The real shape of the failure: not damage, but a document from a build that knows more.
-    func testFutureAttachmentDocumentIsReportedWithoutDeletingIt() throws {
+    func testFutureAttachmentDocumentDoesNotEnterTheAuthoritativeStartupDecode() throws {
         let database = try makeDatabase()
         let sessionID = SessionID()
         try database.save(ProjectsState(projects: [makeProject("alpha")]))
@@ -387,7 +420,10 @@ final class ProjectDatabaseTests: XCTestCase {
         let load = try database.load()
 
         XCTAssertEqual(load.state.projects.map(\.name), ["alpha"])
-        XCTAssertEqual(load.unreadable.sessionAttachments.sessions, [sessionID])
+        XCTAssertTrue(
+            load.unreadable.sessionAttachments.sessions.isEmpty,
+            "payload validity belongs to the first feature access, not project-graph startup"
+        )
         XCTAssertTrue(load.unreadable.panelLayouts.isEmpty)
         XCTAssertEqual(try rowCount("session_attachments"), 1)
     }

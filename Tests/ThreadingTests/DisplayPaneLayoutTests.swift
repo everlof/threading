@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+@preconcurrency import WebKit
 @testable import Threading
 
 /// What the display panel lets the window do, and how the picture inside it is reached.
@@ -103,6 +104,41 @@ final class DisplayPaneLayoutTests: XCTestCase {
         pane.addContentTab(content, for: sessionID)
         pane.view.layoutSubtreeIfNeeded()
         return pane
+    }
+
+    /// An empty pane and an image tab have no reason to launch WebKit. The shared document
+    /// renderer is mounted only when HTML becomes the selected content.
+    func testDocumentRendererIsLazyUntilHTMLContentIsShown() {
+        let pane = DisplayPaneController()
+        pane.view.frame = NSRect(x: 0, y: 0, width: 420, height: 700)
+        let sessionID = SessionID()
+        pane.showSession(sessionID)
+        pane.view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(descendants(of: pane.view).compactMap { $0 as? WKWebView }.isEmpty)
+
+        pane.addContentTab(
+            DisplayContent(
+                body: .image(
+                    filledImage(size: NSSize(width: 20, height: 20), color: .systemTeal),
+                    url: URL(fileURLWithPath: "/tmp/lazy-display-pane-image.png")
+                ),
+                title: "Image",
+                subtitle: "Image"
+            ),
+            for: sessionID
+        )
+        XCTAssertTrue(descendants(of: pane.view).compactMap { $0 as? WKWebView }.isEmpty)
+
+        pane.addContentTab(
+            DisplayContent(
+                body: .html("<p>Document</p>"),
+                title: "Document",
+                subtitle: "Document"
+            ),
+            for: sessionID
+        )
+        XCTAssertEqual(descendants(of: pane.view).compactMap { $0 as? WKWebView }.count, 1)
     }
 
     // MARK: - The Picture Does Not Size the Pane

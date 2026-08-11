@@ -27,9 +27,11 @@ enum ProjectDatabaseLoadError: LocalizedError {
 /// from nothing; the session is a chat with no other copy.
 ///
 /// So an unreadable auxiliary row is reported rather than thrown, and what the all-or-nothing
-/// rule was protecting is protected one row at a time instead: the feature is told the row is
-/// absent, and `StateManager` refuses to write over it for the rest of the launch. A newer build,
-/// or a build with the fix for whatever produced it, still reads it.
+/// rule was protecting is protected one row at a time instead: `StateManager` validates a row
+/// when its feature first asks for it, tells the feature it is absent on failure, and refuses to
+/// write over it for the rest of the launch. A newer build, or a build with the fix for whatever
+/// produced it, still reads it. Startup still records structurally unkeyed rows eagerly because
+/// no feature can ever ask for one of those by id and only skipping prune can preserve it.
 struct UnreadableRows {
 
     /// Sessions whose stored payload did not decode.
@@ -52,10 +54,11 @@ struct UnreadableAuxiliaryRows {
     var isEmpty: Bool { panelLayouts.isEmpty && sessionAttachments.isEmpty }
 }
 
-/// A successful load: the authoritative project graph, plus the auxiliary rows it had to skip.
+/// A successful load: the authoritative project graph, plus auxiliary rows startup must protect.
 ///
-/// Returned together rather than read separately, so a caller cannot take the state and forget to
-/// ask what it could not read — which would put those rows back in reach of the next write.
+/// Payload decoding is deliberately lazy: panels and attachments are not launch-critical, and
+/// decoding all of them delayed every launch even when no pane asked for them. Structurally
+/// unkeyed rows are returned with the state because no later feature read can discover them.
 struct ProjectsStateLoad {
     let state: ProjectsState
     let unreadable: UnreadableAuxiliaryRows
@@ -161,16 +164,13 @@ final class ProjectDatabase {
                 throw corruptRow("session", id: rawID, reason: "missing indexed provider kind")
             }
             let storedLastActiveAt = sessions.double(3)
-            guard let payload = sessions.text(4) else {
+            guard let payload = sessions.data(4) else {
                 throw corruptRow("session", id: rawID, reason: "missing JSON payload")
             }
 
             let session: AgentSession
             do {
-                session = try Self.decoder.decode(
-                    AgentSession.self,
-                    from: Data(payload.utf8)
-                )
+                session = try Self.decoder.decode(AgentSession.self, from: payload)
             } catch {
                 throw corruptRow(
                     "session",
@@ -218,13 +218,13 @@ final class ProjectDatabase {
             guard let storedPath = rows.text(2) else {
                 throw corruptRow("project", id: rawID, reason: "missing indexed path")
             }
-            guard let payload = rows.text(3) else {
+            guard let payload = rows.data(3) else {
                 throw corruptRow("project", id: rawID, reason: "missing JSON payload")
             }
 
             var project: Project
             do {
-                project = try Self.decoder.decode(Project.self, from: Data(payload.utf8))
+                project = try Self.decoder.decode(Project.self, from: payload)
             } catch {
                 throw corruptRow(
                     "project",
@@ -282,13 +282,11 @@ final class ProjectDatabase {
                 savedAt: Date()
             ),
             unreadable: UnreadableAuxiliaryRows(
-                panelLayouts: try unreadableRows(
-                    in: ProjectDatabaseSchema.panelTable,
-                    as: PersistedPanel.self
+                panelLayouts: try structurallyUnreadableRows(
+                    in: ProjectDatabaseSchema.panelTable
                 ),
-                sessionAttachments: try unreadableRows(
-                    in: ProjectDatabaseSchema.attachmentsTable,
-                    as: PersistedSessionAttachments.self
+                sessionAttachments: try structurallyUnreadableRows(
+                    in: ProjectDatabaseSchema.attachmentsTable
                 )
             )
         )
@@ -469,46 +467,24 @@ final class ProjectDatabase {
 
     // MARK: - Private Methods — App State
 
-    /// Reads every row of an auxiliary table through its own decoder, and names the ones that
-    /// failed instead of failing the load.
+    /// Finds auxiliary rows no later feature read can identify, without decoding their payloads.
     ///
-    /// This used to throw, which put a panel and an attachment list under the same all-or-nothing
-    /// contract as the project graph. The reason it did is still sound and still honoured: a
-    /// document that merely looked *missing* to its feature would be overwritten by that feature's
-    /// next ordinary edit, and the only copy would be gone. What was wrong was the blast radius —
-    /// the whole database was quarantined over one row, taking every project and chat with it. The
-    /// caller keeps these ids and refuses writes to exactly those rows.
+    /// Payload validity is checked lazily by `StateManager` on the first read or write for that
+    /// session. That preserves unreadable and future-format documents without charging startup for
+    /// panels and attachments it will not open. A malformed `session_id` is the exception: no
+    /// feature can request it later, so startup must notice it and prevent a table-wide prune.
     ///
     /// Still throwing on a SQL failure is deliberate: a table that cannot be read at all is a
     /// database that cannot be trusted, which is the case quarantine exists for.
-    private func unreadableRows<Value: Decodable>(
-        in table: String,
-        as type: Value.Type
-    ) throws -> UnreadableRows {
+    private func structurallyUnreadableRows(in table: String) throws -> UnreadableRows {
         var unreadable = UnreadableRows()
 
-        let statement = try database.prepare("SELECT session_id, data FROM \(table)")
+        let statement = try database.prepare("SELECT session_id FROM \(table)")
         defer { statement.finalize() }
         while try statement.step() {
-            guard let rawID = statement.text(0), let sessionID = SessionID(uuidString: rawID) else {
+            guard let rawID = statement.text(0), SessionID(uuidString: rawID) != nil else {
                 unreadable.containsUnkeyedRows = true
                 continue
-            }
-            guard let payload = statement.text(1) else {
-                unreadable.sessions.insert(sessionID)
-                continue
-            }
-            do {
-                _ = try Self.decoder.decode(type, from: Data(payload.utf8))
-            } catch {
-                ThreadingLogger.storage.error(
-                    """
-                    Unreadable \(table, privacy: .public) row for session \
-                    \(sessionID.uuidString, privacy: .public): \
-                    \(error.localizedDescription, privacy: .private(mask: .hash))
-                    """
-                )
-                unreadable.sessions.insert(sessionID)
             }
         }
 

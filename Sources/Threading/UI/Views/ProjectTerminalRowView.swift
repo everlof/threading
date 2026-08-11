@@ -8,7 +8,8 @@ final class ProjectTerminalRowView: NSTableCellView {
         symbolName: SidebarRowDefaults.actionSymbol,
         accessibility: L10n.string("Terminal actions"),
         target: .inline,
-        inkSource: .chrome
+        inkSource: .chrome,
+        glyphMaterialization: .deferred
     )
 
     private var trackingArea: NSTrackingArea?
@@ -146,6 +147,8 @@ final class ProjectTerminalRowView: NSTableCellView {
     }
 
     private func setActionVisible(_ visible: Bool, animated: Bool) {
+        if visible { actionButton.materializeGlyphIfNeeded() }
+
         guard animated else {
             actionButton.alphaValue = visible ? 1 : 0
             return

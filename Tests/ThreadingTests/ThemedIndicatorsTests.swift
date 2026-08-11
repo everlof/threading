@@ -447,6 +447,7 @@ final class ThemedIndicatorsTests: XCTestCase {
         AppThemePalette.set(AppThemeStyles.industrial)
         let indicator = SessionStatusIndicator()
         indicator.hostGround = .selection
+        indicator.update(for: .working)
 
         let spinner = try XCTUnwrap(
             descendants(of: indicator).compactMap { $0 as? ThemedSpinner }.first
@@ -593,11 +594,15 @@ final class ThemedIndicatorsTests: XCTestCase {
 
     func testSessionLoadingUsesTheSpinnerEvenWhenTheAgentIsDormant() throws {
         let indicator = SessionStatusIndicator()
-        let spinner = try XCTUnwrap(
-            indicator.subviews.compactMap { $0 as? ThemedSpinner }.first
+        XCTAssertFalse(
+            indicator.subviews.contains { $0 is ThemedSpinner },
+            "an idle status eagerly built its invisible working state"
         )
 
         indicator.update(for: .dormant, isLoading: true)
+        let spinner = try XCTUnwrap(
+            indicator.subviews.compactMap { $0 as? ThemedSpinner }.first
+        )
         XCTAssertTrue(spinner.isAnimating)
         XCTAssertEqual(spinner.accessibilityLabel(), "Loading session")
 

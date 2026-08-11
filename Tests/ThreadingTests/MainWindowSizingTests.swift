@@ -47,6 +47,46 @@ final class MainWindowSizingTests: XCTestCase {
 
     // MARK: - The Window Can Be Small
 
+    /// The saved divider is the sidebar rows' final horizontal geometry. Mounting the tree in
+    /// `MainWindowController.init` built and laid out the viewport there, then the next-turn
+    /// width restore immediately laid the same rows out again. The real outline remains empty
+    /// until that geometry turn and mounts before the following display cycle.
+    func testTheInitialSidebarTreeWaitsForItsRestoredDivider() throws {
+        let previousWidth = SidebarWidth.stored
+        defer {
+            if let previousWidth {
+                SidebarWidth.record(previousWidth)
+            } else {
+                SidebarWidth.reset()
+            }
+        }
+        let chosenWidth: CGFloat = 360
+        SidebarWidth.record(chosenWidth)
+
+        let controller = MainWindowController()
+        self.controller = controller
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1_200, height: 700))
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertFalse(
+            controller.initialSidebarTreeIsMounted,
+            "the viewport mounted before the deferred divider-geometry turn"
+        )
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        let sidebar = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        XCTAssertTrue(controller.initialSidebarTreeIsMounted)
+        XCTAssertEqual(
+            sidebar.viewController.view.frame.width,
+            chosenWidth,
+            accuracy: 1,
+            "the tree mounted without the saved divider becoming its standing geometry"
+        )
+    }
+
     /// Nothing in the content may hold the window taller than `WindowDefaults.minHeight`.
     ///
     /// AppKit derives a window's minimum content size from the constraints it finds at

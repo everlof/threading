@@ -63,6 +63,14 @@ final class StateManager {
     /// can read them opens the store.
     private var unreadableAuxiliaryRows = UnreadableAuxiliaryRows()
 
+    /// Auxiliary rows successfully decoded since the last project-graph load.
+    ///
+    /// Validation moved from launch to first access so a chat that never opens a panel or an
+    /// attachment list does not pay to decode them. Keeping the positive result avoids decoding
+    /// the same panel again merely because its host saves several slices in one turn.
+    private var readablePanelRows: Set<SessionID> = []
+    private var readableAttachmentRows: Set<SessionID> = []
+
     /// Sessions already named in a refusal, so a pane that saves on every navigation says it once.
     private var reportedUnreadableWrites: Set<String> = []
 
@@ -511,7 +519,9 @@ final class StateManager {
         guard !isUnreadable(unreadableAuxiliaryRows.panelLayouts, for: sessionID) else { return nil }
         importLegacyPanelLayoutsIfNeeded()
         do {
-            return try database().panelPayload(for: sessionID)
+            let payload = try database().panelPayload(for: sessionID)
+            guard panelPayloadIsReadable(payload, for: sessionID) else { return nil }
+            return payload
         } catch {
             ThreadingLogger.mcp.error(
                 "Could not load display panel: \(error.localizedDescription, privacy: .private(mask: .hash))"
@@ -529,7 +539,20 @@ final class StateManager {
             refusing: "display panel"
         ) else { return }
         do {
-            try database().savePanelPayload(payload, for: sessionID)
+            let database = try database()
+            if !readablePanelRows.contains(sessionID) {
+                let existing = try database.panelPayload(for: sessionID)
+                guard panelPayloadIsReadable(existing, for: sessionID) else {
+                    _ = isUnreadable(
+                        unreadableAuxiliaryRows.panelLayouts,
+                        for: sessionID,
+                        refusing: "display panel"
+                    )
+                    return
+                }
+            }
+            try database.savePanelPayload(payload, for: sessionID)
+            readablePanelRows.insert(sessionID)
         } catch {
             ThreadingLogger.mcp.error(
                 "Could not persist display panel: \(error.localizedDescription, privacy: .private(mask: .hash))"
@@ -565,7 +588,9 @@ final class StateManager {
             for: sessionID
         ) else { return nil }
         do {
-            return try database().attachmentsPayload(for: sessionID)
+            let payload = try database().attachmentsPayload(for: sessionID)
+            guard attachmentsPayloadIsReadable(payload, for: sessionID) else { return nil }
+            return payload
         } catch {
             ThreadingLogger.mcp.error(
                 "Could not load session attachments: \(error.localizedDescription, privacy: .private(mask: .hash))"
@@ -583,7 +608,20 @@ final class StateManager {
             refusing: "session attachments"
         ) else { return }
         do {
-            try database().saveAttachmentsPayload(payload, for: sessionID)
+            let database = try database()
+            if !readableAttachmentRows.contains(sessionID) {
+                let existing = try database.attachmentsPayload(for: sessionID)
+                guard attachmentsPayloadIsReadable(existing, for: sessionID) else {
+                    _ = isUnreadable(
+                        unreadableAuxiliaryRows.sessionAttachments,
+                        for: sessionID,
+                        refusing: "session attachments"
+                    )
+                    return
+                }
+            }
+            try database.saveAttachmentsPayload(payload, for: sessionID)
+            readableAttachmentRows.insert(sessionID)
         } catch {
             ThreadingLogger.mcp.error(
                 "Could not persist session attachments: \(error.localizedDescription, privacy: .private(mask: .hash))"
@@ -734,6 +772,8 @@ final class StateManager {
     func closeDatabase() {
         openDatabase?.close()
         openDatabase = nil
+        readablePanelRows.removeAll()
+        readableAttachmentRows.removeAll()
     }
 
     // MARK: - Persistence Health
@@ -755,13 +795,14 @@ final class StateManager {
 
     // MARK: - Unreadable Auxiliary Rows
 
-    /// Records what a load could not decode, and says so once rather than per write.
+    /// Records structural auxiliary hazards startup cannot defer, and says so once.
     ///
-    /// Reported at `error` level on purpose: nothing is lost yet, but a session is running with a
-    /// panel it cannot see and will not replace, and the launch that produced the row is worth
-    /// finding while the two builds still exist.
+    /// Payload failures join these sets lazily at first feature access. Startup only needs to find
+    /// rows whose session id is malformed, because no feature can ever request one and discover it.
     private func record(_ unreadable: UnreadableAuxiliaryRows) {
         unreadableAuxiliaryRows = unreadable
+        readablePanelRows.removeAll()
+        readableAttachmentRows.removeAll()
         reportedUnreadableWrites.removeAll()
         guard !unreadable.isEmpty else { return }
 
@@ -776,6 +817,60 @@ final class StateManager {
             those rows are kept and will not be written over this launch
             """
         )
+    }
+
+    /// Validates one panel at the feature boundary instead of every panel during launch.
+    private func panelPayloadIsReadable(_ payload: String?, for sessionID: SessionID) -> Bool {
+        guard let payload else {
+            readablePanelRows.insert(sessionID)
+            return true
+        }
+        guard !readablePanelRows.contains(sessionID) else { return true }
+        do {
+            _ = try JSONDecoder().decode(PersistedPanel.self, from: Data(payload.utf8))
+            readablePanelRows.insert(sessionID)
+            return true
+        } catch {
+            unreadableAuxiliaryRows.panelLayouts.sessions.insert(sessionID)
+            ThreadingLogger.storage.error(
+                """
+                Unreadable \(ProjectDatabaseSchema.panelTable, privacy: .public) row for session \
+                \(sessionID.uuidString, privacy: .public): \
+                \(error.localizedDescription, privacy: .private(mask: .hash))
+                """
+            )
+            return false
+        }
+    }
+
+    /// Validates one attachment document at first use, with the same overwrite refusal as panels.
+    private func attachmentsPayloadIsReadable(
+        _ payload: String?,
+        for sessionID: SessionID
+    ) -> Bool {
+        guard let payload else {
+            readableAttachmentRows.insert(sessionID)
+            return true
+        }
+        guard !readableAttachmentRows.contains(sessionID) else { return true }
+        do {
+            _ = try JSONDecoder().decode(
+                PersistedSessionAttachments.self,
+                from: Data(payload.utf8)
+            )
+            readableAttachmentRows.insert(sessionID)
+            return true
+        } catch {
+            unreadableAuxiliaryRows.sessionAttachments.sessions.insert(sessionID)
+            ThreadingLogger.storage.error(
+                """
+                Unreadable \(ProjectDatabaseSchema.attachmentsTable, privacy: .public) row for \
+                session \(sessionID.uuidString, privacy: .public): \
+                \(error.localizedDescription, privacy: .private(mask: .hash))
+                """
+            )
+            return false
+        }
     }
 
     /// Whether this session's row in an auxiliary table is one the load could not read.

@@ -11,8 +11,16 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
     typealias SessionHoverContentProvider =
         @MainActor (SessionInfoPopoverViewController.Info) -> NSViewController?
+    typealias SessionHoverInfoProvider =
+        @MainActor (AgentSession, SessionActivity) -> SessionInfoPopoverViewController.Info
+    typealias SessionAccountProvider =
+        @MainActor (AgentKind, AccountHandle) -> AgentAccount?
 
-    private let statusIndicator = SessionStatusIndicator()
+    /// The trailing geometry exists for every row, but idle and dormant sessions draw no status.
+    /// Keep that stable slot cheap and materialize the indicator's attention/limit subviews and
+    /// constraints only after a state has pixels to contribute.
+    private let statusSlot = NSView()
+    private var statusIndicator: SessionStatusIndicator?
     /// The row's `⋯`, the same nested icon button a tab's `×` is — see `ThemedIconButton`.
     /// It inks from the chrome because the sidebar sits on the chrome's ground, not the
     /// terminal's backdrop.
@@ -20,7 +28,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         symbolName: SidebarRowDefaults.actionSymbol,
         accessibility: L10n.string("Session actions"),
         target: .inline,
-        inkSource: .chrome
+        inkSource: .chrome,
+        glyphMaterialization: .deferred
     )
 
     /// Archiving without opening the menu first — the one row action reached often enough to
@@ -29,7 +38,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         symbolName: SidebarRowDefaults.archiveSymbol,
         accessibility: SidebarRowDefaults.archiveAccessibilityLabel,
         target: .inline,
-        inkSource: .chrome
+        inkSource: .chrome,
+        glyphMaterialization: .deferred
     )
 
     /// The buttons the pointer reveals, crossfaded against the status indicator as one.
@@ -46,8 +56,13 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
 
-    /// Content for the hover popover, refreshed on every configure.
-    private var popoverInfo: SessionInfoPopoverViewController.Info?
+    /// Source for the hover popover, refreshed on every configure.
+    ///
+    /// The derived `Info` is deliberately not retained here. It reads account directories and
+    /// git context, and most rows are never hovered; paying that file-system work while AppKit
+    /// mounts every visible sidebar row made it part of cold launch instead.
+    private var popoverSession: AgentSession?
+    private var popoverActivity: SessionActivity?
     private var popover: ThemedPopover?
 
     /// Decides when the hover card opens and closes; `SessionPopoverDefaults.hoverPolicy`
@@ -58,7 +73,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         scheduler.onDismiss = { [weak self] in self?.dismissPopover() }
         return scheduler
     }()
+    private let sessionHoverInfoProvider: SessionHoverInfoProvider
     private let sessionHoverContentProvider: SessionHoverContentProvider
+    private let sessionAccountProvider: SessionAccountProvider
 
     /// Invoked when the row's action button is pressed, carrying the row's session.
     var onAction: ((SessionID, NSView) -> Void)?
@@ -73,12 +90,17 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// The account's chip, overlaid on the mark's bottom-trailing corner. Deliberately not
     /// an arranged subview: the stack would give it a slot of its own, when the whole point
     /// is that it rides the mark rather than standing beside it.
-    private let accountChipView = NSImageView()
+    /// Exists only after a row actually has an alternate-account chip to show. A standard
+    /// session has no badge at all; constructing an image view and four constraints for every
+    /// ordinary row made absent content part of viewport mounting and scrolling.
+    private var accountChipView: NSImageView?
 
     private let titleLabel = MorphingTitleLabel()
     /// Pinning is stronger than every sidebar sort, so it remains visible beside the title
     /// rather than being communicated only by the row's position.
-    private let pinnedIndicator = NSImageView()
+    /// Inserted into the arranged content only for a pinned session. Most rows are unpinned, so
+    /// resolving this SF Symbol (and carrying an empty arranged slot) belongs behind that state.
+    private var pinnedIndicator: NSImageView?
     private let nativeIdentityContent = NSView()
     private let nativeContent = NSView()
     private let afterTitleSlot = NSStackView()
@@ -87,7 +109,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     )
     private lazy var contentContainer = ComponentContentContainer(defaultContent: nativeContent)
     private lazy var rowContentStack = NSStackView(
-        views: [contentContainer, pinnedIndicator, afterTitleSlot]
+        views: [contentContainer, afterTitleSlot]
     )
     private lazy var identityCustomizationHost = ComponentCustomizationHost(
         target: .sessionIdentity(),
@@ -169,7 +191,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         customizationLookup = {
             ComponentCustomizationProviderSlot.shared.customization(for: $0)
         }
+        sessionHoverInfoProvider = SessionInfoPopoverViewController.Info.init
         sessionHoverContentProvider = Self.nativeSessionHoverContent(for:)
+        sessionAccountProvider = AgentAccountDiscovery.account(for:handle:)
         super.init(frame: frameRect)
         setupViews()
     }
@@ -179,10 +203,16 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     init(
         customizationLookup: @escaping ComponentCustomizationHost.Lookup,
         sessionHoverContentProvider: @escaping SessionHoverContentProvider =
-            SessionRowView.nativeSessionHoverContent(for:)
+            SessionRowView.nativeSessionHoverContent(for:),
+        sessionHoverInfoProvider: @escaping SessionHoverInfoProvider =
+            SessionInfoPopoverViewController.Info.init,
+        sessionAccountProvider: @escaping SessionAccountProvider =
+            AgentAccountDiscovery.account(for:handle:)
     ) {
         self.customizationLookup = customizationLookup
         self.sessionHoverContentProvider = sessionHoverContentProvider
+        self.sessionHoverInfoProvider = sessionHoverInfoProvider
+        self.sessionAccountProvider = sessionAccountProvider
         super.init(frame: .zero)
         setupViews()
     }
@@ -204,10 +234,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.setAccessibilityIdentifier("sidebar.session.identity")
 
-        accountChipView.imageScaling = .scaleProportionallyDown
-        accountChipView.translatesAutoresizingMaskIntoConstraints = false
-        accountChipView.setAccessibilityIdentifier("sidebar.session.account")
-
         titleLabel.applyFont(.controlRegular)
         titleLabel.setAccessibilityIdentifier("sidebar.session.title")
 
@@ -227,30 +253,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             SidebarRowDefaults.stretchableHugging,
             for: .horizontal
         )
-
-        pinnedIndicator.image = Design.Symbol.image(
-            SidebarRowDefaults.pinnedSymbol,
-            slot: Design.Size.inlineButtonGlyph,
-            pointSize: Design.Symbol.control
-        )
-        pinnedIndicator.imageScaling = .scaleProportionallyDown
-        pinnedIndicator.translatesAutoresizingMaskIntoConstraints = false
-        pinnedIndicator.setContentHuggingPriority(.required, for: .horizontal)
-        pinnedIndicator.setContentCompressionResistancePriority(.required, for: .horizontal)
-        pinnedIndicator.setAccessibilityElement(true)
-        pinnedIndicator.setAccessibilityRole(.image)
-        pinnedIndicator.setAccessibilityLabel(SidebarRowDefaults.pinnedAccessibilityLabel)
-        pinnedIndicator.setAccessibilityIdentifier("sidebar.session.pinned")
-        pinnedIndicator.isHidden = true
-
-        NSLayoutConstraint.activate([
-            pinnedIndicator.widthAnchor.constraint(
-                equalToConstant: Design.Size.inlineButtonGlyph
-            ),
-            pinnedIndicator.heightAnchor.constraint(
-                equalToConstant: Design.Size.inlineButtonGlyph
-            )
-        ])
 
         setupTrailingSlot()
         setupCustomizableContent()
@@ -292,7 +294,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     private func setupCustomizableContent() {
         nativeIdentityContent.translatesAutoresizingMaskIntoConstraints = false
         nativeIdentityContent.addSubview(iconView)
-        nativeIdentityContent.addSubview(accountChipView)
         nativeIdentityContent.setAccessibilityIdentifier(
             "sidebar.session.identity.default-content"
         )
@@ -307,25 +308,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             iconView.topAnchor.constraint(equalTo: nativeIdentityContent.topAnchor),
             iconView.bottomAnchor.constraint(equalTo: nativeIdentityContent.bottomAnchor),
             iconView.leadingAnchor.constraint(equalTo: nativeIdentityContent.leadingAnchor),
-            iconView.trailingAnchor.constraint(equalTo: nativeIdentityContent.trailingAnchor),
-
-            // Hung off the provider mark rather than laid out beside it, so the native
-            // composition remains compact. A selected identity renderer may choose a HStack
-            // instead by replacing this entire inner container.
-            accountChipView.widthAnchor.constraint(
-                equalToConstant: AccountBadgeDefaults.chipSize
-            ),
-            accountChipView.heightAnchor.constraint(
-                equalToConstant: AccountBadgeDefaults.chipSize
-            ),
-            accountChipView.trailingAnchor.constraint(
-                equalTo: iconView.trailingAnchor,
-                constant: AccountBadgeDefaults.cornerOverhang
-            ),
-            accountChipView.bottomAnchor.constraint(
-                equalTo: iconView.bottomAnchor,
-                constant: AccountBadgeDefaults.cornerOverhang
-            )
+            iconView.trailingAnchor.constraint(equalTo: nativeIdentityContent.trailingAnchor)
         ])
 
         identityContentContainer.setAccessibilityIdentifier(
@@ -385,10 +368,77 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         _ = customizationHost
     }
 
+    /// Materializes the alternate-account overlay when it first has pixels to contribute.
+    /// Hung off the provider mark rather than laid out beside it, so the native composition
+    /// remains compact. A selected identity renderer may still replace this whole container.
+    private func accountChipViewForPresentation() -> NSImageView {
+        if let accountChipView { return accountChipView }
+
+        let chip = NSImageView()
+        chip.imageScaling = .scaleProportionallyDown
+        chip.translatesAutoresizingMaskIntoConstraints = false
+        chip.setAccessibilityIdentifier("sidebar.session.account")
+        nativeIdentityContent.addSubview(chip)
+
+        NSLayoutConstraint.activate([
+            chip.widthAnchor.constraint(equalToConstant: AccountBadgeDefaults.chipSize),
+            chip.heightAnchor.constraint(equalToConstant: AccountBadgeDefaults.chipSize),
+            chip.trailingAnchor.constraint(
+                equalTo: iconView.trailingAnchor,
+                constant: AccountBadgeDefaults.cornerOverhang
+            ),
+            chip.bottomAnchor.constraint(
+                equalTo: iconView.bottomAnchor,
+                constant: AccountBadgeDefaults.cornerOverhang
+            )
+        ])
+
+        accountChipView = chip
+        return chip
+    }
+
+    /// Adds the pin mark only once a pinned row needs it. Reuse keeps the now-warm view hidden,
+    /// while rows that never carry a pin never pay for its image, constraints, or stack slot.
+    private func setPinned(_ pinned: Bool) {
+        guard pinned else {
+            pinnedIndicator?.isHidden = true
+            return
+        }
+        if let pinnedIndicator {
+            pinnedIndicator.isHidden = false
+            return
+        }
+
+        let indicator = NSImageView()
+        indicator.image = Design.Symbol.image(
+            SidebarRowDefaults.pinnedSymbol,
+            slot: Design.Size.inlineButtonGlyph,
+            pointSize: Design.Symbol.control
+        )
+        indicator.imageScaling = .scaleProportionallyDown
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        indicator.setContentHuggingPriority(.required, for: .horizontal)
+        indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
+        indicator.setAccessibilityElement(true)
+        indicator.setAccessibilityRole(.image)
+        indicator.setAccessibilityLabel(SidebarRowDefaults.pinnedAccessibilityLabel)
+        indicator.setAccessibilityIdentifier("sidebar.session.pinned")
+        indicator.contentTintColor = backgroundStyle == .emphasized
+            ? Design.Ink.selection.label
+            : Design.Surface.accent
+
+        rowContentStack.insertArrangedSubview(indicator, at: 1)
+        NSLayoutConstraint.activate([
+            indicator.widthAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
+            indicator.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph)
+        ])
+        pinnedIndicator = indicator
+    }
+
     /// The slot sits at the trailing edge, where it reads as status rather than as another
     /// icon competing with the agent's own.
     private func setupTrailingSlot() {
-        statusIndicator.translatesAutoresizingMaskIntoConstraints = false
+        statusSlot.translatesAutoresizingMaskIntoConstraints = false
 
         // No size stated for either button: each knows its own target and padding.
         //
@@ -414,11 +464,11 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
         trailingSlot.translatesAutoresizingMaskIntoConstraints = false
         trailingSlot.setAccessibilityIdentifier("sidebar.session.trailing")
-        statusIndicator.setAccessibilityIdentifier("sidebar.session.status")
+        statusSlot.setAccessibilityIdentifier("sidebar.session.status")
         actionButton.setAccessibilityIdentifier("sidebar.session.actions")
         archiveButton.setAccessibilityIdentifier("sidebar.session.archive")
         hoverControls.setAccessibilityIdentifier("sidebar.session.hover-controls")
-        trailingSlot.addSubview(statusIndicator)
+        trailingSlot.addSubview(statusSlot)
         trailingSlot.addSubview(hoverControls)
 
         let width = trailingSlot.widthAnchor.constraint(
@@ -433,13 +483,40 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             // the row's trailing edge, which is exactly where the dot sat when it was the only
             // thing in the slot. Centred in the widened slot it would drift inboard, moving
             // the status of every row in the list to buy a button nobody is hovering.
-            statusIndicator.centerXAnchor.constraint(equalTo: archiveButton.centerXAnchor),
-            statusIndicator.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor),
-            statusIndicator.widthAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
-            statusIndicator.heightAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
+            statusSlot.centerXAnchor.constraint(equalTo: archiveButton.centerXAnchor),
+            statusSlot.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor),
+            statusSlot.widthAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
+            statusSlot.heightAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
             hoverControls.trailingAnchor.constraint(equalTo: trailingSlot.trailingAnchor),
             hoverControls.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
         ])
+    }
+
+    /// Applies status without making an invisible `SessionStatusIndicator` part of every cold
+    /// viewport mount. Once a recycled row has needed one it remains warm and receives idle state
+    /// so any former mark disappears; rows that have only ever been idle keep the empty slot.
+    private func updateStatus(for activity: SessionActivity, isLoading: Bool) {
+        let presentsStatus = isLoading || ![.idle, .dormant].contains(activity)
+        guard presentsStatus || statusIndicator != nil else { return }
+
+        let indicator: SessionStatusIndicator
+        if let statusIndicator {
+            indicator = statusIndicator
+        } else {
+            let materialized = SessionStatusIndicator()
+            materialized.translatesAutoresizingMaskIntoConstraints = false
+            materialized.hostGround = backgroundStyle == .emphasized ? .selection : nil
+            statusSlot.addSubview(materialized)
+            NSLayoutConstraint.activate([
+                materialized.leadingAnchor.constraint(equalTo: statusSlot.leadingAnchor),
+                materialized.trailingAnchor.constraint(equalTo: statusSlot.trailingAnchor),
+                materialized.topAnchor.constraint(equalTo: statusSlot.topAnchor),
+                materialized.bottomAnchor.constraint(equalTo: statusSlot.bottomAnchor)
+            ])
+            statusIndicator = materialized
+            indicator = materialized
+        }
+        indicator.update(for: activity, isLoading: isLoading)
     }
 
     // MARK: - Hover
@@ -507,10 +584,14 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // Asked of the popover rather than of the reference held to it, for the reason
         // `ProjectRowView.presentPopover` states: a dropdown opening in this window closes the
         // card, and a stale reference would read as one still showing.
-        guard let popoverInfo, let sessionID, window != nil, popover?.isShown != true else { return }
+        guard let popoverSession,
+              let popoverActivity,
+              window != nil,
+              popover?.isShown != true
+        else { return }
         guard let controller = makeSessionHoverCard(
-            info: popoverInfo,
-            sessionID: sessionID
+            session: popoverSession,
+            activity: popoverActivity
         ) else {
             return
         }
@@ -524,6 +605,19 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         content.show(relativeTo: bounds, of: self, preferredEdge: .maxX)
 
         popover = content
+    }
+
+    /// Resolves hover-only state at the point the hover card is actually requested. Keeping
+    /// this seam separate also lets the launch regression prove that ordinary row configuration
+    /// performs no hover discovery.
+    func makeSessionHoverCard(
+        session: AgentSession,
+        activity: SessionActivity
+    ) -> NSViewController? {
+        makeSessionHoverCard(
+            info: sessionHoverInfoProvider(session, activity),
+            sessionID: session.id
+        )
     }
 
     /// Builds the customizable presentation independently from its hover trigger. The row keeps
@@ -586,12 +680,14 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// inline target; the title yields the second target only while both actions are visible.
     private func setActionVisible(_ visible: Bool, animated: Bool) {
         if visible {
+            actionButton.materializeGlyphIfNeeded()
+            archiveButton.materializeGlyphIfNeeded()
             setTrailingSlotExpanded(true)
         }
 
         guard animated else {
             hoverControls.alphaValue = visible ? 1 : 0
-            statusIndicator.alphaValue = visible ? 0 : 1
+            statusSlot.alphaValue = visible ? 0 : 1
             setTrailingSlotExpanded(visible)
             return
         }
@@ -599,7 +695,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = Design.Motion.quick
             hoverControls.animator().alphaValue = visible ? 1 : 0
-            statusIndicator.animator().alphaValue = visible ? 0 : 1
+            statusSlot.animator().alphaValue = visible ? 0 : 1
         }, completionHandler: { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !visible, !self.isHovered else { return }
@@ -637,7 +733,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         if sessionID != session.id {
             dismissPopover()
         }
-        popoverInfo = SessionInfoPopoverViewController.Info(session: session, activity: activity)
+        popoverSession = session
+        popoverActivity = activity
 
         // Read before the id is overwritten: a morph is only honest when the name being
         // replaced is the one this row is showing, which means the *same* session with a
@@ -649,7 +746,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         sessionID = session.id
         nativeTitle = session.displayTitle
         nativeToolTip = nil
-        pinnedIndicator.isHidden = !session.isPinned
+        setPinned(session.isPinned)
 
         // Bound to *this* session rather than reading the row's id when it fires. A press
         // outlives the row it started on — `ThemedIconButton` completes the gesture even after
@@ -659,7 +756,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
         isDormant = activity == .dormant
 
-        statusIndicator.update(for: activity, isLoading: isLoading)
+        updateStatus(for: activity, isLoading: isLoading)
 
         // Rows are reconfigured while the pointer sits on them (activity changes as an
         // agent works), so the hover state is reasserted rather than reset.
@@ -667,7 +764,13 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
         // The hover popover carries the full title and account, so a tooltip would only
         // duplicate it more slowly.
-        let account = AgentAccountDiscovery.account(for: session.kind, handle: session.accountHandle)
+        // The standard login never has an account chip. Looking it up anyway makes the first
+        // visible row scan every account directory and parse shell aliases during cold launch.
+        // Alternate rows still resolve synchronously because their chip is visible content;
+        // the hover card performs its own complete lookup only when requested.
+        let account = session.accountHandle.isStandard
+            ? nil
+            : sessionAccountProvider(session.kind, session.accountHandle)
         applyAgentIcon(for: session, account: account)
         applyTextColors()
 
@@ -741,10 +844,17 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             // An explicit user emoji remains above an extension resolver in precedence.
             chip = builtInChip
         }
-        accountChipView.image = chip
-        accountChipView.setAccessibilityLabel(account?.displayName)
-        accountChipView.isHidden = chip == nil
-        accountChipView.alphaValue = isDormant ? AgentIconDefaults.dormantAlpha : 1
+        if let chip {
+            let chipView = accountChipViewForPresentation()
+            chipView.image = chip
+            chipView.setAccessibilityLabel(account?.displayName)
+            chipView.isHidden = false
+            chipView.alphaValue = isDormant ? AgentIconDefaults.dormantAlpha : 1
+        } else if let accountChipView {
+            accountChipView.image = nil
+            accountChipView.setAccessibilityLabel(nil)
+            accountChipView.isHidden = true
+        }
 
         nativeIcon = iconView.image
         nativeIconTint = iconView.contentTintColor
@@ -898,7 +1008,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             case "session.provider-image":
                 return nativeIcon
             case "session.account-image":
-                return accountChipView.image
+                return accountChipView?.image
             default:
                 return nil
             }
@@ -932,10 +1042,10 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // fill is named: the unemphasized one is the accent held far back over the sidebar's
         // surface, where the chrome's ink is still the ink that reads.
         let ground: InkSource? = backgroundStyle == .emphasized ? .selection : nil
-        pinnedIndicator.contentTintColor = backgroundStyle == .emphasized
+        pinnedIndicator?.contentTintColor = backgroundStyle == .emphasized
             ? Design.Ink.selection.label
             : Design.Surface.accent
-        statusIndicator.hostGround = ground
+        statusIndicator?.hostGround = ground
         actionButton.hostGround = ground
         archiveButton.hostGround = ground
     }

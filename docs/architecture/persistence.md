@@ -98,14 +98,21 @@ reasoning that a document which merely looked *missing* to its feature would be 
 that feature's next ordinary edit. The reasoning was right and the blast radius was wrong: a
 failed load quarantines the database, so one panel written by a build a format version ahead
 took every project and chat with it — which is exactly what happened, from a row reading
-`{"formatVersion":2,…,"tabs":[]}` that a pre-detached-windows build refused. `ProjectDatabase.load`
-now returns a `ProjectsStateLoad`: the project graph, plus the rows it could not read. What the
+`{"formatVersion":2,…,"tabs":[]}` that a pre-detached-windows build refused. What the
 all-or-nothing rule protected is protected one row at a time — `StateManager` reports the row to
 its feature as absent so the pane rebuilds, and refuses every write to it for the rest of the
-launch, so the bytes are still there for the build that can read them. A row whose `session_id`
-is not an identifier at all is tracked apart as `containsUnkeyedRows`, because no feature can ask
-for it by id and only skipping the table's prune keeps it. The project and session rows stay
-all-or-nothing: those are the copy of record.
+launch, so the bytes are still there for the build that can read them.
+
+That validation is **lazy at the feature boundary**, not cosmetic laziness. Startup scans only
+the auxiliary `session_id` columns. The first panel/attachment read decodes that session's row;
+more importantly, a first write that arrives before any read also fetches and validates the
+existing row before replacing it. Successful validation is cached for the open database. A future
+or corrupt payload joins the unreadable set and the write is refused. This removed full decoding
+of every saved panel and attachment list from launch without opening a data-loss race. A row whose
+`session_id` is not an identifier remains the necessary eager exception: no feature can ask for it
+by id later, so startup records `containsUnkeyedRows` and only skipping the table's prune can keep
+it. The project and session rows stay all-or-nothing and eagerly decoded because those are the copy
+of record.
 
 Agent execution evidence has different write and trust needs from mutable application state, so it
 does not live in SQLite. [Execution Audit](execution-audit.md) keeps a bounded append-only,

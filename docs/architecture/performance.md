@@ -495,6 +495,9 @@ scripts/profile_threading.sh window-resize-stress
 # Right-pane open/close beside a repainting Codex TUI, including remote-grid control.
 scripts/profile_threading.sh display-pane-stress
 
+# Three first-window launch measurements plus an isolated command-line App Launch trace.
+scripts/profile_threading.sh startup
+
 # Lightweight stacks from an already-running app.
 scripts/profile_threading.sh sample 15 Threading
 
@@ -537,6 +540,19 @@ same pane action during each capture. Output defaults to `/tmp/threading-profile
 `THREADING_PROFILE_OUTPUT` to retain it elsewhere. Command-line Instruments can still require
 macOS Developer Tools authorization the first time, but it requires no interactive Instruments
 launch or template setup.
+
+`startup` is deliberately separate from `full`: the former launches a measured process and the
+latter attaches to an already-running app. The startup sweep is safe while the regular app stays
+open. It builds an isolated app copy, changes only that copy's bundle identity, ad-hoc signs it,
+and gives each repetition a fresh copy-on-write snapshot of the real Application Support tree.
+SQLite's backup API replaces the independently cloned database/WAL/SHM family with one consistent
+image, and the real preferences are copied into the throwaway bundle domain. The measured process
+therefore sees the real project/session, extension, icon, theme and window-state shape while every
+lock, marker, log and write belongs to temporary state that is removed after the sweep.
+`THREADING_STARTUP_PROFILE_RUNS` controls the repetition count (three by default);
+`THREADING_STARTUP_PROFILE_CONFIGURATION` selects the build configuration (Debug by default).
+Set `THREADING_STARTUP_PROFILE_DERIVED_DATA` to a trusted existing DerivedData directory for fast
+incremental tuning runs; omitting it keeps each retained artifact self-contained.
 
 The three scaling-audit commands run System and Neo Brutalism by default and accept their printed
 `THREADING_*` variables as one-point overrides. Extension-settings virtualization removed the
@@ -1008,6 +1024,195 @@ once on alternate-screen exit instead of 117–253 ms on every drag tick. A gene
 added: after removing invisible work, live grid updates and repaints fit within one 60 Hz frame and
 keep terminal content tracking the pointer.
 
+## Cold launch to the first ready window
+
+`THREADING_STARTUP_PROFILE=1` follows the production launch path through state loading, appearance
+restore, menu construction, `MainWindowController`, ordering the first window, and the next main
+queue turn. It then terminates cleanly before session restoration, extension processes, polling,
+or background services begin. The one bounded `THREADING_PERF app-startup` line reports every
+phase separately and includes the project/session counts that define the measured store. The
+ordinary always-on `app.launch` signpost remains unchanged.
+
+The first Debug trace against one project and 99 sessions found two pieces of invisible eager work
+inside the 352–356 ms window-construction phase:
+
+- every visible `SessionRowView` derived account and git information for a hover card that had not
+  been requested; and
+- the zero-height native `WindowTitleBandView` asked AppKit to render the application icon even
+  though only takeover chrome displays it.
+
+Session rows now retain only the source session/activity until the pointer actually requests the
+card. The title band similarly asks for the application icon only when its resolved style exposes
+the icon slot. An App Launch trace proves both former stacks are absent. The matched xctrace runs
+and the lower-noise direct repetitions measured:
+
+| Debug launch measurement | Before | After | Change |
+|---|---:|---:|---:|
+| xctrace process entry → first ready turn | 652.0 ms | 572.1 ms | −79.9 ms (−12.3%) |
+| xctrace window construction | 356.4 ms | 290.9 ms | −65.6 ms (−18.4%) |
+| Direct process entry → first ready turn | 687.7 ms | 610.2 ms median of three | −77.5 ms (−11.3%) |
+| Direct window construction | 352.1 ms | 284.5 ms median of three | −67.6 ms (−19.2%) |
+
+A follow-up sample of the remaining first-outline mount found another invisible state inside an
+otherwise visible row: the first idle `SessionStatusIndicator` spent a 5 ms sample constructing a
+layer-backed `ThemedSpinner`. The spinner also owns theme and accessibility-display observers, and
+99 stored sessions are overwhelmingly idle at launch. The indicator now materializes that subtree
+only when a session first enters working or loading; attention and limit marks keep their original
+eager, lightweight geometry. Focused indicator, limit-mark and session-row suites execute 101 tests
+across the idle/working/loading/selection transitions.
+
+Three follow-up direct launches against the same one-project / 99-session store measured 531.4,
+540.6 and 542.0 ms process-entry-to-ready, with 239.9, 241.6 and 245.0 ms of window construction.
+The median intermediate direct baseline was therefore **540.6 ms total / 241.6 ms window
+construction**.
+The installed app was running when the final check was made, so the CLI's state-lock guard correctly
+refused the additional matched App Launch trace; those values were an intermediate direct baseline
+rather than a new paired xctrace comparison.
+
+The next call tree found 15 ms of a complete `SessionComposerViewController` built behind the
+placeholder used while the saved session is restored: `ChipView`, `PromptView`, and footer controls
+were all loaded even though startup never showed the composer. `TerminalContainerViewController`
+now retains the composer factory and delegate intent but constructs and installs the controller only
+when `showComposer` requests that route. Hide, handoff, recovery, terminal, conversation, and
+settings paths inspect the stored controller without crossing that lazy boundary. The late install
+also preserves the original view order below the git-status overlay. The following App Launch trace
+contains **0 ms** in `SessionComposerViewController`, `PromptView`, or `ChipView`; the focused
+composer, fit, toolbar, and recovery-startup suites cover the deferred route and its first use.
+
+That trace also caught the first standard-login row synchronously enumerating account directories
+and parsing shell aliases solely to learn that the standard account has no badge. Standard rows now
+skip discovery; alternate rows still resolve their visible badge synchronously. Three matched direct
+runs immediately before and after that fast path measured:
+
+| Debug direct launch, one project / 99 sessions | Before median | After median | Change |
+|---|---:|---:|---:|
+| Process entry → first ready turn | 563.5 ms | 541.0 ms | −22.5 ms (−4.0%) |
+| Window construction | 246.5 ms | 236.0 ms | −10.5 ms (−4.3%) |
+
+The after runs were 485.1, 541.0 and 541.7 ms total, so launch variance remains material. The final
+isolated App Launch capture measured **454.0 ms total / 217.8 ms window construction** and proved
+the standard scan absent. One visible alternate-account row still carried a 5 ms directory scan;
+removing that would require an honest asynchronous badge-resolution design rather than withholding
+or guessing visible identity content.
+
+That same trace found a smaller presentation cost in each mounted sidebar row: the action controls
+must exist before hover for keyboard and VoiceOver access, but their hidden SF Symbols do not yet
+contribute pixels. `ThemedIconButton` now supports a presentation-only lazy boundary. The real
+control shell, constraints, action, and accessibility metadata remain eager; only the latest glyph
+is resolved at first draw or explicit reveal. Session, project, and terminal-row hover actions use
+that boundary. Component and row tests verify that pointerless activation still works before
+materialization and that the latest changed symbol appears on reveal.
+
+The matched follow-up App Launch trace contains no `ThemedIconButton.renderSlot` or CoreUI symbol
+resolution below `SessionRowView.init`. It measured **457.1 ms total / 213.3 ms window
+construction**, versus **454.0 / 217.8 ms** immediately before the change. At the profiler's 5 ms
+sampling interval this is a roughly one-sample window improvement and a flat total, which is the
+honest result for this small fix. Three direct launches measured 482.2/194.4, 473.5/191.2, and
+460.6/184.4 ms total/window (median **473.5 / 191.2 ms**), but that larger swing includes warm-cache
+variance and is not attributed to deferred glyphs.
+
+The remaining window phase is mostly the visible AppKit surface: cold `NSWindow` creation,
+split/sidebar construction, first outline cells, symbol/image initialization, Auto Layout, and
+initial-frame application. The final trace attributed about 60 ms to AppKit showing the window's
+native toolbar, about 55 ms to the first `ThemedOutlineView` layout, and about 40 ms to the outline's
+visible-cell provider (inclusive and therefore overlapping). The 99 stored sessions do not all
+become views; the outline mounts its viewport.
+
+The stack paths split that apparent 55 ms outline owner into two layouts of the same viewport:
+roughly 35 ms of row construction ran while attaching the native toolbar, before the saved window
+frame was in force, and roughly 20 ms ran when `applyInitialFrame` established the geometry the
+window would actually draw. The rows were therefore paying for a transient, invisible size. The
+main-window sidebar now keeps its real empty outline installed through content-controller, toolbar,
+and frame setup, then mounts the persisted tree once after `applyInitialFrame`. Standalone sidebar
+controllers retain eager mounting. The lifecycle boundary is idempotent, and focused sidebar plus
+window/chrome suites cover both the deferred empty pass and the one real mount.
+
+The same samples exposed two smaller hidden-state costs inside every ordinary session row. A
+standard-account row constructed an absent account-chip image view and four constraints, and an
+unpinned row resolved an SF Symbol and reserved an arranged stack slot for an invisible pin.
+Neither subtree now exists until the corresponding state is visible. Reused rows keep a previously
+materialized subtree warm and hide it when absent; pinned accessibility content appears at the same
+boundary as the indicator. This is content laziness inside the viewport row, not an attempt to make
+the outline's row virtualization lazy twice.
+
+The structural duplicate is removed, but its matched after-trace still matters. The startup CLI
+now clones the real state into a temporary Cocoa home and replaces the live SQLite family with a
+consistent backup, so its lock and launch writes cannot touch the installed app even when that app
+remains open. `scripts/profile_threading.sh startup` reproduces the repeated phase lines and
+preserves `App-Launch.trace` without opening Instruments or interrupting an active session. The
+remaining one-pass visible-row mount and native toolbar installation are the next window owners
+after that comparison.
+
+The one-pass trace still found two correctness-preserving micro-costs. Idle/dormant session rows
+constructed a full `SessionStatusIndicator` even though it had no pixels; rows now keep a fixed
+12-point geometry slot and materialize the indicator only on the first visible state. The title
+wrapper also configured font, truncation and alignment on an empty `MorphingLabel`; LabelMorph now
+invalidates empty intrinsic state without rebuilding an empty layer tree. The follow-up trace lost
+the former indicator and empty-rebuild samples and reduced sampled `SessionRowView.init` work from
+about 25 ms to one 5 ms sample. Direct median window construction moved only **209.1 → 208.4 ms**,
+so these remain scaling/ownership fixes rather than a claimed launch-speed win.
+
+The next trace put **40 ms** under `ProjectDatabase.load`, **35 ms** of it decoding every saved
+`PersistedPanel` and `PersistedSessionAttachments` document solely to identify future/corrupt rows.
+Reading SQLite `TEXT` payloads directly as bytes first removed two sampled `String → Data` copies,
+but did not materially change wall time because JSON decoding remained the owner. Auxiliary payload
+validation now moves to first feature access while preserving the refusal boundary: a first write
+before any read validates the existing row too, successful validation is cached, and unreadable
+bytes are still never replaced. Startup only scans auxiliary row identifiers so malformed unkeyed
+rows remain protected from prune.
+
+Matched three-run Debug launches against the same one-project / 99-session snapshot measured:
+
+| Cold launch phase | Eager auxiliary decode | Lazy feature-boundary decode | Change |
+|---|---:|---:|---:|
+| State load median | 58.0 ms | **23.3 ms** | **−34.7 ms (−59.8%)** |
+| Process entry → first ready turn median | 483.6 ms | **470.2 ms** | −13.4 ms (−2.8%) |
+
+The smaller end-to-end gain is expected noise from dyld, native window construction and the first
+main-queue turn; one after-run still recorded a 58.3 ms state outlier. The owned phase is the firm
+result. In the verification trace, `PersistedPanel.init` and
+`PersistedSessionAttachments.init` have **zero startup samples**; `ProjectDatabase.load` appears
+only in two short SQLite reads totalling 0.144 ms, including 0.020 ms for the structural auxiliary
+scan. Sixty focused database/state-manager tests cover authoritative corruption, future panels,
+future attachments arriving before first read, unkeyed-row pruning, migration and raw UTF-8 bytes.
+
+The next launch trace showed that the supposed one-pass sidebar mount still stopped one lifecycle
+event too early. The saved *window* frame was final, but the saved sidebar divider was deliberately
+restored on the next main-queue turn, after AppKit had laid out the native toolbar. Mounting rows in
+`MainWindowController.init` therefore built the viewport at the default divider, ordered that tree
+into the window, then changed its width and laid the same labels and constraints out again. The
+trace contained `MorphingLabel.layout` below `restoreSidebarWidth`; a width is presentation
+geometry, so neither the model nor the outline should have crossed its lazy boundary before it.
+
+The main-window outline now stays empty through toolbar installation, saved window-frame restore,
+ordering, toolbar measurement and saved divider restore. The same next-turn geometry block mounts
+the persisted tree after the divider settles and before the first display cycle. The startup
+readiness block is queued later, so the measurement still includes the complete visible viewport;
+this is deleted duplicate work, not a faster marker. Since the mount deliberately crosses the old
+`window_construct` phase boundary, compare the combined window-construction, ordering and
+first-ready-turn tail:
+
+| Five-run Debug launch, real snapshot | Prior ordering | Divider-first mount | Change |
+|---|---:|---:|---:|
+| Window construction + ordering + first ready turn, median | 305.8 ms | **227.8 ms** | **−78.0 ms (−25.5%)** |
+| Process entry → first ready turn, median | 420.1 ms | **345.7 ms** | **−74.4 ms (−17.7%)** |
+
+The controlled swap used the same one-project / 99-session snapshot. A second five-run fixed sweep
+after the live snapshot gained one session reproduced a **228.2 ms** combined UI tail. Its trace
+has no `MorphingLabel` or row layout below `restoreSidebarWidth`; the remaining sampled restore is
+empty split geometry and the viewport mounts once. A lifecycle regression test holds the deferred
+boundary through the saved-divider turn. The focused sizing/tree suites ran 36 tests (one opt-in
+stress case skipped), while explicit 1,000- and 5,000-session sweeps kept 23 materialized cells and
+resize p95 at 5.69 ms and 6.32 ms respectively.
+
+The next sampled row-construction owner, the fixed two-button `NSStackView` used by each visible
+sidebar row, was also tested rather than assumed. Across seven 500-pair microbench repetitions, a
+custom fixed-frame container measured 11.427 ms versus 11.819 ms for the stack: only 0.392 ms over
+500 rows, or roughly 0.02 ms at the 23-row launch viewport. Launch-wide A/B/A results moved with
+unrelated dyld, state and AppKit variance and did not reproduce that first apparent difference.
+The custom component and its stress fixture were therefore reverted; the complexity would not buy
+a measurable startup improvement.
+
 ## Display-pane transition beside a live TUI
 
 Opening the right pane originally performed two consecutive 200 ms transitions: first the split
@@ -1017,28 +1222,34 @@ SIGWINCH. A full-screen Codex or Claude process answers each SIGWINCH by repaint
 screen, so a visually small motion multiplied into layout plus process output at animation-frame
 frequency.
 
-The remembered divider position is now installed inside the same animation group as the
-uncollapse. While a visible animated pane moves, `EmojiFixedTerminalView` keeps its current grid
-and remembers only the last valid frame-derived grid. The completion re-enters SwiftTerm's normal
-frame-size route once at the stable frame, preserving its emulator, PTY, accessibility, search and
-scroller notifications. The hold is nested for rapid opposing actions, and an active remote grid
-continues to win if remote control begins during the motion.
+The remembered divider position is installed in the same geometry transaction as the uncollapse,
+so there is no second restoration motion. More importantly, terminal-backed sessions take the
+immediate split route even when the caller requests animation. That commits the one useful final
+width without blocking the main thread on a backing-tree animation or manufacturing intermediate
+terminal grids. Native conversation surfaces retain the standard motion. This is a presentation
+policy at the pane boundary, not a SwiftTerm resize suppression: terminal frame, emulator, PTY,
+accessibility, search and scroller state still follow the one final geometry normally.
 
-`WindowEdgeTests.testStressDisplayPaneTransitionBesideCodexWhenEnabled` drives the production pane
-route and a real alternate-screen terminal. Hosted XCTest does not commit split-view implicit
-animation frames, so the fixture deterministically proposes twelve terminal widths per transition
-— the 60 Hz frame count of a 200 ms motion — and makes Codex-like output repaint after every grid
-the terminal actually accepts. A five-cycle Debug run measured:
+The empty display pane had a second independent cold cost: `viewDidLoad` eagerly installed a
+`WKWebView`, launching WebKit services for image, chart, native-controller, and empty panes.
+`DisplayPaneController` now installs its shared document renderer only when HTML is actually
+selected, and tears down a switched-away page without constructing the renderer for non-HTML
+content.
 
-| Grid owner | Proposed transition ticks | Refused transient grids | Accepted grids | Total fixture work |
-|---|---:|---:|---:|---:|
-| Natural Mac grid | 120 | 129 | **10** — one per open and close | 123.2 ms |
-| Remote/frozen control | 120 | 125 | **0** | 20.1 ms |
+`WindowEdgeTests.testStressDisplayPaneTransitionBesideCodexWhenEnabled` drives that production
+route beside a real alternate-screen terminal and feeds a Codex-like repaint after every accepted
+grid. Its phase probes separate controller preparation, collapse state, split layout, toolbar,
+divider geometry, terminal grid decisions, and repaint. A five-cycle fresh-process Debug
+comparison measured:
 
-The refused count includes the split controller's own synchronous geometry proposals in addition
-to the twelve synthetic animation ticks. The invariant is the accepted count: it scales with
-completed pane actions, not animation frames. Run the fixture through
-`scripts/profile_threading.sh display-pane-stress`; routine `full` includes it.
+| Workload | Before | After |
+|---|---:|---:|
+| Cold first open | ~302 ms | 10.7 ms |
+| Five open/close cycles | ~399 ms | 46.7 ms |
+
+The final natural-grid fixture accepts at most one grid per completed action; a remotely frozen
+grid accepts none. There are no synthetic transition ticks or secretly deferred grids. Run the
+fixture through `scripts/profile_threading.sh display-pane-stress`; routine `full` includes it.
 
 ## Git Review as the first stress target
 
@@ -1571,6 +1782,18 @@ did it twice more. Ignoring already-matching state and persisting only the chang
 representative 5,000-session controller load from about 3,165 ms to 200 ms and collapse/re-expand
 from about 303 ms to 3.8 ms. A repeated sweep measured 135 ms load, 72 ms first layout and 7.3 ms
 disclosure. These figures are regression-scale evidence, not release-build launch claims.
+
+A later sweep after deferring absent account and pin subtrees kept materialized cell count bound to
+the viewport and exercised 120 consecutive resize ticks:
+
+| Sessions | Logical rows | Materialized cells | Load | First layout | Resize p95 / max |
+|---:|---:|---:|---:|---:|---:|
+| 1,000 | 1,060 | 24 | 84.8 ms | 51.2 ms | 5.12 / 5.84 ms |
+| 5,000 | 5,120 | 23 | 157.3 ms | 46.5 ms | 5.12 / 5.60 ms |
+
+The resize tail remains inside a 60 Hz frame even at 5,000 sessions, and the constructed view count
+does not grow with the model. The two stress runs and 131 focused sidebar-row tests passed; the
+numbers remain Debug regression fixtures rather than launch measurements.
 
 `sidebar.outline.apply-structure` and `sidebar.disclosure.persist` keep the remaining AppKit and
 SQLite costs separable in a trace. A recursive `expandChildren` experiment remains reverted: before

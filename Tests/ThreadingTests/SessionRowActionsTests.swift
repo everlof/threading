@@ -79,7 +79,7 @@ final class SessionRowActionsTests: XCTestCase {
         return event
     }
 
-    private func view(named identifier: String, in root: NSView) throws -> NSView {
+    private func optionalView(named identifier: String, in root: NSView) -> NSView? {
         func walk(_ node: NSView) -> NSView? {
             if node.accessibilityIdentifier() == identifier { return node }
             for child in node.subviews {
@@ -87,7 +87,22 @@ final class SessionRowActionsTests: XCTestCase {
             }
             return nil
         }
-        return try XCTUnwrap(walk(root), "no view identified as \(identifier)")
+        return walk(root)
+    }
+
+    private func optionalView<View: NSView>(ofType type: View.Type, in root: NSView) -> View? {
+        if let match = root as? View { return match }
+        for child in root.subviews {
+            if let match = optionalView(ofType: type, in: child) { return match }
+        }
+        return nil
+    }
+
+    private func view(named identifier: String, in root: NSView) throws -> NSView {
+        try XCTUnwrap(
+            optionalView(named: identifier, in: root),
+            "no view identified as \(identifier)"
+        )
     }
 
     private func session(_ title: String = "Working session") -> AgentSession {
@@ -117,12 +132,104 @@ final class SessionRowActionsTests: XCTestCase {
 
     // MARK: - Tests
 
+    /// A row's hover card may read account directories and git context. Mounting the visible
+    /// rows at launch must not perform that work for cards the pointer never asks to see.
+    func testHoverInfoDiscoveryIsDeferredUntilTheCardIsRequested() {
+        var infoBuildCount = 0
+        let row = SessionRowView(
+            customizationLookup: { _ in .empty },
+            sessionHoverContentProvider: { _ in NSViewController() },
+            sessionHoverInfoProvider: { session, activity in
+                infoBuildCount += 1
+                return SessionInfoPopoverViewController.Info(
+                    session: session,
+                    activity: activity
+                )
+            }
+        )
+        let session = session("Deferred hover details")
+
+        row.configure(with: session, activity: .idle)
+
+        XCTAssertEqual(infoBuildCount, 0)
+        XCTAssertNotNil(row.makeSessionHoverCard(session: session, activity: .idle))
+        XCTAssertEqual(infoBuildCount, 1)
+    }
+
+    /// A standard login has no account chip. Resolving it during first paint used to scan the
+    /// account directories and parse shell aliases even though the result could not be shown.
+    func testStandardAccountSkipsDiscoveryButAnAlternateAccountStillResolvesItsChip() {
+        var resolvedHandles: [AccountHandle] = []
+        let row = SessionRowView(
+            customizationLookup: { _ in .empty },
+            sessionAccountProvider: { provider, handle in
+                resolvedHandles.append(handle)
+                return AgentAccount(
+                    provider: provider,
+                    handle: handle,
+                    configPath: "/tmp/\(handle.name)"
+                )
+            }
+        )
+
+        row.configure(with: session("Standard"), activity: .idle)
+        XCTAssertEqual(resolvedHandles, [])
+        XCTAssertNil(
+            optionalView(named: "sidebar.session.account", in: row),
+            "a standard row built an account-badge subtree it can never show"
+        )
+
+        row.configure(
+            with: AgentSession(
+                kind: .claude,
+                title: "Alternate",
+                accountHandle: .named("work")
+            ),
+            activity: .idle
+        )
+        XCTAssertEqual(resolvedHandles, [.named("work")])
+        XCTAssertNotNil(
+            optionalView(named: "sidebar.session.account", in: row),
+            "the alternate account did not cross the badge boundary"
+        )
+    }
+
+    /// The controls remain in the hierarchy for pointerless access, while their hidden glyphs
+    /// stay out of first sidebar paint and materialize together on the first real hover.
+    func testHoverControlGlyphsAreDeferredUntilTheRowRevealsThem() throws {
+        let (_, row) = hostedRow()
+        row.configure(with: session(), activity: .idle)
+
+        let actions = try XCTUnwrap(
+            try view(named: "sidebar.session.actions", in: row) as? ThemedIconButton
+        )
+        let archive = try XCTUnwrap(
+            try view(named: "sidebar.session.archive", in: row) as? ThemedIconButton
+        )
+        XCTAssertFalse(actions.hasMaterializedGlyph)
+        XCTAssertFalse(archive.hasMaterializedGlyph)
+        XCTAssertEqual(actions.accessibilityRole(), .button)
+        XCTAssertEqual(archive.accessibilityRole(), .button)
+
+        enter(row)
+        defer { leave(row) }
+
+        XCTAssertTrue(actions.hasMaterializedGlyph)
+        XCTAssertTrue(archive.hasMaterializedGlyph)
+    }
+
     /// Pinning already changes where the row sorts, but position alone is not a visible state:
     /// under Name or Recent Activity the same session may have led the list anyway. The row
     /// therefore carries an explicit mark, and reuse must remove it when the cell is handed to
     /// an ordinary session.
     func testPinnedSessionsCarryAnAccessibleMarkThatClearsOnReuse() throws {
         let (_, row) = hostedRow()
+        row.configure(with: session("Ordinary session"), activity: .idle)
+        XCTAssertNil(
+            optionalView(named: "sidebar.session.pinned", in: row),
+            "an unpinned row resolved and installed an absent pin mark"
+        )
+
         var pinned = session("Pinned session")
         pinned.isPinned = true
         row.configure(with: pinned, activity: .idle)
@@ -138,6 +245,31 @@ final class SessionRowActionsTests: XCTestCase {
 
         row.configure(with: session("Ordinary session"), activity: .idle)
         XCTAssertTrue(indicator.isHidden, "a recycled row kept the previous session's pin")
+    }
+
+    /// Idle is the overwhelmingly common stored-session state at launch. Its trailing geometry
+    /// remains stable for hover actions, but the attention dot, limit mark and their constraints
+    /// have no pixels to contribute until a real status arrives.
+    func testIdleRowsMaterializeStatusContentOnlyAfterAVisibleState() {
+        let (_, row) = hostedRow()
+        let session = session("Deferred status")
+
+        row.configure(with: session, activity: .idle)
+        XCTAssertNotNil(optionalView(named: "sidebar.session.status", in: row))
+        XCTAssertNil(
+            optionalView(ofType: SessionStatusIndicator.self, in: row),
+            "an idle row built the invisible status subtree"
+        )
+
+        row.configure(with: session, activity: .working)
+        let materialized = optionalView(ofType: SessionStatusIndicator.self, in: row)
+        XCTAssertNotNil(materialized, "a working row did not cross the status boundary")
+
+        row.configure(with: session, activity: .idle)
+        XCTAssertTrue(
+            optionalView(ofType: SessionStatusIndicator.self, in: row) === materialized,
+            "reuse discarded status content instead of keeping its now-warm subtree"
+        )
     }
 
     /// The report that produced this test: the `⋯` could not be clicked on the selected chat,
