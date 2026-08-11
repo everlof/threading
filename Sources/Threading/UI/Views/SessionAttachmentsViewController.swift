@@ -197,9 +197,14 @@ final class SessionAttachmentsViewController: NSViewController {
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
+    /// In the row's own voice — `.caption`, tertiary — because it is the row's own sentence:
+    /// the list one inch above states exactly this name-over-path pair, and the footer restating
+    /// it in mono read as a different kind of fact. The mono face also sat badly under the
+    /// prose title: a monospaced x-height at caption scale is nearly the title's, so the two
+    /// lines read cramped at the same `hairline` gap the row wears comfortably.
     private lazy var pathLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
-        label.applyFont(.compactCode)
+        label.applyFont(.caption)
         label.textColor = Design.Text.tertiary
         label.lineBreakMode = .byTruncatingMiddle
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
