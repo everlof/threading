@@ -241,6 +241,12 @@ capture_ios_conversation_fixture() {
     echo "The ${label} fixture produced no THREADING_PERF metrics." >&2
     return 1
   fi
+  if ! rg -q \
+      "THREADING_PERF ios-conversation-cold-open .*invalid_width_cells=0 settle_tasks=1" \
+      "${container_metrics}"; then
+    echo "The ${label} fixture mounted cells before receiving its real width or scheduled duplicate cold settling." >&2
+    return 1
+  fi
   cp "${container_metrics}" "${output_directory}/ios-${label}.metrics.log"
 
   launch_result="$(

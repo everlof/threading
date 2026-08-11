@@ -496,6 +496,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
     private var hasStreamingItem = false
     private var permissionItemID: String?
     private var needsInitialBottomPosition = true
+    private var isInitialBottomPositionScheduled = false
     private var hasTimelineAppeared = false
     private var contentSizeObserver: NSObjectProtocol?
     private var viewportSaveWorkItem: DispatchWorkItem?
@@ -521,6 +522,9 @@ final class RemoteConversationTimelineViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+#if DEBUG
+        MobileConversationPerformanceProbe.timelineViewLoadStarted()
+#endif
         configureCollectionView()
         configureDataSource()
         observeStoreIfNeeded()
@@ -536,6 +540,9 @@ final class RemoteConversationTimelineViewController: UIViewController {
         }
         applySnapshot(scrollToBottom: initialViewport?.followsBottom != false)
         prefetchMarkdown()
+#if DEBUG
+        MobileConversationPerformanceProbe.timelineViewLoadEnded()
+#endif
     }
 
     isolated deinit {
@@ -566,6 +573,11 @@ final class RemoteConversationTimelineViewController: UIViewController {
         hasTimelineAppeared = true
         positionInitialBottomAfterLayout()
         reportPerformanceFirstPaintIfReady()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        positionInitialBottomAfterLayout()
     }
 
     func updateTheme(_ theme: RemoteThemePalette) {
@@ -624,6 +636,11 @@ final class RemoteConversationTimelineViewController: UIViewController {
             collectionView: collectionView
         ) { [weak self] collectionView, indexPath, item in
             guard let self else { return nil }
+#if DEBUG
+            MobileConversationPerformanceProbe.visibleCellWillConfigure(
+                collectionWidth: collectionView.bounds.width
+            )
+#endif
             switch item {
             case .history:
                 let cell = collectionView.dequeueReusableCell(
@@ -772,6 +789,12 @@ final class RemoteConversationTimelineViewController: UIViewController {
         scrollToBottom: Bool = false
     ) {
         var snapshot = makeSnapshot()
+#if DEBUG
+        let profilesInitialSnapshot = !hasAppliedInitialSnapshot
+        if profilesInitialSnapshot {
+            MobileConversationPerformanceProbe.initialSnapshotApplyStarted()
+        }
+#endif
         recordSyntheticState()
         let existing = Set(snapshot.itemIdentifiers)
         let rowItems = ids.map(Item.row).filter(existing.contains)
@@ -787,6 +810,11 @@ final class RemoteConversationTimelineViewController: UIViewController {
         }
         dataSource.apply(snapshot, animatingDifferences: hasAppliedInitialSnapshot) { [weak self] in
             guard let self else { return }
+#if DEBUG
+            if profilesInitialSnapshot {
+                MobileConversationPerformanceProbe.initialSnapshotApplied()
+            }
+#endif
             self.hasAppliedInitialSnapshot = true
             if scrollToBottom {
                 if self.needsInitialBottomPosition {
@@ -996,13 +1024,29 @@ final class RemoteConversationTimelineViewController: UIViewController {
     }
 
     private func positionInitialBottomAfterLayout() {
-        guard needsInitialBottomPosition, hasAppliedInitialSnapshot else { return }
-        collectionView.layoutIfNeeded()
+        guard needsInitialBottomPosition,
+              hasAppliedInitialSnapshot,
+              collectionView.bounds.width > 1,
+              collectionView.bounds.height > 1 else { return }
+        guard !isInitialBottomPositionScheduled else { return }
+        isInitialBottomPositionScheduled = true
+#if DEBUG
+        MobileConversationPerformanceProbe.initialBottomSettleScheduled()
+#endif
         positionFromContinuity()
-        // Self-sizing cells replace their estimated heights during the first layout pass.
-        // Re-anchor once on the next pass; after this, normal near-bottom logic owns scrolling.
+
+        // `applySnapshot` runs from the child's `viewDidLoad`, before the parent has installed
+        // the timeline's constraints. Forcing layout from the diffable completion therefore
+        // used to create visible cells at a one-point width, then throw those heights away and
+        // create them again after the real width arrived. The first valid layout establishes the
+        // estimated bottom without nesting another layout pass. Settle measured visible heights
+        // once on the next turn; repeated layout/view-appearance callbacks share this task.
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.needsInitialBottomPosition else { return }
+            guard let self else { return }
+            guard self.needsInitialBottomPosition else {
+                self.isInitialBottomPositionScheduled = false
+                return
+            }
             self.collectionView.layoutIfNeeded()
             self.positionFromContinuity()
             // Positioning can expose one more estimated row at the viewport boundary. Consume
@@ -1010,6 +1054,10 @@ final class RemoteConversationTimelineViewController: UIViewController {
             self.collectionView.layoutIfNeeded()
             self.positionFromContinuity()
             self.needsInitialBottomPosition = false
+            self.isInitialBottomPositionScheduled = false
+#if DEBUG
+            MobileConversationPerformanceProbe.initialBottomSettled()
+#endif
             self.reportPerformanceFirstPaintIfReady()
         }
     }
@@ -1104,6 +1152,13 @@ enum MobileConversationPerformanceProbe {
     private static var fixture: Fixture?
     private static var didReportFirstPaint = false
     private static var scrollDriver: ScrollDriver?
+    private static var timelineViewLoadStartedAt: TimeInterval?
+    private static var timelineViewLoadEndedAt: TimeInterval?
+    private static var initialSnapshotStartedAt: TimeInterval?
+    private static var initialSnapshotAppliedAt: TimeInterval?
+    private static var initialBottomSettledAt: TimeInterval?
+    private static var invalidWidthCellConfigurations = 0
+    private static var initialBottomSettleTasks = 0
 
     static func fixtureDidLoad(
         mode: String,
@@ -1128,6 +1183,43 @@ enum MobileConversationPerformanceProbe {
         didReportFirstPaint = false
         scrollDriver?.stop()
         scrollDriver = nil
+        timelineViewLoadStartedAt = nil
+        timelineViewLoadEndedAt = nil
+        initialSnapshotStartedAt = nil
+        initialSnapshotAppliedAt = nil
+        initialBottomSettledAt = nil
+        invalidWidthCellConfigurations = 0
+        initialBottomSettleTasks = 0
+    }
+
+    static func timelineViewLoadStarted() {
+        timelineViewLoadStartedAt = ProcessInfo.processInfo.systemUptime
+    }
+
+    static func timelineViewLoadEnded() {
+        timelineViewLoadEndedAt = ProcessInfo.processInfo.systemUptime
+    }
+
+    static func initialSnapshotApplyStarted() {
+        initialSnapshotStartedAt = ProcessInfo.processInfo.systemUptime
+    }
+
+    static func initialSnapshotApplied() {
+        initialSnapshotAppliedAt = ProcessInfo.processInfo.systemUptime
+    }
+
+    static func initialBottomSettleScheduled() {
+        initialBottomSettleTasks += 1
+    }
+
+    static func initialBottomSettled() {
+        initialBottomSettledAt = ProcessInfo.processInfo.systemUptime
+    }
+
+    static func visibleCellWillConfigure(collectionWidth: CGFloat) {
+        if collectionWidth <= 1 {
+            invalidWidthCellConfigurations += 1
+        }
     }
 
     static func timelineDidAppear(_ collectionView: UICollectionView) {
@@ -1149,6 +1241,18 @@ enum MobileConversationPerformanceProbe {
             let firstPaintMilliseconds = (
                 ProcessInfo.processInfo.systemUptime - fixture.startedAt
             ) * 1_000
+            let timelineViewLoadMilliseconds = elapsedMilliseconds(
+                from: timelineViewLoadStartedAt,
+                to: timelineViewLoadEndedAt
+            )
+            let initialSnapshotMilliseconds = elapsedMilliseconds(
+                from: initialSnapshotStartedAt,
+                to: initialSnapshotAppliedAt
+            )
+            let initialBottomSettleMilliseconds = elapsedMilliseconds(
+                from: initialSnapshotAppliedAt,
+                to: initialBottomSettledAt
+            )
             report(
                 "THREADING_PERF ios-conversation-cold-open "
                     + "mode=\(fixture.mode) source_rows=\(fixture.sourceRows) "
@@ -1160,6 +1264,11 @@ enum MobileConversationPerformanceProbe {
                     + "bottom_error=\(milliseconds(bottomError)) "
                     + "fixture_ms=\(milliseconds(fixture.generationMilliseconds)) "
                     + "store_ms=\(milliseconds(fixture.storeMilliseconds)) "
+                    + "timeline_load_ms=\(milliseconds(timelineViewLoadMilliseconds)) "
+                    + "snapshot_apply_ms=\(milliseconds(initialSnapshotMilliseconds)) "
+                    + "bottom_settle_ms=\(milliseconds(initialBottomSettleMilliseconds)) "
+                    + "invalid_width_cells=\(invalidWidthCellConfigurations) "
+                    + "settle_tasks=\(initialBottomSettleTasks) "
                     + "first_paint_ms=\(milliseconds(firstPaintMilliseconds))"
             )
 
@@ -1185,6 +1294,14 @@ enum MobileConversationPerformanceProbe {
         if scrollDriver === driver {
             scrollDriver = nil
         }
+    }
+
+    private static func elapsedMilliseconds(
+        from start: TimeInterval?,
+        to end: TimeInterval?
+    ) -> Double {
+        guard let start, let end else { return 0 }
+        return max(0, (end - start) * 1_000)
     }
 
     private static func milliseconds(_ value: Double) -> String {
@@ -2077,21 +2194,19 @@ private final class RemoteNoticeMessageView: UIView {
 }
 
 private final class RemoteStreamingMessageView: UIView {
-    private var hasConfigured = false
-    private let textView = RemoteUserMessageView.textView(
-        text: "",
-        font: RemoteAssistantMessageView.proseFontForStreaming,
-        color: .secondaryLabel
-    )
+    private let label = UILabel()
 
     init(text: String, theme: RemoteThemePalette) {
         super.init(frame: .zero)
-        addSubview(textView)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.numberOfLines = 0
+        label.adjustsFontForContentSizeCategory = true
+        addSubview(label)
         NSLayoutConstraint.activate([
-            textView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            textView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            textView.topAnchor.constraint(equalTo: topAnchor),
-            textView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor),
+            label.topAnchor.constraint(equalTo: topAnchor),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         accessibilityLabel = MobileL10n.string("Agent is responding")
         configure(text: text, theme: theme)
@@ -2101,15 +2216,10 @@ private final class RemoteStreamingMessageView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func configure(text: String, theme: RemoteThemePalette) {
-        if hasConfigured {
-            _ = textView.layoutManager
-        }
-        hasConfigured = true
-        textView.font = RemoteAssistantMessageView.proseFontForStreaming
-        textView.textColor = theme.uiSecondaryLabel
-        if textView.text != text {
-            textView.text = text
-            textView.selectedRange = NSRange(location: 0, length: 0)
+        label.font = RemoteAssistantMessageView.proseFontForStreaming
+        label.textColor = theme.uiSecondaryLabel
+        if label.text != text {
+            label.text = text
         }
     }
 }

@@ -815,11 +815,17 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 
     private func restoreDraft() {
         guard let hostID = model.activeHostID else { return }
-        textView.text = continuity.draft(
+        let draft = continuity.draft(
             surface: .conversation,
             hostID: hostID,
             sessionID: connection.session.id
         )
+        // Assigning even the same empty string makes UITextView coordinate a selection change
+        // and cold-load dictation services. Most conversations have no saved draft, so keep that
+        // framework out of first paint without delaying a real draft by one frame.
+        if textView.text != draft {
+            textView.text = draft
+        }
         placeholderLabel.isHidden = !textView.text.isEmpty
     }
 

@@ -687,9 +687,45 @@ Both scales reached the actual last item at the expected 20-point bottom inset, 
 on item 0, and geometry failures remained zero. The direct native cold sample no longer contains
 the old 117-sample hosting/AttributeGraph owner. Its first Core Animation commit is about 122 ms;
 roughly 46 ms is the initial diffable snapshot, visible-cell creation and final bottom-height
-positioning. That initial UIKit mount is now the next measured cold-open target. Standard dashboard
-and settings screens still use a hosting controller and should migrate only when their own traces
-justify it.
+positioning. Standard dashboard and settings screens still use a hosting controller and should
+migrate only when their own traces justify it.
+
+The phase split showed that the snapshot value was not the 46 ms owner. The timeline applied it
+from the child's `viewDidLoad`, before the parent installed the child's constraints, and its
+diffable completion immediately called `layoutIfNeeded`. UIKit therefore created the bottom cells
+at a one-point width, invalidated every discovered height when the real width arrived, and created
+the visible cells again. `viewDidAppear` could also schedule a second copy of the three-pass bottom
+settle while the first completion was still pending.
+
+Initial anchoring now waits for the first `viewDidLayoutSubviews` with real bounds. That pass sets
+the estimated bottom without nesting another layout, and all layout/appearance callbacks share
+one next-turn measured-height settle. The DEBUG fixture reports invalid-width cell construction and
+settle-task count; the CLI refuses a run unless they are exactly zero and one. The initial raw
+assistant/streaming surface is also a light multiline label. It exists only until the off-main
+Markdown batch returns, at which point completed messages still install the normal selectable text
+views; transient content no longer initializes TextKit selection machinery merely to be replaced.
+
+Three same-simulator fresh-process production-window runs measured **248.13–257.53 ms before** and
+**174.93–188.50 ms after**, a 28–32% cold-open reduction. A clean CLI run measured:
+
+| Phase | 160 mounted rows | 5,000 mounted rows |
+|---|---:|---:|
+| Timeline view load | 4.72 ms | 11.99 ms |
+| Diffable snapshot apply | 0.39 ms | 4.29 ms |
+| Snapshot-to-final-bottom settle | 92.10 ms | 96.86 ms |
+| Invalid-width cells / settle tasks | 0 / 1 | 0 / 1 |
+| Settled first paint | **181.20 ms** | **195.95 ms** |
+
+The retained 5,000-row regression reached item 0 in 37.05 ms, scrolled at 10.26 ms p50 / 13.66 ms
+p95, ended at item 0, and reported zero geometry failures. The optimized path therefore removed a
+duplicate cold mount rather than trading initial speed for later scrolling or an estimated-only
+viewport.
+
+The same cold sample found a separate 16-sample framework load below `restoreDraft()`: assigning
+the empty saved draft to an already-empty composer made `UITextView` coordinate a selection change,
+initialize dictation, and dynamically load AssistantServices. Draft restoration now compares first.
+A real saved draft is still installed synchronously; the overwhelmingly common empty state does no
+text mutation and leaves dictation cold until the composer genuinely needs it.
 
 The device commands intentionally attach rather than build or install: first install a Release
 build, connect and unlock the trusted Developer Mode device, and leave Threading open in the
