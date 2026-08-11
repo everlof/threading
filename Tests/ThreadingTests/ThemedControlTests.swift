@@ -5258,8 +5258,9 @@ final class ThemedControlTests: XCTestCase {
     }
 
     /// The plate's fill along its middle row, sampled inside its own border and past the corners
-    /// so the curve is never what a comparison is reading.
-    private func surfaceSamples(across control: SplitIconButtonView) throws -> [NSColor] {
+    /// so the curve is never what a comparison is reading. Takes either split plate — the
+    /// sampling rows are the same construction in both.
+    private func surfaceSamples(across control: NSView) throws -> [NSColor] {
         let rep = try XCTUnwrap(control.bitmapImageRepForCachingDisplay(in: control.bounds))
         control.cacheDisplay(in: control.bounds, to: rep)
 
@@ -5282,7 +5283,7 @@ final class ThemedControlTests: XCTestCase {
     }
 
     /// The four outermost pixels, which a rounded plate leaves clear and a square fill does not.
-    private func cornerSamples(of control: SplitIconButtonView) throws -> [NSColor] {
+    private func cornerSamples(of control: NSView) throws -> [NSColor] {
         let rep = try XCTUnwrap(control.bitmapImageRepForCachingDisplay(in: control.bounds))
         control.cacheDisplay(in: control.bounds, to: rep)
 
@@ -5303,6 +5304,140 @@ final class ThemedControlTests: XCTestCase {
             trackingNumber: 0,
             userData: nil
         )!
+    }
+
+    // MARK: - Titled Split Control
+
+    /// The titled plate draws one silhouette too — the press half is a `ThemedButton` here, and
+    /// neither half may bring a surface of its own to the weld.
+    func testTheTitledSplitControlDrawsOneSurfaceAcrossBothHalves() throws {
+        AppThemePalette.set(.system)
+        let control = titledSplitControl()
+        let samples = try surfaceSamples(across: control)
+
+        XCTAssertGreaterThan(
+            samples.first?.alphaComponent ?? 0, 0.05,
+            "the plate is not drawn at all — the rest of this test would pass on empty air"
+        )
+        for sample in samples {
+            XCTAssertEqual(
+                sample, samples[0],
+                "the plate changes colour across its own width — a half is drawing a surface "
+                    + "of its own"
+            )
+        }
+    }
+
+    /// Hovering raises the half under the pointer and nothing else, inside the plate — the
+    /// press half is the wide one here, so a raise that leaked would be most of the control.
+    func testHoveringRaisesOnlyTheHalfUnderThePointerInsideTheTitledPlate() throws {
+        AppThemePalette.set(.system)
+
+        let halves: [(String, (SplitButtonView) -> NSView)] = [
+            ("press", { $0.action }),
+            ("chevron", { $0.chevron })
+        ]
+        for (name, half) in halves {
+            let control = titledSplitControl()
+            let resting = try surfaceSamples(across: control)
+
+            half(control).mouseEntered(with: hoverEvent())
+            let raised = try surfaceSamples(across: control)
+
+            let lit = zip(resting, raised).filter { $0.0 != $0.1 }.count
+            XCTAssertGreaterThan(lit, 0, "hovering the \(name) half raised nothing")
+            XCTAssertLessThan(
+                lit, resting.count,
+                "hovering the \(name) half raised the whole plate — the other half is a "
+                    + "separate target and has to keep saying so"
+            )
+
+            for corner in try cornerSamples(of: control) {
+                XCTAssertLessThan(
+                    corner.alphaComponent, 0.5,
+                    "the \(name) half's raise squared off the plate's corner — it is drawing "
+                        + "its own rect rather than filling inside the shared silhouette"
+                )
+            }
+        }
+    }
+
+    /// The plate is furniture; the halves are the buttons — the same contract as the icon
+    /// plate, restated because the halves are different types here.
+    func testTheTitledSplitControlAnnouncesItsHalvesAndNotItself() {
+        let control = titledSplitControl()
+
+        XCTAssertFalse(control.isAccessibilityElement())
+        XCTAssertEqual(control.accessibilityRole(), .group)
+        XCTAssertTrue(control.action.isAccessibilityElement())
+        XCTAssertEqual(control.action.accessibilityTitle(), "Copy Path")
+        XCTAssertEqual(control.chevron.accessibilityTitle(), "Attachment actions")
+
+        let spy = ActionSpy()
+        control.action.target = spy
+        control.action.action = #selector(ActionSpy.fire)
+        XCTAssertTrue(control.action.accessibilityPerformPress())
+        XCTAssertEqual(spy.count, 1, "the press half does nothing when VoiceOver presses it")
+    }
+
+    /// The plate reads its material at draw time, so a live theme switch recolours it with
+    /// nothing recorded to go stale.
+    func testTheTitledSplitControlFollowsALiveThemeSwitch() throws {
+        AppThemePalette.set(.system)
+        let control = titledSplitControl()
+        let before = try surfaceSamples(across: control)
+
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        let after = try surfaceSamples(across: control)
+
+        XCTAssertNotEqual(
+            before.first, after.first,
+            "the plate kept the colour it was first drawn in — it is not reading its material"
+        )
+    }
+
+    /// One plate, welded: the halves share an edge, the plate is exactly as wide as they are,
+    /// and it stands at the chevron's stated base — the button family's own height, not the
+    /// toolbar's.
+    func testTheTitledSplitControlIsExactlyItsTwoHalvesWide() {
+        let control = titledSplitControl()
+
+        XCTAssertEqual(control.action.frame.maxX, control.chevron.frame.minX, accuracy: 0.5)
+        XCTAssertEqual(
+            control.frame.width,
+            control.action.intrinsicContentSize.width + Design.Size.splitMenuWidth,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(control.frame.height, Design.Size.chipHeight, accuracy: 0.5)
+    }
+
+    /// A titled plate laid out the way the attachments footer lays it out, in a window that is
+    /// never shown.
+    private func titledSplitControl() -> SplitButtonView {
+        let control = SplitButtonView(
+            action: ThemedButton(title: "Copy Path", target: nil, action: nil),
+            chevron: ThemedIconButton(
+                symbolName: DesignSymbols.chevron,
+                accessibility: "Attachment actions",
+                target: .titledSplitMenu
+            )
+        )
+
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 60))
+        host.addSubview(control)
+        NSLayoutConstraint.activate([
+            control.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+            control.centerYAnchor.constraint(equalTo: host.centerYAnchor)
+        ])
+        let window = NSWindow(
+            contentRect: host.frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        return control
     }
 
     // MARK: - Content Surfaces
@@ -6111,6 +6246,7 @@ final class ThemedControlTests: XCTestCase {
                 "ShortcutRecorderView",
                 "SidebarBackdropView",
                 "SidebarBrandView",
+                "SplitButtonView",
                 "SplitIconButtonView",
                 "SubagentSummaryView",
                 "SubmissionStatusView",

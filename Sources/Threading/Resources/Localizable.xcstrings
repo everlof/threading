@@ -27139,7 +27139,9 @@
     "No data to compare": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inga data att jämföra"}}}},
     "Close Settings": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Stäng inställningarna"}}}},
     "Restore Name & Icon": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ namn och ikon"}}}},
-    "Restore this account's detected name and provider icon": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ kontots upptäckta namn och leverantörsikon"}}}}
+    "Restore this account's detected name and provider icon": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ kontots upptäckta namn och leverantörsikon"}}}},
+    "SplitButtonView": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "SplitButtonView"}}}},
+    "The same weld for a titled press on the pane's ground — a neutral secondary and its menu chevron. A primary cannot weld: its accent against the chevron's neutral would be a permanent seam.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Samma svetsning för ett tryck med titel på panelens egen grund — en neutral sekundär och dess menypil. En primär kan inte svetsas: dess accent mot pilens neutrala yta skulle bli en permanent skarv."}}}}
   },
   "version": "1.0"
 }

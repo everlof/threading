@@ -153,7 +153,10 @@ final class SessionComposerViewController: NSViewController {
             // `small`, where everything else on this row is `medium` apart. The two are one
             // decision offered two ways — send it now, send it later — and the tighter gap is
             // how that is said without a plate around them, which is the same ranking
-            // `SplitIconButtonView` draws for the pair it welds. It is also what keeps the row
+            // `SplitIconButtonView` draws for the pair it welds. A plate is not on offer here:
+            // this press is the accent-filled primary, and `SplitButtonView` welds neutral
+            // pairs only — a shared plate under an accent press would hold a permanent colour
+            // seam, so the spread form *is* the primary's split control. It is also what keeps the row
             // inside a 560-point pane: at `medium` the row's minimum ran three points past what
             // `ComposerWindowFitTests` allows the column, and an icon button's width is a
             // required constraint that no compression priority will yield.

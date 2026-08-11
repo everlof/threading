@@ -232,14 +232,12 @@ final class SessionAttachmentsViewController: NSViewController {
     )
 
     /// The other ways to take it — the same entries as the row's own menu, one builder
-    /// (`contextMenuEntries`), so the two surfaces cannot drift apart. Beside the titled press
-    /// rather than welded to it: the tighter `PaneFooterView` item gap is the same ranking the
-    /// composer's schedule chevron draws next to its send.
+    /// (`contextMenuEntries`), so the two surfaces cannot drift apart.
     private lazy var actionsChevron: ThemedIconButton = {
         let button = ThemedIconButton(
             symbolName: DesignSymbols.chevron,
             accessibility: L10n.string("Attachment actions"),
-            target: .besidePrimary
+            target: .titledSplitMenu
         )
         button.presentsMenu = true
         button.onPress = { [weak self, weak button] in
@@ -249,12 +247,27 @@ final class SessionAttachmentsViewController: NSViewController {
         return button
     }()
 
+    /// The press and its chevron on one plate (`SplitButtonView`): the two act on **one** file,
+    /// and spaced as siblings they read as a button with an unrelated chevron floating beside
+    /// it — the same misreading the header's Open in control was welded to remove.
+    ///
+    /// This used to be the spread form, matching the composer's schedule chevron beside its
+    /// send. That match was the wrong axis: the composer's pair is *forced* apart by emphasis —
+    /// its press is the accent-filled primary, and a shared plate would hold a permanent colour
+    /// seam between the accent and the chevron's neutral. This press is a neutral secondary, so
+    /// the weld is available, and welding is what says "one file, one decision"
+    /// (`design-system.md`).
+    private lazy var actionsControl = SplitButtonView(
+        action: primaryActionButton,
+        chevron: actionsChevron
+    )
+
     /// The pane's floor: the selected file named at one edge, what to do with it at the other,
     /// one centreline between them — the band's geometry, stated once in `PaneFooterView`.
     private lazy var footerBand: PaneFooterView = {
         let band = PaneFooterView(
             leading: [fileTextBlock],
-            trailing: [primaryActionButton, actionsChevron],
+            trailing: [actionsControl],
             margin: .paneEdge
         )
         // Two `PaneFooterView`s live in this pane; the identifier is what tells them apart.

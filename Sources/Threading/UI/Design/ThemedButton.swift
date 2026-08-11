@@ -260,6 +260,30 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         didSet { needsDisplay = true }
     }
 
+    /// Whether this button draws its own fill, border and glow, or leaves them to whoever
+    /// hosts it.
+    ///
+    /// False for the press half of a `SplitButtonView`, and *only* for a host that draws the
+    /// surface itself — the seam `ThemedIconButton` already states, on the titled button. The
+    /// title, the image, the chord, the focus ring and the press gesture are unchanged, because
+    /// none of them is the surface. A hosted half also keeps its face put: the travel a material
+    /// states for hover and press belongs to a whole control, and a half that moved alone would
+    /// tear the plate it shares.
+    var drawsSurface = true {
+        didSet {
+            guard drawsSurface != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    /// Told to the host that draws this button's surface, whenever what it would draw changed —
+    /// see `ThemedIconButton.surfaceStateDidChange` for why the host cannot track this itself.
+    var surfaceStateDidChange: (() -> Void)?
+
+    /// Whether a host drawing for this button should raise its half — the pointer is on it, or
+    /// holding it down.
+    var isRaised: Bool { isHovered || isPressed }
+
     /// Mirrors `NSButton.keyEquivalent`, so a sheet's default and cancel buttons keep answering
     /// Return and Escape. It matches on the character whatever is held with it, which is what a
     /// sheet wants and what a pane holding a text field must not use — `shortcut` above is the
@@ -279,7 +303,17 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
     // MARK: - State
 
     private var isPressed = false {
-        didSet { needsDisplay = true }
+        didSet {
+            guard isPressed != oldValue else { return }
+            needsDisplay = true
+            surfaceStateDidChange?()
+        }
+    }
+
+    /// A raised half is drawn by the plate, not by this button, so the plate has to be told.
+    override func hoverDidChange() {
+        super.hoverDidChange()
+        surfaceStateDidChange?()
     }
 
     /// What this press will send, taken at the moment the press began, and where it was aimed,
@@ -550,6 +584,22 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         // ring around it, the same silhouette as the well underneath.
         let corner = appliedSurfaceRadius ?? Design.Radius.control(fitting: bounds.size)
 
+        // The press half of a split control draws no surface of its own: the plate underneath
+        // is one shape, and a second one raised inside it is the seam `SplitButtonView` removes.
+        // The glow is *cleared* rather than skipped — the half may have drawn one before it was
+        // welded — and the ring still needs a silhouette to follow, so it takes the one that
+        // was not drawn. The face stays put too: no visual offset, because a half that travelled
+        // alone would tear the plate it shares.
+        guard drawsSurface else {
+            applyThemeControlGlow(nil, radius: corner)
+            drawKeyboardFocus(
+                around: ThemedSurface.Shape(rect: bounds, radius: corner),
+                color: Design.Surface.accent
+            )
+            drawContent(in: bounds)
+            return
+        }
+
         // Clay's controls are separate lifted objects, not flat drawings on a lifted card. The
         // material may state that tighter depth independently from the broad panel shadow; a
         // pressed control drops the outer lift while the existing sunken drawing reports press.
@@ -640,6 +690,12 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
             )
         }
 
+        drawContent(in: faceBounds)
+    }
+
+    /// The face's ink — image, title and chord — drawn the same whether the surface under it is
+    /// this button's own or a host plate's.
+    private func drawContent(in faceBounds: NSRect) {
         let content = faceBounds.insetBy(
             dx: isBordered ? Layout.titleInset : Layout.plainInset,
             dy: 0

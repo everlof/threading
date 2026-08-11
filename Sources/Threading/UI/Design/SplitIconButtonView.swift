@@ -19,6 +19,10 @@ import AppKit
 /// The halves are deliberately not the same width (`Design.Size.splitMenuWidth`): a press is the
 /// whole point of the control and the chevron is the day the answer is different, so the two are
 /// not offered as equals.
+///
+/// The titled counterpart on the pane's own ground is `SplitButtonView`, and the rule for which
+/// pairs may weld at all — emphasis decides; a primary keeps its chevron beside it — is stated
+/// there.
 final class SplitIconButtonView: BackdropOverlay {
 
     // MARK: - Properties

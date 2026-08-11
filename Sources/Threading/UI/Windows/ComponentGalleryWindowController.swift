@@ -120,6 +120,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ShortcutRecorderView",
         "SidebarBackdropView",
         "SidebarBrandView",
+        "SplitButtonView",
         "SplitIconButtonView",
         "SubagentSummaryView",
         "SubmissionStatusView",
@@ -787,6 +788,13 @@ final class ComponentGalleryViewController: NSViewController {
                     makeSplitButtonStory()
                 ),
                 story(
+                    "SplitButtonView",
+                    "The same weld for a titled press on the pane's ground — a neutral secondary "
+                        + "and its menu chevron. A primary cannot weld: its accent against the "
+                        + "chevron's neutral would be a permanent seam.",
+                    makeTitledSplitStory()
+                ),
+                story(
                     "ExecutionAuditEventView",
                     "One audit row per source, resting and selected: the ledger's fixed grid of category, phase, operation and fidelity.",
                     makeExecutionAuditStory()
@@ -1032,6 +1040,32 @@ final class ComponentGalleryViewController: NSViewController {
         }
 
         return row([SplitIconButtonView(action: open, chevron: choose)])
+    }
+
+    /// The titled counterpart on the pane's own ground — the attachments footer's press. Here
+    /// for the same reason as the icon plate above: what matters is the join, and that only a
+    /// *neutral* press can share one (`SplitButtonView`'s own doc states the emphasis rule).
+    private func makeTitledSplitStory() -> NSView {
+        let press = ThemedButton(
+            title: L10n.string("Copy Path"),
+            target: self,
+            action: #selector(titledSplitPressed)
+        )
+
+        let chevron = ThemedIconButton(
+            symbolName: DesignSymbols.chevron,
+            accessibility: L10n.string("Attachment actions"),
+            target: .titledSplitMenu
+        )
+        chevron.onPress = { [weak self] in
+            self?.showReceipt(L10n.format("Pressed %@.", L10n.string("Attachment actions")))
+        }
+
+        return row([SplitButtonView(action: press, chevron: chevron)])
+    }
+
+    @objc private func titledSplitPressed() {
+        showReceipt(L10n.format("Pressed %@.", L10n.string("Copy Path")))
     }
 
     /// The compare header's own shape, since that is the row this component was written for: a

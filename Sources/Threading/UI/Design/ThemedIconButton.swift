@@ -49,6 +49,13 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         /// the exception, and equal halves would offer them as the same choice twice.
         case splitMenu
 
+        /// The chevron half of a **titled** split control — `SplitButtonView`, which welds the
+        /// other ways to take a press onto a `ThemedButton`. The same ranking as `.splitMenu` —
+        /// the press is the point, the chevron the exception — on the button's own base height
+        /// rather than the toolbar's, because two halves of one plate must agree about how tall
+        /// the plate is, and a chip-height press cannot share one with a toolbar-height chevron.
+        case titledSplitMenu
+
         /// The narrow chevron beside a prompt's compact send glyph. Like `splitMenu`, it is the
         /// exceptional half of one decision; unlike the toolbar version it belongs inside the
         /// prompt's 18-point footer control group. Naming the role here keeps its 12×18 geometry
@@ -85,6 +92,11 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
                     width: Design.Size.splitMenuWidth,
                     height: Design.Size.toolbarButtonHeight
                 )
+            case .titledSplitMenu:
+                NSSize(
+                    width: Design.Size.splitMenuWidth,
+                    height: Design.Size.chipHeight
+                )
             case .compactSplitMenu:
                 NSSize(
                     width: Design.Size.compactSplitMenuWidth,
@@ -101,7 +113,8 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
             case .toolbar, .splitMenu: Design.Size.tabIconSlot
             case .compactSplitMenu: 8
             case .inline: Design.Size.inlineButtonGlyph
-            case .besidePrimary: Design.Symbol.slot(inControlOfHeight: Design.Size.chipHeight)
+            case .besidePrimary, .titledSplitMenu:
+                Design.Symbol.slot(inControlOfHeight: Design.Size.chipHeight)
             }
         }
 
@@ -119,7 +132,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
             case .toolbar, .splitMenu: Design.Symbol.toolbar
             case .compactSplitMenu: Design.Symbol.control
             case .inline: Design.Symbol.control
-            case .besidePrimary: Design.Symbol.pointSize(forSlot: glyph)
+            case .besidePrimary, .titledSplitMenu: Design.Symbol.pointSize(forSlot: glyph)
             }
         }
 
@@ -136,7 +149,8 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
             // The rest sit on a surface something else already drew — another control's fill,
             // the plate a split control shares, or the pane a primary already lifted from —
             // so the resting lift is invisible there.
-            case .inline, .splitMenu, .compactSplitMenu, .besidePrimary: \.surfaceHover
+            case .inline, .splitMenu, .titledSplitMenu, .compactSplitMenu, .besidePrimary:
+                \.surfaceHover
             }
         }
     }
@@ -145,10 +159,11 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
 
     /// Whether this button draws its own fill and border, or leaves them to whoever hosts it.
     ///
-    /// False for the halves of a `SplitIconButtonView`, and *only* for a host that draws the
-    /// surface itself: two halves each raising their own rounded rect is the seam that component
-    /// exists to remove. Everything else about the button — the glyph, the focus ring, the press
-    /// gesture, the accessibility — is unchanged, because none of it is the surface.
+    /// False for the halves of a split plate — `SplitIconButtonView`'s pair, `SplitButtonView`'s
+    /// chevron — and *only* for a host that draws the surface itself: two halves each raising
+    /// their own rounded rect is the seam those components exist to remove. Everything else about
+    /// the button — the glyph, the focus ring, the press gesture, the accessibility — is
+    /// unchanged, because none of it is the surface.
     var drawsSurface = true {
         didSet {
             guard drawsSurface != oldValue else { return }
