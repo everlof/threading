@@ -703,9 +703,9 @@ deterministic driver.
 
 `SessionAttachmentStoreTests.testStressAttachmentScanWhenEnabled` scans a generated
 terminal-sized buffer of path-shaped text and records what the scan admits. It exists because the
-attachment scope became configurable, and both sides of that setting put new work on the **main
-thread** — the observer scans on the queue the window draws on, so the scan's cost is a stall's
-cost.
+attachment scope became configurable, and both sides of that setting introduced work whose queue
+ownership matters: matching and filesystem resolution belong on a worker, while admission remains
+main-actor state and the wide scope may also take custody of newly visible file bytes.
 
 Two changes were worth a number rather than an argument. Containment used to be answered *before*
 the filesystem, so a path outside the project was rejected on a string comparison; counting one
@@ -758,11 +758,29 @@ rows the caps were about to throw away.
   made refusing free. A count the pane shows has to be a count of files that exist, so
   `maximumCandidatesPerScan` is what keeps that bounded.
 
-What remains is the regex pass itself, which is why the shipped column is flat at 20–55 ms
-whatever the buffer holds: the `absent` row does no filesystem work at all and still costs 23 ms.
-That is the next target if this ever needs one — the pass is bounded and debounced, but it is
-still tens of milliseconds on the queue the window draws on, which is why `attachments.scan` is a
-recorded span rather than something a stall snapshot has to guess at.
+The remaining regex pass was still flat at 20–55 ms whatever the buffer held: the `absent` row did
+no filesystem work at all and still cost 23 ms. It no longer runs on the queue the window draws
+on. The observer captures SwiftTerm's bounded text on the main actor, resolves immutable text and
+URLs in a user-initiated worker task, then returns only the bounded resolution for admission.
+Native structured assistant messages use the same split rather than synchronously scanning each
+finished answer.
+
+The follow-up 2026-08-11 sweep reports main-actor scheduling, worker resolution, main-actor
+admission and end-to-end readiness separately. Cold/warm pairs are in milliseconds. The 979 KB
+row remains deliberately beyond the production 256 KB terminal-buffer cap.
+
+| Buffer / scope | Old synchronous main | Main schedule | Worker | Main apply | Ready |
+|---|---:|---:|---:|---:|---:|
+| 1,000 absent, narrow | 25.25 / 21.83 | 0.72 / 0.02 | 23.18 / 20.94 | 0.09 / 0.01 | 24.15 / 23.10 |
+| 1,000 mixed, wide | 55.73 / 55.59 | 0.72 / 0.02 | 45.99 / 41.51 | 14.05 / 0.90 | 60.96 / 42.57 |
+| 5,000 outside, wide | 82.14 / 114.14 | 0.75 / 0.02 | 47.02 / 43.73 | 25.08 / 0.80 | 73.02 / 47.47 |
+
+The high-frequency repaint path is now below one millisecond of main-actor work: warm scheduling
+is about 0.02 ms and warm apply is 0.01–0.90 ms. A cold wide-scope scan can still spend 14–25 ms
+admitting genuinely new outside files because custody means copying them. That bounded, one-time
+copy slice is a separate ownership problem; it must not be confused with the regex/filesystem
+scan that every repaint used to pay. `attachments.scan` therefore remains a recorded wall-time
+span, while its stress fixture exposes which portion could actually stall the event loop.
 
 ## Attachment preview-format stress target
 

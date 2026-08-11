@@ -1261,8 +1261,9 @@ run_attachment_stress() {
     }
 
     # shape:scope:paths. Both scopes at both extremes, because the interesting comparison is
-    # what widening costs on the same buffer — the narrow scope refuses on a `stat`, the wide
-    # one takes custody of bytes, and both happen on the main thread.
+    # what widening costs on the same buffer. Matching, existence checks and containment run on
+    # the worker; newly visible rows are admitted on the main actor, where wide scope may take
+    # custody of bytes. The fixture reports schedule, worker, apply and end-to-end separately.
     local workloads=(
       "absent:narrow:1000"
       "mixed:narrow:1000"

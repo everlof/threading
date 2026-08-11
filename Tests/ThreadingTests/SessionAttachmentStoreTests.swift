@@ -54,6 +54,17 @@ final class SessionAttachmentStoreTests: XCTestCase {
         )
     }
 
+    private func waitForAttachmentScan(
+        _ observer: TerminalAttachmentObserver,
+        timeout: TimeInterval = 2
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while observer.isScanInFlight, Date() < deadline {
+            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.005)))
+        }
+        XCTAssertFalse(observer.isScanInFlight, "attachment resolution did not finish")
+    }
+
     @discardableResult
     private func write(_ bytes: [UInt8], to url: URL) throws -> URL {
         try Data(bytes).write(to: url)
@@ -748,16 +759,16 @@ final class SessionAttachmentStoreTests: XCTestCase {
 
     /// Opt-in scan workload against a terminal-sized buffer of paths.
     ///
-    /// This is the main thread's work: the observer scans on the same queue the window draws on,
-    /// so the scan's cost is a stall's cost. Two things about the scope change made it worth a
-    /// deterministic number rather than an argument. Containment used to be answered *before*
-    /// the filesystem, so an outside path was rejected on a string comparison; reporting one
-    /// costs a `stat`, which puts the filesystem in the path of text an agent merely printed.
-    /// And the wide scope copies bytes, on that same thread. `maximumCandidatesPerScan` is what
-    /// bounds the first; the per-session cap bounds the second.
+    /// This separates the event-loop cost from the worker cost: capturing the bounded terminal
+    /// buffer and scheduling resolution must stay cheap even when regex and filesystem work do
+    /// not. Two things about the scope change made it worth a deterministic number rather than
+    /// an argument. Reporting an outside path costs a `stat`; the wide scope also takes custody
+    /// of bytes when a newly visible file is admitted. `maximumCandidatesPerScan` bounds the
+    /// worker half, and the per-session cap bounds that one-time main-actor admission half.
     ///
-    /// The buffer is generated before the clock starts, so the measurements cover the regex
-    /// pass, the resolution, the admission and — where the workload asks for it — the copies.
+    /// The buffer is generated before the clock starts. The production observer reports main-
+    /// actor scheduling separately from worker resolution, main-actor admission and end-to-end
+    /// readiness; a lower wall time is useful, but event-loop ownership is the invariant.
     func testStressAttachmentScanWhenEnabled() throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["THREADING_ATTACHMENT_STRESS"] == "1",
@@ -777,20 +788,35 @@ final class SessionAttachmentStoreTests: XCTestCase {
         let buffer = try makeStressBuffer(shape: shape, pathCount: pathCount)
         let store = makeStore()
         let session = SessionID()
+        let observer = TerminalAttachmentObserver(
+            sessionID: session,
+            projectRoot: { [checkout] in checkout },
+            currentDirectory: { [checkout] in checkout },
+            text: { buffer.text },
+            record: { resolution, sessionID, root in
+                store.record(
+                    resolved: resolution,
+                    sessionID: sessionID,
+                    projectRoot: root
+                )
+            }
+        )
 
         // A cold scan, then a repeat of the identical buffer: the second is the one a repainting
         // terminal actually pays, since every path in it has been seen and admitted already.
         let baselineMemory = Self.physicalFootprintBytes()
         let coldStarted = DispatchTime.now().uptimeNanoseconds
-        let admitted = store.recordReferences(
-            in: buffer.text,
-            sessionID: session,
-            projectRoot: checkout
-        )
-        let coldEnded = DispatchTime.now().uptimeNanoseconds
+        observer.scanNow()
+        let coldScheduled = DispatchTime.now().uptimeNanoseconds
+        waitForAttachmentScan(observer)
+        let coldReady = DispatchTime.now().uptimeNanoseconds
+        let coldMetrics = try XCTUnwrap(observer.lastScanMetrics)
         let warmStarted = DispatchTime.now().uptimeNanoseconds
-        store.recordReferences(in: buffer.text, sessionID: session, projectRoot: checkout)
-        let warmEnded = DispatchTime.now().uptimeNanoseconds
+        observer.scanNow()
+        let warmScheduled = DispatchTime.now().uptimeNanoseconds
+        waitForAttachmentScan(observer)
+        let warmReady = DispatchTime.now().uptimeNanoseconds
+        let warmMetrics = try XCTUnwrap(observer.lastScanMetrics)
 
         // And the read every pane, tool and remote fetch goes through, which re-proves each
         // stored row against the filesystem and applies the scope gate.
@@ -814,10 +840,16 @@ final class SessionAttachmentStoreTests: XCTestCase {
                 + "shape=\(shape.rawValue) scope=\(allowsFilesOutsideProject ? "wide" : "narrow") "
                 + "paths=\(pathCount) buffer_kb=\(buffer.text.utf8.count / 1024) "
                 + "inside_on_disk=\(buffer.insideCount) outside_on_disk=\(buffer.outsideCount) "
-                + "admitted=\(admitted.count) listed=\(listed.count) "
+                + "admitted=\(coldMetrics.recorded) listed=\(listed.count) "
                 + "withheld=\(store.withheldReferences(for: session).count) outside_count=\(outside) "
-                + "cold_scan_ms=\(Self.milliseconds(coldEnded - coldStarted)) "
-                + "warm_scan_ms=\(Self.milliseconds(warmEnded - warmStarted)) "
+                + "cold_schedule_ms=\(Self.milliseconds(coldScheduled - coldStarted)) "
+                + "cold_worker_ms=\(Self.milliseconds(coldMetrics.workerNanoseconds)) "
+                + "cold_apply_ms=\(Self.milliseconds(coldMetrics.applyNanoseconds)) "
+                + "cold_ready_ms=\(Self.milliseconds(coldReady - coldStarted)) "
+                + "warm_schedule_ms=\(Self.milliseconds(warmScheduled - warmStarted)) "
+                + "warm_worker_ms=\(Self.milliseconds(warmMetrics.workerNanoseconds)) "
+                + "warm_apply_ms=\(Self.milliseconds(warmMetrics.applyNanoseconds)) "
+                + "warm_ready_ms=\(Self.milliseconds(warmReady - warmStarted)) "
                 + "read_ms=\(Self.milliseconds(readEnded - readStarted)) "
                 + "count_ms=\(Self.milliseconds(countEnded - countStarted)) "
                 + "copied_mb=\(Self.megabytes(copiedBytes)) "

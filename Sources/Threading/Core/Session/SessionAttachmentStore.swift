@@ -1096,7 +1096,7 @@ enum AttachmentReferenceDetector {
     /// found and where, and the store — which knows the user's answer — decides what that means.
     /// Sorting the two apart here rather than filtering at the call site is what lets a refused
     /// file still be counted.
-    struct Resolution: Equatable {
+    struct Resolution: Equatable, Sendable {
         var insideProject: [URL] = []
         var outsideProject: [URL] = []
 
@@ -1305,15 +1305,35 @@ enum AttachmentReferenceDetector {
 @MainActor
 final class TerminalAttachmentObserver {
 
+    struct ScanMetrics: Equatable {
+        let bytes: Int
+        let workerNanoseconds: UInt64
+        let applyNanoseconds: UInt64
+        let found: Int
+        let recorded: Int
+    }
+
+    typealias Recorder = @MainActor (
+        AttachmentReferenceDetector.Resolution,
+        SessionID,
+        URL
+    ) -> [SessionAttachment]
+
     private let sessionID: SessionID
     private let projectRoot: () -> URL?
     private let currentDirectory: () -> URL?
     private let text: () -> String
     private let isEnabled: () -> Bool
     private let now: () -> Date
+    private let record: Recorder
     private var pendingScan: Task<Void, Never>?
+    private var resolutionTask: Task<Void, Never>?
     private var lastScan: Date?
     private var pathsInLastScan: Set<String> = []
+    private var scanGeneration = 0
+
+    private(set) var isScanInFlight = false
+    private(set) var lastScanMetrics: ScanMetrics?
 
     init(
         sessionID: SessionID,
@@ -1321,7 +1341,14 @@ final class TerminalAttachmentObserver {
         currentDirectory: @escaping () -> URL?,
         text: @escaping () -> String,
         isEnabled: @escaping () -> Bool = { true },
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        record: @escaping Recorder = { resolution, sessionID, root in
+            SessionAttachmentStore.shared.record(
+                resolved: resolution,
+                sessionID: sessionID,
+                projectRoot: root
+            )
+        }
     ) {
         self.sessionID = sessionID
         self.projectRoot = projectRoot
@@ -1329,10 +1356,12 @@ final class TerminalAttachmentObserver {
         self.text = text
         self.isEnabled = isEnabled
         self.now = now
+        self.record = record
     }
 
     deinit {
         pendingScan?.cancel()
+        resolutionTask?.cancel()
     }
 
     /// Scans now when it may, defers only as long as it must.
@@ -1371,28 +1400,73 @@ final class TerminalAttachmentObserver {
         pendingScan?.cancel()
         pendingScan = nil
         lastScan = now()
+        scanGeneration += 1
+        let generation = scanGeneration
+        resolutionTask?.cancel()
+        resolutionTask = nil
+        isScanInFlight = false
+        lastScanMetrics = nil
         guard isEnabled() else {
             pathsInLastScan.removeAll()
             return
         }
         guard let root = projectRoot() else { return }
 
-        // One coarse span, on the debounce rather than on output: this runs on the queue the
-        // window draws on, over a buffer whose size is decided by whatever an agent last
-        // printed, and `attachment-stress` measures it in tens of milliseconds. When the stall
-        // monitor's automatic snapshot lands, the semantic context has to name this — a sample
-        // can say the process was inside `NSRegularExpression` without saying who asked.
+        // Reading SwiftTerm's buffer is main-actor work. Everything after that is immutable text,
+        // URLs and filesystem queries, so doing it on the queue the window draws on would turn a
+        // bounded 20–55 ms regex pass into visible input and scroll latency.
         let scanned = text()
+        let current = currentDirectory()
         let span = PerformanceRecorder.shared.begin(
             "attachments.scan",
             category: "attachments",
             metadata: ["bytes": String(scanned.utf8.count)]
         )
-        let resolution = AttachmentReferenceDetector.resolve(
-            text: scanned,
-            projectRoot: root,
-            currentDirectory: currentDirectory()
-        )
+        isScanInFlight = true
+        resolutionTask = Task.detached(priority: .userInitiated) { [weak self] in
+            let started = DispatchTime.now().uptimeNanoseconds
+            let resolution = AttachmentReferenceDetector.resolve(
+                text: scanned,
+                projectRoot: root,
+                currentDirectory: current
+            )
+            let ended = DispatchTime.now().uptimeNanoseconds
+            guard !Task.isCancelled else {
+                span.end(metadata: ["cancelled": "1"])
+                return
+            }
+            await self?.finishScan(
+                resolution,
+                scannedBytes: scanned.utf8.count,
+                workerNanoseconds: ended - started,
+                generation: generation,
+                projectRoot: root,
+                span: span
+            )
+        }
+    }
+
+    private func finishScan(
+        _ resolution: AttachmentReferenceDetector.Resolution,
+        scannedBytes: Int,
+        workerNanoseconds: UInt64,
+        generation: Int,
+        projectRoot root: URL,
+        span: PerformanceSpan
+    ) {
+        guard generation == scanGeneration else {
+            span.end(metadata: ["superseded": "1"])
+            return
+        }
+        resolutionTask = nil
+        isScanInFlight = false
+        guard isEnabled() else {
+            pathsInLastScan.removeAll()
+            span.end(metadata: ["disabled": "1"])
+            return
+        }
+
+        let applyStarted = DispatchTime.now().uptimeNanoseconds
         // Both halves are held to the same "newly visible" rule. A path outside the project is
         // refused rather than listed, but re-offering it on every repaint would still be work,
         // and would keep re-announcing a hint the user has already read.
@@ -1403,17 +1477,18 @@ final class TerminalAttachmentObserver {
         pathsInLastScan = Set(
             (resolution.insideProject + resolution.outsideProject).map(\.path)
         )
-        guard !newly.isEmpty else {
-            span.end(metadata: ["found": "0"])
-            return
-        }
-        let recorded = SessionAttachmentStore.shared.record(
-            resolved: newly,
-            sessionID: sessionID,
-            projectRoot: root
+        let recorded = newly.isEmpty ? [] : record(newly, sessionID, root)
+        let applyEnded = DispatchTime.now().uptimeNanoseconds
+        let found = newly.insideProject.count + newly.outsideProject.count
+        lastScanMetrics = ScanMetrics(
+            bytes: scannedBytes,
+            workerNanoseconds: workerNanoseconds,
+            applyNanoseconds: applyEnded - applyStarted,
+            found: found,
+            recorded: recorded.count
         )
         span.end(metadata: [
-            "found": String(newly.insideProject.count + newly.outsideProject.count),
+            "found": String(found),
             "recorded": String(recorded.count)
         ])
     }

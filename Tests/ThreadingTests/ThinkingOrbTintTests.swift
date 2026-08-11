@@ -20,6 +20,17 @@ final class ThinkingOrbTintTests: XCTestCase {
         return rep
     }
 
+    private func waitForAttachmentScan(
+        _ observer: TerminalAttachmentObserver,
+        timeout: TimeInterval = 1
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while observer.isScanInFlight, Date() < deadline {
+            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.005)))
+        }
+        XCTAssertFalse(observer.isScanInFlight, "attachment resolution did not finish")
+    }
+
     /// Every dot the orb actually painted (alpha above a floor), as sRGB.
     private func inkPixels(_ rep: NSBitmapImageRep) -> [NSColor] {
         var out: [NSColor] = []
@@ -325,6 +336,7 @@ final class ThinkingOrbTintTests: XCTestCase {
 
         isEnabled = true
         observer.scanNow()
+        waitForAttachmentScan(observer)
         XCTAssertEqual(
             SessionAttachmentStore.shared.attachments(for: sessionID).map(\.relativePath),
             ["first.png"]
@@ -340,6 +352,7 @@ final class ThinkingOrbTintTests: XCTestCase {
 
         isEnabled = true
         observer.scanNow()
+        waitForAttachmentScan(observer)
         XCTAssertEqual(
             SessionAttachmentStore.shared.attachments(for: sessionID).map(\.relativePath),
             ["second.pdf", "first.png"]
@@ -373,6 +386,7 @@ final class ThinkingOrbTintTests: XCTestCase {
 
         // Leading edge: the very first output scans without waiting for quiet.
         observer.noteOutput()
+        waitForAttachmentScan(observer)
         XCTAssertEqual(
             SessionAttachmentStore.shared.attachments(for: sessionID).map(\.relativePath),
             ["early.png"]
@@ -390,6 +404,7 @@ final class ThinkingOrbTintTests: XCTestCase {
         // Past the busy cap the stream is still running, and the scan happens anyway.
         clock = clock.addingTimeInterval(SessionAttachmentDefaults.terminalBusyScanInterval)
         observer.noteOutput()
+        waitForAttachmentScan(observer)
         XCTAssertEqual(
             SessionAttachmentStore.shared.attachments(for: sessionID).map(\.relativePath),
             ["late.png", "early.png"]

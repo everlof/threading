@@ -2322,12 +2322,22 @@ final class ConversationViewController: NSViewController {
             fileURLWithPath: agentSession.workingDirectory(in: project),
             isDirectory: true
         )
-        for text in texts {
-            SessionAttachmentStore.shared.recordReferences(
-                in: text,
-                sessionID: sessionID,
-                projectRoot: root
+        let scanned = texts.joined(separator: "\n")
+        let sessionID = sessionID
+        Task.detached(priority: .userInitiated) {
+            let resolution = AttachmentReferenceDetector.resolve(
+                text: scanned,
+                projectRoot: root,
+                currentDirectory: nil
             )
+            guard !resolution.isEmpty, !Task.isCancelled else { return }
+            _ = await MainActor.run {
+                SessionAttachmentStore.shared.record(
+                    resolved: resolution,
+                    sessionID: sessionID,
+                    projectRoot: root
+                )
+            }
         }
     }
 
