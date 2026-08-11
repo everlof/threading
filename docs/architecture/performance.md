@@ -152,7 +152,8 @@ external data reaches eager AppKit work.
 | Resolved | Browser baseline library | The 200-record value model is presented by reusable table rows. Only a viewport of cards exists; screenshot reads, SHA-256 and source inspection run off-main with reuse cancellation, while the main actor performs only a row-sized decode and assignment. The before/after measurements are below. |
 | Resolved | File pane refresh | Directory enumeration, resource-value reads, natural sorting and snapshot signatures now run off-main for initial load, hot refresh and disclosure. Main-actor reconciliation preserves node identity with a sorted merge; equal signatures skip both reconciliation and AppKit reload. The before/after measurements are below. |
 | Resolved | Archived settings | The archive is a cheap value-row model in one grouped table. The recent fold owns ten session identities; expansion inserts the older identities, and project events recycle only the viewport while preserving the clip origin. The before/after measurements are below. |
-| Medium | Tools dynamic sections | Tool rows, extension-contributed settings and persistent website origins are virtualized at their repeating unit. Browser Sign-In remains one coarse row, so a large credential inventory can still defeat the outer table's bound. |
+| Resolved | Tools dynamic sections | Tool rows, extension-contributed settings, persistent website origins and Browser Sign-In inventories are all value rows in the same grouped table. Provider, credential and exemption mutations refresh cheap snapshots and recycle only the viewport. |
+| Resolved | Settings search results | An installed extension can contribute up to eight searchable pages, so the 256-package ceiling can produce 2,048 extension results before built-ins. Results are value rows; a query-only change updates the two visible labels in place and preserves the exact clip origin. |
 | Resolved | Git Review watched refresh | A build can expose ~9,000 generated files / ~80,000 changed lines and refresh repeatedly. The pane now reconciles stable paths in place, anchors by path + within-row offset, and defers model/height mutations until live scrolling ends. The remaining full-index scrollbar-drag cost is measured separately below. |
 | Resolved | Git Review during live resize | The 8,985-file fixture now drives 48 distinct widths through the real layout callback. Complete-index height invalidation averages 6.08 ms, with 6.66 ms p95 and 10.49 ms max, while preserving correct offscreen wrapping estimates and scrollbar extent. |
 | Resolved | Account settings cold discovery | A fresh-process fixture separates real home-directory/login-marker/shell-alias discovery from page construction. Five accounts take 6.61 ms to discover, 12.31 ms to render and 8.14 ms to lay out; the seven-second cache makes subsequent callers lock-cheap. |
@@ -195,6 +196,8 @@ the UI times. The 2026-08-08 Debug sweep used the local Apple-silicon Mac:
 | Extension panel, 500 semantic nodes | 29 ms render + 232–245 ms layout | Generation replacement: 261–275 ms; draw: 55–58 ms/frame | 707 descendants; 51–67 MB |
 | Extensions preferences, 256 installed packages | 457–509 ms construction + **5,317–5,478 ms layout** | One disclosure: **6,017–6,282 ms** | 3,601 descendants; 197–198 MB |
 | Archived settings, 250 conversations | 74.0 ms construction + 31.7 ms layout | Expand: 146.4 ms mutation + **1,912.8 ms layout**; unchanged event: 303.0 ms + 1,897.1 ms | 2,776 expanded descendants; 96.6 MB |
+| Tools Browser Sign-In, 250 submission exemptions | 31.8 ms construction + **2,247.3 ms layout** | No separate mutation phase | 2,310 descendants; 112.4 MB |
+| Settings search, 250 results | 162.1 ms construction + **1,169.2 ms layout** | Query update: 384.4 ms mutation + **1,096.1 ms layout** | 2,761 descendants; 87.0 MB |
 | Extension settings, one 128-field extension | 63–77 ms render + 941–945 ms layout | Draw: 30–35 ms/frame | 1,169 descendants; 54–61 MB |
 | Extension settings, four 128-field extensions | 211–215 ms render + **56,841–61,485 ms layout** | Draw: 47 ms System / 121 ms Neo Brutalism | 4,640 descendants; 292–307 MB |
 | Browser baseline library, 200 records | 170–178 ms render + 507–559 ms layout | One permission toggle: 679–742 ms; draw: 24 ms System / **544 ms Neo Brutalism** | 2,411 descendants; 119 MB System / 217 MB Neo Brutalism |
@@ -444,8 +447,11 @@ scripts/profile_threading.sh git-stress
 # Maximum-contract agent charts: decode/model, cold pane, updates, and rendered frames.
 scripts/profile_threading.sh chart-stress
 
-# Deterministic Tools settings cold open, disclosure, full expansion, website origins, and scroll.
+# Tools cold open, disclosure, credentials/exemptions, website origins, and rendered scroll.
 scripts/profile_threading.sh tools-settings-stress
+
+# Maximum-contract settings results, a query-only update, and scroll-position preservation.
+scripts/profile_threading.sh settings-search-stress
 
 # Changed-files card at 10–1,000 files, with collapsed trees and aggregate capped previews.
 scripts/profile_threading.sh changed-files-stress
@@ -1510,9 +1516,10 @@ Tools settings page without opening the app or Instruments: cold construction an
 and collapse of the largest tool group, all-group expansion, and 48 rendered scroll positions.
 `scripts/profile_threading.sh tools-settings-stress` builds an isolated test product and runs the
 fixture under System and Neo Brutalism. Set `THREADING_TOOLS_SETTINGS_STRESS_THEME` to one theme ID
-for a focused run. It then runs the theme-independent 1,000-origin Website Access fixture; override
-that count with `THREADING_TOOLS_WEBSITE_ACCESS_STRESS_ORIGINS`. The baseline catalog had 12 groups
-and 66 tools; the post-change tree has 67. Browser is the largest group in both at 34 tools.
+for a focused run. It then runs theme-independent 1,000-entry Website Access and Browser Sign-In
+fixtures; override their counts with `THREADING_TOOLS_WEBSITE_ACCESS_STRESS_ORIGINS` and
+`THREADING_TOOLS_BROWSER_SIGN_IN_STRESS_ORIGINS`. The baseline catalog had 12 groups and 66 tools;
+the post-change tree has 67. Browser is the largest group in both at 34 tools.
 
 Two fresh-process Debug runs per theme, with `NSApplication` initialized as it is before an in-app
 settings navigation and the page attached to an offscreen `NSWindow`, measured:
@@ -1589,5 +1596,41 @@ rows, while a single table-card decoration preserves the visual section.
 At 1,000 origins, the repaired fresh process measured **63.9 ms load + 43.6 ms first layout**, with
 10 of 1,005 rows materialized, 112 descendants and 7.7 MB added. Revoke tags index the same sorted
 origin snapshot used to build the row identities, and every mutation refreshes that snapshot before
-recycling the viewport. Do not put the origins back inside one section view. Browser Sign-In still
-has the same coarse-row risk for credentials and remains the next bounded Tools audit target.
+recycling the viewport. Do not put the origins back inside one section view.
+
+Browser Sign-In had the same nested-card defect. Its provider picker, linked 1Password items,
+Threading-vault identities and process-lifetime submission exemptions all lived in one outer table
+cell. A 250-exemption fresh process took **31.8 ms to construct + 2,247.3 ms to lay out**, retained
+2,310 descendants and added 112.4 MB. The repair snapshots only identity metadata during `render()`,
+then gives the caption, provider, each identity, each exemption and the provider-specific empty/add
+actions their own `PresentationRow`. One table-card decoration keeps the section visually whole.
+
+At 1,000 exemptions, the repaired process measured **30.4 ms load + 25.1 ms first layout**, with 10
+of 1,006 rows materialized, 102 descendants and 8.3 MB added. The action regression test invokes
+`Ask Again` through a materialized row and proves both the process store and value-row count shrink
+together. Remove/revoke tags always index the same sorted snapshot that built the identities, and a
+mutation rebuilds that snapshot before viewport recycling. Do not aggregate any Browser Sign-In
+inventory back into a single row, and do not read credential secrets while building the snapshot.
+
+### Settings search results
+
+Search is a frequency-scaled surface as well as a size-scaled one: an installed extension can
+contribute up to eight settings pages, so the 256-package ceiling alone can produce 2,048 matching
+pages, and the result controller receives updates on every query change. The original controller
+mapped every match to a complete row, nested those rows in one settings page and replaced the page
+on each update. At only 250 matches, a fresh process took **162.1 ms to construct + 1,169.2 ms to
+lay out**, retained 2,761 descendants and added 87.0 MB. Repeating the same identities with a new
+query cost another **384.4 ms mutation + 1,096.1 ms layout** and could reset the scroll position.
+
+The repair keeps match identities in a `ThemedGroupedTableView` and materializes only the viewport.
+An identity change reloads the value rows; a query-only change updates the two `SearchMatchLabel`
+instances in each visible cell in place, so buttons, constraints and offscreen height discoveries
+remain untouched. At 2,048 matches, the repaired process measured **25.4 ms load + 40.0 ms first
+layout** and **1.8 ms update + 1.5 ms update layout**, with 18 of 2,049 rows materialized, 222
+descendants and 12.2 MB added. The fixture scrolls to the end before changing the query and asserts
+the exact clip origin is preserved. Run it with `scripts/profile_threading.sh
+settings-search-stress`; override the ceiling with `THREADING_SETTINGS_SEARCH_STRESS_RESULTS`.
+
+Do not rebuild result cells for a query-only highlight change, and do not turn the result set back
+into one eager settings card. Action tags must continue to index the same match snapshot that
+created the row identities.

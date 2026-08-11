@@ -6,6 +6,7 @@
 #   scripts/profile_threading.sh agent-work-stress
 #   scripts/profile_threading.sh chart-stress
 #   scripts/profile_threading.sh tools-settings-stress
+#   scripts/profile_threading.sh settings-search-stress
 #   scripts/profile_threading.sh extensions-preferences-stress
 #   scripts/profile_threading.sh archived-settings-stress
 #   scripts/profile_threading.sh component-gallery-stress
@@ -46,7 +47,7 @@ performance_directory="${THREADING_PROFILE_OUTPUT:-/tmp/threading-profiles}"
 built_in_directory="${HOME}/Library/Application Support/Threading/Performance"
 
 usage() {
-  sed -n '3,36p' "$0"
+  sed -n '3,37p' "$0"
 }
 
 resolve_pid() {
@@ -507,7 +508,63 @@ run_tools_settings_stress() {
       xcrun xctest \
         -XCTest ThreadingTests.SettingsDisclosureRenderTests/testStressToolsWebsiteAccessWhenEnabled \
         "${test_bundle}"
+
+    THREADING_TOOLS_BROWSER_SIGN_IN_STRESS=1 \
+    THREADING_TOOLS_BROWSER_SIGN_IN_STRESS_ORIGINS="${THREADING_TOOLS_BROWSER_SIGN_IN_STRESS_ORIGINS:-1000}" \
+    DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+      xcrun xctest \
+        -XCTest ThreadingTests.SettingsDisclosureRenderTests/testStressToolsBrowserSignInWhenEnabled \
+        "${test_bundle}"
   ) 2>&1 | tee "${output_directory}/tools-settings-stress.log"
+}
+
+run_settings_search_stress() {
+  local output_directory="$1"
+  local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
+  local derived_data="${output_directory}/derived-data"
+  echo "Running deterministic settings-search result and query-update sweep…"
+
+  (
+    cd "${repository_directory}"
+    xcodebuild \
+      -project Threading.xcodeproj \
+      -scheme Threading \
+      -testPlan Threading-Fast \
+      -destination "platform=macOS" \
+      -configuration Debug \
+      -derivedDataPath "${derived_data}" \
+      -jobs "${jobs}" \
+      -quiet \
+      build-for-testing
+
+    local build_directory
+    build_directory="$(
+      xcodebuild \
+        -project Threading.xcodeproj \
+        -scheme Threading \
+        -configuration Debug \
+        -destination "platform=macOS" \
+        -derivedDataPath "${derived_data}" \
+        -showBuildSettings \
+        -json \
+        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
+    )"
+    local app="${build_directory}/Threading.app"
+    local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
+    [[ -d "${test_bundle}" ]] || {
+      echo "Built test bundle not found at ${test_bundle}." >&2
+      return 1
+    }
+
+    THREADING_SETTINGS_SEARCH_STRESS=1 \
+    THREADING_SETTINGS_SEARCH_STRESS_RESULTS="${THREADING_SETTINGS_SEARCH_STRESS_RESULTS:-2048}" \
+    DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+      xcrun xctest \
+        -XCTest ThreadingTests.SettingsRowLayoutTests/testStressSettingsSearchResultsWhenEnabled \
+        "${test_bundle}"
+  ) 2>&1 | tee "${output_directory}/settings-search-stress.log"
 }
 
 run_extensions_preferences_stress() {
@@ -1485,6 +1542,11 @@ case "${command}" in
     run_tools_settings_stress "${output_directory}"
     ;;
 
+  settings-search-stress)
+    output_directory="$(new_run_directory settings-search-stress)"
+    run_settings_search_stress "${output_directory}"
+    ;;
+
   extensions-preferences-stress)
     output_directory="$(new_run_directory extensions-preferences-stress)"
     run_extensions_preferences_stress "${output_directory}"
@@ -1663,6 +1725,7 @@ case "${command}" in
     run_git_stress "${output_directory}"
     run_chart_stress "${output_directory}"
     run_tools_settings_stress "${output_directory}"
+    run_settings_search_stress "${output_directory}"
     run_extensions_preferences_stress "${output_directory}"
     run_archived_settings_stress "${output_directory}"
     run_conversation_stress "${output_directory}"

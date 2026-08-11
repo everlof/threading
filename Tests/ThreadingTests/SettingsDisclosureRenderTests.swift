@@ -117,6 +117,73 @@ final class SettingsDisclosureRenderTests: XCTestCase {
     }
 
     @MainActor
+    func testBrowserSignInExemptionsRemainActionableWhenVirtualized() throws {
+        let previousProvider = BrowserCredentialPreference.provider
+        BrowserCredentialPreference.provider = .systemAutoFill
+        let exemptions = BrowserSubmissionExemptions.shared
+        exemptions.revokeAll()
+        defer {
+            exemptions.revokeAll()
+            BrowserCredentialPreference.provider = previousProvider
+        }
+        for index in 0..<80 {
+            let url = try XCTUnwrap(URL(string: "https://virtual-\(index).example.test"))
+            exemptions.exempt(try XCTUnwrap(BrowserOrigin(url: url)))
+        }
+        let suite = "BrowserSignInVirtualization-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let controller = ToolsPreferencesViewController(
+            groups: [],
+            browserAccessStore: BrowserAccessStore(defaults: defaults)
+        )
+        let page = controller.view
+        let window = performanceWindow(page)
+        let host = try XCTUnwrap(window.contentView)
+        host.layoutSubtreeIfNeeded()
+        let askAgain = try XCTUnwrap(
+            descendants(of: page, type: ThemedButton.self).first { $0.title == "Ask Again" }
+        )
+
+        XCTAssertEqual(controller.virtualRowCount, 86)
+        XCTAssertLessThan(controller.materializedRowCount, controller.virtualRowCount)
+        XCTAssertTrue(askAgain.performPrimaryAction())
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(exemptions.exemptOriginKeys.count, 79)
+        XCTAssertEqual(controller.virtualRowCount, 85)
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
+        withExtendedLifetime(window) {}
+    }
+
+    @MainActor
+    func testBrowserSignInVaultEmptyStateRemainsASeparateVirtualRow() throws {
+        let previousProvider = BrowserCredentialPreference.provider
+        BrowserCredentialPreference.provider = .threadingVault
+        defer { BrowserCredentialPreference.provider = previousProvider }
+        let suite = "BrowserSignInVaultEmpty-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = ToolsPreferencesViewController(
+            groups: [],
+            browserAccessStore: BrowserAccessStore(defaults: defaults),
+            credentialStore: BrowserCredentialStore(
+                service: "codes.threading.browser.credential.empty-\(UUID().uuidString)",
+                dataProtection: false
+            )
+        )
+        let page = controller.view
+        let window = performanceWindow(page)
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(labels(in: page).contains { $0.stringValue == "No test credentials stored" })
+        XCTAssertEqual(controller.virtualRowCount, 7)
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
+        withExtendedLifetime(window) {}
+    }
+
+    @MainActor
     func testArchivedVirtualPagePreservesContributedSettingsFields() throws {
         let field = ExtensionSettingField(
             id: "archive-label",
@@ -677,6 +744,67 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         )
 
         XCTAssertGreaterThanOrEqual(controller.virtualRowCount, originCount + 5)
+        XCTAssertGreaterThan(controller.materializedRowCount, 0)
+        XCTAssertLessThan(controller.materializedRowCount, controller.virtualRowCount)
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
+        withExtendedLifetime(window) {}
+    }
+
+    /// Exercises Browser Sign-In's inner inventory independently of Keychain and 1Password.
+    /// Submission exemptions are process-lifetime values, but they share the same coarse outer
+    /// table cell as stored credentials and therefore expose the same retained-stack scaling.
+    @MainActor
+    func testStressToolsBrowserSignInWhenEnabled() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["THREADING_TOOLS_BROWSER_SIGN_IN_STRESS"] == "1" else {
+            throw XCTSkip(
+                "Set THREADING_TOOLS_BROWSER_SIGN_IN_STRESS=1 to run Browser Sign-In stress."
+            )
+        }
+        let originCount = max(
+            Int(environment["THREADING_TOOLS_BROWSER_SIGN_IN_STRESS_ORIGINS"] ?? "") ?? 1_000,
+            1
+        )
+        let previousProvider = BrowserCredentialPreference.provider
+        BrowserCredentialPreference.provider = .systemAutoFill
+        let exemptions = BrowserSubmissionExemptions.shared
+        exemptions.revokeAll()
+        defer {
+            exemptions.revokeAll()
+            BrowserCredentialPreference.provider = previousProvider
+        }
+        for index in 0..<originCount {
+            let url = try XCTUnwrap(URL(string: "https://stress-\(index).example.test"))
+            exemptions.exempt(try XCTUnwrap(BrowserOrigin(url: url)))
+        }
+
+        let memoryBefore = physicalFootprintBytes()
+        let controller = ToolsPreferencesViewController(
+            groups: [],
+            browserAccessStore: BrowserAccessStore()
+        )
+        let loadStarted = DispatchTime.now().uptimeNanoseconds
+        let page = controller.view
+        let loaded = DispatchTime.now().uptimeNanoseconds
+        let window = performanceWindow(page)
+        let host = try XCTUnwrap(window.contentView)
+        host.layoutSubtreeIfNeeded()
+        let laidOut = DispatchTime.now().uptimeNanoseconds
+        let descendants = descendantCount(in: page)
+        let memoryAfter = physicalFootprintBytes()
+        let memoryDelta = memoryAfter >= memoryBefore ? memoryAfter - memoryBefore : 0
+
+        print(
+            "THREADING_PERF tools-browser-sign-in origins=\(originCount) "
+                + "load_ms=\(Self.milliseconds(loaded - loadStarted)) "
+                + "layout_ms=\(Self.milliseconds(laidOut - loaded)) "
+                + "virtual_rows=\(controller.virtualRowCount) "
+                + "materialized_rows=\(controller.materializedRowCount) "
+                + "descendants=\(descendants) "
+                + "footprint_delta_mb=\(Self.megabytes(memoryDelta))"
+        )
+
+        XCTAssertGreaterThanOrEqual(controller.virtualRowCount, originCount + 6)
         XCTAssertGreaterThan(controller.materializedRowCount, 0)
         XCTAssertLessThan(controller.materializedRowCount, controller.virtualRowCount)
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])

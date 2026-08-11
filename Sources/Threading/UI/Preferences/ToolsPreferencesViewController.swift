@@ -26,6 +26,7 @@ final class ToolsPreferencesViewController: NSViewController {
     private let chromeAutomationProfile: ChromeAutomationProfile
     private var persistentOriginKeys: [String] = []
     private let credentialStore: BrowserCredentialStore
+    private var credentialProvider: BrowserCredentialProvider = .fallback
     private var storedCredentials: [BrowserCredentialIdentity] = []
     private var onePasswordItems: [BrowserCredentialIdentity] = []
     private var exemptSubmissionOrigins: [String] = []
@@ -38,7 +39,15 @@ final class ToolsPreferencesViewController: NSViewController {
         case note
         case group(Int)
         case tool(group: Int, tool: Int)
-        case browserSignIn
+        case browserSignInCaption
+        case browserSignInProvider
+        case browserSignInOnePasswordEmpty
+        case browserSignInOnePasswordIdentity(Int)
+        case browserSignInOnePasswordAdd
+        case browserSignInVaultEmpty
+        case browserSignInVaultIdentity(Int)
+        case browserSignInVaultAdd
+        case browserSignInSubmissionExemption(Int)
         case chromeAutomation
         case websiteAccessCaption
         case websiteAccessEmpty
@@ -139,6 +148,14 @@ final class ToolsPreferencesViewController: NSViewController {
     private func render() {
         guard isViewLoaded else { return }
         extensionSections = ExtensionSettingsRenderer.hostSectionModels(for: .tools)
+        credentialProvider = BrowserCredentialPreference.provider
+        onePasswordItems = credentialProvider == .onePassword && OnePasswordCLI.isInstalled
+            ? OnePasswordItemStore.identities()
+            : []
+        storedCredentials = credentialProvider == .threadingVault
+            ? credentialStore.identities()
+            : []
+        exemptSubmissionOrigins = BrowserSubmissionExemptions.shared.exemptOriginKeys
         persistentOriginKeys = browserAccessStore.allowedOrigins.sorted()
         presentationRows = makePresentationRows()
         updateCardDecorations()
@@ -184,7 +201,35 @@ final class ToolsPreferencesViewController: NSViewController {
                 })
             }
         }
-        rows.append(contentsOf: [.browserSignIn, .chromeAutomation, .websiteAccessCaption])
+        rows.append(contentsOf: [.browserSignInCaption, .browserSignInProvider])
+        switch credentialProvider {
+        case .systemAutoFill:
+            break
+        case .onePassword where OnePasswordCLI.isInstalled:
+            if onePasswordItems.isEmpty {
+                rows.append(.browserSignInOnePasswordEmpty)
+            } else {
+                rows.append(contentsOf: onePasswordItems.indices.map(
+                    PresentationRow.browserSignInOnePasswordIdentity
+                ))
+                rows.append(.browserSignInOnePasswordAdd)
+            }
+        case .onePassword:
+            break
+        case .threadingVault:
+            if storedCredentials.isEmpty {
+                rows.append(.browserSignInVaultEmpty)
+            } else {
+                rows.append(contentsOf: storedCredentials.indices.map(
+                    PresentationRow.browserSignInVaultIdentity
+                ))
+                rows.append(.browserSignInVaultAdd)
+            }
+        }
+        rows.append(contentsOf: exemptSubmissionOrigins.indices.map(
+            PresentationRow.browserSignInSubmissionExemption
+        ))
+        rows.append(contentsOf: [.chromeAutomation, .websiteAccessCaption])
         if persistentOriginKeys.isEmpty {
             rows.append(.websiteAccessEmpty)
         } else {
@@ -217,9 +262,20 @@ final class ToolsPreferencesViewController: NSViewController {
             )
         }
         var extensionBounds: [Int: (first: Int, last: Int)] = [:]
+        var browserSignInBounds: (first: Int, last: Int)?
         var websiteBounds: (first: Int, last: Int)?
         for (rowIndex, row) in presentationRows.enumerated() {
             switch row {
+            case .browserSignInProvider, .browserSignInOnePasswordEmpty,
+                 .browserSignInOnePasswordIdentity, .browserSignInOnePasswordAdd,
+                 .browserSignInVaultEmpty, .browserSignInVaultIdentity,
+                 .browserSignInVaultAdd, .browserSignInSubmissionExemption:
+                if var bounds = browserSignInBounds {
+                    bounds.last = rowIndex
+                    browserSignInBounds = bounds
+                } else {
+                    browserSignInBounds = (rowIndex, rowIndex)
+                }
             case .websiteAccessEmpty, .websiteAccessOrigin, .websiteAccessRevokeAll:
                 if var bounds = websiteBounds {
                     bounds.last = rowIndex
@@ -234,10 +290,15 @@ final class ToolsPreferencesViewController: NSViewController {
                 } else {
                     extensionBounds[sectionIndex] = (rowIndex, rowIndex)
                 }
-            case .note, .group, .tool, .browserSignIn, .chromeAutomation,
+            case .note, .group, .tool, .browserSignInCaption, .chromeAutomation,
                  .websiteAccessCaption, .extensionCaption:
                 break
             }
+        }
+        if let browserSignInBounds {
+            decorations.append(ThemedTableCardDecoration(
+                rows: browserSignInBounds.first...browserSignInBounds.last
+            ))
         }
         if let websiteBounds {
             decorations.append(ThemedTableCardDecoration(
@@ -429,136 +490,136 @@ final class ToolsPreferencesViewController: NSViewController {
     /// The naming is a guardrail, not decoration: the dominant failure mode of a deliberately
     /// weaker vault is people putting real credentials in it because it was convenient, and what
     /// the screen calls itself is most of what prevents that.
-    private func browserSignInSection() -> NSView {
+    private func browserSignInProviderRow() -> NSView {
         let picker = SettingsUI.popUp(target: self, action: #selector(credentialProviderChanged(_:)))
         for provider in BrowserCredentialProvider.allCases {
             picker.addItem(withTitle: Self.providerTitle(provider))
         }
         picker.selectItem(at: BrowserCredentialProvider.allCases.firstIndex(
-            of: BrowserCredentialPreference.provider
+            of: credentialProvider
         ) ?? 0)
 
-        var rows: [NSView] = [
-            SettingsUI.row(
-                title: "Sign-in values come from",
-                subtitle: Self.providerExplanation(BrowserCredentialPreference.provider),
-                control: picker
-            )
-        ]
+        return SettingsUI.row(
+            title: "Sign-in values come from",
+            subtitle: Self.providerExplanation(credentialProvider),
+            control: picker
+        )
+    }
 
-        if BrowserCredentialPreference.provider == .onePassword, OnePasswordCLI.isInstalled {
-            onePasswordItems = OnePasswordItemStore.identities()
-            if onePasswordItems.isEmpty {
-                rows.append(SettingsUI.row(
-                    title: "No 1Password items linked",
-                    subtitle: """
-                        Point an origin at a 1Password item and agents can sign in to it without \
-                        you typing anything.
-                        """,
-                    control: SettingsUI.button(
-                        "Link…",
-                        target: self,
-                        action: #selector(addOnePasswordItem)
-                    )
-                ))
-            } else {
-                rows.append(contentsOf: onePasswordItems.enumerated().map { index, identity in
-                    let remove = SettingsUI.button(
-                        "Remove",
-                        target: self,
-                        action: #selector(removeOnePasswordItem(_:))
-                    )
-                    remove.tag = index
-                    return SettingsUI.row(
-                        title: "\(identity.label) — \(identity.originKey)",
-                        subtitle: OnePasswordItemStore.reference(for: identity) ?? "",
-                        control: remove,
-                        localizes: false
-                    )
-                })
-                rows.append(SettingsUI.row(
-                    title: "Another 1Password item",
-                    subtitle: "Threading stores the reference only. 1Password holds the value.",
-                    control: SettingsUI.button(
-                        "Link…",
-                        target: self,
-                        action: #selector(addOnePasswordItem)
-                    )
-                ))
-            }
-        }
-
-        if BrowserCredentialPreference.provider == .threadingVault {
-            storedCredentials = credentialStore.identities()
-            if storedCredentials.isEmpty {
-                rows.append(SettingsUI.row(
-                    title: "No test credentials stored",
-                    subtitle: """
-                        Add a throwaway account and agents can sign in to that exact origin \
-                        without you typing it. Never store a real account here.
-                        """,
-                    control: SettingsUI.button(
-                        "Add…",
-                        target: self,
-                        action: #selector(addTestCredential)
-                    )
-                ))
-            } else {
-                rows.append(contentsOf: storedCredentials.enumerated().map { index, identity in
-                    let remove = SettingsUI.button(
-                        "Remove",
-                        target: self,
-                        action: #selector(removeTestCredential(_:))
-                    )
-                    remove.tag = index
-                    return SettingsUI.row(
-                        title: "\(identity.label) — \(identity.originKey)",
-                        subtitle: "Agents may fill this account on this exact origin.",
-                        control: remove
-                    )
-                })
-                rows.append(SettingsUI.row(
-                    title: L10n.string("Another test account"),
-                    subtitle: BrowserCredentialStore.isShellReachable
-                        ? L10n.string("""
-                            Stored in your login Keychain, and removed by Reset Everything. This \
-                            build cannot use the protected Keychain, so a command line on this \
-                            Mac — including an agent's — could add or delete entries here.
-                            """)
-                        : L10n.string("""
-                            Stored in your protected Keychain, out of reach of the command line, \
-                            and removed by Reset Everything.
-                            """),
-                    control: SettingsUI.button(
-                        "Add…",
-                        target: self,
-                        action: #selector(addTestCredential)
-                    ),
-                    localizes: false
-                ))
-            }
-        }
-
-        exemptSubmissionOrigins = BrowserSubmissionExemptions.shared.exemptOriginKeys
-        rows.append(contentsOf: exemptSubmissionOrigins.enumerated().map { index, origin in
-            let revoke = SettingsUI.button(
-                "Ask Again",
+    private func browserSignInOnePasswordEmptyRow() -> NSView {
+        SettingsUI.row(
+            title: "No 1Password items linked",
+            subtitle: """
+                Point an origin at a 1Password item and agents can sign in to it without you \
+                typing anything.
+                """,
+            control: SettingsUI.button(
+                "Link…",
                 target: self,
-                action: #selector(revokeSubmissionExemption(_:))
+                action: #selector(addOnePasswordItem)
             )
-            revoke.tag = index
-            return SettingsUI.row(
-                title: origin,
-                subtitle: L10n.string("""
-                    Forms submit here without asking. This lasts until you quit Threading and is \
-                    never written to disk.
-                    """),
-                control: revoke,
-                localizes: false
-            )
-        })
+        )
+    }
 
-        return SettingsUI.section("Browser Sign-In", SettingsCard(rows: rows))
+    private func browserSignInOnePasswordIdentityRow(at index: Int) -> NSView {
+        guard onePasswordItems.indices.contains(index) else { return NSView() }
+        let identity = onePasswordItems[index]
+        let remove = SettingsUI.button(
+            "Remove",
+            target: self,
+            action: #selector(removeOnePasswordItem(_:))
+        )
+        remove.tag = index
+        return SettingsUI.row(
+            title: "\(identity.label) — \(identity.originKey)",
+            subtitle: OnePasswordItemStore.reference(for: identity) ?? "",
+            control: remove,
+            localizes: false
+        )
+    }
+
+    private func browserSignInOnePasswordAddRow() -> NSView {
+        SettingsUI.row(
+            title: "Another 1Password item",
+            subtitle: "Threading stores the reference only. 1Password holds the value.",
+            control: SettingsUI.button(
+                "Link…",
+                target: self,
+                action: #selector(addOnePasswordItem)
+            )
+        )
+    }
+
+    private func browserSignInVaultEmptyRow() -> NSView {
+        SettingsUI.row(
+            title: "No test credentials stored",
+            subtitle: """
+                Add a throwaway account and agents can sign in to that exact origin without you \
+                typing it. Never store a real account here.
+                """,
+            control: SettingsUI.button(
+                "Add…",
+                target: self,
+                action: #selector(addTestCredential)
+            )
+        )
+    }
+
+    private func browserSignInVaultIdentityRow(at index: Int) -> NSView {
+        guard storedCredentials.indices.contains(index) else { return NSView() }
+        let identity = storedCredentials[index]
+        let remove = SettingsUI.button(
+            "Remove",
+            target: self,
+            action: #selector(removeTestCredential(_:))
+        )
+        remove.tag = index
+        return SettingsUI.row(
+            title: "\(identity.label) — \(identity.originKey)",
+            subtitle: "Agents may fill this account on this exact origin.",
+            control: remove
+        )
+    }
+
+    private func browserSignInVaultAddRow() -> NSView {
+        SettingsUI.row(
+            title: L10n.string("Another test account"),
+            subtitle: BrowserCredentialStore.isShellReachable
+                ? L10n.string("""
+                    Stored in your login Keychain, and removed by Reset Everything. This build \
+                    cannot use the protected Keychain, so a command line on this Mac — including \
+                    an agent's — could add or delete entries here.
+                    """)
+                : L10n.string("""
+                    Stored in your protected Keychain, out of reach of the command line, and \
+                    removed by Reset Everything.
+                    """),
+            control: SettingsUI.button(
+                "Add…",
+                target: self,
+                action: #selector(addTestCredential)
+            ),
+            localizes: false
+        )
+    }
+
+    private func browserSignInSubmissionExemptionRow(at index: Int) -> NSView {
+        guard exemptSubmissionOrigins.indices.contains(index) else { return NSView() }
+        let revoke = SettingsUI.button(
+            "Ask Again",
+            target: self,
+            action: #selector(revokeSubmissionExemption(_:))
+        )
+        revoke.tag = index
+        return SettingsUI.row(
+            title: exemptSubmissionOrigins[index],
+            subtitle: L10n.string("""
+                Forms submit here without asking. This lasts until you quit Threading and is \
+                never written to disk.
+                """),
+            control: revoke,
+            localizes: false
+        )
     }
 
     private static func providerTitle(_ provider: BrowserCredentialProvider) -> String {
@@ -966,6 +1027,9 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
         if case .extensionCaption = presentationRows[row] {
             return Design.Spacing.small
         }
+        if case .browserSignInCaption = presentationRows[row] {
+            return Design.Spacing.small
+        }
         if case .websiteAccessCaption = presentationRows[row] {
             return Design.Spacing.small
         }
@@ -976,10 +1040,15 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
         switch row {
         case .tool:
             return 0
+        case .browserSignInProvider, .browserSignInOnePasswordEmpty,
+             .browserSignInOnePasswordIdentity, .browserSignInOnePasswordAdd,
+             .browserSignInVaultEmpty, .browserSignInVaultIdentity,
+             .browserSignInVaultAdd, .browserSignInSubmissionExemption:
+            return 0
         case .websiteAccessEmpty, .websiteAccessOrigin, .websiteAccessRevokeAll:
             return 0
-        case .note, .group, .browserSignIn, .chromeAutomation, .websiteAccessCaption,
-             .extensionCaption:
+        case .note, .group, .browserSignInCaption, .chromeAutomation,
+             .websiteAccessCaption, .extensionCaption:
             return Design.Spacing.large
         case .extensionField(let sectionIndex, let fieldIndex):
             guard fieldIndex == 0, extensionSections.indices.contains(sectionIndex) else {
@@ -1011,8 +1080,24 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
                 ? 1
                 : ToolsPreferencesDefaults.disabledAlpha
             return SettingsUI.fullRow(content)
-        case .browserSignIn:
-            return browserSignInSection()
+        case .browserSignInCaption:
+            return SettingsUI.caption("Browser Sign-In")
+        case .browserSignInProvider:
+            return browserSignInProviderRow()
+        case .browserSignInOnePasswordEmpty:
+            return browserSignInOnePasswordEmptyRow()
+        case .browserSignInOnePasswordIdentity(let index):
+            return browserSignInOnePasswordIdentityRow(at: index)
+        case .browserSignInOnePasswordAdd:
+            return browserSignInOnePasswordAddRow()
+        case .browserSignInVaultEmpty:
+            return browserSignInVaultEmptyRow()
+        case .browserSignInVaultIdentity(let index):
+            return browserSignInVaultIdentityRow(at: index)
+        case .browserSignInVaultAdd:
+            return browserSignInVaultAddRow()
+        case .browserSignInSubmissionExemption(let index):
+            return browserSignInSubmissionExemptionRow(at: index)
         case .chromeAutomation:
             return chromeAutomationSection()
         case .websiteAccessCaption:

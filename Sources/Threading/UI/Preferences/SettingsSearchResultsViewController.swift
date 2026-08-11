@@ -29,12 +29,43 @@ final class SettingsSearchResultsViewController: NSViewController {
 
     private var query: String
     private var matches: [SettingsSearchMatch]
-    /// The page each row's button opens, indexed by the button's tag.
-    ///
-    /// The tag indexes *this* rather than `SettingsPages.all`: an extension starting or stopping
-    /// re-numbers the catalogue, and a button holding a stale index into it would quietly open
-    /// the wrong page. The rows and this list are rebuilt together or not at all.
-    private var rowPageIDs: [String] = []
+
+    private enum PresentationRow {
+        case empty
+        case caption
+        case match(Int)
+    }
+
+    private var presentationRows: [PresentationRow] = []
+
+    private lazy var tableView: ThemedGroupedTableView = {
+        let table = ThemedGroupedTableView()
+        let column = NSTableColumn(
+            identifier: NSUserInterfaceItemIdentifier("SettingsSearchResultsContent")
+        )
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = .zero
+        table.rowHeight = SettingsUIDefaults.rowHeight
+        table.usesAutomaticRowHeights = true
+        table.autoresizingMask = [.width]
+        table.delegate = self
+        table.dataSource = self
+        return table
+    }()
+
+    private lazy var scrollView: ThemedScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.documentView = tableView
+        return scroll
+    }()
 
     // MARK: - Initialization
 
@@ -56,52 +87,97 @@ final class SettingsSearchResultsViewController: NSViewController {
     /// letters rather than restarting at each one.
     func update(query: String, matches: [SettingsSearchMatch]) {
         guard query != self.query || matches != self.matches else { return }
+        let identitiesAreUnchanged = matches == self.matches
         self.query = query
         self.matches = matches
         guard isViewLoaded else { return }
-        rebuild()
+        if identitiesAreUnchanged {
+            reloadVisibleRows()
+        } else {
+            reloadRows()
+        }
     }
 
     // MARK: - Lifecycle
 
     override func loadView() {
         view = NSView()
-        rebuild()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(scrollView)
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        reloadRows()
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let width = tableView.tableColumns.first?.width ?? tableView.bounds.width
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            for cell in rowView.subviews {
+                (cell as? ThemedVirtualTableCell)?.setColumnWidth(width)
+            }
+        }
     }
 
     // MARK: - Private Methods
 
-    private func rebuild() {
-        view.subviews.forEach { $0.removeFromSuperview() }
-        rowPageIDs = []
-
-        let page = SettingsUI.page(sections())
-        page.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(page)
-
-        NSLayoutConstraint.activate([
-            page.topAnchor.constraint(equalTo: view.topAnchor),
-            page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
-    }
-
-    private func sections() -> [NSView] {
-        guard !matches.isEmpty else {
-            return [SettingsUI.section(
-                nil,
-                SettingsCard(rows: [SettingsUI.fullRow(
-                    SettingsUI.note(L10n.string("No settings found."))
-                )])
+    private func reloadRows() {
+        if matches.isEmpty {
+            presentationRows = [.empty]
+            tableView.cardDecorations = [ThemedTableCardDecoration(
+                rows: 0...0,
+                topInset: Design.Spacing.large
+            )]
+        } else {
+            presentationRows = [.caption]
+            presentationRows.append(contentsOf: matches.indices.map(PresentationRow.match))
+            tableView.cardDecorations = [ThemedTableCardDecoration(
+                rows: 1...matches.count
             )]
         }
+        tableView.reloadData()
+    }
 
-        return [SettingsUI.section(
-            L10n.format("Matches for “%@”", query),
-            SettingsCard(rows: matches.map(row(for:))),
-            localizesTitle: false
-        )]
+    /// Highlighting and the caption depend on the query, but neither changes row height. When a
+    /// keystroke leaves the result identities alone, update the existing visible labels in place.
+    /// Rebuilding even those cells spends a frame recreating buttons and constraints that did not
+    /// change; reloading the whole table also discards AppKit's offscreen height discoveries.
+    private func reloadVisibleRows() {
+        let range = tableView.rows(in: tableView.visibleRect)
+        guard range.location != NSNotFound, range.length > 0 else { return }
+        if NSLocationInRange(0, range) {
+            tableView.reloadData(
+                forRowIndexes: IndexSet(integer: 0),
+                columnIndexes: IndexSet(integer: 0)
+            )
+        }
+        tableView.enumerateAvailableRowViews { [weak self] rowView, rowIndex in
+            guard let self, self.presentationRows.indices.contains(rowIndex),
+                  case .match(let matchIndex) = self.presentationRows[rowIndex],
+                  self.matches.indices.contains(matchIndex) else { return }
+            let match = self.matches[matchIndex]
+            let labels = self.searchLabels(in: rowView)
+            labels.first?.show(match.title, matching: self.query)
+            if labels.count > 1 {
+                labels[1].show(
+                    match.terms.joined(separator: SettingsSearchDefaults.termSeparator),
+                    matching: self.query
+                )
+            }
+        }
+    }
+
+    private func searchLabels(in root: NSView) -> [SearchMatchLabel] {
+        var result: [SearchMatchLabel] = []
+        if let label = root as? SearchMatchLabel { result.append(label) }
+        for child in root.subviews {
+            result.append(contentsOf: searchLabels(in: child))
+        }
+        return result
     }
 
     /// One matched section: what it is called, what the query touched inside it, and the way in.
@@ -114,15 +190,14 @@ final class SettingsSearchResultsViewController: NSViewController {
     /// left the reader to find the word themselves — which, on a row reading
     /// "Notifications · Mute · Sound", is the row asking them to run their own search inside the
     /// answer to their search. The highlight is the rest of that sentence.
-    private func row(for match: SettingsSearchMatch) -> NSView {
+    private func row(for match: SettingsSearchMatch, index: Int) -> NSView {
         let open = SettingsUI.button(
             L10n.string("Open"),
             target: self,
             action: #selector(openClicked)
         )
-        open.tag = rowPageIDs.count
+        open.tag = index
         open.setAccessibilityLabel(L10n.format("Open %@", match.title))
-        rowPageIDs.append(match.pageID)
 
         // No subtitle when the query only touched the section's own name: an empty second line
         // would be a row explaining that it has nothing to explain.
@@ -138,7 +213,81 @@ final class SettingsSearchResultsViewController: NSViewController {
     }
 
     @objc private func openClicked(_ sender: NSControl) {
-        guard rowPageIDs.indices.contains(sender.tag) else { return }
-        onOpen?(rowPageIDs[sender.tag])
+        guard matches.indices.contains(sender.tag) else { return }
+        onOpen?(matches[sender.tag].pageID)
+    }
+}
+
+// MARK: - Virtualized Results
+
+extension SettingsSearchResultsViewController: NSTableViewDataSource, NSTableViewDelegate {
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        presentationRows.count
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        false
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row tableRow: Int
+    ) -> NSView? {
+        guard presentationRows.indices.contains(tableRow) else { return nil }
+        let identifier = NSUserInterfaceItemIdentifier("SettingsSearchResultVirtualRow")
+        let host = tableView.makeView(
+            withIdentifier: identifier,
+            owner: self
+        ) as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+        host.identifier = identifier
+        let row = presentationRows[tableRow]
+        host.install(
+            content(for: row),
+            columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width,
+            horizontalInset: Design.Size.glowGutter,
+            topInset: topInset(for: row),
+            bottomInset: bottomInset(forRowAt: tableRow)
+        )
+        return host
+    }
+
+    private func content(for row: PresentationRow) -> NSView {
+        switch row {
+        case .empty:
+            return SettingsUI.fullRow(SettingsUI.note(L10n.string("No settings found.")))
+        case .caption:
+            return SettingsUI.caption(
+                L10n.format("Matches for “%@”", query),
+                localizes: false
+            )
+        case .match(let index):
+            guard matches.indices.contains(index) else { return NSView() }
+            return self.row(for: matches[index], index: index)
+        }
+    }
+
+    private func topInset(for row: PresentationRow) -> CGFloat {
+        switch row {
+        case .empty, .caption: return Design.Spacing.large
+        case .match: return 0
+        }
+    }
+
+    private func bottomInset(forRowAt row: Int) -> CGFloat {
+        guard presentationRows.indices.contains(row) else { return 0 }
+        switch presentationRows[row] {
+        case .caption: return Design.Spacing.small
+        case .empty: return Design.Spacing.large
+        case .match: return row == presentationRows.count - 1 ? Design.Spacing.large : 0
+        }
+    }
+
+    var virtualRowCountForTesting: Int { presentationRows.count }
+
+    var materializedRowCountForTesting: Int {
+        var count = 0
+        tableView.enumerateAvailableRowViews { _, _ in count += 1 }
+        return count
     }
 }

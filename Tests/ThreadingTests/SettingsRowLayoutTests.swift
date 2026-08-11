@@ -520,7 +520,7 @@ final class SettingsRowLayoutTests: XCTestCase {
                 .init(pageID: "motion", title: "Motion", symbol: "sparkles", terms: [])
             ]
         )
-        results.loadView()
+        let window = searchResultsWindow(results)
 
         let titles = labels(in: results.view)
         XCTAssertTrue(titles.contains("General"))
@@ -531,12 +531,14 @@ final class SettingsRowLayoutTests: XCTestCase {
             titles.contains { $0.localizedCaseInsensitiveContains("mute") },
             "the page never repeated the query it is answering"
         )
+        withExtendedLifetime(window) {}
     }
 
     func testTheResultsPageSaysSoWhenNothingMatched() {
         let results = SettingsSearchResultsViewController(query: "zzzz", matches: [])
-        results.loadView()
+        let window = searchResultsWindow(results)
         XCTAssertTrue(labels(in: results.view).contains(L10n.string("No settings found.")))
+        withExtendedLifetime(window) {}
     }
 
     /// The tag indexes the rows this page built, never `SettingsPages.all` — an extension
@@ -551,7 +553,7 @@ final class SettingsRowLayoutTests: XCTestCase {
         )
         var opened: String?
         results.onOpen = { opened = $0 }
-        results.loadView()
+        let window = searchResultsWindow(results)
 
         let buttons = descendants(of: results.view)
             .compactMap { $0 as? ThemedButton }
@@ -561,6 +563,7 @@ final class SettingsRowLayoutTests: XCTestCase {
         let second = try XCTUnwrap(buttons.last)
         _ = NSApp.sendAction(try XCTUnwrap(second.action), to: second.target, from: second)
         XCTAssertEqual(opened, "themes")
+        withExtendedLifetime(window) {}
     }
 
     /// Listing the terms said *that* the query landed here and left the reader to find the word
@@ -578,9 +581,10 @@ final class SettingsRowLayoutTests: XCTestCase {
                 )
             ]
         )
-        results.loadView()
+        let window = searchResultsWindow(results)
 
         XCTAssertEqual(marks(in: results.view), ["Mute"])
+        withExtendedLifetime(window) {}
     }
 
     /// A page whose *name* is what matched says so on the line the reader is reading, rather than
@@ -590,9 +594,90 @@ final class SettingsRowLayoutTests: XCTestCase {
             query: "motion",
             matches: [.init(pageID: "motion", title: "Motion", symbol: "sparkles", terms: [])]
         )
-        results.loadView()
+        let window = searchResultsWindow(results)
 
         XCTAssertEqual(marks(in: results.view), ["Motion"])
+        withExtendedLifetime(window) {}
+    }
+
+    @MainActor
+    func testStressSettingsSearchResultsWhenEnabled() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["THREADING_SETTINGS_SEARCH_STRESS"] == "1" else {
+            throw XCTSkip("Set THREADING_SETTINGS_SEARCH_STRESS=1 to run settings search stress.")
+        }
+        let resultCount = max(
+            Int(environment["THREADING_SETTINGS_SEARCH_STRESS_RESULTS"] ?? "") ?? 2_048,
+            1
+        )
+        let matches = (0..<resultCount).map { index in
+            SettingsSearchMatch(
+                pageID: "com.example.stress-\(index).page",
+                title: "Stress Extension \(index) — Matching Settings Page",
+                symbol: "puzzlepiece.extension",
+                terms: ["Matching", "Settings", "Performance"]
+            )
+        }
+        let memoryBefore = ProcessUtility.getResourceUsage(
+            forPid: Int32(ProcessInfo.processInfo.processIdentifier)
+        )?.memoryBytes ?? 0
+        let controller = SettingsSearchResultsViewController(query: "matching", matches: matches)
+        let loadStarted = DispatchTime.now().uptimeNanoseconds
+        let page = controller.view
+        let loaded = DispatchTime.now().uptimeNanoseconds
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 760),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = page
+        page.layoutSubtreeIfNeeded()
+        let laidOut = DispatchTime.now().uptimeNanoseconds
+        let scrollView = try XCTUnwrap(
+            descendants(of: page).compactMap { $0 as? NSScrollView }.first
+        )
+        let overflow = max(
+            (scrollView.documentView?.bounds.height ?? 0) - scrollView.contentView.bounds.height,
+            0
+        )
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: overflow))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        page.layoutSubtreeIfNeeded()
+        let originBeforeUpdate = scrollView.contentView.bounds.origin
+        let updateStarted = DispatchTime.now().uptimeNanoseconds
+        controller.update(query: "settings", matches: matches)
+        let updated = DispatchTime.now().uptimeNanoseconds
+        page.layoutSubtreeIfNeeded()
+        let updateLaidOut = DispatchTime.now().uptimeNanoseconds
+        let originAfterUpdate = scrollView.contentView.bounds.origin
+        let memoryAfter = ProcessUtility.getResourceUsage(
+            forPid: Int32(ProcessInfo.processInfo.processIdentifier)
+        )?.memoryBytes ?? 0
+        let memoryDelta = memoryAfter >= memoryBefore ? memoryAfter - memoryBefore : 0
+        let footprintMB = String(format: "%.1f", Double(memoryDelta) / 1_048_576)
+
+        print(
+            "THREADING_PERF settings-search results=\(resultCount) "
+                + "load_ms=\(Self.milliseconds(loaded - loadStarted)) "
+                + "layout_ms=\(Self.milliseconds(laidOut - loaded)) "
+                + "update_ms=\(Self.milliseconds(updated - updateStarted)) "
+                + "update_layout_ms=\(Self.milliseconds(updateLaidOut - updated)) "
+                + "virtual_rows=\(controller.virtualRowCountForTesting) "
+                + "materialized_rows=\(controller.materializedRowCountForTesting) "
+                + "descendants=\(descendants(of: page).count + 1) "
+                + "footprint_delta_mb=\(footprintMB)"
+        )
+        XCTAssertEqual(controller.virtualRowCountForTesting, resultCount + 1)
+        XCTAssertGreaterThan(controller.materializedRowCountForTesting, 0)
+        XCTAssertLessThan(
+            controller.materializedRowCountForTesting,
+            controller.virtualRowCountForTesting
+        )
+        XCTAssertEqual(originAfterUpdate.x, originBeforeUpdate.x, accuracy: 0.5)
+        XCTAssertEqual(originAfterUpdate.y, originBeforeUpdate.y, accuracy: 0.5)
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
+        withExtendedLifetime(window) {}
     }
 
     /// An ordinary settings page is not a search result. Every row on it must be exactly the row
@@ -622,6 +707,24 @@ final class SettingsRowLayoutTests: XCTestCase {
 
     private func labels(in view: NSView) -> [String] {
         descendants(of: view).compactMap { ($0 as? NSTextField)?.stringValue }
+    }
+
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.2f", Double(nanoseconds) / 1_000_000)
+    }
+
+    private func searchResultsWindow(
+        _ controller: SettingsSearchResultsViewController
+    ) -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 760),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = controller.view
+        window.contentView?.layoutSubtreeIfNeeded()
+        return window
     }
 
     /// Pre-order, so the titles come back in the order they are read down the list.
