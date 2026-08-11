@@ -25,6 +25,9 @@ short pointer to the durable record so this directory does not become a competin
 - [Usage-aware accounts](usage-aware-accounts.md) — tell an agent what its budget is, let the user
   rank which logins may be spent automatically, and move work to the next best one before a
   weekly window strands it.
+- [Cross-platform Usage dashboard](cross-platform-usage-dashboard.md) — bring the Mac's measured
+  usage and limit history to the iOS companion through bounded owner-only snapshots, with banked
+  reset inventory and evidence presented consistently on both platforms.
 - [CCS launch profiles and GLM](ccs-launch-profiles-and-glm.md) — adopt CCS-managed launch
   profiles without importing credentials, with route-safe account support and a gated GLM path.
 - [Pasteboard-aware prompt suggestions](pasteboard-prompt-suggestions.md) — offer a short-lived,
