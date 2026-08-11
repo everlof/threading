@@ -12,7 +12,7 @@ import Foundation
 /// instead — see `SessionAttachmentStore` for why that exception exists and where it stops.
 struct SessionAttachment: Equatable, Identifiable {
 
-    enum Kind: String, Codable {
+    enum Kind: String, Codable, Sendable {
         case image
         case pdf
         case html
@@ -167,6 +167,30 @@ struct SessionAttachmentsDidChange: AppEvent {
 @MainActor
 final class SessionAttachmentStore {
 
+    struct ScannedRecordResult {
+        let attachments: [SessionAttachment]
+        let custodyWorkerNanoseconds: UInt64
+        let mainActorNanoseconds: UInt64
+
+        static let empty = ScannedRecordResult(
+            attachments: [],
+            custodyWorkerNanoseconds: 0,
+            mainActorNanoseconds: 0
+        )
+    }
+
+    private struct StagedCopy: Sendable {
+        let source: URL
+        let url: URL
+        let relativePath: String
+        let kind: SessionAttachment.Kind
+    }
+
+    private struct StagedCopyBatch: Sendable {
+        let copies: [StagedCopy]
+        let workerNanoseconds: UInt64
+    }
+
     /// Hosted tests exercise the shared store; the user's real database is not theirs to write.
     static let shared: SessionAttachmentStore = {
         guard NSClassFromString("XCTestCase") == nil else {
@@ -212,6 +236,7 @@ final class SessionAttachmentStore {
     private let loadPayload: ((SessionID) -> String?)?
     private let savePayload: ((String, SessionID) -> Void)?
     private let retainPersisted: ((Set<SessionID>) -> Void)?
+    private let stageCopy: @Sendable (URL, URL) throws -> Void
 
     /// Where a declared file from outside the checkout is copied to. Absent means the store may
     /// only hold references, so a declared file it cannot take custody of is refused rather than
@@ -237,7 +262,10 @@ final class SessionAttachmentStore {
         retainPersisted: ((Set<SessionID>) -> Void)? = nil,
         copiesDirectory: (() -> URL)? = nil,
         referenceRoot: ((SessionID) -> URL?)? = nil,
-        allowsFilesOutsideProject: @escaping () -> Bool = { false }
+        allowsFilesOutsideProject: @escaping () -> Bool = { false },
+        stageCopy: @escaping @Sendable (URL, URL) throws -> Void = {
+            try FileManager().copyItem(at: $0, to: $1)
+        }
     ) {
         self.fileManager = fileManager
         self.now = now
@@ -247,6 +275,7 @@ final class SessionAttachmentStore {
         self.copiesDirectory = copiesDirectory
         self.referenceRoot = referenceRoot
         self.allowsFilesOutsideProject = allowsFilesOutsideProject
+        self.stageCopy = stageCopy
     }
 
     // MARK: Recording — the scanned door
@@ -299,6 +328,109 @@ final class SessionAttachmentStore {
         return made
     }
 
+    /// The scanned door for interactive callers. Filesystem resolution has already happened on
+    /// a worker; this keeps taking custody there too. Each outside file is copied into a unique,
+    /// unpublished session slot, then the main actor publishes that slot (or atomically folds it
+    /// into a row that won the same-source race while copying). The list is still main-actor
+    /// state and no path becomes remotely fetchable before admission.
+    func recordScanned(
+        resolved resolution: AttachmentReferenceDetector.Resolution,
+        sessionID: SessionID,
+        projectRoot: URL,
+        shouldAdmit: @escaping @MainActor () -> Bool = { true }
+    ) async -> ScannedRecordResult {
+        let firstMainStarted = DispatchTime.now().uptimeNanoseconds
+        guard shouldAdmit() else {
+            return ScannedRecordResult(
+                attachments: [],
+                custodyWorkerNanoseconds: 0,
+                mainActorNanoseconds: DispatchTime.now().uptimeNanoseconds - firstMainStarted
+            )
+        }
+        var made = record(
+            urls: resolution.insideProject,
+            sessionID: sessionID,
+            projectRoot: projectRoot
+        )
+
+        guard !resolution.outsideProject.isEmpty else {
+            return ScannedRecordResult(
+                attachments: made,
+                custodyWorkerNanoseconds: 0,
+                mainActorNanoseconds: DispatchTime.now().uptimeNanoseconds - firstMainStarted
+            )
+        }
+        guard allowsFilesOutsideProject() else {
+            noteWithheld(resolution.outsideProject, for: sessionID)
+            return ScannedRecordResult(
+                attachments: made,
+                custodyWorkerNanoseconds: 0,
+                mainActorNanoseconds: DispatchTime.now().uptimeNanoseconds - firstMainStarted
+            )
+        }
+
+        loadIfNeeded(sessionID)
+        let timestamp = now()
+        let admissible = Array(
+            resolution.outsideProject.suffix(SessionAttachmentDefaults.maximumPerSession)
+        )
+        guard let root = copiesRoot(for: sessionID) else {
+            removeWithheldAttempts(admissible, for: sessionID)
+            return ScannedRecordResult(
+                attachments: made,
+                custodyWorkerNanoseconds: 0,
+                mainActorNanoseconds: DispatchTime.now().uptimeNanoseconds - firstMainStarted
+            )
+        }
+        let firstMainEnded = DispatchTime.now().uptimeNanoseconds
+
+        let stageCopy = stageCopy
+        let stagingTask = Task.detached(priority: .userInitiated) {
+            Self.stageScannedCopies(admissible, in: root, copyFile: stageCopy)
+        }
+        let staged = await withTaskCancellationHandler {
+            await stagingTask.value
+        } onCancel: {
+            stagingTask.cancel()
+        }
+
+        let secondMainStarted = DispatchTime.now().uptimeNanoseconds
+        guard !Task.isCancelled, shouldAdmit() else {
+            discard(staged)
+            return ScannedRecordResult(
+                attachments: made,
+                custodyWorkerNanoseconds: staged.workerNanoseconds,
+                mainActorNanoseconds: (firstMainEnded - firstMainStarted)
+                    + (DispatchTime.now().uptimeNanoseconds - secondMainStarted)
+            )
+        }
+        guard allowsFilesOutsideProject() else {
+            discard(staged)
+            noteWithheld(resolution.outsideProject, for: sessionID)
+            return ScannedRecordResult(
+                attachments: made,
+                custodyWorkerNanoseconds: staged.workerNanoseconds,
+                mainActorNanoseconds: (firstMainEnded - firstMainStarted)
+                    + (DispatchTime.now().uptimeNanoseconds - secondMainStarted)
+            )
+        }
+
+        let outside = finishStagedCopies(
+            staged.copies,
+            attempted: admissible,
+            sessionID: sessionID,
+            root: root,
+            referencedAt: timestamp
+        )
+        made += outside
+        return ScannedRecordResult(
+            attachments: made,
+            custodyWorkerNanoseconds: staged.workerNanoseconds,
+            mainActorNanoseconds: (firstMainEnded - firstMainStarted)
+                + (DispatchTime.now().uptimeNanoseconds - secondMainStarted)
+        )
+    }
+
     /// Takes custody of scanned files from outside the project. The declared door's own machinery,
     /// with the one difference that matters downstream: these rows carry `isOutsideProject`, so
     /// narrowing the scope again can find them without guessing from their location.
@@ -336,9 +468,157 @@ final class SessionAttachmentStore {
         // A path attempted and refused (a file that has since gone, custody that could not be
         // taken) is dropped rather than retried, so the pane cannot go on offering to reveal
         // something that will not arrive. The next scan that names it offers it again.
-        let attempted = Set(admissible.map(\.path))
-        withheldBySession[sessionID]?.removeAll { attempted.contains($0.path) }
+        removeWithheldAttempts(Array(admissible), for: sessionID)
         return admit(made, for: sessionID)
+    }
+
+    /// Copies into unique, not-yet-listed slots. A task may be cancelled between files; anything
+    /// it already produced is returned so the main actor can remove those unpublished bytes.
+    private nonisolated static func stageScannedCopies(
+        _ urls: [URL],
+        in root: URL,
+        copyFile: @Sendable (URL, URL) throws -> Void
+    ) -> StagedCopyBatch {
+        let started = DispatchTime.now().uptimeNanoseconds
+        let fileManager = FileManager()
+        var copies: [StagedCopy] = []
+        for url in urls {
+            guard !Task.isCancelled else { break }
+            let source = url.standardizedFileURL.resolvingSymlinksInPath()
+            guard let kind = AttachmentReferenceDetector.kind(for: source),
+                  let values = try? source.resourceValues(forKeys: [.isRegularFileKey]),
+                  values.isRegularFile == true else {
+                continue
+            }
+
+            let relativePath = "\(UUID().uuidString)/\(source.lastPathComponent)"
+            let destination = root.appendingPathComponent(relativePath)
+            do {
+                try fileManager.createDirectory(
+                    at: destination.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try copyFile(source, destination)
+                copies.append(StagedCopy(
+                    source: source,
+                    url: destination,
+                    relativePath: relativePath,
+                    kind: kind
+                ))
+            } catch {
+                try? fileManager.removeItem(at: destination.deletingLastPathComponent())
+                ThreadingLogger.session.error(
+                    "Failed to stage attachment \(source.lastPathComponent, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
+        }
+        return StagedCopyBatch(
+            copies: copies,
+            workerNanoseconds: DispatchTime.now().uptimeNanoseconds - started
+        )
+    }
+
+    /// Reconciles a staged batch with state that may have changed while its bytes were copying.
+    /// A same-source winner keeps its opaque identity and slot; otherwise the unique staged slot
+    /// simply becomes visible, which makes cold admission a state mutation rather than file I/O.
+    private func finishStagedCopies(
+        _ staged: [StagedCopy],
+        attempted: [URL],
+        sessionID: SessionID,
+        root: URL,
+        referencedAt: Date
+    ) -> [SessionAttachment] {
+        var made: [SessionAttachment] = []
+        for copy in staged {
+            let existing = attachmentsBySession[sessionID]?.first {
+                !$0.isImmutableSnapshot && $0.sourcePath == copy.source.path
+                    && AttachmentReferenceDetector.contains($0.url, inside: root)
+            }
+
+            let destination: URL
+            let relativePath: String
+            let id: String
+            if let existing {
+                destination = existing.url
+                relativePath = existing.relativePath
+                id = existing.id
+                guard install(copy, over: destination) else { continue }
+            } else {
+                destination = copy.url
+                relativePath = copy.relativePath
+                id = UUID().uuidString.lowercased()
+                guard fileManager.fileExists(atPath: destination.path) else { continue }
+            }
+
+            made.append(SessionAttachment(
+                sessionID: sessionID,
+                id: id,
+                root: root,
+                url: destination,
+                relativePath: relativePath,
+                sourcePath: copy.source.path,
+                kind: copy.kind,
+                origin: .agent,
+                isOutsideProject: true,
+                referencedAt: referencedAt
+            ))
+        }
+
+        // State first, announcement second. `admit` posts synchronously and an open pane may
+        // immediately ask to admit withheld rows again.
+        removeWithheldAttempts(attempted, for: sessionID)
+        return admit(made, for: sessionID)
+    }
+
+    private func removeWithheldAttempts(_ urls: [URL], for sessionID: SessionID) {
+        let attempted = Set(urls.map(\.path))
+        withheldBySession[sessionID]?.removeAll { attempted.contains($0.path) }
+    }
+
+    /// Only a same-source race reaches this path. The expensive copy already happened; these
+    /// same-volume renames retain the old bytes until the new staged file is standing.
+    private func install(_ staged: StagedCopy, over destination: URL) -> Bool {
+        let directory = destination.deletingLastPathComponent()
+        let backup = directory.appendingPathComponent(".threading-backup-\(UUID().uuidString)")
+        var movedStandingCopy = false
+        do {
+            if fileManager.fileExists(atPath: destination.path) {
+                try fileManager.moveItem(at: destination, to: backup)
+                movedStandingCopy = true
+            }
+            try fileManager.moveItem(at: staged.url, to: destination)
+            try? fileManager.removeItem(at: staged.url.deletingLastPathComponent())
+            if movedStandingCopy {
+                do {
+                    try fileManager.removeItem(at: backup)
+                } catch {
+                    ThreadingLogger.session.warning(
+                        "Attachment replacement left a stale backup source=\(backup.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                    )
+                }
+            }
+            return true
+        } catch {
+            if movedStandingCopy, !fileManager.fileExists(atPath: destination.path) {
+                try? fileManager.moveItem(at: backup, to: destination)
+            }
+            try? fileManager.removeItem(at: staged.url.deletingLastPathComponent())
+            ThreadingLogger.session.error(
+                "Failed to install staged attachment \(staged.source.lastPathComponent, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return false
+        }
+    }
+
+    /// Staged slots have never been published, so cancellation and a scope change may clean them
+    /// on a utility worker without racing a reader of the attachment list.
+    private func discard(_ batch: StagedCopyBatch) {
+        Task.detached(priority: .utility) {
+            let fileManager = FileManager()
+            for copy in batch.copies {
+                try? fileManager.removeItem(at: copy.url.deletingLastPathComponent())
+            }
+        }
     }
 
     /// Records already-resolved in-checkout files. Scanning resolves its own, so this is for a
@@ -1308,6 +1588,7 @@ final class TerminalAttachmentObserver {
     struct ScanMetrics: Equatable {
         let bytes: Int
         let workerNanoseconds: UInt64
+        let custodyWorkerNanoseconds: UInt64
         let applyNanoseconds: UInt64
         let found: Int
         let recorded: Int
@@ -1316,8 +1597,9 @@ final class TerminalAttachmentObserver {
     typealias Recorder = @MainActor (
         AttachmentReferenceDetector.Resolution,
         SessionID,
-        URL
-    ) -> [SessionAttachment]
+        URL,
+        @escaping @MainActor () -> Bool
+    ) async -> SessionAttachmentStore.ScannedRecordResult
 
     private let sessionID: SessionID
     private let projectRoot: () -> URL?
@@ -1342,11 +1624,12 @@ final class TerminalAttachmentObserver {
         text: @escaping () -> String,
         isEnabled: @escaping () -> Bool = { true },
         now: @escaping () -> Date = Date.init,
-        record: @escaping Recorder = { resolution, sessionID, root in
-            SessionAttachmentStore.shared.record(
+        record: @escaping Recorder = { resolution, sessionID, root, shouldAdmit in
+            await SessionAttachmentStore.shared.recordScanned(
                 resolved: resolution,
                 sessionID: sessionID,
-                projectRoot: root
+                projectRoot: root,
+                shouldAdmit: shouldAdmit
             )
         }
     ) {
@@ -1453,14 +1736,14 @@ final class TerminalAttachmentObserver {
         generation: Int,
         projectRoot root: URL,
         span: PerformanceSpan
-    ) {
+    ) async {
         guard generation == scanGeneration else {
             span.end(metadata: ["superseded": "1"])
             return
         }
-        resolutionTask = nil
-        isScanInFlight = false
         guard isEnabled() else {
+            resolutionTask = nil
+            isScanInFlight = false
             pathsInLastScan.removeAll()
             span.end(metadata: ["disabled": "1"])
             return
@@ -1477,19 +1760,37 @@ final class TerminalAttachmentObserver {
         pathsInLastScan = Set(
             (resolution.insideProject + resolution.outsideProject).map(\.path)
         )
-        let recorded = newly.isEmpty ? [] : record(newly, sessionID, root)
-        let applyEnded = DispatchTime.now().uptimeNanoseconds
+        let filteredEnded = DispatchTime.now().uptimeNanoseconds
+        let result = if newly.isEmpty {
+            SessionAttachmentStore.ScannedRecordResult.empty
+        } else {
+            await record(newly, sessionID, root) { [weak self] in
+                guard let self else { return false }
+                return self.scanGeneration == generation && self.isEnabled()
+            }
+        }
+        guard generation == scanGeneration else {
+            span.end(metadata: ["superseded": "1"])
+            return
+        }
+        resolutionTask = nil
+        isScanInFlight = false
         let found = newly.insideProject.count + newly.outsideProject.count
         lastScanMetrics = ScanMetrics(
             bytes: scannedBytes,
             workerNanoseconds: workerNanoseconds,
-            applyNanoseconds: applyEnded - applyStarted,
+            custodyWorkerNanoseconds: result.custodyWorkerNanoseconds,
+            applyNanoseconds: (filteredEnded - applyStarted) + result.mainActorNanoseconds,
             found: found,
-            recorded: recorded.count
+            recorded: result.attachments.count
         )
         span.end(metadata: [
             "found": String(found),
-            "recorded": String(recorded.count)
+            "recorded": String(result.attachments.count),
+            "custody_worker_ms": String(
+                format: "%.3f",
+                Double(result.custodyWorkerNanoseconds) / 1_000_000
+            )
         ])
     }
 }

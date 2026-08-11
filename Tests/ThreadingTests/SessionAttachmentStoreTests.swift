@@ -41,7 +41,12 @@ final class SessionAttachmentStoreTests: XCTestCase {
     /// what happens *at the moment it changes* is what these assert.
     private var allowsFilesOutsideProject = false
 
-    private func makeStore(takesCustody: Bool = true) -> SessionAttachmentStore {
+    private func makeStore(
+        takesCustody: Bool = true,
+        stageCopy: @escaping @Sendable (URL, URL) throws -> Void = {
+            try FileManager().copyItem(at: $0, to: $1)
+        }
+    ) -> SessionAttachmentStore {
         SessionAttachmentStore(
             loadPayload: { [weak self] in self?.payloads[$0] },
             savePayload: { [weak self] payload, id in self?.payloads[id] = payload },
@@ -50,8 +55,30 @@ final class SessionAttachmentStoreTests: XCTestCase {
             },
             copiesDirectory: takesCustody ? { [copies] in copies! } : nil,
             referenceRoot: { [checkout] _ in checkout },
-            allowsFilesOutsideProject: { [weak self] in self?.allowsFilesOutsideProject ?? false }
+            allowsFilesOutsideProject: { [weak self] in self?.allowsFilesOutsideProject ?? false },
+            stageCopy: stageCopy
         )
+    }
+
+    private final class CopyGate: @unchecked Sendable {
+        private let started = DispatchSemaphore(value: 0)
+        private let release = DispatchSemaphore(value: 0)
+
+        func copy(_ source: URL, to destination: URL) throws {
+            started.signal()
+            release.wait()
+            try FileManager().copyItem(at: source, to: destination)
+        }
+
+        func waitUntilStarted() async {
+            await Task.detached { [started] in
+                started.wait()
+            }.value
+        }
+
+        func proceed() {
+            release.signal()
+        }
     }
 
     private func waitForAttachmentScan(
@@ -355,6 +382,87 @@ final class SessionAttachmentStoreTests: XCTestCase {
         )
         XCTAssertEqual(try Data(contentsOf: listed.url), Data([0x89, 0x50]))
         XCTAssertEqual(store.countOfFilesOutsideProject(for: session), 1)
+    }
+
+    /// A scope answer can change while worker custody is in progress. An unpublished slot may
+    /// be discarded, but it may never leak into the list after the gate has closed.
+    func testAsyncScannedAdmissionRechecksScopeAfterWorkerCustody() async throws {
+        allowsFilesOutsideProject = true
+        let gate = CopyGate()
+        let store = makeStore(stageCopy: gate.copy)
+        let session = SessionID()
+        let shot = try write([0x89, 0x50], to: elsewhere.appendingPathComponent("slow.png"))
+        let resolution = AttachmentReferenceDetector.Resolution(outsideProject: [shot])
+
+        let admission = Task { @MainActor in
+            await store.recordScanned(
+                resolved: resolution,
+                sessionID: session,
+                projectRoot: checkout
+            )
+        }
+        await gate.waitUntilStarted()
+        allowsFilesOutsideProject = false
+        gate.proceed()
+        let result = await admission.value
+
+        XCTAssertTrue(result.attachments.isEmpty)
+        XCTAssertTrue(store.attachments(for: session).isEmpty)
+        XCTAssertEqual(store.withheldReferences(for: session).map(\.path), [shot.path])
+
+        let sessionRoot = copies.appendingPathComponent(session.uuidString, isDirectory: true)
+        let deadline = Date().addingTimeInterval(1)
+        while (try? FileManager.default.contentsOfDirectory(atPath: sessionRoot.path).isEmpty) == false,
+              Date() < deadline {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(
+            try? FileManager.default.contentsOfDirectory(atPath: sessionRoot.path),
+            [],
+            "a scope change left unpublished custody bytes behind"
+        )
+    }
+
+    /// State may also advance while the worker copies. The later finisher must fold into the row
+    /// that won rather than publish a duplicate or replace its opaque remote identity.
+    func testAsyncScannedAdmissionKeepsTheSameSourceWinnerIdentity() async throws {
+        allowsFilesOutsideProject = true
+        let gate = CopyGate()
+        let store = makeStore(stageCopy: gate.copy)
+        let session = SessionID()
+        let chart = try write([0x01], to: elsewhere.appendingPathComponent("race.png"))
+        let resolution = AttachmentReferenceDetector.Resolution(outsideProject: [chart])
+
+        let admission = Task { @MainActor in
+            await store.recordScanned(
+                resolved: resolution,
+                sessionID: session,
+                projectRoot: checkout
+            )
+        }
+        await gate.waitUntilStarted()
+        let winner = try XCTUnwrap(store.record(
+            declared: chart,
+            sessionID: session,
+            projectRoot: checkout,
+            origin: .agent
+        ))
+        gate.proceed()
+        _ = await admission.value
+
+        let listed = try XCTUnwrap(store.attachments(for: session).first)
+        XCTAssertEqual(store.attachments(for: session).count, 1)
+        XCTAssertEqual(listed.id, winner.id)
+        XCTAssertEqual(listed.relativePath, winner.relativePath)
+        XCTAssertEqual(try Data(contentsOf: listed.url), Data([0x01]))
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(
+                at: copies.appendingPathComponent(session.uuidString, isDirectory: true),
+                includingPropertiesForKeys: nil
+            ).count,
+            1,
+            "the losing unpublished slot was not removed"
+        )
     }
 
     /// The answer the user gave is the answer the pane shows, not the answer it shows the next
@@ -793,11 +901,12 @@ final class SessionAttachmentStoreTests: XCTestCase {
             projectRoot: { [checkout] in checkout },
             currentDirectory: { [checkout] in checkout },
             text: { buffer.text },
-            record: { resolution, sessionID, root in
-                store.record(
+            record: { resolution, sessionID, root, shouldAdmit in
+                await store.recordScanned(
                     resolved: resolution,
                     sessionID: sessionID,
-                    projectRoot: root
+                    projectRoot: root,
+                    shouldAdmit: shouldAdmit
                 )
             }
         )
@@ -844,10 +953,12 @@ final class SessionAttachmentStoreTests: XCTestCase {
                 + "withheld=\(store.withheldReferences(for: session).count) outside_count=\(outside) "
                 + "cold_schedule_ms=\(Self.milliseconds(coldScheduled - coldStarted)) "
                 + "cold_worker_ms=\(Self.milliseconds(coldMetrics.workerNanoseconds)) "
+                + "cold_custody_worker_ms=\(Self.milliseconds(coldMetrics.custodyWorkerNanoseconds)) "
                 + "cold_apply_ms=\(Self.milliseconds(coldMetrics.applyNanoseconds)) "
                 + "cold_ready_ms=\(Self.milliseconds(coldReady - coldStarted)) "
                 + "warm_schedule_ms=\(Self.milliseconds(warmScheduled - warmStarted)) "
                 + "warm_worker_ms=\(Self.milliseconds(warmMetrics.workerNanoseconds)) "
+                + "warm_custody_worker_ms=\(Self.milliseconds(warmMetrics.custodyWorkerNanoseconds)) "
                 + "warm_apply_ms=\(Self.milliseconds(warmMetrics.applyNanoseconds)) "
                 + "warm_ready_ms=\(Self.milliseconds(warmReady - warmStarted)) "
                 + "read_ms=\(Self.milliseconds(readEnded - readStarted)) "

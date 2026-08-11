@@ -2324,6 +2324,7 @@ final class ConversationViewController: NSViewController {
         )
         let scanned = texts.joined(separator: "\n")
         let sessionID = sessionID
+        let agentKindRawValue = agentSession.kind.rawValue
         Task.detached(priority: .userInitiated) {
             let resolution = AttachmentReferenceDetector.resolve(
                 text: scanned,
@@ -2331,13 +2332,15 @@ final class ConversationViewController: NSViewController {
                 currentDirectory: nil
             )
             guard !resolution.isEmpty, !Task.isCancelled else { return }
-            _ = await MainActor.run {
-                SessionAttachmentStore.shared.record(
-                    resolved: resolution,
-                    sessionID: sessionID,
-                    projectRoot: root
-                )
-            }
+            _ = await SessionAttachmentStore.shared.recordScanned(
+                resolved: resolution,
+                sessionID: sessionID,
+                projectRoot: root,
+                shouldAdmit: {
+                    guard let kind = AgentKind(rawValue: agentKindRawValue) else { return false }
+                    return AppSettings.shared.detectsAttachmentReferences(for: kind)
+                }
+            )
         }
     }
 

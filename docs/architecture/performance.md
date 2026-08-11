@@ -775,12 +775,32 @@ row remains deliberately beyond the production 256 KB terminal-buffer cap.
 | 1,000 mixed, wide | 55.73 / 55.59 | 0.72 / 0.02 | 45.99 / 41.51 | 14.05 / 0.90 | 60.96 / 42.57 |
 | 5,000 outside, wide | 82.14 / 114.14 | 0.75 / 0.02 | 47.02 / 43.73 | 25.08 / 0.80 | 73.02 / 47.47 |
 
-The high-frequency repaint path is now below one millisecond of main-actor work: warm scheduling
-is about 0.02 ms and warm apply is 0.01–0.90 ms. A cold wide-scope scan can still spend 14–25 ms
-admitting genuinely new outside files because custody means copying them. That bounded, one-time
-copy slice is a separate ownership problem; it must not be confused with the regex/filesystem
-scan that every repaint used to pay. `attachments.scan` therefore remains a recorded wall-time
-span, while its stress fixture exposes which portion could actually stall the event loop.
+The high-frequency repaint path was below one millisecond of main-actor work: warm scheduling was
+about 0.02 ms and warm apply was 0.01–0.90 ms. Cold wide-scope admission still spent 14–25 ms on
+the main actor because custody meant copying genuinely new outside files there.
+
+Custody now has its own worker phase. It copies each outside file into a unique unpublished slot;
+the main actor publishes that slot only after rechecking the scope and caller generation. If a
+same-source row wins while the copy is in flight, the staged bytes are atomically folded into the
+winner's existing slot so its opaque ID and relative path do not change. Cancellation or a scope
+change discards the unpublished slots. Focused tests pin both the scope-change and same-source-race
+contracts.
+
+Three fresh-process `outside / wide / 1,000` runs on 2026-08-11 measured:
+
+| Phase | Before | After |
+|---|---:|---:|
+| Main schedule, cold | 2.90 ms | 0.71–0.73 ms |
+| Resolution worker, cold | 40.31 ms | 35.23–36.35 ms |
+| Custody worker, cold | included in main apply | 11.81–13.59 ms |
+| Main apply, cold | 27.40 ms | 3.35–3.99 ms |
+| Ready, cold | 70.84 ms | 51.33–54.89 ms |
+| Main apply, warm | 0.81 ms | 0.67–0.82 ms |
+
+Cold main-actor admission fell about 85%, while the byte-copying invariant stayed intact. The
+remaining one-time custody cost is explicit worker time rather than event-loop work.
+`attachments.scan` remains a recorded wall-time span, and the stress fixture reports both worker
+phases so a regression cannot hide inside the aggregate.
 
 ## Attachment preview-format stress target
 
