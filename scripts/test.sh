@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
-# One entry point for the three test levels. See "Testing" in CLAUDE.md.
+# One entry point for the four test levels. See "Testing" in CLAUDE.md.
 #
 #   scripts/test.sh              # fast  — default; no window is ordered on screen
 #   scripts/test.sh fast
 #   scripts/test.sh all          # everything, including the on-screen WKWebView tests
+#   scripts/test.sh ui           # app-level XCUITest scenarios in a disposable Cocoa home
 #   scripts/test.sh e2e          # real APNs + optionally a real Claude; needs credentials
 #
 # Extra arguments are forwarded to xcodebuild, so this still works:
@@ -13,7 +14,7 @@
 set -euo pipefail
 
 level="${1:-fast}"
-if [[ "${level}" == "fast" || "${level}" == "all" || "${level}" == "e2e" ]]; then
+if [[ "${level}" == "fast" || "${level}" == "all" || "${level}" == "ui" || "${level}" == "e2e" ]]; then
   shift || true
 else
   level="fast"
@@ -28,6 +29,10 @@ python3 "${script_directory}/check_test_registration.py"
 
 if [[ "${level}" == "e2e" ]]; then
   exec "${script_directory}/run_notification_e2e.sh" "$@"
+fi
+
+if [[ "${level}" == "ui" ]]; then
+  exec "${script_directory}/ui-test.sh" "$@"
 fi
 
 case "${level}" in

@@ -1,0 +1,28 @@
+{
+  "configurations" : [
+    {
+      "id" : "D62280CB-DC42-4A24-B7AB-7BCB25A8D607",
+      "name" : "UI Scenarios",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:Threading.xcodeproj",
+      "identifier" : "F6000001000000000000001",
+      "name" : "Threading"
+    }
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:Threading.xcodeproj",
+        "identifier" : "C0D100010000000000000001",
+        "name" : "ThreadingUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

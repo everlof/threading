@@ -30,6 +30,7 @@ xcodebuild -project Threading.xcodeproj -scheme Threading -configuration Debug b
 # Run the tests — see "Test levels" below for which one to pick
 scripts/test.sh          # fast: everything except the tests that put a window on screen
 scripts/test.sh all      # the whole ThreadingTests target
+scripts/test.sh ui       # app-level XCUITest scenarios in an isolated Cocoa home
 
 # Run the built app (never the bare binary — build with xcodebuild, then open the bundle)
 open "$(ls -dt ~/Library/Developer/Xcode/DerivedData/Threading-*/Build/Products/Debug/Threading.app | head -1)"
@@ -49,6 +50,12 @@ mode is silent: an unregistered test file builds nothing and `xcodebuild test` r
 "Executed 0 tests" for it. `scripts/add_test_file.py` does the four edits. Every app build,
 `scripts/test.sh`, and `scripts/ci.sh` runs `scripts/check_test_registration.py`, which compares
 the directory with the test target's Sources phase and refuses both missing and stale entries.
+
+`Tests/ThreadingUITests` is deliberately different: it is a synchronized folder owned by the
+`ThreadingUITests` UI-testing target, so new scenario sources are compiled automatically. Those
+tests launch the shipping executable against a disposable `CFFIXED_USER_HOME`; read
+[`ui-scenario-testing.md`](docs/architecture/ui-scenario-testing.md) before adding a scenario or
+recording provider traffic.
 
 ## Dependencies
 
@@ -162,6 +169,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Developer ID signing, notarization, `scripts/release.sh`, and the Sparkle automatic-update plan | [`releasing.md`](docs/architecture/releasing.md) |
 | Reclaimable build output, the two deletion gates, `scc` code stats | [`storage-and-stats.md`](docs/architecture/storage-and-stats.md) |
 | Persistence/wire failure semantics, dependency direction, strict concurrency, bounded work, CI and release gates | [`reliability-and-type-safety.md`](docs/architecture/reliability-and-type-safety.md) |
+| Application-level XCUITest journeys, recorded provider traffic and deterministic fixture agents | [`ui-scenario-testing.md`](docs/architecture/ui-scenario-testing.md) |
 | Any UI at all: the component vocabulary, themed controls, tabs, the composer, motion previews | [`design-system.md`](docs/architecture/design-system.md) |
 | The three forked packages and the seams that are ours | [`dependencies.md`](docs/architecture/dependencies.md) |
 
