@@ -35,6 +35,15 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
     /// anchor the gesture carries, answering whether a menu actually opened.
     var onContextMenu: ((Int, ThemedMenuAnchor) -> Bool)?
 
+    /// Space over a row, and the trackpad's preview gesture on one — Finder's preview keys,
+    /// answered here by the app's own inspector rather than the system panel.
+    ///
+    /// Reported rather than handled, on the same contract as `onContextMenu`: the host decides
+    /// whether that row holds anything worth inspecting, and a `false` answer leaves the event
+    /// with AppKit, so a list that has nothing to preview keeps type-select and the system
+    /// gesture it would otherwise have swallowed.
+    var onQuickLook: ((Int) -> Bool)?
+
     /// A drag left this list without landing in it — the pointer went outside, or the whole drag
     /// ended.
     ///
@@ -115,6 +124,31 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
             return super.accessibilityPerformShowMenu()
         }
         return onContextMenu(selectedRow, .control)
+    }
+
+    /// Bare Space on the selected row. A modifier makes it something else — Command-Space is
+    /// Spotlight's — so only the unmodified key is claimed, and even then only if the host
+    /// answers it.
+    override func keyDown(with event: NSEvent) {
+        guard event.charactersIgnoringModifiers == " ",
+              event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+              let onQuickLook,
+              selectedRow >= 0,
+              onQuickLook(selectedRow) else {
+            super.keyDown(with: event)
+            return
+        }
+    }
+
+    /// The trackpad's preview gesture — three-finger tap, or a force click — on the row under
+    /// the pointer rather than the selected one, because that is the row it was aimed at. The
+    /// same route `ThemedImagePreview` takes for the same gesture.
+    override func quickLook(with event: NSEvent) {
+        let row = row(at: convert(event.locationInWindow, from: nil))
+        guard let onQuickLook, row >= 0, onQuickLook(row) else {
+            super.quickLook(with: event)
+            return
+        }
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {

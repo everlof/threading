@@ -813,6 +813,21 @@ extension, and drops alone when both are unknown — decoding used to be all-or-
 session, and the next admission then persisted the fresh rows over a payload that still held
 every older one.
 
+**Space on a row is Finder's preview key, answered by the app's own inspector.** The list itself
+carries no policy: `ThemedTableView.onQuickLook` reports the bare key and the trackpad's preview
+gesture the way `onContextMenu` reports a right-click, and a `false` answer leaves the event with
+AppKit — a list with nothing to preview keeps type-select, and Command-Space is never claimed.
+The pane answers in three ways, one per what the inspector can actually hold: an image or a PDF
+opens *on the rail* (`mediaInspectorSelection(forRow:)` — the same collection the picture below
+the fold hands the inspector, so the two routes cannot drift); an archive or an office document
+opens as a single `.document` item through `MediaInspectorDocumentView`, the boundary already
+rendering it below the fold; HTML and diagram source decline, because the pane renders those
+itself — a non-persistent `WKWebView` and a `ThemedTextView` — and routing them through the
+inspector would hand both to a system previewer instead, which is the decision the non-persistent
+data store was made to avoid. Declining costs nothing: that row's preview is already on screen.
+Opening is not `perform`, so the footer's remembered action does not move — looking at a file is
+not a choice about what to do with it, exactly as double-click's comment says from the other end.
+
 **It is also where the panel's per-image tabs went** — see the Display Panel section above for the
 merge and its no-project fallback. The list had to become two things it was not to take them:
 

@@ -1974,6 +1974,14 @@ images and PDFs inline (click an image to enter the same collection-aware media 
 archives and documents through the same Quick Look preview the space bar shows in Finder, and
 diagram files as their own source text, ready to read or drag into a chat.
 
+**Space previews the selected row**, the way it does in Finder — with Threading's own inspector
+rather than the system panel. An image or a PDF opens on the rail with every other image and PDF
+in the session beside it, so the arrow keys and the thumbnail strip walk the list without closing
+anything; an archive or a document opens on its own. Space closes it again, and the list keeps
+your selection. HTML and diagram source have no inspector — the pane already renders those below
+the fold — so Space does nothing on those rows. The trackpad's preview gesture (three-finger tap,
+or a force click) does the same thing to the row under the pointer.
+
 The footer names the selected file and, beside the name, offers one button plus a **⌄** menu —
 like Finder's toolbar. The button performs whatever you last chose from the menu (**Open**,
 **Finder**, **Copy Path**, **Copy Image**/**Copy File**, or **Add to Chat**), starting at

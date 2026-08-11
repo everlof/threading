@@ -261,6 +261,41 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         return controller
     }
 
+    /// The same pane inside a window, which is what the preview key needs: the inspector
+    /// installs into the window's own content view rather than opening a panel, so a pane held
+    /// in nothing has nowhere to put it. Never ordered on screen — see the note in `CLAUDE.md`.
+    private func windowedPane(
+        showing urls: [URL],
+        size: NSSize
+    ) throws -> (pane: SessionAttachmentsViewController, window: NSWindow) {
+        let pane = try laidOutPane(showing: urls, size: size)
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = pane
+        pane.view.layoutSubtreeIfNeeded()
+        return (pane, window)
+    }
+
+    /// The bare key, as the list receives it.
+    private func spaceKey(in window: NSWindow) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: " ",
+            charactersIgnoringModifiers: " ",
+            isARepeat: false,
+            keyCode: 49
+        ))
+    }
+
     /// Somewhere the project is not, with a real picture in it.
     private func writeOutsideProjectPNG() throws -> URL {
         let elsewhere = FileManager.default.temporaryDirectory
@@ -596,6 +631,120 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         XCTAssertNil(
             SessionAttachmentThumbnails.thumbnail(for: attachment),
             "an archive was sent through the image decoder for its row"
+        )
+    }
+
+    // MARK: - The Preview Key
+
+    /// Space is the key Finder previews with, and the pane answers it with the app's own
+    /// inspector rather than the system panel — the same surface a click on the picture below
+    /// the fold opens, positioned on the selected row and carrying the other rows on its rail.
+    func testSpaceOnAnImageRowOpensTheAppsOwnInspectorOnTheRail() throws {
+        let pictures = try writePNGs(count: 3, size: NSSize(width: 40, height: 30))
+        let (pane, window) = try windowedPane(
+            showing: pictures, size: NSSize(width: 353, height: 700)
+        )
+        defer { MediaInspectorPresenter.dismiss(in: window) }
+        let table = try attachmentsTable(in: pane.view)
+        table.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+
+        table.keyDown(with: try spaceKey(in: window))
+
+        XCTAssertTrue(
+            MediaInspectorPresenter.isPresenting(in: window),
+            "Space on a selected picture opened nothing"
+        )
+        XCTAssertEqual(
+            descendants(of: pane.view).compactMap { $0 as? MediaInspectorView }.count,
+            1,
+            "the key opened something other than the app's own inspector"
+        )
+        let selection = try XCTUnwrap(pane.mediaInspectorSelection(forRow: 1))
+        XCTAssertEqual(selection.items.count, 3, "the row opened alone rather than on the rail")
+        XCTAssertEqual(selection.selectedIndex, 1, "the rail opened on a row nobody selected")
+        XCTAssertNil(
+            PreferenceStore.shared.string(forKey: SessionAttachmentsDefaults.lastActionKey),
+            "looking at a row is not a choice about what to do with it, and moved the footer's memory"
+        )
+    }
+
+    /// A modified Space is somebody else's — Command-Space is Spotlight's — so only the bare key
+    /// is claimed. Asserted here because the list, not the pane, is what draws that line.
+    func testAModifiedSpaceIsNotThePreviewKey() throws {
+        let pictures = try writePNGs(count: 2, size: NSSize(width: 40, height: 30))
+        let (pane, window) = try windowedPane(
+            showing: pictures, size: NSSize(width: 353, height: 700)
+        )
+        defer { MediaInspectorPresenter.dismiss(in: window) }
+        let table = try attachmentsTable(in: pane.view)
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+
+        let bare = try spaceKey(in: window)
+        let commanded = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: " ",
+            charactersIgnoringModifiers: " ",
+            isARepeat: false,
+            keyCode: bare.keyCode
+        ))
+        table.keyDown(with: commanded)
+
+        XCTAssertFalse(
+            MediaInspectorPresenter.isPresenting(in: window),
+            "the list claimed a key it shares with the system"
+        )
+    }
+
+    /// The other kinds the inspector can hold open alone: there is no rail for an archive to
+    /// join, and the same contained boundary that renders it below the fold renders it here.
+    func testSpaceOnAnArchiveRowOpensItAlone() throws {
+        let zip = root.appendingPathComponent("bundle.zip")
+        try Data([0x50, 0x4B, 0x05, 0x06] + [UInt8](repeating: 0, count: 18)).write(to: zip)
+        let (pane, window) = try windowedPane(
+            showing: [zip], size: NSSize(width: 353, height: 700)
+        )
+        let table = try attachmentsTable(in: pane.view)
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+
+        table.keyDown(with: try spaceKey(in: window))
+
+        XCTAssertTrue(
+            MediaInspectorPresenter.isPresenting(in: window),
+            "Space on an archive opened nothing"
+        )
+        XCTAssertNil(
+            pane.mediaInspectorSelection(forRow: 0),
+            "an archive joined the image rail, where the inspector can only draw a blank"
+        )
+        MediaInspectorPresenter.dismiss(in: window)
+        // Quick Look's display bundle activates asynchronously — see `parkedQuickLookWindows`.
+        Self.parkedQuickLookWindows.append(window)
+    }
+
+    /// HTML and diagram source are the two kinds the pane renders itself — a non-persistent web
+    /// view and a text view — and routing them into the inspector would hand both to a system
+    /// previewer instead. The key declines, so the list keeps it and the row's own preview,
+    /// already on screen, stands.
+    func testSpaceOnAnHTMLRowLeavesTheKeyWithTheList() throws {
+        let html = root.appendingPathComponent("preview.html")
+        try Data("<html><body>Preview</body></html>".utf8).write(to: html)
+        let (pane, window) = try windowedPane(
+            showing: [html], size: NSSize(width: 353, height: 700)
+        )
+        defer { MediaInspectorPresenter.dismiss(in: window) }
+        let table = try attachmentsTable(in: pane.view)
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+
+        table.keyDown(with: try spaceKey(in: window))
+
+        XCTAssertFalse(
+            MediaInspectorPresenter.isPresenting(in: window),
+            "HTML was handed to a previewer the pane deliberately does not use for it"
         )
     }
 

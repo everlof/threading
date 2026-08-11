@@ -129,6 +129,7 @@ final class SessionAttachmentsViewController: NSViewController {
         table.delegate = self
         table.target = self
         table.doubleAction = #selector(openSelected)
+        table.onQuickLook = { [weak self] row in self?.inspectAttachment(atRow: row) ?? false }
         table.allowsEmptySelection = false
         // Several rows are a batch: dragging one selected row carries every selected row's
         // file — AppKit asks `pasteboardWriterForRow` per row — and the two places a batch
@@ -1019,29 +1020,35 @@ final class SessionAttachmentsViewController: NSViewController {
         previewMessage.isHidden = false
     }
 
+    /// The collection the inspector's arrows and thumbnail rail walk, positioned on `row`.
+    ///
+    /// An allow-list, not "everything but HTML": the inspector's canvas decodes images and its
+    /// document view draws PDFs, and a zip paged in between two screenshots would be a rail slot
+    /// the inspector can only answer with a blank. `nil` therefore means *this row is not on the
+    /// rail*, which is also how the row's own preview key reads it.
+    func mediaInspectorSelection(forRow row: Int) -> MediaInspectorSelection? {
+        guard attachments.indices.contains(row) else { return nil }
+        let selectedID = attachments[row].id
+        let inspectable = attachments.filter { $0.kind == .image || $0.kind == .pdf }
+        guard let selectedIndex = inspectable.firstIndex(where: { $0.id == selectedID }) else {
+            return nil
+        }
+        let items = inspectable.map {
+            MediaInspectorItem(
+                url: $0.url,
+                title: $0.name,
+                content: $0.kind == .image ? .image : .document
+            )
+        }
+        return MediaInspectorSelection(items: items, selectedIndex: selectedIndex)
+    }
+
     private func installedImageView() -> ThemedImagePreview {
         if let imageView { return imageView }
         let image = ThemedImagePreview()
         image.inspectorSelectionProvider = { [weak self] in
             guard let self else { return nil }
-            let row = self.tableView.selectedRow
-            guard self.attachments.indices.contains(row) else { return nil }
-            let selectedID = self.attachments[row].id
-            // An allow-list, not "everything but HTML": the inspector's canvas decodes images
-            // and its document view draws PDFs, and a zip paged in between two screenshots
-            // would be a rail slot the inspector can only answer with a blank.
-            let inspectable = self.attachments.filter { $0.kind == .image || $0.kind == .pdf }
-            guard let selectedIndex = inspectable.firstIndex(where: { $0.id == selectedID }) else {
-                return nil
-            }
-            let items = inspectable.map {
-                MediaInspectorItem(
-                    url: $0.url,
-                    title: $0.name,
-                    content: $0.kind == .image ? .image : .document
-                )
-            }
-            return MediaInspectorSelection(items: items, selectedIndex: selectedIndex)
+            return self.mediaInspectorSelection(forRow: self.tableView.selectedRow)
         }
         image.isHidden = true
         installPreviewSurface(image)
@@ -1207,6 +1214,32 @@ final class SessionAttachmentsViewController: NSViewController {
     /// when a file is double-clicked either.
     @objc private func openSelected() {
         perform(.open, on: selectedAttachments)
+    }
+
+    /// Space on a row — Finder's key, answered by the app's own inspector, which Space closes
+    /// again. Not `perform`: this opens nothing outside the app and is no more a choice about
+    /// what to do with the file than clicking its picture below the fold is, so the footer's
+    /// remembered action stays where the user left it.
+    ///
+    /// Three answers, because the pane previews six kinds and the inspector holds four of them:
+    /// an image or a PDF opens *on the rail* with every other one beside it; an archive or an
+    /// office document opens alone, through the same contained boundary that already renders it
+    /// below the fold; HTML and diagram source decline, since the pane renders those itself —
+    /// through a non-persistent web view and a text view — and routing them into the inspector
+    /// would hand both to a system previewer instead. Their row's own preview is already on
+    /// screen, so declining costs the user nothing.
+    @discardableResult
+    func inspectAttachment(atRow row: Int) -> Bool {
+        guard attachments.indices.contains(row) else { return false }
+        if let selection = mediaInspectorSelection(forRow: row) {
+            return MediaInspectorPresenter.present(selection, from: tableView)
+        }
+        let attachment = attachments[row]
+        guard attachment.kind == .archive || attachment.kind == .document else { return false }
+        return MediaInspectorPresenter.present(
+            MediaInspectorItem(url: attachment.url, title: attachment.name, content: .document),
+            from: tableView
+        )
     }
 
     /// The footer's press: whatever the menu was last used for, resolved against what the
