@@ -138,7 +138,7 @@ final class SQLiteDatabase {
                 try execute("PRAGMA user_version = \(version)")
             }
         }
-        ThreadingLogger.agent.info("Database migrated to schema version \(target, privacy: .public)")
+        ThreadingLogger.storage.info("Database migrated to schema version \(target, privacy: .public)")
     }
 
     /// The first column of the first row, for the one-value queries.
@@ -180,8 +180,8 @@ final class SQLiteDatabase {
             }
             return true
         } catch {
-            ThreadingLogger.agent.error(
-                "Could not make the SQLite store safe to move: \(error.localizedDescription, privacy: .public)"
+            ThreadingLogger.storage.error(
+                "Could not make the SQLite store safe to move: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return false
         }

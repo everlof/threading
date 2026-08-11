@@ -200,13 +200,13 @@ struct TerminalTheme: Codable, Equatable {
         if let colour = NSColor(hex: hex) { return colour }
 
         guard let role = ThemeColorKey(rawValue: key.stringValue) else {
-            ThreadingLogger.terminal.error(
+            ThreadingLogger.terminal.warning(
                 "Theme colour \(key.stringValue, privacy: .public) is unparseable and unnamed."
             )
             return .white
         }
 
-        ThreadingLogger.terminal.error(
+        ThreadingLogger.terminal.warning(
             """
             Theme colour \(key.stringValue, privacy: .public) could not be parsed; \
             using the stock palette's own value for that role.

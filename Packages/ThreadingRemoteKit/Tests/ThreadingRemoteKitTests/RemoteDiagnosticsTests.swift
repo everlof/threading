@@ -2,6 +2,23 @@ import XCTest
 @testable import ThreadingRemoteKit
 
 final class RemoteDiagnosticsTests: XCTestCase {
+    private final class StorageEvents: @unchecked Sendable {
+        private let lock = NSLock()
+        private var events: [RemoteDiagnosticJournalStorageEvent] = []
+
+        func append(_ event: RemoteDiagnosticJournalStorageEvent) {
+            lock.lock()
+            events.append(event)
+            lock.unlock()
+        }
+
+        var snapshot: [RemoteDiagnosticJournalStorageEvent] {
+            lock.lock()
+            defer { lock.unlock() }
+            return events
+        }
+    }
+
     private var directory: URL!
 
     override func setUpWithError() throws {
@@ -26,6 +43,34 @@ final class RemoteDiagnosticsTests: XCTestCase {
 
         XCTAssertEqual(journal.records().map(\.event), [.socketConnecting, .socketConnected])
         XCTAssertEqual(journal.records().last?.fields["transport"], "websocket")
+    }
+
+    func testJournalReportsContentFreeStorageFailureAndRecovery() throws {
+        let blocked = directory.appendingPathComponent("blocked")
+        try Data("not-a-directory".utf8).write(to: blocked)
+        let events = StorageEvents()
+        let journal = RemoteDiagnosticJournal(
+            directory: blocked,
+            source: .iOSClient,
+            storageEventHandler: { event in events.append(event) }
+        )
+
+        journal.record(.socketConnecting)
+        XCTAssertTrue(events.snapshot.contains {
+            $0.outcome == .failed && $0.stage == .directory
+        })
+
+        try FileManager.default.removeItem(at: blocked)
+        try FileManager.default.createDirectory(
+            at: blocked,
+            withIntermediateDirectories: true
+        )
+        journal.record(.socketConnected)
+
+        XCTAssertTrue(events.snapshot.contains {
+            $0.outcome == .recovered && $0.stage == .directory
+        })
+        XCTAssertEqual(journal.records().map(\.event), [.socketConnected])
     }
 
     func testJournalBoundsAndStripsFieldValues() {

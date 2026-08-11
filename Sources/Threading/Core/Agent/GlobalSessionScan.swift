@@ -104,9 +104,13 @@ enum GlobalSessionScan {
     static func discover(
         completion: @escaping @MainActor @Sendable (GlobalScanResult) -> Void
     ) {
+        let started = DispatchTime.now().uptimeNanoseconds
         let replaySources = TranscriptReplayFormat.allCases.map { format in
             (format: format, accounts: AgentAccountDiscovery.accounts(for: format.kind))
         }
+        ThreadingLogger.agent.info(
+            "Global session scan started formats=\(replaySources.count, privacy: .public) accounts=\(replaySources.reduce(0) { $0 + $1.accounts.count }, privacy: .public)"
+        )
         let known = Set(
             ProjectStore.shared.projects
                 .flatMap(\.sessions)
@@ -144,6 +148,18 @@ enum GlobalSessionScan {
                 failures: discovery.failures,
                 additionalFailureCount: discovery.additionalFailureCount
             )
+
+            let elapsedMilliseconds = (DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+            let conversationCount = result.groups.reduce(0) { $0 + $1.conversations.count }
+            if result.totalFailureCount > 0 {
+                ThreadingLogger.agent.warning(
+                    "Global session scan completed groups=\(result.groups.count, privacy: .public) conversations=\(conversationCount, privacy: .public) missing_folders=\(result.missingFolderConversations, privacy: .public) failures=\(result.totalFailureCount, privacy: .public) duration_ms=\(elapsedMilliseconds, privacy: .public)"
+                )
+            } else {
+                ThreadingLogger.agent.info(
+                    "Global session scan completed groups=\(result.groups.count, privacy: .public) conversations=\(conversationCount, privacy: .public) missing_folders=\(result.missingFolderConversations, privacy: .public) failures=0 duration_ms=\(elapsedMilliseconds, privacy: .public)"
+                )
+            }
 
             DispatchQueue.main.async { completion(result) }
         }

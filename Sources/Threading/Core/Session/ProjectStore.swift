@@ -1319,7 +1319,7 @@ final class ProjectStore {
             stateWritePolicy = .failedLoad
             if let quarantinedAt {
                 ThreadingLogger.agent.error(
-                    "Projects state requires recovery from \(quarantinedAt.path, privacy: .public)"
+                    "Projects state requires recovery from \(quarantinedAt.path, privacy: .private(mask: .hash))"
                 )
             }
         }

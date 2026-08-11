@@ -92,8 +92,18 @@ final class ProjectIconDiscovery {
         replacesExisting: Bool,
         completion: (@MainActor @Sendable (Bool) -> Void)?
     ) {
+        let startedAt = Date()
         let folder = project.folderURL
         let projectID = project.id
+        if replacesExisting {
+            ThreadingLogger.agent.info(
+                "Project icon discovery requested project=\(projectID.uuidString, privacy: .public)"
+            )
+        } else {
+            ThreadingLogger.agent.debug(
+                "Project icon discovery started project=\(projectID.uuidString, privacy: .public) automatic=true"
+            )
+        }
 
         queue.async {
             let found = Self.findIcon(for: folder)
@@ -103,11 +113,24 @@ final class ProjectIconDiscovery {
                 // search ran, and an automatic result must never displace a choice.
                 let current = ProjectStore.shared.project(withID: projectID)?.icon
                 guard replacesExisting || current == nil else {
+                    ThreadingLogger.agent.debug(
+                        "Project icon discovery discarded project=\(projectID.uuidString, privacy: .public) reason=icon_changed"
+                    )
                     completion?(false)
                     return
                 }
 
                 guard let found else {
+                    let durationMilliseconds = Int(Date().timeIntervalSince(startedAt) * 1_000)
+                    if replacesExisting {
+                        ThreadingLogger.agent.info(
+                            "Project icon discovery completed project=\(projectID.uuidString, privacy: .public) result=not_found duration_ms=\(durationMilliseconds, privacy: .public)"
+                        )
+                    } else {
+                        ThreadingLogger.agent.debug(
+                            "Project icon discovery completed project=\(projectID.uuidString, privacy: .public) result=not_found duration_ms=\(durationMilliseconds, privacy: .public)"
+                        )
+                    }
                     completion?(false)
                     return
                 }
@@ -118,8 +141,29 @@ final class ProjectIconDiscovery {
                     for: projectID
                 )
                 guard case .success = result else {
+                    let reason: String
+                    switch result {
+                    case .failure(.projectNotFound): reason = "project_not_found"
+                    case .failure(.unusableImage): reason = "unusable_image"
+                    case .failure(.storageFailed): reason = "storage_failed"
+                    case .failure(.persistenceRefused): reason = "persistence_refused"
+                    case .success: reason = "unexpected"
+                    }
+                    ThreadingLogger.agent.warning(
+                        "Project icon discovery failed project=\(projectID.uuidString, privacy: .public) source=\(found.source.rawValue, privacy: .public) reason=\(reason, privacy: .public)"
+                    )
                     completion?(false)
                     return
+                }
+                let durationMilliseconds = Int(Date().timeIntervalSince(startedAt) * 1_000)
+                if replacesExisting {
+                    ThreadingLogger.agent.info(
+                        "Project icon discovery completed project=\(projectID.uuidString, privacy: .public) result=stored source=\(found.source.rawValue, privacy: .public) duration_ms=\(durationMilliseconds, privacy: .public)"
+                    )
+                } else {
+                    ThreadingLogger.agent.debug(
+                        "Project icon discovery completed project=\(projectID.uuidString, privacy: .public) result=stored source=\(found.source.rawValue, privacy: .public) duration_ms=\(durationMilliseconds, privacy: .public)"
+                    )
                 }
                 completion?(true)
             }

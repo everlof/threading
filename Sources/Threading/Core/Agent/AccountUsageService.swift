@@ -238,7 +238,7 @@ final class AccountUsageService {
             }
 
             ThreadingLogger.agent.info(
-                "Usage fetch failed for \(accountID, privacy: .public): \(error.message, privacy: .public)"
+                "Usage fetch failed for \(accountID, privacy: .private(mask: .hash)): \(error.message, privacy: .private(mask: .hash))"
             )
         }
         entries[accountID] = entry

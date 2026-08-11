@@ -38,7 +38,7 @@ enum DefaultsQuarantine {
         defaults.set(data, forKey: destination)
 
         guard defaults.data(forKey: destination) == data else {
-            ThreadingLogger.session.error(
+            ThreadingLogger.storage.error(
                 """
                 Could not quarantine unreadable \(key, privacy: .public); \
                 refusing to overwrite it.
@@ -47,10 +47,10 @@ enum DefaultsQuarantine {
             return false
         }
 
-        ThreadingLogger.session.error(
+        ThreadingLogger.storage.error(
             """
             \(key, privacy: .public) could not be decoded; the previous value is kept at \
-            \(destination, privacy: .public).
+            \(destination, privacy: .private(mask: .hash)).
             """
         )
         return true
@@ -209,6 +209,9 @@ final class RecoverableDefaultsStore<Value: Codable> {
             let fallback = defaultValue()
             if criticality == .rebuildableCache {
                 defaults.removeObject(forKey: key)
+                ThreadingLogger.storage.warning(
+                    "Discarded unreadable rebuildable cache \(self.key, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
                 return .unreadable(fallback: fallback, recovery: nil)
             }
 
@@ -218,11 +221,11 @@ final class RecoverableDefaultsStore<Value: Codable> {
                     DefaultsQuarantine.quarantineKey(for: key)
                 )
                 : nil
-            ThreadingLogger.session.error(
+            ThreadingLogger.storage.error(
                 """
                 Could not load \(self.key, privacy: .public) as \
                 \(self.criticality.rawValue, privacy: .public) state: \
-                \(error.localizedDescription, privacy: .public)
+                \(error.localizedDescription, privacy: .private(mask: .hash))
                 """
             )
             return .unreadable(fallback: fallback, recovery: recovery)
@@ -232,7 +235,7 @@ final class RecoverableDefaultsStore<Value: Codable> {
     @discardableResult
     func save(_ value: Value) -> Bool {
         guard writesAllowed else {
-            ThreadingLogger.session.error(
+            ThreadingLogger.storage.error(
                 "Refusing to save \(self.key, privacy: .public): recovery copy was not verified"
             )
             return false
@@ -249,15 +252,15 @@ final class RecoverableDefaultsStore<Value: Codable> {
             defaults.set(data, forKey: key)
             guard defaults.data(forKey: key) == data else {
                 writesAllowed = false
-                ThreadingLogger.session.error(
+                ThreadingLogger.storage.error(
                     "Could not verify saved \(self.key, privacy: .public); later writes are disabled"
                 )
                 return false
             }
             return true
         } catch {
-            ThreadingLogger.session.error(
-                "Could not save \(self.key, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            ThreadingLogger.storage.error(
+                "Could not save \(self.key, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return false
         }
@@ -331,17 +334,26 @@ final class RecoverableFileStore<Value: Codable> {
         } catch {
             let fallback = defaultValue()
             if criticality == .rebuildableCache {
-                try? fileManager.removeItem(at: url)
+                do {
+                    try fileManager.removeItem(at: url)
+                    ThreadingLogger.storage.warning(
+                        "Discarded unreadable rebuildable cache \(self.url.lastPathComponent, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                    )
+                } catch let removalError {
+                    ThreadingLogger.storage.error(
+                        "Could not remove unreadable rebuildable cache \(self.url.lastPathComponent, privacy: .private(mask: .hash)): \(removalError.localizedDescription, privacy: .private(mask: .hash))"
+                    )
+                }
                 return .unreadable(fallback: fallback, recovery: nil)
             }
 
             let recoveryURL = quarantine()
             writesAllowed = recoveryURL != nil
-            ThreadingLogger.session.error(
+            ThreadingLogger.storage.error(
                 """
-                Could not load \(self.url.lastPathComponent, privacy: .public) as \
+                Could not load \(self.url.lastPathComponent, privacy: .private(mask: .hash)) as \
                 \(self.criticality.rawValue, privacy: .public) state: \
-                \(error.localizedDescription, privacy: .public)
+                \(error.localizedDescription, privacy: .private(mask: .hash))
                 """
             )
             return .unreadable(
@@ -354,8 +366,8 @@ final class RecoverableFileStore<Value: Codable> {
     @discardableResult
     func save(_ value: Value) -> Bool {
         guard writesAllowed else {
-            ThreadingLogger.session.error(
-                "Refusing to save \(self.url.lastPathComponent, privacy: .public): recovery copy was not verified"
+            ThreadingLogger.storage.error(
+                "Refusing to save \(self.url.lastPathComponent, privacy: .private(mask: .hash)): recovery copy was not verified"
             )
             return false
         }
@@ -370,8 +382,8 @@ final class RecoverableFileStore<Value: Codable> {
             encoder.dateEncodingStrategy = dateEncodingStrategy
             let data = try encoder.encode(RecoverableStoreEnvelope(value: value))
             guard data.count <= sizePolicy.maximumBytes else {
-                ThreadingLogger.session.error(
-                    "Refusing to save oversized \(self.url.lastPathComponent, privacy: .public)"
+                ThreadingLogger.storage.error(
+                    "Refusing to save oversized \(self.url.lastPathComponent, privacy: .private(mask: .hash))"
                 )
                 return false
             }
@@ -381,16 +393,16 @@ final class RecoverableFileStore<Value: Codable> {
                 maximumBytes: sizePolicy.maximumBytes
             ) == data else {
                 writesAllowed = false
-                ThreadingLogger.session.error(
-                    "Could not verify saved \(self.url.lastPathComponent, privacy: .public); later writes are disabled"
+                ThreadingLogger.storage.error(
+                    "Could not verify saved \(self.url.lastPathComponent, privacy: .private(mask: .hash)); later writes are disabled"
                 )
                 return false
             }
             return true
         } catch {
             writesAllowed = false
-            ThreadingLogger.session.error(
-                "Could not save \(self.url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            ThreadingLogger.storage.error(
+                "Could not save \(self.url.lastPathComponent, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return false
         }
@@ -427,13 +439,13 @@ final class RecoverableFileStore<Value: Codable> {
         do {
             try fileManager.moveItem(at: url, to: destination)
             guard fileManager.fileExists(atPath: destination.path) else { return nil }
-            ThreadingLogger.session.error(
-                "Kept unreadable \(self.url.lastPathComponent, privacy: .public) at \(destination.path, privacy: .public)"
+            ThreadingLogger.storage.error(
+                "Kept unreadable \(self.url.lastPathComponent, privacy: .private(mask: .hash)) at \(destination.path, privacy: .private(mask: .hash))"
             )
             return destination
         } catch {
-            ThreadingLogger.session.error(
-                "Could not quarantine \(self.url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            ThreadingLogger.storage.error(
+                "Could not quarantine \(self.url.lastPathComponent, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return nil
         }

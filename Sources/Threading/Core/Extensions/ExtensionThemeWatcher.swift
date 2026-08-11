@@ -81,7 +81,7 @@ final class ExtensionThemeWatcher: @unchecked Sendable {
             UInt32(kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagNoDefer)
         ) else {
             ThreadingLogger.extensions.error(
-                "Theme watch stream could not be created for \(self.root, privacy: .public)"
+                "Theme watch stream could not be created for \(self.root, privacy: .private(mask: .hash))"
             )
             return
         }

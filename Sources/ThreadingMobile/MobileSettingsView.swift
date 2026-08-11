@@ -263,6 +263,7 @@ private struct MacAppearanceSettingsView: View {
             } catch is CancellationError {
                 return
             } catch {
+                MobileDiagnostics.logDegraded(.themeSelection, error: error)
                 errorMessage = error.localizedDescription
             }
         }

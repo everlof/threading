@@ -108,7 +108,7 @@ enum SettingsSearchResearch {
                     completion(.success(validated(raw)))
                 } else {
                     ThreadingLogger.agent.error(
-                        "Settings research returned no readable answer (\(output?.count ?? 0) bytes)"
+                    "Settings research returned no readable answer (\(output?.count ?? 0, privacy: .public) bytes)"
                     )
                     completion(.failure(.noAnswer))
                 }
@@ -252,14 +252,14 @@ enum SettingsSearchResearch {
             )
         } catch {
             ThreadingLogger.agent.error(
-                "Settings research launch failed: \(error.localizedDescription, privacy: .public)"
+                "Settings research launch failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return (nil, .launchFailed)
         }
 
         let output = String(decoding: result.output, as: UTF8.self)
         ThreadingLogger.agent.info(
-            "Settings research child finished: \(String(describing: result.termination), privacy: .public), \(result.output.count) retained output bytes, truncated=\(result.outputWasTruncated, privacy: .public)"
+            "Settings research child finished: \(String(describing: result.termination), privacy: .public), \(result.output.count, privacy: .public) retained output bytes, truncated=\(result.outputWasTruncated, privacy: .public)"
         )
 
         switch result.termination {

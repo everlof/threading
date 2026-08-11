@@ -1,4 +1,5 @@
 @preconcurrency import AppKit
+import SwiftTerm
 import ThreadingExtensionKit
 import ThreadingRemoteKit
 
@@ -110,6 +111,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // startup then: the tests exercise types directly and must not spawn agents, start the MCP
         // server, or touch the user's stores.
         if NSClassFromString("XCTestCase") != nil { return }
+
+        configureSwiftTermDiagnostics()
 
         let launchSpan = PerformanceRecorder.shared.begin(
             "app.launch",
@@ -437,6 +440,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // The latter also catches a rename made while Threading was closed.
         SessionNaming.backfillLegacyNames()
         SessionNaming.refreshProviderTitlesAtLaunch()
+    }
+
+    /// Bridges the vendored terminal engine into the app's privacy-enforced logging boundary.
+    /// SwiftTerm events carry only stable codes and structural integers; terminal bytes, rendered
+    /// text, titles, paths and arbitrary errors cannot be represented by the event type.
+    private func configureSwiftTermDiagnostics() {
+        SwiftTermDiagnostics.installHandler { event in
+            let code = event.code.rawValue
+            let facts = String(describing: event.facts)
+            let suppressed = event.suppressedCount
+
+            switch event.severity {
+            case .debug:
+                ThreadingLogger.terminal.debug(
+                    "SwiftTerm code=\(code, privacy: .public) facts=\(facts, privacy: .public) suppressed=\(suppressed, privacy: .public)"
+                )
+            case .info:
+                ThreadingLogger.terminal.info(
+                    "SwiftTerm code=\(code, privacy: .public) facts=\(facts, privacy: .public) suppressed=\(suppressed, privacy: .public)"
+                )
+            case .notice:
+                ThreadingLogger.terminal.notice(
+                    "SwiftTerm code=\(code, privacy: .public) facts=\(facts, privacy: .public) suppressed=\(suppressed, privacy: .public)"
+                )
+            case .warning:
+                ThreadingLogger.terminal.warning(
+                    "SwiftTerm code=\(code, privacy: .public) facts=\(facts, privacy: .public) suppressed=\(suppressed, privacy: .public)"
+                )
+            case .error:
+                ThreadingLogger.terminal.error(
+                    "SwiftTerm code=\(code, privacy: .public) facts=\(facts, privacy: .public) suppressed=\(suppressed, privacy: .public)"
+                )
+            case .fault:
+                ThreadingLogger.terminal.fault(
+                    "SwiftTerm code=\(code, privacy: .public) facts=\(facts, privacy: .public) suppressed=\(suppressed, privacy: .public)"
+                )
+            }
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -866,7 +907,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @MainActor
     private func presentRelaunchFailure(_ error: Error) {
         ThreadingLogger.agent.error(
-            "Relaunch failed: \(error.localizedDescription, privacy: .public)"
+            "Relaunch failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
         )
         let alert = ThemedAlert()
         alert.alertStyle = .warning
@@ -918,8 +959,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         do {
             try AppDataResetFlow.perform(.everything)
         } catch {
-            ThreadingLogger.agent.error(
-                "Reset failed: \(error.localizedDescription, privacy: .public)"
+            ThreadingLogger.app.error(
+                "Reset failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             let alert = ThemedAlert()
             alert.alertStyle = .warning
@@ -974,6 +1015,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 try registry.register(contract)
             }
         } catch {
+            ThreadingLogger.extensions.fault(
+                "Host component contract registration failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             assertionFailure("Invalid host component contract: \(error)")
             ComponentCustomizationProviderSlot.shared.provider = nil
             return
@@ -1803,6 +1847,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             )
             NSWorkspace.shared.activateFileViewerSelecting([report])
         } catch {
+            ThreadingLogger.remote.error(
+                "Support report creation failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             let alert = ThemedAlert()
             alert.alertStyle = .warning
             alert.messageText = L10n.string("Couldn’t create support report")

@@ -219,8 +219,8 @@ final class AdvancedPreferencesViewController: NSViewController {
         } catch {
             // Nothing has been restarted, so the app is still usable and saying so is the whole
             // response. A reset that half-happened is the case this must not hide.
-            ThreadingLogger.agent.error(
-                "Reset failed: \(error.localizedDescription, privacy: .public)"
+            ThreadingLogger.app.error(
+                "Reset failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             presentFailure(error)
         }

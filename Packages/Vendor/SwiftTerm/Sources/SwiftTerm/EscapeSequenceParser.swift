@@ -356,7 +356,11 @@ public class EscapeSequenceParser {
     }
     
     var csiHandlerFallback : CsiHandlerFallback = { (pars: [Int], collect: cstring, code: UInt8) -> () in
-        print ("Cannot handle ESC-\(code)")
+        SwiftTermDiagnostics.emit(
+            .debug,
+            .parserUnhandledControlSequence,
+            facts: ["code": Int(code), "parameterCount": pars.count, "collectCount": collect.count]
+        )
     }
     
     var oscHandlerFallback: OscHandlerFallback = { code, data -> () in

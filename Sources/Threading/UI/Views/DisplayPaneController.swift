@@ -2499,7 +2499,7 @@ extension DisplayPaneController: WKNavigationDelegate {
   /// re-rendered once. A document that reliably crashes WebKit will loop visibly rather
   /// than silently, which is the more debuggable failure.
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-    ThreadingLogger.mcp.error("Display panel web content process terminated; re-rendering")
+    ThreadingLogger.mcp.warning("Display panel web content process terminated; re-rendering")
     render()
   }
 }

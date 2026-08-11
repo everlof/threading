@@ -80,6 +80,9 @@ final class ExtensionNetworkBroker: ExtensionNetworkBrokering {
         transport: Transport
     ) async -> Result<BrokeredFetchReading, BrokeredFetchFailure> {
         guard let url = URL(string: request.url) else {
+            ThreadingLogger.extensions.warning(
+                "Extension brokered request rejected stage=url_parse url=\(request.url, privacy: .private(mask: .hash))"
+            )
             return .failure(BrokeredFetchFailure(
                 message: L10n.string("The brokered URL could not be parsed."),
                 credential: .anonymous
@@ -112,6 +115,9 @@ final class ExtensionNetworkBroker: ExtensionNetworkBrokering {
             } catch {
                 // Transport trouble is environmental, not credential-dependent; retrying the
                 // same network under another token would only repeat the wait.
+                ThreadingLogger.extensions.error(
+                    "Extension brokered request transport failed host=\(url.host ?? request.url, privacy: .private(mask: .hash)) credential_tier=\(credential.tier.rawValue, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
                 return .failure(BrokeredFetchFailure(
                     message: L10n.format(
                         "The host could not reach %@: %@",
@@ -123,6 +129,9 @@ final class ExtensionNetworkBroker: ExtensionNetworkBrokering {
             }
 
             guard data.count <= ExtensionBrokeredNetwork.maximumResponseBodyBytes else {
+                ThreadingLogger.extensions.warning(
+                    "Extension brokered response refused reason=oversized status=\(http.statusCode, privacy: .public) response_bytes=\(data.count, privacy: .public) credential_tier=\(credential.tier.rawValue, privacy: .public)"
+                )
                 return .failure(BrokeredFetchFailure(
                     message: L10n.string("The response exceeds the brokered size limit."),
                     credential: credential.tier
@@ -164,6 +173,9 @@ final class ExtensionNetworkBroker: ExtensionNetworkBrokering {
             }
         }
         // Unreachable: the last tier always returns above. Kept for the compiler.
+        ThreadingLogger.extensions.fault(
+            "Extension brokered request exhausted credentials without a result credential_count=\(credentials.count, privacy: .public)"
+        )
         return .failure(BrokeredFetchFailure(
             message: L10n.string("Every GitHub credential Threading holds was refused."),
             credential: .anonymous

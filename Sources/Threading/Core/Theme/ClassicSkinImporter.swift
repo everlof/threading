@@ -76,10 +76,46 @@ enum ClassicSkinImporter {
                 return L10n.string("The skin artwork could not be stored.")
             }
         }
+
+        var diagnosticCode: String {
+            switch self {
+            case .wrongExtension: return "wrong_extension"
+            case .archiveTooLarge: return "archive_too_large"
+            case .invalidArchive: return "invalid_archive"
+            case .encryptedArchive: return "encrypted_archive"
+            case .unsupportedCompression: return "unsupported_compression"
+            case .tooManyEntries: return "too_many_entries"
+            case .expandedArchiveTooLarge: return "expanded_archive_too_large"
+            case .missingTitleBar: return "missing_title_bar"
+            case .invalidTitleBar: return "invalid_title_bar"
+            case .titleBarTooSmall: return "title_bar_too_small"
+            case .titleBarTooLarge: return "title_bar_too_large"
+            case .couldNotStoreAsset: return "asset_write_failed"
+            }
+        }
     }
 
     /// Creates and returns a custom theme. The caller decides whether to make it current.
     static func importSkin(at url: URL) throws -> AppTheme {
+        ThreadingLogger.theme.info(
+            "Classic skin import started source=\(url.path, privacy: .private(mask: .hash))"
+        )
+        do {
+            let theme = try importSkinContents(at: url)
+            ThreadingLogger.theme.info(
+                "Classic skin import completed source=\(url.path, privacy: .private(mask: .hash)) theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"
+            )
+            return theme
+        } catch {
+            let diagnosticCode = (error as? Failure)?.diagnosticCode ?? "unexpected"
+            ThreadingLogger.theme.error(
+                "Classic skin import failed source=\(url.path, privacy: .private(mask: .hash)) reason=\(diagnosticCode, privacy: .public)"
+            )
+            throw error
+        }
+    }
+
+    private static func importSkinContents(at url: URL) throws -> AppTheme {
         guard url.pathExtension.caseInsensitiveCompare("wsz") == .orderedSame else {
             throw Failure.wrongExtension
         }

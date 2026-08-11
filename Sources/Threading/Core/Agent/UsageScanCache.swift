@@ -25,11 +25,24 @@ final class UsageScanCache {
         let records: [UsageLedgerRecord]
     }
 
+    private enum FailureStage: String, CaseIterable {
+        case directory
+        case backupExclusion = "backup_exclusion"
+        case read
+        case decode
+        case encode
+        case oversized
+        case write
+        case enumerate
+        case remove
+    }
+
     private let directory: URL
     private let fileManager: FileManager
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
     private var usedFiles = Set<String>()
+    private var failureCounts: [FailureStage: Int] = [:]
 
     init(directory: URL, fileManager: FileManager = .default) {
         self.directory = directory
@@ -46,6 +59,7 @@ final class UsageScanCache {
 
     func beginScan() {
         usedFiles.removeAll(keepingCapacity: true)
+        failureCounts.removeAll(keepingCapacity: true)
         prepareDirectory()
     }
 
@@ -61,11 +75,7 @@ final class UsageScanCache {
         let cacheURL = url(forSourcePath: source.path, parserID: parserID)
         usedFiles.insert(cacheURL.lastPathComponent)
 
-        if let data = try? BoundedFileReader.read(
-            cacheURL,
-            maximumBytes: UsageScanCacheDefaults.maximumEntryBytes
-        ),
-           let envelope = try? decoder.decode(Envelope.self, from: data),
+        if let envelope = cachedEnvelope(at: cacheURL),
            envelope.schemaVersion == UsageScanCacheDefaults.schemaVersion,
            envelope.parserID == parserID,
            envelope.sourcePath == source.path,
@@ -81,10 +91,7 @@ final class UsageScanCache {
             fingerprint: fingerprint,
             records: parsed
         )
-        if let data = try? encoder.encode(envelope),
-           data.count <= UsageScanCacheDefaults.maximumEntryBytes {
-            try? data.write(to: cacheURL, options: .atomic)
-        }
+        persist(envelope, at: cacheURL)
         return Result(records: parsed, wasCacheHit: false)
     }
 
@@ -100,11 +107,7 @@ final class UsageScanCache {
         let cacheURL = url(forSourcePath: key, parserID: parserID)
         usedFiles.insert(cacheURL.lastPathComponent)
 
-        if let data = try? BoundedFileReader.read(
-            cacheURL,
-            maximumBytes: UsageScanCacheDefaults.maximumEntryBytes
-        ),
-           let envelope = try? decoder.decode(Envelope.self, from: data),
+        if let envelope = cachedEnvelope(at: cacheURL),
            envelope.schemaVersion == UsageScanCacheDefaults.schemaVersion,
            envelope.parserID == parserID,
            envelope.sourcePath == key,
@@ -120,33 +123,106 @@ final class UsageScanCache {
             fingerprint: fingerprint,
             records: parsed
         )
-        if let data = try? encoder.encode(envelope),
-           data.count <= UsageScanCacheDefaults.maximumEntryBytes {
-            try? data.write(to: cacheURL, options: .atomic)
-        }
+        persist(envelope, at: cacheURL)
         return Result(records: parsed, wasCacheHit: false)
     }
 
     /// Removes entries for transcript files no longer offered by any adapter. Cache deletion is
     /// recoverable and deliberately scoped to this private directory.
     func finishScan() {
-        guard let entries = try? fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil
-        ) else { return }
+        let entries: [URL]
+        do {
+            entries = try fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+            )
+        } catch {
+            recordFailure(.enumerate)
+            reportFailures()
+            return
+        }
 
         for entry in entries where entry.pathExtension == UsageScanCacheDefaults.extensionName {
             guard !usedFiles.contains(entry.lastPathComponent) else { continue }
-            try? fileManager.removeItem(at: entry)
+            do {
+                try fileManager.removeItem(at: entry)
+            } catch {
+                recordFailure(.remove)
+            }
         }
+        reportFailures()
     }
 
     private func prepareDirectory() {
-        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            recordFailure(.directory)
+            return
+        }
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         var mutable = directory
-        try? mutable.setResourceValues(values)
+        do {
+            try mutable.setResourceValues(values)
+        } catch {
+            recordFailure(.backupExclusion)
+        }
+    }
+
+    private func cachedEnvelope(at url: URL) -> Envelope? {
+        let data: Data
+        do {
+            data = try BoundedFileReader.read(
+                url,
+                maximumBytes: UsageScanCacheDefaults.maximumEntryBytes
+            )
+        } catch {
+            // A cache that has never been written is the ordinary cold path, not a failure.
+            if fileManager.fileExists(atPath: url.path) {
+                recordFailure(.read)
+            }
+            return nil
+        }
+
+        do {
+            return try decoder.decode(Envelope.self, from: data)
+        } catch {
+            recordFailure(.decode)
+            return nil
+        }
+    }
+
+    private func persist(_ envelope: Envelope, at url: URL) {
+        let data: Data
+        do {
+            data = try encoder.encode(envelope)
+        } catch {
+            recordFailure(.encode)
+            return
+        }
+        guard data.count <= UsageScanCacheDefaults.maximumEntryBytes else {
+            recordFailure(.oversized)
+            return
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            recordFailure(.write)
+        }
+    }
+
+    private func recordFailure(_ stage: FailureStage) {
+        failureCounts[stage, default: 0] += 1
+    }
+
+    private func reportFailures() {
+        for stage in FailureStage.allCases {
+            guard let count = failureCounts[stage], count > 0 else { continue }
+            ThreadingLogger.usage.warning(
+                "Usage scan cache degraded stage=\(stage.rawValue, privacy: .public) count=\(count, privacy: .public)"
+            )
+        }
     }
 
     private func fingerprint(of source: URL) -> Fingerprint? {

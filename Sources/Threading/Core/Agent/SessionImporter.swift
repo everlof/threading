@@ -25,6 +25,11 @@ struct ImportableSession: Identifiable {
 /// but the CLI's own scaffolding has nothing to resume.
 enum SessionImporter {
 
+    private struct ScanBatch {
+        var sessions: [ImportableSession]
+        var failures: Int
+    }
+
     // MARK: - Public Methods
 
     /// Discovers conversations belonging to a project's folder, newest first.
@@ -36,11 +41,16 @@ enum SessionImporter {
         for project: Project,
         completion: @escaping @MainActor @Sendable ([ImportableSession]) -> Void
     ) {
+        let startedAt = Date()
         let folder = normalized(project.folderPath)
         let known = Set(project.sessions.compactMap { $0.resumeState.transcriptID })
         let replaySources = TranscriptReplayFormat.allCases.map { format in
             (format: format, accounts: AgentAccountDiscovery.accounts(for: format.kind))
         }
+        let accountCount = replaySources.reduce(0) { $0 + $1.accounts.count }
+        ThreadingLogger.agent.info(
+            "Project session import scan started project=\(project.id.uuidString, privacy: .public) formats=\(replaySources.count, privacy: .public) accounts=\(accountCount, privacy: .public)"
+        )
 
         DispatchQueue.global(qos: .userInitiated).async {
             // Resolve the project's worktree once, so a chat is attributed by which checkout
@@ -48,7 +58,7 @@ enum SessionImporter {
             // worktree nested inside the folder out of it — a different checkout, its own id.
             let worktree = GitInfo.worktreeIdentity(for: folder)
 
-            let found = replaySources.flatMap { source in
+            let batches = replaySources.map { source in
                 sessions(
                     inFolder: folder,
                     worktree: worktree,
@@ -56,12 +66,25 @@ enum SessionImporter {
                     accounts: source.accounts
                 )
             }
+            let found = batches.flatMap(\.sessions)
+            let failures = batches.reduce(0) { $0 + $1.failures }
 
             let result = deduplicated(
                 found
                     .filter { !known.contains($0.agentSessionID) }
                     .sorted { $0.lastActiveAt > $1.lastActiveAt }
             )
+
+            let durationMilliseconds = Int(Date().timeIntervalSince(startedAt) * 1_000)
+            if failures > 0 {
+                ThreadingLogger.agent.warning(
+                    "Project session import scan completed project=\(project.id.uuidString, privacy: .public) results=\(result.count, privacy: .public) failures=\(failures, privacy: .public) duration_ms=\(durationMilliseconds, privacy: .public)"
+                )
+            } else {
+                ThreadingLogger.agent.info(
+                    "Project session import scan completed project=\(project.id.uuidString, privacy: .public) results=\(result.count, privacy: .public) failures=0 duration_ms=\(durationMilliseconds, privacy: .public)"
+                )
+            }
 
             DispatchQueue.main.async { completion(result) }
         }
@@ -91,7 +114,7 @@ enum SessionImporter {
         worktree: String?,
         format: TranscriptReplayFormat,
         accounts: [AgentAccount]
-    ) -> [ImportableSession] {
+    ) -> ScanBatch {
         switch format {
         case .claude:
             return claudeSessions(inFolder: folder, worktree: worktree, accounts: accounts)
@@ -128,23 +151,36 @@ enum SessionImporter {
         inFolder folder: String,
         worktree: String?,
         accounts: [AgentAccount]
-    ) -> [ImportableSession] {
+    ) -> ScanBatch {
         let slug = folder.replacingOccurrences(
             of: "/",
             with: AgentDefaults.projectSlugSeparator
         )
 
-        return accounts.flatMap { account -> [ImportableSession] in
+        let fileManager = FileManager.default
+        var found: [ImportableSession] = []
+        var failures = 0
+        for account in accounts {
             let directory = URL(fileURLWithPath: account.configPath)
                 .appendingPathComponent(AgentDefaults.claudeProjectsSubdirectory)
                 .appendingPathComponent(slug)
 
-            guard let files = try? FileManager.default.contentsOfDirectory(
-                at: directory,
-                includingPropertiesForKeys: [.contentModificationDateKey]
-            ) else { return [] }
+            let files: [URL]
+            do {
+                files = try fileManager.contentsOfDirectory(
+                    at: directory,
+                    includingPropertiesForKeys: [.contentModificationDateKey]
+                )
+            } catch {
+                let cocoa = error as NSError
+                if cocoa.domain != NSCocoaErrorDomain
+                    || cocoa.code != CocoaError.fileReadNoSuchFile.rawValue {
+                    failures += 1
+                }
+                continue
+            }
 
-            return files.compactMap { url -> ImportableSession? in
+            found.append(contentsOf: files.compactMap { url -> ImportableSession? in
                 guard url.pathExtension == AgentDefaults.transcriptExtension else { return nil }
 
                 let info = claudeInfo(at: url)
@@ -163,8 +199,9 @@ enum SessionImporter {
                     title: title,
                     lastActiveAt: lastActivity(at: url)
                 )
-            }
+            })
         }
+        return ScanBatch(sessions: found, failures: failures)
     }
 
     /// A transcript's title and the directory it was launched in.
@@ -220,8 +257,11 @@ enum SessionImporter {
         inFolder folder: String,
         worktree: String?,
         accounts: [AgentAccount]
-    ) -> [ImportableSession] {
-        return accounts.flatMap { account -> [ImportableSession] in
+    ) -> ScanBatch {
+        let fileManager = FileManager.default
+        var found: [ImportableSession] = []
+        var failures = 0
+        for account in accounts {
             // One small account-wide read before the rollout walk. A retained Codex name lives
             // here rather than in the rollout, and using it during import avoids making a
             // dormant conversation wait for its first resume (or the next app launch) before
@@ -230,13 +270,16 @@ enum SessionImporter {
             let root = URL(fileURLWithPath: account.configPath)
                 .appendingPathComponent(AgentAccountDefaults.sessionsSubdirectory)
 
-            guard let enumerator = FileManager.default.enumerator(
+            guard let enumerator = fileManager.enumerator(
                 at: root,
                 includingPropertiesForKeys: [.contentModificationDateKey],
                 options: [.skipsHiddenFiles]
-            ) else { return [] }
+            ) else {
+                if fileManager.fileExists(atPath: root.path) { failures += 1 }
+                continue
+            }
 
-            return enumerator.compactMap { element -> ImportableSession? in
+            found.append(contentsOf: enumerator.compactMap { element -> ImportableSession? in
                 guard let url = element as? URL,
                       url.pathExtension == CodexDiscoveryDefaults.rolloutExtension,
                       url.lastPathComponent.hasPrefix(CodexDiscoveryDefaults.rolloutPrefix)
@@ -263,8 +306,9 @@ enum SessionImporter {
                     title: providerTitles[header.id] ?? promptTitle,
                     lastActiveAt: lastActivity(at: url)
                 )
-            }
+            })
         }
+        return ScanBatch(sessions: found, failures: failures)
     }
 
     /// Reads a rollout's `session_meta` header — its identifier and launch directory.

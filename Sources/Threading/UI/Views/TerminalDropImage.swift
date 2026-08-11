@@ -68,7 +68,7 @@ enum TerminalDropImage {
 
         guard let converted = writePNG(from: path) else {
             ThreadingLogger.session.error(
-                "Could not convert dropped image: \(path, privacy: .public)"
+                "Could not convert dropped image: \(path, privacy: .private(mask: .hash))"
             )
             return path
         }
@@ -123,7 +123,7 @@ enum TerminalDropImage {
             return destination.path
         } catch {
             ThreadingLogger.session.error(
-                "Failed to write converted drop: \(error.localizedDescription, privacy: .public)"
+                "Failed to write converted drop: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return nil
         }

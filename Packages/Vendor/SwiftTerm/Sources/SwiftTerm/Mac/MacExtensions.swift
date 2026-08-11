@@ -70,13 +70,14 @@ extension NSView {
        self.getRectsBeingDrawn(&rectsPtr, count: &count)
 
        return Array(UnsafeBufferPointer(start: rectsPtr, count: count))
-     }
+    }
     
     public func pending(_ msg: String = "PENDING RECTS") {
-        print (msg)
-        for x in rectsBeingDrawn() {
-            print ("   -> \(x)")
-        }
+        SwiftTermDiagnostics.emit(
+            .debug,
+            .uiDrawingInspectionSuppressed,
+            facts: ["rectangleCount": rectsBeingDrawn().count]
+        )
     }
 }
 extension NSAttributedString {

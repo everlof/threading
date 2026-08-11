@@ -105,7 +105,7 @@ enum ProjectIconStore {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             try png.write(to: directory.appendingPathComponent(fileName), options: .atomic)
         } catch {
-            ThreadingLogger.agent.error("Failed to store project icon: \(error.localizedDescription, privacy: .public)")
+            ThreadingLogger.agent.error("Failed to store project icon: \(error.localizedDescription, privacy: .private(mask: .hash))")
             throw ProjectIconStoreError.writeFailed
         }
 
@@ -153,7 +153,7 @@ enum ProjectIconStore {
             return true
         } catch {
             ThreadingLogger.agent.error(
-                "Failed to remove project icon: \(error.localizedDescription, privacy: .public)"
+                "Failed to remove project icon: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return false
         }

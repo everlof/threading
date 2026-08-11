@@ -229,11 +229,15 @@ final class MCPServer: @unchecked Sendable {
                 switch state {
                 case .ready:
                     self?.portStorage.withLock { $0 = listener.port?.rawValue }
-                    ThreadingLogger.mcp.info("MCP server listening on port \(listener.port?.rawValue ?? 0)")
+            ThreadingLogger.mcp.info(
+                "MCP server listening on port \(listener.port?.rawValue ?? 0, privacy: .public)"
+            )
                     finish()
 
                 case .failed(let error):
-                    ThreadingLogger.mcp.error("MCP server failed: \(error.localizedDescription)")
+            ThreadingLogger.mcp.error(
+                "MCP server failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
                     self?.portStorage.withLock { $0 = nil }
                     finish()
 
@@ -248,7 +252,9 @@ final class MCPServer: @unchecked Sendable {
 
             listener.start(queue: queue)
         } catch {
-            ThreadingLogger.mcp.error("MCP server could not start: \(error.localizedDescription)")
+            ThreadingLogger.mcp.error(
+                "MCP server could not start: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             finish()
         }
     }
@@ -394,7 +400,9 @@ final class MCPServer: @unchecked Sendable {
 
         DispatchQueue.main.async {
             PermissionBroker.decide(permissionRequest) { decision in
-                ThreadingLogger.mcp.info("permission \(toolName) for \(sessionID): \(String(describing: decision))")
+        ThreadingLogger.mcp.info(
+            "permission \(toolName, privacy: .public) for \(sessionID, privacy: .public): \(String(describing: decision), privacy: .public)"
+        )
                 reply(decision)
             }
         }
@@ -532,7 +540,9 @@ final class MCPServer: @unchecked Sendable {
 
             // Completion-based, since some tools (a page load, a DOM query) finish asynchronously.
             handler.handle(call, for: sessionID) { result in
-                ThreadingLogger.mcp.info("tools/call \(call.name) for \(sessionID): isError=\(result.isError)")
+        ThreadingLogger.mcp.info(
+            "tools/call \(call.name, privacy: .public) for \(sessionID, privacy: .public): isError=\(result.isError, privacy: .public)"
+        )
 
                 // A failing tool reports through `isError` in the result, not a protocol error:
                 // the call itself succeeded, and the agent should see why it did not work.

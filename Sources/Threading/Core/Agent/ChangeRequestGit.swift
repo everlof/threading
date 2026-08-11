@@ -47,7 +47,8 @@ enum ChangeRequestGit {
                 GitReviewCommands.common + [
                     "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"
                 ],
-                in: root
+                in: root,
+                reportsRejectedExit: false
             ))
             let counts = upstream.flatMap { _ in
                 try? trimmed(GitProcess.run(

@@ -71,9 +71,11 @@ public final class BufferLine: CustomDebugStringConvertible {
         }
         set(value) {
             if index >= dataSize {
-                // All bugs I was aware of have been handled, but keep this message here to
-                // help future refactorings.
-                print("BufferLine: You passed an index out of range, adjusting to prevent crash, but you should debug")
+                SwiftTermDiagnostics.emit(
+                    .fault,
+                    .bufferBoundsCorrected,
+                    facts: ["index": index, "size": dataSize]
+                )
                 data[dataSize-1] = value
             } else {
                 data[index] = value
@@ -275,4 +277,3 @@ public final class BufferLine: CustomDebugStringConvertible {
         }
     }
 }
-

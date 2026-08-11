@@ -43,7 +43,7 @@ enum CodexHookInstaller {
             ), let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else {
                 ThreadingLogger.agent.error(
-                    "Refusing to replace unreadable Codex hooks in \(codexHome, privacy: .public)"
+                    "Refusing to replace unreadable Codex hooks in \(codexHome, privacy: .private(mask: .hash))"
                 )
                 return false
             }
@@ -57,7 +57,7 @@ enum CodexHookInstaller {
         let merged = merging(into: existing)
 
         guard !isEquivalent(merged, existing) else {
-            ThreadingLogger.agent.debug("Codex hooks already current in \(codexHome, privacy: .public)")
+            ThreadingLogger.agent.debug("Codex hooks already current in \(codexHome, privacy: .private(mask: .hash))")
             return false
         }
 
@@ -85,14 +85,16 @@ enum CodexHookInstaller {
             // Durable, because of what a rewrite *costs*: Codex pins a trusted hook by hashing
             // its text, so this line is the moment the user's approval stopped applying and
             // their hooks went quiet. It is the answer to "these worked yesterday".
-            ThreadingLogger.agent.info("Installed Codex hooks in \(codexHome, privacy: .public)")
+            ThreadingLogger.agent.info("Installed Codex hooks in \(codexHome, privacy: .private(mask: .hash))")
             EventLog.shared.record(.hooks, "Rewrote Codex hooks, trust must be renewed", [
                 "codexHome": codexHome,
                 "existed": existing.isEmpty ? "no" : "yes"
             ])
             return true
         } catch {
-            ThreadingLogger.agent.error("Failed to install Codex hooks: \(error.localizedDescription)")
+            ThreadingLogger.agent.error(
+                "Failed to install Codex hooks: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             EventLog.shared.record(.hooks, "Failed to install Codex hooks", [
                 "codexHome": codexHome,
                 "error": error.localizedDescription

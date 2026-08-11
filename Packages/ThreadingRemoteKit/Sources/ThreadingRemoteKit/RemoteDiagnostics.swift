@@ -318,11 +318,56 @@ public enum RemoteDiagnosticUploadPolicy {
     }
 }
 
+/// A content-free storage health event from the diagnostic journal itself.
+///
+/// The journal cannot record its own failure into itself. Embedders receive this separate,
+/// non-recursive signal and may send it to their platform logger. No path or error description is
+/// representable here because either may contain a bearer or other user data.
+public struct RemoteDiagnosticJournalStorageEvent: Sendable, Equatable {
+    public enum Outcome: String, Sendable {
+        case failed
+        case recovered
+    }
+
+    public enum Stage: String, Sendable {
+        case encoding
+        case recordTooLarge = "record_too_large"
+        case directory
+        case fileCreation = "file_creation"
+        case fileOpen = "file_open"
+        case seek
+        case write
+        case close
+        case enumerate
+        case metadata
+        case decode
+        case retention
+        case read
+    }
+
+    public enum ErrorDomain: String, Sendable {
+        case none
+        case posix
+        case cocoa
+        case other
+    }
+
+    public let outcome: Outcome
+    public let stage: Stage
+    public let errorDomain: ErrorDomain
+    public let errorCode: Int
+    public let affectedCount: Int
+}
+
 /// A small synchronous journal for post-mortem support reports.
 ///
 /// Remote lifecycle produces a few records per state transition, not per terminal byte. A
 /// synchronous append therefore buys crash resilience without becoming a hot-path cost.
 public final class RemoteDiagnosticJournal: @unchecked Sendable {
+    public typealias StorageEventHandler = @Sendable (
+        RemoteDiagnosticJournalStorageEvent
+    ) -> Void
+
     static let maximumJournalReadBytes = 8 * 1_024 * 1_024
     static let maximumRecordBytes = 64 * 1_024
     static let maximumJournalDirectoryEntries = 256
@@ -333,10 +378,19 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
 
     private let retention: TimeInterval
     private let maximumReportRecords: Int
+    private let storageEventHandler: StorageEventHandler?
     private let queue = DispatchQueue(label: "codes.threading.remote-diagnostics")
     private var openDay: String?
     private var openHandle: FileHandle?
     private var didPrune = false
+    private var failedStorageStages = Set<RemoteDiagnosticJournalStorageEvent.Stage>()
+    private var reportedFailedStorageStages = Set<
+        RemoteDiagnosticJournalStorageEvent.Stage
+    >()
+    private var lastStorageFailureNanoseconds: [
+        RemoteDiagnosticJournalStorageEvent.Stage: UInt64
+    ] = [:]
+    private let storageEventIntervalNanoseconds: UInt64 = 60_000_000_000
 
     private lazy var timestampFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -361,7 +415,8 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         directory: URL,
         source: RemoteDiagnosticSource,
         retention: TimeInterval = 7 * 24 * 60 * 60,
-        maximumReportRecords: Int = 5_000
+        maximumReportRecords: Int = 5_000,
+        storageEventHandler: StorageEventHandler? = nil
     ) {
         precondition(retention >= 0)
         precondition(maximumReportRecords >= 0)
@@ -369,6 +424,7 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         self.source = source
         self.retention = retention
         self.maximumReportRecords = maximumReportRecords
+        self.storageEventHandler = storageEventHandler
     }
 
     @discardableResult
@@ -429,15 +485,29 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
                 didPrune = true
             }
             let urls = journalURLs()
+            var rejectedRecordCount = 0
             let decoded = urls.flatMap { url -> [RemoteDiagnosticRecord] in
-                guard let data = Self.boundedJournalSuffix(at: url) else { return [] }
+                guard let data = boundedJournalSuffix(at: url) else { return [] }
                 return data.split(separator: 0x0A).compactMap {
-                    guard $0.count <= Self.maximumRecordBytes else { return nil }
-                    return try? JSONDecoder().decode(
-                        RemoteDiagnosticRecord.self,
-                        from: Data($0)
-                    )
+                    guard $0.count <= Self.maximumRecordBytes else {
+                        rejectedRecordCount += 1
+                        return nil
+                    }
+                    do {
+                        return try JSONDecoder().decode(
+                            RemoteDiagnosticRecord.self,
+                            from: Data($0)
+                        )
+                    } catch {
+                        rejectedRecordCount += 1
+                        return nil
+                    }
                 }
+            }
+            if rejectedRecordCount > 0 {
+                reportStorageFailure(.decode, affectedCount: rejectedRecordCount)
+            } else {
+                reportStorageRecovery(.decode)
             }
             let ordered = decoded.enumerated().sorted { lhs, rhs in
                 let lhsDate = timestampFormatter.date(from: lhs.element.timestamp)
@@ -501,68 +571,165 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
     }
 
     private func append(_ record: RemoteDiagnosticRecord) {
-        guard let data = try? JSONEncoder().encode(record),
-              data.count <= Self.maximumRecordBytes,
-              let handle = handle(forDay: dayFormatter.string(from: Date())) else {
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(record)
+            reportStorageRecovery(.encoding)
+        } catch {
+            reportStorageFailure(.encoding, error: error)
+            return
+        }
+        guard data.count <= Self.maximumRecordBytes else {
+            reportStorageFailure(.recordTooLarge, affectedCount: data.count)
+            return
+        }
+        reportStorageRecovery(.recordTooLarge)
+        guard let handle = handle(forDay: dayFormatter.string(from: Date())) else {
             return
         }
         do {
             try handle.write(contentsOf: data + Data([0x0A]))
+            reportStorageRecovery(.write)
         } catch {
-            // Diagnostics must never become a reason for the app itself to fail.
+            reportStorageFailure(.write, error: error)
+            closeOpenHandle()
         }
     }
 
     private func handle(forDay day: String) -> FileHandle? {
         if openDay == day, let openHandle { return openHandle }
-        try? openHandle?.close()
-        openHandle = nil
-        openDay = nil
+        closeOpenHandle()
 
-        try? FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
+        do {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            reportStorageRecovery(.directory)
+        } catch {
+            reportStorageFailure(.directory, error: error)
+            return nil
+        }
         let url = journalURL(day: day)
         if !FileManager.default.fileExists(atPath: url.path) {
-            FileManager.default.createFile(atPath: url.path, contents: nil)
+            guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
+                reportStorageFailure(.fileCreation)
+                return nil
+            }
         }
-        guard let handle = try? FileHandle(forWritingTo: url) else { return nil }
-        handle.seekToEndOfFile()
+        reportStorageRecovery(.fileCreation)
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forWritingTo: url)
+            reportStorageRecovery(.fileOpen)
+        } catch {
+            reportStorageFailure(.fileOpen, error: error)
+            return nil
+        }
+        do {
+            try handle.seekToEnd()
+            reportStorageRecovery(.seek)
+        } catch {
+            reportStorageFailure(.seek, error: error)
+            do {
+                try handle.close()
+                reportStorageRecovery(.close)
+            } catch {
+                reportStorageFailure(.close, error: error)
+            }
+            return nil
+        }
         openDay = day
         openHandle = handle
         return handle
     }
 
-    private func pruneExpiredJournals() {
-        let cutoff = Date().addingTimeInterval(-retention)
-        for url in journalURLs() {
-            guard let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey])
-                .contentModificationDate, modified < cutoff else {
-                continue
-            }
-            try? FileManager.default.removeItem(at: url)
+    private func closeOpenHandle() {
+        let handle = openHandle
+        openHandle = nil
+        openDay = nil
+        guard let handle else { return }
+        do {
+            try handle.close()
+            reportStorageRecovery(.close)
+        } catch {
+            reportStorageFailure(.close, error: error)
         }
     }
 
+    private func pruneExpiredJournals() {
+        let cutoff = Date().addingTimeInterval(-retention)
+        var metadataFailed = false
+        var retentionFailed = false
+        for url in journalURLs() {
+            let modified: Date?
+            do {
+                modified = try url.resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate
+            } catch {
+                metadataFailed = true
+                reportStorageFailure(.metadata, error: error)
+                continue
+            }
+            guard let modified, modified < cutoff else {
+                continue
+            }
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                retentionFailed = true
+                reportStorageFailure(.retention, error: error)
+            }
+        }
+        if !metadataFailed { reportStorageRecovery(.metadata) }
+        if !retentionFailed { reportStorageRecovery(.retention) }
+    }
+
     private func journalURLs() -> [URL] {
-        guard let urls = try? RemoteBoundedDirectoryReader.shallowContents(
-            of: directory,
-            includingPropertiesForKeys: [
-                .contentModificationDateKey,
-                .isRegularFileKey,
-                .isSymbolicLinkKey,
-            ],
-            maximumEntries: Self.maximumJournalDirectoryEntries
-        ) else { return [] }
-        return urls
-            .filter {
-                let values = try? $0.resourceValues(forKeys: [
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(
+            atPath: directory.path,
+            isDirectory: &isDirectory
+        ) else {
+            reportStorageRecovery(.enumerate)
+            return []
+        }
+        guard isDirectory.boolValue else {
+            reportStorageFailure(.enumerate)
+            return []
+        }
+        let urls: [URL]
+        do {
+            urls = try RemoteBoundedDirectoryReader.shallowContents(
+                of: directory,
+                includingPropertiesForKeys: [
+                    .contentModificationDateKey,
                     .isRegularFileKey,
                     .isSymbolicLinkKey,
-                ])
-                guard values?.isRegularFile == true,
-                      values?.isSymbolicLink != true else { return false }
+                ],
+                maximumEntries: Self.maximumJournalDirectoryEntries
+            )
+            reportStorageRecovery(.enumerate)
+        } catch {
+            reportStorageFailure(.enumerate, error: error)
+            return []
+        }
+        var metadataFailed = false
+        let result = urls
+            .filter {
+                let values: URLResourceValues
+                do {
+                    values = try $0.resourceValues(forKeys: [
+                        .isRegularFileKey,
+                        .isSymbolicLinkKey,
+                    ])
+                } catch {
+                    metadataFailed = true
+                    reportStorageFailure(.metadata, error: error)
+                    return false
+                }
+                guard values.isRegularFile == true,
+                      values.isSymbolicLink != true else { return false }
                 let name = $0.deletingPathExtension().lastPathComponent
                 let prefix = "remote-diagnostics-"
                 guard $0.pathExtension == "jsonl", name.hasPrefix(prefix) else { return false }
@@ -573,6 +740,8 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
                 }
             }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        if !metadataFailed { reportStorageRecovery(.metadata) }
+        return result
     }
 
     private func journalURL(day: String) -> URL {
@@ -582,28 +751,113 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
     /// Reads only the newest bounded suffix. Reports retain their newest records, so walking a
     /// multi-day journal from byte zero did unbounded work for data the final `suffix` discarded
     /// anyway. If the read begins mid-record, that fragment is dropped before JSON decoding.
-    private static func boundedJournalSuffix(at url: URL) -> Data? {
-        let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
-        guard values?.isRegularFile == true,
-              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
+    private func boundedJournalSuffix(at url: URL) -> Data? {
+        let values: URLResourceValues
+        do {
+            values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            reportStorageRecovery(.metadata)
+        } catch {
+            reportStorageFailure(.metadata, error: error)
+            return nil
+        }
+        guard values.isRegularFile == true else { return nil }
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forReadingFrom: url)
+            reportStorageRecovery(.fileOpen)
+        } catch {
+            reportStorageFailure(.fileOpen, error: error)
+            return nil
+        }
+        defer {
+            do {
+                try handle.close()
+                reportStorageRecovery(.close)
+            } catch {
+                reportStorageFailure(.close, error: error)
+            }
+        }
 
         do {
             let end = try handle.seekToEnd()
-            let allowance = UInt64(maximumJournalReadBytes)
+            let allowance = UInt64(Self.maximumJournalReadBytes)
             let start = end > allowance ? end - allowance : 0
             try handle.seek(toOffset: start)
-            guard var data = try handle.read(upToCount: maximumJournalReadBytes) else {
+            guard var data = try handle.read(upToCount: Self.maximumJournalReadBytes) else {
                 return nil
             }
             if start > 0 {
                 guard let newline = data.firstIndex(of: 0x0A) else { return Data() }
                 data.removeSubrange(data.startIndex...newline)
             }
+            reportStorageRecovery(.read)
             return data
         } catch {
+            reportStorageFailure(.read, error: error)
             return nil
         }
+    }
+
+    private func reportStorageFailure(
+        _ stage: RemoteDiagnosticJournalStorageEvent.Stage,
+        error: Error? = nil,
+        affectedCount: Int = 1
+    ) {
+        let now = DispatchTime.now().uptimeNanoseconds
+        failedStorageStages.insert(stage)
+        if let previous = lastStorageFailureNanoseconds[stage],
+           now &- previous < storageEventIntervalNanoseconds {
+            return
+        }
+        reportedFailedStorageStages.insert(stage)
+        lastStorageFailureNanoseconds[stage] = now
+        emitStorageEvent(
+            outcome: .failed,
+            stage: stage,
+            error: error,
+            affectedCount: affectedCount
+        )
+    }
+
+    private func reportStorageRecovery(
+        _ stage: RemoteDiagnosticJournalStorageEvent.Stage
+    ) {
+        guard failedStorageStages.remove(stage) != nil else { return }
+        guard reportedFailedStorageStages.remove(stage) != nil else { return }
+        emitStorageEvent(
+            outcome: .recovered,
+            stage: stage,
+            error: nil,
+            affectedCount: 0
+        )
+    }
+
+    private func emitStorageEvent(
+        outcome: RemoteDiagnosticJournalStorageEvent.Outcome,
+        stage: RemoteDiagnosticJournalStorageEvent.Stage,
+        error: Error?,
+        affectedCount: Int
+    ) {
+        guard let storageEventHandler else { return }
+        let nsError = error as NSError?
+        let domain: RemoteDiagnosticJournalStorageEvent.ErrorDomain
+        switch nsError?.domain {
+        case NSPOSIXErrorDomain:
+            domain = .posix
+        case NSCocoaErrorDomain:
+            domain = .cocoa
+        case nil:
+            domain = .none
+        default:
+            domain = .other
+        }
+        storageEventHandler(RemoteDiagnosticJournalStorageEvent(
+            outcome: outcome,
+            stage: stage,
+            errorDomain: domain,
+            errorCode: nsError?.code ?? 0,
+            affectedCount: max(affectedCount, 0)
+        ))
     }
 
     private static func safeValue(_ value: String) -> String {

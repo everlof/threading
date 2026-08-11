@@ -130,14 +130,14 @@ enum CommitMessageComposer {
             )
         } catch {
             ThreadingLogger.agent.error(
-                "Commit draft launch failed: \(error.localizedDescription, privacy: .public)"
+                "Commit draft launch failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return (nil, .launchFailed)
         }
 
         let output = String(decoding: result.output, as: UTF8.self)
         ThreadingLogger.agent.info(
-            "Commit draft child finished: \(String(describing: result.termination), privacy: .public), \(result.output.count) retained output bytes, truncated=\(result.outputWasTruncated, privacy: .public)"
+            "Commit draft child finished: \(String(describing: result.termination), privacy: .public), \(result.output.count, privacy: .public) retained output bytes, truncated=\(result.outputWasTruncated, privacy: .public)"
         )
 
         switch result.termination {

@@ -3567,7 +3567,7 @@ extension BrowserViewController: WKNavigationDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        ThreadingLogger.mcp.error("Browser web content process terminated; reloading")
+        ThreadingLogger.browser.warning("Browser web content process terminated; reloading")
         webView.reload()
     }
 

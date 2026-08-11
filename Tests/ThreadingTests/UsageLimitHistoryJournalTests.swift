@@ -42,11 +42,43 @@ final class UsageLimitHistoryJournalTests: XCTestCase {
         let loaded = await journal.load(now: now)
         XCTAssertEqual(loaded.resets, [event])
 
-        await journal.deleteHistory()
+        let deleted = await journal.deleteHistory()
+        XCTAssertTrue(deleted)
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.path))
         XCTAssertTrue(
             try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty
         )
+    }
+
+    func testAppendFailsRatherThanSilentlyDroppingHistoryWhenDirectoryIsBlocked() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("usage-limit-journal-blocked-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("not a directory".utf8).write(to: directory)
+
+        let journal = UsageLimitHistoryJournal(directory: directory)
+        do {
+            try await journal.append(
+                samples: [sample(at: Date(), fraction: 0.5)],
+                resets: [],
+                now: Date()
+            )
+            XCTFail("a blocked private journal directory must fail the append")
+        } catch {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: directory.path))
+        }
+    }
+
+    func testDeleteFailureIsReportedRatherThanCachedAsAnEmptyJournal() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("usage-limit-delete-blocked-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("not a directory".utf8).write(to: directory)
+
+        let deleted = await UsageLimitHistoryJournal(directory: directory).deleteHistory()
+
+        XCTAssertFalse(deleted)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.path))
     }
 
     private func sample(at: Date, fraction: Double) -> UsageSample {

@@ -413,7 +413,7 @@ final class ExtensionPackageStore: @unchecked Sendable {
                 try fileManager.removeItem(at: outgoing)
             } catch {
                 ThreadingLogger.extensions.error(
-                    "Updated \(identifier, privacy: .public), but its replaced package could not be removed: \(error.localizedDescription, privacy: .public)"
+                    "Updated \(identifier, privacy: .public), but its replaced package could not be removed: \(error.localizedDescription, privacy: .private(mask: .hash))"
                 )
             }
             return installed
@@ -494,15 +494,27 @@ final class ExtensionPackageStore: @unchecked Sendable {
         // The package has already moved at this point. A storage recovery failure must not make
         // callers believe the uninstall failed and keep stale UI state; private data remains in
         // its original host-owned directory and is therefore still recoverable.
-        try? storageStore.recover(identifier: identifier, alongside: destination)
+        do {
+            try storageStore.recover(identifier: identifier, alongside: destination)
+        } catch {
+            ThreadingLogger.extensions.warning(
+                "Extension uninstall could not move private storage identifier=\(identifier, privacy: .public) recovery=\(destination.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+        }
         let provenance = provenanceFileURL(identifier: identifier)
         if fileManager.fileExists(atPath: provenance.path) {
-            try? fileManager.moveItem(
-                at: provenance,
-                to: destination
-                    .deletingPathExtension()
-                    .appendingPathExtension("provenance.json")
-            )
+            do {
+                try fileManager.moveItem(
+                    at: provenance,
+                    to: destination
+                        .deletingPathExtension()
+                        .appendingPathExtension("provenance.json")
+                )
+            } catch {
+                ThreadingLogger.extensions.warning(
+                    "Extension uninstall could not move provenance identifier=\(identifier, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
         }
         return destination
     }

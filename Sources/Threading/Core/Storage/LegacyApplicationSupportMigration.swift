@@ -107,7 +107,7 @@ enum LegacyApplicationSupportMigration {
         // adopting did not arrive — a full disk or a torn hot copy should get another launch,
         // not be recorded as a migration that happened.
         if legacyHasDatabase && !outcome.adoptedDatabase {
-            ThreadingLogger.agent.error(
+            ThreadingLogger.storage.error(
                 "Leaving the pre-rename adoption unmarked so the next launch tries again"
             )
         } else {
@@ -115,7 +115,7 @@ enum LegacyApplicationSupportMigration {
         }
 
         if outcome.didAdoptAnything {
-            ThreadingLogger.agent.info(
+            ThreadingLogger.storage.info(
                 """
                 Adopted \(outcome.adoptedFileCount, privacy: .public) file(s) and \
                 \(outcome.adoptedDatabase ? "the database" : "no database", privacy: .public) \
@@ -146,10 +146,10 @@ enum LegacyApplicationSupportMigration {
         } catch {
             // An unreadable store is not evidence that the user has work here, but it is also
             // not something to overwrite on a guess. `StateManager` owns quarantining it.
-            ThreadingLogger.agent.error(
+            ThreadingLogger.storage.error(
                 """
                 Could not read the current store while considering the pre-rename directory: \
-                \(error.localizedDescription, privacy: .public)
+                \(error.localizedDescription, privacy: .private(mask: .hash))
                 """
             )
             return false
@@ -188,10 +188,10 @@ enum LegacyApplicationSupportMigration {
                 try fileManager.copyItem(at: source, to: destination)
                 adopted += 1
             } catch {
-                ThreadingLogger.agent.error(
+                ThreadingLogger.storage.error(
                     """
-                    Could not adopt \(relative, privacy: .public) from the pre-rename directory: \
-                    \(error.localizedDescription, privacy: .public)
+                    Could not adopt \(relative, privacy: .private(mask: .hash)) from the pre-rename directory: \
+                    \(error.localizedDescription, privacy: .private(mask: .hash))
                     """
                 )
             }
@@ -228,10 +228,10 @@ enum LegacyApplicationSupportMigration {
                 try fileManager.copyItem(at: from, to: to)
                 written.append(to)
             } catch {
-                ThreadingLogger.agent.error(
+                ThreadingLogger.storage.error(
                     """
                     Could not adopt the pre-rename database: \
-                    \(error.localizedDescription, privacy: .public)
+                    \(error.localizedDescription, privacy: .private(mask: .hash))
                     """
                 )
                 written.forEach { try? fileManager.removeItem(at: $0) }
@@ -242,7 +242,7 @@ enum LegacyApplicationSupportMigration {
         // Opened *and* read: opening a torn file can succeed on its header alone, and the
         // question being asked is whether the projects arrived.
         guard (try? ProjectDatabase(url: destination).load()) != nil else {
-            ThreadingLogger.agent.error(
+            ThreadingLogger.storage.error(
                 "The pre-rename database did not read back after being copied; leaving a fresh store"
             )
             written.forEach { try? fileManager.removeItem(at: $0) }

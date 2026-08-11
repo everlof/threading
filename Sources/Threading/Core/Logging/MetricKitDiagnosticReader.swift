@@ -192,7 +192,7 @@ struct MetricKitDiagnosticReader {
         } catch {
             // A directory-level read failure is an error, not an empty inventory.
             ThreadingLogger.performance.error(
-                "MetricKit diagnostics unreadable: \(error.localizedDescription, privacy: .public)"
+                "MetricKit diagnostics unreadable: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return .unreadable(payloadFiles: 0)
         }

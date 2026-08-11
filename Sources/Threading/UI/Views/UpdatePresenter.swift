@@ -313,7 +313,9 @@ final class UpdatePresenter: UpdatePresenting {
     ) {
         let acknowledgeOnce = Self.once(acknowledge)
         guard hostWindow() != nil else {
-            ThreadingLogger.updates.info("Update verdict with no window: \(message, privacy: .public)")
+            ThreadingLogger.updates.info(
+                "Update verdict with no window: \(message, privacy: .private(mask: .hash))"
+            )
             acknowledgeOnce()
             return
         }

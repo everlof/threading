@@ -44,6 +44,54 @@ final class EventLogTests: XCTestCase {
         XCTAssertEqual(messages, ["first", "second"])
     }
 
+    /// A diagnostics failure is not permanent just because the first append found it. The next
+    /// lifecycle boundary retries the directory and descriptor instead of retaining a dead
+    /// handle or silently disabling the journal for the process lifetime.
+    func testRecordRecoversAfterItsDirectoryBecomesWritable() throws {
+        let blocked = testDirectory.appendingPathComponent("blocked")
+        try Data("not a directory".utf8).write(to: blocked)
+        let log = EventLog(directory: blocked)
+
+        log.record(.app, "lost while blocked")
+
+        try FileManager.default.removeItem(at: blocked)
+        try FileManager.default.createDirectory(at: blocked, withIntermediateDirectories: true)
+        log.record(.app, "written after recovery")
+
+        let contents = try String(contentsOf: log.currentJournalURL, encoding: .utf8)
+        let messages = try contents.split(separator: "\n").map { line -> String? in
+            let object = try JSONSerialization.jsonObject(with: Data(line.utf8))
+            return (object as? [String: Any])?["message"] as? String
+        }
+        XCTAssertEqual(messages, ["written after recovery"])
+    }
+
+    /// The launch marker is the crash detector, so recovering only the journal is insufficient.
+    /// Once storage returns, an ordinary later record repairs the marker without requiring a
+    /// second call to `beginLaunch` (which is deliberately a no-op).
+    func testARecordRepairsAMarkerThatStartupCouldNotWrite() throws {
+        let blocked = testDirectory.appendingPathComponent("blocked-marker")
+        try Data("not a directory".utf8).write(to: blocked)
+        let log = EventLog(directory: blocked)
+
+        log.beginLaunch()
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: blocked.appendingPathComponent(EventLogDefaults.markerFileName).path
+            )
+        )
+
+        try FileManager.default.removeItem(at: blocked)
+        try FileManager.default.createDirectory(at: blocked, withIntermediateDirectories: true)
+        log.record(.app, "storage returned")
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: blocked.appendingPathComponent(EventLogDefaults.markerFileName).path
+            )
+        )
+    }
+
     /// The point of the whole mechanism: a launch that never reached `endLaunch` is reported
     /// by the *next* one, because its marker is still lying there.
     func testLaunchWithoutAQuitIsReportedByTheNextLaunch() throws {

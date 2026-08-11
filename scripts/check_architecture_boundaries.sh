@@ -7,6 +7,10 @@ script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_directory="$(cd "${script_directory}/.." && pwd)"
 failed=0
 
+if ! python3 "${script_directory}/check_logging_boundaries.py" "${repository_directory}"; then
+  failed=1
+fi
+
 tool_handlers=(
   "${repository_directory}"/Sources/Threading/UI/Windows/AgentToolCoordinator+*.swift
 )

@@ -233,6 +233,7 @@ struct RemoteBrowserFollowView: View {
         } catch is CancellationError {
             return
         } catch {
+            MobileDiagnostics.logDegraded(.browserTabs, error: error)
             preview = nil
             loadError = error.localizedDescription
         }
@@ -265,6 +266,7 @@ struct RemoteBrowserFollowView: View {
         } catch is CancellationError {
             return
         } catch {
+            MobileDiagnostics.logDegraded(.browserPreview, error: error)
             if selectedTabID == tab.id {
                 preview = nil
                 loadError = error.localizedDescription

@@ -1,8 +1,51 @@
 import CryptoKit
+import OSLog
 import ThreadingRemoteKit
 import SwiftUI
 import UIKit
 import UserNotifications
+
+private let mobileDiagnosticLogger = Logger(
+    subsystem: "codes.threading.mobile",
+    category: "diagnostics"
+)
+
+/// Fixed operation names for the local unified-log fallback.
+///
+/// The enum prevents a caller from accidentally putting a URL, host name, session title, or
+/// other user-controlled value in a public log field. Error values are reduced to the same
+/// structural codes used by the share-safe journal.
+enum MobileDiagnosticSurface: String {
+    case attachmentList = "attachment_list"
+    case attachmentMetadata = "attachment_metadata"
+    case attachmentContent = "attachment_content"
+    case browserTabs = "browser_tabs"
+    case browserPreview = "browser_preview"
+    case continuityStorage = "continuity_storage"
+    case extensionPanelLoad = "extension_panel_load"
+    case extensionPanelAction = "extension_panel_action"
+    case gitReview = "git_review"
+    case gitRepositoryFiles = "git_repository_files"
+    case gitRepositoryFile = "git_repository_file"
+    case hostStorage = "host_storage"
+    case issueReportDelivery = "issue_report_delivery"
+    case issueReportExport = "issue_report_export"
+    case keyboardStorage = "keyboard_storage"
+    case sessionAction = "session_action"
+    case themeSelection = "theme_selection"
+}
+
+enum MobileDiagnosticFailureCode: String {
+    case decode = "decode"
+    case encode = "encode"
+    case newerFormat = "newer_format"
+    case validation = "validation"
+    case writeVerification = "write_verification"
+}
+
+enum MobileDiagnosticErrorDomain: String {
+    case keychain
+}
 
 enum MobileDiagnostics {
     static let journal = RemoteDiagnosticJournal(
@@ -10,7 +53,10 @@ enum MobileDiagnostics {
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Threading", isDirectory: true)
             .appendingPathComponent("Diagnostics", isDirectory: true),
-        source: .iOSClient
+        source: .iOSClient,
+        storageEventHandler: { event in
+            reportMobileDiagnosticStorageEvent(event)
+        }
     )
     @MainActor static let sharing = MobileDiagnosticSharingController()
 
@@ -56,6 +102,53 @@ enum MobileDiagnostics {
         return "other.\(cocoa.code)"
     }
 
+    /// Records an operation that failed at its user-visible boundary without logging the
+    /// localized error text. Foundation error descriptions frequently contain request URLs,
+    /// file paths, host names, or credential-bearing fragments.
+    static func logFailure(_ surface: MobileDiagnosticSurface, error: Error) {
+        mobileDiagnosticLogger.error(
+            "Mobile operation failed surface=\(surface.rawValue, privacy: .public) code=\(errorCode(error), privacy: .public)"
+        )
+    }
+
+    /// Records a fixed validation or persistence outcome which has no underlying `Error`.
+    static func logFailure(
+        _ surface: MobileDiagnosticSurface,
+        code: MobileDiagnosticFailureCode
+    ) {
+        mobileDiagnosticLogger.error(
+            "Mobile operation failed surface=\(surface.rawValue, privacy: .public) code=\(code.rawValue, privacy: .public)"
+        )
+    }
+
+    static func logFailure(
+        _ surface: MobileDiagnosticSurface,
+        domain: MobileDiagnosticErrorDomain,
+        code: Int
+    ) {
+        mobileDiagnosticLogger.error(
+            "Mobile operation failed surface=\(surface.rawValue, privacy: .public) domain=\(domain.rawValue, privacy: .public) code=\(code, privacy: .public)"
+        )
+    }
+
+    /// A recoverable request failure where the screen remains usable and already presents a
+    /// retry affordance. This is a warning rather than an error because offline operation is
+    /// expected for a remote client.
+    static func logDegraded(_ surface: MobileDiagnosticSurface, error: Error) {
+        mobileDiagnosticLogger.warning(
+            "Mobile operation degraded surface=\(surface.rawValue, privacy: .public) code=\(errorCode(error), privacy: .public)"
+        )
+    }
+
+    static func logDegraded(
+        _ surface: MobileDiagnosticSurface,
+        code: MobileDiagnosticFailureCode
+    ) {
+        mobileDiagnosticLogger.warning(
+            "Mobile operation degraded surface=\(surface.rawValue, privacy: .public) code=\(code.rawValue, privacy: .public)"
+        )
+    }
+
     static func supportReport(
         additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
     ) throws -> URL {
@@ -67,6 +160,32 @@ enum MobileDiagnostics {
             protocolVersion: RemoteProtocol.current,
             minimumProtocolVersion: RemoteProtocol.minimumSupported,
             additionalDetails: additionalDetails
+        )
+    }
+}
+
+private func reportMobileDiagnosticStorageEvent(
+    _ event: RemoteDiagnosticJournalStorageEvent
+) {
+    if event.outcome == .recovered {
+        mobileDiagnosticLogger.notice(
+            "Remote diagnostic journal storage recovered stage=\(event.stage.rawValue, privacy: .public)"
+        )
+        return
+    }
+
+    switch event.stage {
+    case .encoding:
+        mobileDiagnosticLogger.fault(
+            "Remote diagnostic journal storage failed stage=\(event.stage.rawValue, privacy: .public) domain=\(event.errorDomain.rawValue, privacy: .public) code=\(event.errorCode, privacy: .public) affected=\(event.affectedCount, privacy: .public)"
+        )
+    case .directory, .fileCreation, .fileOpen, .seek, .write, .read:
+        mobileDiagnosticLogger.error(
+            "Remote diagnostic journal storage failed stage=\(event.stage.rawValue, privacy: .public) domain=\(event.errorDomain.rawValue, privacy: .public) code=\(event.errorCode, privacy: .public) affected=\(event.affectedCount, privacy: .public)"
+        )
+    case .recordTooLarge, .close, .enumerate, .metadata, .decode, .retention:
+        mobileDiagnosticLogger.warning(
+            "Remote diagnostic journal storage failed stage=\(event.stage.rawValue, privacy: .public) domain=\(event.errorDomain.rawValue, privacy: .public) code=\(event.errorCode, privacy: .public) affected=\(event.affectedCount, privacy: .public)"
         )
     }
 }

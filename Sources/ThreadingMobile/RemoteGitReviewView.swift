@@ -382,6 +382,7 @@ struct RemoteGitReviewView: View {
             return
         } catch {
             guard requestedMode == mode else { return }
+            MobileDiagnostics.logDegraded(.gitReview, error: error)
             snapshot = nil
             errorMessage = error.localizedDescription
         }
@@ -410,6 +411,7 @@ struct RemoteGitReviewView: View {
         } catch is CancellationError {
             return
         } catch {
+            MobileDiagnostics.logDegraded(.gitRepositoryFiles, error: error)
             repositoryFiles = nil
             errorMessage = error.localizedDescription
         }
@@ -443,6 +445,7 @@ struct RemoteGitReviewView: View {
         } catch is CancellationError {
             return
         } catch {
+            MobileDiagnostics.logDegraded(.gitRepositoryFile, error: error)
             errorMessage = error.localizedDescription
         }
     }

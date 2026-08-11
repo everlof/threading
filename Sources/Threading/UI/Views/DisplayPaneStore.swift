@@ -139,7 +139,7 @@ final class DisplayPaneStore {
     } catch {
       if quarantined.insert(sessionID).inserted {
         ThreadingLogger.mcp.error(
-          "Display panel could not be read and will not be overwritten: \(error.localizedDescription, privacy: .public)"
+          "Display panel could not be read and will not be overwritten: \(error.localizedDescription, privacy: .private(mask: .hash))"
         )
       }
       return nil
@@ -239,7 +239,9 @@ final class DisplayPaneStore {
       let data = try encoder.encode(panel)
       StateManager.shared.savePanelPayload(String(decoding: data, as: UTF8.self), for: sessionID)
     } catch {
-      ThreadingLogger.mcp.error("Could not encode display panel: \(error.localizedDescription)")
+      ThreadingLogger.mcp.error(
+        "Could not encode display panel: \(error.localizedDescription, privacy: .private(mask: .hash))"
+      )
     }
   }
 
@@ -258,7 +260,9 @@ final class DisplayPaneStore {
       try data.write(to: cacheDirectory(sessionID).appendingPathComponent(name), options: .atomic)
       return name
     } catch {
-      ThreadingLogger.mcp.error("Could not cache panel image: \(error.localizedDescription)")
+      ThreadingLogger.mcp.error(
+        "Could not cache panel image: \(error.localizedDescription, privacy: .private(mask: .hash))"
+      )
       return nil
     }
   }
@@ -273,7 +277,15 @@ final class DisplayPaneStore {
 
   func removeCachedImage(_ name: String, for sessionID: SessionID) {
     guard StoredPathComponent.isValid(name) else { return }
-    try? fileManager.removeItem(at: cacheDirectory(sessionID).appendingPathComponent(name))
+    let url = cacheDirectory(sessionID).appendingPathComponent(name)
+    guard fileManager.fileExists(atPath: url.path) else { return }
+    do {
+      try fileManager.removeItem(at: url)
+    } catch {
+      ThreadingLogger.mcp.warning(
+        "Could not remove cached panel image session=\(sessionID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+      )
+    }
   }
 
   /// Saves a browser capture at a real path the terminal agent can read in addition to the MCP
@@ -334,8 +346,8 @@ final class DisplayPaneStore {
       )
       return url
     } catch {
-      ThreadingLogger.mcp.error(
-        "Could not cache browser artifact: \(error.localizedDescription)"
+      ThreadingLogger.browser.error(
+        "Could not cache browser artifact: \(error.localizedDescription, privacy: .private(mask: .hash))"
       )
       return nil
     }
@@ -348,12 +360,18 @@ final class DisplayPaneStore {
     maximumCount: Int
   ) {
     let keys: Set<URLResourceKey> = [.contentModificationDateKey]
-    guard
-      let files = try? fileManager.contentsOfDirectory(
+    let files: [URL]
+    do {
+      files = try fileManager.contentsOfDirectory(
         at: directory,
         includingPropertiesForKeys: Array(keys)
       )
-    else { return }
+    } catch {
+      ThreadingLogger.browser.warning(
+        "Browser artifact retention could not enumerate cache directory=\(directory.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+      )
+      return
+    }
     let captures =
       files
       .filter {
@@ -364,8 +382,19 @@ final class DisplayPaneStore {
         let right = (try? $1.resourceValues(forKeys: keys).contentModificationDate) ?? .distantPast
         return left < right
       }
-    for stale in captures.dropLast(maximumCount) {
-      try? fileManager.removeItem(at: stale)
+    var removalFailures = 0
+    let staleCaptures = captures.dropLast(maximumCount)
+    for stale in staleCaptures {
+      do {
+        try fileManager.removeItem(at: stale)
+      } catch {
+        removalFailures += 1
+      }
+    }
+    if removalFailures > 0 {
+      ThreadingLogger.browser.warning(
+        "Browser artifact retention incomplete failures=\(removalFailures, privacy: .public) candidates=\(staleCaptures.count, privacy: .public)"
+      )
     }
   }
 
@@ -378,17 +407,38 @@ final class DisplayPaneStore {
 
     // The image caches are still directories on disk, so they are still swept by hand.
     let keep = Set(sessionIDs.map(\.uuidString))
-    guard
-      let entries = try? fileManager.contentsOfDirectory(
+    let entries: [URL]
+    do {
+      entries = try fileManager.contentsOfDirectory(
         at: root, includingPropertiesForKeys: nil
       )
-    else { return }
+    } catch {
+      let cocoa = error as NSError
+      if cocoa.domain == NSCocoaErrorDomain,
+         cocoa.code == CocoaError.fileReadNoSuchFile.rawValue {
+        return
+      }
+      ThreadingLogger.mcp.warning(
+        "Panel cache cleanup could not enumerate directory=\(self.root.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+      )
+      return
+    }
 
+    var removalFailures = 0
     for entry in entries {
       let base = entry.deletingPathExtension().lastPathComponent
       if !keep.contains(base) {
-        try? fileManager.removeItem(at: entry)
+        do {
+          try fileManager.removeItem(at: entry)
+        } catch {
+          removalFailures += 1
+        }
       }
+    }
+    if removalFailures > 0 {
+      ThreadingLogger.mcp.warning(
+        "Panel cache cleanup incomplete failures=\(removalFailures, privacy: .public) candidates=\(entries.count, privacy: .public)"
+      )
     }
   }
 

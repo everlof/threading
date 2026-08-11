@@ -138,17 +138,29 @@ enum SessionMigration {
     /// a move can be undone by moving back.
     @discardableResult
     static func move(sessionID: SessionID, to account: AgentAccount) -> Result<Void, MoveError> {
+        ThreadingLogger.agent.info(
+            "Session migration requested session=\(sessionID.uuidString, privacy: .public) provider=\(account.provider.rawValue, privacy: .public) account=\(account.handle.name, privacy: .private(mask: .hash))"
+        )
         guard let session = ProjectStore.shared.session(withID: sessionID),
               let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else {
+            ThreadingLogger.agent.notice(
+                "Session migration refused session=\(sessionID.uuidString, privacy: .public) reason=missing_session"
+            )
             return .failure(MoveError(message: "The session no longer exists."))
         }
 
         guard session.kind == account.provider else {
             let kind = session.kind.displayName
+            ThreadingLogger.agent.notice(
+                "Session migration refused session=\(sessionID.uuidString, privacy: .public) reason=provider_mismatch"
+            )
             return .failure(MoveError(message: "A \(kind) conversation can only move to another \(kind) account."))
         }
 
         guard let source = sourceTranscript(for: session, in: project) else {
+            ThreadingLogger.agent.notice(
+                "Session migration refused session=\(sessionID.uuidString, privacy: .public) reason=missing_transcript"
+            )
             return .failure(MoveError(message: "This conversation has nothing recorded to move yet."))
         }
 
@@ -158,10 +170,16 @@ enum SessionMigration {
                 of: source,
                 beneath: URL(fileURLWithPath: current.configPath, isDirectory: true)
               ) else {
+            ThreadingLogger.agent.warning(
+                "Session migration refused session=\(sessionID.uuidString, privacy: .public) reason=invalid_source_location"
+            )
             return .failure(MoveError(message: "Could not locate the conversation on disk."))
         }
 
         guard ProjectStore.shared.acceptsDurableMutations else {
+            ThreadingLogger.agent.error(
+                "Session migration refused session=\(sessionID.uuidString, privacy: .public) reason=persistence_refused"
+            )
             return .failure(MoveError(message: "The moved conversation could not be saved."))
         }
 
@@ -184,21 +202,32 @@ enum SessionMigration {
                 return mutation == .applied || mutation == .unchanged
             }
         } catch TranscriptCopyTransactionError.sourceNotRegular {
+            ThreadingLogger.agent.warning(
+                "Session migration failed session=\(sessionID.uuidString, privacy: .public) reason=source_not_regular"
+            )
             return .failure(MoveError(message: "The conversation transcript is not a regular file."))
         } catch TranscriptCopyTransactionError.commitRefused {
+            ThreadingLogger.agent.error(
+                "Session migration failed session=\(sessionID.uuidString, privacy: .public) reason=commit_refused"
+            )
             return .failure(MoveError(message: "The moved conversation could not be saved."))
         } catch TranscriptCopyTransactionError.rollbackFailed(let recoveryPath, let detail) {
             ThreadingLogger.agent.error(
-                "Migrated transcript rollback needs recovery at \(recoveryPath, privacy: .private(mask: .hash)): \(detail, privacy: .public)"
+                "Migrated transcript rollback needs recovery at \(recoveryPath, privacy: .private(mask: .hash)): \(detail, privacy: .private(mask: .hash))"
             )
             return .failure(MoveError(
                 message: "The moved conversation could not be saved; its previous target copy was kept for recovery."
             ))
         } catch {
+            ThreadingLogger.agent.error(
+                "Session migration failed session=\(sessionID.uuidString, privacy: .public) reason=copy_failed error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             return .failure(MoveError(message: "Could not copy the conversation: \(error.localizedDescription)"))
         }
 
-        ThreadingLogger.agent.info("Migrated session \(sessionID) to account \(account.handle, privacy: .public)")
+        ThreadingLogger.agent.info(
+            "Migrated session \(sessionID, privacy: .public) to account \(account.handle, privacy: .private(mask: .hash))"
+        )
         return .success(())
     }
 
@@ -277,24 +306,39 @@ enum ConversationContinuation {
         to account: AgentAccount,
         completion: @escaping @MainActor @Sendable (Result<AgentSession, ContinuationError>) -> Void
     ) {
+        ThreadingLogger.agent.info(
+            "Conversation continuation requested source=\(sourceID.uuidString, privacy: .public) provider=\(account.provider.rawValue, privacy: .public) account=\(account.handle.name, privacy: .private(mask: .hash))"
+        )
         guard let source = ProjectStore.shared.session(withID: sourceID),
               let project = ProjectStore.shared.executionProject(forSessionID: sourceID) else {
+            ThreadingLogger.agent.notice(
+                "Conversation continuation refused source=\(sourceID.uuidString, privacy: .public) reason=missing_source"
+            )
             completion(.failure(ContinuationError(message: "The source session no longer exists.")))
             return
         }
         guard source.kind != account.provider else {
+            ThreadingLogger.agent.notice(
+                "Conversation continuation refused source=\(sourceID.uuidString, privacy: .public) reason=same_provider"
+            )
             completion(.failure(ContinuationError(
                 message: "Choose an account from a different provider for this continuation."
             )))
             return
         }
         guard canContinue(source, in: project) else {
+            ThreadingLogger.agent.notice(
+                "Conversation continuation refused source=\(sourceID.uuidString, privacy: .public) reason=missing_transcript"
+            )
             completion(.failure(ContinuationError(
                 message: "This conversation has nothing recorded to continue from yet."
             )))
             return
         }
         guard ProjectStore.shared.acceptsDurableMutations else {
+            ThreadingLogger.agent.error(
+                "Conversation continuation refused source=\(sourceID.uuidString, privacy: .public) reason=persistence_refused"
+            )
             completion(.failure(ContinuationError(
                 message: "The destination conversation could not be saved."
             )))
@@ -318,6 +362,9 @@ enum ConversationContinuation {
             targetModel: targetModel,
             targetTitle: title
         ) else {
+            ThreadingLogger.agent.error(
+                "Conversation continuation failed source=\(sourceID.uuidString, privacy: .public) reason=handoff_unavailable"
+            )
             completion(.failure(ContinuationError(
                 message: "Could not build the continuation path."
             )))
@@ -327,12 +374,18 @@ enum ConversationContinuation {
         ConversationHandoffCapture.capture(source: source, project: project) { result in
             switch result {
             case .failure(let error):
+                ThreadingLogger.agent.error(
+                    "Conversation continuation failed source=\(sourceID.uuidString, privacy: .public) reason=capture_failed error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
                 completion(.failure(error))
 
             case .success(let snapshot):
                 do {
                     try ConversationHandoffStore.save(snapshot: snapshot, for: targetID)
                 } catch {
+                    ThreadingLogger.agent.error(
+                        "Conversation continuation failed source=\(sourceID.uuidString, privacy: .public) target=\(targetID.uuidString, privacy: .public) reason=snapshot_write_failed error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+                    )
                     completion(.failure(ContinuationError(
                         message: "Could not snapshot the conversation: \(error.localizedDescription)"
                     )))
@@ -352,6 +405,9 @@ enum ConversationContinuation {
                     id: targetID
                 ) else {
                     ConversationHandoffStore.remove(for: targetID)
+                    ThreadingLogger.agent.error(
+                        "Conversation continuation failed source=\(sourceID.uuidString, privacy: .public) target=\(targetID.uuidString, privacy: .public) reason=session_create_failed"
+                    )
                     completion(.failure(ContinuationError(
                         message: "Could not create the destination session."
                     )))
@@ -359,7 +415,7 @@ enum ConversationContinuation {
                 }
 
                 ThreadingLogger.agent.info(
-                    "Continued session \(sourceID) as \(target.id) on \(target.kind.rawValue, privacy: .public)"
+                    "Continued session \(sourceID, privacy: .public) as \(target.id, privacy: .public) on \(target.kind.rawValue, privacy: .public)"
                 )
                 completion(.success(target))
             }
@@ -396,7 +452,13 @@ enum ConversationContinuation {
                 """
         }
 
-        guard let history = try? ConversationHandoffStore.inlineHistory(for: session.id) else {
+        let history: String
+        do {
+            history = try ConversationHandoffStore.inlineHistory(for: session.id)
+        } catch {
+            ThreadingLogger.agent.warning(
+                "Conversation continuation history unavailable session=\(session.id.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             return """
                 This is a Threading cross-provider continuation bootstrap, but its frozen history \
                 is unavailable. Tell the user the handoff could not be read.
@@ -625,7 +687,15 @@ enum ConversationHandoffCapture {
         let directory = fileManager.temporaryDirectory
             .appendingPathComponent("threading-handoff-\(UUID().uuidString)", isDirectory: true)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? fileManager.removeItem(at: directory) }
+        defer {
+            do {
+                try fileManager.removeItem(at: directory)
+            } catch {
+                ThreadingLogger.agent.warning(
+                    "Conversation export cleanup failed directory=\(directory.path, privacy: .private(mask: .hash)) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
+        }
 
         let output = directory.appendingPathComponent("export")
         let standardErrorURL = directory.appendingPathComponent("stderr")
@@ -794,7 +864,13 @@ enum ConversationHandoffStore {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         var mutableDirectory = directory
-        try? mutableDirectory.setResourceValues(values)
+        do {
+            try mutableDirectory.setResourceValues(values)
+        } catch {
+            ThreadingLogger.agent.warning(
+                "Conversation handoff directory could not be excluded from backup directory=\(directory.path, privacy: .private(mask: .hash)) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+        }
 
         let destination = url(for: sessionID, rootDirectory: rootDirectory)
         if fileManager.fileExists(atPath: destination.path) {
@@ -899,9 +975,16 @@ enum ConversationHandoffStore {
     }
 
     static func remove(for sessionID: SessionID, rootDirectory: URL? = nil) {
-        try? FileManager.default.removeItem(
-            at: url(for: sessionID, rootDirectory: rootDirectory)
-        )
+        let fileManager = FileManager.default
+        let snapshotURL = url(for: sessionID, rootDirectory: rootDirectory)
+        guard fileManager.fileExists(atPath: snapshotURL.path) else { return }
+        do {
+            try fileManager.removeItem(at: snapshotURL)
+        } catch {
+            ThreadingLogger.agent.warning(
+                "Conversation handoff cleanup failed session=\(sessionID.uuidString, privacy: .public) path=\(snapshotURL.path, privacy: .private(mask: .hash)) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+        }
     }
 
     private static func directory(rootDirectory: URL?) -> URL {
@@ -921,7 +1004,13 @@ enum ConversationHandoffStore {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         var mutableDirectory = directory
-        try? mutableDirectory.setResourceValues(values)
+        do {
+            try mutableDirectory.setResourceValues(values)
+        } catch {
+            ThreadingLogger.agent.warning(
+                "Conversation handoff directory could not be excluded from backup directory=\(directory.path, privacy: .private(mask: .hash)) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+        }
     }
 }
 

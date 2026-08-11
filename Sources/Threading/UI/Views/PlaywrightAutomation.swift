@@ -29,6 +29,20 @@ final class PlaywrightAutomationRunner: Sendable {
         let script: URL
     }
 
+    private enum FailureStage: String {
+        case validation
+        case runtime
+        case directory
+        case encode
+        case timeout
+        case launch
+        case exit
+        case response
+        case scenario
+        case screenshot
+        case result
+    }
+
     /// The profile facts an attached run needs, decided by the app rather than by the agent.
     ///
     /// The origins are the canonical `BrowserOrigin.key` strings the user actually granted, not
@@ -81,13 +95,13 @@ final class PlaywrightAutomationRunner: Sendable {
     ) -> PlaywrightAutomationOutput {
         let steps = arguments.steps ?? []
         guard (1...50).contains(steps.count) else {
-            return failure("steps must contain between 1 and 50 entries.")
+            return failure(.validation, "steps must contain between 1 and 50 entries.")
         }
         if arguments.fullPage == true && arguments.screenshot != true {
-            return failure("full_page requires screenshot=true.")
+            return failure(.validation, "full_page requires screenshot=true.")
         }
         if arguments.includeImage == true && arguments.screenshot != true {
-            return failure("include_image requires screenshot=true.")
+            return failure(.validation, "include_image requires screenshot=true.")
         }
 
         return execute(
@@ -108,16 +122,16 @@ final class PlaywrightAutomationRunner: Sendable {
     ) -> PlaywrightAutomationOutput {
         let steps = arguments.steps ?? []
         guard (1...50).contains(steps.count) else {
-            return failure("steps must contain between 1 and 50 entries.")
+            return failure(.validation, "steps must contain between 1 and 50 entries.")
         }
         if arguments.fullPage == true && arguments.screenshot != true {
-            return failure("full_page requires screenshot=true.")
+            return failure(.validation, "full_page requires screenshot=true.")
         }
         if arguments.includeImage == true && arguments.screenshot != true {
-            return failure("include_image requires screenshot=true.")
+            return failure(.validation, "include_image requires screenshot=true.")
         }
         guard !profile.allowedOrigins.isEmpty else {
-            return failure("An attached run needs at least one authorized origin.")
+            return failure(.validation, "An attached run needs at least one authorized origin.")
         }
 
         return execute(
@@ -153,11 +167,12 @@ final class PlaywrightAutomationRunner: Sendable {
         failureHint: String,
         overrides: (Arguments) -> [String: Any]
     ) -> PlaywrightAutomationOutput {
+        let started = DispatchTime.now().uptimeNanoseconds
         let runtime: Runtime
         do {
             runtime = try resolveRuntime()
         } catch {
-            return failure(error.localizedDescription)
+            return failure(.runtime, error.localizedDescription)
         }
 
         let temporary = FileManager.default.temporaryDirectory
@@ -168,9 +183,20 @@ final class PlaywrightAutomationRunner: Sendable {
                 withIntermediateDirectories: true
             )
         } catch {
-            return failure("Could not prepare browser automation files: \(error.localizedDescription)")
+            return failure(
+                .directory,
+                "Could not prepare browser automation files: \(error.localizedDescription)"
+            )
         }
-        defer { try? FileManager.default.removeItem(at: temporary) }
+        defer {
+            do {
+                try FileManager.default.removeItem(at: temporary)
+            } catch {
+                ThreadingLogger.browser.warning(
+                    "Playwright temporary cleanup failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
+        }
 
         let requestURL = temporary.appendingPathComponent("request.json")
         let responseURL = temporary.appendingPathComponent("response.json")
@@ -183,6 +209,7 @@ final class PlaywrightAutomationRunner: Sendable {
                   var object = try JSONSerialization.jsonObject(with: encoded)
                     as? [String: Any] else {
                 return failure(
+                    .validation,
                     "The browser automation request exceeds \(Self.maximumRequestBytes) bytes."
                 )
             }
@@ -197,7 +224,10 @@ final class PlaywrightAutomationRunner: Sendable {
             FileManager.default.createFile(atPath: responseURL.path, contents: nil)
             FileManager.default.createFile(atPath: errorURL.path, contents: nil)
         } catch {
-            return failure("Could not encode isolated browser request: \(error.localizedDescription)")
+            return failure(
+                .encode,
+                "Could not encode isolated browser request: \(error.localizedDescription)"
+            )
         }
 
         let termination: BoundedChildTermination
@@ -227,17 +257,18 @@ final class PlaywrightAutomationRunner: Sendable {
             termination = process.waitUntilExit(timeout: timeout)
             if termination == .timedOut {
                 return failure(
+                    .timeout,
                     "The browser automation run exceeded \(Int(timeout)) seconds and was stopped."
                 )
             }
         } catch {
-            return failure("Could not launch Playwright: \(error.localizedDescription)")
+            return failure(.launch, "Could not launch Playwright: \(error.localizedDescription)")
         }
 
         let stderr = boundedText(at: errorURL, maximumBytes: 4_096)
         guard termination == .exited(0) else {
             let detail = stderr.isEmpty ? "" : " \(stderr)"
-            return failure("The Playwright helper exited unexpectedly.\(detail)")
+            return failure(.exit, "The Playwright helper exited unexpectedly.\(detail)")
         }
         guard let responseData = try? BoundedFileReader.read(
             responseURL,
@@ -247,7 +278,10 @@ final class PlaywrightAutomationRunner: Sendable {
               let response = try? JSONSerialization.jsonObject(with: responseData)
                 as? [String: Any],
               let succeeded = response["ok"] as? Bool else {
-            return failure("The Playwright helper returned an invalid or oversized response.")
+            return failure(
+                .response,
+                "The Playwright helper returned an invalid or oversized response."
+            )
         }
 
         if !succeeded {
@@ -255,6 +289,7 @@ final class PlaywrightAutomationRunner: Sendable {
                 String($0.prefix(1_000))
             } ?? "The scenario failed."
             return failure(
+                .scenario,
                 """
                 \(failureIntro): \(detail)
                 \(failureHint)
@@ -263,16 +298,27 @@ final class PlaywrightAutomationRunner: Sendable {
         }
 
         var screenshot: Data?
-        if capturesScreenshot,
-           let data = try? BoundedFileReader.read(
-            screenshotURL,
-            maximumBytes: Self.maximumScreenshotBytes
-           ) {
-            screenshot = data
+        if capturesScreenshot {
+            do {
+                screenshot = try BoundedFileReader.read(
+                    screenshotURL,
+                    maximumBytes: Self.maximumScreenshotBytes
+                )
+            } catch {
+                ThreadingLogger.browser.warning(
+                    "Playwright screenshot unavailable: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
         }
         guard let formatted = prettyJSON(response) else {
-            return failure("The Playwright helper result could not be encoded.")
+            return failure(.result, "The Playwright helper result could not be encoded.")
         }
+        let elapsedMilliseconds = (
+            DispatchTime.now().uptimeNanoseconds - started
+        ) / 1_000_000
+        ThreadingLogger.browser.info(
+            "Playwright automation completed response_bytes=\(responseData.count, privacy: .public) screenshot_bytes=\(screenshot?.count ?? 0, privacy: .public) duration_ms=\(elapsedMilliseconds, privacy: .public)"
+        )
         return .success(text: formatted, screenshotPNG: screenshot)
     }
 
@@ -378,7 +424,24 @@ final class PlaywrightAutomationRunner: Sendable {
         return String(data: data, encoding: .utf8)
     }
 
-    private func failure(_ message: String) -> PlaywrightAutomationOutput {
-        .failure(message: message)
+    private func failure(
+        _ stage: FailureStage,
+        _ message: String
+    ) -> PlaywrightAutomationOutput {
+        switch stage {
+        case .validation:
+            ThreadingLogger.browser.notice(
+                "Playwright automation refused stage=\(stage.rawValue, privacy: .public) detail=\(message, privacy: .private(mask: .hash))"
+            )
+        case .runtime, .timeout, .exit, .scenario, .screenshot:
+            ThreadingLogger.browser.warning(
+                "Playwright automation failed stage=\(stage.rawValue, privacy: .public) detail=\(message, privacy: .private(mask: .hash))"
+            )
+        case .directory, .encode, .launch, .response, .result:
+            ThreadingLogger.browser.error(
+                "Playwright automation failed stage=\(stage.rawValue, privacy: .public) detail=\(message, privacy: .private(mask: .hash))"
+            )
+        }
+        return .failure(message: message)
     }
 }

@@ -20,6 +20,7 @@ final class UsageHistoryStore {
     private let journal: UsageLimitHistoryJournal
     private var journalLoaded = false
     private var journalLoadTask: Task<PreparedJournal, Never>?
+    private var journalFailureStage: String?
 
     init(directory: URL? = nil, fileManager: FileManager = .default) {
         let root = directory ?? fileManager
@@ -167,12 +168,14 @@ final class UsageHistoryStore {
         return snapshot(since: since, now: now)
     }
 
-    func deleteHistory() async {
-        await journal.deleteHistory()
+    @discardableResult
+    func deleteHistory() async -> Bool {
+        guard await journal.deleteHistory() else { return false }
         samples = [:]
         resetEvents = []
         journalLoaded = true
         NotificationCenter.default.post(name: .usageLimitHistoryDidChange, object: self)
+        return true
     }
 
     private func bootstrapJournal() async {
@@ -206,7 +209,17 @@ final class UsageHistoryStore {
                 !prepared.sampleIdentities.contains(Self.sampleIdentity($0))
             }
             if !missing.isEmpty {
-                try? await journal.append(samples: missing, resets: [], now: Date())
+                do {
+                    try await journal.append(samples: missing, resets: [], now: Date())
+                    reportJournalRecovery()
+                } catch {
+                    reportJournalFailure(
+                        stage: "legacy_migration",
+                        sampleCount: missing.count,
+                        resetCount: 0,
+                        error: error
+                    )
+                }
             }
         }
         NotificationCenter.default.post(name: .usageLimitHistoryDidChange, object: self)
@@ -238,9 +251,40 @@ final class UsageHistoryStore {
 
     private func persist(samples: [UsageSample], resets: [UsageLimitResetEvent]) {
         guard !samples.isEmpty || !resets.isEmpty else { return }
-        Task { [journal] in
-            try? await journal.append(samples: samples, resets: resets, now: Date())
+        Task { [weak self, journal] in
+            do {
+                try await journal.append(samples: samples, resets: resets, now: Date())
+                self?.reportJournalRecovery()
+            } catch {
+                self?.reportJournalFailure(
+                    stage: "append",
+                    sampleCount: samples.count,
+                    resetCount: resets.count,
+                    error: error
+                )
+            }
         }
+    }
+
+    private func reportJournalFailure(
+        stage: String,
+        sampleCount: Int,
+        resetCount: Int,
+        error: Error
+    ) {
+        guard journalFailureStage != stage else { return }
+        journalFailureStage = stage
+        ThreadingLogger.usage.error(
+            "Usage history persistence failed stage=\(stage, privacy: .public) samples=\(sampleCount, privacy: .public) resets=\(resetCount, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+        )
+    }
+
+    private func reportJournalRecovery() {
+        guard let stage = journalFailureStage else { return }
+        journalFailureStage = nil
+        ThreadingLogger.usage.notice(
+            "Usage history persistence recovered after=\(stage, privacy: .public)"
+        )
     }
 
     private func prune(_ series: [UsageSample], now: Date) -> [UsageSample] {

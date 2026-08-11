@@ -106,12 +106,18 @@ final class RemoteHostStore {
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return .success([]) }
         guard status == errSecSuccess, let data = result as? Data else {
+            MobileDiagnostics.logFailure(
+                .hostStorage,
+                domain: .keychain,
+                code: Int(status)
+            )
             writesAllowed = false
             return .failure(.keychain(status))
         }
         do {
             return .success(try JSONDecoder().decode([PairedRemoteHost].self, from: data))
         } catch {
+            MobileDiagnostics.logFailure(.hostStorage, error: error)
             // Keychain is already the protected recovery copy. Refuse future writes so an
             // ordinary pairing cannot replace bytes a newer/older build may still understand.
             writesAllowed = false
@@ -120,8 +126,14 @@ final class RemoteHostStore {
     }
 
     func save(_ hosts: [PairedRemoteHost]) throws {
-        guard writesAllowed else { throw StoreError.unreadable }
-        guard let data = try? JSONEncoder().encode(hosts) else { throw StoreError.encoding }
+        guard writesAllowed else {
+            MobileDiagnostics.logFailure(.hostStorage, code: .writeVerification)
+            throw StoreError.unreadable
+        }
+        guard let data = try? JSONEncoder().encode(hosts) else {
+            MobileDiagnostics.logFailure(.hostStorage, code: .encode)
+            throw StoreError.encoding
+        }
         let match: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -136,10 +148,24 @@ final class RemoteHostStore {
 
         let status = SecItemUpdate(match as CFDictionary, attributes as CFDictionary)
         if status == errSecSuccess { return }
-        guard status == errSecItemNotFound else { throw StoreError.keychain(status) }
+        guard status == errSecItemNotFound else {
+            MobileDiagnostics.logFailure(
+                .hostStorage,
+                domain: .keychain,
+                code: Int(status)
+            )
+            throw StoreError.keychain(status)
+        }
         var add = match
         attributes.forEach { add[$0.key] = $0.value }
         let addStatus = SecItemAdd(add as CFDictionary, nil)
-        guard addStatus == errSecSuccess else { throw StoreError.keychain(addStatus) }
+        guard addStatus == errSecSuccess else {
+            MobileDiagnostics.logFailure(
+                .hostStorage,
+                domain: .keychain,
+                code: Int(addStatus)
+            )
+            throw StoreError.keychain(addStatus)
+        }
     }
 }

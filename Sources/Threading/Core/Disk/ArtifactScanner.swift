@@ -172,7 +172,12 @@ enum ArtifactScanner {
             at: root,
             includingPropertiesForKeys: keys,
             options: [.skipsPackageDescendants]
-        ) else { return [] }
+        ) else {
+            ThreadingLogger.storage.warning(
+                "Artifact scan could not enumerate project root=\(root.path, privacy: .private(mask: .hash))"
+            )
+            return []
+        }
 
         while let url = walker.nextObject() as? URL {
             let values = try? url.resourceValues(forKeys: Set(keys))
@@ -234,7 +239,8 @@ enum ArtifactScanner {
             _ = try GitProcess.run(
                 ["check-ignore", "--quiet", url.path],
                 in: root,
-                maximumOutput: ArtifactDefaults.maximumCheckOutput
+                maximumOutput: ArtifactDefaults.maximumCheckOutput,
+                reportsRejectedExit: false
             )
         } catch {
             return false
@@ -284,18 +290,21 @@ enum ArtifactScanner {
     @discardableResult
     static func remove(_ artifact: ReclaimableArtifact) -> Bool {
         guard isSafeToRemove(artifact) else {
-            ThreadingLogger.agent.error(
-                "Refused to remove \(artifact.url.path, privacy: .public): no longer disposable"
+            ThreadingLogger.storage.error(
+                "Refused to remove \(artifact.url.path, privacy: .private(mask: .hash)): no longer disposable"
             )
             return false
         }
 
         do {
             try FileManager.default.removeItem(at: artifact.url)
+            ThreadingLogger.storage.notice(
+                "Reclaimable artifact removed kind=\(artifact.kind.rawValue, privacy: .public) path=\(artifact.url.path, privacy: .private(mask: .hash)) bytes=\(artifact.byteCount, privacy: .public)"
+            )
             return true
         } catch {
-            ThreadingLogger.agent.error(
-                "Could not remove \(artifact.url.path, privacy: .public) — \(error.localizedDescription, privacy: .public)"
+            ThreadingLogger.storage.error(
+                "Could not remove \(artifact.url.path, privacy: .private(mask: .hash)) — \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return false
         }

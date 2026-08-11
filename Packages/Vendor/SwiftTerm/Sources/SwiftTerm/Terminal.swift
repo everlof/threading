@@ -860,7 +860,13 @@ open class Terminal {
             default:
                 ok = 0 // this means the request is not valid, report that to the host.
                 // invalid: DCS 0 $ r Pt ST (xterm)
-                terminal.log ("Unknown DCS + \(newData!)")
+                if !terminal.silentLog {
+                    SwiftTermDiagnostics.emit(
+                        .debug,
+                        .parserUnhandledDeviceControl,
+                        facts: ["byteCount": data.count]
+                    )
+                }
                 // Do not report 'newData', because it can be exploited
                 // see https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=510030
                 result = ""
@@ -874,17 +880,32 @@ open class Terminal {
     func configureParser (_ parser: EscapeSequenceParser)
     {
         parser.csiHandlerFallback = { [unowned self] (pars: [Int], collect: cstring, code: UInt8) -> () in
-            let ch = Character(UnicodeScalar(code))
-            self.log ("SwiftTerm: Unknown CSI Code (collect=\(collect) code=\(ch) pars=\(pars))")
+            guard !self.silentLog else { return }
+            SwiftTermDiagnostics.emit(
+                .debug,
+                .parserUnhandledControlSequence,
+                facts: ["code": Int(code), "parameterCount": pars.count, "collectCount": collect.count]
+            )
         }
         parser.escHandlerFallback = { [unowned self] (txt: cstring, flag: UInt8) in
-            self.log ("SwiftTerm: Unknown ESC Code: ESC + \(Character(Unicode.Scalar (flag))) txt=\(txt)")
+            guard !self.silentLog else { return }
+            SwiftTermDiagnostics.emit(
+                .debug,
+                .parserUnhandledEscape,
+                facts: ["code": Int(flag), "collectCount": txt.count]
+            )
         }
         parser.executeHandlerFallback = { [unowned self] in
-            self.log ("SwiftTerm: Unknown EXECUTE code")
+            guard !self.silentLog else { return }
+            SwiftTermDiagnostics.emit(.debug, .parserUnhandledExecute)
         }
         parser.oscHandlerFallback = { [unowned self] code, data in
-            self.log ("SwiftTerm: Unknown OSC code: \(code)")
+            guard !self.silentLog else { return }
+            SwiftTermDiagnostics.emit(
+                .debug,
+                .parserUnhandledOperatingSystemCommand,
+                facts: ["code": code, "byteCount": data.count]
+            )
         }
         parser.printHandler = { [unowned self] slice in handlePrint (slice) }
         parser.printStateReset = { [unowned self] in printStateReset() }
@@ -1059,7 +1080,9 @@ open class Terminal {
 
         // Error handler
         parser.errorHandler = { [unowned self] state in
-            self.log ("SwiftTerm: Parsing error, state: \(state)")
+            if !self.silentLog {
+                SwiftTermDiagnostics.emit(.warning, .parserStateError)
+            }
             return state
         }
 
@@ -2697,7 +2720,7 @@ open class Terminal {
             //   Pu = 0  or omitted ⇒  default to character cells.
             //   Pu = 1  ⇐  device physical pixels.
             //   Pu = 2  ⇐  character cells.
-            print ("TODO: Enable Locator Reporting (DECELR)")
+            log("Locator reporting (DECELR) is not implemented")
         default:
             break
         }
@@ -3569,7 +3592,7 @@ open class Terminal {
         }
         
         while i < parCount {
-            var p = pars [i]
+            let p = pars [i]
             switch p {
             case 0:
                 // default
@@ -3673,7 +3696,11 @@ open class Terminal {
                 }
                 
             default:
-                print ("Unknown SGR attribute: \(p) \(pars)")
+                SwiftTermDiagnostics.emit(
+                    .debug,
+                    .terminalUnsupportedSGR,
+                    facts: ["attribute": p, "parameterCount": pars.count]
+                )
             }
             i += 1
         }
@@ -4608,29 +4635,25 @@ open class Terminal {
             } else if let c = item as? UInt8 {
                 buffer.append (c)
             } else {
-                log ("Do not know how to handle type \(item)")
+                SwiftTermDiagnostics.emit(.fault, .terminalSendResponseTypeInvariant)
             }
         }
         tdel?.send (source: self, data: buffer[...])
     }
     
-#if DEBUG
     public var silentLog = false
-#else
-    public var silentLog = true
-#endif
     
     func error (_ text: String)
     {
         if !silentLog {
-            print("Error: \(text)")
+            SwiftTermDiagnostics.emit(.warning, .parserStateError)
         }
     }
     
     func log (_ text: String)
     {
         if !silentLog {
-            print("Info: \(text)")
+            SwiftTermDiagnostics.emit(.debug, .terminalUnsupportedSequence)
         }
     }
     
@@ -4954,7 +4977,17 @@ open class Terminal {
             let scrollRegionHeight = bottomRow - topRow + 1 /*as it's zero-based*/
             if scrollRegionHeight > 1 {
                 if !buffer.lines.shiftElements (start: topRow + 1, count: scrollRegionHeight - 1, offset: -1) {
-                    print ("Assertion on scroll, state was: bottomRow=\(bottomRow) topRow=\(topRow) yDisp=\(buffer.yDisp) linesTop=\(buffer.linesTop) isAlternate=\(isCurrentBufferAlternate)")
+                    SwiftTermDiagnostics.emit(
+                        .fault,
+                        .terminalScrollInvariant,
+                        facts: [
+                            "bottomRow": bottomRow,
+                            "topRow": topRow,
+                            "displayRow": buffer.yDisp,
+                            "linesTop": buffer.linesTop,
+                            "alternate": isCurrentBufferAlternate ? 1 : 0
+                        ]
+                    )
                 }
             }
             buffer.lines [bottomRow] = BufferLine (from: newLine)
@@ -5302,7 +5335,17 @@ open class Terminal {
             // blankLine(true) is xterm/linux behavior
             let scrollRegionHeight = buffer.scrollBottom - buffer.scrollTop
             if !buffer.lines.shiftElements (start: buffer.y + buffer.yBase, count: scrollRegionHeight, offset: 1) {
-                print ("Assertion on reverseIndex, state was: y=\(buffer.y) scrollTop=\(buffer.scrollTop)  yDisp=\(buffer.yDisp) linesTop=\(buffer.linesTop) isAlternate=\(isCurrentBufferAlternate)")
+                SwiftTermDiagnostics.emit(
+                    .fault,
+                    .terminalReverseIndexInvariant,
+                    facts: [
+                        "row": buffer.y,
+                        "scrollTop": buffer.scrollTop,
+                        "displayRow": buffer.yDisp,
+                        "linesTop": buffer.linesTop,
+                        "alternate": isCurrentBufferAlternate ? 1 : 0
+                    ]
+                )
             }
             buffer.lines [buffer.y + buffer.yBase] = buffer.getBlankLine (attribute: eraseAttr ())
             updateRange (startLine: buffer.scrollTop, endLine: buffer.scrollBottom)

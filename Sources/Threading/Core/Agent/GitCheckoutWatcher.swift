@@ -133,7 +133,7 @@ final class GitCheckoutWatcher: @unchecked Sendable {
             flags
         ) else {
             ThreadingLogger.git.error(
-                "FSEvents stream could not be created for \(self.watchedPaths.first ?? "", privacy: .public)"
+                "FSEvents stream could not be created for \(self.watchedPaths.first ?? "", privacy: .private(mask: .hash))"
             )
             return
         }

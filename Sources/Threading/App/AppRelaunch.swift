@@ -50,12 +50,23 @@ enum AppRelaunch {
         /// that will never happen.
         func commit(reason: IntentionalExitReason) throws -> Never {
             guard process.isRunning else {
+                ThreadingLogger.app.error("Relaunch helper exited before commit")
                 throw AppRelaunchError.helperExitedBeforeCommit
             }
-            try signal.write(contentsOf: AppRelaunchDefaults.commitSignal)
+            do {
+                try signal.write(contentsOf: AppRelaunchDefaults.commitSignal)
+            } catch {
+                ThreadingLogger.app.error(
+                    "Relaunch helper signaling failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+                throw error
+            }
             isCommitted = true
             try? signal.close()
 
+            ThreadingLogger.app.notice(
+                "Relaunch committed reason=\(reason.rawValue, privacy: .public)"
+            )
             recordIntentionalExit(reason: reason)
             exit(EXIT_SUCCESS)
         }
@@ -107,7 +118,17 @@ enum AppRelaunch {
         process.executableURL = executableURL
         process.arguments = relaunchCommand(for: bundle)
         process.standardInput = pipe
-        try process.run()
+        do {
+            try process.run()
+        } catch {
+            ThreadingLogger.app.error(
+                "Relaunch helper start failed executable=\(executableURL.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            throw error
+        }
+        ThreadingLogger.app.info(
+            "Relaunch helper prepared process=\(process.processIdentifier, privacy: .public)"
+        )
         return PreparedRelaunch(process: process, signal: pipe.fileHandleForWriting)
     }
 }

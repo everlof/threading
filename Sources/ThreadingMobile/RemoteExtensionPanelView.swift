@@ -112,6 +112,7 @@ struct RemoteExtensionPanelView: View {
         } catch is CancellationError {
             return
         } catch {
+            MobileDiagnostics.logDegraded(.extensionPanelLoad, error: error)
             panel = nil
             loadError = error.localizedDescription
         }
@@ -177,6 +178,7 @@ struct RemoteExtensionPanelView: View {
             return
         } catch {
             guard sequence == actionSequence else { return }
+            MobileDiagnostics.logDegraded(.extensionPanelAction, error: error)
             statusMessage = error.localizedDescription
             statusIsError = true
         }

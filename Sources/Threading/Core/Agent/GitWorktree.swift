@@ -46,32 +46,58 @@ enum GitWorktree {
     /// group with its siblings in the sidebar.
     @discardableResult
     static func create(branch: String, at destination: URL, from project: Project) throws -> URL {
+        ThreadingLogger.git.info(
+            "Worktree creation started project=\(project.id.uuidString, privacy: .public) branch=\(branch, privacy: .private(mask: .hash)) destination=\(destination.path, privacy: .private(mask: .hash))"
+        )
         guard let root = GitInfo.repositoryRoot(for: project.folderPath) else {
+            ThreadingLogger.git.notice(
+                "Worktree creation refused project=\(project.id.uuidString, privacy: .public) reason=not_repository"
+            )
             throw Failure.notARepository
         }
 
         guard !FileManager.default.fileExists(atPath: destination.path) else {
+            ThreadingLogger.git.notice(
+                "Worktree creation refused project=\(project.id.uuidString, privacy: .public) reason=destination_exists destination=\(destination.path, privacy: .private(mask: .hash))"
+            )
             throw Failure.destinationExists(destination.path)
         }
 
         // -b creates the branch; without it an existing branch already checked out elsewhere
         // would be refused, which is the common case when reusing a name.
-        try run(
-            ["worktree", "add", "-b", branch, destination.path],
-            in: root
-        )
+        do {
+            try run(
+                ["worktree", "add", "-b", branch, destination.path],
+                in: root
+            )
+        } catch {
+            ThreadingLogger.git.error(
+                "Worktree creation failed project=\(project.id.uuidString, privacy: .public) branch=\(branch, privacy: .private(mask: .hash)) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            throw error
+        }
 
+        ThreadingLogger.git.info(
+            "Worktree creation completed project=\(project.id.uuidString, privacy: .public) branch=\(branch, privacy: .private(mask: .hash)) destination=\(destination.path, privacy: .private(mask: .hash))"
+        )
         return destination
     }
 
     /// Branch names already present in the repository, for offering existing branches.
     static func branches(in project: Project) -> [String] {
-        guard let root = GitInfo.repositoryRoot(for: project.folderPath),
-              let output = try? run(
-                  ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
-                  in: root
-              )
-        else { return [] }
+        guard let root = GitInfo.repositoryRoot(for: project.folderPath) else { return [] }
+        let output: String
+        do {
+            output = try run(
+                ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+                in: root
+            )
+        } catch {
+            ThreadingLogger.git.warning(
+                "Worktree branch listing failed project=\(project.id.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return []
+        }
 
         return output
             .split(separator: "\n")
@@ -178,6 +204,9 @@ enum ManagedGitWorkspace {
     static func finishLocalDelivery(
         _ workspace: ManagedWorkspace
     ) -> ManagedWorkspaceLocalFinishOutcome {
+        ThreadingLogger.git.info(
+            "Managed workspace local delivery started mode=\(workspace.delivery.rawValue, privacy: .public) workspace=\(workspace.worktreeRoot, privacy: .private(mask: .hash))"
+        )
         do {
             let completed: ManagedWorkspace
             switch workspace.delivery {
@@ -186,8 +215,14 @@ enum ManagedGitWorkspace {
             case .keepForReview:
                 completed = keepForReview(workspace)
             }
+            ThreadingLogger.git.info(
+                "Managed workspace local delivery completed mode=\(workspace.delivery.rawValue, privacy: .public) state=\(completed.state.rawValue, privacy: .public) workspace=\(workspace.worktreeRoot, privacy: .private(mask: .hash))"
+            )
             return .completed(completed)
         } catch {
+            ThreadingLogger.git.error(
+                "Managed workspace local delivery failed mode=\(workspace.delivery.rawValue, privacy: .public) workspace=\(workspace.worktreeRoot, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             var failed = workspace
             failed.state = .needsAttention
             failed.lastError = error.localizedDescription
@@ -203,6 +238,9 @@ enum ManagedGitWorkspace {
         plan: ManagedWorkspacePlan,
         rootDirectory: URL? = nil
     ) throws -> ManagedWorkspace {
+        ThreadingLogger.git.info(
+            "Managed workspace provisioning started session=\(sessionID.uuidString, privacy: .public) mode=\(plan.delivery.rawValue, privacy: .public) publication=\(plan.publication != nil, privacy: .public)"
+        )
         guard let sourceRoot = GitInfo.repositoryRoot(for: project.folderPath)?.standardizedFileURL
         else { throw Failure.notARepository }
 
@@ -246,7 +284,16 @@ enum ManagedGitWorkspace {
             // This directory did not exist before this call and no agent has run in it. A
             // best-effort ordinary removal is therefore safe; failure leaves Git's own record
             // intact rather than reaching for --force.
-            _ = try? run(["worktree", "remove", worktreeRoot.path], in: sourceRoot)
+            do {
+                try run(["worktree", "remove", worktreeRoot.path], in: sourceRoot)
+            } catch let cleanupError {
+                ThreadingLogger.git.warning(
+                    "Managed workspace provisioning cleanup failed session=\(sessionID.uuidString, privacy: .public): \(cleanupError.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
+            ThreadingLogger.git.error(
+                "Managed workspace provisioning failed session=\(sessionID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             throw error
         }
 
@@ -258,7 +305,7 @@ enum ManagedGitWorkspace {
             $0.appendingPathComponent($1, isDirectory: true)
         }
 
-        return ManagedWorkspace(
+        let workspace = ManagedWorkspace(
             repositoryRoot: sourceRoot.path,
             sourceCheckoutPath: sourceRoot.path,
             worktreeRoot: worktreeRoot.path,
@@ -274,6 +321,10 @@ enum ManagedGitWorkspace {
             state: .active,
             lastError: nil
         )
+        ThreadingLogger.git.info(
+            "Managed workspace provisioning completed session=\(sessionID.uuidString, privacy: .public) mode=\(plan.delivery.rawValue, privacy: .public) publication=\(plan.publication != nil, privacy: .public)"
+        )
+        return workspace
     }
 
     /// Validates the agent's handoff, fast-forwards the original checkout, and removes exactly
@@ -424,6 +475,9 @@ enum ManagedGitWorkspace {
     /// was removed. Provider transcript lookup hashes this path, so a different temporary path
     /// would make the same conversation look unrelated.
     static func restore(_ workspace: ManagedWorkspace) throws -> ManagedWorkspace {
+        ThreadingLogger.git.info(
+            "Managed workspace restore started state=\(workspace.state.rawValue, privacy: .public) workspace=\(workspace.worktreeRoot, privacy: .private(mask: .hash))"
+        )
         let source = URL(fileURLWithPath: workspace.sourceCheckoutPath, isDirectory: true)
         let worktree = URL(fileURLWithPath: workspace.worktreeRoot, isDirectory: true)
         if FileManager.default.fileExists(atPath: worktree.path) {
@@ -449,7 +503,16 @@ enum ManagedGitWorkspace {
         } catch {
             // Restore has not relaunched the agent yet, so this newly created checkout still has
             // no user work to protect. Leave no half-restored registration when locking fails.
-            _ = try? run(["worktree", "remove", worktree.path], in: source)
+            do {
+                try run(["worktree", "remove", worktree.path], in: source)
+            } catch let cleanupError {
+                ThreadingLogger.git.warning(
+                    "Managed workspace restore cleanup failed workspace=\(workspace.worktreeRoot, privacy: .private(mask: .hash)): \(cleanupError.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
+            ThreadingLogger.git.error(
+                "Managed workspace restore failed workspace=\(workspace.worktreeRoot, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             throw error
         }
 
@@ -459,6 +522,9 @@ enum ManagedGitWorkspace {
         }
         active.state = .active
         active.lastError = nil
+        ThreadingLogger.git.info(
+            "Managed workspace restore completed previous_state=\(workspace.state.rawValue, privacy: .public) workspace=\(workspace.worktreeRoot, privacy: .private(mask: .hash))"
+        )
         return active
     }
 

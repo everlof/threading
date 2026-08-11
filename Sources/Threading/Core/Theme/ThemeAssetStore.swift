@@ -116,8 +116,8 @@ enum ThemeAssetStore {
                 options: .atomic
             )
         } catch {
-            ThreadingLogger.agent.error(
-                "Failed to store theme asset: \(error.localizedDescription, privacy: .public)"
+            ThreadingLogger.theme.error(
+                "Theme asset write failed theme=\(themeID.rawValue, privacy: .private(mask: .hash)) file=\(fileName, privacy: .private(mask: .hash)) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return nil
         }
@@ -198,7 +198,14 @@ enum ThemeAssetStore {
             ThemeAssetDefaults.classicSkinTitleBarFileName
         ))
         guard let folder = folder(for: themeID) else { return }
-        try? FileManager.default.removeItem(at: folder)
+        guard FileManager.default.fileExists(atPath: folder.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: folder)
+        } catch {
+            ThreadingLogger.theme.warning(
+                "Theme asset cleanup failed theme=\(themeID.rawValue, privacy: .private(mask: .hash)) path=\(folder.path, privacy: .private(mask: .hash)) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+        }
     }
 
     /// Duplicating a theme copies its assets, so the copy's sidebar survives the original's

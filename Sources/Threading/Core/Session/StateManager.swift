@@ -102,7 +102,7 @@ final class StateManager {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         } catch {
             ThreadingLogger.agent.error(
-                "Failed to create state directory: \(error.localizedDescription, privacy: .public)"
+                "Failed to create state directory: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
         }
     }
@@ -128,7 +128,7 @@ final class StateManager {
             try database().save(state)
             return true
         } catch {
-            ThreadingLogger.agent.error("Failed to save projects state: \(error.localizedDescription, privacy: .public)")
+            ThreadingLogger.agent.error("Failed to save projects state: \(error.localizedDescription, privacy: .private(mask: .hash))")
             requireRecovery()
             return false
         }
@@ -143,7 +143,7 @@ final class StateManager {
             return true
         } catch {
             ThreadingLogger.agent.error(
-                "Failed to save project: \(error.localizedDescription, privacy: .public)"
+                "Failed to save project: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             requireRecovery()
             return false
@@ -159,7 +159,7 @@ final class StateManager {
             return true
         } catch {
             ThreadingLogger.agent.error(
-                "Failed to save selected session: \(error.localizedDescription, privacy: .public)"
+                "Failed to save selected session: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             requireRecovery()
             return false
@@ -175,7 +175,7 @@ final class StateManager {
             return true
         } catch {
             ThreadingLogger.agent.error(
-                "Failed to save running sessions: \(error.localizedDescription, privacy: .public)"
+                "Failed to save running sessions: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             requireRecovery()
             return false
@@ -197,7 +197,7 @@ final class StateManager {
             return ids
         } catch {
             ThreadingLogger.agent.error(
-                "Failed to read running sessions: \(error.localizedDescription, privacy: .public)"
+                "Failed to read running sessions: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             requireRecovery()
             return []
@@ -239,7 +239,7 @@ final class StateManager {
             return .failed(quarantinedAt: nil)
         } catch {
             ThreadingLogger.agent.error(
-                "Failed to load projects state: \(error.localizedDescription, privacy: .public)"
+                "Failed to load projects state: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             let quarantinedAt = quarantineDatabase()
             requireRecovery(quarantinedAt: quarantinedAt)
@@ -264,7 +264,7 @@ final class StateManager {
             state = try decodeAndMigrateProjectsState(from: data)
         } catch {
             ThreadingLogger.agent.error(
-                "Legacy projects.json could not be read: \(error.localizedDescription, privacy: .public)"
+                "Legacy projects.json could not be read: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return .failed(quarantinedAt: quarantineProjectsState())
         }
@@ -280,14 +280,36 @@ final class StateManager {
 
     private func retireLegacyProjectsState() {
         let retiredURL = projectsStateURL.appendingPathExtension(SQLiteDefaults.migratedSuffix)
-        try? fileManager.removeItem(at: retiredURL)
-        try? fileManager.moveItem(at: projectsStateURL, to: retiredURL)
+        if fileManager.fileExists(atPath: retiredURL.path) {
+            do {
+                try fileManager.removeItem(at: retiredURL)
+            } catch {
+                ThreadingLogger.agent.warning(
+                    "Could not replace retired legacy projects state destination=\(retiredURL.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
+        }
+        do {
+            try fileManager.moveItem(at: projectsStateURL, to: retiredURL)
+        } catch {
+            ThreadingLogger.agent.warning(
+                "Could not retire imported legacy projects state source=\(self.projectsStateURL.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+        }
         // The rolling backup described the document, not the database; it would only ever be
         // restored *over* an import that has already happened.
-        try? fileManager.moveItem(
-            at: projectsBackupURL,
-            to: projectsBackupURL.appendingPathExtension(SQLiteDefaults.migratedSuffix)
-        )
+        if fileManager.fileExists(atPath: projectsBackupURL.path) {
+            do {
+                try fileManager.moveItem(
+                    at: projectsBackupURL,
+                    to: projectsBackupURL.appendingPathExtension(SQLiteDefaults.migratedSuffix)
+                )
+            } catch {
+                ThreadingLogger.agent.warning(
+                    "Could not retire legacy projects backup source=\(self.projectsBackupURL.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
+        }
     }
 
     /// Reads the version before the full schema, refusing state from a newer app and routing
@@ -377,12 +399,12 @@ final class StateManager {
         do {
             try fileManager.moveItem(at: projectsStateURL, to: destination)
             ThreadingLogger.agent.error(
-                "Quarantined unreadable projects state at \(destination.path, privacy: .public)"
+                "Quarantined unreadable projects state at \(destination.path, privacy: .private(mask: .hash))"
             )
             return destination
         } catch {
             ThreadingLogger.agent.error(
-                "Failed to quarantine projects state: \(error.localizedDescription, privacy: .public)"
+                "Failed to quarantine projects state: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return nil
         }
@@ -434,7 +456,7 @@ final class StateManager {
             }
         } catch {
             ThreadingLogger.agent.error(
-                "Left the unreadable database bundle in place because a retired sidecar could not be removed: \(error.localizedDescription, privacy: .public)"
+                "Left the unreadable database bundle in place because a retired sidecar could not be removed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return nil
         }
@@ -452,13 +474,13 @@ final class StateManager {
             try fileManager.moveItem(at: databaseURL, to: destination)
         } catch {
             ThreadingLogger.agent.error(
-                "Failed to quarantine the database: \(error.localizedDescription, privacy: .public)"
+                "Failed to quarantine the database: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return nil
         }
 
         ThreadingLogger.agent.error(
-            "Quarantined unreadable database at \(destination.path, privacy: .public)"
+            "Quarantined unreadable database at \(destination.path, privacy: .private(mask: .hash))"
         )
         return destination
     }
@@ -492,7 +514,7 @@ final class StateManager {
             return try database().panelPayload(for: sessionID)
         } catch {
             ThreadingLogger.mcp.error(
-                "Could not load display panel: \(error.localizedDescription, privacy: .public)"
+                "Could not load display panel: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             requireRecovery()
             return nil
@@ -510,7 +532,7 @@ final class StateManager {
             try database().savePanelPayload(payload, for: sessionID)
         } catch {
             ThreadingLogger.mcp.error(
-                "Could not persist display panel: \(error.localizedDescription, privacy: .public)"
+                "Could not persist display panel: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             requireRecovery()
         }
@@ -526,7 +548,7 @@ final class StateManager {
             try database().retainPanels(sessionIDs: sessionIDs)
         } catch {
             ThreadingLogger.mcp.error(
-                "Could not prune display panels: \(error.localizedDescription, privacy: .public)"
+                "Could not prune display panels: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             requireRecovery()
         }
@@ -546,7 +568,7 @@ final class StateManager {
             return try database().attachmentsPayload(for: sessionID)
         } catch {
             ThreadingLogger.mcp.error(
-                "Could not load session attachments: \(error.localizedDescription, privacy: .public)"
+                "Could not load session attachments: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             requireRecovery()
             return nil
@@ -564,7 +586,7 @@ final class StateManager {
             try database().saveAttachmentsPayload(payload, for: sessionID)
         } catch {
             ThreadingLogger.mcp.error(
-                "Could not persist session attachments: \(error.localizedDescription, privacy: .public)"
+                "Could not persist session attachments: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             requireRecovery()
         }
@@ -580,7 +602,7 @@ final class StateManager {
             try database().retainAttachments(sessionIDs: sessionIDs)
         } catch {
             ThreadingLogger.mcp.error(
-                "Could not prune session attachments: \(error.localizedDescription, privacy: .public)"
+                "Could not prune session attachments: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             requireRecovery()
         }
@@ -621,7 +643,7 @@ final class StateManager {
             database = try self.database()
         } catch {
             ThreadingLogger.mcp.error(
-                "Could not inspect display panel storage: \(error.localizedDescription, privacy: .public)"
+                "Could not inspect display panel storage: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             requireRecovery()
             return
@@ -635,7 +657,7 @@ final class StateManager {
             )
         } catch {
             ThreadingLogger.mcp.error(
-                "Could not inspect legacy display panels: \(error.localizedDescription, privacy: .public)"
+                "Could not inspect legacy display panels: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             requireRecovery()
             return
@@ -664,7 +686,7 @@ final class StateManager {
                 retired.append(file)
             } catch {
                 ThreadingLogger.mcp.error(
-                    "Could not import legacy display panel \(file.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    "Could not import legacy display panel \(file.lastPathComponent, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
                 )
                 requireRecovery()
                 return
@@ -683,7 +705,7 @@ final class StateManager {
                 )
             } catch {
                 ThreadingLogger.mcp.error(
-                    "Could not retire legacy display panel \(file.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    "Could not retire legacy display panel \(file.lastPathComponent, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
                 )
             }
         }
@@ -798,7 +820,14 @@ final class StateManager {
 
     /// Removes the window-based state file left by the pre-project layout.
     func clearLegacySessionState() {
-        try? fileManager.removeItem(at: sessionStateURL)
+        guard fileManager.fileExists(atPath: sessionStateURL.path) else { return }
+        do {
+            try fileManager.removeItem(at: sessionStateURL)
+        } catch {
+            ThreadingLogger.session.warning(
+                "Could not remove legacy session state source=\(self.sessionStateURL.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+        }
     }
 }
 

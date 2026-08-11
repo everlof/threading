@@ -104,7 +104,11 @@ class CircularList<T> {
     func recycle ()
     {
         if count != maxLength {
-            print ("can only recycle when the buffer is full")
+            SwiftTermDiagnostics.emit(
+                .fault,
+                .bufferRecycleInvariant,
+                facts: ["count": count, "maximum": maxLength]
+            )
             abort ()
         }
         let index = getCyclicIndex(count)
@@ -167,22 +171,26 @@ class CircularList<T> {
     
     func shiftElements (start: Int, count: Int, offset: Int) -> Bool
     {
-        func dumpState (_ msg: String) -> Bool {
-            print ("Assertion at start=\(start) count=\(count) offset=\(offset): \(msg)")
+        func reportFailure (_ reason: Int) -> Bool {
+            SwiftTermDiagnostics.emit(
+                .fault,
+                .bufferShiftInvariant,
+                facts: ["start": start, "count": count, "offset": offset, "reason": reason]
+            )
             return false
         }
         
         if count < 0 {
-            return dumpState ("count < 0")
+            return reportFailure(1)
         }
         if start < 0 {
-            return dumpState ("start < 0")
+            return reportFailure(2)
         }
         if start >= self.count {
-            return dumpState ("start >= self.count")
+            return reportFailure(3)
         }
         if start+offset <= 0 {
-            return dumpState ("start+offset <= 0")
+            return reportFailure(4)
         }
 //        precondition (count > 0)
 //        precondition (start >= 0)
@@ -319,7 +327,11 @@ internal class CircularBufferLineList {
     func recycle ()
     {
         if count != maxLength {
-            print ("can only recycle when the buffer is full")
+            SwiftTermDiagnostics.emit(
+                .fault,
+                .bufferRecycleInvariant,
+                facts: ["count": count, "maximum": maxLength]
+            )
             abort ()
         }
         let index = getCyclicIndex(count)
@@ -383,22 +395,26 @@ internal class CircularBufferLineList {
     
     func shiftElements (start: Int, count: Int, offset: Int) -> Bool
     {
-        func dumpState (_ msg: String) -> Bool {
-            print ("Assertion at start=\(start) count=\(count) offset=\(offset): \(msg)")
+        func reportFailure (_ reason: Int) -> Bool {
+            SwiftTermDiagnostics.emit(
+                .fault,
+                .bufferShiftInvariant,
+                facts: ["start": start, "count": count, "offset": offset, "reason": reason]
+            )
             return false
         }
         
         if count < 0 {
-            return dumpState ("count < 0")
+            return reportFailure(1)
         }
         if start < 0 {
-            return dumpState ("start < 0")
+            return reportFailure(2)
         }
         if start >= self.count {
-            return dumpState ("start >= self.count")
+            return reportFailure(3)
         }
         if start+offset <= 0 {
-            return dumpState ("start+offset <= 0")
+            return reportFailure(4)
         }
 //        precondition (count > 0)
 //        precondition (start >= 0)
@@ -431,4 +447,3 @@ internal class CircularBufferLineList {
         }
     }
 }
-

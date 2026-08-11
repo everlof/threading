@@ -239,7 +239,7 @@ final class UsageWindowPoker {
         lastPoke[key] = now
 
         ThreadingLogger.agent.info(
-            "Usage window poke starting for \(key, privacy: .public)"
+            "Usage window poke starting for \(key, privacy: .private(mask: .hash))"
         )
 
         Task.detached(priority: .utility) {
@@ -275,7 +275,7 @@ final class UsageWindowPoker {
 
         if let failure {
             ThreadingLogger.agent.error(
-                "Usage window poke failed for \(accountID, privacy: .public): \(failure, privacy: .public)"
+                "Usage window poke failed for \(accountID, privacy: .private(mask: .hash)): \(failure, privacy: .private(mask: .hash))"
             )
         }
 

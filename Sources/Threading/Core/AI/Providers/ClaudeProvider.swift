@@ -83,9 +83,11 @@ final class ClaudeProvider: AIProvider {
 
         // Log request
         let startTime = Date()
-        ThreadingLogger.aiRequest.debug("Claude request - model: \(self.model)")
-        ThreadingLogger.aiRequest.debug("System prompt: \(systemPrompt)")
-        ThreadingLogger.aiRequest.debug("User message: \(userMessage)")
+        ThreadingLogger.aiRequest.debug(
+            "Claude request - model: \(self.model, privacy: .private(mask: .hash))"
+        )
+        ThreadingLogger.aiRequest.debug("System prompt: \(systemPrompt, privacy: .private)")
+        ThreadingLogger.aiRequest.debug("User message: \(userMessage, privacy: .private)")
 
         let (data, response) = try await session.data(for: request)
         let duration = Date().timeIntervalSince(startTime)
@@ -107,7 +109,9 @@ final class ClaudeProvider: AIProvider {
             throw AIError.missingAPIKey
         default:
             let message = try? parseErrorMessage(data)
-            ThreadingLogger.aiResponse.error("Claude response: server error \(httpResponse.statusCode) - \(message ?? "unknown")")
+            ThreadingLogger.aiResponse.error(
+                "Claude response: server error \(httpResponse.statusCode, privacy: .public) - \(message ?? "unknown", privacy: .private(mask: .hash))"
+            )
             throw AIError.serverError(statusCode: httpResponse.statusCode, message: message)
         }
     }
@@ -125,7 +129,9 @@ final class ClaudeProvider: AIProvider {
         if let usage = json["usage"] as? [String: Any] {
             let inputTokens = usage["input_tokens"] as? Int ?? 0
             let outputTokens = usage["output_tokens"] as? Int ?? 0
-            ThreadingLogger.aiResponse.info("Claude response - duration: \(String(format: "%.2f", duration))s, input_tokens: \(inputTokens), output_tokens: \(outputTokens)")
+        ThreadingLogger.aiResponse.info(
+            "Claude response - duration: \(String(format: "%.2f", duration), privacy: .public)s, input_tokens: \(inputTokens, privacy: .public), output_tokens: \(outputTokens, privacy: .public)"
+        )
 
             // Record token usage
             await TokenUsageManager.shared.record(
@@ -135,7 +141,7 @@ final class ClaudeProvider: AIProvider {
             )
         }
 
-        ThreadingLogger.aiResponse.debug("Claude response text: \(text)")
+        ThreadingLogger.aiResponse.debug("Claude response text: \(text, privacy: .private)")
         return text
     }
 

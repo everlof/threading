@@ -13,7 +13,10 @@ enum MacRemoteDiagnostics {
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(ProjectIconDefaults.applicationDirectoryName)
             .appendingPathComponent("Diagnostics", isDirectory: true),
-        source: .macOSHost
+        source: .macOSHost,
+        storageEventHandler: { event in
+            reportMacRemoteDiagnosticStorageEvent(event)
+        }
     )
 
     static func record(
@@ -76,5 +79,31 @@ enum MacRemoteDiagnostics {
             .recordCount: String(records.count),
         ])
         return true
+    }
+}
+
+private func reportMacRemoteDiagnosticStorageEvent(
+    _ event: RemoteDiagnosticJournalStorageEvent
+) {
+    if event.outcome == .recovered {
+        ThreadingLogger.remote.notice(
+            "Share-safe diagnostic journal storage recovered stage=\(event.stage.rawValue, privacy: .public)"
+        )
+        return
+    }
+
+    switch event.stage {
+    case .encoding:
+        ThreadingLogger.remote.fault(
+            "Share-safe diagnostic journal storage failed stage=\(event.stage.rawValue, privacy: .public) domain=\(event.errorDomain.rawValue, privacy: .public) code=\(event.errorCode, privacy: .public) affected=\(event.affectedCount, privacy: .public)"
+        )
+    case .directory, .fileCreation, .fileOpen, .seek, .write, .read:
+        ThreadingLogger.remote.error(
+            "Share-safe diagnostic journal storage failed stage=\(event.stage.rawValue, privacy: .public) domain=\(event.errorDomain.rawValue, privacy: .public) code=\(event.errorCode, privacy: .public) affected=\(event.affectedCount, privacy: .public)"
+        )
+    case .recordTooLarge, .close, .enumerate, .metadata, .decode, .retention:
+        ThreadingLogger.remote.warning(
+            "Share-safe diagnostic journal storage failed stage=\(event.stage.rawValue, privacy: .public) domain=\(event.errorDomain.rawValue, privacy: .public) code=\(event.errorCode, privacy: .public) affected=\(event.affectedCount, privacy: .public)"
+        )
     }
 }

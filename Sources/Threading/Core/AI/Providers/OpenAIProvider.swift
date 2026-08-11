@@ -81,9 +81,11 @@ final class OpenAIProvider: AIProvider {
 
         // Log request
         let startTime = Date()
-        ThreadingLogger.aiRequest.debug("OpenAI request - model: \(self.model)")
-        ThreadingLogger.aiRequest.debug("System prompt: \(systemPrompt)")
-        ThreadingLogger.aiRequest.debug("User message: \(userMessage)")
+        ThreadingLogger.aiRequest.debug(
+            "OpenAI request - model: \(self.model, privacy: .private(mask: .hash))"
+        )
+        ThreadingLogger.aiRequest.debug("System prompt: \(systemPrompt, privacy: .private)")
+        ThreadingLogger.aiRequest.debug("User message: \(userMessage, privacy: .private)")
 
         let (data, response) = try await session.data(for: request)
         let duration = Date().timeIntervalSince(startTime)
@@ -104,7 +106,9 @@ final class OpenAIProvider: AIProvider {
             throw AIError.missingAPIKey
         default:
             let message = try? parseErrorMessage(data)
-            ThreadingLogger.aiResponse.error("OpenAI response: server error \(httpResponse.statusCode) - \(message ?? "unknown")")
+            ThreadingLogger.aiResponse.error(
+                "OpenAI response: server error \(httpResponse.statusCode, privacy: .public) - \(message ?? "unknown", privacy: .private(mask: .hash))"
+            )
             throw AIError.serverError(statusCode: httpResponse.statusCode, message: message)
         }
     }
@@ -123,7 +127,9 @@ final class OpenAIProvider: AIProvider {
         if let usage = json["usage"] as? [String: Any] {
             let promptTokens = usage["prompt_tokens"] as? Int ?? 0
             let completionTokens = usage["completion_tokens"] as? Int ?? 0
-            ThreadingLogger.aiResponse.info("OpenAI response - duration: \(String(format: "%.2f", duration))s, prompt_tokens: \(promptTokens), completion_tokens: \(completionTokens)")
+        ThreadingLogger.aiResponse.info(
+            "OpenAI response - duration: \(String(format: "%.2f", duration), privacy: .public)s, prompt_tokens: \(promptTokens, privacy: .public), completion_tokens: \(completionTokens, privacy: .public)"
+        )
 
             // Record token usage
             await TokenUsageManager.shared.record(
@@ -133,7 +139,7 @@ final class OpenAIProvider: AIProvider {
             )
         }
 
-        ThreadingLogger.aiResponse.debug("OpenAI response text: \(content)")
+        ThreadingLogger.aiResponse.debug("OpenAI response text: \(content, privacy: .private)")
         return content
     }
 

@@ -91,7 +91,7 @@ enum ProjectIconResearch {
         let folderURL = project.folderURL
 
         ThreadingLogger.agent.info(
-            "Icon research started for \(project.name, privacy: .public) in \(project.folderPath, privacy: .public)"
+            "Icon research started for \(project.name, privacy: .private(mask: .hash)) in \(project.folderPath, privacy: .private(mask: .hash))"
         )
 
         queue.async {
@@ -103,7 +103,7 @@ enum ProjectIconResearch {
                 switch outcome {
                 case .failure(let error):
                     ThreadingLogger.agent.error(
-                        "Icon research failed for \(projectID, privacy: .public): \(error.message, privacy: .public)"
+                        "Icon research failed for \(projectID, privacy: .public): \(error.message, privacy: .private(mask: .hash))"
                     )
                     completion(.failure(error))
 
@@ -115,7 +115,7 @@ enum ProjectIconResearch {
                     ) {
                     case .success(let icon):
                         ThreadingLogger.agent.info(
-                            "Icon research succeeded for \(projectID, privacy: .public): stored \(icon.fileName, privacy: .public)"
+                            "Icon research succeeded for \(projectID, privacy: .public): stored \(icon.fileName, privacy: .private(mask: .hash))"
                         )
                         completion(.success(icon))
                     case .failure(.unusableImage):
@@ -159,7 +159,7 @@ enum ProjectIconResearch {
         }
 
         ThreadingLogger.agent.info(
-            "Icon research answer for \(projectID, privacy: .public): \(message, privacy: .public)"
+            "Icon research answer for \(projectID, privacy: .public): \(message, privacy: .private)"
         )
 
         guard let answer = answer(from: message) else {
@@ -184,7 +184,7 @@ enum ProjectIconResearch {
             try output.write(to: recordURL(for: projectID), atomically: true, encoding: .utf8)
         } catch {
             ThreadingLogger.agent.error(
-                "Could not write icon research record: \(error.localizedDescription, privacy: .public)"
+                "Could not write icon research record: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
         }
     }
@@ -204,14 +204,14 @@ enum ProjectIconResearch {
             )
         } catch {
             ThreadingLogger.agent.error(
-                "Icon research launch failed: \(error.localizedDescription, privacy: .public)"
+                "Icon research launch failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return (nil, .launchFailed)
         }
 
         let output = String(decoding: result.output, as: UTF8.self)
         ThreadingLogger.agent.info(
-            "Icon research child finished: \(String(describing: result.termination), privacy: .public), \(result.output.count) retained output bytes, truncated=\(result.outputWasTruncated, privacy: .public)"
+            "Icon research child finished: \(String(describing: result.termination), privacy: .public), \(result.output.count, privacy: .public) retained output bytes, truncated=\(result.outputWasTruncated, privacy: .public)"
         )
 
         switch result.termination {

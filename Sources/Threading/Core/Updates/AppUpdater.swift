@@ -51,7 +51,7 @@ final class AppUpdater {
         } catch {
             started = false
             ThreadingLogger.updates.error(
-                "Sparkle failed to start: \(error.localizedDescription, privacy: .public)"
+                "Sparkle failed to start: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
         }
 
@@ -75,6 +75,9 @@ final class AppUpdater {
         updater.automaticallyChecksForUpdates = UpdateFeedPolicy.allowsScheduledChecks(
             on: AppInfo.buildChannel,
             userChoice: enabled
+        )
+        ThreadingLogger.updates.debug(
+            "Update scheduling configured channel=\(AppInfo.buildChannel.rawValue, privacy: .public) requested=\(enabled, privacy: .public) effective=\(self.updater.automaticallyChecksForUpdates, privacy: .public)"
         )
 
         // Downloading without checking is not a state this app offers: the switch means "do not

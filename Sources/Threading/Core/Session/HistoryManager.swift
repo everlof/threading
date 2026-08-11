@@ -55,7 +55,7 @@ enum HistoryManager {
             try fileManager.moveItem(at: legacy, to: destination)
         } catch {
             ThreadingLogger.session.error(
-                "Failed to migrate project terminal history: \(error.localizedDescription)"
+                "Failed to migrate project terminal history: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
         }
     }
@@ -76,7 +76,7 @@ enum HistoryManager {
             do {
                 try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             } catch {
-                ThreadingLogger.session.error("Failed to create the history directory: \(error.localizedDescription, privacy: .public)")
+                ThreadingLogger.session.error("Failed to create the history directory: \(error.localizedDescription, privacy: .private(mask: .hash))")
             }
         }
     }
@@ -118,7 +118,7 @@ enum HistoryManager {
                 }
             }
         } catch {
-            ThreadingLogger.session.error("Failed to clean up orphaned history files: \(error.localizedDescription, privacy: .public)")
+            ThreadingLogger.session.error("Failed to clean up orphaned history files: \(error.localizedDescription, privacy: .private(mask: .hash))")
         }
     }
 
@@ -138,7 +138,7 @@ enum HistoryManager {
             do {
                 try fileManager.removeItem(at: filePath)
             } catch {
-                ThreadingLogger.session.error("Failed to remove a history file: \(error.localizedDescription, privacy: .public)")
+                ThreadingLogger.session.error("Failed to remove a history file: \(error.localizedDescription, privacy: .private(mask: .hash))")
             }
         }
     }

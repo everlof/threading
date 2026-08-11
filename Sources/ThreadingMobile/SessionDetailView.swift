@@ -315,6 +315,7 @@ struct SessionDetailView: View {
         } catch is CancellationError {
             return
         } catch {
+            MobileDiagnostics.logDegraded(.sessionAction, error: error)
             launchError = error.localizedDescription
         }
     }
@@ -337,6 +338,7 @@ struct SessionDetailView: View {
             } catch is CancellationError {
                 return
             } catch {
+                MobileDiagnostics.logDegraded(.themeSelection, error: error)
                 connection?.previewTerminalTheme(previous)
                 themeError = error.localizedDescription
             }
@@ -376,6 +378,7 @@ struct SessionDetailView: View {
             } catch is CancellationError {
                 return
             } catch {
+                MobileDiagnostics.logDegraded(.sessionAction, error: error)
                 sessionActionError = error.localizedDescription
                 await open()
             }
@@ -399,6 +402,7 @@ struct SessionDetailView: View {
             } catch is CancellationError {
                 return
             } catch {
+                MobileDiagnostics.logDegraded(.sessionAction, error: error)
                 sessionActionError = error.localizedDescription
             }
         }

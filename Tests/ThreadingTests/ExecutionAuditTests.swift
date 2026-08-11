@@ -359,6 +359,69 @@ final class ExecutionAuditTests: XCTestCase {
         XCTAssertTrue(result.records.isEmpty)
     }
 
+    func testAppendFailureLeavesTheChainUnadvancedAndCanRecover() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("execution-audit-blocked-\(UUID().uuidString)")
+        try Data("not a directory".utf8).write(to: directory)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+
+        let store = ExecutionAuditStore(directory: directory)
+        let sessionID = SessionID()
+        XCTAssertNil(store.append(
+            sessionID: sessionID,
+            source: .providerStream,
+            provider: "codex",
+            category: .shell,
+            phase: .requested,
+            operation: "first",
+            fidelity: .exact
+        ))
+
+        try FileManager.default.removeItem(at: directory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let recovered = store.append(
+            sessionID: sessionID,
+            source: .providerStream,
+            provider: "codex",
+            category: .shell,
+            phase: .requested,
+            operation: "second",
+            fidelity: .exact
+        )
+
+        XCTAssertEqual(recovered?.sequence, 1)
+        XCTAssertEqual(store.read(sessionID: sessionID).integrity, .verified)
+        XCTAssertEqual(store.read(sessionID: sessionID).records.map(\.operation), ["second"])
+    }
+
+    func testOversizedRecordDoesNotAdvanceTheChain() throws {
+        let fixture = try makeStore(maximumSegmentBytes: 1_024)
+        let sessionID = SessionID()
+
+        XCTAssertNil(fixture.store.append(
+            sessionID: sessionID,
+            source: .providerStream,
+            provider: "codex",
+            category: .shell,
+            phase: .completed,
+            operation: "oversized",
+            output: .string(String(repeating: "x", count: 2_000)),
+            fidelity: .exact
+        ))
+        let retained = fixture.store.append(
+            sessionID: sessionID,
+            source: .providerStream,
+            provider: "codex",
+            category: .shell,
+            phase: .completed,
+            operation: "retained",
+            fidelity: .exact
+        )
+
+        XCTAssertEqual(retained?.sequence, 1)
+        XCTAssertEqual(fixture.store.read(sessionID: sessionID).records.map(\.operation), ["retained"])
+    }
+
     func testRemovingSessionDeletesCurrentAndRotatedLedger() throws {
         let fixture = try makeStore(maximumSegmentBytes: 1_024, retainedRotatedSegments: 2)
         let sessionID = SessionID()

@@ -81,12 +81,14 @@ final class MobileSessionContinuityStore: ObservableObject {
                 archive = empty
                 writesAllowed = false
                 recoveryMessage = "Saved session state was created by a newer version."
+                MobileDiagnostics.logDegraded(.continuityStorage, code: .newerFormat)
                 return
             }
             decoded.version = Defaults.archiveVersion
             try Self.validate(decoded)
             archive = decoded
         } catch {
+            MobileDiagnostics.logFailure(.continuityStorage, error: error)
             let recoveryKey = Defaults.unreadableKeyPrefix + UUID().uuidString.lowercased()
             defaults.set(data, forKey: recoveryKey)
             if defaults.data(forKey: recoveryKey) == data {
@@ -203,16 +205,19 @@ final class MobileSessionContinuityStore: ObservableObject {
         do {
             try Self.validate(candidate)
         } catch {
+            MobileDiagnostics.logFailure(.continuityStorage, code: .validation)
             recoveryMessage = "Session state exceeded its safe storage limits and was not changed."
             return
         }
         guard let data = try? JSONEncoder().encode(candidate),
               data.count <= Defaults.maximumArchiveBytes else {
+            MobileDiagnostics.logFailure(.continuityStorage, code: .encode)
             recoveryMessage = "Session state exceeded its safe storage limit and was not changed."
             return
         }
         defaults.set(data, forKey: Defaults.archiveKey)
         guard defaults.data(forKey: Defaults.archiveKey) == data else {
+            MobileDiagnostics.logFailure(.continuityStorage, code: .writeVerification)
             writesAllowed = false
             recoveryMessage = "Session state could not be saved. New writes are paused."
             return

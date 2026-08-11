@@ -182,7 +182,7 @@ final class GitHubAppConnection {
             return grant.accessToken
         } catch {
             ThreadingLogger.github.error(
-                "GitHub App token refresh failed: \(error.localizedDescription)"
+                "GitHub App token refresh failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return store.token(.access)
         }

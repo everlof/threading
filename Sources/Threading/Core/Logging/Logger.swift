@@ -3,6 +3,13 @@ import OSLog
 /// Centralized logging infrastructure using Apple's OSLog framework.
 /// View logs with: `log stream --predicate 'subsystem == "codes.threading"'`
 /// Or filter by category: `log stream --predicate 'subsystem == "codes.threading" AND category BEGINSWITH "ai"'`
+///
+/// Every interpolation chooses `privacy:` explicitly. Public fields are structural machine facts:
+/// enum tokens, counts, durations, status codes and opaque session identifiers. User content,
+/// paths, filenames, URLs, account labels, command arguments, provider/client text and arbitrary
+/// error descriptions are private; use `.private(mask: .hash)` when correlation is useful and
+/// `.private` for prompts or response bodies. Credentials and bearer tokens are never logged,
+/// even privately. `scripts/check_logging_boundaries.py` enforces the source-level part.
 enum ThreadingLogger {
 
     // MARK: - Subsystem
@@ -22,8 +29,14 @@ enum ThreadingLogger {
 
     // MARK: - Terminal Loggers
 
+    /// Application launch, shutdown, and process-wide safety boundaries.
+    static let app = Logger(subsystem: subsystem, category: "app")
+
     /// Terminal operations (buffer, rendering)
     static let terminal = Logger(subsystem: subsystem, category: "terminal")
+
+    /// Embedded browser tabs, baseline persistence, and Playwright automation.
+    static let browser = Logger(subsystem: subsystem, category: "browser")
 
     /// Session management (lifecycle, state)
     static let session = Logger(subsystem: subsystem, category: "session")
@@ -38,6 +51,18 @@ enum ThreadingLogger {
 
     /// Coarse performance spans, main-thread stalls, and trace export failures.
     static let performance = Logger(subsystem: subsystem, category: "performance")
+
+    /// The local, hash-linked execution ledger (storage, rotation, integrity, deletion).
+    static let audit = Logger(subsystem: subsystem, category: "audit")
+
+    /// Usage metering, durable limit history, and dashboard source coverage.
+    static let usage = Logger(subsystem: subsystem, category: "usage")
+
+    /// App chrome themes, terminal palettes, theme imports, and local image assets.
+    static let theme = Logger(subsystem: subsystem, category: "theme")
+
+    /// Persistence recovery/migration, SQLite, reclaimable-artifact scans, and disk cleanup.
+    static let storage = Logger(subsystem: subsystem, category: "storage")
 
     // MARK: - MCP Loggers
 

@@ -456,7 +456,7 @@ struct StreamParseDiagnostics {
         malformedLineCount += 1
         let total = malformedLineCount
         ThreadingLogger.agent.warning(
-            "Skipped malformed \(provider, privacy: .public) stream line; total \(total)"
+            "Skipped malformed \(provider, privacy: .public) stream line; total \(total, privacy: .public)"
         )
     }
 }

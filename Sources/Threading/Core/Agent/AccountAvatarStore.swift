@@ -156,11 +156,29 @@ enum AccountAvatarStore {
         attempted.insert(account.id)
 
         let target = fileURL(for: account)
+        ThreadingLogger.agent.debug(
+            "Account avatar discovery started provider=\(account.provider.rawValue, privacy: .public) account=\(account.id.rawValue, privacy: .private(mask: .hash))"
+        )
 
         queue.async {
-            guard let email = email(for: account),
-                  let data = lookupAvatar(email: email),
-                  let png = ProjectIconStore.normalizedPNGData(from: data) else { return }
+            guard let email = email(for: account) else {
+                ThreadingLogger.agent.debug(
+                    "Account avatar discovery completed provider=\(account.provider.rawValue, privacy: .public) account=\(account.id.rawValue, privacy: .private(mask: .hash)) result=no_email"
+                )
+                return
+            }
+            guard let data = lookupAvatar(email: email) else {
+                ThreadingLogger.agent.debug(
+                    "Account avatar discovery completed provider=\(account.provider.rawValue, privacy: .public) account=\(account.id.rawValue, privacy: .private(mask: .hash)) result=not_found"
+                )
+                return
+            }
+            guard let png = ProjectIconStore.normalizedPNGData(from: data) else {
+                ThreadingLogger.agent.warning(
+                    "Account avatar discovery failed provider=\(account.provider.rawValue, privacy: .public) account=\(account.id.rawValue, privacy: .private(mask: .hash)) reason=invalid_image"
+                )
+                return
+            }
 
             DispatchQueue.main.async {
                 do {
@@ -171,10 +189,14 @@ enum AccountAvatarStore {
                     try png.write(to: target, options: .atomic)
                 } catch {
                     ThreadingLogger.agent.error(
-                        "Could not store account avatar: \(error.localizedDescription, privacy: .public)"
+                        "Could not store account avatar provider=\(account.provider.rawValue, privacy: .public) account=\(account.id.rawValue, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
                     )
                     return
                 }
+
+                ThreadingLogger.agent.info(
+                    "Account avatar stored provider=\(account.provider.rawValue, privacy: .public) account=\(account.id.rawValue, privacy: .private(mask: .hash)) bytes=\(png.count, privacy: .public)"
+                )
 
                 // The same route an emoji edit takes: the sidebar rebuilds and the rows
                 // pick the file up from disk.

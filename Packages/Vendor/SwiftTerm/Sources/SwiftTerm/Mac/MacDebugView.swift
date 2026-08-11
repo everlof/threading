@@ -65,7 +65,7 @@ public class TerminalDebugView: NSView {
         ]
         
         if hilight {
-            print ("here")
+            SwiftTermDiagnostics.emit(.debug, .uiDrawingInspectionSuppressed)
         }
         res.append (NSAttributedString (string: prefix, attributes: (hilight ? selLineAttr : nsattr)))
         var str = ""

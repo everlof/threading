@@ -125,6 +125,13 @@ final class ManagedWorkspaceRemoteCleanupCoordinator {
         let outcome: ManagedWorkspaceRemoteCleanupOutcome
     }
 
+    private enum RecoveryOutcome: String {
+        case waiting
+        case deleted
+        case alreadyAbsent = "already_absent"
+        case ownershipLost = "ownership_lost"
+    }
+
     private let store: ProjectStore
     private let center: NotificationCenter
     private let cleaner: ManagedWorkspaceRemoteCleaner
@@ -148,6 +155,7 @@ final class ManagedWorkspaceRemoteCleanupCoordinator {
     func start() {
         guard !hasStarted, !RecoveryMode.isActive else { return }
         hasStarted = true
+        ThreadingLogger.git.info("Managed review branch reconciliation started")
 
         let observations = AppEventObservations(center: center)
         observations.observe(NSApplication.didBecomeActiveNotification) { [weak self] in
@@ -178,6 +186,9 @@ final class ManagedWorkspaceRemoteCleanupCoordinator {
         guard !candidates.isEmpty else { return }
 
         isReconciling = true
+        ThreadingLogger.git.info(
+            "Managed review branch reconciliation pass started candidates=\(candidates.count, privacy: .public)"
+        )
         let cleaner = self.cleaner
         Task { [weak self] in
             var results: [Result] = []
@@ -205,14 +216,23 @@ final class ManagedWorkspaceRemoteCleanupCoordinator {
 
             switch result.outcome {
             case .waiting:
-                reportedFailures.removeValue(forKey: result.candidate.sessionID)
+                clearReportedFailure(
+                    sessionID: result.candidate.sessionID,
+                    outcome: .waiting
+                )
 
             case .disposed(let state):
                 store.update(sessionID: result.candidate.sessionID) {
                     $0.managedWorkspace?.remoteBranchState = state
                     $0.managedWorkspace?.lastError = nil
                 }
-                reportedFailures.removeValue(forKey: result.candidate.sessionID)
+                clearReportedFailure(
+                    sessionID: result.candidate.sessionID,
+                    outcome: state == .deleted ? .deleted : .alreadyAbsent
+                )
+                ThreadingLogger.git.info(
+                    "Managed review branch disposed session=\(result.candidate.sessionID.uuidString, privacy: .public) result=\(state.rawValue, privacy: .public)"
+                )
                 EventLog.shared.record(.session, "Managed review branch disposed", [
                     "session": result.candidate.sessionID.uuidString,
                     "result": state.rawValue
@@ -223,7 +243,13 @@ final class ManagedWorkspaceRemoteCleanupCoordinator {
                     $0.managedWorkspace?.remoteBranchState = .ownershipLost
                     $0.managedWorkspace?.lastError = message
                 }
-                reportedFailures.removeValue(forKey: result.candidate.sessionID)
+                clearReportedFailure(
+                    sessionID: result.candidate.sessionID,
+                    outcome: .ownershipLost
+                )
+                ThreadingLogger.git.warning(
+                    "Managed review branch preserved session=\(result.candidate.sessionID.uuidString, privacy: .public) reason=\(message, privacy: .private(mask: .hash))"
+                )
                 EventLog.shared.record(.session, "Managed review branch preserved", [
                     "session": result.candidate.sessionID.uuidString,
                     "reason": message
@@ -235,6 +261,9 @@ final class ManagedWorkspaceRemoteCleanupCoordinator {
         }
 
         isReconciling = false
+        ThreadingLogger.git.info(
+            "Managed review branch reconciliation pass completed results=\(results.count, privacy: .public)"
+        )
         if owesAnotherPass {
             owesAnotherPass = false
             reconcile()
@@ -244,10 +273,20 @@ final class ManagedWorkspaceRemoteCleanupCoordinator {
     private func reportFailureOnce(_ message: String, sessionID: SessionID) {
         guard reportedFailures[sessionID] != message else { return }
         reportedFailures[sessionID] = message
+        ThreadingLogger.git.warning(
+            "Managed review branch cleanup deferred session=\(sessionID.uuidString, privacy: .public) reason=\(message, privacy: .private(mask: .hash))"
+        )
         EventLog.shared.record(.session, "Managed review branch cleanup deferred", [
             "session": sessionID.uuidString,
             "reason": message
         ])
+    }
+
+    private func clearReportedFailure(sessionID: SessionID, outcome: RecoveryOutcome) {
+        guard reportedFailures.removeValue(forKey: sessionID) != nil else { return }
+        ThreadingLogger.git.notice(
+            "Managed review branch cleanup recovered session=\(sessionID.uuidString, privacy: .public) outcome=\(outcome.rawValue, privacy: .public)"
+        )
     }
 
     private func rearm() {

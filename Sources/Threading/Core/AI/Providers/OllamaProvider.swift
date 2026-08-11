@@ -79,8 +79,10 @@ final class OllamaProvider: AIProvider {
 
         // Log request
         let startTime = Date()
-        ThreadingLogger.aiRequest.debug("Ollama request - model: \(self.model), url: \(url.absoluteString)")
-        ThreadingLogger.aiRequest.debug("Prompt: \(prompt)")
+        ThreadingLogger.aiRequest.debug(
+            "Ollama request - model: \(self.model, privacy: .private(mask: .hash)), url: \(url.absoluteString, privacy: .private(mask: .hash))"
+        )
+        ThreadingLogger.aiRequest.debug("Prompt: \(prompt, privacy: .private)")
 
         let (data, response) = try await session.data(for: request)
         let duration = Date().timeIntervalSince(startTime)
@@ -94,11 +96,15 @@ final class OllamaProvider: AIProvider {
         case 200:
             return try await parseResponse(data, duration: duration)
         case 404:
-            ThreadingLogger.aiResponse.error("Ollama response: model '\(self.model)' not found")
+            ThreadingLogger.aiResponse.error(
+                "Ollama response: model '\(self.model, privacy: .private(mask: .hash))' not found"
+            )
             throw AIError.serverError(statusCode: 404, message: "Model '\(model)' not found. Run 'ollama pull \(model)' first.")
         default:
             let message = try? parseErrorMessage(data)
-            ThreadingLogger.aiResponse.error("Ollama response: server error \(httpResponse.statusCode) - \(message ?? "unknown")")
+            ThreadingLogger.aiResponse.error(
+                "Ollama response: server error \(httpResponse.statusCode, privacy: .public) - \(message ?? "unknown", privacy: .private(mask: .hash))"
+            )
             throw AIError.serverError(statusCode: httpResponse.statusCode, message: message)
         }
     }
@@ -113,7 +119,9 @@ final class OllamaProvider: AIProvider {
         // Extract and log token usage (Ollama provides eval counts)
         let promptEvalCount = json["prompt_eval_count"] as? Int ?? 0
         let evalCount = json["eval_count"] as? Int ?? 0
-        ThreadingLogger.aiResponse.info("Ollama response - duration: \(String(format: "%.2f", duration))s, prompt_eval_count: \(promptEvalCount), eval_count: \(evalCount)")
+        ThreadingLogger.aiResponse.info(
+            "Ollama response - duration: \(String(format: "%.2f", duration), privacy: .public)s, prompt_eval_count: \(promptEvalCount, privacy: .public), eval_count: \(evalCount, privacy: .public)"
+        )
 
         // Record token usage
         await TokenUsageManager.shared.record(
@@ -122,7 +130,7 @@ final class OllamaProvider: AIProvider {
             outputTokens: evalCount
         )
 
-        ThreadingLogger.aiResponse.debug("Ollama response text: \(response)")
+        ThreadingLogger.aiResponse.debug("Ollama response text: \(response, privacy: .private)")
         return response
     }
 

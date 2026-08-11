@@ -109,6 +109,8 @@ final class ArtifactScanService {
     func startPassiveScanning() {
         guard passiveTimer == nil else { return }
 
+        ThreadingLogger.storage.info("Passive artifact scanning scheduled")
+
         let timer = Timer.scheduledTimer(
             withTimeInterval: ArtifactScanDefaults.passiveInterval,
             repeats: true
@@ -137,6 +139,9 @@ final class ArtifactScanService {
     /// Rescans everything on demand, ignoring both staleness and the busy rule — this is the
     /// Rescan button, where the user has asked for the disk to be read *now*.
     func refreshAll() {
+        ThreadingLogger.storage.notice(
+            "Artifact rescan requested projects=\(ProjectStore.shared.projects.count, privacy: .public)"
+        )
         for project in ProjectStore.shared.projects {
             refresh(project, force: true)
         }
@@ -156,6 +161,10 @@ final class ArtifactScanService {
 
         let projectID = project.id
         let folderPath = project.folderPath
+        let startedAt = Date()
+        ThreadingLogger.storage.debug(
+            "Artifact scan started project=\(projectID.uuidString, privacy: .public) forced=\(force, privacy: .public)"
+        )
 
         queue.async { [weak self] in
             let artifacts = ArtifactScanner.scan(projectFolder: folderPath)
@@ -167,6 +176,11 @@ final class ArtifactScanService {
                 self.scans[projectID] = ProjectScan(scannedAt: scannedAt, artifacts: artifacts)
                 self.save()
                 self.notifyChanged()
+                let bytes = artifacts.reduce(Int64(0)) { $0 + $1.byteCount }
+                let durationMilliseconds = Int(Date().timeIntervalSince(startedAt) * 1_000)
+                ThreadingLogger.storage.debug(
+                    "Artifact scan completed project=\(projectID.uuidString, privacy: .public) artifacts=\(artifacts.count, privacy: .public) bytes=\(bytes, privacy: .public) duration_ms=\(durationMilliseconds, privacy: .public)"
+                )
             }
         }
     }

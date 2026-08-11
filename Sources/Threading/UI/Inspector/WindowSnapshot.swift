@@ -148,7 +148,10 @@ enum WindowSnapshot {
     /// into a chat within the minute. The timestamped name says which capture is which when
     /// several accumulate.
     static func writePNG(_ rep: NSBitmapImageRep) -> URL? {
-        guard let data = rep.representation(using: .png, properties: [:]) else { return nil }
+        guard let data = rep.representation(using: .png, properties: [:]) else {
+            ThreadingLogger.app.warning("Inspector screenshot PNG encoding failed")
+            return nil
+        }
 
         let name = InspectorDefaults.screenshotPrefix + Self.timestamp.string(from: Date()) + ".png"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
@@ -157,6 +160,9 @@ enum WindowSnapshot {
             try data.write(to: url)
             return url
         } catch {
+            ThreadingLogger.app.error(
+                "Inspector screenshot write failed destination=\(url.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             return nil
         }
     }

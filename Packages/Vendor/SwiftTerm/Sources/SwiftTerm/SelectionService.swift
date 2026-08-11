@@ -167,7 +167,6 @@ class SelectionService: CustomDebugStringConvertible {
                 newPos.col = 0
             }
         }
-        print("SelectinRows=\(selectingRows)")
         shiftExtend (bufferPosition: newPos)
     }
     

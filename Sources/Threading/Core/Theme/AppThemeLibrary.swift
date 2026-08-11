@@ -102,6 +102,9 @@ enum AppThemeLibrary {
     /// nothing on screen.
     static func contributedThemesDidChange() {
         if theme(withID: current.id) == nil {
+            ThreadingLogger.theme.warning(
+                "Active contributed theme became unavailable theme=\(current.id.rawValue, privacy: .private(mask: .hash)); falling back to system"
+            )
             apply(.system)
         } else if let stored = defaults.string(forKey: Keys.currentThemeID),
                   stored != current.id.rawValue,
@@ -153,8 +156,14 @@ enum AppThemeLibrary {
             try create(copy)
         } catch {
             ThemeAssetStore.removeAll(for: copy.id)
+            ThreadingLogger.theme.error(
+                "App theme duplication failed source=\(source.id.rawValue, privacy: .private(mask: .hash)) target=\(copy.id.rawValue, privacy: .private(mask: .hash)) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             throw error
         }
+        ThreadingLogger.theme.info(
+            "App theme duplicated source=\(source.id.rawValue, privacy: .private(mask: .hash)) target=\(copy.id.rawValue, privacy: .private(mask: .hash))"
+        )
         return copy
     }
 
@@ -218,10 +227,16 @@ enum AppThemeLibrary {
         }
         try AppThemeEditing.validate(theme)
         guard AppThemeStore.shared.insert(theme) else {
+            ThreadingLogger.theme.error(
+                "App theme creation persistence failed theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"
+            )
             throw AppThemeEditingError.invalid(
                 "The custom app theme could not be saved."
             )
         }
+        ThreadingLogger.theme.info(
+            "App theme created theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) variants=\(theme.variants.count, privacy: .public)"
+        )
         NotificationCenter.default.post(AppThemeLibraryDidChange())
     }
 
@@ -243,8 +258,14 @@ enum AppThemeLibrary {
         }
         try AppThemeEditing.validate(theme)
         guard AppThemeStore.shared.replace(theme) else {
+            ThreadingLogger.theme.error(
+                "App theme update persistence failed theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"
+            )
             throw AppThemeEditingError.invalid("The custom app theme no longer exists.")
         }
+        ThreadingLogger.theme.info(
+            "App theme updated theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) variants=\(theme.variants.count, privacy: .public)"
+        )
         NotificationCenter.default.post(AppThemeLibraryDidChange())
         if current.id == theme.id {
             apply(theme)
@@ -253,13 +274,27 @@ enum AppThemeLibrary {
 
     @discardableResult
     static func delete(_ theme: AppTheme) -> Bool {
-        guard isCustom(theme), AppThemeStore.shared.remove(id: theme.id) else { return false }
+        guard isCustom(theme) else {
+            ThreadingLogger.theme.notice(
+                "App theme deletion refused theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) reason=not_custom"
+            )
+            return false
+        }
+        guard AppThemeStore.shared.remove(id: theme.id) else {
+            ThreadingLogger.theme.error(
+                "App theme deletion persistence failed theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"
+            )
+            return false
+        }
         // The document owned files too: sidebar assets die with the theme that referenced
         // them, or Application Support accumulates folders no document can reach.
         ThemeAssetStore.removeAll(for: theme.id)
         if current.id == theme.id {
             apply(.system)
         }
+        ThreadingLogger.theme.info(
+            "App theme deleted theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"
+        )
         NotificationCenter.default.post(AppThemeLibraryDidChange())
         return true
     }
@@ -299,6 +334,9 @@ enum AppThemeLibrary {
         current = restored
         AppThemePalette.set(restored)
         applyAppearance(for: restored)
+        ThreadingLogger.theme.info(
+            "App theme restored mode=\(mode.rawValue, privacy: .public) theme=\(restored.id.rawValue, privacy: .private(mask: .hash))"
+        )
     }
 
     /// Pins the system appearance to the theme's own mode.
@@ -318,7 +356,12 @@ enum AppThemeLibrary {
         // theme's extension is disabled, the user then picks System deliberately — a choice
         // the early return used to swallow, leaving the stored id pointing at the old theme.
         defaults.set(theme.id.rawValue, forKey: Keys.currentThemeID)
-        guard theme != current else { return }
+        guard theme != current else {
+            ThreadingLogger.theme.debug(
+                "App theme selection persisted without visual change theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"
+            )
+            return
+        }
 
         current = theme
         AppThemePalette.set(theme)
@@ -330,6 +373,9 @@ enum AppThemeLibrary {
 
         AppThemeRefresh.repaintEverything()
         NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id))
+        ThreadingLogger.theme.info(
+            "App theme applied theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) mode=\(theme.mode.rawValue, privacy: .public)"
+        )
     }
 }
 

@@ -160,7 +160,9 @@ final class ClaudeStreamSession:
                 }
             }
         } catch {
-            ThreadingLogger.agent.error("Stream session failed to start: \(error.localizedDescription)")
+            ThreadingLogger.agent.error(
+                "Stream session failed to start: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             Task { @MainActor [weak self] in
                 self?.onExit?(AgentChildProcessDefaults.spawnFailureStatus)
             }
@@ -287,7 +289,9 @@ final class ClaudeStreamSession:
             try input.write(contentsOf: data)
             return true
         } catch {
-            ThreadingLogger.agent.error("Stream session write failed: \(error.localizedDescription)")
+            ThreadingLogger.agent.error(
+                "Stream session write failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             onEvent?(.turnFinished(
                 text: error.localizedDescription,
                 outcome: .failed,

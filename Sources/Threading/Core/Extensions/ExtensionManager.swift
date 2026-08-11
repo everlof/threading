@@ -480,6 +480,9 @@ final class ExtensionManager:
                 extensionIdentifier: extensionIdentifier
             )
         } catch {
+            ThreadingLogger.extensions.error(
+                "Extension setting persistence failed identifier=\(extensionIdentifier, privacy: .public) setting=\(settingID, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             completion(.failure(error))
             return
         }
@@ -554,12 +557,18 @@ final class ExtensionManager:
                 "extension": extensionIdentifier,
                 "setting": field.id
             ])
+            ThreadingLogger.extensions.error(
+                "Extension setting rollback failed identifier=\(extensionIdentifier, privacy: .public) setting=\(field.id, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             return failure
         }
 
         guard runtimeStateIsUncertain else { return originalError }
         let failure = ExtensionSettingsManagerError.runtimeStateUncertain(
             originalError.localizedDescription
+        )
+        ThreadingLogger.extensions.warning(
+            "Extension stopped after uncertain setting update identifier=\(extensionIdentifier, privacy: .public) setting=\(field.id, privacy: .public) error=\(originalError.localizedDescription, privacy: .private(mask: .hash))"
         )
         stop(extensionIdentifier, status: .failed(failure.localizedDescription))
         return failure
@@ -642,7 +651,7 @@ final class ExtensionManager:
         ) { result in
             if case .failure(let error) = result {
                 ThreadingLogger.extensions.error(
-                    "Component action failed for \(identifier, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    "Component action failed for \(identifier, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
                 )
             }
         }
@@ -1273,6 +1282,9 @@ final class ExtensionManager:
             Result<InstalledExtensionSnapshot, Error>
         ) -> Void
     ) {
+        ThreadingLogger.extensions.info(
+            "Extension installation started source=\(sourceURL.path, privacy: .private(mask: .hash))"
+        )
         let store = self.store
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Result { try store.install(from: sourceURL) }
@@ -1281,8 +1293,14 @@ final class ExtensionManager:
                 self.refreshInventory(postChange: true)
                 switch result {
                 case .failure(let error):
+                    ThreadingLogger.extensions.error(
+                        "Extension installation failed source=\(sourceURL.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                    )
                     completion(.failure(error))
                 case .success(let bundle):
+                    ThreadingLogger.extensions.info(
+                        "Extension installation completed identifier=\(bundle.manifest.identifier, privacy: .public)"
+                    )
                     guard let installed = self.installedExtensions.first(where: {
                         $0.identifier == bundle.manifest.identifier
                     }) else {
@@ -1310,7 +1328,14 @@ final class ExtensionManager:
         let store = self.store
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Result { try store.updatePlan(from: sourceURL) }
-            DispatchQueue.main.async { completion(result) }
+            DispatchQueue.main.async {
+                if case .failure(let error) = result {
+                    ThreadingLogger.extensions.warning(
+                        "Extension update inspection failed source=\(sourceURL.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                    )
+                }
+                completion(result)
+            }
         }
     }
 
@@ -1342,6 +1367,9 @@ final class ExtensionManager:
             completion(.failure(ExtensionManagerError.operationInProgress(identifier)))
             return
         }
+        ThreadingLogger.extensions.info(
+            "Extension update started identifier=\(identifier, privacy: .public) source=\(sourceURL.path, privacy: .private(mask: .hash))"
+        )
         // Stop synchronously, on the main actor, before any filesystem work is scheduled.
         stop(identifier, status: .updating)
         notifyChange()
@@ -1363,9 +1391,15 @@ final class ExtensionManager:
                 }
                 switch result {
                 case .failure(let error):
+                    ThreadingLogger.extensions.error(
+                        "Extension update failed identifier=\(identifier, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                    )
                     self.notifyChange()
                     completion(.failure(error))
                 case .success(let bundle):
+                    ThreadingLogger.extensions.info(
+                        "Extension update completed identifier=\(identifier, privacy: .public) data_version=\(bundle.manifest.dataVersion, privacy: .public)"
+                    )
                     guard let installed = self.installedExtensions.first(where: {
                         $0.identifier == bundle.manifest.identifier
                     }) else {
@@ -1393,6 +1427,9 @@ final class ExtensionManager:
 
         try store.setEnabled(enabled, identifier: identifier)
         enabledIdentifiers = store.enabledIdentifiers()
+        ThreadingLogger.extensions.info(
+            "Extension enablement changed identifier=\(identifier, privacy: .public) enabled=\(enabled, privacy: .public)"
+        )
 
         if enabled {
             start(identifier)
@@ -1451,7 +1488,18 @@ final class ExtensionManager:
             throw ExtensionManagerError.operationInProgress(identifier)
         }
         stop(identifier, status: .disabled)
-        let recoveredAt = try store.uninstall(identifier: identifier)
+        let recoveredAt: URL
+        do {
+            recoveredAt = try store.uninstall(identifier: identifier)
+        } catch {
+            ThreadingLogger.extensions.error(
+                "Extension uninstall failed identifier=\(identifier, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            throw error
+        }
+        ThreadingLogger.extensions.info(
+            "Extension uninstall completed identifier=\(identifier, privacy: .public) recovery=\(recoveredAt.path, privacy: .private(mask: .hash))"
+        )
         refreshInventory(postChange: true)
         return recoveredAt
     }
@@ -1537,6 +1585,12 @@ final class ExtensionManager:
             )
         } catch {
             statuses[identifier] = .failed(error.localizedDescription)
+            ThreadingLogger.extensions.error(
+                "Extension host authorization failed identifier=\(identifier, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            EventLog.shared.record(.extensions, "Extension host authorization failed", [
+                "identifier": identifier,
+            ])
             notifyChange()
             return
         }
@@ -1646,6 +1700,12 @@ final class ExtensionManager:
                         self.sessionGenerations.removeValue(forKey: identifier)
                     }
                     self.statuses[identifier] = .failed(error.localizedDescription)
+                    ThreadingLogger.extensions.error(
+                        "Extension process failed to start identifier=\(identifier, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                    )
+                    EventLog.shared.record(.extensions, "Extension process failed to start", [
+                        "identifier": identifier,
+                    ])
                     CommandRegistry.shared.removeExtensionCommands(
                         extensionIdentifier: identifier
                     )
@@ -1668,6 +1728,15 @@ final class ExtensionManager:
                         panels: started.registration.panels.count,
                         tools: started.registration.mcpTools.count
                     )
+                    ThreadingLogger.extensions.info(
+                        "Extension process started identifier=\(identifier, privacy: .public) commands=\(started.registration.commands.count, privacy: .public) panels=\(started.registration.panels.count, privacy: .public) tools=\(started.registration.mcpTools.count, privacy: .public)"
+                    )
+                    EventLog.shared.record(.extensions, "Extension process started", [
+                        "identifier": identifier,
+                        "commands": String(started.registration.commands.count),
+                        "panels": String(started.registration.panels.count),
+                        "tools": String(started.registration.mcpTools.count),
+                    ])
                     if !bundle.manifest.settings.isEmpty,
                        let values = try? self.settingsStore.effectiveValues(
                            extensionIdentifier: identifier,
@@ -1677,7 +1746,7 @@ final class ExtensionManager:
                         started.session.updateSettings(values: values) { result in
                             if case .failure(let error) = result {
                                 ThreadingLogger.extensions.error(
-                                    "Initial settings sync failed for \(identifier, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                                    "Initial settings sync failed for \(identifier, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
                                 )
                             }
                         }
@@ -1708,6 +1777,14 @@ final class ExtensionManager:
                         )
                         if self.enabledIdentifiers.contains(identifier) {
                             self.statuses[identifier] = .failed(error.localizedDescription)
+                            ThreadingLogger.extensions.warning(
+                                "Enabled extension process stopped identifier=\(identifier, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                            )
+                            EventLog.shared.record(
+                                .extensions,
+                                "Enabled extension process stopped",
+                                ["identifier": identifier]
+                            )
                         } else {
                             self.statuses[identifier] = .disabled
                         }
@@ -1781,6 +1858,9 @@ final class ExtensionManager:
             companionStartTokens.removeValue(forKey: key)
             let completions = companionStartCompletions.removeValue(forKey: key) ?? []
             companionStatuses[key] = .failed(error.localizedDescription)
+            ThreadingLogger.extensions.error(
+                "Extension companion authorization failed identifier=\(identifier, privacy: .public) companion=\(companion.declaration.id, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             completions.forEach { $0(.failure(error)) }
             notifyChange()
             return
@@ -1828,11 +1908,22 @@ final class ExtensionManager:
                 switch result {
                 case .failure(let error):
                     self.companionStatuses[key] = .failed(error.localizedDescription)
+                    ThreadingLogger.extensions.error(
+                        "Extension companion failed to start identifier=\(identifier, privacy: .public) companion=\(companion.declaration.id, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+                    )
+                    EventLog.shared.record(
+                        .extensions,
+                        "Extension companion failed to start",
+                        ["identifier": identifier, "companion": companion.declaration.id]
+                    )
                     completions.forEach { $0(.failure(error)) }
 
                 case .success(let supervisor):
                     self.companionSupervisors[key] = supervisor
                     self.companionStatuses[key] = .running
+                    ThreadingLogger.extensions.info(
+                        "Extension companion started identifier=\(identifier, privacy: .public) companion=\(companion.declaration.id, privacy: .public)"
+                    )
                     supervisor.startRemoteSurfaces {
                         [weak self, weak supervisor] packet in
                         DispatchQueue.main.async {
@@ -1864,6 +1955,14 @@ final class ExtensionManager:
                             .contains(identifier)
                             ? .failed(error.localizedDescription)
                             : .disabled
+                        ThreadingLogger.extensions.warning(
+                            "Extension companion stopped unexpectedly identifier=\(identifier, privacy: .public) companion=\(companion.declaration.id, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+                        )
+                        EventLog.shared.record(
+                            .extensions,
+                            "Extension companion stopped unexpectedly",
+                            ["identifier": identifier, "companion": companion.declaration.id]
+                        )
                         self.notifyChange()
                     }
                 }
@@ -1930,7 +2029,7 @@ final class ExtensionManager:
         } catch {
             inventoryErrorDescription = error.localizedDescription
             ThreadingLogger.extensions.error(
-                "Could not read extension inventory: \(error.localizedDescription)"
+                "Could not read extension inventory: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             EventLog.shared.record(.extensions, "Extension inventory read failed")
             if postChange {
@@ -2055,7 +2154,7 @@ final class ExtensionManager:
             let reason = (error as? LocalizedError)?.errorDescription
                 ?? error.localizedDescription
             ThreadingLogger.extensions.error(
-                "Live theme reload for \(identifier, privacy: .public) refused: \(reason, privacy: .public). Keeping the last good version."
+                "Live theme reload for \(identifier, privacy: .public) refused: \(reason, privacy: .private(mask: .hash)). Keeping the last good version."
             )
         }
     }

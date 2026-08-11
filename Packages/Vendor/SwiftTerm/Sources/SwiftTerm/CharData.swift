@@ -133,7 +133,7 @@ public struct Attribute: Equatable, Hashable {
             result += ";8"
         }
         
-        print ("Attribute.toSgr() BROKEN - THIS ONLY HANDLES 8 bits")
+        SwiftTermDiagnostics.emit(.notice, .characterSGREncodingUnsupported)
         switch fg {
         case .ansi256(let c):
             if c > 16 {
@@ -141,8 +141,7 @@ public struct Attribute: Equatable, Hashable {
             } else {
                 result += ";\(c >= 8 ? 9 : 3)\(c >= 8 ? c - 8 : c);"
             }
-        case .trueColor(let r, let g, let b):
-            print ("Here  is where truecolor needs to be handled \(r), \(g), \(b)")
+        case .trueColor:
             break
         default:
             break
@@ -155,8 +154,7 @@ public struct Attribute: Equatable, Hashable {
             } else {
                 result += ";\(c >= 8 ? 10 : 4)\(c >= 8 ? c - 8 : c);"
             }
-        case .trueColor(let r, let g, let b):
-            print ("Here  is where truecolor needs to be handled \(r), \(g), \(b)")
+        case .trueColor:
             break
         default:
             break

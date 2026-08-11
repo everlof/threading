@@ -764,9 +764,6 @@ extension TerminalView {
             assert (selectionRange.length >= 0)
             if (selectionRange.location + selectionRange.length >= cols) {
             }
-            if row == 1 {
-                print(selectionRange)
-            }
             attributedString.addAttribute(.selectionBackgroundColor, value: selectedTextBackgroundColor, range: selectionRange)
         }
     }
@@ -1300,7 +1297,6 @@ extension TerminalView {
         let oldPosition = terminal.buffer.yDisp
         
         let maxScrollback = terminal.buffer.lines.count - terminal.rows
-        print ("maxScrollBack: \(maxScrollback)")
         var newScrollPosition = Int (Double (maxScrollback) * toPosition)
         
         if newScrollPosition < 0 {
@@ -1309,8 +1305,6 @@ extension TerminalView {
         if newScrollPosition > maxScrollback {
             newScrollPosition = maxScrollback
         }
-        print ("newScrollpsitin: \(newScrollPosition)")
-        
         if newScrollPosition != oldPosition {
             scrollTo(row: newScrollPosition)
         }

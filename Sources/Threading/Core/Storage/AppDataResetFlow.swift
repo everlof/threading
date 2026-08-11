@@ -36,6 +36,14 @@ enum AppDataResetFlow {
             try AppDataReset.perform(scope, at: date)
         }
     ) throws -> Never {
+        let scopeCode: String
+        switch scope {
+        case .settings: scopeCode = "settings"
+        case .everything: scopeCode = "everything"
+        }
+        ThreadingLogger.app.notice(
+            "App data reset started scope=\(scopeCode, privacy: .public)"
+        )
         // Prove that the helper can start before deleting credentials, closing the database or
         // moving anything. It waits behind a pipe until `commit`; an error below releases this
         // owner and cancels the helper without ever asking it to reopen the app.
@@ -65,8 +73,8 @@ enum AppDataResetFlow {
         }
 
         let outcome = try reset(scope, date)
-        ThreadingLogger.agent.info(
-            "Reset app data into \(outcome.backup.lastPathComponent, privacy: .public)"
+        ThreadingLogger.app.notice(
+            "App data reset prepared scope=\(scopeCode, privacy: .public) backup=\(outcome.backup.lastPathComponent, privacy: .private(mask: .hash)) preferences=\(outcome.tookPreferences, privacy: .public) support=\(outcome.tookSupportDirectory, privacy: .public)"
         )
         try relaunch.commit(reason: reason)
     }

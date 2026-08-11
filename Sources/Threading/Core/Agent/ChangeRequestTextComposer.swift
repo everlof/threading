@@ -27,6 +27,16 @@ enum ChangeRequestTextComposer {
             case .noAnswer: return L10n.string("Codex returned no pull request draft.")
             }
         }
+
+        var diagnosticCode: String {
+            switch self {
+            case .alreadyRunning: return "already_running"
+            case .launchFailed: return "launch_failed"
+            case .timedOut: return "timed_out"
+            case .exitedAbnormally: return "exited_abnormally"
+            case .noAnswer: return "no_answer"
+            }
+        }
     }
 
     @MainActor private static var runningRoots: Set<String> = []
@@ -44,9 +54,16 @@ enum ChangeRequestTextComposer {
         ) -> Void
     ) {
         guard !runningRoots.contains(root.path) else {
+            ThreadingLogger.github.notice(
+                "Change-request draft composition already running repository=\(root.path, privacy: .private(mask: .hash))"
+            )
             completion(.failure(.alreadyRunning))
             return
         }
+        let started = DispatchTime.now().uptimeNanoseconds
+        ThreadingLogger.github.info(
+            "Change-request draft composition started commits=\(seed.commitSubjects.count, privacy: .public) template=\(seed.template != nil, privacy: .public) diff_characters=\(seed.diff.count, privacy: .public) repository=\(root.path, privacy: .private(mask: .hash))"
+        )
         runningRoots.insert(root.path)
         let plan = AgentLauncher.codexResearchPlan(
             in: root.path,
@@ -60,9 +77,25 @@ enum ChangeRequestTextComposer {
                 .flatMap(draft(from:))
             DispatchQueue.main.async {
                 runningRoots.remove(root.path)
-                if let failure { completion(.failure(failure)) }
-                else if let answer { completion(.success(answer)) }
-                else { completion(.failure(.noAnswer)) }
+                let elapsedMilliseconds = (
+                    DispatchTime.now().uptimeNanoseconds - started
+                ) / 1_000_000
+                if let failure {
+                    ThreadingLogger.github.warning(
+                        "Change-request draft composition failed result=\(failure.diagnosticCode, privacy: .public) duration_ms=\(elapsedMilliseconds, privacy: .public) repository=\(root.path, privacy: .private(mask: .hash))"
+                    )
+                    completion(.failure(failure))
+                } else if let answer {
+                    ThreadingLogger.github.info(
+                        "Change-request draft composition completed duration_ms=\(elapsedMilliseconds, privacy: .public) repository=\(root.path, privacy: .private(mask: .hash))"
+                    )
+                    completion(.success(answer))
+                } else {
+                    ThreadingLogger.github.warning(
+                        "Change-request draft composition failed result=no_answer duration_ms=\(elapsedMilliseconds, privacy: .public) repository=\(root.path, privacy: .private(mask: .hash))"
+                    )
+                    completion(.failure(.noAnswer))
+                }
             }
         }
     }
@@ -121,6 +154,9 @@ enum ChangeRequestTextComposer {
                 maximumOutputBytes: ChangeRequestTextDefaults.maximumOutputBytes
             )
         } catch {
+            ThreadingLogger.github.error(
+                "Change-request draft process launch failed executable=\(plan.executable, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             return (nil, .launchFailed)
         }
 

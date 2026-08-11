@@ -216,6 +216,40 @@ final class ExecutionAuditStore: @unchecked Sendable {
         let startedAt: Date
     }
 
+    private enum StorageFailure: Error {
+        case directory(Error)
+        case encoding(Error)
+        case recordTooLarge(Int)
+        case rotation(Error)
+        case fileCreation
+        case fileOpen(Error)
+        case write(Error)
+
+        var stage: String {
+            switch self {
+            case .directory: return "directory"
+            case .encoding: return "encoding"
+            case .recordTooLarge: return "record_too_large"
+            case .rotation: return "rotation"
+            case .fileCreation: return "file_creation"
+            case .fileOpen: return "file_open"
+            case .write: return "write"
+            }
+        }
+
+        var diagnostic: String? {
+            switch self {
+            case .directory(let error), .encoding(let error), .rotation(let error),
+                 .fileOpen(let error), .write(let error):
+                return error.localizedDescription
+            case .recordTooLarge(let bytes):
+                return "encoded record has \(bytes) bytes"
+            case .fileCreation:
+                return nil
+            }
+        }
+    }
+
     private struct SealPayload: Encodable {
         let id: UUID
         let sessionID: SessionID
@@ -262,6 +296,12 @@ final class ExecutionAuditStore: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.threading.execution-audit")
     private var chainStates: [SessionID: ChainState] = [:]
     private var pendingTools: [SessionID: [String: PendingTool]] = [:]
+    /// One line per failing stage and session, not one line per streamed tool event. A disk-full
+    /// failure can otherwise turn the diagnostic intended to explain it into its own flood.
+    private var appendFailureStages: [SessionID: String] = [:]
+    /// Verification happens whenever the inspector reloads. Report a broken signature once until
+    /// its shape changes or verifies again, rather than faulting once per visible refresh.
+    private var readProblemSignatures: [SessionID: String] = [:]
 
     init(
         directory: URL? = nil,
@@ -525,58 +565,70 @@ final class ExecutionAuditStore: @unchecked Sendable {
             : .exactWithRedactions
 
         let record: ExecutionAuditRecord? = queue.sync {
-            ensureDirectory()
-            var state = stateLocked(for: sessionID)
-            let timestamp = Date()
-            let id = UUID()
-            let sequence = state.sequence + 1
-            let summary = Self.summary(operation: operation, input: sanitized.input)
-            let placeholder = ExecutionAuditRecord(
-                id: id,
-                sessionID: sessionID,
-                sequence: sequence,
-                timestamp: timestamp,
-                source: source,
-                provider: provider,
-                category: category,
-                phase: phase,
-                operation: operation,
-                callID: callID,
-                summary: summary,
-                input: sanitized.input,
-                output: sanitized.output,
-                durationMilliseconds: durationMilliseconds,
-                fidelity: fidelity,
-                redactions: sanitized.redactions,
-                previousDigest: state.digest,
-                digest: ""
-            )
-            guard let digest = Self.digest(SealPayload(record: placeholder)) else { return nil }
-            let sealed = ExecutionAuditRecord(
-                id: id,
-                sessionID: sessionID,
-                sequence: sequence,
-                timestamp: timestamp,
-                source: source,
-                provider: provider,
-                category: category,
-                phase: phase,
-                operation: operation,
-                callID: callID,
-                summary: summary,
-                input: sanitized.input,
-                output: sanitized.output,
-                durationMilliseconds: durationMilliseconds,
-                fidelity: fidelity,
-                redactions: sanitized.redactions,
-                previousDigest: state.digest,
-                digest: digest
-            )
-            guard appendLocked(sealed, sessionID: sessionID) else { return nil }
-            state.sequence = sequence
-            state.digest = digest
-            chainStates[sessionID] = state
-            return sealed
+            do {
+                try ensureDirectory()
+                var state = stateLocked(for: sessionID)
+                let timestamp = Date()
+                let id = UUID()
+                let sequence = state.sequence + 1
+                let summary = Self.summary(operation: operation, input: sanitized.input)
+                let placeholder = ExecutionAuditRecord(
+                    id: id,
+                    sessionID: sessionID,
+                    sequence: sequence,
+                    timestamp: timestamp,
+                    source: source,
+                    provider: provider,
+                    category: category,
+                    phase: phase,
+                    operation: operation,
+                    callID: callID,
+                    summary: summary,
+                    input: sanitized.input,
+                    output: sanitized.output,
+                    durationMilliseconds: durationMilliseconds,
+                    fidelity: fidelity,
+                    redactions: sanitized.redactions,
+                    previousDigest: state.digest,
+                    digest: ""
+                )
+                guard let digest = Self.digest(SealPayload(record: placeholder)) else {
+                    reportAppendFailure(.encoding(ExecutionAuditStoreError.seal), for: sessionID)
+                    return nil
+                }
+                let sealed = ExecutionAuditRecord(
+                    id: id,
+                    sessionID: sessionID,
+                    sequence: sequence,
+                    timestamp: timestamp,
+                    source: source,
+                    provider: provider,
+                    category: category,
+                    phase: phase,
+                    operation: operation,
+                    callID: callID,
+                    summary: summary,
+                    input: sanitized.input,
+                    output: sanitized.output,
+                    durationMilliseconds: durationMilliseconds,
+                    fidelity: fidelity,
+                    redactions: sanitized.redactions,
+                    previousDigest: state.digest,
+                    digest: digest
+                )
+                try appendLocked(sealed, sessionID: sessionID)
+                state.sequence = sequence
+                state.digest = digest
+                chainStates[sessionID] = state
+                reportAppendRecovery(for: sessionID)
+                return sealed
+            } catch let failure as StorageFailure {
+                reportAppendFailure(failure, for: sessionID)
+                return nil
+            } catch {
+                reportAppendFailure(.write(error), for: sessionID)
+                return nil
+            }
         }
 
         if record != nil {
@@ -597,14 +649,25 @@ final class ExecutionAuditStore: @unchecked Sendable {
         queue.sync {
             chainStates.removeValue(forKey: sessionID)
             pendingTools.removeValue(forKey: sessionID)
+            appendFailureStages.removeValue(forKey: sessionID)
+            readProblemSignatures.removeValue(forKey: sessionID)
 
             // The store owns a closed set of names for one session. Address those names directly
             // instead of enumerating every other session's ledger (and accepting arbitrary
             // `baseName.*` files as ours) whenever a session is deleted.
             let manager = FileManager.default
-            try? manager.removeItem(at: currentURL(for: sessionID))
-            for index in 1...Self.maximumRetainedRotatedSegments {
-                try? manager.removeItem(at: rotatedURL(for: sessionID, index: index))
+            let urls = [currentURL(for: sessionID)]
+                + (1...Self.maximumRetainedRotatedSegments).map {
+                    rotatedURL(for: sessionID, index: $0)
+                }
+            for url in urls where manager.fileExists(atPath: url.path) {
+                do {
+                    try manager.removeItem(at: url)
+                } catch {
+                    ThreadingLogger.audit.error(
+                        "Execution audit deletion failed for \(sessionID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                    )
+                }
             }
         }
     }
@@ -621,12 +684,16 @@ final class ExecutionAuditStore: @unchecked Sendable {
             .appendingPathComponent("ExecutionAudit", isDirectory: true)
     }
 
-    private func ensureDirectory() {
-        try? FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
+    private func ensureDirectory() throws {
+        do {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+        } catch {
+            throw StorageFailure.directory(error)
+        }
     }
 
     private func currentURL(for sessionID: SessionID) -> URL {
@@ -645,12 +712,20 @@ final class ExecutionAuditStore: @unchecked Sendable {
         return state
     }
 
-    private func appendLocked(_ record: ExecutionAuditRecord, sessionID: SessionID) -> Bool {
+    private func appendLocked(_ record: ExecutionAuditRecord, sessionID: SessionID) throws {
         let encoder = Self.encoder
-        guard var line = try? encoder.encode(record) else { return false }
+        let encoded: Data
+        do {
+            encoded = try encoder.encode(record)
+        } catch {
+            throw StorageFailure.encoding(error)
+        }
+        var line = encoded
         line.append(0x0A)
-        guard line.count <= maximumSegmentBytes else { return false }
-        rotateIfNeeded(sessionID: sessionID, incomingBytes: line.count)
+        guard line.count <= maximumSegmentBytes else {
+            throw StorageFailure.recordTooLarge(line.count)
+        }
+        try rotateIfNeeded(sessionID: sessionID, incomingBytes: line.count)
 
         let url = currentURL(for: sessionID)
         if !FileManager.default.fileExists(atPath: url.path) {
@@ -658,44 +733,61 @@ final class ExecutionAuditStore: @unchecked Sendable {
                 atPath: url.path,
                 contents: nil,
                 attributes: [.posixPermissions: 0o600]
-            ) else { return false }
+            ) else { throw StorageFailure.fileCreation }
         }
-        guard let handle = try? FileHandle(forWritingTo: url) else { return false }
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forWritingTo: url)
+        } catch {
+            throw StorageFailure.fileOpen(error)
+        }
         defer { try? handle.close() }
         do {
             try handle.seekToEnd()
             try handle.write(contentsOf: line)
             try handle.synchronize()
-            return true
         } catch {
-            return false
+            throw StorageFailure.write(error)
         }
     }
 
-    private func rotateIfNeeded(sessionID: SessionID, incomingBytes: Int) {
+    private func rotateIfNeeded(sessionID: SessionID, incomingBytes: Int) throws {
         let file = currentURL(for: sessionID)
-        let currentBytes = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard FileManager.default.fileExists(atPath: file.path) else { return }
+        let currentBytes: Int
+        do {
+            currentBytes = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        } catch {
+            throw StorageFailure.rotation(error)
+        }
         guard currentBytes > 0,
               currentBytes > maximumSegmentBytes - incomingBytes else {
             return
         }
         let manager = FileManager.default
-        if retainedRotatedSegments == 0 {
-            try? manager.removeItem(at: file)
-            return
-        }
-        try? manager.removeItem(at: rotatedURL(for: sessionID, index: retainedRotatedSegments))
-        if retainedRotatedSegments > 1 {
-            for index in stride(from: retainedRotatedSegments - 1, through: 1, by: -1) {
-                let source = rotatedURL(for: sessionID, index: index)
-                guard manager.fileExists(atPath: source.path) else { continue }
-                try? manager.moveItem(
-                    at: source,
-                    to: rotatedURL(for: sessionID, index: index + 1)
-                )
+        do {
+            if retainedRotatedSegments == 0 {
+                try manager.removeItem(at: file)
+                return
             }
+            let oldest = rotatedURL(for: sessionID, index: retainedRotatedSegments)
+            if manager.fileExists(atPath: oldest.path) {
+                try manager.removeItem(at: oldest)
+            }
+            if retainedRotatedSegments > 1 {
+                for index in stride(from: retainedRotatedSegments - 1, through: 1, by: -1) {
+                    let source = rotatedURL(for: sessionID, index: index)
+                    guard manager.fileExists(atPath: source.path) else { continue }
+                    try manager.moveItem(
+                        at: source,
+                        to: rotatedURL(for: sessionID, index: index + 1)
+                    )
+                }
+            }
+            try manager.moveItem(at: file, to: rotatedURL(for: sessionID, index: 1))
+        } catch {
+            throw StorageFailure.rotation(error)
         }
-        try? manager.moveItem(at: file, to: rotatedURL(for: sessionID, index: 1))
     }
 
     private func readLocked(sessionID: SessionID) -> ExecutionAuditReadResult {
@@ -738,10 +830,49 @@ final class ExecutionAuditStore: @unchecked Sendable {
             prior = record
         }
         if malformed > 0 { integrity = .broken }
-        return ExecutionAuditReadResult(
+        let result = ExecutionAuditReadResult(
             records: records,
             integrity: integrity,
             malformedLineCount: malformed
+        )
+        reportReadProblem(result, for: sessionID)
+        return result
+    }
+
+    private func reportAppendFailure(_ failure: StorageFailure, for sessionID: SessionID) {
+        guard appendFailureStages[sessionID] != failure.stage else { return }
+        appendFailureStages[sessionID] = failure.stage
+        if let diagnostic = failure.diagnostic {
+            ThreadingLogger.audit.error(
+                "Execution audit append failed at \(failure.stage, privacy: .public) for \(sessionID.uuidString, privacy: .public): \(diagnostic, privacy: .private(mask: .hash))"
+            )
+        } else {
+            ThreadingLogger.audit.error(
+                "Execution audit append failed at \(failure.stage, privacy: .public) for \(sessionID.uuidString, privacy: .public)"
+            )
+        }
+    }
+
+    private func reportAppendRecovery(for sessionID: SessionID) {
+        guard let stage = appendFailureStages.removeValue(forKey: sessionID) else { return }
+        ThreadingLogger.audit.notice(
+            "Execution audit append recovered after \(stage, privacy: .public) for \(sessionID.uuidString, privacy: .public)"
+        )
+    }
+
+    private func reportReadProblem(
+        _ result: ExecutionAuditReadResult,
+        for sessionID: SessionID
+    ) {
+        guard result.integrity == .broken else {
+            readProblemSignatures.removeValue(forKey: sessionID)
+            return
+        }
+        let signature = "broken:\(result.malformedLineCount)"
+        guard readProblemSignatures[sessionID] != signature else { return }
+        readProblemSignatures[sessionID] = signature
+        ThreadingLogger.audit.fault(
+            "Execution audit verification failed for \(sessionID.uuidString, privacy: .public); malformed=\(result.malformedLineCount, privacy: .public)"
         )
     }
 
@@ -798,6 +929,16 @@ final class ExecutionAuditStore: @unchecked Sendable {
             input: object
         ).oneLineSummary
         return subject.isEmpty ? operation : "\(operation) · \(subject)"
+    }
+}
+
+private enum ExecutionAuditStoreError: LocalizedError {
+    case seal
+
+    var errorDescription: String? {
+        switch self {
+        case .seal: return "record seal could not be encoded"
+        }
     }
 }
 

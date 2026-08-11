@@ -498,6 +498,7 @@ struct SessionDashboard: View {
             } catch is CancellationError {
                 return
             } catch {
+                MobileDiagnostics.logDegraded(.sessionAction, error: error)
                 actionError = error.localizedDescription
             }
         }
@@ -537,6 +538,7 @@ struct SessionDashboard: View {
             } catch is CancellationError {
                 return
             } catch {
+                MobileDiagnostics.logDegraded(.sessionAction, error: error)
                 actionError = error.localizedDescription
             }
         }
@@ -552,6 +554,7 @@ struct SessionDashboard: View {
             } catch is CancellationError {
                 return
             } catch {
+                MobileDiagnostics.logDegraded(.themeSelection, error: error)
                 themeError = error.localizedDescription
             }
         }
@@ -1441,6 +1444,7 @@ struct NewRemoteSessionView: View {
             } catch is CancellationError {
                 return
             } catch {
+                MobileDiagnostics.logDegraded(.sessionAction, error: error)
                 errorMessage = error.localizedDescription
             }
         }

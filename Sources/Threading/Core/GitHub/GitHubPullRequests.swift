@@ -175,7 +175,7 @@ struct GitHubPullRequestClient: Sendable {
             metadata = try JSONDecoder().decode(RepositoryResponse.self, from: repositoryData)
         } catch {
             ThreadingLogger.github.error(
-                "GitHub repository response could not be decoded: \(error.localizedDescription, privacy: .public)"
+                "GitHub repository response could not be decoded: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return .failed(message: L10n.string("GitHub returned a response Threading could not read."))
         }
@@ -199,7 +199,7 @@ struct GitHubPullRequestClient: Sendable {
             pulls = try JSONDecoder().decode([PullResponse].self, from: pullsData)
         } catch {
             ThreadingLogger.github.error(
-                "GitHub pull-request response could not be decoded: \(error.localizedDescription, privacy: .public)"
+                "GitHub pull-request response could not be decoded: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return .failed(message: L10n.string("GitHub returned a response Threading could not read."))
         }
@@ -260,7 +260,7 @@ struct GitHubPullRequestClient: Sendable {
             pull = try JSONDecoder().decode(PullResponse.self, from: data)
         } catch {
             ThreadingLogger.github.error(
-                "GitHub pull-request lifecycle response could not be decoded: \(error.localizedDescription, privacy: .public)"
+                "GitHub pull-request lifecycle response could not be decoded: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return .failed(message: L10n.string(
                 "GitHub returned a response Threading could not read."

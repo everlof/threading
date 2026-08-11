@@ -219,7 +219,7 @@ final class LimitRecoveryCoordinator {
             ThreadingLogger.agent.info(
                 """
                 Limit recovery armed for \(sessionID.uuidString, privacy: .public), \
-                continuing at \(plan.dueAt.description, privacy: .public)
+                continuing in \(max(0, Int(plan.dueAt.timeIntervalSinceNow)), privacy: .public) seconds
                 """
             )
             recovering.remove(sessionID)
@@ -327,7 +327,7 @@ final class LimitRecoveryCoordinator {
         ThreadingLogger.agent.error(
             """
             Limit recovery stood down for \(sessionID.uuidString, privacy: .public): \
-            \(reason, privacy: .public)
+            \(reason, privacy: .private(mask: .hash))
             """
         )
         recovering.remove(sessionID)

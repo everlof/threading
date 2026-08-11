@@ -110,7 +110,7 @@ enum AgentAccountDiscovery {
         }
 
         ThreadingLogger.agent.warning(
-            "Account \(handle, privacy: .public) not found for \(provider.rawValue, privacy: .public); using default"
+            "Account \(handle, privacy: .private(mask: .hash)) not found for \(provider.rawValue, privacy: .public); using default"
         )
         return preferredAccount(for: provider)
             ?? discovered.first { $0.isDefault }

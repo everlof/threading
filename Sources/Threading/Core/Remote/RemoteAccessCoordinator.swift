@@ -430,7 +430,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     ) -> CreatedShare? {
         guard invitationOrigin != nil else { return nil }
 
-        guard let invitationToken = Self.randomToken() else { return nil }
+        guard let invitationToken = Self.randomToken() else {
+            ThreadingLogger.remote.error(
+                "Remote credential generation failed stage=guest_invitation"
+            )
+            return nil
+        }
         let id = UUID().uuidString.lowercased()
         let createdAt = Date()
         let expiresAt = createdAt.addingTimeInterval(RemoteAccessDefaults.defaultShareExpiry)
@@ -458,6 +463,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
 
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
+        ThreadingLogger.remote.info(
+            "Remote guest invitation created session=\(sessionID.rawValue, privacy: .public) capability=\(capability.rawValue, privacy: .public) permission_approval=\(canApprovePermissions, privacy: .public)"
+        )
         return CreatedShare(
             url: url,
             expiresAt: expiresAt,
@@ -488,7 +496,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             return cached.redemption
         }
         if token == pairingBootstrapToken {
-            guard let accessToken = Self.randomToken() else { return nil }
+            guard let accessToken = Self.randomToken() else {
+                ThreadingLogger.remote.error(
+                    "Remote credential generation failed stage=owner_access"
+                )
+                return nil
+            }
             if persistsOwnerDevice {
                 let previousToken = ownerDevices.devices.first(where: {
                     $0.deviceID == normalizedDeviceID
@@ -510,6 +523,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
                     boundDeviceID: normalizedDeviceID
                 )
                 authority.set(authorization, forToken: accessToken)
+                ThreadingLogger.remote.notice(
+                    "Remote owner browser paired persistent=false"
+                )
                 return finishPairing(
                     bootstrap: token,
                     deviceID: normalizedDeviceID,
@@ -530,7 +546,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
 
             var share = shares[index]
             let memberID = UUID().uuidString.lowercased()
-            guard let accessToken = Self.randomToken() else { return nil }
+            guard let accessToken = Self.randomToken() else {
+                ThreadingLogger.remote.error(
+                    "Remote credential generation failed stage=guest_access"
+                )
+                return nil
+            }
             let member = RemoteMember(
                 id: memberID,
                 displayName: normalizedName,
@@ -558,6 +579,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             authority.set(authorization, forToken: accessToken)
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
             RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
+            ThreadingLogger.remote.notice(
+                "Remote guest invitation redeemed session=\(sessionID.rawValue, privacy: .public) capability=\(share.capability.rawValue, privacy: .public) permission_approval=\(share.canApprovePermissions, privacy: .public)"
+            )
             return RemoteInvitationRedemption(
                 accessToken: accessToken,
                 authorization: authorization
@@ -586,6 +610,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         if let previousToken { authority.set(nil, forToken: previousToken) }
         authority.set(record.authorization, forToken: accessToken)
         server.revokeConnections(shareID: record.id)
+        ThreadingLogger.remote.notice(
+            "Remote owner device paired rotated=\(previousToken != nil, privacy: .public)"
+        )
         return finishPairing(
             bootstrap: bootstrap,
             deviceID: deviceID,
@@ -615,6 +642,11 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         // existing device bearers working while refusing another pairing until a restart can
         // obtain fresh entropy.
         pairingBootstrapToken = Self.pairingToken()
+        if pairingBootstrapToken == nil {
+            ThreadingLogger.remote.error(
+                "Remote credential generation failed stage=pairing_rotation"
+            )
+        }
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         return redemption
     }
@@ -692,6 +724,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         server.revokeConnections(shareID: record.id)
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
+        ThreadingLogger.remote.notice("Remote owner device revoked")
         return true
     }
 
@@ -700,9 +733,20 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     func deleteOwnerDevicesForAppReset() throws {
         stop()
         try ownerDevices.deleteAllForAppReset()
-        try guestShareStore.deleteAll()
+        let removedShareCount = sessionShares.values.reduce(0) { $0 + $1.count }
+        do {
+            try guestShareStore.deleteAll()
+        } catch {
+            ThreadingLogger.remote.error(
+                "Remote guest share persistence failed stage=delete error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            throw error
+        }
         sessionShares.removeAll()
         guestSharePersistenceError = nil
+        ThreadingLogger.remote.notice(
+            "Remote guest shares deleted for app reset count=\(removedShareCount, privacy: .public)"
+        )
     }
 
     /// Ends one person's access to one chat, closing whatever they have open.
@@ -724,6 +768,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             sessionShares = candidate
             revoke(record)
             sharingChanged()
+            ThreadingLogger.remote.notice(
+                "Remote guest member revoked session=\(sessionID.rawValue, privacy: .public)"
+            )
             return true
         }
         return false
@@ -747,6 +794,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         guard persistGuestShares(candidate) else { return false }
         sessionShares = candidate
         sharingChanged()
+        ThreadingLogger.remote.notice(
+            "Remote guest invitation revoked session=\(sessionID.rawValue, privacy: .public)"
+        )
         return true
     }
 
@@ -760,6 +810,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             for member in share.members.values { revoke(member) }
         }
         sharingChanged()
+        ThreadingLogger.remote.notice(
+            "Remote session sharing revoked session=\(sessionID.rawValue, privacy: .public) shares=\(removed.count, privacy: .public)"
+        )
     }
 
     private func revoke(_ member: MemberRecord) {
@@ -822,9 +875,15 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
                 }
             }
             sessionShares = restored
+            ThreadingLogger.remote.info(
+                "Remote guest shares restored sessions=\(restored.count, privacy: .public) shares=\(restored.values.reduce(0) { $0 + $1.count }, privacy: .public)"
+            )
         } catch {
             guestSharePersistenceError = error.localizedDescription
             sessionShares = [:]
+            ThreadingLogger.remote.error(
+                "Remote guest share persistence failed stage=load error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
         }
     }
 
@@ -860,6 +919,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             return true
         } catch {
             guestSharePersistenceError = error.localizedDescription
+            ThreadingLogger.remote.error(
+                "Remote guest share persistence failed stage=save records=\(records.count, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
             return false
         }
@@ -975,6 +1037,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         // The photographed value is a bootstrap, never the durable capability. It is consumed
         // and rotated when a device exchanges it for its own 256-bit bearer.
         guard let token = Self.pairingToken() else {
+            ThreadingLogger.remote.error(
+                "Remote credential generation failed stage=listener_start"
+            )
             status = .failed(reason: L10n.string("A secure remote access token could not be created."))
             return
         }
@@ -1007,7 +1072,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
                 RemoteSessionMirrorRegistry.shared.remoteAccessStarted()
                 self.startTransports(port: port)
                 ThreadingLogger.remote.info(
-                    "Remote access local URL: http://127.0.0.1:\(port)/#\(token, privacy: .private)"
+                    "Remote access listener ready port=\(port, privacy: .public)"
                 )
                 EventLog.shared.record(.remote, "Remote access started", ["port": String(port)])
                 MacRemoteDiagnostics.record(.hostListenerStarted, fields: [

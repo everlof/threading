@@ -314,7 +314,9 @@ final class RemoteConnection: @unchecked Sendable {
             nextBytes: data.count,
             limit: limit
         ) else {
-            ThreadingLogger.remote.error("Dropping a slow remote connection over the send high-water mark")
+            ThreadingLogger.remote.warning(
+                "Dropping a slow remote connection over the send high-water mark"
+            )
             forceClose()
             return
         }

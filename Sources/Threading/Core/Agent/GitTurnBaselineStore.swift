@@ -113,7 +113,7 @@ final class GitTurnBaselineStore {
             case .failure(let failure):
                 self.failures[sessionID] = failure
                 ThreadingLogger.git.error(
-                    "Turn baseline capture failed for \(sessionID, privacy: .public): \(failure.localizedDescription, privacy: .public)"
+                    "Turn baseline capture failed for \(sessionID, privacy: .public): \(failure.localizedDescription, privacy: .private(mask: .hash))"
                 )
             }
             completion()

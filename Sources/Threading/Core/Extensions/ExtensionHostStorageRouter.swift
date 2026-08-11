@@ -300,7 +300,7 @@ final class ExtensionHostStorageRouter: @unchecked Sendable {
             )
         default:
             ThreadingLogger.extensions.error(
-                "Extension key-value operation failed: \(error.localizedDescription, privacy: .public)"
+                "Extension key-value operation failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return failure(
                 status: 500,
@@ -318,7 +318,7 @@ final class ExtensionHostStorageRouter: @unchecked Sendable {
             return failure(status: 413, reason: "Payload Too Large", "The extension cache is full.")
         default:
             ThreadingLogger.extensions.error(
-                "Extension cache operation failed: \(error.localizedDescription, privacy: .public)"
+                "Extension cache operation failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return failure(
                 status: 500,

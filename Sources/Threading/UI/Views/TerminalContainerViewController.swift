@@ -1221,7 +1221,7 @@ final class TerminalContainerViewController: NSViewController {
             in: project
         ) else {
             ThreadingLogger.agent.error(
-                "Refused native conversation for unsupported runtime \(agentSession.kind.rawValue)"
+                "Refused native conversation for unsupported runtime \(agentSession.kind.rawValue, privacy: .public)"
             )
             return
         }

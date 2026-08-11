@@ -51,7 +51,7 @@ final class UsageWindowSettings {
             do {
                 try Self.validate(newValue)
             } catch {
-                ThreadingLogger.session.error("Refusing invalid usage-window schedule")
+                ThreadingLogger.usage.error("Refusing invalid usage-window schedule")
                 return
             }
             guard persistence.save(newValue) else { return }

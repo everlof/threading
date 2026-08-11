@@ -505,7 +505,7 @@ final class SessionAttachmentStore {
             try Data(html.utf8).write(to: destination, options: .atomic)
         } catch {
             ThreadingLogger.session.error(
-                "Failed to keep generated HTML: \(error.localizedDescription, privacy: .public)"
+                "Failed to keep generated HTML: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return nil
         }
@@ -979,7 +979,15 @@ final class SessionAttachmentStore {
                 movedStandingCopy = true
             }
             try fileManager.moveItem(at: candidate, to: destination)
-            if movedStandingCopy { try? fileManager.removeItem(at: backup) }
+            if movedStandingCopy {
+                do {
+                    try fileManager.removeItem(at: backup)
+                } catch {
+                    ThreadingLogger.session.warning(
+                        "Attachment replacement left a stale backup source=\(backup.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                    )
+                }
+            }
             return true
         } catch {
             try? fileManager.removeItem(at: candidate)
@@ -989,17 +997,17 @@ final class SessionAttachmentStore {
                         try fileManager.moveItem(at: backup, to: destination)
                     } catch {
                         ThreadingLogger.session.fault(
-                            "Attachment rollback left its previous copy at \(backup.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                            "Attachment rollback left its previous copy at \(backup.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
                         )
                     }
                 } else {
                     ThreadingLogger.session.fault(
-                        "Attachment replacement conflicted; its previous copy remains recoverable at \(backup.path, privacy: .public)"
+                        "Attachment replacement conflicted; its previous copy remains recoverable at \(backup.path, privacy: .private(mask: .hash))"
                     )
                 }
             }
             ThreadingLogger.session.error(
-                "Failed to keep attachment \(file.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Failed to keep attachment \(file.lastPathComponent, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return false
         }
@@ -1015,7 +1023,7 @@ final class SessionAttachmentStore {
             return true
         } catch {
             ThreadingLogger.session.error(
-                "Failed to keep attachment \(sourceName, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Failed to keep attachment \(sourceName, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return false
         }
@@ -1024,6 +1032,7 @@ final class SessionAttachmentStore {
     /// Removes the bytes behind rows that have left the list. A referenced file is untouched —
     /// it belongs to the checkout, and evicting a row is not a reason to delete the user's file.
     private func discardCopies(in attachments: [SessionAttachment]) {
+        var failureCount = 0
         for attachment in attachments {
             guard let root = copiesRoot(for: attachment.sessionID),
                   AttachmentReferenceDetector.contains(attachment.url, inside: root),
@@ -1031,19 +1040,46 @@ final class SessionAttachmentStore {
                   let slot = attachment.relativePath.split(separator: "/").first else {
                 continue
             }
-            try? fileManager.removeItem(at: root.appendingPathComponent(String(slot)))
+            do {
+                try fileManager.removeItem(at: root.appendingPathComponent(String(slot)))
+            } catch {
+                failureCount += 1
+            }
+        }
+        if failureCount > 0 {
+            ThreadingLogger.session.warning(
+                "Attachment copy cleanup incomplete failures=\(failureCount, privacy: .public) candidates=\(attachments.count, privacy: .public)"
+            )
         }
     }
 
     private func discardCopiesOutside(_ sessionIDs: Set<SessionID>) {
         guard let directory = copiesDirectory?() else { return }
         let kept = Set(sessionIDs.map(\.uuidString))
-        let contents = (try? fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil
-        )) ?? []
+        let contents: [URL]
+        do {
+            contents = try fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+            )
+        } catch {
+            ThreadingLogger.session.warning(
+                "Attachment copy cleanup could not enumerate directory=\(directory.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return
+        }
+        var failureCount = 0
         for url in contents where !kept.contains(url.lastPathComponent) {
-            try? fileManager.removeItem(at: url)
+            do {
+                try fileManager.removeItem(at: url)
+            } catch {
+                failureCount += 1
+            }
+        }
+        if failureCount > 0 {
+            ThreadingLogger.session.warning(
+                "Attachment orphan cleanup incomplete failures=\(failureCount, privacy: .public) candidates=\(contents.count, privacy: .public)"
+            )
         }
     }
 }

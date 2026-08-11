@@ -100,7 +100,9 @@ enum AccountEmailProbe {
                 output: .standardOutput
             )
         } catch {
-            ThreadingLogger.agent.error("Could not ask claude for its account: \(error.localizedDescription)")
+            ThreadingLogger.agent.error(
+                "Could not ask claude for its account: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             return nil
         }
         guard result.termination == .exited(0), !result.outputWasTruncated,

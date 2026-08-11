@@ -24836,6 +24836,16 @@
         }
       }
     },
+    "Threading could not prepare the GitHub report.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading kunde inte förbereda GitHub-rapporten."
+          }
+        }
+      }
+    },
     "Threading could not reach GitHub: %@": {
       "localizations": {
         "sv": {

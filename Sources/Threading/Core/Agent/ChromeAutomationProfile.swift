@@ -139,7 +139,7 @@ final class ChromeAutomationProfile {
         NSWorkspace.shared.openApplication(at: application, configuration: configuration) { _, error in
             guard let error else { return }
             ThreadingLogger.agent.error(
-                "Chrome automation profile did not open: \(error.localizedDescription, privacy: .public)"
+                "Chrome automation profile did not open: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
         }
         return true

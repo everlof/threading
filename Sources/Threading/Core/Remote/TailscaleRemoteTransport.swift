@@ -48,6 +48,7 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
     private func beginStart(port: UInt16) {
 
         guard let executable = Self.executableURL() else {
+            ThreadingLogger.remote.notice("Tailscale transport is unavailable because the CLI is not installed")
             finishUnavailable(.notInstalled)
             return
         }
@@ -59,6 +60,7 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         run(
             executable: executable,
             arguments: Self.statusArguments,
+            stage: "status",
             launchID: launchID
         ) { [weak self] status, data in
             guard let self, self.launchID == launchID else { return }
@@ -77,6 +79,7 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
             self.run(
                 executable: executable,
                 arguments: Self.serveStatusArguments,
+                stage: "serve_status",
                 launchID: launchID
             ) { [weak self] configStatus, configData in
                 guard let self, self.launchID == launchID else { return }
@@ -96,6 +99,7 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
                 self.run(
                     executable: executable,
                     arguments: Self.serveArguments(localPort: port),
+                    stage: "publish",
                     launchID: launchID
                 ) { [weak self] serveStatus, serveData in
                     guard let self, self.launchID == launchID else { return }
@@ -134,6 +138,9 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         } catch {
             // The backend listener has already closed, so a stale Serve handler reaches nothing.
             // The next start retries removal before publishing this exact port.
+            ThreadingLogger.remote.warning(
+                "Tailscale cleanup launch failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             return
         }
         cleanupCommand = cleanup
@@ -143,14 +150,23 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
             terminationGrace: BoundedChildDefaults.terminationGrace
         )
         let pid = cleanup.processIdentifier
-        cleanup.observeExit { [weak self, weak cleanup] _ in
+        cleanup.observeExit { [weak self, weak cleanup] status in
             Task { @MainActor in
                 guard let self else { return }
                 self.shutdownEscalations.removeValue(forKey: pid)?.complete()
                 guard self.cleanupCommand === cleanup else { return }
-                _ = self.cleanupDeadline?.complete()
+                let timedOut = self.cleanupDeadline?.complete() == true
                 self.cleanupDeadline = nil
                 self.cleanupCommand = nil
+                if timedOut {
+                    ThreadingLogger.remote.warning("Tailscale cleanup timed out")
+                } else if status != 0 {
+                    ThreadingLogger.remote.warning(
+                        "Tailscale cleanup exited status=\(status, privacy: .public)"
+                    )
+                } else {
+                    ThreadingLogger.remote.debug("Tailscale cleanup completed")
+                }
                 guard let pending = self.pendingStart else { return }
                 self.pendingStart = nil
                 self.onStateChange = pending.onStateChange
@@ -164,6 +180,7 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
     private func run(
         executable: URL,
         arguments: [String],
+        stage: String,
         launchID: UUID,
         completion: @escaping @MainActor @Sendable (Int32, Data) -> Void
     ) {
@@ -171,6 +188,9 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         do {
             pipe = try ChildPipe()
         } catch {
+            ThreadingLogger.remote.error(
+                "Tailscale command pipe creation failed stage=\(stage, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             finishUnavailable(.statusUnavailable)
             return
         }
@@ -191,6 +211,9 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
             pipe.closeWriteEnd()
         } catch {
             pipe.closeBothEnds()
+            ThreadingLogger.remote.error(
+                "Tailscale command launch failed stage=\(stage, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             finishUnavailable(.statusUnavailable)
             return
         }
@@ -200,9 +223,19 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         outputHandle = output
         command = process
         output.readabilityHandler = { [weak self, weak process] handle in
-            guard let data = try? handle.read(
-                upToCount: RemoteTailscaleDefaults.outputReadChunkBytes
-            ), !data.isEmpty, self != nil, process != nil else { return }
+            let data: Data
+            do {
+                guard let chunk = try handle.read(
+                    upToCount: RemoteTailscaleDefaults.outputReadChunkBytes
+                ), !chunk.isEmpty, self != nil, process != nil else { return }
+                data = chunk
+            } catch {
+                handle.readabilityHandler = nil
+                ThreadingLogger.remote.warning(
+                    "Tailscale command output read failed stage=\(stage, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+                return
+            }
             collector.append(data)
         }
         commandDeadline = ChildProcessDeadline(
@@ -229,6 +262,19 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
                 self.outputHandle = nil
                 self.outputCollector = nil
                 self.command = nil
+                if timedOut {
+                    ThreadingLogger.remote.warning(
+                        "Tailscale command timed out stage=\(stage, privacy: .public)"
+                    )
+                } else if status != 0 {
+                    ThreadingLogger.remote.warning(
+                        "Tailscale command exited stage=\(stage, privacy: .public) status=\(status, privacy: .public) output_bytes=\(capturedOutput.count, privacy: .public)"
+                    )
+                } else {
+                    ThreadingLogger.remote.debug(
+                        "Tailscale command completed stage=\(stage, privacy: .public) output_bytes=\(capturedOutput.count, privacy: .public)"
+                    )
+                }
                 completion(status, capturedOutput)
             }
         }

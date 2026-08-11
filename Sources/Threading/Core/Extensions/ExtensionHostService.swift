@@ -281,7 +281,7 @@ final class ExtensionHostService {
         } catch {
             baseURL = nil
             ThreadingLogger.extensions.error(
-                "Extension host could not start: \(error.localizedDescription)"
+                "Extension host could not start: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             finishStartup()
         }
@@ -1090,7 +1090,7 @@ final class ExtensionHostService {
             )
         default:
             ThreadingLogger.extensions.error(
-                "Extension cache operation failed: \(error.localizedDescription, privacy: .public)"
+                "Extension cache operation failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return jsonFailure(
                 status: 500,
@@ -1120,7 +1120,7 @@ final class ExtensionHostService {
             )
         default:
             ThreadingLogger.extensions.error(
-                "Extension key-value operation failed: \(error.localizedDescription, privacy: .public)"
+                "Extension key-value operation failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return jsonFailure(
                 status: 500,
@@ -1132,7 +1132,7 @@ final class ExtensionHostService {
 
     private func secretStoreFailure(_ error: Error) -> HTTPResponse {
         ThreadingLogger.extensions.error(
-            "Extension Keychain operation failed: \(error.localizedDescription)"
+                "Extension Keychain operation failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
         )
         return jsonFailure(
             status: 500,
@@ -1983,14 +1983,14 @@ final class ExtensionHostService {
             }
             baseURL = URL(string: "http://\(Self.host):\(port)/v1")
             ThreadingLogger.extensions.info(
-                "Extension host listening on port \(port)"
+            "Extension host listening on port \(port, privacy: .public)"
             )
             finishStartup()
 
         case .failed(let error):
             baseURL = nil
             ThreadingLogger.extensions.error(
-                "Extension host failed: \(error.localizedDescription)"
+                "Extension host failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             finishStartup()
 

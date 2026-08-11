@@ -96,6 +96,7 @@ struct RemoteAttachmentsView: View {
             attachments = try await client.attachments(sessionID: session.id).attachments
             errorMessage = nil
         } catch {
+            MobileDiagnostics.logDegraded(.attachmentList, error: error)
             errorMessage = error.localizedDescription
         }
     }
@@ -221,6 +222,7 @@ struct RemoteAttachmentTargetView: View {
         } catch is CancellationError {
             return
         } catch {
+            MobileDiagnostics.logDegraded(.attachmentMetadata, error: error)
             attachment = nil
             errorMessage = error.localizedDescription
         }
@@ -329,6 +331,7 @@ struct RemoteAttachmentPreview: View {
             )
             errorMessage = nil
         } catch {
+            MobileDiagnostics.logDegraded(.attachmentContent, error: error)
             data = nil
             errorMessage = error.localizedDescription
         }

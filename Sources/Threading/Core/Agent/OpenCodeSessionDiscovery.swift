@@ -49,7 +49,7 @@ enum OpenCodeSessionDiscovery {
             }
 
             ThreadingLogger.agent.warning(
-                "OpenCode session discovery timed out for \(projectPath, privacy: .public)"
+                "OpenCode session discovery timed out for \(projectPath, privacy: .private(mask: .hash))"
             )
             Task { @MainActor in completion(nil) }
         }

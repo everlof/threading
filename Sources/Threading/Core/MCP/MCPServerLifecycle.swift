@@ -41,7 +41,9 @@ extension MCPServer {
 
         guard let event = Self.event(inQuery: query) else {
             respond(.accepted)
-            ThreadingLogger.mcp.warning("Lifecycle report naming no event: \(query ?? "", privacy: .public)")
+            ThreadingLogger.mcp.warning(
+                "Lifecycle report naming no event: \(query ?? "", privacy: .private(mask: .hash))"
+            )
             EventLog.shared.record(.hooks, "Lifecycle report named no known event", [
                 "session": sessionID.uuidString,
                 "query": query ?? ""

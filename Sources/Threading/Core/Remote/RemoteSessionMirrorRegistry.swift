@@ -1699,7 +1699,7 @@ final class RemoteSessionMirrorRegistry {
             return String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
         } catch {
             ThreadingLogger.remote.error(
-                "Remote mirror encoding failed: \(error.localizedDescription, privacy: .public)"
+                "Remote mirror encoding failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return #"{"type":"error","code":"encodingFailed"}"#
         }

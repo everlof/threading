@@ -502,6 +502,9 @@ final class TranscriptUsageService {
         }
         let loginShellPath = AgentLauncher.loginShellPath
         let cacheDirectory = cacheDirectory
+        ThreadingLogger.usage.info(
+            "Usage scan started accounts=\(accountSources.count, privacy: .public) projects=\(projects.count, privacy: .public) exports=\(exports.count, privacy: .public)"
+        )
 
         queue.async { [weak self] in
             let report = Self.build(
@@ -517,6 +520,10 @@ final class TranscriptUsageService {
                 self.isBuilding = false
                 self.report = report
                 _ = self.persistence.save(report)
+                let failedCoverage = report.coverage.filter { $0.state == .failed }.count
+                ThreadingLogger.usage.info(
+                    "Usage scan completed sources=\(report.scan.sourceFiles, privacy: .public) cache_hits=\(report.scan.cacheHits, privacy: .public) cache_misses=\(report.scan.cacheMisses, privacy: .public) records=\(report.scan.distinctRecords, privacy: .public) failed_sources=\(failedCoverage, privacy: .public) duration_ms=\(Int(report.scan.duration * 1_000), privacy: .public)"
+                )
                 self.notifyChanged()
             }
         }
@@ -602,6 +609,9 @@ final class TranscriptUsageService {
                 if result.wasCacheHit { scan.cacheHits += 1 } else { scan.cacheMisses += 1 }
                 records.append(contentsOf: result.records)
                 guard var item = coverage[runtime.rawValue] else {
+                    ThreadingLogger.usage.fault(
+                        "Usage coverage invariant missing runtime=\(runtime.rawValue, privacy: .public)"
+                    )
                     assertionFailure("Missing usage coverage for \(runtime.rawValue)")
                     continue
                 }
@@ -620,6 +630,9 @@ final class TranscriptUsageService {
             case .claude, .codex, .grok: continue
             }
             guard var item = coverage[runtime.rawValue] else {
+                ThreadingLogger.usage.fault(
+                    "Usage coverage invariant missing runtime=\(runtime.rawValue, privacy: .public)"
+                )
                 assertionFailure("Missing usage coverage for \(runtime.rawValue)")
                 continue
             }
@@ -657,12 +670,18 @@ final class TranscriptUsageService {
                         route.detail = nil
                         coverage[routeID] = route
                     } else {
+                        ThreadingLogger.usage.fault(
+                            "Usage coverage invariant missing route=\(routeID, privacy: .public)"
+                        )
                         assertionFailure("Missing usage coverage for \(routeID)")
                     }
                 }
             } catch {
                 item.state = item.recordCount > 0 ? .partial : .failed
                 item.detail = "One or more OpenCode exports could not be read."
+                ThreadingLogger.usage.error(
+                    "Usage export failed runtime=\(runtime.rawValue, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
             }
             coverage[runtime.rawValue] = item
         }

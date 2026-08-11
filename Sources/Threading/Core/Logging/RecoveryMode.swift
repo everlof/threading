@@ -29,7 +29,7 @@ enum RecoveryMode {
 
     static func enter(_ resolution: LaunchModeResolution) {
         guard !hasEntered else {
-            ThreadingLogger.session.error(
+            ThreadingLogger.app.error(
                 """
                 Refusing a second launch-mode entry: this launch is already \
                 \(Self.resolution.token, privacy: .public) and was asked for \
@@ -67,7 +67,7 @@ enum RecoveryMode {
     /// refusal: a path that starts a process in recovery leaves no trace at all, while one that
     /// refuses leaves a line naming itself.
     static func refuse(_ what: String) {
-        ThreadingLogger.session.info(
+        ThreadingLogger.app.info(
             "Recovery mode refused: \(what, privacy: .public)"
         )
     }

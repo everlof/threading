@@ -438,7 +438,7 @@ final class StoragePreferencesViewController: NSViewController {
                 removed += 1
             }
 
-            ThreadingLogger.agent.info(
+            ThreadingLogger.storage.info(
                 "Reclaimed \(removed, privacy: .public) of \(artifacts.count, privacy: .public) artifacts"
             )
 

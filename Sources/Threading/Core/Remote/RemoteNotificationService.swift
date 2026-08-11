@@ -751,13 +751,13 @@ actor RemoteAPNSPushSender {
             )
             if !result.accepted {
                 ThreadingLogger.remote.warning(
-                    "APNs refused a remote notification: \(result.diagnosticDescription, privacy: .public)"
+                    "APNs refused a remote notification: \(result.diagnosticDescription, privacy: .private(mask: .hash))"
                 )
             }
             return result
         } catch {
             ThreadingLogger.remote.warning(
-                "APNs notification delivery failed: \(error.localizedDescription, privacy: .public)"
+                "APNs notification delivery failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return RemoteAPNSDeliveryResult(
                 statusCode: nil,

@@ -56,7 +56,7 @@ enum CodexSessionDiscovery {
             }
 
             ThreadingLogger.agent.warning(
-                "Codex session discovery timed out for \(projectPath, privacy: .public) in \(codexHome, privacy: .public)"
+                "Codex session discovery timed out for \(projectPath, privacy: .private(mask: .hash)) in \(codexHome, privacy: .private(mask: .hash))"
             )
             DispatchQueue.main.async { completion(nil) }
         }

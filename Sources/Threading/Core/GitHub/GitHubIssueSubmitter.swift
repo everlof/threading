@@ -115,6 +115,7 @@ struct GitHubIssueSubmitter: Sendable {
         guard let endpoint = URL(
             string: "https://\(GitHubDefaults.apiHost)/repos/\(repository)/issues"
         ) else {
+            ThreadingLogger.github.fault("GitHub issue endpoint construction failed")
             return .failed(message: L10n.string("Threading could not build the GitHub address."))
         }
 
@@ -123,6 +124,9 @@ struct GitHubIssueSubmitter: Sendable {
         let credentials = resolved.filter { $0.token != nil }
 
         guard !credentials.isEmpty else {
+            ThreadingLogger.github.notice(
+                "GitHub issue submission is using the browser because no writable credential is available"
+            )
             return webFormOutcome(
                 for: draft,
                 message: L10n.string("Threading has no GitHub sign-in, so this opens the form in your browser.")
@@ -132,12 +136,18 @@ struct GitHubIssueSubmitter: Sendable {
         for credential in credentials {
             switch await attempt(draft, at: endpoint, as: credential) {
             case .created(let url, let number, let tier):
+                ThreadingLogger.github.info(
+                    "GitHub issue created number=\(number, privacy: .public) credential_tier=\(tier.rawValue, privacy: .public)"
+                )
                 return .created(url: url, number: number, tier: tier)
 
             case .transportFailed(let message):
                 return .failed(message: message)
 
             case .refused(let status, let message):
+                ThreadingLogger.github.warning(
+                    "GitHub issue submission refused status=\(status, privacy: .public) credential_tier=\(credential.tier.rawValue, privacy: .public)"
+                )
                 if status == 401 {
                     await resolver?.invalidate(credential.tier)
                 }
@@ -151,6 +161,9 @@ struct GitHubIssueSubmitter: Sendable {
 
         // Every credential was refused for a reason about the credential. The user's browser
         // session is a credential Threading does not have, so it is where this goes next.
+        ThreadingLogger.github.notice(
+            "GitHub issue submission is using the browser after all writable credentials were refused"
+        )
         return webFormOutcome(
             for: draft,
             message: L10n.string("GitHub would not accept the report from this Mac's sign-in, so this opens the form in your browser.")
@@ -202,13 +215,22 @@ struct GitHubIssueSubmitter: Sendable {
         if let token = credential.token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        request.httpBody = Self.requestBody(for: draft)
+        guard let requestBody = Self.requestBody(for: draft) else {
+            ThreadingLogger.github.fault("GitHub issue request encoding failed")
+            return .transportFailed(
+                message: L10n.string("Threading could not prepare the GitHub report.")
+            )
+        }
+        request.httpBody = requestBody
 
         let data: Data
         let http: HTTPURLResponse
         do {
             (data, http) = try await transport(request)
         } catch {
+            ThreadingLogger.github.error(
+                "GitHub issue transport failed credential_tier=\(credential.tier.rawValue, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             return .transportFailed(message: L10n.format(
                 "Threading could not reach GitHub: %@",
                 error.localizedDescription
@@ -225,6 +247,9 @@ struct GitHubIssueSubmitter: Sendable {
         guard let created = Self.createdIssue(from: data) else {
             // GitHub accepted it, so the issue exists; only our reading of the answer failed.
             // Saying "failed" here would invite a duplicate.
+            ThreadingLogger.github.warning(
+                "GitHub issue response was successful but unreadable status=\(http.statusCode, privacy: .public) response_bytes=\(data.count, privacy: .public)"
+            )
             return .created(
                 url: URL(string: "https://\(GitHubDefaults.webHost)/\(repository)/issues")
                     ?? endpoint,
@@ -240,6 +265,7 @@ struct GitHubIssueSubmitter: Sendable {
         message: String
     ) -> GitHubIssueSubmission {
         guard let url = webFormURL(for: draft) else {
+            ThreadingLogger.github.fault("GitHub issue web-form URL construction failed")
             return .failed(message: L10n.string("Threading could not build the GitHub address."))
         }
         return .webForm(url: url, message: message)

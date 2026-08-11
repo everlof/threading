@@ -649,7 +649,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 )
             } catch {
                 ThreadingLogger.extensions.error(
-                    "Could not render Metal surface from \(extensionIdentifier, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    "Could not render Metal surface from \(extensionIdentifier, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
                 )
                 return nil
             }

@@ -117,12 +117,19 @@ final class AgentChildProcess {
             try? process.standardError.close()
             throw error
         }
+        let executableIdentity = URL(fileURLWithPath: executable).lastPathComponent
+        ThreadingLogger.agent.info(
+            "Agent child launched pid=\(child.processIdentifier, privacy: .public) session=\(sessionID.uuidString, privacy: .public) executable=\(executableIdentity, privacy: .private(mask: .hash))"
+        )
         // The pid rather than the child: the supervisor stores this handler, so capturing it
         // here would be a cycle that only the reap could break — including for a child that
         // never exits.
         let pid = child.processIdentifier
         child.observeExit { status in
             ledger.clear(pid: pid)
+            ThreadingLogger.agent.info(
+                "Agent child exited pid=\(pid, privacy: .public) session=\(sessionID.uuidString, privacy: .public) status=\(status, privacy: .public)"
+            )
             onExit(status)
         }
 
@@ -135,6 +142,9 @@ final class AgentChildProcess {
     /// subagent would otherwise leave it behind, reparented to launchd, with the ledger entry
     /// already cleared by the leader's own reap.
     func terminate() {
+        ThreadingLogger.agent.notice(
+            "Agent child termination requested pid=\(self.processIdentifier, privacy: .public)"
+        )
         child.terminate()
     }
 

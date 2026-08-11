@@ -109,6 +109,13 @@ final class EventLog: @unchecked Sendable {
         case unknown
     }
 
+    /// The independent durable paths whose failures are deduplicated in the live log.
+    private enum DiagnosticTarget: String {
+        case journal
+        case launchMarker = "launch_marker"
+        case housekeeping
+    }
+
     // MARK: - Singleton
 
     static let shared = EventLog()
@@ -128,6 +135,10 @@ final class EventLog: @unchecked Sendable {
 
     private var openDay: String?
     private var openHandle: FileHandle?
+
+    /// One live-log error per target and failure stage. A dead diagnostics directory can affect
+    /// every lifecycle record; repeating the same error for each one buries the first cause.
+    private var reportedFailureStages: [DiagnosticTarget: String] = [:]
 
     /// The marker *this* instance wrote, or `nil` while it has not begun a launch.
     ///
@@ -299,29 +310,30 @@ final class EventLog: @unchecked Sendable {
 
             marker[EventLogDefaults.markerDispositionKey] = reason.rawValue
             ownedMarker = marker
-
-            ensureDirectoryExists()
-            guard let data = try? JSONSerialization.data(
-                withJSONObject: marker,
-                options: [.sortedKeys]
-            ) else { return }
-            try? data.write(to: markerURL, options: .atomic)
+            persistMarker(marker)
         }
     }
 
     // MARK: - Private Methods
 
     private func append(_ line: String) {
-        guard let data = (line + "\n").data(using: .utf8),
-              let handle = handle(forDay: dayStamp(Date())) else { return }
+        guard let data = (line + "\n").data(using: .utf8) else {
+            reportEncodingFault(target: .journal)
+            return
+        }
+        guard let handle = handle(forDay: dayStamp(Date())) else { return }
 
         do {
             try handle.write(contentsOf: data)
+            reportRecovery(target: .journal)
+            repairMissingOwnedMarker()
         } catch {
-            // Deliberately not recursive: the journal is what just failed.
-            ThreadingLogger.session.error(
-                "Event log write failed: \(error.localizedDescription, privacy: .public)"
-            )
+            // Reopen on the next record. A descriptor can remain valid after one failed write
+            // while every later write to it fails in exactly the same way.
+            try? openHandle?.close()
+            openHandle = nil
+            openDay = nil
+            reportFailure(target: .journal, stage: "write", error: error)
         }
     }
 
@@ -329,11 +341,15 @@ final class EventLog: @unchecked Sendable {
     private func handle(forDay day: String) -> FileHandle? {
         if let openHandle, openDay == day { return openHandle }
 
-        try? openHandle?.close()
+        do {
+            try openHandle?.close()
+        } catch {
+            reportWarning(target: .journal, stage: "close", error: error)
+        }
         openHandle = nil
         openDay = nil
 
-        ensureDirectoryExists()
+        guard ensureDirectoryExists(target: .journal) else { return nil }
 
         guard let handle = openForAppending(journalURL(forDay: day)) else { return nil }
 
@@ -357,7 +373,10 @@ final class EventLog: @unchecked Sendable {
     /// write, and `O_CREAT` is also what makes the file on a first launch.
     private func openForAppending(_ url: URL) -> FileHandle? {
         let descriptor = open(url.path, O_WRONLY | O_APPEND | O_CREAT, EventLogDefaults.fileMode)
-        guard descriptor >= 0 else { return nil }
+        guard descriptor >= 0 else {
+            reportFailure(target: .journal, stage: "open", errnoCode: errno)
+            return nil
+        }
         return FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     }
 
@@ -393,8 +412,6 @@ final class EventLog: @unchecked Sendable {
     }
 
     private func writeMarker() {
-        ensureDirectoryExists()
-
         let marker: [String: String] = [
             // Minted per launch rather than derived from the pid: a pid is reused by the system,
             // and a hosted test bundle shares one with the application hosting it, so it cannot
@@ -410,12 +427,34 @@ final class EventLog: @unchecked Sendable {
         // its `Quit` record. Removing a file that is not there is what a no-op looks like.
         ownedMarker = marker
 
+        persistMarker(marker)
+    }
+
+    private func persistMarker(_ marker: [String: String]) {
+        guard ensureDirectoryExists(target: .launchMarker) else { return }
         guard let data = try? JSONSerialization.data(
             withJSONObject: marker,
             options: [.sortedKeys]
-        ) else { return }
+        ) else {
+            reportEncodingFault(target: .launchMarker)
+            return
+        }
 
-        try? data.write(to: markerURL, options: .atomic)
+        do {
+            try data.write(to: markerURL, options: .atomic)
+            reportRecovery(target: .launchMarker)
+        } catch {
+            reportFailure(target: .launchMarker, stage: "write", error: error)
+        }
+    }
+
+    /// If startup could not put its marker down, the first later journal write retries it. The
+    /// existing-file guard is the ownership boundary: another fail-open instance may have put a
+    /// different launch there, and this process must never overwrite that evidence.
+    private func repairMissingOwnedMarker() {
+        guard let ownedMarker,
+              !FileManager.default.fileExists(atPath: markerURL.path) else { return }
+        persistMarker(ownedMarker)
     }
 
     /// Removes the marker only while it is still the one this launch wrote.
@@ -434,7 +473,12 @@ final class EventLog: @unchecked Sendable {
                 == ownedMarker[EventLogDefaults.markerLaunchKey]
         else { return }
 
-        try? FileManager.default.removeItem(at: markerURL)
+        do {
+            try FileManager.default.removeItem(at: markerURL)
+            reportRecovery(target: .launchMarker)
+        } catch {
+            reportWarning(target: .launchMarker, stage: "remove", error: error)
+        }
     }
 
     /// The previous launch's marker, if it never got cleaned up — which is the case where the app
@@ -452,7 +496,11 @@ final class EventLog: @unchecked Sendable {
               let marker = try? JSONSerialization.jsonObject(with: data) as? [String: String]
         else { return nil }
 
-        try? FileManager.default.removeItem(at: markerURL)
+        do {
+            try FileManager.default.removeItem(at: markerURL)
+        } catch {
+            reportWarning(target: .launchMarker, stage: "consume", error: error)
+        }
         return marker
     }
 
@@ -513,10 +561,18 @@ final class EventLog: @unchecked Sendable {
     /// *and* before the prune, so it answers "has this app ever run here" rather than "is there
     /// a journal the retention window still likes".
     private func journalExists() -> Bool {
-        guard let contents = try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil
-        ) else { return false }
+        let contents: [URL]
+        do {
+            contents = try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+            )
+        } catch where !FileManager.default.fileExists(atPath: directory.path) {
+            return false
+        } catch {
+            reportWarning(target: .housekeeping, stage: "enumerate", error: error)
+            return false
+        }
 
         return contents.contains { $0.pathExtension == EventLogDefaults.fileExtension }
     }
@@ -526,23 +582,85 @@ final class EventLog: @unchecked Sendable {
     private func pruneExpiredJournals() {
         let cutoff = Date().addingTimeInterval(-EventLogDefaults.retention)
 
-        guard let contents = try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.contentModificationDateKey]
-        ) else { return }
+        let contents: [URL]
+        do {
+            contents = try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.contentModificationDateKey]
+            )
+        } catch where !FileManager.default.fileExists(atPath: directory.path) {
+            return
+        } catch {
+            reportWarning(target: .housekeeping, stage: "prune_enumerate", error: error)
+            return
+        }
 
         for url in contents where url.pathExtension == EventLogDefaults.fileExtension {
             guard let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey])
                 .contentModificationDate, modified < cutoff else { continue }
 
-            try? FileManager.default.removeItem(at: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                reportWarning(target: .housekeeping, stage: "prune_remove", error: error)
+            }
         }
     }
 
-    private func ensureDirectoryExists() {
-        try? FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
+    private func ensureDirectoryExists(target: DiagnosticTarget) -> Bool {
+        do {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            return true
+        } catch {
+            reportFailure(target: target, stage: "directory", error: error)
+            return false
+        }
+    }
+
+    // MARK: - Live Diagnostics Fallback
+
+    /// These deliberately bypass the durable journal: the durable journal is the component
+    /// reporting that it cannot perform its job.
+    private func reportFailure(target: DiagnosticTarget, stage: String, error: Error) {
+        guard reportedFailureStages[target] != stage else { return }
+        reportedFailureStages[target] = stage
+        ThreadingLogger.app.error(
+            "Event log unavailable target=\(target.rawValue, privacy: .public) stage=\(stage, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+        )
+    }
+
+    private func reportFailure(target: DiagnosticTarget, stage: String, errnoCode: Int32) {
+        guard reportedFailureStages[target] != stage else { return }
+        reportedFailureStages[target] = stage
+        ThreadingLogger.app.error(
+            "Event log unavailable target=\(target.rawValue, privacy: .public) stage=\(stage, privacy: .public) errno=\(errnoCode, privacy: .public)"
+        )
+    }
+
+    private func reportWarning(target: DiagnosticTarget, stage: String, error: Error) {
+        guard reportedFailureStages[target] != stage else { return }
+        reportedFailureStages[target] = stage
+        ThreadingLogger.app.warning(
+            "Event log maintenance failed target=\(target.rawValue, privacy: .public) stage=\(stage, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+        )
+    }
+
+    private func reportEncodingFault(target: DiagnosticTarget) {
+        let stage = "encoding"
+        guard reportedFailureStages[target] != stage else { return }
+        reportedFailureStages[target] = stage
+        ThreadingLogger.app.fault(
+            "Event log invariant failed target=\(target.rawValue, privacy: .public) stage=\(stage, privacy: .public)"
+        )
+    }
+
+    private func reportRecovery(target: DiagnosticTarget) {
+        guard let stage = reportedFailureStages.removeValue(forKey: target) else { return }
+        ThreadingLogger.app.notice(
+            "Event log recovered target=\(target.rawValue, privacy: .public) after=\(stage, privacy: .public)"
         )
     }
 

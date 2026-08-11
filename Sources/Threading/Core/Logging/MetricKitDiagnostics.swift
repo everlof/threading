@@ -107,63 +107,104 @@ final class MetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unchecke
     }
 
     private func persist(metricPayloads payloads: [MXMetricPayload]) {
+        var written = 0
         for payload in payloads {
-            write(
+            if write(
                 payload.jsonRepresentation(),
                 kind: MetricKitStorage.metricsDirectoryName,
                 beganAt: payload.timeStampBegin,
                 endedAt: payload.timeStampEnd
+            ) {
+                written += 1
+            }
+        }
+        if !payloads.isEmpty {
+            ThreadingLogger.performance.info(
+                "MetricKit payload batch kind=metrics received=\(payloads.count, privacy: .public) persisted=\(written, privacy: .public)"
             )
         }
         prune(kind: MetricKitStorage.metricsDirectoryName)
     }
 
     private func persist(diagnosticPayloads payloads: [MXDiagnosticPayload]) {
+        var written = 0
         for payload in payloads {
-            write(
+            if write(
                 payload.jsonRepresentation(),
                 kind: MetricKitStorage.diagnosticsDirectoryName,
                 beganAt: payload.timeStampBegin,
                 endedAt: payload.timeStampEnd
+            ) {
+                written += 1
+            }
+        }
+        if !payloads.isEmpty {
+            ThreadingLogger.performance.info(
+                "MetricKit payload batch kind=diagnostics received=\(payloads.count, privacy: .public) persisted=\(written, privacy: .public)"
             )
         }
         prune(kind: MetricKitStorage.diagnosticsDirectoryName)
     }
 
-    private func write(_ data: Data, kind: String, beganAt: Date, endedAt: Date) {
+    @discardableResult
+    private func write(_ data: Data, kind: String, beganAt: Date, endedAt: Date) -> Bool {
         let kindDirectory = directory.appendingPathComponent(kind, isDirectory: true)
-        try? FileManager.default.createDirectory(
-            at: kindDirectory,
-            withIntermediateDirectories: true
-        )
+        do {
+            try FileManager.default.createDirectory(
+                at: kindDirectory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            ThreadingLogger.performance.error(
+                "MetricKit \(kind, privacy: .public) directory creation failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return false
+        }
 
         let beginning = Int64(beganAt.timeIntervalSince1970)
         let ending = Int64(endedAt.timeIntervalSince1970)
         let url = kindDirectory.appendingPathComponent(
             "\(beginning)-\(ending).\(MetricKitStorage.payloadExtension)"
         )
-        guard !FileManager.default.fileExists(atPath: url.path) else { return }
+        guard !FileManager.default.fileExists(atPath: url.path) else { return false }
 
         do {
             try data.write(to: url, options: .atomic)
+            return true
         } catch {
             ThreadingLogger.performance.error(
-                "MetricKit \(kind, privacy: .public) write failed: \(error.localizedDescription, privacy: .public)"
+                "MetricKit \(kind, privacy: .public) write failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
+            return false
         }
     }
 
     private func prune(kind: String) {
         let kindDirectory = directory.appendingPathComponent(kind, isDirectory: true)
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: kindDirectory,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ).filter({ $0.pathExtension == MetricKitStorage.payloadExtension }) else { return }
+        guard FileManager.default.fileExists(atPath: kindDirectory.path) else { return }
+        let files: [URL]
+        do {
+            files = try FileManager.default.contentsOfDirectory(
+                at: kindDirectory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ).filter { $0.pathExtension == MetricKitStorage.payloadExtension }
+        } catch {
+            ThreadingLogger.performance.warning(
+                "MetricKit \(kind, privacy: .public) retention scan failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return
+        }
 
         for url in files.sorted(by: { $0.lastPathComponent > $1.lastPathComponent })
             .dropFirst(max(reportLimit, 1)) {
-            try? FileManager.default.removeItem(at: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                ThreadingLogger.performance.warning(
+                    "MetricKit \(kind, privacy: .public) retention deletion failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
         }
     }
 }

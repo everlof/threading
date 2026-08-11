@@ -16,10 +16,6 @@ import Foundation
 import UIKit
 import CoreText
 import CoreGraphics
-import os
-
-@available(iOS 14.0, *)
-internal var log: Logger = Logger(subsystem: "org.tirania.SwiftTerm", category: "msg")
 
 /**
  * TerminalView provides an AppKit/UIKit front-end to the `Terminal` terminal emulator.
@@ -582,7 +578,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             sendKeyRight()
         }
         if imgName == nil {
-            print ("What?")
+            SwiftTermDiagnostics.emit(.fault, .uiDirectionKeyInvariant)
         }
         guard let name = imgName else { return }
 
@@ -1298,7 +1294,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 data = .bytes ([0x1b])
                 
             case .keyboardInsert:
-                print (".keyboardInsert ignored")
+                SwiftTermDiagnostics.emit(.debug, .uiKeyboardInsertUnsupported)
                 break
                 
             case .keyboardReturn:

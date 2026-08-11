@@ -92,7 +92,9 @@ enum GitIndexWriter {
                 throw Failure.nothingStaged
             }
 
-            ThreadingLogger.git.info("committing \(trimmed.count) characters of message")
+        ThreadingLogger.git.info(
+            "committing \(trimmed.count, privacy: .public) characters of message"
+        )
             _ = try GitProcess.run(GitWriteCommands.commit(message: trimmed), in: root)
             return GitDiffParser.decode(try GitProcess.run(GitWriteCommands.headSubject(), in: root))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -121,7 +123,11 @@ enum GitIndexWriter {
     }
 
     private static func hasCommits(in root: URL) -> Bool {
-        (try? GitProcess.run(GitReviewCommands.common + GitReviewCommands.headHash(), in: root)) != nil
+        (try? GitProcess.run(
+            GitReviewCommands.common + GitReviewCommands.headHash(),
+            in: root,
+            reportsRejectedExit: false
+        )) != nil
     }
 }
 

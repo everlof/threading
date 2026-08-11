@@ -134,11 +134,11 @@ final class PerformanceRecorder: @unchecked Sendable {
             do {
                 let url = try self.write(document)
                 ThreadingLogger.performance.notice(
-                    "Automatic performance trace: \(url.path, privacy: .public)"
+                    "Automatic performance trace: \(url.path, privacy: .private(mask: .hash))"
                 )
             } catch {
                 ThreadingLogger.performance.error(
-                    "Performance trace export failed: \(error.localizedDescription, privacy: .public)"
+                    "Performance trace export failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
                 )
             }
         }
@@ -282,11 +282,19 @@ final class PerformanceRecorder: @unchecked Sendable {
 
     private func pruneReports() {
         let keys: Set<URLResourceKey> = [.contentModificationDateKey]
-        guard let candidates = try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: Array(keys),
-            options: [.skipsHiddenFiles]
-        ).filter({ $0.pathExtension == "json" }) else { return }
+        let candidates: [URL]
+        do {
+            candidates = try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: Array(keys),
+                options: [.skipsHiddenFiles]
+            ).filter { $0.pathExtension == "json" }
+        } catch {
+            ThreadingLogger.performance.warning(
+                "Performance trace retention scan failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return
+        }
 
         let ordered = candidates.sorted {
             let left = try? $0.resourceValues(forKeys: keys).contentModificationDate
@@ -295,7 +303,13 @@ final class PerformanceRecorder: @unchecked Sendable {
         }
 
         for url in ordered.dropFirst(max(configuration.reportLimit, 1)) {
-            try? FileManager.default.removeItem(at: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                ThreadingLogger.performance.warning(
+                    "Performance trace retention deletion failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
         }
     }
 

@@ -1322,13 +1322,13 @@ final class BrowserBaselineStore {
                 withIntermediateDirectories: true
             )
             try fileManager.moveItem(at: directory, to: destination)
-            ThreadingLogger.session.error(
-                "Quarantined an unreadable browser baseline at \(directory.lastPathComponent, privacy: .public)"
+            ThreadingLogger.browser.error(
+                "Quarantined an unreadable browser baseline at \(directory.lastPathComponent, privacy: .private(mask: .hash))"
             )
         } catch {
             isWriteBlocked = true
-            ThreadingLogger.session.error(
-                "Could not quarantine an unreadable browser baseline: \(error.localizedDescription, privacy: .public)"
+            ThreadingLogger.browser.error(
+                "Could not quarantine an unreadable browser baseline: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
         }
     }

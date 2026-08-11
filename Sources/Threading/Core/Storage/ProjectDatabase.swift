@@ -501,11 +501,11 @@ final class ProjectDatabase {
             do {
                 _ = try Self.decoder.decode(type, from: Data(payload.utf8))
             } catch {
-                ThreadingLogger.agent.error(
+                ThreadingLogger.storage.error(
                     """
                     Unreadable \(table, privacy: .public) row for session \
                     \(sessionID.uuidString, privacy: .public): \
-                    \(error.localizedDescription, privacy: .public)
+                    \(error.localizedDescription, privacy: .private(mask: .hash))
                     """
                 )
                 unreadable.sessions.insert(sessionID)

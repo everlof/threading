@@ -884,7 +884,7 @@ final class SubagentStateStore {
             try data.write(to: url(for: sessionID), options: .atomic)
         } catch {
             ThreadingLogger.agent.error(
-                "Failed to save subagents for \(sessionID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Failed to save subagents for \(sessionID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
         }
     }
@@ -923,12 +923,12 @@ final class SubagentStateStore {
             try fileManager.moveItem(at: file, to: destination)
             writesBlocked.remove(sessionID)
             ThreadingLogger.agent.error(
-                "Quarantined unreadable subagent state for \(sessionID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Quarantined unreadable subagent state for \(sessionID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
         } catch {
             writesBlocked.insert(sessionID)
             ThreadingLogger.agent.error(
-                "Could not quarantine subagent state for \(sessionID.uuidString, privacy: .public); writes blocked: \(error.localizedDescription, privacy: .public)"
+                "Could not quarantine subagent state for \(sessionID.uuidString, privacy: .public); writes blocked: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
         }
     }

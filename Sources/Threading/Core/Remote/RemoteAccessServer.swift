@@ -132,10 +132,14 @@ final class RemoteAccessServer: @unchecked Sendable {
                 case .ready:
                     let resolved = listener.port?.rawValue
                     self?.portStorage.withLock { $0 = resolved }
-                    ThreadingLogger.remote.info("Remote access server listening on port \(resolved ?? 0)")
+            ThreadingLogger.remote.info(
+                "Remote access server listening on port \(resolved ?? 0, privacy: .public)"
+            )
                     finish(resolved)
                 case .failed(let error):
-                    ThreadingLogger.remote.error("Remote access server failed: \(error.localizedDescription)")
+            ThreadingLogger.remote.error(
+                "Remote access server failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
                     if self?.listener === listener {
                         self?.portStorage.withLock { $0 = nil }
                         self?.listener = nil
@@ -153,7 +157,9 @@ final class RemoteAccessServer: @unchecked Sendable {
 
             listener.start(queue: queue)
         } catch {
-            ThreadingLogger.remote.error("Remote access server could not start: \(error.localizedDescription)")
+            ThreadingLogger.remote.error(
+                "Remote access server could not start: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             finish(nil)
         }
     }
@@ -2204,7 +2210,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
     private func recordFailedAuth(reason: String, device: String?) {
         authLimiter.recordFailure(device: device)
-        ThreadingLogger.remote.error("Remote auth denied: \(reason, privacy: .public)")
+        ThreadingLogger.remote.warning("Remote auth denied: \(reason, privacy: .public)")
         EventLog.shared.record(.remote, "Remote auth denied", ["reason": reason])
         var fields: [RemoteDiagnosticField: String] = [.reason: reason]
         if let device {
@@ -2258,7 +2264,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         let message = update == .client
             ? "This client is out of date. Reload the page or update the app."
             : "Threading on the Mac is out of date. Update it to connect."
-        ThreadingLogger.remote.error("Remote protocol mismatch, update needed on: \(update.rawValue, privacy: .public)")
+        ThreadingLogger.remote.warning(
+            "Remote protocol mismatch, update needed on: \(update.rawValue, privacy: .public)"
+        )
         EventLog.shared.record(.remote, "Remote protocol mismatch", ["update": update.rawValue])
         return RemoteUpgradeRequiredDTO(update: update, message: message)
     }
@@ -2267,8 +2275,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         do {
             return String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
         } catch {
-            ThreadingLogger.remote.error(
-                "Remote server encoding failed: \(error.localizedDescription, privacy: .public)"
+            ThreadingLogger.remote.fault(
+                "Remote server encoding failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return #"{"type":"error","code":"encodingFailed"}"#
         }

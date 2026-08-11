@@ -51,11 +51,13 @@ final class MobileTerminalKeyboardStore: ObservableObject {
                 customLayouts = [:]
                 writesAllowed = false
                 recoveryMessage = "Saved keyboards were created by a newer version."
+                MobileDiagnostics.logDegraded(.keyboardStorage, code: .newerFormat)
                 return
             }
             try Self.validate(decoded.layouts)
             customLayouts = decoded.layouts
         } catch {
+            MobileDiagnostics.logFailure(.keyboardStorage, error: error)
             let recoveryKey = Defaults.unreadableKeyPrefix + UUID().uuidString.lowercased()
             defaults.set(data, forKey: recoveryKey)
             if defaults.data(forKey: recoveryKey) == data {
@@ -101,17 +103,20 @@ final class MobileTerminalKeyboardStore: ObservableObject {
         do {
             try Self.validate(layouts)
         } catch {
+            MobileDiagnostics.logFailure(.keyboardStorage, code: .validation)
             recoveryMessage = "Keyboards exceeded their safe storage limits and were not changed."
             return
         }
         let archive = Archive(version: Defaults.archiveVersion, layouts: layouts)
         guard let data = try? JSONEncoder().encode(archive),
               data.count <= Defaults.maximumArchiveBytes else {
+            MobileDiagnostics.logFailure(.keyboardStorage, code: .encode)
             recoveryMessage = "Keyboards exceeded their safe storage limit and were not changed."
             return
         }
         defaults.set(data, forKey: Defaults.archiveKey)
         guard defaults.data(forKey: Defaults.archiveKey) == data else {
+            MobileDiagnostics.logFailure(.keyboardStorage, code: .writeVerification)
             writesAllowed = false
             recoveryMessage = "Keyboards could not be saved. Changes are paused."
             return

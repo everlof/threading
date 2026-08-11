@@ -26,13 +26,47 @@ enum SingleInstanceLock {
             in: .userDomainMask
         )[0].appendingPathComponent(SingleInstanceDefaults.applicationDirectoryName)
 
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            ThreadingLogger.app.error(
+                "Single-instance lock directory preparation failed; launch is continuing without a guaranteed lock: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+        }
 
         let path = directory.appendingPathComponent(SingleInstanceDefaults.lockFileName).path
         descriptor = open(path, O_CREAT | O_RDWR, 0o644)
-        guard descriptor >= 0 else { return true }
+        guard descriptor >= 0 else {
+            let code = errno
+            ThreadingLogger.app.error(
+                "Single-instance lock file could not be opened; launch is continuing without a lock (errno=\(code, privacy: .public))"
+            )
+            return true
+        }
 
-        return flock(descriptor, LOCK_EX | LOCK_NB) == 0
+        guard flock(descriptor, LOCK_EX | LOCK_NB) != 0 else {
+            ThreadingLogger.app.info("Single-instance state lock acquired")
+            return true
+        }
+
+        let code = errno
+        close(descriptor)
+        descriptor = -1
+
+        if code == EWOULDBLOCK || code == EAGAIN {
+            ThreadingLogger.app.notice(
+                "Duplicate launch refused because the state lock is already held"
+            )
+            return false
+        }
+
+        ThreadingLogger.app.error(
+            "Single-instance state lock failed; launch is continuing without a lock (errno=\(code, privacy: .public))"
+        )
+        return true
     }
 }
 

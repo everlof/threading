@@ -416,16 +416,18 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             scroller.doubleValue =  scrollPosition
         case .knob:
             scroll(toPosition: scroller.doubleValue)
-        case .knobSlot:
-            print ("Scroller .knobSlot clicked")
-        case .noPart:
-            print ("Scroller .noPart clicked")
-        case .decrementLine:
-            print ("Scroller .decrementLine clicked")
-        case .incrementLine:
-            print ("Scroller .incrementLine clicked")
+        case .knobSlot, .noPart, .decrementLine, .incrementLine:
+            SwiftTermDiagnostics.emit(
+                .debug,
+                .uiUnhandledAction,
+                facts: ["action": Int(scroller.hitPart.rawValue)]
+            )
         default:
-            print ("Scroller: New value introduced")
+            SwiftTermDiagnostics.emit(
+                .debug,
+                .uiUnhandledAction,
+                facts: ["action": Int(scroller.hitPart.rawValue)]
+            )
         }
     }
     
@@ -889,7 +891,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         case #selector(deleteWordBackward(_:)):
             send (EscapeSequences.emacsBackwardKillWord)
         default:
-            print ("Unhandle selector \(selector)")
+            SwiftTermDiagnostics.emit(.debug, .uiUnhandledAction)
         }
     }
     
@@ -943,7 +945,11 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     
     // NSTextInputClient protocol implementation
     open func markedRange() -> NSRange {
-        print ("markedRange: This should return the actual range from the selection")
+        SwiftTermDiagnostics.emit(
+            .warning,
+            .uiTextInputUnsupported,
+            facts: ["operation": 1]
+        )
         
         // This means "no marked" - when we fix, we should address
         return NSRange.empty
@@ -958,7 +964,11 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     
     // NSTextInputClient protocol implementation
     open func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
-        print ("Attribuetd string")
+        SwiftTermDiagnostics.emit(
+            .warning,
+            .uiTextInputUnsupported,
+            facts: ["operation": 2]
+        )
         return nil
     }
     
@@ -981,7 +991,11 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     
     // NSTextInputClient protocol implementation
     open func characterIndex(for point: NSPoint) -> Int {
-        print ("characterIndex:for point: This should return the actual range from the selection")
+        SwiftTermDiagnostics.emit(
+            .warning,
+            .uiTextInputUnsupported,
+            facts: ["operation": 3]
+        )
         return NSNotFound
     }
     
@@ -1009,7 +1023,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         case #selector(copy(_:)):
             return selection.active
         default:
-            print ("Validating User Interface Item: \(item)")
+            SwiftTermDiagnostics.emit(.debug, .uiUnhandledAction)
             return false
         }
     }

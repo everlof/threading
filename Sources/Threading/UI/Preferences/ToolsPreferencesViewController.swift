@@ -849,13 +849,20 @@ final class ToolsPreferencesViewController: NSViewController {
         }
 
         do {
+            let identity = BrowserCredentialIdentity(originKey: origin.key, label: label)
             try credentialStore.save(
                 username: username.trimmingCharacters(in: .whitespacesAndNewlines),
                 password: password,
-                for: BrowserCredentialIdentity(originKey: origin.key, label: label)
+                for: identity
+            )
+            ThreadingLogger.browser.info(
+                "Browser test credential saved origin=\(identity.originKey, privacy: .private(mask: .hash)) label=\(identity.label, privacy: .private(mask: .hash))"
             )
             render()
         } catch {
+            ThreadingLogger.browser.error(
+                "Browser test credential save failed origin=\(origin.key, privacy: .private(mask: .hash)) label=\(label, privacy: .private(mask: .hash)) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             refuse(error.localizedDescription)
         }
     }
@@ -958,8 +965,19 @@ final class ToolsPreferencesViewController: NSViewController {
 
     @objc private func removeTestCredential(_ sender: ThemedButton) {
         guard storedCredentials.indices.contains(sender.tag) else { return }
-        try? credentialStore.delete(storedCredentials[sender.tag])
-        render()
+        let identity = storedCredentials[sender.tag]
+        do {
+            try credentialStore.delete(identity)
+            ThreadingLogger.browser.info(
+                "Browser test credential removed origin=\(identity.originKey, privacy: .private(mask: .hash)) label=\(identity.label, privacy: .private(mask: .hash))"
+            )
+            render()
+        } catch {
+            ThreadingLogger.browser.error(
+                "Browser test credential removal failed origin=\(identity.originKey, privacy: .private(mask: .hash)) label=\(identity.label, privacy: .private(mask: .hash)) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            ThemedAlert(error: error).runModal()
+        }
     }
 
     @objc private func revokeWebsiteAccess(_ sender: ThemedButton) {

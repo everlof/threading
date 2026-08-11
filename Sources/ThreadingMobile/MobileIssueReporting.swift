@@ -322,6 +322,7 @@ struct MobileIssueReportView: View {
                     )
                 }
             } catch {
+                MobileDiagnostics.logFailure(.issueReportDelivery, error: error)
                 notice = Notice(
                     title: MobileL10n.string("Couldn’t send report"),
                     message: error.localizedDescription,
@@ -360,6 +361,7 @@ struct MobileIssueReportView: View {
             } catch is CancellationError {
                 return
             } catch {
+                MobileDiagnostics.logFailure(.sessionAction, error: error)
                 notice = Notice(
                     title: MobileL10n.string("Couldn’t create task"),
                     message: error.localizedDescription,
@@ -453,6 +455,7 @@ struct MobileIssueReportView: View {
             }
             sharePayload = DiagnosticsSharePayload(items: items)
         } catch {
+            MobileDiagnostics.logFailure(.issueReportExport, error: error)
             exportError = MobileL10n.string("The report files could not be prepared.")
         }
         activeAction = nil
@@ -614,14 +617,23 @@ actor MobileIssueReportOutbox {
             guard let receipt = try await deliverExclusively(submission) else {
                 return .queued
             }
-            try? FileManager.default.removeItem(at: destination)
+            do {
+                try FileManager.default.removeItem(at: destination)
+            } catch {
+                MobileDiagnostics.logFailure(.issueReportDelivery, error: error)
+            }
             return .delivered(receipt)
         } catch let error as MobileIssueReportError where error.shouldRemainQueued {
             return .queued
         } catch is URLError {
             return .queued
         } catch {
-            try? FileManager.default.removeItem(at: destination)
+            do {
+                try FileManager.default.removeItem(at: destination)
+            } catch let cleanupError {
+                MobileDiagnostics.logFailure(.issueReportDelivery, error: cleanupError)
+            }
+            MobileDiagnostics.logFailure(.issueReportDelivery, error: error)
             throw error
         }
     }
@@ -632,17 +644,30 @@ actor MobileIssueReportOutbox {
         do {
             try prepareDirectory()
         } catch {
+            MobileDiagnostics.logFailure(.issueReportDelivery, error: error)
             return
         }
-        guard let urls = try? pendingURLs() else { return }
+        let urls: [URL]
+        do {
+            urls = try pendingURLs()
+        } catch {
+            MobileDiagnostics.logFailure(.issueReportDelivery, error: error)
+            return
+        }
         for url in urls {
             guard let submission = PublicIssueReportPolicy.submission(at: url) else {
+                MobileDiagnostics.logFailure(.issueReportDelivery, code: .decode)
                 continue
             }
             do {
                 guard try await deliverExclusively(submission) != nil else { continue }
-                try? FileManager.default.removeItem(at: url)
+                do {
+                    try FileManager.default.removeItem(at: url)
+                } catch {
+                    MobileDiagnostics.logFailure(.issueReportDelivery, error: error)
+                }
             } catch {
+                MobileDiagnostics.logDegraded(.issueReportDelivery, error: error)
                 return
             }
         }

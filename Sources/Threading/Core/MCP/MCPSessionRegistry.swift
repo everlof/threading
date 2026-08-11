@@ -126,7 +126,9 @@ enum MCPSessionRegistry {
             try data.write(to: file, options: .atomic)
             return file.path
         } catch {
-            ThreadingLogger.mcp.error("Failed to write MCP config for \(sessionID): \(error)")
+            ThreadingLogger.mcp.error(
+                "Failed to write MCP config for \(sessionID, privacy: .public): \(error, privacy: .private(mask: .hash))"
+            )
             return nil
         }
     }
@@ -170,7 +172,9 @@ enum MCPSessionRegistry {
             // Silent otherwise, and total: no port means no hooks, so the session falls back to
             // inferring its state from output and — if it is a rendered one — to having its
             // tools blocked outright with no card to approve them.
-            ThreadingLogger.mcp.error("No MCP port; \(sessionID) launches without hooks")
+            ThreadingLogger.mcp.error(
+                "No MCP port; \(sessionID, privacy: .public) launches without hooks"
+            )
             EventLog.shared.record(.hooks, "Launched without hooks, MCP listener has no port", [
                 "session": sessionID.uuidString,
                 "brokersPermissions": brokersPermissions ? "yes" : "no",
@@ -239,7 +243,9 @@ enum MCPSessionRegistry {
             try data.write(to: file, options: .atomic)
             return file.path
         } catch {
-            ThreadingLogger.mcp.error("Failed to write hook settings for \(sessionID): \(error)")
+            ThreadingLogger.mcp.error(
+                "Failed to write hook settings for \(sessionID, privacy: .public): \(error, privacy: .private(mask: .hash))"
+            )
             return nil
         }
     }
@@ -371,7 +377,7 @@ enum MCPSessionRegistry {
             try FileManager.default.removeItem(at: file)
         } catch {
             ThreadingLogger.mcp.error(
-                "Failed to remove disabled hook settings for \(sessionID): \(error)"
+                "Failed to remove disabled hook settings for \(sessionID, privacy: .public): \(error, privacy: .private(mask: .hash))"
             )
         }
     }

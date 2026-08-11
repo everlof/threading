@@ -1963,7 +1963,7 @@ enum PromptAttachment {
             return url.path
         } catch {
             ThreadingLogger.session.error(
-                "Failed to write dropped image: \(error.localizedDescription, privacy: .public)"
+                "Failed to write dropped image: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return nil
         }

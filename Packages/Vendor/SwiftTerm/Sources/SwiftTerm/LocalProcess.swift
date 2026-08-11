@@ -261,16 +261,28 @@ public class LocalProcess {
             let ddata = DispatchData(bytes: ptr)
             let copyCount = ddata.count
             if debugIO {
-                print ("[SEND-\(copy)] Queuing data to client: \(data) ")
+                SwiftTermDiagnostics.emit(
+                    .debug,
+                    .ptyWriteQueued,
+                    facts: ["sequence": copy, "byteCount": data.count]
+                )
             }
 
             DispatchIO.write(toFileDescriptor: childfd, data: ddata, runningHandlerOn: DispatchQueue.global(qos: .userInitiated), handler:  { dd, errno in
                 self.total += copyCount
                 if self.debugIO {
-                    print ("[SEND-\(copy)] completed bytes=\(self.total)")
+                    SwiftTermDiagnostics.emit(
+                        .debug,
+                        .ptyWriteCompleted,
+                        facts: ["sequence": copy, "totalByteCount": self.total]
+                    )
                 }
                 if errno != 0 {
-                    print ("Error writing data to the child, errno=\(errno)")
+                    SwiftTermDiagnostics.emit(
+                        .error,
+                        .ptyWriteFailed,
+                        facts: ["errno": Int(errno), "byteCount": copyCount]
+                    )
                 }
             })
         }
@@ -294,7 +306,11 @@ public class LocalProcess {
         }
         if debugIO {
             totalRead += data.count
-            print ("[READ] count=\(data.count) received from host total=\(totalRead)")
+            SwiftTermDiagnostics.emit(
+                .debug,
+                .ptyReadCompleted,
+                facts: ["byteCount": data.count, "totalByteCount": totalRead]
+            )
         }
         
         if data.count == 0 {
@@ -311,8 +327,7 @@ public class LocalProcess {
                     try dataCopy.write(to: URL.init(fileURLWithPath: path))
                     logFileCounter += 1
                 } catch {
-                    // Ignore write error
-                    print ("Got error while logging data dump to \(path): \(error)")
+                    SwiftTermDiagnostics.emit(.warning, .ptyDataDumpFailed)
                 }
             }
         })

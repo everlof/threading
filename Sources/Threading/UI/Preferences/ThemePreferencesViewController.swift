@@ -901,7 +901,13 @@ final class ThemePreferencesViewController: NSViewController {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 try encoder.encode(theme).write(to: url)
+                ThreadingLogger.theme.info(
+                    "Terminal theme export completed theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) destination=\(url.path, privacy: .private(mask: .hash))"
+                )
             } catch {
+                ThreadingLogger.theme.error(
+                    "Terminal theme export failed theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) destination=\(url.path, privacy: .private(mask: .hash)) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
                 ThemedAlert(error: error).runModal()
             }
         }

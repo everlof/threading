@@ -42,7 +42,9 @@ struct RemoteRouter {
             withExtension: nil,
             subdirectory: Self.clientDirectory
         ), let data = try? Data(contentsOf: url) else {
-            ThreadingLogger.remote.error("Remote client asset missing from the bundle: \(asset.file, privacy: .public)")
+            ThreadingLogger.remote.fault(
+                "Remote client asset missing from the bundle: \(asset.file, privacy: .public)"
+            )
             return Self.harden(HTTPResponse.status(404, "Not Found"), isDocument: false)
         }
 
@@ -249,7 +251,7 @@ struct RemoteRouter {
             body = try JSONEncoder().encode(value)
         } catch {
             ThreadingLogger.remote.error(
-                "Remote JSON response encoding failed: \(error.localizedDescription, privacy: .public)"
+                "Remote JSON response encoding failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return harden(
                 HTTPResponse(

@@ -178,7 +178,7 @@ enum LoginShellProbe {
             )
         } catch {
             ThreadingLogger.github.error(
-                "Login-shell probe could not start: \(error.localizedDescription)"
+                "Login-shell probe could not start: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return nil
         }

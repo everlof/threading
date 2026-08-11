@@ -100,6 +100,7 @@ final class LaunchFlagsStore: @unchecked Sendable {
 
     private let fileManager: FileManager
     private let queue = DispatchQueue(label: LaunchFlagsDefaults.queueLabel)
+    private var reportedReadRefusal = false
 
     // MARK: - Initialization
 
@@ -135,9 +136,9 @@ final class LaunchFlagsStore: @unchecked Sendable {
             cleared.consumedByLaunch = launchID
 
             guard write(cleared) else {
-                ThreadingLogger.session.error(
+                ThreadingLogger.app.error(
                     """
-                    Could not clear the launch flags at \(self.url.path, privacy: .public). \
+                    Could not clear the launch flags at \(self.url.path, privacy: .private(mask: .hash)). \
                     They are ignored for this launch rather than becoming permanent.
                     """
                 )
@@ -153,8 +154,8 @@ final class LaunchFlagsStore: @unchecked Sendable {
         queue.sync {
             let read = readFlags()
             guard !read.isRefused else {
-                ThreadingLogger.session.error(
-                    "Refusing to replace unreadable launch flags at \(self.url.path, privacy: .public)"
+                ThreadingLogger.app.error(
+                    "Refusing to replace unreadable launch flags at \(self.url.path, privacy: .private(mask: .hash))"
                 )
                 return false
             }
@@ -182,20 +183,57 @@ final class LaunchFlagsStore: @unchecked Sendable {
     /// one-shot it could not understand.
     private func readFlags() -> LaunchFlagsRead {
         guard fileManager.fileExists(atPath: url.path) else { return .missing }
-        guard let data = try? BoundedFileReader.read(
-            url,
-            maximumBytes: LaunchFlagsDefaults.maximumFileBytes
-        ), let flags = try? JSONDecoder().decode(LaunchFlags.self, from: data) else {
+        let data: Data
+        do {
+            data = try BoundedFileReader.read(
+                url,
+                maximumBytes: LaunchFlagsDefaults.maximumFileBytes
+            )
+        } catch {
+            reportReadRefusal(
+                stage: "read",
+                detail: error.localizedDescription
+            )
             return .refused
         }
-        guard flags.version <= LaunchFlagsDefaults.formatVersion else { return .refused }
+        let flags: LaunchFlags
+        do {
+            flags = try JSONDecoder().decode(LaunchFlags.self, from: data)
+        } catch {
+            reportReadRefusal(
+                stage: "decode",
+                detail: error.localizedDescription
+            )
+            return .refused
+        }
+        guard flags.version <= LaunchFlagsDefaults.formatVersion else {
+            if !reportedReadRefusal {
+                reportedReadRefusal = true
+                ThreadingLogger.app.warning(
+                    "Launch flags use a newer format version=\(flags.version, privacy: .public); flags are ignored"
+                )
+            }
+            return .refused
+        }
+        if reportedReadRefusal {
+            reportedReadRefusal = false
+            ThreadingLogger.app.notice("Launch flags became readable again")
+        }
         return .loaded(flags)
     }
 
     private func write(_ flags: LaunchFlags) -> Bool {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(flags) else { return false }
+        let data: Data
+        do {
+            data = try encoder.encode(flags)
+        } catch {
+            ThreadingLogger.app.fault(
+                "Launch flags encoding failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return false
+        }
 
         do {
             try fileManager.createDirectory(
@@ -205,11 +243,19 @@ final class LaunchFlagsStore: @unchecked Sendable {
             try data.write(to: url, options: .atomic)
             return true
         } catch {
-            ThreadingLogger.session.error(
-                "Launch flags write failed: \(error.localizedDescription, privacy: .public)"
+            ThreadingLogger.app.error(
+                "Launch flags write failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return false
         }
+    }
+
+    private func reportReadRefusal(stage: String, detail: String) {
+        guard !reportedReadRefusal else { return }
+        reportedReadRefusal = true
+        ThreadingLogger.app.error(
+            "Launch flags are unreadable stage=\(stage, privacy: .public): \(detail, privacy: .private(mask: .hash))"
+        )
     }
 }
 

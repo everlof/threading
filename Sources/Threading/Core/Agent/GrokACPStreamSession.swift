@@ -97,7 +97,7 @@ final class GrokACPStreamSession:
             }
         } catch {
             ThreadingLogger.agent.error(
-                "Grok ACP failed to start: \(error.localizedDescription)"
+                "Grok ACP failed to start: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             // Match every other native transport: start never calls an external lifecycle
             // callback re-entrantly before its caller has finished installing the surface.
@@ -355,7 +355,7 @@ final class GrokACPStreamSession:
             return true
         } catch {
             ThreadingLogger.agent.error(
-                "Grok ACP write failed: \(error.localizedDescription)"
+                "Grok ACP write failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return false
         }

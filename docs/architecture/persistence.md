@@ -228,6 +228,47 @@ The two stay separate rather than becoming one wrapper. `Logger`'s privacy annot
 (`\(id, privacy: .public)`) live inside the `OSLogMessage` literal and cannot be rendered
 back out as a string, so a type feeding both would have to drop them at every call site.
 
+**Every unified-log interpolation states its privacy.** Relying on OSLog's implicit default is
+safe at runtime but ambiguous in review: nobody can tell whether the author classified the field
+or forgot. `scripts/check_logging_boundaries.py`, reached by the ordinary architecture/build gate,
+therefore refuses an unmarked interpolation and direct `Logger`/`os_log` use outside
+`ThreadingLogger`.
+
+- `.public` is for structural machine facts: enum tokens, booleans, counts, durations, status and
+  exit codes, ports, schema versions and opaque session/project/turn identifiers. These are the
+  fields a persisted error needs in order to remain actionable.
+- `.private(mask: .hash)` is for values useful only by correlation: paths and filenames, URLs,
+  account handles/ids, command arguments, extension-supplied diagnostics and arbitrary
+  `localizedDescription` text. Errors can embed a path, URL or response excerpt even when the
+  static error type looks harmless.
+- `.private` is for content that is useful only during an explicitly privacy-enabled live
+  reproduction, such as prompts and provider response bodies. Bearer tokens, credentials,
+  filled browser values and raw client log text are not logged at all; marking a secret private
+  is not permission to collect it.
+
+The lint also refuses known content/path/account expressions marked public. It is deliberately a
+floor rather than a data-flow engine: a locally named `reason` still has to be classified by the
+reviewer who knows whether it is an internal enum token or untrusted prose.
+
+**Levels describe impact, not how interesting a line is.** `debug` is repeatable detail and
+high-frequency observation; `info` is an expected successful boundary; `notice` is an uncommon
+but healthy transition worth retaining; `warning` is a recoverable refusal or degraded fallback;
+`error` means the requested operation failed or durable state needs recovery; `fault` is a broken
+invariant or data-safety failure. A retry that succeeds stays debug/info, while a swallowed error
+does not become harmless merely because the UI has no alert.
+
+**Categories name the owning subsystem, not the screen that happened to call it.** Process and
+conversation lifecycle use `agent`/`session`; repository probes and mutations use `git`; embedded
+browser state and automation use `browser`; app/terminal themes and reclaimable disk data use
+`theme`/`storage`; and remote access, extensions, MCP, updates, usage and the execution audit each
+have their own category. A low-level helper used by several screens logs under that owner once;
+the screens do not duplicate the same failure under a UI category.
+
+`EventLog` is explicitly different: it is the owner-local post-mortem journal and its schema can
+contain commands, paths and submitted prompts. It is never attached to the share-safe remote
+diagnostics route. That exception does not extend to unified logging, support reports or hosted
+telemetry.
+
 **The journal's descriptor is opened `O_APPEND`, not seeked to the end.** More than one
 process writes this file: a hosted XCTest bundle runs inside the real application, so a test
 run journals into the developer's own `Logs` directory while the app is running. Two

@@ -337,7 +337,11 @@ enum BrowserBaselineGit {
 
     static func commitSHA(forProjectAt root: URL?) -> String? {
         guard let root else { return nil }
-        guard let data = try? GitProcess.run(["rev-parse", "HEAD"], in: root) else { return nil }
+        guard let data = try? GitProcess.run(
+            ["rev-parse", "HEAD"],
+            in: root,
+            reportsRejectedExit: false
+        ) else { return nil }
         let sha = String(decoding: data, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return sha.count == 40 ? sha : nil

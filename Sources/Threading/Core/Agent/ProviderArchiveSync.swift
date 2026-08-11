@@ -210,6 +210,7 @@ private enum ProviderArchiveCommandRunner {
     private static func runSynchronously(
         _ command: ProviderArchiveCommand
     ) -> Result<Void, ProviderArchiveFailure> {
+        let started = DispatchTime.now().uptimeNanoseconds
         let result: BoundedChildResult
         do {
             result = try BoundedChildProcess.run(
@@ -220,6 +221,9 @@ private enum ProviderArchiveCommandRunner {
                 maximumOutputBytes: ProviderArchiveDefaults.maximumCommandOutputBytes
             )
         } catch {
+            ThreadingLogger.session.error(
+                "Provider archive command launch failed provider=\(command.providerName, privacy: .private(mask: .hash)) archives=\(command.archives, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             return .failure(.commandCouldNotLaunch(
                 provider: command.providerName,
                 archives: command.archives,
@@ -227,6 +231,22 @@ private enum ProviderArchiveCommandRunner {
             ))
         }
         guard result.termination == .exited(0) else {
+            let elapsedMilliseconds = (
+                DispatchTime.now().uptimeNanoseconds - started
+            ) / 1_000_000
+            let resultCode: String
+            let status: Int32
+            switch result.termination {
+            case .timedOut:
+                resultCode = "timed_out"
+                status = -1
+            case .exited(let exitStatus):
+                resultCode = "exited"
+                status = exitStatus
+            }
+            ThreadingLogger.session.warning(
+                "Provider archive command rejected provider=\(command.providerName, privacy: .private(mask: .hash)) archives=\(command.archives, privacy: .public) result=\(resultCode, privacy: .public) status=\(status, privacy: .public) output_bytes=\(result.output.count, privacy: .public) duration_ms=\(elapsedMilliseconds, privacy: .public)"
+            )
             let reported = String(decoding: result.output, as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let detail: String
@@ -246,6 +266,12 @@ private enum ProviderArchiveCommandRunner {
                 detail: detail
             ))
         }
+        let elapsedMilliseconds = (
+            DispatchTime.now().uptimeNanoseconds - started
+        ) / 1_000_000
+        ThreadingLogger.session.info(
+            "Provider archive command completed provider=\(command.providerName, privacy: .private(mask: .hash)) archives=\(command.archives, privacy: .public) duration_ms=\(elapsedMilliseconds, privacy: .public)"
+        )
         return .success(())
     }
 }
@@ -292,6 +318,7 @@ final class ProviderArchiveSync {
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
+        ThreadingLogger.session.info("Provider archive reconciliation started")
 
         let observations = AppEventObservations(center: center)
         observations.observe(NSApplication.didBecomeActiveNotification) { [weak self] in
@@ -308,6 +335,9 @@ final class ProviderArchiveSync {
         completion: @escaping Completion
     ) {
         reconciliationGeneration += 1
+        ThreadingLogger.session.info(
+            "Provider archive change requested session=\(sessionID.uuidString, privacy: .public) archived=\(archived, privacy: .public)"
+        )
         guard let session = store.session(withID: sessionID) else {
             completion(.failure(.sessionNotFound))
             return
@@ -430,6 +460,9 @@ final class ProviderArchiveSync {
 
         let work = Array(batches.values)
         guard !work.isEmpty else { return }
+        ThreadingLogger.session.info(
+            "Provider archive reconciliation pass started accounts=\(work.count, privacy: .public) sessions=\(work.reduce(0) { $0 + $1.candidates.count }, privacy: .public)"
+        )
         DispatchQueue.global(qos: .utility).async {
             let readings: [(Batch, ProviderArchiveSnapshot?)] = work.map { batch in
                 let ids = Set(batch.candidates.map(\.transcriptID))
@@ -476,6 +509,9 @@ final class ProviderArchiveSync {
         }
 
         applySynchronized(immediate)
+        ThreadingLogger.session.info(
+            "Provider archive reconciliation evaluated immediate=\(immediate.count, privacy: .public) commands=\(commands.count, privacy: .public)"
+        )
         for (candidate, archives) in commands {
             runAutomaticCommand(
                 archives: archives,
@@ -514,6 +550,9 @@ final class ProviderArchiveSync {
                 )
             case .failure(let failure):
                 pending.remove(sessionID)
+                ThreadingLogger.session.error(
+                    "Provider archive change failed session=\(sessionID.uuidString, privacy: .public) archives=\(archives, privacy: .public) provider=\(command.providerName, privacy: .private(mask: .hash)): \(failure.localizedDescription, privacy: .private(mask: .hash))"
+                )
                 EventLog.shared.record(.session, "Provider archive command failed", [
                     "session": sessionID.uuidString,
                     "provider": command.providerName,
@@ -566,6 +605,9 @@ final class ProviderArchiveSync {
             case .success:
                 reconcile()
             case .failure(let failure):
+                ThreadingLogger.session.warning(
+                    "Provider archive reconciliation failed session=\(candidate.sessionID.uuidString, privacy: .public) archives=\(archives, privacy: .public) provider=\(command.providerName, privacy: .private(mask: .hash)): \(failure.localizedDescription, privacy: .private(mask: .hash))"
+                )
                 EventLog.shared.record(.session, "Provider archive reconciliation failed", [
                     "session": candidate.sessionID.uuidString,
                     "provider": command.providerName,

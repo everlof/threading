@@ -61,6 +61,18 @@ of each journal. A partial first line and any record above 64 KiB are discarded.
 enforced on the opened file, so an externally enlarged or replaced journal cannot make a support
 report allocate the whole file merely to throw away its old prefix.
 
+The journal cannot write its own storage failures into itself. `ThreadingRemoteKit` therefore
+emits a separate, rate-bounded storage-health event to the embedding app's unified logger. That
+event carries only a fixed stage, `posix`/`cocoa`/`other` domain, numeric error code and affected
+count; it cannot represent a path or error description. macOS and iOS both log the first failure
+and its recovery, while a persistent failure is repeated at most once per minute per stage.
+
+iOS also has a local unified-log fallback at `codes.threading.mobile/diagnostics` for ordinary
+screen and persistence failures that may occur before a share-safe remote event exists. Those
+records contain only a fixed surface enum plus a fixed failure code or numeric error domain/code;
+localized descriptions, hosts, URLs, paths, titles, attachment names and credentials cannot be
+represented by the API.
+
 Client-to-Mac upload has a second trust boundary: only an interactive all-sessions owner bearer
 may call it; the declared source must match the shipping client header; batches are capped at 250
 records and 256 KiB; timestamps, client-appropriate events and fields are revalidated; and values

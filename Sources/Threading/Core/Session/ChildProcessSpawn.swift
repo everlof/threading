@@ -565,7 +565,7 @@ enum BoundedChildProcess {
             // Closing the reader makes a still-writing child receive SIGPIPE. The exit status
             // remains the caller's diagnostic; partial bytes remain more useful than none.
             ThreadingLogger.agent.error(
-                "Could not drain helper child output: \(error.localizedDescription, privacy: .public)"
+                "Could not drain helper child output: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
         }
         return (kept, wasTruncated)

@@ -88,26 +88,67 @@ final class ThemeManager {
 
     /// Delete a custom theme (cannot delete built-in themes)
     func deleteTheme(_ theme: TerminalTheme) -> Bool {
-        guard !isBuiltIn(theme) else { return false }
+        guard !isBuiltIn(theme) else {
+            ThreadingLogger.theme.notice(
+                "Terminal theme deletion refused theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) reason=built_in"
+            )
+            return false
+        }
         var themes = customThemes
         let oldCount = themes.count
         themes.removeAll { $0.id == theme.id }
-        guard themes.count != oldCount else { return false }
-        return commit(themes)
+        guard themes.count != oldCount else {
+            ThreadingLogger.theme.notice(
+                "Terminal theme deletion refused theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) reason=missing"
+            )
+            return false
+        }
+        guard commit(themes) else {
+            ThreadingLogger.theme.error(
+                "Terminal theme deletion persistence failed theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"
+            )
+            return false
+        }
+        ThreadingLogger.theme.info(
+            "Terminal theme deleted theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"
+        )
+        return true
     }
 
     /// Rename a custom theme
     func renameTheme(_ theme: TerminalTheme, to newName: String) -> Bool {
-        guard !isBuiltIn(theme), !isReserved(newName) else { return false }
+        guard !isBuiltIn(theme), !isReserved(newName) else {
+            ThreadingLogger.theme.notice(
+                "Terminal theme rename refused theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) reason=reserved"
+            )
+            return false
+        }
         guard !allThemes.contains(where: {
             $0.id != theme.id && namesEqual($0.name, newName)
-        }) else { return false }
+        }) else {
+            ThreadingLogger.theme.notice(
+                "Terminal theme rename refused theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) reason=name_collision"
+            )
+            return false
+        }
 
         var themes = customThemes
         if let index = themes.firstIndex(where: { $0.id == theme.id }) {
             themes[index].name = newName
-            return commit(themes)
+            guard commit(themes) else {
+                ThreadingLogger.theme.error(
+                    "Terminal theme rename persistence failed theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"
+                )
+                return false
+            }
+            ThreadingLogger.theme.info(
+                "Terminal theme renamed theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) name=\(newName, privacy: .private(mask: .hash))"
+            )
+            return true
         }
+        ThreadingLogger.theme.notice(
+            "Terminal theme rename refused theme=\(theme.id.rawValue, privacy: .private(mask: .hash)) reason=missing"
+        )
         return false
     }
 
@@ -144,13 +185,40 @@ final class ThemeManager {
         }
 
         newTheme = theme.duplicated(named: newName)
-        return addTheme(newTheme) ? newTheme : nil
+        guard addTheme(newTheme) else {
+            ThreadingLogger.theme.error(
+                "Terminal theme duplication failed source=\(theme.id.rawValue, privacy: .private(mask: .hash)) target=\(newTheme.id.rawValue, privacy: .private(mask: .hash))"
+            )
+            return nil
+        }
+        ThreadingLogger.theme.info(
+            "Terminal theme duplicated source=\(theme.id.rawValue, privacy: .private(mask: .hash)) target=\(newTheme.id.rawValue, privacy: .private(mask: .hash))"
+        )
+        return newTheme
     }
 
     // MARK: - Apple Terminal Import
 
     /// Import a theme from Apple Terminal's .terminal file
     func importAppleTerminalTheme(from url: URL) throws -> TerminalTheme {
+        ThreadingLogger.theme.info(
+            "Terminal theme import started source=\(url.path, privacy: .private(mask: .hash))"
+        )
+        do {
+            let theme = try importAppleTerminalThemeContents(from: url)
+            ThreadingLogger.theme.info(
+                "Terminal theme import completed source=\(url.path, privacy: .private(mask: .hash)) theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"
+            )
+            return theme
+        } catch {
+            ThreadingLogger.theme.error(
+                "Terminal theme import failed source=\(url.path, privacy: .private(mask: .hash)) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            throw error
+        }
+    }
+
+    private func importAppleTerminalThemeContents(from url: URL) throws -> TerminalTheme {
         let data = try Self.boundedImportData(from: url)
 
         guard let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {

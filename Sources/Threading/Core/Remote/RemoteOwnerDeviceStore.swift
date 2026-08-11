@@ -156,8 +156,14 @@ final class RemoteOwnerDeviceRegistry {
         self.store = store
         do {
             devices = try store.load()
+            ThreadingLogger.remote.info(
+                "Remote owner devices restored count=\(self.devices.count, privacy: .public)"
+            )
         } catch {
             persistenceError = error.localizedDescription
+            ThreadingLogger.remote.error(
+                "Remote owner-device persistence failed stage=load error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
         }
     }
 
@@ -214,9 +220,20 @@ final class RemoteOwnerDeviceRegistry {
     /// `Reset Everything` is explicit authority to remove even an item that could not be
     /// decoded. Ordinary pairing and revocation stay fail-closed and never take this path.
     func deleteAllForAppReset() throws {
-        try store.deleteAll()
+        let removedCount = devices.count
+        do {
+            try store.deleteAll()
+        } catch {
+            ThreadingLogger.remote.error(
+                "Remote owner-device persistence failed stage=delete error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            throw error
+        }
         devices = []
         persistenceError = nil
+        ThreadingLogger.remote.notice(
+            "Remote owner devices deleted for app reset count=\(removedCount, privacy: .public)"
+        )
     }
 
     private func persist(_ candidate: [RemoteOwnerDeviceRecord]) -> Bool {
@@ -225,6 +242,9 @@ final class RemoteOwnerDeviceRegistry {
             return true
         } catch {
             persistenceError = error.localizedDescription
+            ThreadingLogger.remote.error(
+                "Remote owner-device persistence failed stage=save count=\(candidate.count, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
             return false
         }
     }

@@ -205,6 +205,18 @@ final class LaunchLedgerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: ledgerURL.path))
     }
 
+    func testOpeningANewerFormatBlocksOlderRecordsFromBeingAppended() throws {
+        try write([try line(version: 2, kind: "begin", launch: "future")])
+        let before = try Data(contentsOf: ledgerURL)
+        let subject = ledger()
+
+        let opening = subject.openLaunch(previousOutcome: .unknown)
+        subject.beginLaunch(opening, id: "older-build")
+
+        XCTAssertTrue(subject.isWriteBlocked)
+        XCTAssertEqual(try Data(contentsOf: ledgerURL), before)
+    }
+
     /// What Reset Everything leaves when the directory is moved aside under a running app: the
     /// next write recreates the file holding nothing but an ending.
     func testARecordNamingNoBeginIsCountedRatherThanFatal() throws {

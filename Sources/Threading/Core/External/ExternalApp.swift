@@ -416,7 +416,9 @@ final class ExternalAppLauncher {
         guard let applicationURL = applicationURL(for: app) else {
             refresh()
             NSSound.beep()
-            ThreadingLogger.agent.error("Cannot open in \(app.name, privacy: .public): not installed")
+            ThreadingLogger.agent.warning(
+                "Cannot open in \(app.name, privacy: .public): not installed"
+            )
             return
         }
 
@@ -464,7 +466,7 @@ final class ExternalAppLauncher {
             Task { @MainActor in
                 NSSound.beep()
                 ThreadingLogger.agent.error(
-                    "Could not open in \(name, privacy: .public): \(error.localizedDescription)"
+                    "Could not open in \(name, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
                 )
             }
         }
@@ -505,7 +507,7 @@ final class ExternalAppLauncher {
         } catch {
             NSSound.beep()
             ThreadingLogger.agent.error(
-                "Could not run \(name, privacy: .public)'s command: \(error.localizedDescription)"
+                "Could not run \(name, privacy: .public)'s command: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
         }
     }

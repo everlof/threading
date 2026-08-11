@@ -76,7 +76,7 @@ enum CodeStatsRunner {
             )
         } catch {
             ThreadingLogger.agent.error(
-                "Could not run scc: \(error.localizedDescription, privacy: .public)"
+                "Could not run scc: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return nil
         }
@@ -85,7 +85,7 @@ enum CodeStatsRunner {
 
         let elapsed = Int(-started.timeIntervalSinceNow * 1000)
         ThreadingLogger.agent.debug(
-            "scc measured \(folder, privacy: .public) in \(elapsed)ms, \(result.output.count) bytes"
+            "scc measured \(folder, privacy: .private(mask: .hash)) in \(elapsed, privacy: .public)ms, \(result.output.count, privacy: .public) bytes"
         )
 
         return try? CodeStats.parse(sccJSON: result.output)

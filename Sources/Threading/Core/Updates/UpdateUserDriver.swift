@@ -125,13 +125,18 @@ extension UpdateUserDriver: SPUUserDriver {
         _ request: SPUUpdatePermissionRequest,
         reply: @escaping (SUUpdatePermissionResponse) -> Void
     ) {
+        let approved = automaticChecksApproved()
+        ThreadingLogger.updates.debug(
+            "Update permission answered automatic=\(approved, privacy: .public) system_profile=false"
+        )
         reply(SUUpdatePermissionResponse(
-            automaticUpdateChecks: automaticChecksApproved(),
+            automaticUpdateChecks: approved,
             sendSystemProfile: false
         ))
     }
 
     func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
+        ThreadingLogger.updates.info("User-initiated update check started")
         presenter.showCheckingForUpdates(cancel: cancellation)
     }
 
@@ -140,6 +145,9 @@ extension UpdateUserDriver: SPUUserDriver {
         state: SPUUserUpdateState,
         reply: @escaping (SPUUserUpdateChoice) -> Void
     ) {
+        ThreadingLogger.updates.info(
+            "Update found version=\(appcastItem.displayVersionString, privacy: .private(mask: .hash)) user_initiated=\(state.userInitiated, privacy: .public) informational=\(appcastItem.isInformationOnlyUpdate, privacy: .public) critical=\(appcastItem.isCriticalUpdate, privacy: .public)"
+        )
         presenter.showUpdateFound(
             versionInfo(for: appcastItem),
             origin: state.userInitiated ? .user : .scheduled
@@ -153,12 +161,15 @@ extension UpdateUserDriver: SPUUserDriver {
             from: downloadData.data,
             encodingName: downloadData.textEncodingName
         )
+        ThreadingLogger.updates.info(
+            "Update release notes received bytes=\(downloadData.data.count, privacy: .public) decoded=\(text != nil, privacy: .public)"
+        )
         presenter.showReleaseNotes(text.map { .downloaded($0) } ?? .unavailable)
     }
 
     func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {
         ThreadingLogger.updates.error(
-            "Release notes failed to download: \(error.localizedDescription, privacy: .public)"
+            "Release notes failed to download: \(error.localizedDescription, privacy: .private(mask: .hash))"
         )
         presenter.showReleaseNotes(.unavailable)
     }
@@ -168,6 +179,9 @@ extension UpdateUserDriver: SPUUserDriver {
         // you" reason — already newest, OS too old, channel gated — so the honest sheet is its
         // words, not a hardcoded "up to date" that would misreport the gated cases.
         let nsError = error as NSError
+        ThreadingLogger.updates.info(
+            "Update check completed without an offer domain=\(nsError.domain, privacy: .private(mask: .hash)) code=\(nsError.code, privacy: .public)"
+        )
         presenter.showNoUpdateFound(
             message: nsError.localizedDescription,
             detail: nsError.localizedRecoverySuggestion ?? "",
@@ -178,7 +192,7 @@ extension UpdateUserDriver: SPUUserDriver {
     func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
         let nsError = error as NSError
         ThreadingLogger.updates.error(
-            "Updater error: \(nsError.localizedDescription, privacy: .public)"
+            "Updater error: \(nsError.localizedDescription, privacy: .private(mask: .hash))"
         )
         presenter.showUpdateError(
             message: nsError.localizedDescription,
@@ -191,6 +205,7 @@ extension UpdateUserDriver: SPUUserDriver {
 
     func showDownloadInitiated(cancellation: @escaping () -> Void) {
         downloadProgress = UpdateDownloadProgress()
+        ThreadingLogger.updates.info("Update download started")
         presenter.showDownloadStarted(cancel: cancellation)
     }
 
@@ -205,6 +220,7 @@ extension UpdateUserDriver: SPUUserDriver {
     }
 
     func showDownloadDidStartExtractingUpdate() {
+        ThreadingLogger.updates.info("Update extraction started")
         presenter.showExtractionStarted()
     }
 
@@ -213,6 +229,7 @@ extension UpdateUserDriver: SPUUserDriver {
     }
 
     func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        ThreadingLogger.updates.notice("Update ready to install and relaunch")
         presenter.showReadyToInstall { choice in
             reply(Self.sparkleChoice(choice))
         }
@@ -224,6 +241,9 @@ extension UpdateUserDriver: SPUUserDriver {
     ) {
         // Threading terminates cleanly on the quit event Sparkle sends, so the retry handler
         // goes unused; the sheet's only job is to say why the app is about to disappear.
+        ThreadingLogger.updates.notice(
+            "Update installation started application_terminated=\(applicationTerminated, privacy: .public)"
+        )
         presenter.showInstalling()
     }
 
@@ -231,14 +251,19 @@ extension UpdateUserDriver: SPUUserDriver {
         _ relaunched: Bool,
         acknowledgement: @escaping () -> Void
     ) {
+        ThreadingLogger.updates.info(
+            "Update installation completed relaunched=\(relaunched, privacy: .public)"
+        )
         presenter.showUpdateInstalled(acknowledge: acknowledgement)
     }
 
     func showUpdateInFocus() {
+        ThreadingLogger.updates.debug("Update UI focused")
         presenter.focusUpdateUI()
     }
 
     func dismissUpdateInstallation() {
+        ThreadingLogger.updates.debug("Update UI dismissed")
         presenter.dismissUpdateUI()
     }
 }

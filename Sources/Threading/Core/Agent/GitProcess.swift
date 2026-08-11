@@ -56,13 +56,16 @@ enum GitProcess {
     ///
     /// `acceptedExitCodes` exists for the commands whose non-zero exit is an answer rather
     /// than a failure: `diff --no-index` exits 1 to say "the files differ".
+    /// `reportsRejectedExit` is false only for probes whose rejected status is an ordinary
+    /// negative answer that the caller deliberately converts to nil/false.
     static func run(
         _ arguments: [String],
         in root: URL,
         input: Data? = nil,
         environmentOverrides: [String: String] = [:],
         maximumOutput: Int = GitReviewDefaults.maximumDiffBytes,
-        acceptedExitCodes: Set<Int32> = [0]
+        acceptedExitCodes: Set<Int32> = [0],
+        reportsRejectedExit: Bool = true
     ) throws -> Data {
         let command = arguments.first(where: { !$0.hasPrefix("-") }) ?? "unknown"
         let performanceSpan = PerformanceRecorder.shared.begin(
@@ -183,8 +186,8 @@ enum GitProcess {
 
         let elapsed = Int(-started.timeIntervalSinceNow * 1000)
         performanceOutputBytes = outputData.count
-        ThreadingLogger.git.info(
-            "git \(arguments.first ?? "", privacy: .public) finished in \(elapsed)ms, \(outputData.count) bytes"
+        ThreadingLogger.git.debug(
+            "git \(arguments.first ?? "", privacy: .private(mask: .hash)) finished in \(elapsed, privacy: .public)ms, \(outputData.count, privacy: .public) bytes"
         )
 
         if timedOut { throw GitFailure.timedOut }
@@ -194,9 +197,11 @@ enum GitProcess {
         guard acceptedExitCodes.contains(child.terminationStatus) else {
             let message = String(data: errorCapture.value, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            ThreadingLogger.git.error(
-                "git \(arguments.joined(separator: " "), privacy: .public) failed: \(message ?? "", privacy: .public)"
-            )
+            if reportsRejectedExit {
+                ThreadingLogger.git.error(
+                    "git \(arguments.joined(separator: " "), privacy: .private(mask: .hash)) failed: \(message ?? "", privacy: .private(mask: .hash))"
+                )
+            }
             throw failure(fromStandardError: message)
         }
 
@@ -315,7 +320,7 @@ enum GitChildEnvironment {
             )
         } catch {
             ThreadingLogger.git.error(
-                "Could not resolve login-shell PATH: \(error.localizedDescription, privacy: .public)"
+                "Could not resolve login-shell PATH: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return nil
         }

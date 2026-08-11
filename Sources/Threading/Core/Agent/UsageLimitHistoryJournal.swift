@@ -19,7 +19,14 @@ actor UsageLimitHistoryJournal {
 
     func load(now: Date) -> UsageLimitHistorySnapshot {
         if let loadedSnapshot { return loadedSnapshot }
-        prepareDirectory()
+        do {
+            try prepareDirectory()
+        } catch {
+            ThreadingLogger.usage.error(
+                "Usage history directory is unavailable: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return UsageLimitHistorySnapshot(samples: [], resets: [], loadedAt: now)
+        }
         pruneFiles(now: now)
 
         let decoder = JSONDecoder()
@@ -27,15 +34,27 @@ actor UsageLimitHistoryJournal {
         let cutoff = now.addingTimeInterval(
             -TimeInterval(UsageLimitHistoryDefaults.retentionDays) * 86_400
         )
-        let urls = ((try? fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
-        )) ?? []).filter(Self.isJournalFile).sorted { $0.lastPathComponent < $1.lastPathComponent }
+        let contents: [URL]
+        do {
+            contents = try fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
+            )
+        } catch {
+            ThreadingLogger.usage.error(
+                "Usage history enumeration failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return UsageLimitHistorySnapshot(samples: [], resets: [], loadedAt: now)
+        }
+        let urls = contents.filter(Self.isJournalFile)
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
         var samples: [UsageSample] = []
         var resets: [UsageLimitResetEvent] = []
         var resetIDs = Set<String>()
         var count = 0
+        var rejectedFiles = 0
+        var rejectedRecords = 0
 
         for url in urls where count < UsageLimitHistoryDefaults.maximumLoadedRecords {
             guard let values = try? url.resourceValues(forKeys: [
@@ -45,12 +64,18 @@ actor UsageLimitHistoryJournal {
                   let data = try? BoundedFileReader.read(
                     url,
                     maximumBytes: UsageLimitHistoryDefaults.maximumDailyFileBytes
-                  ) else { continue }
+                  ) else {
+                rejectedFiles += 1
+                continue
+            }
 
             for line in data.split(separator: 0x0A)
                 where count < UsageLimitHistoryDefaults.maximumLoadedRecords {
                 guard let record = try? decoder.decode(Record.self, from: Data(line)),
-                      record.schemaVersion == 1 else { continue }
+                      record.schemaVersion == 1 else {
+                    rejectedRecords += 1
+                    continue
+                }
                 count += 1
                 if let sample = record.sample,
                    sample.at >= cutoff, sample.at <= now.addingTimeInterval(5 * 60),
@@ -71,6 +96,14 @@ actor UsageLimitHistoryJournal {
             loadedAt: now
         )
         loadedSnapshot = snapshot
+        if rejectedFiles > 0 || rejectedRecords > 0 {
+            ThreadingLogger.usage.warning(
+                "Usage history load skipped files=\(rejectedFiles, privacy: .public) records=\(rejectedRecords, privacy: .public)"
+            )
+        }
+        ThreadingLogger.usage.info(
+            "Usage history loaded records=\(count, privacy: .public) samples=\(samples.count, privacy: .public) resets=\(resets.count, privacy: .public)"
+        )
         return snapshot
     }
 
@@ -108,24 +141,49 @@ actor UsageLimitHistoryJournal {
         pruneFiles(now: now)
     }
 
-    func deleteHistory() {
-        guard let urls = try? fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey]
-        ) else {
+    @discardableResult
+    func deleteHistory() -> Bool {
+        let urls: [URL]
+        do {
+            urls = try fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey]
+            )
+        } catch where !fileManager.fileExists(atPath: directory.path) {
             loadedSnapshot = .empty
-            return
+            return true
+        } catch {
+            ThreadingLogger.usage.error(
+                "Usage history deletion could not enumerate storage: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return false
         }
+        var deletionFailures = 0
         for url in urls where Self.isJournalFile(url) {
             guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
                   values.isRegularFile == true, values.isSymbolicLink != true else { continue }
-            try? fileManager.removeItem(at: url)
+            do {
+                try fileManager.removeItem(at: url)
+            } catch {
+                deletionFailures += 1
+                ThreadingLogger.usage.error(
+                    "Usage history file deletion failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
+        }
+        guard deletionFailures == 0 else {
+            // A later load must reflect the surviving records; caching an empty snapshot would
+            // make a failed privacy reset appear successful for the rest of the process.
+            loadedSnapshot = nil
+            return false
         }
         loadedSnapshot = .empty
+        ThreadingLogger.usage.info("Usage history deleted")
+        return true
     }
 
     private func append(_ data: Data, to url: URL) throws {
-        prepareDirectory()
+        try prepareDirectory()
         if !fileManager.fileExists(atPath: url.path) {
             guard fileManager.createFile(
                 atPath: url.path,
@@ -153,13 +211,16 @@ actor UsageLimitHistoryJournal {
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
-    private func prepareDirectory() {
-        try? fileManager.createDirectory(
+    private func prepareDirectory() throws {
+        try fileManager.createDirectory(
             at: directory,
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
-        try? fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: directory.path
+        )
     }
 
     private func pruneFiles(now: Date) {
@@ -167,17 +228,31 @@ actor UsageLimitHistoryJournal {
             -TimeInterval(UsageLimitHistoryDefaults.retentionDays) * 86_400
         )
         let cutoffDay = Self.dayKey(cutoff)
-        guard let urls = try? fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.isSymbolicLinkKey]
-        ) else { return }
+        let urls: [URL]
+        do {
+            urls = try fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isSymbolicLinkKey]
+            )
+        } catch {
+            ThreadingLogger.usage.warning(
+                "Usage history retention scan failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return
+        }
         for url in urls where Self.isJournalFile(url) {
             let name = url.deletingPathExtension().lastPathComponent
             guard let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey]),
                   values.isSymbolicLink != true,
                   name.hasPrefix("limits-"),
                   String(name.dropFirst("limits-".count)) < cutoffDay else { continue }
-            try? fileManager.removeItem(at: url)
+            do {
+                try fileManager.removeItem(at: url)
+            } catch {
+                ThreadingLogger.usage.warning(
+                    "Usage history retention deletion failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
         }
     }
 

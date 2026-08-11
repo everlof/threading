@@ -183,7 +183,7 @@ final class CodexStreamSession:
             }
         } catch {
             ThreadingLogger.agent.error(
-                "Codex app-server failed to start: \(error.localizedDescription)"
+                "Codex app-server failed to start: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             Task { @MainActor [weak self] in
                 self?.onExit?(AgentChildProcessDefaults.spawnFailureStatus)
@@ -714,7 +714,7 @@ final class CodexStreamSession:
 
     private func rejectSkillsResponse(_ reason: String) {
         ThreadingLogger.agent.warning(
-            "Ignored incomplete Codex skills snapshot: \(reason, privacy: .public)"
+            "Ignored incomplete Codex skills snapshot: \(reason, privacy: .private(mask: .hash))"
         )
     }
 
@@ -772,7 +772,7 @@ final class CodexStreamSession:
             return true
         } catch {
             ThreadingLogger.agent.error(
-                "Codex app-server write failed: \(error.localizedDescription)"
+                "Codex app-server write failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return false
         }
@@ -835,13 +835,13 @@ final class CodexStreamSession:
                 messageIDsInFlight.remove(messageID)
                 onMessageLifecycle?(messageID, .cancelled)
                 ThreadingLogger.agent.info(
-                    "Codex refused a steer; the message returns to the queue: \(error, privacy: .public)"
+                    "Codex refused a steer; the message returns to the queue: \(error, privacy: .private(mask: .hash))"
                 )
             case .interruptTurn:
                 // Nothing to settle: the turn's own terminal event still decides how it ended,
                 // and a refused interrupt most often means it had already finished.
                 ThreadingLogger.agent.info(
-                    "Codex refused an interrupt: \(error, privacy: .public)"
+                    "Codex refused an interrupt: \(error, privacy: .private(mask: .hash))"
                 )
             }
             return

@@ -46,6 +46,9 @@ enum ProjectFolderPrompt {
                 )
                 completion(url)
             } catch {
+                ThreadingLogger.session.error(
+                    "Project folder creation failed destination=\(url.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
                 presentCreationFailure(for: url, error: error)
             }
         }

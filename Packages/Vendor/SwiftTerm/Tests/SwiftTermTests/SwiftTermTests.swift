@@ -4,6 +4,23 @@ import XCTest
 
 final class SwiftTermTests: XCTestCase {
     static var queue: DispatchQueue!
+
+    private final class DiagnosticEvents: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: [SwiftTermDiagnosticEvent] = []
+
+        func append(_ event: SwiftTermDiagnosticEvent) {
+            lock.lock()
+            storage.append(event)
+            lock.unlock()
+        }
+
+        var snapshot: [SwiftTermDiagnosticEvent] {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage
+        }
+    }
     
     class override func setUp() {
         queue = DispatchQueue(label: "Runner", qos: .userInteractive, attributes: .concurrent, autoreleaseFrequency: .inherit, target: nil)
@@ -323,6 +340,26 @@ final class SwiftTermTests: XCTestCase {
         XCTAssertEqual(t.getCharacter (col:0, row: 0), "A")
         XCTAssertEqual(t.getCharacter (col:1, row: 0), "a")
         XCTAssertEqual(t.getCharacter (col:0, row: 1), "B")
+    }
+
+    func testDiagnosticsAreStructuredAndRateLimited() {
+        let events = DiagnosticEvents()
+        SwiftTermDiagnostics.installHandler { event in
+            events.append(event)
+        }
+        addTeardownBlock {
+            SwiftTermDiagnostics.removeHandler()
+        }
+
+        SwiftTermDiagnostics.emit(.error, .ptyWriteFailed, facts: ["errno": 5])
+        SwiftTermDiagnostics.emit(.error, .ptyWriteFailed, facts: ["errno": 6])
+        SwiftTermDiagnostics.emit(.fault, .bufferWidthInvariant, facts: ["expectedColumns": 80])
+
+        let captured = events.snapshot
+        XCTAssertEqual(captured.count, 2)
+        XCTAssertEqual(captured[0].code, .ptyWriteFailed)
+        XCTAssertEqual(captured[0].facts, ["errno": 5])
+        XCTAssertEqual(captured[1].code, .bufferWidthInvariant)
     }
     
     func xtestFailuresOnHeadless ()

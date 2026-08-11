@@ -339,6 +339,7 @@ final class LaunchLedger: @unchecked Sendable {
 
     private var handle: FileHandle?
     private var stabilityTimer: DispatchSourceTimer?
+    private var reportedWriteFailureStage: String?
 
     private struct OpenLaunch {
         let id: String
@@ -377,7 +378,7 @@ final class LaunchLedger: @unchecked Sendable {
                 // Refused, and said out loud. A second open writes nothing either way, so the
                 // only trace a sequencing regression would otherwise leave is the *absence* of a
                 // record — which is exactly what nobody notices during a live diagnosis.
-                ThreadingLogger.session.error(
+                ThreadingLogger.app.error(
                     """
                     Refusing a second launch-ledger open: this process has already read, \
                     tombstoned and compacted, and opening again would tombstone its own launch.
@@ -421,7 +422,7 @@ final class LaunchLedger: @unchecked Sendable {
             // says it happened here. One shared ledger makes the difference academic today and
             // exact tomorrow, when a supervisor holds a second one over the same file.
             guard opening.isValid, hasOpened, openLaunch == nil else {
-                ThreadingLogger.session.error(
+                ThreadingLogger.app.error(
                     """
                     Refusing a launch-ledger begin: opening valid=\
                     \(opening.isValid, privacy: .public), opened here=\
@@ -592,16 +593,30 @@ final class LaunchLedger: @unchecked Sendable {
                 maximumBytes: LaunchLedgerDefaults.maximumFileBytes
             )
         } catch {
-            return .corrupt(quarantinedAt: quarantine())
+            let quarantined = quarantine()
+            ThreadingLogger.app.fault(
+                "Launch ledger read failed quarantined=\(quarantined != nil, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return .corrupt(quarantinedAt: quarantined)
         }
 
         switch LaunchLedgerParser.parse(data) {
         case .valid(let history):
             return .valid(history)
         case .unsupportedVersion(let newest):
+            // A downgrade may inspect future history but must never append an older record to
+            // it. That would leave the newer build a mixed-format ledger it cannot trust.
+            writesAllowed = false
+            ThreadingLogger.app.warning(
+                "Launch ledger uses a newer format version=\(newest, privacy: .public); writes are disabled"
+            )
             return .unsupportedVersion(newestFormatSeen: newest)
         case .corrupt:
-            return .corrupt(quarantinedAt: quarantine())
+            let quarantined = quarantine()
+            ThreadingLogger.app.fault(
+                "Launch ledger is corrupt quarantined=\(quarantined != nil, privacy: .public)"
+            )
+            return .corrupt(quarantinedAt: quarantined)
         }
     }
 
@@ -622,10 +637,10 @@ final class LaunchLedger: @unchecked Sendable {
             return destination
         } catch {
             writesAllowed = false
-            ThreadingLogger.session.error(
+            ThreadingLogger.app.error(
                 """
                 Could not move the damaged launch ledger aside: \
-                \(error.localizedDescription, privacy: .public). Later records are refused.
+                \(error.localizedDescription, privacy: .private(mask: .hash)). Later records are refused.
                 """
             )
             return nil
@@ -647,11 +662,15 @@ final class LaunchLedger: @unchecked Sendable {
         let keep = Self.recordsToKeep(from: history)
         guard keep.count != history.records.count else { return }
 
-        var text = ""
+        var lines: [String] = []
+        lines.reserveCapacity(keep.count)
         for record in keep {
-            guard let line = encode(record) else { continue }
-            text += line + "\n"
+            // Compaction is all-or-nothing. Skipping one unencodable record would manufacture a
+            // different launch history while claiming the rewrite succeeded.
+            guard let line = encode(record) else { return }
+            lines.append(line)
         }
+        let text = lines.isEmpty ? "" : lines.joined(separator: "\n") + "\n"
 
         closeHandle()
         let staging = url.deletingLastPathComponent()
@@ -662,8 +681,8 @@ final class LaunchLedger: @unchecked Sendable {
             _ = try fileManager.replaceItemAt(url, withItemAt: staging)
         } catch {
             try? fileManager.removeItem(at: staging)
-            ThreadingLogger.session.error(
-                "Could not compact the launch ledger: \(error.localizedDescription, privacy: .public)"
+            ThreadingLogger.app.error(
+                "Could not compact the launch ledger: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
         }
     }
@@ -720,21 +739,31 @@ final class LaunchLedger: @unchecked Sendable {
 
     private func append(_ record: LaunchLedgerRecord) {
         guard writesAllowed, let line = encode(record) else { return }
-        guard let data = (line + "\n").data(using: .utf8), let handle = openHandle() else { return }
+        guard let data = (line + "\n").data(using: .utf8) else {
+            reportWriteFault(stage: "utf8")
+            return
+        }
+        guard let handle = openHandle() else { return }
 
         do {
             try handle.write(contentsOf: data)
+            reportWriteRecovery()
         } catch {
-            ThreadingLogger.session.error(
-                "Launch ledger write failed: \(error.localizedDescription, privacy: .public)"
-            )
+            closeHandle()
+            reportWriteFailure(stage: "write", error: error)
         }
     }
 
     private func encode(_ record: LaunchLedgerRecord) -> String? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(record) else { return nil }
+        let data: Data
+        do {
+            data = try encoder.encode(record)
+        } catch {
+            reportWriteFault(stage: "encoding", error: error)
+            return nil
+        }
         return String(data: data, encoding: .utf8)
     }
 
@@ -743,14 +772,22 @@ final class LaunchLedger: @unchecked Sendable {
     /// two handles holding two offsets over one file write straight through each other.
     private func openHandle() -> FileHandle? {
         if let handle { return handle }
-        try? ensureDirectoryExists()
+        do {
+            try ensureDirectoryExists()
+        } catch {
+            reportWriteFailure(stage: "directory", error: error)
+            return nil
+        }
 
         let descriptor = open(
             url.path,
             O_WRONLY | O_APPEND | O_CREAT,
             LaunchLedgerDefaults.fileMode
         )
-        guard descriptor >= 0 else { return nil }
+        guard descriptor >= 0 else {
+            reportWriteFailure(stage: "open", errnoCode: errno)
+            return nil
+        }
 
         let opened = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         handle = opened
@@ -758,8 +795,52 @@ final class LaunchLedger: @unchecked Sendable {
     }
 
     private func closeHandle() {
-        try? handle?.close()
+        do {
+            try handle?.close()
+        } catch {
+            ThreadingLogger.app.warning(
+                "Launch ledger descriptor close failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+        }
         handle = nil
+    }
+
+    private func reportWriteFailure(stage: String, error: Error) {
+        guard reportedWriteFailureStage != stage else { return }
+        reportedWriteFailureStage = stage
+        ThreadingLogger.app.error(
+            "Launch ledger persistence failed stage=\(stage, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+        )
+    }
+
+    private func reportWriteFailure(stage: String, errnoCode: Int32) {
+        guard reportedWriteFailureStage != stage else { return }
+        reportedWriteFailureStage = stage
+        ThreadingLogger.app.error(
+            "Launch ledger persistence failed stage=\(stage, privacy: .public) errno=\(errnoCode, privacy: .public)"
+        )
+    }
+
+    private func reportWriteFault(stage: String, error: Error? = nil) {
+        guard reportedWriteFailureStage != stage else { return }
+        reportedWriteFailureStage = stage
+        if let error {
+            ThreadingLogger.app.fault(
+                "Launch ledger invariant failed stage=\(stage, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+        } else {
+            ThreadingLogger.app.fault(
+                "Launch ledger invariant failed stage=\(stage, privacy: .public)"
+            )
+        }
+    }
+
+    private func reportWriteRecovery() {
+        guard let stage = reportedWriteFailureStage else { return }
+        reportedWriteFailureStage = nil
+        ThreadingLogger.app.notice(
+            "Launch ledger persistence recovered after=\(stage, privacy: .public)"
+        )
     }
 
     private func cancelStabilityTimerLocked() {

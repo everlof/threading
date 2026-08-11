@@ -465,7 +465,11 @@ public final class Buffer {
             for i in 0..<lines.count {
                 let line = lines [i]
                 if line.count < newCols {
-                    print ("stop here newCols=\(newCols) but the element has: \(line.count)")
+                    SwiftTermDiagnostics.emit(
+                        .fault,
+                        .bufferWidthInvariant,
+                        facts: ["expectedColumns": newCols, "actualColumns": line.count]
+                    )
                     abort ()
                 }
             }
@@ -1045,29 +1049,7 @@ public final class Buffer {
     
     func dump ()
     {
-        var str = ""
-        str += "xDisp=\(xDisp), yDisp=\(yDisp), xBase=\(xBase), yBase=\(yBase)\n"
-        str += "scrollTop=\(scrollTop) scrollBottom=\(scrollBottom)\n"
-        str += "count=\(lines.count) maxLength=\(lines.maxLength)\n"
-        for i in 0..<_lines.getArray().count {
-            var txt: String
-            if let r = _lines.getArray()[i] {
-                txt = r.debugDescription.replacingOccurrences(of: "\u{0}", with: " ")
-            } else {
-                txt = "<empty>"
-            }
-            let flag = i >= yDisp ? ">>" : "  "
-            let istr = String (format: "%03d", i)
-            let cstr = String (format: "%03d", _lines.debugGetCyclicIndex(i))
-            str += "[\(istr):\(cstr)]\(flag)\(txt)\n"
-        }
-        let file = "/Users/miguel/Downloads/Logs/dump-\(Buffer.n)"
-        do {
-            try str.write(to: URL.init (fileURLWithPath: file), atomically: false, encoding: .utf8)
-
-        } catch {
-            print ("Could not log the dump() contents to \(file)")
-        }
+        SwiftTermDiagnostics.emit(.notice, .bufferDebugDumpSuppressed)
         Buffer.n += 1
     }
     
@@ -1151,14 +1133,6 @@ public final class Buffer {
     
     func dumpConsole ()
     {
-        let debugBuffer = self
-        for y in 0..<debugBuffer._lines.maxLength {
-            let flag = y == debugBuffer.yDisp ? "D" : " "
-            let yb   = y == debugBuffer.yBase ? "B" : " "
-            let istr = String (format: "%03d", y)
-            let cstr = String (format: "%03d", debugBuffer._lines.debugGetCyclicIndex(y))
-        
-            print ("[\(istr):\(cstr)]\(flag)\(yb) \(debugBuffer._lines.getArray() [y].debugDescription)")
-        }
+        SwiftTermDiagnostics.emit(.notice, .bufferDebugDumpSuppressed)
     }    
 }
