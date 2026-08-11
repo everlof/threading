@@ -32,6 +32,8 @@ public enum AgentScenarioPrivacyAudit {
             switch step {
             case .expectHost(_, let value), .emitAgent(_, let value, _):
                 payload = value
+            case .writeFixtureFile(let path, let contents):
+                payload = path + "\n" + contents
             case .checkpoint, .exit:
                 return []
             }

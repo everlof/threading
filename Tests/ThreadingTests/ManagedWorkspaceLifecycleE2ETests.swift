@@ -10,6 +10,47 @@ import XCTest
 /// work lands in the detached checkout production code later validates and disposes.
 final class ManagedWorkspaceLifecycleE2ETests: XCTestCase {
 
+    /// Native chat must receive the same per-session fixture boundary as terminal sessions.
+    /// Otherwise a UI scenario that looks isolated can silently launch the developer's real
+    /// provider as soon as the conversation controller materializes.
+    @MainActor
+    func testFixtureLaunchPlanReachesNativeConversation() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: directory))
+        let session = try XCTUnwrap(store.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: true,
+            title: "Native fixture boundary"
+        ))
+        defer {
+            AgentRuntime.shared.discard(sessionID: session.id)
+            store.removeProject(id: project.id)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let planRequested = expectation(description: "native conversation requests fixture plan")
+        XCTAssertTrue(AgentRuntime.shared.installFixtureLaunchPlan(for: session.id) { _, _, _ in
+            planRequested.fulfill()
+            return AgentLaunchPlan(
+                executable: "/usr/bin/true",
+                arguments: [],
+                resumeState: .awaitingIdentifier
+            )
+        })
+
+        let conversation = try XCTUnwrap(
+            AgentRuntime.shared.makeConversation(for: session, in: project)
+        )
+        conversation.launch()
+
+        wait(for: [planRequested], timeout: 3)
+    }
+
     /// The boundary the process-only scenarios below intentionally do not cross: this launches
     /// the fixture through the ordinary terminal runtime, addresses the real loopback MCP server
     /// with this session's token, and lets the production lifecycle relay, archive scheduler and

@@ -201,6 +201,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if plan.runsLegacyMigration {
             adoption = LegacyApplicationSupportMigration.runIfNeeded()
         }
+#if DEBUG
+        switch UIScenarioBootstrap.installIfRequested() {
+        case .notRequested, .installed:
+            break
+        case .refused(let reason):
+            ThreadingLogger.app.error("UI scenario bootstrap refused: \(reason, privacy: .public)")
+            NSApp.terminate(nil)
+            return
+        }
+#endif
         LaunchLedger.shared.record(.migrationDone, detail: [
             StartupCheckpointDefaults.migrationField: plan.runsLegacyMigration
                 ? StartupCheckpointDefaults.migrationRan
@@ -1966,3 +1976,157 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         mainWindowController?.decreaseFontSize()
     }
 }
+
+#if DEBUG
+/// The only whole-app fixture entry point.
+///
+/// A UI scenario is allowed to replace one provider process only when every mutable artifact
+/// resolves below the disposable Cocoa home created by the test runner, and the executable is
+/// the helper sealed inside this app bundle. A partial or tampered contract terminates before
+/// the window can restore a session, which is the fail-closed boundary that prevents a broken
+/// test from launching the developer's real Codex installation.
+@MainActor
+private enum UIScenarioBootstrap {
+    enum Result {
+        case notRequested
+        case installed
+        case refused(String)
+    }
+
+    private enum Key {
+        static let home = "THREADING_UI_SCENARIO_HOME"
+        static let project = "THREADING_UI_SCENARIO_PROJECT"
+        static let freshTape = "THREADING_UI_SCENARIO_FRESH_TAPE"
+        static let resumeTape = "THREADING_UI_SCENARIO_RESUME_TAPE"
+    }
+
+    private static let markerName = ".threading-ui-scenario-home"
+    private static let sessionID = SessionID(
+        UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
+    )
+
+    static func installIfRequested(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) -> Result {
+        let fixtureKeys = [Key.project, Key.freshTape, Key.resumeTape]
+        guard fixtureKeys.contains(where: { environment[$0] != nil }) else {
+            return .notRequested
+        }
+        guard let homePath = environment[Key.home],
+              environment["HOME"] == homePath,
+              environment["CFFIXED_USER_HOME"] == homePath else {
+            return .refused("scenario home does not own HOME and CFFIXED_USER_HOME")
+        }
+
+        let root = URL(fileURLWithPath: homePath, isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        guard fileManager.fileExists(
+            atPath: root.appendingPathComponent(markerName).path
+        ) else {
+            return .refused("scenario home marker is missing")
+        }
+        guard let project = artifact(
+            Key.project,
+            environment: environment,
+            root: root,
+            expectsDirectory: true,
+            executable: false,
+            fileManager: fileManager
+        ), let freshTape = artifact(
+            Key.freshTape,
+            environment: environment,
+            root: root,
+            expectsDirectory: false,
+            executable: false,
+            fileManager: fileManager
+        ), let resumeTape = artifact(
+            Key.resumeTape,
+            environment: environment,
+            root: root,
+            expectsDirectory: false,
+            executable: false,
+            fileManager: fileManager
+        ) else {
+            return .refused("one or more fixture artifacts are missing or outside scenario home")
+        }
+        let executable = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Helpers/threading-scenario")
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let helpers = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Helpers", isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        guard executable.deletingLastPathComponent() == helpers,
+              fileManager.isExecutableFile(atPath: executable.path) else {
+            return .refused("the signed UI scenario helper is not embedded")
+        }
+
+        guard let storedProject = ProjectStore.shared.addProject(folderURL: project) else {
+            return .refused("could not persist the synthetic project")
+        }
+        let session: AgentSession
+        if let existing = ProjectStore.shared.session(withID: sessionID) {
+            guard existing.usesNativeUI,
+                  existing.title == "Update status fixture",
+                  ProjectStore.shared.project(forSessionID: sessionID)?.id == storedProject.id else {
+                return .refused("fixed fixture session collides with incompatible state")
+            }
+            session = existing
+        } else {
+            guard let created = ProjectStore.shared.addSession(
+                to: storedProject.id,
+                kind: .codex,
+                usesNativeUI: true,
+                title: "Update status fixture",
+                id: sessionID
+            ) else {
+                return .refused("could not persist the fixture conversation")
+            }
+            session = created
+        }
+
+        ProjectStore.shared.selectedSessionID = sessionID
+        let rootPath = root.path
+        guard AgentRuntime.shared.installFixtureLaunchPlan(
+            for: sessionID,
+            provider: { _, _, _ in
+                let current = ProjectStore.shared.session(withID: sessionID) ?? session
+                let tape = current.resumeState.isResumable ? resumeTape : freshTape
+                return AgentLaunchPlan(
+                    executable: executable.path,
+                    arguments: ["replay", tape.path, "--scenario-root", rootPath],
+                    resumeState: current.resumeState
+                )
+            }
+        ) else {
+            return .refused("could not install the fixture process")
+        }
+        return .installed
+    }
+
+    private static func artifact(
+        _ key: String,
+        environment: [String: String],
+        root: URL,
+        expectsDirectory: Bool,
+        executable: Bool,
+        fileManager: FileManager
+    ) -> URL? {
+        guard let path = environment[key], !path.isEmpty else { return nil }
+        let candidate = URL(fileURLWithPath: path, isDirectory: expectsDirectory)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        guard candidate.path.hasPrefix(root.path + "/") else { return nil }
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+              isDirectory.boolValue == expectsDirectory,
+              !executable || fileManager.isExecutableFile(atPath: candidate.path) else {
+            return nil
+        }
+        return candidate
+    }
+}
+#endif

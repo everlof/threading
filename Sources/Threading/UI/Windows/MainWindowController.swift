@@ -351,6 +351,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func applyInitialFrame() {
         guard let window else { return }
 
+#if DEBUG
+        if let scenarioSize = MainWindowUIScenarioSize.requested() {
+            window.setContentSize(scenarioSize)
+            window.center()
+            return
+        }
+#endif
+
         if window.setFrameUsingName(MainWindowDefaults.frameAutosaveName) {
             holdRestoredFrameOnScreen(window)
         } else {
@@ -3044,6 +3052,51 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         window?.representedURL = currentFolderURL
     }
 }
+
+#if DEBUG
+/// Debug-only launch input used by the out-of-process UI runner.
+///
+/// Requiring the isolated scenario-home marker keeps ordinary debug launches and a developer's
+/// saved window frame entirely untouched. Both dimensions must be present and valid; a partial
+/// contract is rejected instead of producing a misleading compact-layout test.
+private enum MainWindowUIScenarioSize {
+    private static let markerName = ".threading-ui-scenario-home"
+    private static let widthKey = "THREADING_UI_WINDOW_WIDTH"
+    private static let heightKey = "THREADING_UI_WINDOW_HEIGHT"
+
+    static func requested(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) -> NSSize? {
+        let widthValue = environment[widthKey]
+        let heightValue = environment[heightKey]
+        guard widthValue != nil || heightValue != nil else { return nil }
+
+        guard let scenarioHome = environment["THREADING_UI_SCENARIO_HOME"],
+              environment["HOME"] == scenarioHome,
+              environment["CFFIXED_USER_HOME"] == scenarioHome,
+              fileManager.fileExists(
+                atPath: URL(fileURLWithPath: scenarioHome, isDirectory: true)
+                    .appendingPathComponent(markerName)
+                    .path
+              ),
+              let widthValue,
+              let heightValue,
+              let width = Double(widthValue),
+              let height = Double(heightValue),
+              width.isFinite,
+              height.isFinite,
+              width >= Double(WindowDefaults.minWidth),
+              height >= Double(WindowDefaults.minHeight),
+              width <= 10_000,
+              height <= 10_000 else {
+            assertionFailure("Invalid Threading UI scenario window contract")
+            return nil
+        }
+        return NSSize(width: width, height: height)
+    }
+}
+#endif
 
 // MARK: - ProjectSidebarViewControllerDelegate
 

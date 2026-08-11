@@ -15,6 +15,21 @@ struct UIScenarioSandbox {
 
     let root: URL
 
+    struct CodexFileChangeFixture {
+        let project: URL
+        let freshTape: URL
+        let resumeTape: URL
+
+        @MainActor
+        func configure(_ application: XCUIApplication, scenarioRoot: URL) {
+            application.launchEnvironment["CODEX_HOME"] = scenarioRoot
+                .appendingPathComponent(".codex", isDirectory: true).path
+            application.launchEnvironment["THREADING_UI_SCENARIO_PROJECT"] = project.path
+            application.launchEnvironment["THREADING_UI_SCENARIO_FRESH_TAPE"] = freshTape.path
+            application.launchEnvironment["THREADING_UI_SCENARIO_RESUME_TAPE"] = resumeTape.path
+        }
+    }
+
     static func make(fileManager: FileManager = .default) throws -> UIScenarioSandbox {
         let root = fileManager.temporaryDirectory
             .appendingPathComponent("ThreadingUITests", isDirectory: true)
@@ -27,7 +42,9 @@ struct UIScenarioSandbox {
         return UIScenarioSandbox(root: root)
     }
 
-    func configure(_ application: XCUIApplication) {
+    @MainActor
+    @discardableResult
+    func configure(_ application: XCUIApplication) -> CGSize {
         application.launchEnvironment["CFFIXED_USER_HOME"] = root.path
         application.launchEnvironment["HOME"] = root.path
         application.launchEnvironment["THREADING_UI_SCENARIO_HOME"] = root.path
@@ -36,6 +53,64 @@ struct UIScenarioSandbox {
             "-NSQuitAlwaysKeepsWindows", "NO",
             "-\(Defaults.onboardingCompletedVersion)", "1",
         ]
+        return UIWindowContract.configure(application)
+    }
+
+    /// Builds the smallest real checkout and copies every mutable fixture below the isolated
+    /// home. The signed replay executable is embedded in the tested app: macOS deliberately
+    /// refuses to execute code copied into an XCUITest runner's temporary container.
+    func prepareCodexFileChangeFixture(
+        fileManager: FileManager = .default
+    ) throws -> CodexFileChangeFixture {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let fixtureDirectory = root.appendingPathComponent("fixture", isDirectory: true)
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        let codexSessions = root
+            .appendingPathComponent(".codex/sessions/2026/08/11", isDirectory: true)
+        try fileManager.createDirectory(at: fixtureDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: project, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: codexSessions, withIntermediateDirectories: true)
+        try Data("{}\n".utf8).write(
+            to: root.appendingPathComponent(".codex/auth.json"),
+            options: .atomic
+        )
+        try Data("Synthetic UI scenario repository.\n".utf8).write(
+            to: project.appendingPathComponent("README.md"),
+            options: .atomic
+        )
+        try Data("before\n".utf8).write(
+            to: project.appendingPathComponent("status.txt"),
+            options: .atomic
+        )
+
+        try runGit(["init", "--quiet"], in: project)
+        try runGit(["add", "README.md", "status.txt"], in: project)
+        try runGit([
+            "-c", "user.name=Threading UI Fixture",
+            "-c", "user.email=fixture@invalid.example",
+            "commit", "--quiet", "-m", "Initial synthetic state",
+        ], in: project)
+
+        let sourceScenarios = repository
+            .appendingPathComponent("Fixtures/AgentScenarios", isDirectory: true)
+        let freshTape = fixtureDirectory.appendingPathComponent("codex-update-status-fresh.json")
+        let resumeTape = fixtureDirectory.appendingPathComponent("codex-update-status-resume.json")
+        try fileManager.copyItem(
+            at: sourceScenarios.appendingPathComponent(freshTape.lastPathComponent),
+            to: freshTape
+        )
+        try fileManager.copyItem(
+            at: sourceScenarios.appendingPathComponent(resumeTape.lastPathComponent),
+            to: resumeTape
+        )
+        return CodexFileChangeFixture(
+            project: project,
+            freshTape: freshTape,
+            resumeTape: resumeTape
+        )
     }
 
     func remove(fileManager: FileManager = .default) throws {
@@ -48,15 +123,52 @@ struct UIScenarioSandbox {
         }
         try fileManager.removeItem(at: root)
     }
+
+    private func runGit(_ arguments: [String], in directory: URL) throws {
+        let process = Process()
+        // `/usr/bin/git` delegates through xcrun on a developer machine, and xcrun refuses to
+        // run inside the UI runner's App Sandbox. Prefer the real command-line-tools binary;
+        // retain the system path for hosts where it is a standalone Git executable.
+        let candidates = [
+            "/Library/Developer/CommandLineTools/usr/bin/git",
+            "/usr/bin/git",
+        ]
+        guard let git = candidates.first(where: {
+            FileManager.default.isExecutableFile(atPath: $0)
+        }) else {
+            throw UIScenarioSandboxError.gitUnavailable
+        }
+        process.executableURL = URL(fileURLWithPath: git)
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
+        let errors = Pipe()
+        process.standardOutput = Pipe()
+        process.standardError = errors
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationReason == .exit, process.terminationStatus == 0 else {
+            let detail = String(
+                decoding: errors.fileHandleForReading.readDataToEndOfFile(),
+                as: UTF8.self
+            )
+            throw UIScenarioSandboxError.gitFailed(arguments: arguments, detail: detail)
+        }
+    }
 }
 
 enum UIScenarioSandboxError: LocalizedError {
     case refusedUnsafeRemoval(URL)
+    case gitUnavailable
+    case gitFailed(arguments: [String], detail: String)
 
     var errorDescription: String? {
         switch self {
         case .refusedUnsafeRemoval(let url):
             return "refused to remove unverified UI scenario directory at \(url.path)"
+        case .gitUnavailable:
+            return "the UI scenario host has no executable Git binary"
+        case .gitFailed(let arguments, let detail):
+            return "git \(arguments.joined(separator: " ")) failed: \(detail)"
         }
     }
 }

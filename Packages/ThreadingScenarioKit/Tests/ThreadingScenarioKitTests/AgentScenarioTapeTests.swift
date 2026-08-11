@@ -148,6 +148,123 @@ final class AgentScenarioTapeTests: XCTestCase {
         }
     }
 
+    func testFixtureWriteRejectsTraversal() {
+        let tape = AgentScenarioTape(
+            id: "unsafe-write",
+            title: "Unsafe write",
+            provider: .codex,
+            transport: .codexAppServer,
+            provenance: provenance,
+            steps: [
+                .writeFixtureFile(path: "project/../outside.txt", contents: "no"),
+                .exit(status: 0, afterMilliseconds: 0),
+            ]
+        )
+
+        XCTAssertThrowsError(try tape.validate()) { error in
+            XCTAssertEqual(
+                error as? AgentScenarioValidationError,
+                .invalidFixturePath(step: 0, path: "project/../outside.txt")
+            )
+        }
+    }
+
+    func testReplayMatchesJSONSubsetsCapturesIdsAndWritesInsideRoot() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let project = directory.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let input = Pipe()
+        try input.fileHandleForWriting.write(contentsOf: Data(
+            "{\"id\":7,\"method\":\"turn/start\",\"params\":{\"clientUserMessageId\":\"captured-id\",\"cwd\":\"\(project.path)\",\"metadata\":true}}\n".utf8
+        ))
+        try input.fileHandleForWriting.close()
+        let output = Pipe()
+        let tape = AgentScenarioTape(
+            id: "subset-replay",
+            title: "Subset replay",
+            provider: .codex,
+            transport: .codexAppServer,
+            provenance: provenance,
+            steps: [
+                .expectHost(
+                    channel: .standardInput,
+                    payload: "{\"method\":\"turn/start\",\"params\":{\"clientUserMessageId\":\"${TURN_ID}\",\"cwd\":\"${SCENARIO_ROOT}/project\"}}"
+                ),
+                .writeFixtureFile(path: "project/status.txt", contents: "after\n"),
+                .emitAgent(
+                    channel: .standardOutput,
+                    payload: "{\"messageId\":\"${TURN_ID}\"}\n",
+                    afterMilliseconds: 0
+                ),
+                .exit(status: 0, afterMilliseconds: 0),
+            ]
+        )
+
+        let status = try AgentScenarioReplayer(delay: { _ in }).run(
+            tape: tape,
+            scenarioRoot: directory,
+            input: input.fileHandleForReading,
+            standardOutput: output.fileHandleForWriting
+        )
+        try output.fileHandleForWriting.close()
+
+        XCTAssertEqual(status, 0)
+        XCTAssertEqual(
+            String(decoding: try Data(contentsOf: project.appendingPathComponent("status.txt")), as: UTF8.self),
+            "after\n"
+        )
+        XCTAssertEqual(
+            String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
+            "{\"messageId\":\"captured-id\"}\n"
+        )
+    }
+
+    func testReplayBoundsPayloadAfterPlaceholderExpansion() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let oversizedBinding = String(
+            repeating: "x",
+            count: AgentScenarioLimits.maximumPayloadBytes + 1
+        )
+        let tape = AgentScenarioTape(
+            id: "expanded-output-limit",
+            title: "Expanded output limit",
+            provider: .codex,
+            transport: .codexAppServer,
+            provenance: provenance,
+            steps: [
+                .emitAgent(
+                    channel: .standardOutput,
+                    payload: "${TURN_ID}",
+                    afterMilliseconds: 0
+                ),
+                .exit(status: 0, afterMilliseconds: 0),
+            ]
+        )
+
+        XCTAssertThrowsError(try AgentScenarioReplayer(delay: { _ in }).run(
+            tape: tape,
+            scenarioRoot: directory,
+            bindings: ["TURN_ID": oversizedBinding],
+            standardOutput: Pipe().fileHandleForWriting
+        )) { error in
+            XCTAssertEqual(
+                error as? AgentScenarioReplayError,
+                .renderedPayloadTooLarge(
+                    step: 0,
+                    actual: AgentScenarioLimits.maximumPayloadBytes + 1,
+                    maximum: AgentScenarioLimits.maximumPayloadBytes
+                )
+            )
+        }
+    }
+
     func testLoadReadsOneBytePastActualLimit() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

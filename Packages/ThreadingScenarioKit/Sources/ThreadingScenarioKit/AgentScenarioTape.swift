@@ -70,6 +70,7 @@ public struct RecordingProvenance: Codable, Equatable, Sendable {
 public enum AgentScenarioStep: Equatable, Sendable {
     case expectHost(channel: HostChannel, payload: String)
     case emitAgent(channel: AgentChannel, payload: String, afterMilliseconds: Int)
+    case writeFixtureFile(path: String, contents: String)
     case checkpoint(name: String)
     case exit(status: Int32, afterMilliseconds: Int)
 
@@ -92,11 +93,14 @@ extension AgentScenarioStep: Codable {
         case afterMilliseconds
         case name
         case status
+        case path
+        case contents
     }
 
     private enum Kind: String, Codable {
         case expectHost
         case emitAgent
+        case writeFixtureFile
         case checkpoint
         case exit
     }
@@ -117,6 +121,11 @@ extension AgentScenarioStep: Codable {
                     Int.self,
                     forKey: .afterMilliseconds
                 ) ?? 0
+            )
+        case .writeFixtureFile:
+            self = .writeFixtureFile(
+                path: try container.decode(String.self, forKey: .path),
+                contents: try container.decode(String.self, forKey: .contents)
             )
         case .checkpoint:
             self = .checkpoint(name: try container.decode(String.self, forKey: .name))
@@ -145,6 +154,10 @@ extension AgentScenarioStep: Codable {
             if delay != 0 {
                 try container.encode(delay, forKey: .afterMilliseconds)
             }
+        case .writeFixtureFile(let path, let contents):
+            try container.encode(Kind.writeFixtureFile, forKey: .kind)
+            try container.encode(path, forKey: .path)
+            try container.encode(contents, forKey: .contents)
         case .checkpoint(let name):
             try container.encode(Kind.checkpoint, forKey: .kind)
             try container.encode(name, forKey: .name)
@@ -167,6 +180,7 @@ public enum AgentScenarioLimits {
     public static let maximumTitleBytes = 256
     public static let maximumVersionBytes = 128
     public static let maximumCheckpointBytes = 128
+    public static let maximumFixturePathBytes = 1_024
     public static let maximumStepDelayMilliseconds = 30_000
     public static let maximumAggregateDelayMilliseconds = 120_000
 }
@@ -188,6 +202,7 @@ public enum AgentScenarioValidationError: Error, Equatable, LocalizedError, Send
     case exitNotLast(step: Int)
     case missingExit
     case unknownPlaceholder(step: Int, name: String)
+    case invalidFixturePath(step: Int, path: String)
 
     public var errorDescription: String? {
         switch self {
@@ -223,6 +238,8 @@ public enum AgentScenarioValidationError: Error, Equatable, LocalizedError, Send
             return "scenario has no final process exit"
         case .unknownPlaceholder(let step, let name):
             return "scenario step \(step) uses unknown placeholder ${\(name)}"
+        case .invalidFixturePath(let step, let path):
+            return "scenario step \(step) has unsafe fixture path \(path)"
         }
     }
 }
@@ -323,6 +340,24 @@ public extension AgentScenarioTape {
                     step: index,
                     aggregate: &aggregateDelayMilliseconds
                 )
+            case .writeFixtureFile(let path, let contents):
+                guard Self.validFixturePath(path) else {
+                    throw AgentScenarioValidationError.invalidFixturePath(
+                        step: index,
+                        path: path
+                    )
+                }
+                try Self.checkSize(
+                    path,
+                    field: "fixture path",
+                    maximum: AgentScenarioLimits.maximumFixturePathBytes
+                )
+                try Self.validatePayload(
+                    contents,
+                    step: index,
+                    aggregate: &aggregatePayloadBytes
+                )
+                try Self.validatePlaceholders(in: contents, step: index)
             case .checkpoint(let name):
                 try Self.checkSize(
                     name,
@@ -381,6 +416,13 @@ public extension AgentScenarioTape {
         }
         return value.utf8.allSatisfy {
             ($0 >= 97 && $0 <= 122) || ($0 >= 48 && $0 <= 57) || $0 == 45
+        }
+    }
+
+    private static func validFixturePath(_ value: String) -> Bool {
+        guard !value.isEmpty, !value.hasPrefix("/") else { return false }
+        return value.split(separator: "/", omittingEmptySubsequences: false).allSatisfy {
+            !$0.isEmpty && $0 != "." && $0 != ".."
         }
     }
 

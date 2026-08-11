@@ -289,6 +289,7 @@ final class GitReviewFileRow: NSView {
         nameLabel.usesSingleLineMode = true
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         nameLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        nameLabel.setAccessibilityIdentifier("git-review.file.name")
         nameLabel.toolTip = pathText
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
 

@@ -312,6 +312,7 @@ final class GitReviewViewController: NSViewController {
         root.onWindowChange = { [weak self] window in
             window == nil ? self?.stopWatching() : self?.startWatching()
         }
+        root.setAccessibilityIdentifier("git-review.content")
         root.wantsLayer = true
         view = root
     }

@@ -576,6 +576,7 @@ final class ConversationViewController: NSViewController {
         agentSession: AgentSession,
         project: Project,
         subagentState: SubagentSessionState? = nil,
+        launchPlanProvider: AgentLaunchPlanProvider? = nil,
         customizationLookup: @escaping ComponentCustomizationHost.Lookup = {
             ComponentCustomizationProviderSlot.shared.customization(for: $0)
         }
@@ -608,6 +609,9 @@ final class ConversationViewController: NSViewController {
         // current when a dormant native conversation is reopened.
         let plan = {
             let current = ProjectStore.shared.session(withID: agentSession.id) ?? agentSession
+            if let launchPlanProvider {
+                return launchPlanProvider(current, project, nil)
+            }
             return try AgentLauncher.streamPlan(for: current, in: project)
         }
 

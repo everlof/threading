@@ -1363,6 +1363,7 @@
 				E77200010000000000000001 /* Embed Legal Notices */,
 				E77100010000000000000001 /* Embed Extension SDK */,
 				877EDD4F2A5B003140CB8A81 /* Embed Extension Helpers */,
+				E77300010000000000000001 /* Embed UI Scenario Helper */,
 			);
 			buildRules = (
 			);
@@ -1578,6 +1579,26 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		E77300010000000000000001 /* Embed UI Scenario Helper */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/scripts/embed_ui_scenario_helper.sh",
+			);
+			name = "Embed UI Scenario Helper";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"${SRCROOT}/scripts/embed_ui_scenario_helper.sh\"";
+		};
 		E77200010000000000000001 /* Embed Legal Notices */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;

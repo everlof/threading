@@ -312,6 +312,7 @@ final class PromptView: NSView, ThemedComponent {
         refreshSubmitTitle()
         submitButton.target = self
         submitButton.action = #selector(primaryAction)
+        submitButton.setAccessibilityIdentifier("composer.prompt.submit")
         submitButton.translatesAutoresizingMaskIntoConstraints = false
 
         contentStack.orientation = .vertical
@@ -550,6 +551,7 @@ final class PromptView: NSView, ThemedComponent {
 
     private func setupTextView() {
         textView.delegate = self
+        textView.setAccessibilityIdentifier("composer.prompt.text")
         textView.placeholder = placeholder
         textView.applyFont(.body, in: fontSurface)
         textView.textColor = Design.Text.label

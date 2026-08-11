@@ -43,12 +43,24 @@ discovery, and child processes therefore see one disposable scenario home rather
 developer's state. Cleanup refuses any directory that lacks both the exact generated shape and
 the harness marker.
 
+After the first window appears, the harness gives it a 1,400×900 point target, bounded by the
+current screen's visible frame, and verifies the resulting frame through XCUITest. Feature
+scenarios therefore exercise the full multi-pane layout instead of accidentally testing the
+product's compact 800×600 first-launch window.
+
 The first smoke test proves only that the shipping executable reaches a real main window through
 that isolation boundary. It is foundation, not yet feature coverage.
 
 The UI lane needs an interactive macOS test host with automation mode available. A machine that
 can compile the runner but cannot enable UI automation reports an infrastructure failure before
 any scenario method starts; that is not converted into a skipped or passing test.
+
+`scripts/ui-test.sh` builds the fixture-agent executable and asks Xcode to seal it into the Debug
+app's `Contents/Helpers` directory before code signing. The application will accept only that
+exact bundled executable and mutable fixture files below the isolated scenario home. This is a
+load-bearing split: macOS refuses to execute code copied into the XCUITest runner's temporary
+container, and allowing an arbitrary executable path would let a malformed test launch a real
+provider. Non-UI and Release builds remove any helper left in a reused products directory.
 
 ## A session tape is not a transcript
 
@@ -75,9 +87,11 @@ deterministic fixture-agent process
 shipping transport and parser → application UI → accessibility assertions
 ```
 
-Steps are typed as an expected host write, emitted agent bytes, a named checkpoint, or a final
-process exit. Illegal mixtures are not representable. A tape always has a final exit and cannot
-place anything after it. The format currently recognizes only fixed placeholders:
+Steps are typed as an expected host write, emitted agent bytes, a fixture file mutation, a named
+checkpoint, or a final process exit. File mutations are root-relative, reject traversal and
+symlinks, and cannot escape the disposable scenario home. Illegal mixtures are not representable.
+A tape always has a final exit and cannot place anything after it. The format currently recognizes
+only fixed placeholders:
 `${SCENARIO_ROOT}`, `${SESSION_ID}`, `${PROJECT_ID}`, `${TURN_ID}`, and `${PORT}`. An unknown
 placeholder fails validation instead of silently resolving to an empty string or a machine-local
 value.
@@ -99,9 +113,10 @@ and exactly-once completion paths the scenario exists to prove.
 
 Tapes are untrusted recorded files. `AgentScenarioTape.load` reads one byte past a 4 MiB
 opened-file cap and then validates at most 4,096 steps, 256 KiB per payload, 3 MiB aggregate
-payload, 30 seconds per delay, and 120 seconds aggregate delay. Those are protocol safety ceilings,
-not ordinary fixture targets: a normal critical journey should be tens of steps and complete in
-seconds. Long stress streams remain opt-in performance fixtures.
+payload, 30 seconds per delay, and 120 seconds aggregate delay. Replay applies the per-payload
+ceiling again after placeholder expansion. Those are protocol safety ceilings, not ordinary
+fixture targets: a normal critical journey should be tens of steps and complete in seconds. Long
+stress streams remain opt-in performance fixtures.
 
 UI assertions wait for semantic accessibility state. They do not sleep for guessed rendering or
 provider durations. Tape delays reproduce only a behavior where time itself is part of the
@@ -148,9 +163,11 @@ UI lane to required hosted CI after the first fixture agent and critical journey
 clean machine; until then `scripts/test.sh ui` is the explicit local gate and must not be described
 as ordinary CI coverage.
 
-## Next implementation slice
+## First implemented journey
 
-The next slice is one Codex app-server fixture agent and one recorded synthetic journey:
+`CodexFileChangeJourneyUITests` is the first complete scenario. Its minimized Codex app-server
+tape came from one real Codex 0.147.0 exchange against a disposable synthetic repository; account,
+startup, rate-limit and machine-path traffic was deliberately not copied into the fixture. It:
 
 1. launch an isolated project and native conversation;
 2. submit a prompt;
@@ -158,5 +175,7 @@ The next slice is one Codex app-server fixture agent and one recorded synthetic 
 4. show the completed turn and Git Review result;
 5. quit, relaunch into the same isolated home, and prove transcript recovery.
 
-That scenario crosses enough real boundaries to validate the architecture before permission,
-cancellation, rate-limit, and remote/mobile variants are added.
+The test crosses the shipping child-process boundary, JSON-RPC parser, conversation renderer,
+checkout watcher, Git Review surface, provider transcript importer, and durable project store.
+Permission, cancellation, provider failure, rate-limit, and remote/mobile promises remain future
+journeys rather than variants of this one.

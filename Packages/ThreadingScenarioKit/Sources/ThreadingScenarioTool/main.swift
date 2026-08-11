@@ -8,7 +8,7 @@ enum ScenarioToolError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .usage:
-            return "usage: threading-scenario validate <scenario.json> [...]"
+            return "usage: threading-scenario validate <scenario.json> [...] | replay <scenario.json> --scenario-root <directory>"
         case .privacyFindings(let url, let findings):
             let summary = findings
                 .map { "step \($0.step): \($0.kind.rawValue)" }
@@ -20,17 +20,32 @@ enum ScenarioToolError: LocalizedError {
 
 do {
     let arguments = Array(CommandLine.arguments.dropFirst())
-    guard arguments.first == "validate", arguments.count > 1 else {
-        throw ScenarioToolError.usage
-    }
-    for path in arguments.dropFirst() {
-        let url = URL(fileURLWithPath: path)
-        let tape = try AgentScenarioTape.load(from: url)
+    switch arguments.first {
+    case "validate" where arguments.count > 1:
+        for path in arguments.dropFirst() {
+            let url = URL(fileURLWithPath: path)
+            let tape = try AgentScenarioTape.load(from: url)
+            let findings = AgentScenarioPrivacyAudit.findings(in: tape)
+            guard findings.isEmpty else {
+                throw ScenarioToolError.privacyFindings(url, findings)
+            }
+            print("scenario valid: \(tape.id) (\(tape.steps.count) steps)")
+        }
+
+    case "replay" where arguments.count == 4 && arguments[2] == "--scenario-root":
+        let tape = try AgentScenarioTape.load(from: URL(fileURLWithPath: arguments[1]))
         let findings = AgentScenarioPrivacyAudit.findings(in: tape)
         guard findings.isEmpty else {
-            throw ScenarioToolError.privacyFindings(url, findings)
+            throw ScenarioToolError.privacyFindings(URL(fileURLWithPath: arguments[1]), findings)
         }
-        print("scenario valid: \(tape.id) (\(tape.steps.count) steps)")
+        let status = try AgentScenarioReplayer().run(
+            tape: tape,
+            scenarioRoot: URL(fileURLWithPath: arguments[3], isDirectory: true)
+        )
+        exit(status)
+
+    default:
+        throw ScenarioToolError.usage
     }
 } catch {
     FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))

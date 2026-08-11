@@ -463,10 +463,16 @@ final class AgentRuntime {
             return existing
         }
 
+#if DEBUG
+        let fixtureLaunchPlanProvider = fixtureLaunchPlanProviders[agentSession.id]
+#else
+        let fixtureLaunchPlanProvider: AgentLaunchPlanProvider? = nil
+#endif
         guard let conversation = ConversationViewController(
             agentSession: agentSession,
             project: project,
-            subagentState: subagentState(for: agentSession.id)
+            subagentState: subagentState(for: agentSession.id),
+            launchPlanProvider: fixtureLaunchPlanProvider
         ) else { return nil }
         conversations[agentSession.id] = conversation
         return conversation

@@ -1,5 +1,6 @@
 import XCTest
 
+@MainActor
 final class ThreadingLaunchUITests: XCTestCase {
     private var application: XCUIApplication?
     private var sandbox: UIScenarioSandbox?
@@ -21,7 +22,7 @@ final class ThreadingLaunchUITests: XCTestCase {
     /// Scenario-specific tests will build on this launch path instead of inventing a second app.
     func testApplicationLaunchesWithIsolatedState() throws {
         let app = XCUIApplication()
-        try XCTUnwrap(sandbox).configure(app)
+        let targetSize = try XCTUnwrap(sandbox).configure(app)
         application = app
 
         app.launch()
@@ -30,9 +31,11 @@ final class ThreadingLaunchUITests: XCTestCase {
             app.wait(for: .runningForeground, timeout: 20),
             "Threading did not reach the foreground"
         )
+        let window = app.windows.firstMatch
         XCTAssertTrue(
-            app.windows.firstMatch.waitForExistence(timeout: 10),
+            window.waitForExistence(timeout: 10),
             "Threading reached the foreground without presenting its main window"
         )
+        UIWindowContract.assertApplied(to: window, expected: targetSize)
     }
 }
