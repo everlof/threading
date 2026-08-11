@@ -105,6 +105,9 @@ final class SubagentSummaryView: NSView {
     private var items: [SubagentSummaryItem] = []
     private var selectedID: String?
     private var identifiersByButton: [ObjectIdentifier: String] = [:]
+#if DEBUG
+    private(set) var rowRebuildCount = 0
+#endif
 
     // MARK: - Initialization
 
@@ -183,9 +186,26 @@ final class SubagentSummaryView: NSView {
         workingCount: Int,
         doneCount: Int
     ) {
+        update(
+            items: items,
+            workingCount: workingCount,
+            doneCount: doneCount,
+            selectedID: selectedID
+        )
+    }
+
+    /// Installs content and externally-owned navigation selection in one reconciliation pass.
+    /// `setSelection` remains the notifying user action; a host reflecting its model must not
+    /// rebuild every row once for content and immediately again for selection.
+    func update(
+        items: [SubagentSummaryItem],
+        workingCount: Int,
+        doneCount: Int,
+        selectedID: String?
+    ) {
         self.items = items
-        if selectedID.map({ id in !items.contains { $0.id == id } }) == true {
-            selectedID = nil
+        self.selectedID = selectedID.flatMap { candidate in
+            items.contains { $0.id == candidate } ? candidate : nil
         }
 
         let working = L10n.format("%lld working", Int64(workingCount))
@@ -207,6 +227,9 @@ final class SubagentSummaryView: NSView {
     }
 
     private func rebuildRows() {
+#if DEBUG
+        rowRebuildCount += 1
+#endif
         header.isHidden = selectionStyle == .detail
         for view in rows.arrangedSubviews {
             rows.removeArrangedSubview(view)

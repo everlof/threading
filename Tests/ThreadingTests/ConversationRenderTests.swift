@@ -788,7 +788,14 @@ final class ConversationRenderTests: XCTestCase {
         let renderStarted = DispatchTime.now().uptimeNanoseconds
         controller.update(timeline, selectedThreadID: threadID)
         let renderEnded = DispatchTime.now().uptimeNanoseconds
+        let styledMarkdownBlocksDuringRender = controller.cachedMarkdownBlockCount
         controller.view.layoutSubtreeIfNeeded()
+        let initialLayoutEnded = DispatchTime.now().uptimeNanoseconds
+        let appKitMaterializedAfterLayout = controller.materializedPresentationCount
+        let cachedMarkdownBlocksAfterInitialLayout = controller.cachedMarkdownBlockCount
+#if DEBUG
+        let initialRowMaterialization = controller.rowMaterializationDurations
+#endif
 
         // An unshown NSTableView deliberately asks for no cells. Materialize the production
         // presentation rows into a width-constrained document to measure first-paint view work
@@ -815,21 +822,6 @@ final class ConversationRenderTests: XCTestCase {
         let table = controller.transcriptTableView
         let viewportStart = max(0, table.numberOfRows - 18)
         let viewportRows = viewportStart..<table.numberOfRows
-        var rowMountDurations: [UInt64] = []
-        for row in 0..<table.numberOfRows {
-            autoreleasepool {
-                let started = DispatchTime.now().uptimeNanoseconds
-                guard let rowView = controller.tableView(
-                    table,
-                    viewFor: table.tableColumns.first,
-                    row: row
-                ) else { return }
-                rowView.frame = NSRect(x: 0, y: 0, width: frame.width, height: 1)
-                rowView.frame.size.height = max(1, rowView.fittingSize.height)
-                rowView.layoutSubtreeIfNeeded()
-                rowMountDurations.append(DispatchTime.now().uptimeNanoseconds - started)
-            }
-        }
         let materializeStarted = DispatchTime.now().uptimeNanoseconds
         for row in viewportRows {
             guard let rowView = controller.tableView(
@@ -848,6 +840,11 @@ final class ConversationRenderTests: XCTestCase {
         )
         materializedDocument.layoutSubtreeIfNeeded()
         let layoutEnded = DispatchTime.now().uptimeNanoseconds
+        let cachedMarkdownBlocksAfterViewport = controller.cachedMarkdownBlockCount
+        let viewportMarkdownCacheGrowth = max(
+            0,
+            cachedMarkdownBlocksAfterViewport - cachedMarkdownBlocksAfterInitialLayout
+        )
         let renderedMemory = Self.physicalFootprintBytes()
 
         let scrollView = ThemedScrollView(frame: frame)
@@ -865,7 +862,52 @@ final class ConversationRenderTests: XCTestCase {
             }
         }
 
+        // Exercise every logical row only after measuring the cold viewport. Running this
+        // diagnostic first would populate the bounded Markdown cache and make first-paint
+        // materialization look cheaper than the production path.
+        var rowMountDurations: [UInt64] = []
+        for row in 0..<table.numberOfRows {
+            autoreleasepool {
+                let started = DispatchTime.now().uptimeNanoseconds
+                guard let rowView = controller.tableView(
+                    table,
+                    viewFor: table.tableColumns.first,
+                    row: row
+                ) else { return }
+                rowView.frame = NSRect(x: 0, y: 0, width: frame.width, height: 1)
+                rowView.frame.size.height = max(1, rowView.fittingSize.height)
+                rowView.layoutSubtreeIfNeeded()
+                rowMountDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+            }
+        }
+        let diagnosticEnded = DispatchTime.now().uptimeNanoseconds
+
         let descendants = Self.descendantCount(in: materializedDocument)
+#if DEBUG
+        let renderPhases = controller.lastRenderPhaseDurations
+        let renderPhaseMetrics = "summary_ms="
+            + Self.milliseconds(renderPhases.summaryNanoseconds)
+            + " presentation_ms="
+            + Self.milliseconds(renderPhases.presentationNanoseconds)
+            + " reload_ms="
+            + Self.milliseconds(renderPhases.reloadNanoseconds)
+            + " summary_rebuilds=\(renderPhases.summaryRebuilds)"
+            + " appkit_mounts=\(initialRowMaterialization.count)"
+            + " appkit_markdown_mounts=\(initialRowMaterialization.markdownCount)"
+            + " appkit_mount_ms="
+            + Self.milliseconds(initialRowMaterialization.totalNanoseconds)
+            + " appkit_host_ms="
+            + Self.milliseconds(initialRowMaterialization.hostNanoseconds)
+            + " appkit_content_ms="
+            + Self.milliseconds(initialRowMaterialization.contentNanoseconds)
+            + " appkit_markdown_content_ms="
+            + Self.milliseconds(initialRowMaterialization.markdownContentNanoseconds)
+            + " appkit_install_ms="
+            + Self.milliseconds(initialRowMaterialization.installNanoseconds)
+            + " "
+#else
+        let renderPhaseMetrics = ""
+#endif
         print(
             "THREADING_PERF subagent-transcript "
                 + "source=\(source) events=\(events.count) rows=\(controller.renderedRowCount) "
@@ -876,9 +918,18 @@ final class ConversationRenderTests: XCTestCase {
                 + "model_ms=\(Self.milliseconds(modelEnded - modelStarted)) "
                 + "model_thread=worker "
                 + "render_ms=\(Self.milliseconds(renderEnded - renderStarted)) "
+                + renderPhaseMetrics
+                + "styled_markdown_during_render=\(styledMarkdownBlocksDuringRender) "
+                + "appkit_materialized_after_layout=\(appKitMaterializedAfterLayout) "
+                + "cached_markdown_after_layout=\(cachedMarkdownBlocksAfterInitialLayout) "
+                + "cached_markdown_after_viewport=\(cachedMarkdownBlocksAfterViewport) "
+                + "viewport_markdown_cache_growth=\(viewportMarkdownCacheGrowth) "
+                + "initial_layout_ms=\(Self.milliseconds(initialLayoutEnded - renderEnded)) "
+                + "initial_paint_ms=\(Self.milliseconds(initialLayoutEnded - renderStarted)) "
                 + "materialize_ms=\(Self.milliseconds(materializeEnded - materializeStarted)) "
                 + "layout_ms=\(Self.milliseconds(layoutEnded - materializeEnded)) "
-                + "elapsed_ms=\(Self.milliseconds(layoutEnded - renderStarted)) "
+                + "fixture_first_paint_ms=\(Self.milliseconds(layoutEnded - renderStarted)) "
+                + "elapsed_ms=\(Self.milliseconds(diagnosticEnded - renderStarted)) "
                 + "row_mount_p50_ms="
                 + Self.milliseconds(Self.percentile(rowMountDurations, 0.50)) + " "
                 + "row_mount_p95_ms="
@@ -894,6 +945,28 @@ final class ConversationRenderTests: XCTestCase {
             max(40, controller.renderedPresentationCount + 1),
             "the child transcript materialized an unexpectedly large working set"
         )
+        XCTAssertEqual(
+            styledMarkdownBlocksDuringRender,
+            0,
+            "presentation construction eagerly styled offscreen Markdown"
+        )
+        XCTAssertLessThanOrEqual(
+            viewportMarkdownCacheGrowth,
+            viewportRows.count,
+            "the representative viewport styled more Markdown blocks than it requested"
+        )
+        XCTAssertLessThanOrEqual(
+            cachedMarkdownBlocksAfterInitialLayout,
+            appKitMaterializedAfterLayout,
+            "initial layout styled Markdown blocks that AppKit had not materialized"
+        )
+#if DEBUG
+        XCTAssertEqual(
+            renderPhases.summaryRebuilds,
+            1,
+            "the child navigator rebuilt its rows more than once for one model update"
+        )
+#endif
     }
 
     func testDetachedConversationTreeRepaintsOnlyAfterMissingAGlobalSweep() {
@@ -2986,6 +3059,51 @@ final class SubagentSummaryViewTests: XCTestCase {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-subagent-transcript.png")
         try data.write(to: url)
+    }
+
+    func testDocumentTableReflowsWhenThePaneWidthChanges() {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: Design.Typography.body(surface: .conversation),
+            .foregroundColor: Design.Text.label
+        ]
+        let table = ThemedDocumentTableView(
+            headers: [
+                NSAttributedString(string: "Section", attributes: attributes),
+                NSAttributedString(string: "Rows", attributes: attributes)
+            ],
+            rows: [[
+                NSAttributedString(string: "Sessions", attributes: attributes),
+                NSAttributedString(
+                    string: String(
+                        repeating: "New sessions keep their own title and branch. ",
+                        count: 4
+                    ),
+                    attributes: attributes
+                )
+            ]],
+            alignments: [.left, .left],
+            availableWidth: 360,
+            minimumColumnWidth: MarkdownDefaults.tableColumnWidth
+        )
+
+        table.frame.size = NSSize(width: 360, height: table.intrinsicContentSize.height)
+        let narrowHeight = table.intrinsicContentSize.height
+        table.frame.size.width = 720
+        let wideHeight = table.intrinsicContentSize.height
+        table.frame.size.width = 360
+        let restoredHeight = table.intrinsicContentSize.height
+
+        XCTAssertLessThan(
+            wideHeight,
+            narrowHeight,
+            "A wider pane kept the Markdown table's narrow wrapping"
+        )
+        XCTAssertEqual(
+            restoredHeight,
+            narrowHeight,
+            accuracy: 0.5,
+            "Shrinking the pane did not restore the table's measured row height"
+        )
     }
 
     /// A pane narrower than the readable column still has to wrap to *itself*.

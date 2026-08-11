@@ -1175,10 +1175,13 @@ and reveal the cost it merely moved elsewhere.
 production `SubagentTranscriptViewController`. The ordinary generated case is part of `full`;
 passing a child JSONL path reproduces a reported pane exactly. The result is one
 `THREADING_PERF subagent-transcript` line in `subagent-stress.log`, split into transcript read,
-model reduction, presentation render, viewport materialization, layout, per-row mount and scroll
-percentiles. The harness mounts every logical presentation row one at a time to expose a single
-pathological row, then retains only the final 18 as its representative viewport; its `elapsed_ms`
-therefore includes diagnostic work that production first paint does not do.
+model reduction, summary/presentation/reload phases, cold AppKit materialization, representative
+viewport layout, per-row mount and scroll percentiles. The harness mounts the final 18 rows as a
+cold viewport before it asks for every logical row one at a time; reversing that order would warm
+the Markdown cache and understate first-paint work. Its `elapsed_ms` includes the later exhaustive
+diagnostic and is therefore not production first paint. The fixture also asserts that one model
+update rebuilds the child navigator once, styles no Markdown during presentation construction,
+and grows the bounded cache by no more blocks than the viewport requested.
 
 The regression fixture was a 457 KB Claude child transcript with 91 replay events, 47 timeline
 rows, 44 tool calls/results and one 13 KB final Markdown answer. The old retained stack eagerly
@@ -1190,6 +1193,42 @@ p95, 15.7 ms scroll p95 and 15.2 MB renderer growth. Its 384 ms exhaustive test 
 384 ms first paint: render plus representative viewport mount/layout is about 59 ms, and AppKit
 can spread cold height discovery across frames.
 
+Phase instrumentation then found that the generated 600-row case spent 17.16 of 20.96 ms in
+presentation construction, 3.51 ms rebuilding the child navigator and only 0.17 ms reloading the
+table. Presentation identities were nevertheless parsing and styling every assistant Markdown
+block, including blocks whose views AppKit had never requested; the navigator also rebuilt once
+for content and again for selection. Presentation now retains structurally split source blocks,
+styles a block only when its virtual row materializes, and keeps at most 64 styled blocks in an
+identity-and-source-checked LRU that is cleared on selection or theme changes. The navigator takes
+content and selection in one update. Fresh generated runs reduced synchronous render from
+19.8–22.3 ms to 5.9–8.3 ms, with one navigator rebuild and zero styled blocks during render.
+
+The exact provider fixture exposed one more, independent cost. Its final settings inventory is a
+large two-column Markdown table; the general renderer represented every row as a horizontal stack,
+every cell as a wrapper, and every value with a constraint graph. The virtual transcript's settled-
+width path now uses `ThemedDocumentTableView`: selectable cell labels are measured once and placed
+directly, while the design component draws the themed header and separators, forwards vertical
+wheel momentum to the transcript and reflows when the pane width changes. The general Markdown
+path remains unchanged where no settled width is known.
+
+Three fresh exact-replay processes after both changes measured:
+
+| Metric | Lazy source blocks, old table | Current |
+|---|---:|---:|
+| Live descendants | 247 | 171 |
+| Synchronous render | 5.3–5.7 ms | 5.37–5.84 ms |
+| Initial AppKit layout | 52.5–52.7 ms | 42.51–45.35 ms |
+| Initial paint | 58.0–58.2 ms | 48.08–51.19 ms |
+| Representative viewport layout | 29.3–29.5 ms | 15.98–17.08 ms |
+| Row mount p95 | 9.7–12.0 ms | 6.54–7.16 ms |
+| Scroll p95 | 9.2–10.1 ms | 5.48–6.33 ms |
+| Renderer delta | 13.5–13.8 MB | 9.8–10.0 MB |
+
+The remaining 42–45 ms cold layout is AppKit materializing and measuring the initial text viewport;
+steady scrolling is below an 8.3 ms 120 Hz frame. Do not trade that first layout for retained
+off-screen views or guessed row heights: both would weaken the working-set and exact-navigation
+boundaries elsewhere in this document.
+
 The exact fixture also spends about 49 ms reducing provider events into tool summaries, edit
 previews and conversation rows. That reduction is pure model work and now runs on a
 user-initiated worker; the main actor installs its finished `ConversationTimeline` with one
@@ -1199,10 +1238,11 @@ provider file triggers a newer replacement before it finishes.
 
 The load-bearing boundary is two levels of virtualization. The selected transcript is an
 `NSTableView`, collapsed tool runs do not construct their individual rows, and a long assistant
-answer is split at parsed Markdown block boundaries so one visible paragraph or table does not
-attach the whole answer's constraint tree. Disclosure state belongs to the controller and rows
-are inserted or removed from the cheap presentation model. Do not replace this with hidden stack
-children: hidden AppKit views still participate in the layout engine.
+answer is split at structural source-block boundaries without styling it. Only a materialized
+paragraph or table is parsed and drawn, and the cache remains bounded. A width-known document
+table is a directly placed grid, not nested stacks. Disclosure state belongs to the controller
+and rows are inserted or removed from the cheap presentation model. Do not replace this with
+hidden stack children: hidden AppKit views still participate in the layout engine.
 
 ## Native conversation stress target
 

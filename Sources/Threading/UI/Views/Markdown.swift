@@ -113,6 +113,36 @@ enum Markdown {
         return blocks
     }
 
+    /// Splits a document at the same block boundaries as `parse` without constructing fonts,
+    /// attributed strings, or views for content outside the viewport. Virtualized transcripts
+    /// keep these small source values as their presentation model and style a block only when
+    /// AppKit asks for its row.
+    static func sourceBlocks(_ text: String) -> [String] {
+        let lines = text.components(separatedBy: "\n")
+        var blocks: [String] = []
+        var index = 0
+
+        while index < lines.count {
+            if trimmed(lines, index).isEmpty {
+                index += 1
+                continue
+            }
+
+            let end = sourceBlockEnd(lines, index)
+            // Every non-empty line should be either a recognized block or a paragraph. Keep a
+            // recovery path anyway: this parser consumes provider text, and a future reader bug
+            // must render one line plainly rather than terminate the app.
+            guard end > index else {
+                blocks.append(lines[index])
+                index += 1
+                continue
+            }
+            blocks.append(lines[index..<end].joined(separator: "\n"))
+            index = end
+        }
+        return blocks
+    }
+
     private static func firstMatch(
         _ lines: [String],
         _ index: Int,
@@ -122,6 +152,62 @@ enum Markdown {
             if let result = reader(lines, index, style) { return result }
         }
         return nil
+    }
+
+    /// The structural half of the reader table. Keep this in the same type as `parse`: adding a
+    /// new Markdown block means its source boundary and styled reader must change together.
+    private static func sourceBlockEnd(_ lines: [String], _ index: Int) -> Int {
+        let line = trimmed(lines, index)
+
+        if line.hasPrefix("```") {
+            var cursor = index + 1
+            while cursor < lines.count, !trimmed(lines, cursor).hasPrefix("```") {
+                cursor += 1
+            }
+            return min(cursor + 1, lines.count)
+        }
+
+        if isTableStart(lines, index) {
+            var cursor = index + 2
+            while cursor < lines.count, tableCells(lines[cursor]) != nil {
+                cursor += 1
+            }
+            return cursor
+        }
+
+        if headingLevel(line) != nil { return index + 1 }
+
+        if line.hasPrefix("> ") {
+            var cursor = index + 1
+            while cursor < lines.count, trimmed(lines, cursor).hasPrefix("> ") {
+                cursor += 1
+            }
+            return cursor
+        }
+
+        if isBullet(line) {
+            var cursor = index + 1
+            while cursor < lines.count, isBullet(trimmed(lines, cursor)) {
+                cursor += 1
+            }
+            return cursor
+        }
+
+        if orderedContent(line) != nil {
+            var cursor = index + 1
+            while cursor < lines.count, orderedContent(trimmed(lines, cursor)) != nil {
+                cursor += 1
+            }
+            return cursor
+        }
+
+        var cursor = index + 1
+        while cursor < lines.count {
+            let next = trimmed(lines, cursor)
+            if next.isEmpty || startsBlock(next) || isTableStart(lines, cursor) { break }
+            cursor += 1
+        }
+        return cursor
     }
 
     // MARK: - Block Readers

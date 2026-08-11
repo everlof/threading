@@ -39,6 +39,18 @@ final class MarkdownTests: XCTestCase {
         return false
     }
 
+    private func kind(of block: MarkdownBlock) -> String {
+        switch block {
+        case .paragraph: "paragraph"
+        case .heading: "heading"
+        case .bullets: "bullets"
+        case .ordered: "ordered"
+        case .code: "code"
+        case .quote: "quote"
+        case .table: "table"
+        }
+    }
+
     // MARK: - Precedence
 
     /// The ordering that matters most. Inside a fence the text is content, not syntax: a shell
@@ -173,5 +185,41 @@ final class MarkdownTests: XCTestCase {
         XCTAssertEqual(parsed.count, 1)
         XCTAssertTrue(isCode(parsed.first))
         XCTAssertEqual(text(of: parsed.first), "cut off here")
+    }
+
+    /// Virtualized transcripts retain raw blocks and style only the viewport. The structural
+    /// splitter must therefore consume exactly the same units, in the same precedence order,
+    /// as the eager parser it replaces outside the viewport.
+    func testSourceBlocksRoundTripThroughTheStyledParser() {
+        let source = """
+        # Heading
+
+        First prose line
+        second prose line
+
+        > quoted
+        > - still quoted
+
+        - one
+        - two
+
+        1. first
+        2. second
+
+        | Name | Value |
+        | :--- | ----: |
+        | pipe | `a | b` |
+
+        ```sh
+        # not a heading
+        rm *.log
+        ```
+        """
+
+        let eager = blocks(source)
+        let deferred = Markdown.sourceBlocks(source).flatMap(blocks)
+
+        XCTAssertEqual(deferred.map(kind), eager.map(kind))
+        XCTAssertEqual(deferred.map { text(of: $0) }, eager.map { text(of: $0) })
     }
 }

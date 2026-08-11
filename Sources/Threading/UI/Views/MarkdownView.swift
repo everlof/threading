@@ -71,6 +71,17 @@ final class MarkdownView: NSStackView {
     /// Virtualized transcript surfaces use this seam so a long assistant answer can retain its
     /// cheap block model while AppKit owns only the block views around the viewport.
     static func blockView(for block: MarkdownBlock, style: MarkdownStyle) -> NSView {
+        blockView(for: block, style: style, availableWidth: nil)
+    }
+
+    /// Width-aware virtual rows can hand a table its settled readable width up front. The
+    /// design component then lays out its fixed grid directly instead of building a nested
+    /// Auto Layout tree to rediscover the same geometry on every scroll tick.
+    static func blockView(
+        for block: MarkdownBlock,
+        style: MarkdownStyle,
+        availableWidth: CGFloat?
+    ) -> NSView {
         switch block {
         case .paragraph(let text), .heading(let text):
             return label(text)
@@ -88,6 +99,15 @@ final class MarkdownView: NSStackView {
             return quote(text, style: style)
 
         case .table(let model):
+            if let availableWidth, availableWidth > 0 {
+                return ThemedDocumentTableView(
+                    headers: model.headers,
+                    rows: model.rows,
+                    alignments: model.alignments,
+                    availableWidth: availableWidth,
+                    minimumColumnWidth: MarkdownDefaults.tableColumnWidth
+                )
+            }
             return table(model, style: style)
         }
     }

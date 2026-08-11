@@ -9,6 +9,20 @@ extension Markdown {
     /// rest of the line — half-typed emphasis is common while a message is still streaming.
     static func inline(_ text: String, style: MarkdownStyle, heading: Bool = false) -> NSAttributedString {
         let baseFont = heading ? headingFont(style) : style.font
+        // Most assistant prose has no inline syntax. Avoid allocating a grapheme array, a
+        // scanner and a mutable attributed string merely to append one plain run. UTF-8
+        // continuation bytes cannot alias these ASCII markers, so the byte check is both
+        // Unicode-safe and substantially cheaper than materializing `[Character]`.
+        let containsMarkupCandidate = text.utf8.contains { byte in
+            byte == 0x60 || byte == 0x2A || byte == 0x5F || byte == 0x5B
+        }
+        if !containsMarkupCandidate {
+            return NSAttributedString(string: text, attributes: [
+                .font: baseFont,
+                .foregroundColor: style.textColor
+            ])
+        }
+
         let result = NSMutableAttributedString()
 
         var scanner = InlineScanner(text: Array(text))

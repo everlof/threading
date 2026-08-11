@@ -7,6 +7,25 @@ import AppKit
 /// messages, markdown, thinking, tool calls, results, and notices keep the parent's treatment.
 final class SubagentTranscriptViewController: NSViewController {
 
+#if DEBUG
+    struct RenderPhaseDurations {
+        var summaryNanoseconds: UInt64 = 0
+        var presentationNanoseconds: UInt64 = 0
+        var reloadNanoseconds: UInt64 = 0
+        var summaryRebuilds = 0
+    }
+
+    struct RowMaterializationDurations {
+        var count = 0
+        var markdownCount = 0
+        var totalNanoseconds: UInt64 = 0
+        var hostNanoseconds: UInt64 = 0
+        var contentNanoseconds: UInt64 = 0
+        var markdownContentNanoseconds: UInt64 = 0
+        var installNanoseconds: UInt64 = 0
+    }
+#endif
+
     // MARK: - Properties
 
     private let summaryView = SubagentSummaryView()
@@ -52,7 +71,7 @@ final class SubagentTranscriptViewController: NSViewController {
         enum Content {
             case summary
             case timeline(Int)
-            case markdown(MarkdownBlock)
+            case markdown(source: String)
             case divider
             case toolFold(indices: [Int])
         }
@@ -70,7 +89,14 @@ final class SubagentTranscriptViewController: NSViewController {
     private var expandedToolGroups: Set<Int> = []
     private var expandedToolRows: Set<Int> = []
     private var expandedUserRows: Set<Int> = []
-    private var isSynchronizingSelection = false
+    private struct CachedMarkdownBlock {
+        let source: String
+        let block: MarkdownBlock
+    }
+    private static let markdownBlockCacheLimit = 64
+    private var markdownBlockCache: [PresentationID: CachedMarkdownBlock] = [:]
+    private var markdownBlockRecency: [PresentationID] = []
+    private var cachedMarkdownStyle: MarkdownStyle?
     private var hasRendered = false
     private let appEvents = AppEventObservations()
 
@@ -78,6 +104,11 @@ final class SubagentTranscriptViewController: NSViewController {
     private(set) var renderedRowCount = 0
     var renderedPresentationCount: Int { presentationItems.count }
     var materializedPresentationCount: Int { materializedPresentationIDs.count }
+    var cachedMarkdownBlockCount: Int { markdownBlockCache.count }
+#if DEBUG
+    private(set) var lastRenderPhaseDurations = RenderPhaseDurations()
+    private(set) var rowMaterializationDurations = RowMaterializationDurations()
+#endif
     var transcriptScrollView: ThemedScrollView { scrollView }
     var transcriptTableView: ThemedTableView { tableView }
     var onSelectAgent: ((String) -> Void)?
@@ -96,11 +127,13 @@ final class SubagentTranscriptViewController: NSViewController {
 
         summaryView.selectionStyle = .navigation
         summaryView.onSelect = { [weak self] threadID in
-            guard let self, !self.isSynchronizingSelection, let threadID else { return }
+            guard let self, let threadID else { return }
             self.select(threadID, notify: true)
         }
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             guard let self, let agent = self.agent else { return }
+            self.cachedMarkdownStyle = nil
+            self.clearMarkdownBlockCache()
             self.render(agent, shouldFollow: false)
         }
 
@@ -170,6 +203,7 @@ final class SubagentTranscriptViewController: NSViewController {
             expandedToolGroups.removeAll(keepingCapacity: true)
             expandedToolRows.removeAll(keepingCapacity: true)
             expandedUserRows.removeAll(keepingCapacity: true)
+            clearMarkdownBlockCache()
         }
         agent = selected
         representedThreadID = selected?.descriptor.threadID
@@ -196,17 +230,58 @@ final class SubagentTranscriptViewController: NSViewController {
                 "presented": "\(presentationItems.count)"
             ])
         }
+
+#if DEBUG
+        let summaryStarted = DispatchTime.now().uptimeNanoseconds
+        let summaryRebuildsBefore = summaryView.rowRebuildCount
+#endif
+        let summarySpan = PerformanceRecorder.shared.begin(
+            "subagent.transcript.render-summary",
+            category: "conversation"
+        )
         summaryView.update(
             items: agents.map(summaryItem),
             workingCount: workingCount,
-            doneCount: doneCount
+            doneCount: doneCount,
+            selectedID: agent.descriptor.threadID
         )
-        isSynchronizingSelection = true
-        summaryView.setSelection(agent.descriptor.threadID)
-        isSynchronizingSelection = false
+        summarySpan.end(metadata: ["agents": "\(agents.count)"])
+#if DEBUG
+        let summaryEnded = DispatchTime.now().uptimeNanoseconds
+#endif
+
+        let presentationSpan = PerformanceRecorder.shared.begin(
+            "subagent.transcript.build-presentation",
+            category: "conversation"
+        )
         rebuildPresentation(for: agent)
+        presentationSpan.end(metadata: [
+            "rows": "\(agent.conversation.rows.count)",
+            "presented": "\(presentationItems.count)"
+        ])
+#if DEBUG
+        let presentationEnded = DispatchTime.now().uptimeNanoseconds
+#endif
+
+        let reloadSpan = PerformanceRecorder.shared.begin(
+            "subagent.transcript.reload-table",
+            category: "conversation"
+        )
         materializedPresentationIDs.removeAll(keepingCapacity: true)
+#if DEBUG
+        rowMaterializationDurations = RowMaterializationDurations()
+#endif
         tableView.reloadData()
+        reloadSpan.end(metadata: ["presented": "\(presentationItems.count)"])
+#if DEBUG
+        let reloadEnded = DispatchTime.now().uptimeNanoseconds
+        lastRenderPhaseDurations = RenderPhaseDurations(
+            summaryNanoseconds: summaryEnded &- summaryStarted,
+            presentationNanoseconds: presentationEnded &- summaryEnded,
+            reloadNanoseconds: reloadEnded &- presentationEnded,
+            summaryRebuilds: summaryView.rowRebuildCount - summaryRebuildsBefore
+        )
+#endif
 
         hasRendered = true
         if shouldFollow { scrollToBottom() }
@@ -237,17 +312,17 @@ final class SubagentTranscriptViewController: NSViewController {
                 return
             }
 
-            let blocks = Markdown.parse(markdown, style: .assistant)
-            if blocks.isEmpty {
+            let sources = Markdown.sourceBlocks(markdown)
+            if sources.isEmpty {
                 presentationItems.append(PresentationItem(
                     id: .timeline(index),
                     content: .timeline(index)
                 ))
             } else {
-                presentationItems.append(contentsOf: blocks.enumerated().map { blockIndex, block in
+                presentationItems.append(contentsOf: sources.enumerated().map { blockIndex, source in
                     PresentationItem(
                         id: .markdown(row: index, block: blockIndex),
-                        content: .markdown(block)
+                        content: .markdown(source: source)
                     )
                 })
             }
@@ -303,8 +378,47 @@ final class SubagentTranscriptViewController: NSViewController {
     private func clear() {
         presentationItems.removeAll(keepingCapacity: true)
         materializedPresentationIDs.removeAll(keepingCapacity: true)
+        clearMarkdownBlockCache()
         tableView.reloadData()
         hasRendered = false
+    }
+
+    private func markdownBlock(id: PresentationID, source: String) -> MarkdownBlock? {
+        if let cached = markdownBlockCache[id], cached.source == source {
+            touchMarkdownBlock(id)
+            return cached.block
+        }
+
+        guard let block = Markdown.parse(source, style: markdownStyle).first else { return nil }
+        markdownBlockCache[id] = CachedMarkdownBlock(source: source, block: block)
+        touchMarkdownBlock(id)
+        while markdownBlockRecency.count > Self.markdownBlockCacheLimit {
+            let evicted = markdownBlockRecency.removeFirst()
+            markdownBlockCache.removeValue(forKey: evicted)
+        }
+        return block
+    }
+
+    /// Font and colour resolution is pane state, not row state. A theme event invalidates this
+    /// snapshot together with the attributed-block cache; every row in one pass then shares the
+    /// same resolved palette instead of walking the typography/theme layers twice per block.
+    private var markdownStyle: MarkdownStyle {
+        if let cachedMarkdownStyle { return cachedMarkdownStyle }
+        let resolved = MarkdownStyle.assistant
+        cachedMarkdownStyle = resolved
+        return resolved
+    }
+
+    private func touchMarkdownBlock(_ id: PresentationID) {
+        if let existing = markdownBlockRecency.firstIndex(of: id) {
+            markdownBlockRecency.remove(at: existing)
+        }
+        markdownBlockRecency.append(id)
+    }
+
+    private func clearMarkdownBlockCache() {
+        markdownBlockCache.removeAll(keepingCapacity: true)
+        markdownBlockRecency.removeAll(keepingCapacity: true)
     }
 
     private var isNearBottom: Bool {
@@ -478,6 +592,9 @@ extension SubagentTranscriptViewController: NSTableViewDataSource, NSTableViewDe
     ) -> NSView? {
         guard presentationItems.indices.contains(tableRow) else { return nil }
         let item = presentationItems[tableRow]
+#if DEBUG
+        let mountStarted = DispatchTime.now().uptimeNanoseconds
+#endif
         let identifier = NSUserInterfaceItemIdentifier("SubagentTranscriptVirtualRow")
         let host = tableView.makeView(
             withIdentifier: identifier,
@@ -485,6 +602,9 @@ extension SubagentTranscriptViewController: NSTableViewDataSource, NSTableViewDe
         ) as? ConversationVirtualRowHost ?? ConversationVirtualRowHost()
         host.identifier = identifier
         host.setColumnWidth(ConversationVirtualRowHost.columnWidth(of: tableView))
+#if DEBUG
+        let hostEnded = DispatchTime.now().uptimeNanoseconds
+#endif
 
         let content: NSView
         switch item.content {
@@ -492,13 +612,32 @@ extension SubagentTranscriptViewController: NSTableViewDataSource, NSTableViewDe
             content = summaryView
         case .timeline(let index):
             content = rowView(at: index)
-        case .markdown(let block):
-            content = MarkdownView.blockView(for: block, style: .assistant)
+        case .markdown(let source):
+            if let block = markdownBlock(id: item.id, source: source) {
+                let availableWidth = min(
+                    Design.Size.readableWidth,
+                    max(
+                        1,
+                        ConversationVirtualRowHost.columnWidth(of: tableView)
+                            - Design.Spacing.inset * 2
+                    )
+                )
+                content = MarkdownView.blockView(
+                    for: block,
+                    style: markdownStyle,
+                    availableWidth: availableWidth
+                )
+            } else {
+                content = MarkdownView(markdown: source)
+            }
         case .divider:
             content = ConversationRowView.turnDivider()
         case .toolFold(let indices):
             content = toolFold(indices: indices)
         }
+#if DEBUG
+        let contentEnded = DispatchTime.now().uptimeNanoseconds
+#endif
 
         materializedPresentationIDs.insert(item.id)
         let bottomInset = tableRow == presentationItems.count - 1
@@ -513,6 +652,18 @@ extension SubagentTranscriptViewController: NSTableViewDataSource, NSTableViewDe
             },
             onMeasuredHeight: { _ in }
         )
+#if DEBUG
+        let installEnded = DispatchTime.now().uptimeNanoseconds
+        rowMaterializationDurations.count += 1
+        rowMaterializationDurations.totalNanoseconds += installEnded &- mountStarted
+        rowMaterializationDurations.hostNanoseconds += hostEnded &- mountStarted
+        rowMaterializationDurations.contentNanoseconds += contentEnded &- hostEnded
+        rowMaterializationDurations.installNanoseconds += installEnded &- contentEnded
+        if case .markdown = item.content {
+            rowMaterializationDurations.markdownCount += 1
+            rowMaterializationDurations.markdownContentNanoseconds += contentEnded &- hostEnded
+        }
+#endif
         return host
     }
 

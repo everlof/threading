@@ -1160,6 +1160,13 @@ run_subagent_stress() {
         -XCTest ThreadingTests.ConversationRenderTests/testStressSubagentTranscriptWhenEnabled \
         "${test_bundle}"
   ) 2>&1 | tee "${output_directory}/subagent-stress.log"
+
+  if ! rg -q \
+    "THREADING_PERF subagent-transcript .*summary_rebuilds=1 .*styled_markdown_during_render=0" \
+    "${output_directory}/subagent-stress.log"; then
+    echo "Subagents stress did not preserve lazy Markdown and single-pass navigation." >&2
+    return 1
+  fi
 }
 
 run_sidebar_stress() {
