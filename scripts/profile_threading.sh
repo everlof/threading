@@ -1264,7 +1264,8 @@ run_attachment_stress() {
     # what widening costs on the same buffer. Matching, existence checks and containment run on
     # the worker; newly visible rows are admitted on the main actor, where wide scope may take
     # custody of bytes. The fixture reports scheduling, resolution-worker, custody-worker,
-    # main-actor apply and end-to-end time separately.
+    # main-actor apply and end-to-end time separately. Narrow rows also time the pane's async
+    # scope widening; outside/wide rows replace a full generation to expose eviction cleanup.
     local workloads=(
       "absent:narrow:1000"
       "mixed:narrow:1000"

@@ -318,6 +318,8 @@ final class SessionAttachmentsViewController: NSViewController {
     private var scopeBandConstraints: [NSLayoutConstraint] = []
     private var footerToPaneBottom: [NSLayoutConstraint] = []
     private var footerToScopeBand: [NSLayoutConstraint] = []
+    private var scopeAdmissionTask: Task<Void, Never>?
+    private var scopeAdmissionGeneration = 0
 
     // MARK: - Initialization
 
@@ -351,6 +353,10 @@ final class SessionAttachmentsViewController: NSViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        scopeAdmissionTask?.cancel()
     }
 
     // MARK: - Lifecycle
@@ -582,11 +588,13 @@ final class SessionAttachmentsViewController: NSViewController {
         // window — leaves this session's refused paths in hand, and they are admitted here so
         // the answer the user gave is the answer the pane shows, not the answer it shows next
         // time an agent happens to print the path again.
-        if AppSettings.shared.includesAttachmentsOutsideProject,
-           !SessionAttachmentStore.shared.withheldReferences(for: sessionID).isEmpty {
-            SessionAttachmentStore.shared.admitWithheldFilesOutsideProject(for: sessionID)
+        if AppSettings.shared.includesAttachmentsOutsideProject {
+            beginScopeAdmissionIfNeeded()
+        } else {
+            cancelScopeAdmission()
         }
-        allAttachments = SessionAttachmentStore.shared.attachments(for: sessionID)
+        let listSnapshot = SessionAttachmentStore.shared.listSnapshot(for: sessionID)
+        allAttachments = listSnapshot.attachments
         // A file someone explicitly asked to be shown outranks the filter. The alternative is
         // the pane answering "show me this picture" with the list it was already showing, which
         // reads as the request having been dropped — and the filter is a convenience, while this
@@ -609,7 +617,7 @@ final class SessionAttachmentsViewController: NSViewController {
         updateListHeight()
         emptyLabel.stringValue = emptyStateMessage()
         updateFilterControl()
-        updateScopeBand()
+        updateScopeBand(count: listSnapshot.countOfFilesOutsideProject)
 
         let hasAttachments = !attachments.isEmpty
         headerRow.isHidden = allAttachments.isEmpty
@@ -701,8 +709,7 @@ final class SessionAttachmentsViewController: NSViewController {
     /// session that never names one is never asked about them, which is the point: the setting
     /// is a real safety rule, and a rule advertised where it costs nothing teaches people to
     /// turn it off before they have ever needed it.
-    private func updateScopeBand() {
-        let count = SessionAttachmentStore.shared.countOfFilesOutsideProject(for: sessionID)
+    private func updateScopeBand(count: Int) {
         let isShowing = AppSettings.shared.includesAttachmentsOutsideProject
         let wasHidden = scopeBand.isHidden
 
@@ -737,12 +744,51 @@ final class SessionAttachmentsViewController: NSViewController {
         )
     }
 
-    /// Flips the app-wide scope, then takes custody of what this session already refused.
+    /// Starts the pane's one outstanding custody job. The generation is part of the authority:
+    /// changing the setting again cancels the visible request, and a worker finishing afterward
+    /// may discard its unpublished slots but may not publish them into this pane.
+    private func beginScopeAdmissionIfNeeded() {
+        guard scopeAdmissionTask == nil,
+              AppSettings.shared.includesAttachmentsOutsideProject,
+              !SessionAttachmentStore.shared.withheldReferences(for: sessionID).isEmpty else {
+            return
+        }
+
+        scopeAdmissionGeneration &+= 1
+        let generation = scopeAdmissionGeneration
+        let sessionID = sessionID
+        scopeAdmissionTask = Task { [weak self] in
+            _ = await SessionAttachmentStore.shared.admitWithheldFilesOutsideProjectAsync(
+                for: sessionID,
+                shouldAdmit: { [weak self] in
+                    guard let self else { return false }
+                    return self.scopeAdmissionGeneration == generation
+                        && AppSettings.shared.includesAttachmentsOutsideProject
+                }
+            )
+            guard let self, self.scopeAdmissionGeneration == generation else { return }
+            self.scopeAdmissionTask = nil
+            // Admission announces when it publishes rows. A failed or now-missing path publishes
+            // nothing, so this refresh also clears the completed attempt from the scope band.
+            self.refresh()
+        }
+    }
+
+    private func cancelScopeAdmission() {
+        guard let task = scopeAdmissionTask else { return }
+        scopeAdmissionGeneration &+= 1
+        scopeAdmissionTask = nil
+        task.cancel()
+    }
+
+    /// Flips the app-wide scope, then schedules custody of what this session already refused.
     @objc private func toggleScope() {
         let next = !AppSettings.shared.includesAttachmentsOutsideProject
         AppSettings.shared.includesAttachmentsOutsideProject = next
         if next {
-            SessionAttachmentStore.shared.admitWithheldFilesOutsideProject(for: sessionID)
+            beginScopeAdmissionIfNeeded()
+        } else {
+            cancelScopeAdmission()
         }
         refresh()
     }

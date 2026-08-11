@@ -179,6 +179,11 @@ final class SessionAttachmentStore {
         )
     }
 
+    struct ListSnapshot {
+        let attachments: [SessionAttachment]
+        let countOfFilesOutsideProject: Int
+    }
+
     private struct StagedCopy: Sendable {
         let source: URL
         let url: URL
@@ -339,31 +344,71 @@ final class SessionAttachmentStore {
         projectRoot: URL,
         shouldAdmit: @escaping @MainActor () -> Bool = { true }
     ) async -> ScannedRecordResult {
-        let firstMainStarted = DispatchTime.now().uptimeNanoseconds
+        let insideMainStarted = DispatchTime.now().uptimeNanoseconds
         guard shouldAdmit() else {
+            return ScannedRecordResult(
+                attachments: [],
+                custodyWorkerNanoseconds: 0,
+                mainActorNanoseconds: DispatchTime.now().uptimeNanoseconds - insideMainStarted
+            )
+        }
+        let inside = recordResolvedInsideProject(
+            resolution.insideProject,
+            sessionID: sessionID,
+            projectRoot: resolution.resolvedProjectRoot
+                ?? projectRoot.standardizedFileURL.resolvingSymlinksInPath()
+        )
+        let insideMainNanoseconds = DispatchTime.now().uptimeNanoseconds - insideMainStarted
+        let outside = await stageAndAdmitOutsideProject(
+            resolution.outsideProject,
+            sessionID: sessionID,
+            shouldAdmit: shouldAdmit
+        )
+        return ScannedRecordResult(
+            attachments: inside + outside.attachments,
+            custodyWorkerNanoseconds: outside.custodyWorkerNanoseconds,
+            mainActorNanoseconds: insideMainNanoseconds + outside.mainActorNanoseconds
+        )
+    }
+
+    /// Takes custody of paths remembered while the scope was narrow without copying them in the
+    /// button action. The caller's predicate binds the work to the pane/settings generation that
+    /// requested it, so hiding the rows again while staging cannot publish a stale answer.
+    func admitWithheldFilesOutsideProjectAsync(
+        for sessionID: SessionID,
+        shouldAdmit: @escaping @MainActor () -> Bool = { true }
+    ) async -> ScannedRecordResult {
+        guard allowsFilesOutsideProject(),
+              let withheld = withheldBySession[sessionID],
+              !withheld.isEmpty else {
+            return .empty
+        }
+        return await stageAndAdmitOutsideProject(
+            withheld.map { URL(fileURLWithPath: $0.path) },
+            sessionID: sessionID,
+            shouldAdmit: shouldAdmit
+        )
+    }
+
+    /// The worker-owned half shared by live scans and the pane's explicit scope widening.
+    private func stageAndAdmitOutsideProject(
+        _ outsideProject: [URL],
+        sessionID: SessionID,
+        shouldAdmit: @escaping @MainActor () -> Bool
+    ) async -> ScannedRecordResult {
+        let firstMainStarted = DispatchTime.now().uptimeNanoseconds
+
+        guard shouldAdmit(), !outsideProject.isEmpty else {
             return ScannedRecordResult(
                 attachments: [],
                 custodyWorkerNanoseconds: 0,
                 mainActorNanoseconds: DispatchTime.now().uptimeNanoseconds - firstMainStarted
             )
         }
-        var made = record(
-            urls: resolution.insideProject,
-            sessionID: sessionID,
-            projectRoot: projectRoot
-        )
-
-        guard !resolution.outsideProject.isEmpty else {
-            return ScannedRecordResult(
-                attachments: made,
-                custodyWorkerNanoseconds: 0,
-                mainActorNanoseconds: DispatchTime.now().uptimeNanoseconds - firstMainStarted
-            )
-        }
         guard allowsFilesOutsideProject() else {
-            noteWithheld(resolution.outsideProject, for: sessionID)
+            noteWithheld(outsideProject, for: sessionID)
             return ScannedRecordResult(
-                attachments: made,
+                attachments: [],
                 custodyWorkerNanoseconds: 0,
                 mainActorNanoseconds: DispatchTime.now().uptimeNanoseconds - firstMainStarted
             )
@@ -372,12 +417,12 @@ final class SessionAttachmentStore {
         loadIfNeeded(sessionID)
         let timestamp = now()
         let admissible = Array(
-            resolution.outsideProject.suffix(SessionAttachmentDefaults.maximumPerSession)
+            outsideProject.suffix(SessionAttachmentDefaults.maximumPerSession)
         )
         guard let root = copiesRoot(for: sessionID) else {
             removeWithheldAttempts(admissible, for: sessionID)
             return ScannedRecordResult(
-                attachments: made,
+                attachments: [],
                 custodyWorkerNanoseconds: 0,
                 mainActorNanoseconds: DispatchTime.now().uptimeNanoseconds - firstMainStarted
             )
@@ -398,7 +443,7 @@ final class SessionAttachmentStore {
         guard !Task.isCancelled, shouldAdmit() else {
             discard(staged)
             return ScannedRecordResult(
-                attachments: made,
+                attachments: [],
                 custodyWorkerNanoseconds: staged.workerNanoseconds,
                 mainActorNanoseconds: (firstMainEnded - firstMainStarted)
                     + (DispatchTime.now().uptimeNanoseconds - secondMainStarted)
@@ -406,9 +451,9 @@ final class SessionAttachmentStore {
         }
         guard allowsFilesOutsideProject() else {
             discard(staged)
-            noteWithheld(resolution.outsideProject, for: sessionID)
+            noteWithheld(outsideProject, for: sessionID)
             return ScannedRecordResult(
-                attachments: made,
+                attachments: [],
                 custodyWorkerNanoseconds: staged.workerNanoseconds,
                 mainActorNanoseconds: (firstMainEnded - firstMainStarted)
                     + (DispatchTime.now().uptimeNanoseconds - secondMainStarted)
@@ -422,9 +467,8 @@ final class SessionAttachmentStore {
             root: root,
             referencedAt: timestamp
         )
-        made += outside
         return ScannedRecordResult(
-            attachments: made,
+            attachments: outside,
             custodyWorkerNanoseconds: staged.workerNanoseconds,
             mainActorNanoseconds: (firstMainEnded - firstMainStarted)
                 + (DispatchTime.now().uptimeNanoseconds - secondMainStarted)
@@ -529,24 +573,38 @@ final class SessionAttachmentStore {
         referencedAt: Date
     ) -> [SessionAttachment] {
         var made: [SessionAttachment] = []
-        for copy in staged {
-            let existing = attachmentsBySession[sessionID]?.first {
-                !$0.isImmutableSnapshot && $0.sourcePath == copy.source.path
-                    && AttachmentReferenceDetector.contains($0.url, inside: root)
+        var existingBySource: [String: SessionAttachment] = [:]
+        for existing in attachmentsBySession[sessionID] ?? [] where !existing.isImmutableSnapshot {
+            guard existingBySource[existing.sourcePath] == nil,
+                  Self.ownedCopySlot(for: existing, in: root) != nil else {
+                continue
             }
+            existingBySource[existing.sourcePath] = existing
+        }
+        for copy in staged {
+            let existing = existingBySource[copy.source.path]
 
             let destination: URL
             let relativePath: String
             let id: String
+            let origin: SessionAttachment.Origin
+            let isOutsideProject: Bool
             if let existing {
-                destination = existing.url
+                destination = root.appendingPathComponent(existing.relativePath)
                 relativePath = existing.relativePath
                 id = existing.id
+                // A later textual mention does not turn an explicit user/agent handoff into a
+                // scope-governed discovery. Identity includes the authority under which the row
+                // entered the store, not only its opaque remote key.
+                origin = existing.origin
+                isOutsideProject = existing.isOutsideProject
                 guard install(copy, over: destination) else { continue }
             } else {
                 destination = copy.url
                 relativePath = copy.relativePath
                 id = UUID().uuidString.lowercased()
+                origin = .agent
+                isOutsideProject = true
                 guard fileManager.fileExists(atPath: destination.path) else { continue }
             }
 
@@ -558,8 +616,8 @@ final class SessionAttachmentStore {
                 relativePath: relativePath,
                 sourcePath: copy.source.path,
                 kind: copy.kind,
-                origin: .agent,
-                isOutsideProject: true,
+                origin: origin,
+                isOutsideProject: isOutsideProject,
                 referencedAt: referencedAt
             ))
         }
@@ -567,12 +625,49 @@ final class SessionAttachmentStore {
         // State first, announcement second. `admit` posts synchronously and an open pane may
         // immediately ask to admit withheld rows again.
         removeWithheldAttempts(attempted, for: sessionID)
-        return admit(made, for: sessionID)
+        return admit(made, for: sessionID, discardingCopiesOnWorker: true)
     }
 
     private func removeWithheldAttempts(_ urls: [URL], for sessionID: SessionID) {
         let attempted = Set(urls.map(\.path))
         withheldBySession[sessionID]?.removeAll { attempted.contains($0.path) }
+    }
+
+    /// Detector resolutions have already proved these URLs regular, supported and contained on
+    /// their worker. Repeating those `stat`s on the actor made the mixed cold edge pay for every
+    /// project row twice. Admission still rechecks pure containment and derives its own opaque
+    /// row; the authoritative read path handles a file disappearing during the handoff.
+    private func recordResolvedInsideProject(
+        _ urls: [URL],
+        sessionID: SessionID,
+        projectRoot: URL
+    ) -> [SessionAttachment] {
+        let timestamp = now()
+        let rootPrefix = projectRoot.path.hasSuffix("/")
+            ? projectRoot.path
+            : projectRoot.path + "/"
+        let made: [SessionAttachment] = urls
+            .suffix(SessionAttachmentDefaults.maximumPerSession)
+            .compactMap { url -> SessionAttachment? in
+                guard AttachmentReferenceDetector.contains(url, inside: projectRoot),
+                      let kind = AttachmentReferenceDetector.kind(for: url) else {
+                    return nil
+                }
+                let relativePath = String(url.path.dropFirst(rootPrefix.count))
+                guard !relativePath.isEmpty else { return nil }
+                return SessionAttachment(
+                    sessionID: sessionID,
+                    id: UUID().uuidString.lowercased(),
+                    root: projectRoot,
+                    url: url,
+                    relativePath: relativePath,
+                    sourcePath: url.path,
+                    kind: kind,
+                    origin: .agent,
+                    referencedAt: timestamp
+                )
+            }
+        return admit(made, for: sessionID)
     }
 
     /// Only a same-source race reaches this path. The expensive copy already happened; these
@@ -854,13 +949,7 @@ final class SessionAttachmentStore {
     /// what was refused plus anything admitted while the scope was wide and now hidden; under
     /// the wide scope it counts what narrowing would take away.
     func countOfFilesOutsideProject(for sessionID: SessionID) -> Int {
-        let listed = validated(sessionID).filter(\.isOutsideProject)
-        guard !allowsFilesOutsideProject() else { return listed.count }
-
-        let alreadyCounted = Set(listed.map(\.sourcePath))
-        let withheld = (withheldBySession[sessionID] ?? [])
-            .filter { !alreadyCounted.contains($0.path) }
-        return listed.count + withheld.count
+        listSnapshot(for: sessionID).countOfFilesOutsideProject
     }
 
     /// Everything the narrow scope refused for this session, newest first.
@@ -891,37 +980,74 @@ final class SessionAttachmentStore {
     /// Files newest-first, capped, persisted, announced — the half both doors share.
     private func admit(
         _ made: [SessionAttachment],
-        for sessionID: SessionID
+        for sessionID: SessionID,
+        discardingCopiesOnWorker: Bool = false
     ) -> [SessionAttachment] {
         guard !made.isEmpty else { return [] }
 
         // Loaded first, so a reference arriving before the pane was ever opened lands on top
         // of the persisted history rather than replacing it.
         loadIfNeeded(sessionID)
-        var current = attachmentsBySession[sessionID] ?? []
-        for attachment in made {
-            let superseded = attachment.isImmutableSnapshot
-                ? []
-                : current.filter {
-                    !$0.isImmutableSnapshot && $0.sourcePath == attachment.sourcePath
-                }
-            if !attachment.isImmutableSnapshot {
-                current.removeAll {
-                    !$0.isImmutableSnapshot && $0.sourcePath == attachment.sourcePath
-                }
+        let current = attachmentsBySession[sessionID] ?? []
+        var discarded: [SessionAttachment] = []
+
+        // Sequentially filtering and front-inserting one row at a time made a full replacement
+        // quadratic twice over: every new source scanned the growing list to prove it was new,
+        // then scanned it again to remove nothing. Derive the same winners once. The last mutable
+        // row for a source wins; immutable snapshots all survive; reversing the survivors is the
+        // exact chronology produced by repeated insert-at-front.
+        var winningMutableIndex: [String: Int] = [:]
+        for (index, attachment) in made.enumerated() where !attachment.isImmutableSnapshot {
+            winningMutableIndex[attachment.sourcePath] = index
+        }
+        let survivingMade = made.enumerated().compactMap { index, attachment in
+            attachment.isImmutableSnapshot || winningMutableIndex[attachment.sourcePath] == index
+                ? attachment
+                : nil
+        }
+        let winnersBySource = Dictionary(
+            uniqueKeysWithValues: survivingMade.lazy
+                .filter { !$0.isImmutableSnapshot }
+                .map { ($0.sourcePath, $0) }
+        )
+        let survivingCurrent = current.filter { attachment in
+            guard !attachment.isImmutableSnapshot,
+                  let winner = winnersBySource[attachment.sourcePath] else {
+                return true
             }
             // A copy that kept its slot is the same file on disk, now overwritten; only one that
             // lost its slot leaves bytes behind.
-            discardCopies(in: superseded.filter { $0.relativePath != attachment.relativePath })
-            current.insert(attachment, at: 0)
+            if attachment.relativePath != winner.relativePath {
+                discarded.append(attachment)
+            }
+            return false
         }
-        if current.count > SessionAttachmentDefaults.maximumPerSession {
-            let evicted = current.suffix(current.count - SessionAttachmentDefaults.maximumPerSession)
-            discardCopies(in: Array(evicted))
-            current.removeLast(current.count - SessionAttachmentDefaults.maximumPerSession)
+        for (index, attachment) in made.enumerated()
+            where !attachment.isImmutableSnapshot
+                && winningMutableIndex[attachment.sourcePath] != index {
+            guard let winner = winnersBySource[attachment.sourcePath],
+                  attachment.relativePath != winner.relativePath else {
+                continue
+            }
+            discarded.append(attachment)
         }
-        attachmentsBySession[sessionID] = current
-        persist(current, for: sessionID)
+
+        var admitted = Array(survivingMade.reversed()) + survivingCurrent
+        if admitted.count > SessionAttachmentDefaults.maximumPerSession {
+            discarded.append(
+                contentsOf: admitted.suffix(
+                    admitted.count - SessionAttachmentDefaults.maximumPerSession
+                )
+            )
+            admitted.removeLast(admitted.count - SessionAttachmentDefaults.maximumPerSession)
+        }
+        attachmentsBySession[sessionID] = admitted
+        if discardingCopiesOnWorker {
+            discardCopiesOnWorker(in: discarded)
+        } else {
+            discardCopies(in: discarded)
+        }
+        persist(admitted, for: sessionID)
         NotificationCenter.default.post(SessionAttachmentsDidChange(sessionID: sessionID))
         return made
     }
@@ -934,10 +1060,29 @@ final class SessionAttachmentStore {
     /// pane, the MCP tools and the phone's endpoint all pass through. A row admitted while the
     /// scope was wide keeps its bytes and its slot, and simply stops being visible — so turning
     /// the setting off is immediate and total, and turning it back on costs nothing.
-    func attachments(for sessionID: SessionID) -> [SessionAttachment] {
+    /// The pane needs the visible rows and the scope-band count from the same validated state.
+    /// Returning both prevents a refresh from `stat`ing the full capped list once for each fact.
+    func listSnapshot(for sessionID: SessionID) -> ListSnapshot {
         let current = validated(sessionID)
-        guard !allowsFilesOutsideProject() else { return current }
-        return current.filter { !$0.isOutsideProject }
+        let listedOutside = current.filter(\.isOutsideProject)
+        if allowsFilesOutsideProject() {
+            return ListSnapshot(
+                attachments: current,
+                countOfFilesOutsideProject: listedOutside.count
+            )
+        }
+
+        let alreadyCounted = Set(listedOutside.map(\.sourcePath))
+        let withheld = (withheldBySession[sessionID] ?? [])
+            .filter { !alreadyCounted.contains($0.path) }
+        return ListSnapshot(
+            attachments: current.filter { !$0.isOutsideProject },
+            countOfFilesOutsideProject: listedOutside.count + withheld.count
+        )
+    }
+
+    func attachments(for sessionID: SessionID) -> [SessionAttachment] {
+        listSnapshot(for: sessionID).attachments
     }
 
     /// The stored list with every entry re-proven against the filesystem, scope not applied.
@@ -1312,23 +1457,69 @@ final class SessionAttachmentStore {
     /// Removes the bytes behind rows that have left the list. A referenced file is untouched —
     /// it belongs to the checkout, and evicting a row is not a reason to delete the user's file.
     private func discardCopies(in attachments: [SessionAttachment]) {
-        var failureCount = 0
-        for attachment in attachments {
-            guard let root = copiesRoot(for: attachment.sessionID),
-                  AttachmentReferenceDetector.contains(attachment.url, inside: root),
-                  // The copy's own directory, not the file: one attachment owns one directory.
-                  let slot = attachment.relativePath.split(separator: "/").first else {
-                continue
+        Self.discardCopySlots(copySlots(in: attachments))
+    }
+
+    /// An async admission has already done its expensive file work on a worker. Once its new
+    /// list is installed, evicted slots are no longer remotely addressable, so deleting those
+    /// private bytes can follow on a utility worker instead of stalling that admission.
+    private func discardCopiesOnWorker(in attachments: [SessionAttachment]) {
+        let slots = copySlots(in: attachments)
+        guard !slots.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            Self.discardCopySlots(slots)
+        }
+    }
+
+    /// Resolves owned slot directories while still on the store's actor. The detached deleter
+    /// receives only immutable URLs and never consults or mutates attachment state.
+    private func copySlots(in attachments: [SessionAttachment]) -> [URL] {
+        var roots: [SessionID: URL] = [:]
+        return attachments.compactMap { attachment -> URL? in
+            let root: URL
+            if let known = roots[attachment.sessionID] {
+                root = known
+            } else {
+                guard let resolved = copiesRoot(for: attachment.sessionID) else { return nil }
+                roots[attachment.sessionID] = resolved
+                root = resolved
             }
+            return Self.ownedCopySlot(for: attachment, in: root)
+        }
+    }
+
+    /// Rows are minted as `slot/name` beneath a trusted per-session root. Re-proving that shape
+    /// from immutable state is enough before cleanup and avoids standardising the same 64 URLs
+    /// on the event loop. Explicit component checks retain the traversal guard a raw prefix would
+    /// lose for a damaged persisted relative path.
+    private nonisolated static func ownedCopySlot(
+        for attachment: SessionAttachment,
+        in root: URL
+    ) -> URL? {
+        let components = attachment.relativePath.split(separator: "/", omittingEmptySubsequences: false)
+        guard components.count >= 2,
+              components.allSatisfy({ $0 != "." && $0 != ".." && !$0.isEmpty }),
+              attachment.root == root,
+              let slot = components.first else {
+            return nil
+        }
+        return root.appendingPathComponent(String(slot), isDirectory: true)
+    }
+
+    private nonisolated static func discardCopySlots(_ slots: [URL]) {
+        guard !slots.isEmpty else { return }
+        let fileManager = FileManager()
+        var failureCount = 0
+        for slot in slots {
             do {
-                try fileManager.removeItem(at: root.appendingPathComponent(String(slot)))
+                try fileManager.removeItem(at: slot)
             } catch {
                 failureCount += 1
             }
         }
         if failureCount > 0 {
             ThreadingLogger.session.warning(
-                "Attachment copy cleanup incomplete failures=\(failureCount, privacy: .public) candidates=\(attachments.count, privacy: .public)"
+                "Attachment copy cleanup incomplete failures=\(failureCount, privacy: .public) candidates=\(slots.count, privacy: .public)"
             )
         }
     }
@@ -1379,6 +1570,7 @@ enum AttachmentReferenceDetector {
     struct Resolution: Equatable, Sendable {
         var insideProject: [URL] = []
         var outsideProject: [URL] = []
+        var resolvedProjectRoot: URL?
 
         var isEmpty: Bool { insideProject.isEmpty && outsideProject.isEmpty }
     }
@@ -1437,7 +1629,7 @@ enum AttachmentReferenceDetector {
     ) -> Resolution {
         let root = projectRoot.standardizedFileURL.resolvingSymlinksInPath()
         var seen: Set<String> = []
-        var result = Resolution()
+        var result = Resolution(resolvedProjectRoot: root)
 
         for candidate in candidates(in: text) {
             // A relative candidate is proposed against the working directory before the checkout,
@@ -1755,7 +1947,8 @@ final class TerminalAttachmentObserver {
         // and would keep re-announcing a hint the user has already read.
         let newly = AttachmentReferenceDetector.Resolution(
             insideProject: resolution.insideProject.filter { !pathsInLastScan.contains($0.path) },
-            outsideProject: resolution.outsideProject.filter { !pathsInLastScan.contains($0.path) }
+            outsideProject: resolution.outsideProject.filter { !pathsInLastScan.contains($0.path) },
+            resolvedProjectRoot: resolution.resolvedProjectRoot
         )
         pathsInLastScan = Set(
             (resolution.insideProject + resolution.outsideProject).map(\.path)
@@ -1921,7 +2114,7 @@ final class TerminalTranscriptAttachmentObserver {
             )
             guard !resolution.isEmpty else { return }
 
-            DispatchQueue.main.async { [weak self] in
+            Task { @MainActor [weak self] in
                 guard let self,
                       self.generation == expectedGeneration,
                       self.isEnabled() else { return }
@@ -1932,13 +2125,18 @@ final class TerminalTranscriptAttachmentObserver {
                     },
                     outsideProject: resolution.outsideProject.filter {
                         self.pathsRecordedThisTurn.insert($0.path).inserted
-                    }
+                    },
+                    resolvedProjectRoot: resolution.resolvedProjectRoot
                 )
                 guard !fresh.isEmpty else { return }
-                SessionAttachmentStore.shared.record(
+                _ = await SessionAttachmentStore.shared.recordScanned(
                     resolved: fresh,
                     sessionID: self.sessionID,
-                    projectRoot: root
+                    projectRoot: root,
+                    shouldAdmit: { [weak self] in
+                        guard let self else { return false }
+                        return self.generation == expectedGeneration && self.isEnabled()
+                    }
                 )
             }
         }

@@ -174,6 +174,36 @@ final class SessionAttachmentStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: second.url), Data([0x02]), "the copy is stale")
     }
 
+    /// Batch admission has the same last-mention-wins chronology as sequential admission. This
+    /// pins the linear reducer that replaced repeated whole-list scans in full generations.
+    func testABatchDeduplicatesByItsLastSourceWithoutReorderingOtherRows() throws {
+        let store = makeStore()
+        let session = SessionID()
+        let first = try write([0x01], to: elsewhere.appendingPathComponent("first.png"))
+        let other = try write([0x02], to: elsewhere.appendingPathComponent("other.png"))
+
+        let offered = store.record(
+            declared: [first, other, first],
+            sessionID: session,
+            projectRoot: checkout,
+            origin: .agent
+        )
+        let listed = store.attachments(for: session)
+
+        XCTAssertEqual(offered.count, 3)
+        XCTAssertEqual(listed.map(\.name), ["first.png", "other.png"])
+        XCTAssertEqual(listed.first?.id, offered.last?.id)
+        XCTAssertNil(store.attachment(for: session, id: offered[0].id))
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(
+                at: copies.appendingPathComponent(session.uuidString, isDirectory: true),
+                includingPropertiesForKeys: nil
+            ).count,
+            2,
+            "the batch's losing source slot was not removed"
+        )
+    }
+
     /// A generated name is right for a file that only has to outlive the turn and unreadable in a
     /// list, so the composer may hand over a name — but not a different extension, which is what
     /// the preview and the remote content type are chosen from.
@@ -484,6 +514,78 @@ final class SessionAttachmentStoreTests: XCTestCase {
         )
     }
 
+    /// The interactive form returns control while custody is still on its worker, then publishes
+    /// only after the staged bytes are complete. This is the pane's Show-button contract.
+    func testAsyncWithheldAdmissionStagesBeforePublishing() async throws {
+        let gate = CopyGate()
+        let store = makeStore(stageCopy: gate.copy)
+        let session = SessionID()
+        let shot = try write([0x89], to: elsewhere.appendingPathComponent("late-async.png"))
+        store.recordReferences(in: "wrote \(shot.path)", sessionID: session, projectRoot: checkout)
+        allowsFilesOutsideProject = true
+
+        let admission = Task { @MainActor in
+            await store.admitWithheldFilesOutsideProjectAsync(for: session)
+        }
+        await gate.waitUntilStarted()
+
+        XCTAssertTrue(store.attachments(for: session).isEmpty)
+        XCTAssertEqual(store.withheldReferences(for: session).map(\.path), [shot.path])
+
+        gate.proceed()
+        let result = await admission.value
+        XCTAssertEqual(result.attachments.map(\.name), ["late-async.png"])
+        XCTAssertEqual(store.attachments(for: session).map(\.name), ["late-async.png"])
+        XCTAssertTrue(store.withheldReferences(for: session).isEmpty)
+    }
+
+    /// Async scans may replace a full list, but their evicted private slots are cleanup work,
+    /// not admission work. The old rows lose addressability before that deletion is allowed to
+    /// trail on its utility worker.
+    func testAsyncFullListReplacementDefersOwnedSlotCleanupSafely() async throws {
+        allowsFilesOutsideProject = true
+        let store = makeStore()
+        let session = SessionID()
+        let first = try (0..<SessionAttachmentDefaults.maximumPerSession).map { index in
+            try write([UInt8(index % 251)], to: elsewhere.appendingPathComponent("old-\(index).png"))
+        }
+        let oldRows = store.record(
+            declared: first,
+            sessionID: session,
+            projectRoot: checkout,
+            origin: .agent
+        )
+        XCTAssertEqual(oldRows.count, SessionAttachmentDefaults.maximumPerSession)
+
+        let second = try (0..<SessionAttachmentDefaults.maximumPerSession).map { index in
+            try write([UInt8((index + 1) % 251)], to: elsewhere.appendingPathComponent("new-\(index).png"))
+        }
+        let result = await store.recordScanned(
+            resolved: .init(outsideProject: second),
+            sessionID: session,
+            projectRoot: checkout
+        )
+
+        XCTAssertEqual(result.attachments.count, SessionAttachmentDefaults.maximumPerSession)
+        XCTAssertEqual(store.attachments(for: session).count, SessionAttachmentDefaults.maximumPerSession)
+        for row in oldRows {
+            XCTAssertNil(store.attachment(for: session, id: row.id))
+        }
+
+        let sessionRoot = copies.appendingPathComponent(session.uuidString, isDirectory: true)
+        let deadline = Date().addingTimeInterval(1)
+        var slotCount = try FileManager.default.contentsOfDirectory(atPath: sessionRoot.path).count
+        while slotCount > SessionAttachmentDefaults.maximumPerSession, Date() < deadline {
+            try await Task.sleep(nanoseconds: 5_000_000)
+            slotCount = try FileManager.default.contentsOfDirectory(atPath: sessionRoot.path).count
+        }
+        XCTAssertEqual(
+            slotCount,
+            SessionAttachmentDefaults.maximumPerSession,
+            "evicted private slots were left behind after deferred cleanup"
+        )
+    }
+
     /// Narrowing again is immediate and total, and it does not depend on anything being open to
     /// notice: everything that can serve an attachment reads through the one gate.
     func testNarrowingTheScopeHidesThoseRowsEverywhereWithoutDestroyingThem() throws {
@@ -534,6 +636,36 @@ final class SessionAttachmentStoreTests: XCTestCase {
             0,
             "a declared file was counted as something the scope setting is deciding about"
         )
+    }
+
+    /// A later transcript mention refreshes an explicit handoff; it does not retroactively make
+    /// that row subject to the discovery scope merely because both doors name the same source.
+    func testAScanPreservesTheAuthorityOfAnExistingDeclaredRow() async throws {
+        allowsFilesOutsideProject = true
+        let store = makeStore()
+        let session = SessionID()
+        let shot = try write([0x89], to: elsewhere.appendingPathComponent("declared-then-scanned.png"))
+        let declared = try XCTUnwrap(
+            store.record(
+                declared: shot,
+                sessionID: session,
+                projectRoot: checkout,
+                origin: .user
+            )
+        )
+
+        _ = await store.recordScanned(
+            resolved: .init(outsideProject: [shot]),
+            sessionID: session,
+            projectRoot: checkout
+        )
+        let refreshed = try XCTUnwrap(store.attachments(for: session).first)
+
+        XCTAssertEqual(refreshed.id, declared.id)
+        XCTAssertEqual(refreshed.origin, .user)
+        XCTAssertFalse(refreshed.isOutsideProject)
+        allowsFilesOutsideProject = false
+        XCTAssertEqual(store.attachments(for: session).map(\.id), [declared.id])
     }
 
     /// Persisted like the rest, and read back as what it is: the gate has to still find these
@@ -872,7 +1004,7 @@ final class SessionAttachmentStoreTests: XCTestCase {
     /// not. Two things about the scope change made it worth a deterministic number rather than
     /// an argument. Reporting an outside path costs a `stat`; the wide scope also takes custody
     /// of bytes when a newly visible file is admitted. `maximumCandidatesPerScan` bounds the
-    /// worker half, and the per-session cap bounds that one-time main-actor admission half.
+    /// worker half, and the per-session cap bounds worker custody plus main-actor publication.
     ///
     /// The buffer is generated before the clock starts. The production observer reports main-
     /// actor scheduling separately from worker resolution, main-actor admission and end-to-end
@@ -892,8 +1024,19 @@ final class SessionAttachmentStoreTests: XCTestCase {
             rawValue: environment["THREADING_ATTACHMENT_STRESS_SHAPE"] ?? "mixed"
         ) ?? .mixed
         allowsFilesOutsideProject = environment["THREADING_ATTACHMENT_STRESS_SCOPE"] == "wide"
+        let startedWide = allowsFilesOutsideProject
 
         let buffer = try makeStressBuffer(shape: shape, pathCount: pathCount)
+        let rolloverURLs: [URL] = if shape == .outside, startedWide {
+            try (0..<SessionAttachmentDefaults.maximumPerSession).map { index in
+                try write(
+                    [0x89, 0x50, 0x4E, UInt8(index % 255)],
+                    to: elsewhere.appendingPathComponent("rollover-\(index).png")
+                )
+            }
+        } else {
+            []
+        }
         let store = makeStore()
         let session = SessionID()
         let observer = TerminalAttachmentObserver(
@@ -927,14 +1070,56 @@ final class SessionAttachmentStoreTests: XCTestCase {
         let warmReady = DispatchTime.now().uptimeNanoseconds
         let warmMetrics = try XCTUnwrap(observer.lastScanMetrics)
 
-        // And the read every pane, tool and remote fetch goes through, which re-proves each
-        // stored row against the filesystem and applies the scope gate.
-        let readStarted = DispatchTime.now().uptimeNanoseconds
-        let listed = store.attachments(for: session)
-        let readEnded = DispatchTime.now().uptimeNanoseconds
-        let countStarted = DispatchTime.now().uptimeNanoseconds
-        let outside = store.countOfFilesOutsideProject(for: session)
-        let countEnded = DispatchTime.now().uptimeNanoseconds
+        // A full new generation proves whether evicting a full standing list returns filesystem
+        // cleanup to the main actor. This is the cold edge after ordinary first admission.
+        let rolloverStarted = DispatchTime.now().uptimeNanoseconds
+        var rolloverResult: SessionAttachmentStore.ScannedRecordResult?
+        if rolloverURLs.isEmpty {
+            rolloverResult = .empty
+        } else {
+            Task { @MainActor in
+                rolloverResult = await store.recordScanned(
+                    resolved: .init(outsideProject: rolloverURLs),
+                    sessionID: session,
+                    projectRoot: checkout
+                )
+            }
+            let deadline = Date().addingTimeInterval(2)
+            while rolloverResult == nil, Date() < deadline {
+                RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.005)))
+            }
+        }
+        let rolloverReady = DispatchTime.now().uptimeNanoseconds
+        let measuredRollover = try XCTUnwrap(rolloverResult)
+
+        // And the one snapshot a pane refresh consumes: visible rows plus its scope-band count,
+        // from one filesystem validation rather than two identical passes over the capped list.
+        let snapshotStarted = DispatchTime.now().uptimeNanoseconds
+        let listSnapshot = store.listSnapshot(for: session)
+        let snapshotEnded = DispatchTime.now().uptimeNanoseconds
+        let listed = listSnapshot.attachments
+        let outside = listSnapshot.countOfFilesOutsideProject
+
+        // Keep the pane's Show action separate from scanning so a fast observer cannot conceal
+        // a slow settings interaction, and split its event-loop work from worker custody too.
+        let widenStarted = DispatchTime.now().uptimeNanoseconds
+        var widenScheduled = widenStarted
+        var widenResult: SessionAttachmentStore.ScannedRecordResult?
+        if !startedWide, !store.withheldReferences(for: session).isEmpty {
+            allowsFilesOutsideProject = true
+            Task { @MainActor in
+                widenResult = await store.admitWithheldFilesOutsideProjectAsync(for: session)
+            }
+            widenScheduled = DispatchTime.now().uptimeNanoseconds
+            let deadline = Date().addingTimeInterval(2)
+            while widenResult == nil, Date() < deadline {
+                RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.005)))
+            }
+        } else {
+            widenResult = .empty
+        }
+        let widenEnded = DispatchTime.now().uptimeNanoseconds
+        let measuredWiden = try XCTUnwrap(widenResult)
 
         XCTAssertLessThanOrEqual(listed.count, SessionAttachmentDefaults.maximumPerSession)
         XCTAssertLessThanOrEqual(
@@ -946,7 +1131,7 @@ final class SessionAttachmentStoreTests: XCTestCase {
         let memoryDelta = Self.physicalFootprintBytes().saturatingSubtract(baselineMemory)
         print(
             "THREADING_PERF attachment-scan "
-                + "shape=\(shape.rawValue) scope=\(allowsFilesOutsideProject ? "wide" : "narrow") "
+                + "shape=\(shape.rawValue) scope=\(startedWide ? "wide" : "narrow") "
                 + "paths=\(pathCount) buffer_kb=\(buffer.text.utf8.count / 1024) "
                 + "inside_on_disk=\(buffer.insideCount) outside_on_disk=\(buffer.outsideCount) "
                 + "admitted=\(coldMetrics.recorded) listed=\(listed.count) "
@@ -961,8 +1146,16 @@ final class SessionAttachmentStoreTests: XCTestCase {
                 + "warm_custody_worker_ms=\(Self.milliseconds(warmMetrics.custodyWorkerNanoseconds)) "
                 + "warm_apply_ms=\(Self.milliseconds(warmMetrics.applyNanoseconds)) "
                 + "warm_ready_ms=\(Self.milliseconds(warmReady - warmStarted)) "
-                + "read_ms=\(Self.milliseconds(readEnded - readStarted)) "
-                + "count_ms=\(Self.milliseconds(countEnded - countStarted)) "
+                + "rollover_recorded=\(measuredRollover.attachments.count) "
+                + "rollover_custody_worker_ms=\(Self.milliseconds(measuredRollover.custodyWorkerNanoseconds)) "
+                + "rollover_apply_ms=\(Self.milliseconds(measuredRollover.mainActorNanoseconds)) "
+                + "rollover_ready_ms=\(Self.milliseconds(rolloverReady - rolloverStarted)) "
+                + "widened=\(measuredWiden.attachments.count) "
+                + "widen_schedule_ms=\(Self.milliseconds(widenScheduled - widenStarted)) "
+                + "widen_custody_worker_ms=\(Self.milliseconds(measuredWiden.custodyWorkerNanoseconds)) "
+                + "widen_apply_ms=\(Self.milliseconds(measuredWiden.mainActorNanoseconds)) "
+                + "widen_ready_ms=\(Self.milliseconds(widenEnded - widenStarted)) "
+                + "snapshot_ms=\(Self.milliseconds(snapshotEnded - snapshotStarted)) "
                 + "copied_mb=\(Self.megabytes(copiedBytes)) "
                 + "footprint_delta_mb=\(Self.megabytes(memoryDelta))"
         )

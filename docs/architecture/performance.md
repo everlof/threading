@@ -802,6 +802,48 @@ remaining one-time custody cost is explicit worker time rather than event-loop w
 `attachments.scan` remains a recorded wall-time span, and the stress fixture reports both worker
 phases so a regression cannot hide inside the aggregate.
 
+That first split exposed two adjacent interactive edges, so the fixture now exercises them too:
+the pane's **Show** action against the full withheld cap, and a second full generation that evicts
+all 64 standing rows. The former still called the old synchronous custody door; the latter returned
+from worker staging only to delete every evicted slot and repeatedly scan a growing array on the
+main actor.
+
+The pane now owns one cancellable, generation-bound admission task. Its files use the same
+unpublished worker staging as live scans, and changing the global scope again prevents a stale
+task from publishing. Full-generation admission derives last-source-wins chronology in one pass,
+indexes standing sources once, and publishes the new capped list before a utility worker deletes
+the now-unaddressable private slots. Owned-slot checks use the trusted session root plus a
+component-level traversal guard instead of canonicalising the same URLs repeatedly. A later scan
+of an explicitly handed-over file preserves that row's origin and non-scope-governed authority.
+
+Three fresh-process `outside / 1,000` pairs measured:
+
+| Interaction | Before main work | After main work | Worker / ready after |
+|---|---:|---:|---:|
+| Pane Show, 32 withheld files | 12.06–12.84 ms synchronous | 0.01–0.03 ms schedule + 1.07–1.17 ms apply | 6.92–7.90 ms / 10.67–12.03 ms |
+| Replace a full 64-row list | 16.78–17.95 ms apply | 2.45–2.51 ms apply | 11.27–12.56 ms / 13.88–16.68 ms |
+
+The complete seven-point sweep stayed bounded: warm apply was at most 0.81 ms, outside-only cold
+apply at most 2.83 ms, and the mixed cold edge (64 project references plus 12 copied rows) was the
+largest remaining main slice at 7.12 ms. The fixture reports scope-widen and rollover phases
+separately so neither can regress behind the ordinary cold/warm pair.
+
+One more pass removed two duplicate costs that the phase split made visible. The pane used to call
+`attachments(for:)` and then `countOfFilesOutsideProject(for:)`; each call revalidated every row
+against the filesystem, so one refresh paid roughly 12–16 ms for two equivalent walks.
+`listSnapshot(for:)` now returns the rows and scope count from one authoritative validation. Fresh
+processes measured that single snapshot at 4.57–5.40 ms for the mixed fixture and 6.19–9.10 ms for
+64 private copies. The per-read validation invariant remains intact: a deleted file still disappears
+the next time any consumer asks for the snapshot.
+
+Worker resolution also now carries the already-resolved project root into admission. Files that the
+worker has proved to exist inside that root no longer repeat their `stat` and symlink resolution on
+the main actor. Three-run mixed cold admission fell from 6.74–7.12 ms to 3.38–4.98 ms; the final
+seven-point sweep kept all other main apply phases at or below 2.88 ms and warm apply at or below
+0.83 ms. Finally, the delayed transcript observer now enters through the same async scanned-record
+door as terminal and structured-message observation. It no longer resolves on a worker only to copy
+outside bytes synchronously when it returns to the main actor.
+
 ## Attachment preview-format stress target
 
 Detection is only the first half of an attachment feature. Once a file is in the pane, its row

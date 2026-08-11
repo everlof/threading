@@ -171,6 +171,17 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
     }
 
+    private func waitUntil(
+        timeout: TimeInterval = 2,
+        _ condition: () -> Bool
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.005)))
+        }
+        XCTAssertTrue(condition(), "asynchronous pane update did not finish")
+    }
+
     /// By identifier, not by type: the pane holds two `PaneFooterView`s now — the footer naming
     /// the selected file, and this band — and "the first one found" is whichever the traversal
     /// happens to reach.
@@ -892,15 +903,16 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         let band = try scopeBand(in: pane.view)
 
         let show = try XCTUnwrap(button(titled: L10n.string("Show"), in: band) as? ThemedButton)
+        let table = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? NSTableView }.first
+        )
         show.performClick()
+        waitUntil { table.numberOfRows == 2 }
         pane.view.layoutSubtreeIfNeeded()
 
         XCTAssertTrue(AppSettings.shared.includesAttachmentsOutsideProject)
         // The pane's own answer, not the store's: the point of the control is that the list in
         // front of the person who pressed it changes.
-        let table = try XCTUnwrap(
-            descendants(of: pane.view).compactMap { $0 as? NSTableView }.first
-        )
         XCTAssertEqual(
             table.numberOfRows,
             2,
