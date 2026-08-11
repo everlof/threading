@@ -201,10 +201,16 @@ extension GitReviewViewController {
     /// height notifications are deliberately ignored during momentum so they cannot retile the
     /// table between wheel events.
     func finishFileLiveScrolling() {
+        let wasScrollerSeeking = isFileScrollerSeeking
         isFileLiveScrolling = false
+        isFileScrollerSeeking = false
         if let deferredPhaseDuringLiveScroll {
             self.deferredPhaseDuringLiveScroll = nil
             show(deferredPhaseDuringLiveScroll)
+        }
+
+        if wasScrollerSeeking {
+            rematerializeVisibleFilesAfterScrollerSeek()
         }
 
         let visible = fileTableView.rows(in: fileTableView.visibleRect)
@@ -220,6 +226,32 @@ extension GitReviewViewController {
                   let row = host.installedContent as? GitReviewFileRow else { continue }
             recordFileHeight(renderedFiles[fileIndex], row: row)
         }
+    }
+
+    /// Enters the scroller-thumb path. Wheel and trackpad scrolling keep fully rendered rows;
+    /// their ordinary contiguous workload already fits inside a frame, while a knob can jump
+    /// across the whole index on every pointer event.
+    func beginFileScrollerSeek() {
+        isFileLiveScrolling = true
+        isFileScrollerSeeking = true
+    }
+
+    private func rematerializeVisibleFilesAfterScrollerSeek() {
+        guard scrollView.documentView === fileTableView else { return }
+        let visible = fileTableView.rows(in: fileTableView.visibleRect)
+        guard visible.location != NSNotFound else { return }
+        let rows = IndexSet(integersIn: visible.location..<min(
+            NSMaxRange(visible),
+            fileTableView.numberOfRows
+        ))
+        guard !rows.isEmpty else { return }
+        let origin = scrollView.contentView.bounds.origin
+        fileTableView.reloadData(
+            forRowIndexes: rows,
+            columnIndexes: IndexSet(integer: 0)
+        )
+        scrollView.contentView.scroll(to: origin)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     /// One line about the write that just happened — an index another git had locked, or the
@@ -411,6 +443,7 @@ extension GitReviewViewController {
         fileRowHeightWidth = 0
         renderedFileRoot = nil
         instantiatedFileRowCount = 0
+        instantiatedDeferredFileRowCount = 0
         fileTableView.reloadData()
     }
 
@@ -584,12 +617,17 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         let expanded = expansionOverrides[file.path]
             ?? bulkExpansionOverride
             ?? GitReviewFileRow.expandsByDefault(file)
+        let defersExpandedBody = isFileScrollerSeeking && expanded
+        if defersExpandedBody {
+            instantiatedDeferredFileRowCount += 1
+        }
 
         // The row's "Open in" needs an absolute path, and a diff carries only a path
         // relative to the checkout — which is the pane's fact, not the row's.
         let row = GitReviewFileRow(
             file: file,
             expanded: expanded,
+            defersExpandedBody: defersExpandedBody,
             staging: staging,
             wraps: wrapsDiffLines,
             initialDiffWidth: {

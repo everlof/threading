@@ -21,6 +21,7 @@ final class GitReviewFileRow: NSView {
     /// Whether the diff wraps to the pane or runs off it into a horizontal scroller.
     private let wraps: Bool
     private let initialDiffWidth: CGFloat?
+    private let defersExpandedBody: Bool
 
     /// Where this file lives, when it still does. See `init`.
     private let fileURL: URL?
@@ -229,6 +230,7 @@ final class GitReviewFileRow: NSView {
     init(
         file: GitFileDiff,
         expanded: Bool,
+        defersExpandedBody: Bool = false,
         staging: GitStaging? = nil,
         wraps: Bool = true,
         initialDiffWidth: CGFloat? = nil,
@@ -238,10 +240,17 @@ final class GitReviewFileRow: NSView {
         self.staging = staging
         self.wraps = wraps
         self.initialDiffWidth = initialDiffWidth
+        self.defersExpandedBody = defersExpandedBody
         self.fileURL = fileURL
         super.init(frame: .zero)
         setupViews()
-        if expanded && canExpand { toggle() }
+        if expanded && canExpand {
+            if defersExpandedBody {
+                showDeferredExpandedState()
+            } else {
+                toggle()
+            }
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -260,6 +269,10 @@ final class GitReviewFileRow: NSView {
     // MARK: - Setup
 
     private func setupViews() {
+        if defersExpandedBody {
+            setupDeferredViews()
+            return
+        }
         translatesAutoresizingMaskIntoConstraints = false
         applySurface(fill: Design.Surface.controlResting, radius: .control)
 
@@ -364,6 +377,49 @@ final class GitReviewFileRow: NSView {
         let click = NSClickGestureRecognizer(target: self, action: #selector(headerClicked))
         click.delegate = self
         addGestureRecognizer(click)
+    }
+
+    /// The thumb-drag row says which file is passing under the viewport without paying for the
+    /// full interactive header. It is replaced before the pointer can interact with the row.
+    private func setupDeferredViews() {
+        translatesAutoresizingMaskIntoConstraints = false
+        applySurface(fill: Design.Surface.controlResting, radius: .control)
+
+        let nameLabel = NSTextField(labelWithString: pathText)
+        nameLabel.applyFont(.control)
+        nameLabel.textColor = Design.Text.label
+        nameLabel.lineBreakMode = .byTruncatingMiddle
+        nameLabel.usesSingleLineMode = true
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let metaLabel = NSTextField.label(attributed: metaText)
+        metaLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        [nameLabel, metaLabel, bodyContainer].forEach(addSubview)
+        let inset = Design.Spacing.small
+        headerBottom = nameLabel.bottomAnchor.constraint(
+            equalTo: bottomAnchor,
+            constant: -inset
+        )
+        headerBottom?.isActive = true
+        bodyBottom = bodyContainer.bottomAnchor.constraint(
+            equalTo: bottomAnchor,
+            constant: -inset
+        )
+
+        NSLayoutConstraint.activate([
+            nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: inset),
+            metaLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: nameLabel.trailingAnchor,
+                constant: Design.Spacing.small
+            ),
+            metaLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            metaLabel.firstBaselineAnchor.constraint(equalTo: nameLabel.firstBaselineAnchor),
+            bodyContainer.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: inset),
+            bodyContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bodyContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
     }
 
     // MARK: - Context Menu
@@ -487,6 +543,24 @@ final class GitReviewFileRow: NSView {
     }
 
     // MARK: - Expansion
+
+    /// A scroller-thumb drag can cross hundreds of expanded files per frame. Building TextKit
+    /// for a row that exists for only that frame makes the thumb lag behind the pointer. Keep
+    /// the expanded geometry and disclosure state while leaving the body empty; the table
+    /// replaces the resting viewport with ordinary rows when the drag ends.
+    private func showDeferredExpandedState() {
+        guard let headerBottom, let bodyBottom else { return }
+        isExpanded = true
+        headerBottom.isActive = false
+        bodyContainer.isHidden = false
+        bodyBottom.isActive = true
+        if !defersExpandedBody {
+            chevron.image = NSImage(
+                systemSymbolName: "chevron.down",
+                accessibilityDescription: nil
+            )
+        }
+    }
 
     /// Whether this file's diff is currently open — read by "Collapse all" to decide which way
     /// the one action should move every row.

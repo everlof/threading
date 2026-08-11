@@ -154,7 +154,7 @@ external data reaches eager AppKit work.
 | Resolved | Archived settings | The archive is a cheap value-row model in one grouped table. The recent fold owns ten session identities; expansion inserts the older identities, and project events recycle only the viewport while preserving the clip origin. The before/after measurements are below. |
 | Resolved | Tools dynamic sections | Tool rows, extension-contributed settings, persistent website origins and Browser Sign-In inventories are all value rows in the same grouped table. Provider, credential and exemption mutations refresh cheap snapshots and recycle only the viewport. |
 | Resolved | Settings search results | An installed extension can contribute up to eight searchable pages, so the 256-package ceiling can produce 2,048 extension results before built-ins. Results are value rows; a query-only change updates the two visible labels in place and preserves the exact clip origin. |
-| Resolved | Git Review watched refresh | A build can expose ~9,000 generated files / ~80,000 changed lines and refresh repeatedly. The pane now reconciles stable paths in place, anchors by path + within-row offset, and defers model/height mutations until live scrolling ends. The remaining full-index scrollbar-drag cost is measured separately below. |
+| Resolved | Git Review watched refresh | A build can expose ~9,000 generated files / ~80,000 changed lines and refresh repeatedly. The pane now reconciles stable paths in place, anchors by path + within-row offset, and defers model/height mutations until live scrolling ends. A scroller-thumb drag uses geometry-preserving identity rows and materializes full TextKit only for the resting viewport. |
 | Resolved | Git Review during live resize | The 8,985-file fixture now drives 48 distinct widths through the real layout callback. Complete-index height invalidation averages 6.08 ms, with 6.66 ms p95 and 10.49 ms max, while preserving correct offscreen wrapping estimates and scrollbar extent. |
 | Resolved | Account settings cold discovery | A fresh-process fixture separates real home-directory/login-marker/shell-alias discovery from page construction. Five accounts take 6.61 ms to discover, 12.31 ms to render and 8.14 ms to lay out; the seven-second cache makes subsequent callers lock-cheap. |
 | Resolved | Usage dashboard | The report scans off-main with per-source metadata caches, aggregates to 90-day cells and globally deduplicates cached plus fresh records. The breakdown uses virtual table rows, the 180-day journal loads through an actor, and both history analysis and the reusable chart enforce adversarial point budgets. The million-record profile and measured gates live in [`usage-dashboard.md`](usage-dashboard.md#scaling-gate-and-measurements). |
@@ -994,7 +994,19 @@ Debug run at 620×760 measured:
 | Rows instantiated after both sweeps | 437 / 8,985 |
 
 The full-index sweep deliberately jumps about 75 expanded files per frame and is closer to dragging
-the scroller thumb through the whole document than trackpad reading; it remains a useful red limit.
+the scroller thumb through the whole document than trackpad reading. A fresh 2026-08-11 baseline
+put that path at 32.5 ms p95: every transient viewport built complete interactive headers and
+TextKit bodies that disappeared on the next pointer event. The scroller now reports a knob action
+before AppKit applies it. Only that path creates lightweight rows carrying the file path, counts,
+expanded state, themed surface, and the same estimated geometry; ordinary wheel and trackpad
+scrolling still build complete rows. Release replaces the visible lightweight rows at the exact
+same clip origin.
+
+Three retained-process runs measured 11.6–11.9 ms p95 for the full-index sweep, down from 32.5 ms.
+The resting viewport took 13.5–15.7 ms to materialize complete TextKit rows. Representative
+continuous scrolling remained 14.4 ms p95. Across both sweeps the table constructed 440 rows for
+8,985 files, 380 of them transient thumb-drag rows rather than TextKit documents. The result keeps
+thumb tracking below a 60 Hz frame without changing honest scrollbar extent or adding a debounce.
 The resize phase drives a 420–820-point triangle wave through `viewDidLayout`, so every frame takes
 the width-change branch and invalidates all 8,985 cheap height estimates. Its measured maximum is
 still below one 60 Hz frame. Keep the complete invalidation unless a future fixture crosses that

@@ -223,6 +223,7 @@ final class GitReviewViewController: NSViewController {
     var filePreludeViews: [NSView] = []
     var renderedFileRoot: URL?
     var instantiatedFileRowCount = 0
+    var instantiatedDeferredFileRowCount = 0
     var measuredFileRowHeights: [String: (width: CGFloat, height: CGFloat)] = [:]
     var measuredPreludeRowHeights: [Int: (width: CGFloat, height: CGFloat)] = [:]
     var fileRowHeightWidth: CGFloat = 0
@@ -243,6 +244,7 @@ final class GitReviewViewController: NSViewController {
     /// A checkout refresh must not replace table rows in the middle of trackpad momentum.
     /// Keep only the newest result and reconcile it when AppKit ends the live-scroll gesture.
     var isFileLiveScrolling = false
+    var isFileScrollerSeeking = false
     var deferredPhaseDuringLiveScroll: Phase?
 
     private var watcher: GitCheckoutWatcher?
@@ -402,6 +404,11 @@ final class GitReviewViewController: NSViewController {
         scrollEvents.observe(NSScrollView.didEndLiveScrollNotification, object: scrollView) {
             [weak self] in
             self?.finishFileLiveScrolling()
+        }
+        if let scroller = scrollView.verticalScroller as? ThemedScroller {
+            scroller.onWillScrollWithKnob = { [weak self] in
+                self?.beginFileScrollerSeek()
+            }
         }
 
         view.addSubview(scrollView)

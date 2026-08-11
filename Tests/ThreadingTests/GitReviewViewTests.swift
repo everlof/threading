@@ -985,6 +985,53 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertGreaterThan(controller.measuredFileRowHeights.count, measurementsBeforeScroll)
     }
 
+    /// A scrollbar-thumb drag may replace the viewport on every pointer event. Those transient
+    /// rows preserve expanded geometry without building TextKit; release installs the complete
+    /// diff at the exact same scroll origin.
+    func testScrollerThumbSeekDefersBodiesUntilTheRestingViewport() throws {
+        let files = Self.stressSmallExpandedFiles(count: 80, linesPerFile: 9)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+        controller.show(.files(files))
+        controller.view.layoutSubtreeIfNeeded()
+
+        controller.beginFileScrollerSeek()
+        controller.scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: controller.fileTableView.rect(ofRow: 60).minY + 13
+        ))
+        controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+        controller.view.layoutSubtreeIfNeeded()
+        let originDuringSeek = controller.scrollView.contentView.bounds.origin
+        XCTAssertGreaterThan(controller.instantiatedDeferredFileRowCount, 0)
+        XCTAssertNil(
+            Self.firstDescendant(
+                of: GitReviewDiffTextView.self,
+                in: controller.scrollView.contentView
+            )
+        )
+
+        controller.finishFileLiveScrolling()
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            controller.scrollView.contentView.bounds.origin.y,
+            originDuringSeek.y,
+            accuracy: 0.5
+        )
+        XCTAssertNotNil(
+            Self.firstDescendant(
+                of: GitReviewDiffTextView.self,
+                in: controller.scrollView.contentView
+            )
+        )
+    }
+
     /// Opt-in rather than part of the fast suite: this is a repeatable workload for `sample`,
     /// `xctrace`, and before/after measurements of the pane's large-file-index path.
     ///
@@ -1289,7 +1336,12 @@ final class GitReviewViewTests: XCTestCase {
             maximumDistance,
             scroll.contentView.bounds.height * 24
         ))
+        controller.beginFileScrollerSeek()
         let fullIndex = measureSweep(distance: maximumDistance)
+        let seekSettleStarted = DispatchTime.now().uptimeNanoseconds
+        controller.finishFileLiveScrolling()
+        controller.view.layoutSubtreeIfNeeded()
+        let seekSettleEnded = DispatchTime.now().uptimeNanoseconds
 
         // Let the deferred exact-height pass catch up. The cheap model estimates are what make
         // a 9,000-file document immediately scrollable; resolving the materialized rows must not
@@ -1343,6 +1395,12 @@ final class GitReviewViewTests: XCTestCase {
             )
         }
         print(
+            "THREADING_PERF git-review-massive-seek-settle "
+                + "files=\(fileCount) "
+                + "elapsed_ms=\(Self.milliseconds(seekSettleEnded - seekSettleStarted)) "
+                + "deferred_rows=\(controller.instantiatedDeferredFileRowCount)"
+        )
+        print(
             "THREADING_PERF git-review-massive-refresh "
                 + "old_files=\(fileCount) files=\(fileCount + inserted.count) "
                 + "refresh_ms=\(Self.milliseconds(refreshEnded - refreshStarted)) "
@@ -1353,6 +1411,7 @@ final class GitReviewViewTests: XCTestCase {
 
         XCTAssertEqual(table.numberOfRows, fileCount + inserted.count)
         XCTAssertLessThan(controller.instantiatedFileRowCount, fileCount + inserted.count)
+        XCTAssertGreaterThan(controller.instantiatedDeferredFileRowCount, 0)
     }
 
     // MARK: - The Pane's Own Ordering

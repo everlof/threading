@@ -18,6 +18,12 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
 
     let inkSource: InkSource
 
+    /// Reports a proportional-thumb action immediately before the scroll view receives it.
+    /// `NSScrollView`'s live-scroll notification arrives after tracking has started, which is
+    /// too late for a large virtualized document to choose cheap transient rows before the first
+    /// jump. Line buttons and track clicks deliberately stay on the ordinary scroll path.
+    var onWillScrollWithKnob: (() -> Void)?
+
     private var themeRedraw: ThemeRedraw?
     private let appEvents = AppEventObservations()
     private var hoverTracking: NSTrackingArea?
@@ -202,6 +208,13 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
         super.mouseExited(with: event)
         isHovered = false
         scheduleHide()
+    }
+
+    override func sendAction(_ action: Selector?, to target: Any?) -> Bool {
+        if hitPart == .knob {
+            onWillScrollWithKnob?()
+        }
+        return super.sendAction(action, to: target)
     }
 
     // MARK: - Geometry
