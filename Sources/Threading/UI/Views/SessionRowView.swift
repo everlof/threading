@@ -111,44 +111,59 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     private lazy var rowContentStack = NSStackView(
         views: [contentContainer, afterTitleSlot]
     )
-    private lazy var identityCustomizationHost = ComponentCustomizationHost(
-        target: .sessionIdentity(),
-        contentContainer: identityContentContainer,
-        lookup: customizationLookup,
-        imageResolver: { [weak self] reference, extensionIdentifier in
-            self?.resolveCustomizationImage(
-                reference,
-                extensionIdentifier: extensionIdentifier
-            )
-        }
-    )
-    private lazy var customizationHost = ComponentCustomizationHost(
-        target: .init(
-            component: HostComponentContracts.sidebarSessionRow.id,
-            contractVersion: HostComponentContracts.sidebarSessionRow.version
-        ),
-        contentContainer: contentContainer,
-        slots: ["after-title": afterTitleSlot],
-        lookup: customizationLookup,
-        imageResolver: { [weak self] reference, extensionIdentifier in
-            self?.resolveCustomizationImage(
-                reference,
-                extensionIdentifier: extensionIdentifier
-            )
-        },
-        onAction: { [weak self] action in
-            guard let self else { return }
-            if let onCustomizationAction {
-                onCustomizationAction(action)
-            } else {
-                ComponentCustomizationProviderSlot.shared.perform(action)
+    private var identityCustomizationHostIsMaterialized = false
+    private lazy var identityCustomizationHost: ComponentCustomizationHost = {
+        identityCustomizationHostIsMaterialized = true
+        return ComponentCustomizationHost(
+            target: .sessionIdentity(),
+            contentContainer: identityContentContainer,
+            lookup: customizationLookup,
+            imageResolver: { [weak self] reference, extensionIdentifier in
+                self?.resolveCustomizationImage(
+                    reference,
+                    extensionIdentifier: extensionIdentifier
+                )
+            },
+            observesChanges: !defersCustomizationUntilNeeded
+        )
+    }()
+    private var customizationHostIsMaterialized = false
+    private lazy var customizationHost: ComponentCustomizationHost = {
+        customizationHostIsMaterialized = true
+        return ComponentCustomizationHost(
+            target: .init(
+                component: HostComponentContracts.sidebarSessionRow.id,
+                contractVersion: HostComponentContracts.sidebarSessionRow.version
+            ),
+            contentContainer: contentContainer,
+            slots: ["after-title": afterTitleSlot],
+            lookup: customizationLookup,
+            imageResolver: { [weak self] reference, extensionIdentifier in
+                self?.resolveCustomizationImage(
+                    reference,
+                    extensionIdentifier: extensionIdentifier
+                )
+            },
+            observesChanges: !defersCustomizationUntilNeeded,
+            onAction: { [weak self] action in
+                guard let self else { return }
+                if let onCustomizationAction {
+                    onCustomizationAction(action)
+                } else {
+                    ComponentCustomizationProviderSlot.shared.perform(action)
+                }
+            },
+            onProperties: { [weak self] properties in
+                self?.applyCustomizationProperties(properties)
             }
-        },
-        onProperties: { [weak self] properties in
-            self?.applyCustomizationProperties(properties)
-        }
-    )
+        )
+    }()
     private let customizationLookup: ComponentCustomizationHost.Lookup
+    /// Product rows are watched as one visible collection by the sidebar controller. Building
+    /// two independently observing hosts for every row before an extension has published any
+    /// content turned the empty customization path into launch work. Gallery and shell-test
+    /// rows remain self-observing because they do not have that controller.
+    private let defersCustomizationUntilNeeded: Bool
 
     private var nativeTitle = ""
     private var nativeToolTip: String?
@@ -188,6 +203,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
+        defersCustomizationUntilNeeded = true
         customizationLookup = {
             ComponentCustomizationProviderSlot.shared.customization(for: $0)
         }
@@ -202,6 +218,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// the process-wide provider slot through `init(frame:)`.
     init(
         customizationLookup: @escaping ComponentCustomizationHost.Lookup,
+        defersCustomizationUntilNeeded: Bool = false,
         sessionHoverContentProvider: @escaping SessionHoverContentProvider =
             SessionRowView.nativeSessionHoverContent(for:),
         sessionHoverInfoProvider: @escaping SessionHoverInfoProvider =
@@ -209,6 +226,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         sessionAccountProvider: @escaping SessionAccountProvider =
             AgentAccountDiscovery.account(for:handle:)
     ) {
+        self.defersCustomizationUntilNeeded = defersCustomizationUntilNeeded
         self.customizationLookup = customizationLookup
         self.sessionHoverContentProvider = sessionHoverContentProvider
         self.sessionHoverInfoProvider = sessionHoverInfoProvider
@@ -364,8 +382,10 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         addSubview(rowContentStack)
         addSubview(trailingSlot)
 
-        _ = identityCustomizationHost
-        _ = customizationHost
+        if !defersCustomizationUntilNeeded {
+            _ = identityCustomizationHost
+            _ = customizationHost
+        }
     }
 
     /// Materializes the alternate-account overlay when it first has pixels to contribute.
@@ -774,16 +794,66 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         applyAgentIcon(for: session, account: account)
         applyTextColors()
 
-        identityCustomizationHost.updateTarget(
-            .sessionIdentity(sessionID: session.id.uuidString.lowercased())
+        refreshCustomizations()
+    }
+
+    /// Rechecks the two public row surfaces after an extension publication. Product rows call
+    /// this from the sidebar's one observer; rows that are not visible stay entirely dormant
+    /// until AppKit configures them later.
+    func refreshCustomizations(
+        changedTargets: Set<ExtensionComponentTarget>? = nil
+    ) {
+        guard let sessionID else { return }
+        let entityID = sessionID.uuidString.lowercased()
+        let identityTarget = ExtensionComponentTarget.sessionIdentity(sessionID: entityID)
+        let rowTarget = ExtensionComponentTarget(
+            component: HostComponentContracts.sidebarSessionRow.id,
+            contractVersion: HostComponentContracts.sidebarSessionRow.version,
+            entityID: entityID
         )
-        customizationHost.updateTarget(
-            .init(
-                component: HostComponentContracts.sidebarSessionRow.id,
-                contractVersion: HostComponentContracts.sidebarSessionRow.version,
-                entityID: session.id.uuidString.lowercased()
-            )
+
+        refreshCustomizationHost(
+            target: identityTarget,
+            isMaterialized: identityCustomizationHostIsMaterialized,
+            host: { identityCustomizationHost },
+            changedTargets: changedTargets
         )
+        refreshCustomizationHost(
+            target: rowTarget,
+            isMaterialized: customizationHostIsMaterialized,
+            host: { customizationHost },
+            changedTargets: changedTargets
+        )
+    }
+
+    private func refreshCustomizationHost(
+        target: ExtensionComponentTarget,
+        isMaterialized: Bool,
+        host: () -> ComponentCustomizationHost,
+        changedTargets: Set<ExtensionComponentTarget>?
+    ) {
+        guard Self.isCustomizationTarget(target, affectedBy: changedTargets) else { return }
+        guard !defersCustomizationUntilNeeded
+                || isMaterialized
+                || !customizationLookup(target).isEmpty
+        else { return }
+        host().updateTarget(target)
+    }
+
+    private static func isCustomizationTarget(
+        _ target: ExtensionComponentTarget,
+        affectedBy changedTargets: Set<ExtensionComponentTarget>?
+    ) -> Bool {
+        guard let changedTargets else { return true }
+        return changedTargets.contains {
+            $0.component == target.component
+                && $0.contractVersion == target.contractVersion
+                && ($0.entityID == nil || $0.entityID == target.entityID)
+        }
+    }
+
+    var customizationHostsAreMaterialized: Bool {
+        identityCustomizationHostIsMaterialized || customizationHostIsMaterialized
     }
 
     /// The icon slot carries the *agent* — Claude's starburst, OpenAI's knot, a shell's

@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingExtensionKit
 import XCTest
 @testable import Threading
 
@@ -154,6 +155,43 @@ final class SessionRowActionsTests: XCTestCase {
         XCTAssertEqual(infoBuildCount, 0)
         XCTAssertNotNil(row.makeSessionHoverCard(session: session, activity: .idle))
         XCTAssertEqual(infoBuildCount, 1)
+    }
+
+    /// The app starts before extension processes publish their component patches. Empty
+    /// lookups must not create two rendering hosts and two notification observers per visible
+    /// row; the sidebar's collection observer wakes the row when a real patch arrives.
+    func testCustomizationHostsAreDeferredUntilPublishedContentExists() throws {
+        var resolutions: [ExtensionComponentTarget: ComponentCustomizationResolution] = [:]
+        let row = SessionRowView(
+            customizationLookup: { resolutions[$0] ?? .empty },
+            defersCustomizationUntilNeeded: true
+        )
+        let session = session("Deferred customization")
+
+        row.configure(with: session, activity: .idle)
+        XCTAssertFalse(row.customizationHostsAreMaterialized)
+
+        let target = ExtensionComponentTarget(
+            component: HostComponentContracts.sidebarSessionRow.id,
+            contractVersion: HostComponentContracts.sidebarSessionRow.version,
+            entityID: session.id.uuidString.lowercased()
+        )
+        resolutions[target] = ComponentCustomizationResolution(
+            properties: [.title: .text("Published title")],
+            slots: [:],
+            replacement: nil,
+            replacementExtensionIdentifier: nil,
+            replacementCandidates: [],
+            hooks: []
+        )
+
+        row.refreshCustomizations(changedTargets: [target])
+
+        XCTAssertTrue(row.customizationHostsAreMaterialized)
+        let title = try XCTUnwrap(
+            optionalView(named: "sidebar.session.title", in: row) as? MorphingTitleLabel
+        )
+        XCTAssertEqual(title.stringValue, "Published title")
     }
 
     /// A standard login has no account chip. Resolving it during first paint used to scan the

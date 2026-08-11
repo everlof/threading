@@ -1213,6 +1213,25 @@ unrelated dyld, state and AppKit variance and did not reproduce that first appar
 The custom component and its stress fixture were therefore reverted; the complexity would not buy
 a measurable startup improvement.
 
+The following one-project / 100-session trace exposed two more costs in the same first-turn mount.
+`MorphingLabel` prepared every title off-window at the 2x fallback scale, then treated attachment to
+the same 2x window as a scale change and rebuilt the identical glyph tree. Recording the raster
+scale alongside the completed layout snapshot removes that duplicate while a real display-scale
+change still rerasterizes normally. A matched five-run sweep reduced median first-turn work from
+**84.66 to 80.86 ms (−4.5%)**; the after trace contains no `MorphingLabel.rebuild`,
+`updateForBackingScale`, or `viewDidMoveToWindow` stack beneath row attachment.
+
+Each visible product row also constructed two `ComponentCustomizationHost`s, registered two
+notification observers, and ran the empty renderer path before extension processes had started.
+Product rows now perform only the synchronous registry check while the resolution is empty. One
+sidebar-level observer revisits materialized rows when a publication arrives; a row creates only
+the affected host once content exists, while gallery and standalone injected rows remain
+self-observing. The next matched five-run sweep reduced median first-turn work again from **80.86
+to 76.62 ms (−5.2%)**. From the fresh baseline these two owned-phase changes remove **8.04 ms
+(−9.5%)**. Process-entry totals stayed flat within dyld/AppKit launch variance, so no aggregate
+speedup is claimed. The final Time Profiler table contains visible `SessionRowView` construction
+but no `ComponentCustomizationHost`, `renderComposition`, or LabelMorph attachment rebuild.
+
 ## Display-pane transition beside a live TUI
 
 Opening the right pane originally performed two consecutive 200 ms transitions: first the split

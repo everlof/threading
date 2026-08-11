@@ -422,6 +422,13 @@ private extension ProjectSidebarViewController {
         appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
             self?.extensionSettingsDidChange()
         }
+        // Session rows have two independently customizable surfaces. Watching each one made
+        // every visible row install two notification observers before extensions had published
+        // any content. The list owns visibility, so it owns the one observer and wakes only
+        // rows that AppKit has actually materialized.
+        appEvents.observe(ComponentCustomizationDidChange.self) { [weak self] event in
+            self?.refreshVisibleSessionCustomizations(changedTargets: event.targets)
+        }
         // The one settings observer this list carries, and it is value-guarded inside: the
         // event fires for every setting, and every other sidebar-shaping setting rebuilds the
         // *tree* and so arrives as `ProjectsDidChange`. Density changes no node — `reload()`
@@ -1013,6 +1020,23 @@ extension ProjectSidebarViewController {
         let upperBound = min(NSMaxRange(visibleRows), outlineView.numberOfRows)
         for row in visibleRows.location..<upperBound {
             reconfigureRow(at: row)
+        }
+    }
+
+    private func refreshVisibleSessionCustomizations(
+        changedTargets: Set<ExtensionComponentTarget>?
+    ) {
+        let visibleRows = outlineView.rows(in: outlineView.visibleRect)
+        guard visibleRows.location != NSNotFound, visibleRows.length > 0 else { return }
+
+        let upperBound = min(NSMaxRange(visibleRows), outlineView.numberOfRows)
+        for row in visibleRows.location..<upperBound {
+            guard let view = outlineView.view(
+                atColumn: 0,
+                row: row,
+                makeIfNecessary: false
+            ) as? SessionRowView else { continue }
+            view.refreshCustomizations(changedTargets: changedTargets)
         }
     }
 

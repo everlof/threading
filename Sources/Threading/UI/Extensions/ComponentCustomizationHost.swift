@@ -46,6 +46,7 @@ final class ComponentCustomizationHost {
             return NSImage(systemSymbolName: name, accessibilityDescription: nil)
         },
         customSurfaceResolver: @escaping CustomSurfaceResolver = { _, _ in nil },
+        observesChanges: Bool = true,
         onAction: @escaping @MainActor (ComponentCustomizationAction) -> Void = { _ in },
         onProperties: @escaping (
             [ExtensionComponentPropertyID: ExtensionComponentPropertyValue]
@@ -62,9 +63,11 @@ final class ComponentCustomizationHost {
         self.onProperties = onProperties
         self.onResolution = onResolution
 
-        appEvents.observe(ComponentCustomizationDidChange.self) { [weak self] event in
-            guard let self, self.isAffected(by: event.targets) else { return }
-            self.refresh()
+        if observesChanges {
+            appEvents.observe(ComponentCustomizationDidChange.self) { [weak self] event in
+                guard let self, self.isAffected(by: event.targets) else { return }
+                self.refresh()
+            }
         }
     }
 
