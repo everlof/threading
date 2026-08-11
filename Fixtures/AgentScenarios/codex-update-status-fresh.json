@@ -45,7 +45,7 @@
     {
       "channel": "stdin",
       "kind": "expectHost",
-      "payload": "{\"id\":4,\"method\":\"turn/start\",\"params\":{\"threadId\":\"fixture-thread-1\",\"clientUserMessageId\":\"${TURN_ID}\",\"input\":[{\"type\":\"text\",\"text\":\"In this synthetic repository, replace the exact contents of status.txt from before to after.\"}]}}"
+      "payload": "{\"id\":4,\"method\":\"turn/start\",\"params\":{\"threadId\":\"fixture-thread-1\",\"input\":[{\"type\":\"text\",\"text\":\"In this synthetic repository, replace the exact contents of status.txt from before to after.\"}]}}"
     },
     {
       "channel": "stdout",

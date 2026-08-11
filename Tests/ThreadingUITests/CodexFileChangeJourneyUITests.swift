@@ -49,18 +49,26 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
             "the streamed Codex answer never reached the conversation"
         )
         assertFile(statusFile, eventuallyEquals: "after\n")
+        recordScenarioScreenshot(named: "file-change-01-completed-turn", of: firstWindow)
 
         firstLaunch.typeKey("r", modifierFlags: [.command, .shift])
+        let reviewedFile = firstLaunch.staticTexts["git-review.file.name"]
         XCTAssertTrue(
-            firstLaunch.otherElements["git-review.content"].waitForExistence(timeout: 10),
-            "Git Review did not open"
-        )
-        XCTAssertTrue(
-            firstLaunch.staticTexts["status.txt"].waitForExistence(timeout: 10),
+            reviewedFile.waitForExistence(timeout: 10),
             "Git Review did not show the changed file"
         )
+        XCTAssertEqual(
+            reviewedFile.value as? String,
+            "status.txt",
+            "Git Review showed the wrong changed file"
+        )
+        recordScenarioScreenshot(named: "file-change-02-git-review", of: firstWindow)
 
-        firstLaunch.terminate()
+        firstLaunch.typeKey("q", modifierFlags: .command)
+        XCTAssertTrue(
+            firstLaunch.wait(for: .notRunning, timeout: 10),
+            "Threading did not complete a clean quit before relaunch"
+        )
 
         let secondLaunch = XCUIApplication()
         let secondTargetSize = sandbox.configure(secondLaunch)
@@ -80,6 +88,7 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
             "the recorded assistant answer was not recovered after relaunch"
         )
         assertFile(statusFile, eventuallyEquals: "after\n")
+        recordScenarioScreenshot(named: "file-change-03-relaunch-recovery", of: secondWindow)
     }
 
     private func assertFile(

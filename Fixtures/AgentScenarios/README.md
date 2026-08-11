@@ -16,5 +16,7 @@ Record against a disposable synthetic repository. Normalize dynamic identifiers 
 format's fixed placeholders while their meanings are still known. A recording is evidence used to
 author a scenario, not permission to commit every byte the provider happened to emit.
 
-No tape is committed yet. The first recorded fixture should arrive with the mock-agent replay
-process and a UI journey that consumes it.
+The `codex-update-status-*` pair replays the minimized fresh/resume exchange behind the file-change
+and relaunch journey. The `codex-stop-turn-*` pair adds the host-driven interrupt exchange behind
+the Stop-and-continue journey. Each fresh tape has a matching resume tape because the application
+chooses that process contract from durable session state before it starts the provider.

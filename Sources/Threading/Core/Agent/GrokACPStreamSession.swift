@@ -22,7 +22,7 @@ final class GrokACPStreamSession:
     var onEvent: ((StreamEvent) -> Void)?
     var onProviderExecution: ((ProviderExecutionEvent) -> Void)?
     var onExit: ((Int32) -> Void)?
-    var onSendAvailabilityChange: (() -> Void)?
+    var onInteractionAvailabilityChange: (() -> Void)?
     var onComposerCapabilitiesChange: (() -> Void)?
     var onSessionTitleChange: ((String) -> Void)?
     private(set) var composerCapabilities: [ComposerCapability] = []
@@ -123,7 +123,7 @@ final class GrokACPStreamSession:
         self.process = process
         input = process.standardInput
         isRunning = true
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
         sendInitialize()
     }
 
@@ -137,7 +137,7 @@ final class GrokACPStreamSession:
         isTurnInFlight = true
         receivedTurnFinished = false
         turnStartedAt = ProcessInfo.processInfo.systemUptime
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
         sendPendingPromptIfReady()
         return true
     }
@@ -191,7 +191,7 @@ final class GrokACPStreamSession:
         guard input != nil else { return }
         try? input?.close()
         input = nil
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
     }
 
     func terminate() {
@@ -431,7 +431,7 @@ final class GrokACPStreamSession:
                 model: GrokACPAdapter.currentModel(in: result)
             ))
             sendPendingPromptIfReady()
-            onSendAvailabilityChange?()
+            onInteractionAvailabilityChange?()
 
         case .prompt:
             flushPendingMessages()
@@ -732,7 +732,7 @@ final class GrokACPStreamSession:
                 contextWindow: lastContextWindow
             )
         ))
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
     }
 
     private func receivedError(_ chunk: Data) {
@@ -760,7 +760,7 @@ final class GrokACPStreamSession:
                     : diagnostics
             )
         }
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
         onExit?(status)
     }
 

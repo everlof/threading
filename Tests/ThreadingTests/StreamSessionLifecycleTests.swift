@@ -181,6 +181,45 @@ final class StreamSessionLifecycleTests: XCTestCase {
         session.terminate()
     }
 
+    /// `turn/start` makes sending unavailable before app-server reports the provider's turn ID.
+    /// Stop cannot be offered until that second boundary, so it needs its own availability
+    /// notification instead of relying on the earlier send-state transition.
+    func testCodexPublishesStopAvailabilityWhenTheActiveTurnIdentityArrives() {
+        let stopAvailable = expectation(description: "Codex Stop available")
+        var didObserveStop = false
+
+        let session = CodexStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r initialize; "
+                    + "printf '%s\\n' '{\"id\":1,\"result\":{}}'; "
+                    + "read -r initialized; "
+                    + "read -r open_thread; "
+                    + "printf '%s\\n' '{\"id\":2,\"result\":{\"thread\":{"
+                    + "\"id\":\"thread-1\",\"model\":\"gpt-test\"}}}'; "
+                    + "read -r start_turn; "
+                    + "printf '%s\\n' '{\"id\":3,\"result\":{\"turn\":{"
+                    + "\"id\":\"turn-1\",\"status\":\"inProgress\"}}}'; "
+                    + "printf '%s\\n' '{\"method\":\"turn/started\",\"params\":{"
+                    + "\"threadId\":\"thread-1\",\"turn\":{\"id\":\"turn-1\","
+                    + "\"status\":\"inProgress\"}}}'; "
+                    + "cat >/dev/null"
+            )
+        }
+        session.onInteractionAvailabilityChange = {
+            XCTAssertTrue(Thread.isMainThread)
+            guard session.canInterrupt, !didObserveStop else { return }
+            didObserveStop = true
+            stopAvailable.fulfill()
+        }
+
+        session.start()
+        XCTAssertTrue(session.send("Keep working"))
+
+        wait(for: [stopAvailable], timeout: 2)
+        XCTAssertTrue(session.canInterrupt)
+        session.terminate()
+    }
+
     func testCodexReportsTheOpenedAndRenamedThreadTitlesAsProviderMetadata() {
         let reported = expectation(description: "Codex thread titles reported")
         reported.expectedFulfillmentCount = 2

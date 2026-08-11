@@ -15,10 +15,11 @@ struct UIScenarioSandbox {
 
     let root: URL
 
-    struct CodexFileChangeFixture {
+    struct CodexScenarioFixture {
         let project: URL
         let freshTape: URL
         let resumeTape: URL
+        let title: String
 
         @MainActor
         func configure(_ application: XCUIApplication, scenarioRoot: URL) {
@@ -27,6 +28,7 @@ struct UIScenarioSandbox {
             application.launchEnvironment["THREADING_UI_SCENARIO_PROJECT"] = project.path
             application.launchEnvironment["THREADING_UI_SCENARIO_FRESH_TAPE"] = freshTape.path
             application.launchEnvironment["THREADING_UI_SCENARIO_RESUME_TAPE"] = resumeTape.path
+            application.launchEnvironment["THREADING_UI_SCENARIO_TITLE"] = title
         }
     }
 
@@ -61,7 +63,32 @@ struct UIScenarioSandbox {
     /// refuses to execute code copied into an XCUITest runner's temporary container.
     func prepareCodexFileChangeFixture(
         fileManager: FileManager = .default
-    ) throws -> CodexFileChangeFixture {
+    ) throws -> CodexScenarioFixture {
+        try prepareCodexFixture(
+            title: "Update status fixture",
+            freshTapeName: "codex-update-status-fresh.json",
+            resumeTapeName: "codex-update-status-resume.json",
+            fileManager: fileManager
+        )
+    }
+
+    func prepareCodexStopTurnFixture(
+        fileManager: FileManager = .default
+    ) throws -> CodexScenarioFixture {
+        try prepareCodexFixture(
+            title: "Stop turn fixture",
+            freshTapeName: "codex-stop-turn-fresh.json",
+            resumeTapeName: "codex-stop-turn-resume.json",
+            fileManager: fileManager
+        )
+    }
+
+    private func prepareCodexFixture(
+        title: String,
+        freshTapeName: String,
+        resumeTapeName: String,
+        fileManager: FileManager
+    ) throws -> CodexScenarioFixture {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -96,8 +123,8 @@ struct UIScenarioSandbox {
 
         let sourceScenarios = repository
             .appendingPathComponent("Fixtures/AgentScenarios", isDirectory: true)
-        let freshTape = fixtureDirectory.appendingPathComponent("codex-update-status-fresh.json")
-        let resumeTape = fixtureDirectory.appendingPathComponent("codex-update-status-resume.json")
+        let freshTape = fixtureDirectory.appendingPathComponent(freshTapeName)
+        let resumeTape = fixtureDirectory.appendingPathComponent(resumeTapeName)
         try fileManager.copyItem(
             at: sourceScenarios.appendingPathComponent(freshTape.lastPathComponent),
             to: freshTape
@@ -106,10 +133,11 @@ struct UIScenarioSandbox {
             at: sourceScenarios.appendingPathComponent(resumeTape.lastPathComponent),
             to: resumeTape
         )
-        return CodexFileChangeFixture(
+        return CodexScenarioFixture(
             project: project,
             freshTape: freshTape,
-            resumeTape: resumeTape
+            resumeTape: resumeTape,
+            title: title
         )
     }
 

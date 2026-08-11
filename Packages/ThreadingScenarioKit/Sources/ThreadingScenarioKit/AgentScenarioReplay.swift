@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public enum AgentScenarioReplayError: Error, Equatable, LocalizedError, Sendable {
@@ -225,13 +226,23 @@ private struct BoundedLineReader {
                     maximum: maximumBytes
                 )
             }
-            let chunk = try handle.read(upToCount: min(4_096, maximumBytes + 1)) ?? Data()
-            if chunk.isEmpty {
+            let chunkLimit = min(4_096, maximumBytes + 1)
+            var chunk = Data(count: chunkLimit)
+            let count: Int = try chunk.withUnsafeMutableBytes { bytes in
+                while true {
+                    let result = Darwin.read(handle.fileDescriptor, bytes.baseAddress, chunkLimit)
+                    if result >= 0 { return result }
+                    if errno == EINTR { continue }
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+                }
+            }
+            if count == 0 {
                 guard !buffered.isEmpty else { return nil }
                 let line = buffered
                 buffered.removeAll()
                 return String(decoding: line, as: UTF8.self)
             }
+            chunk.removeSubrange(count..<chunk.endIndex)
             buffered.append(chunk)
         }
     }

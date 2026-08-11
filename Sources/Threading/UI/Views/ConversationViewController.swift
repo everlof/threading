@@ -1070,7 +1070,7 @@ final class ConversationViewController: NSViewController {
             self.handle(event)
         }
         stream.onExit = { [weak self] status in self?.handleExit(status) }
-        stream.onSendAvailabilityChange = { [weak self] in
+        stream.onInteractionAvailabilityChange = { [weak self] in
             self?.refreshConversationControls()
             guard let self else { return }
             // Availability is the one signal every transport has for "the turn ended", however

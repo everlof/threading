@@ -51,7 +51,7 @@ final class ClaudeStreamSession:
     /// Fired when the process ends, for any reason.
     var onExit: ((Int32) -> Void)?
 
-    var onSendAvailabilityChange: (() -> Void)?
+    var onInteractionAvailabilityChange: (() -> Void)?
     var onComposerCapabilitiesChange: (() -> Void)?
     private(set) var composerCapabilities: [ComposerCapability] = []
 
@@ -190,7 +190,7 @@ final class ClaudeStreamSession:
         self.process = process
         self.input = process.standardInput
         self.isRunning = true
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
         if onComposerCapabilitiesChange != nil {
             requestComposerCapabilities()
         }
@@ -232,7 +232,7 @@ final class ClaudeStreamSession:
         pendingMessageID = id
         turnStartedAt = ProcessInfo.processInfo.systemUptime
         isTurnInFlight = true
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
         sendPendingTurnIfReady()
         return true
     }
@@ -255,7 +255,7 @@ final class ClaudeStreamSession:
             pendingMessageID = nil
             isTurnInFlight = false
             turnStartedAt = nil
-            onSendAvailabilityChange?()
+            onInteractionAvailabilityChange?()
             return
         }
         pendingPrompt = nil
@@ -420,7 +420,7 @@ final class ClaudeStreamSession:
     func finish() {
         try? input?.close()
         input = nil
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
     }
 
     func terminate() {
@@ -519,7 +519,7 @@ final class ClaudeStreamSession:
             // after the control timeout, and system/init still provides a name-only fallback.
             self.capabilityInitializationFinished = true
             self.sendPendingTurnIfReady()
-            self.onSendAvailabilityChange?()
+            self.onInteractionAvailabilityChange?()
         }
     }
 
@@ -671,7 +671,7 @@ final class ClaudeStreamSession:
         process = nil
         input = nil
         pendingPrompt = nil
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
 
         // A request whose reply will now never arrive fails rather than sitting on its timeout.
         failPendingControlRequests(with: ClaudeControlError.notRunning)
@@ -710,7 +710,7 @@ final class ClaudeStreamSession:
         pendingPrompt = nil
 
         let settled = self.outcome(for: outcome)
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
 
         return .turnFinished(
             text: settled == .stopped ? nil : text,

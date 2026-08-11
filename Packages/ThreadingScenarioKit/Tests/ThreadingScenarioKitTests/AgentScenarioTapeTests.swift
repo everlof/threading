@@ -222,6 +222,68 @@ final class AgentScenarioTapeTests: XCTestCase {
         )
     }
 
+    /// Provider stdin remains open for the life of a conversation. Foundation's
+    /// `read(upToCount:)` waits for its entire requested length on this kind of pipe, so a
+    /// one-line handshake deadlocked until the host either wrote 4 KiB or closed the stream.
+    func testReplayReadsOneLineWithoutWaitingForOpenPipeToClose() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let input = Pipe()
+        let output = Pipe()
+        let finished = expectation(description: "replay consumed a line from an open pipe")
+        let lock = NSLock()
+        var replayResult: Result<Int32, Error>?
+        let tape = AgentScenarioTape(
+            id: "open-pipe-replay",
+            title: "Open pipe replay",
+            provider: .codex,
+            transport: .codexAppServer,
+            provenance: provenance,
+            steps: [
+                .expectHost(
+                    channel: .standardInput,
+                    payload: "{\"id\":1,\"method\":\"initialize\"}"
+                ),
+                .emitAgent(
+                    channel: .standardOutput,
+                    payload: "{\"id\":1,\"result\":{}}\n",
+                    afterMilliseconds: 0
+                ),
+                .exit(status: 0, afterMilliseconds: 0),
+            ]
+        )
+
+        DispatchQueue.global().async {
+            let result = Result {
+                try AgentScenarioReplayer(delay: { _ in }).run(
+                    tape: tape,
+                    scenarioRoot: directory,
+                    input: input.fileHandleForReading,
+                    standardOutput: output.fileHandleForWriting
+                )
+            }
+            lock.withLock { replayResult = result }
+            finished.fulfill()
+        }
+
+        try input.fileHandleForWriting.write(contentsOf: Data(
+            "{\"id\":1,\"method\":\"initialize\"}\n".utf8
+        ))
+        wait(for: [finished], timeout: 1)
+        try input.fileHandleForWriting.close()
+        try output.fileHandleForWriting.close()
+
+        let result = try XCTUnwrap(lock.withLock { replayResult })
+        XCTAssertEqual(try result.get(), 0)
+        XCTAssertEqual(
+            String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
+            "{\"id\":1,\"result\":{}}\n"
+        )
+    }
+
     func testReplayBoundsPayloadAfterPlaceholderExpansion() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

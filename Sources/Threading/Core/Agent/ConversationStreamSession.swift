@@ -10,11 +10,12 @@ protocol ConversationStreamSession: AnyObject {
     var onEvent: ((StreamEvent) -> Void)? { get set }
     var onExit: ((Int32) -> Void)? { get set }
 
-    /// Fired whenever `canSend` may have changed without a stream event carrying that fact.
+    /// Fired whenever an interaction gated by live transport state may have changed.
     ///
-    /// A transport may finish establishing a thread, complete a turn, or lose its process
-    /// without a parent transcript event carrying that state.
-    var onSendAvailabilityChange: (() -> Void)? { get set }
+    /// A transport may finish establishing a thread, learn the provider's active turn identity,
+    /// complete a turn, or lose its process without a parent transcript event carrying every
+    /// resulting change to send, Stop, steering, and configuration controls.
+    var onInteractionAvailabilityChange: (() -> Void)? { get set }
 
     /// Whether the logical conversation is open, not merely whether a turn subprocess exists.
     var isRunning: Bool { get }

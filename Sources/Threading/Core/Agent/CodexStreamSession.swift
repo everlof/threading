@@ -46,7 +46,7 @@ final class CodexStreamSession:
     var onSubagentEvent: ((SubagentEvent) -> Void)?
     var onSessionTitleChange: ((String) -> Void)?
     var onExit: ((Int32) -> Void)?
-    var onSendAvailabilityChange: (() -> Void)?
+    var onInteractionAvailabilityChange: (() -> Void)?
     var onComposerCapabilitiesChange: (() -> Void)?
     private(set) var composerCapabilities: [ComposerCapability] = []
     var sessionTitleSource: AgentTitleSource { .provider }
@@ -212,7 +212,7 @@ final class CodexStreamSession:
         self.process = process
         self.input = process.standardInput
         isRunning = true
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
         sendInitialize()
     }
 
@@ -270,7 +270,7 @@ final class CodexStreamSession:
         receivedTurnFinished = false
         turnStartedAt = ProcessInfo.processInfo.systemUptime
         turnEffort = configurationProvider().effort
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
         sendPendingTurnIfReady()
         return true
     }
@@ -284,7 +284,7 @@ final class CodexStreamSession:
         receivedTurnFinished = false
         turnStartedAt = ProcessInfo.processInfo.systemUptime
         turnEffort = nil
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
         guard sendRequest(
             method: "thread/compact/start",
             parameters: ["threadId": threadID],
@@ -293,7 +293,7 @@ final class CodexStreamSession:
             isCompactionInFlight = false
             isTurnInFlight = false
             turnStartedAt = nil
-            onSendAvailabilityChange?()
+            onInteractionAvailabilityChange?()
             return false
         }
         return true
@@ -309,7 +309,7 @@ final class CodexStreamSession:
         receivedTurnFinished = false
         turnStartedAt = ProcessInfo.processInfo.systemUptime
         turnEffort = configurationProvider().effort
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
         guard sendRequest(
             method: "review/start",
             parameters: [
@@ -322,7 +322,7 @@ final class CodexStreamSession:
             isTurnInFlight = false
             turnStartedAt = nil
             turnEffort = nil
-            onSendAvailabilityChange?()
+            onInteractionAvailabilityChange?()
             return false
         }
         return true
@@ -333,7 +333,7 @@ final class CodexStreamSession:
         guard input != nil else { return }
         try? input?.close()
         input = nil
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
     }
 
     func terminate() {
@@ -551,11 +551,15 @@ final class CodexStreamSession:
 
         if method == "turn/started" {
             if isRoot {
+                let previousTurnID = activeTurnID
                 activeTurnID = turnID
                 // `isCompactionInFlight` is set by the request that asked for it; a review turn
                 // is the one we started through `review/start`. Nothing on the wire names the
                 // kind, so it is remembered from what we asked for.
                 activeTurnKind = isCompactionInFlight ? .compact : activeTurnKind
+                if activeTurnID != previousTurnID {
+                    onInteractionAvailabilityChange?()
+                }
             } else if let threadID = notificationThreadID {
                 childTurnsByThread[threadID] = turnID
             }
@@ -563,9 +567,13 @@ final class CodexStreamSession:
         }
 
         if isRoot {
+            let hadActiveTurn = activeTurnID != nil
             activeTurnID = nil
             activeTurnKind = .ordinary
             settleMessagesInFlight()
+            if hadActiveTurn {
+                onInteractionAvailabilityChange?()
+            }
         } else if let threadID = notificationThreadID {
             childTurnsByThread[threadID] = nil
         }
@@ -597,7 +605,7 @@ final class CodexStreamSession:
         }
         sendPendingTurnIfReady()
         requestSkillsIfNeeded()
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
     }
 
     private func requestSkillsIfNeeded(forceReload: Bool = false) {
@@ -976,7 +984,7 @@ final class CodexStreamSession:
                 if completedCompaction, outcome == .completed {
                     onEvent?(.transcriptNotice(L10n.string("Context compacted.")))
                 }
-                onSendAvailabilityChange?()
+                onInteractionAvailabilityChange?()
             }
             onEvent?(completed)
         }
@@ -1123,7 +1131,7 @@ final class CodexStreamSession:
             )
         }
 
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
         onExit?(status)
     }
 
@@ -1136,7 +1144,7 @@ final class CodexStreamSession:
             outcome: .failed,
             metrics: .empty
         )))
-        onSendAvailabilityChange?()
+        onInteractionAvailabilityChange?()
     }
 
     private func completingTurnMetrics(in event: StreamEvent) -> StreamEvent {

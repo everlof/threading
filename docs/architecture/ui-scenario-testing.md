@@ -55,6 +55,25 @@ The UI lane needs an interactive macOS test host with automation mode available.
 can compile the runner but cannot enable UI automation reports an infrastructure failure before
 any scenario method starts; that is not converted into a skipped or passing test.
 
+Every feature journey records named screenshots at semantic checkpoints with `keepAlways`.
+Captures are scoped to the Threading window rather than the full display, so a successful result
+does not retain pixels from unrelated applications. To keep and export them from a known path:
+
+```bash
+scripts/test.sh ui -resultBundlePath /tmp/ThreadingUI.xcresult
+xcrun xcresulttool export attachments \
+  --path /tmp/ThreadingUI.xcresult \
+  --output-path /tmp/ThreadingUIAttachments
+```
+
+Both paths must be new for each run. Xcode 26 also attaches a full-display MP4 to a failed UI test,
+with `deleteOnSuccess` lifetime. That is useful failure triage, but it is neither durable evidence
+for a passing journey nor scoped to Threading; it can include unrelated private content. A video
+of a successful journey is possible with macOS `screencapture -v`, but it has the same full-display
+privacy boundary and requires Screen Recording permission for the invoking shell. Persistent video
+therefore remains an explicit local diagnostic while window-only screenshots are the automatic
+passing artifact.
+
 `scripts/ui-test.sh` builds the fixture-agent executable and asks Xcode to seal it into the Debug
 app's `Contents/Helpers` directory before code signing. The application will accept only that
 exact bundled executable and mutable fixture files below the isolated scenario home. This is a
@@ -163,7 +182,9 @@ UI lane to required hosted CI after the first fixture agent and critical journey
 clean machine; until then `scripts/test.sh ui` is the explicit local gate and must not be described
 as ordinary CI coverage.
 
-## First implemented journey
+## Implemented journeys
+
+### File change and relaunch recovery
 
 `CodexFileChangeJourneyUITests` is the first complete scenario. Its minimized Codex app-server
 tape came from one real Codex 0.147.0 exchange against a disposable synthetic repository; account,
@@ -177,5 +198,14 @@ startup, rate-limit and machine-path traffic was deliberately not copied into th
 
 The test crosses the shipping child-process boundary, JSON-RPC parser, conversation renderer,
 checkout watcher, Git Review surface, provider transcript importer, and durable project store.
-Permission, cancellation, provider failure, rate-limit, and remote/mobile promises remain future
+Permission, provider failure, rate-limit, and remote/mobile promises remain future
 journeys rather than variants of this one.
+
+### Stop and continue
+
+`CodexStopTurnJourneyUITests` sends a real `turn/start`, waits until the composer exposes its
+accessible Stop action, and presses it. The fixture requires the resulting `turn/interrupt` for
+the exact active turn before reporting an interrupted completion. The test proves the checkout is
+unchanged, the composer becomes ready again, and a second prompt completes in the same process.
+This is the user promise behind cancellation: Stop neither becomes a silent local reset nor leaves
+the retained conversation stranded.

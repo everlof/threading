@@ -1998,6 +1998,7 @@ private enum UIScenarioBootstrap {
         static let project = "THREADING_UI_SCENARIO_PROJECT"
         static let freshTape = "THREADING_UI_SCENARIO_FRESH_TAPE"
         static let resumeTape = "THREADING_UI_SCENARIO_RESUME_TAPE"
+        static let title = "THREADING_UI_SCENARIO_TITLE"
     }
 
     private static let markerName = ".threading-ui-scenario-home"
@@ -2009,7 +2010,7 @@ private enum UIScenarioBootstrap {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default
     ) -> Result {
-        let fixtureKeys = [Key.project, Key.freshTape, Key.resumeTape]
+        let fixtureKeys = [Key.project, Key.freshTape, Key.resumeTape, Key.title]
         guard fixtureKeys.contains(where: { environment[$0] != nil }) else {
             return .notRequested
         }
@@ -2017,6 +2018,14 @@ private enum UIScenarioBootstrap {
               environment["HOME"] == homePath,
               environment["CFFIXED_USER_HOME"] == homePath else {
             return .refused("scenario home does not own HOME and CFFIXED_USER_HOME")
+        }
+        guard let title = environment[Key.title]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty,
+              title.utf8.count <= 128,
+              !title.contains("\n"),
+              !title.contains("\r") else {
+            return .refused("scenario title is missing or invalid")
         }
 
         let root = URL(fileURLWithPath: homePath, isDirectory: true)
@@ -2070,7 +2079,7 @@ private enum UIScenarioBootstrap {
         let session: AgentSession
         if let existing = ProjectStore.shared.session(withID: sessionID) {
             guard existing.usesNativeUI,
-                  existing.title == "Update status fixture",
+                  existing.title == title,
                   ProjectStore.shared.project(forSessionID: sessionID)?.id == storedProject.id else {
                 return .refused("fixed fixture session collides with incompatible state")
             }
@@ -2080,7 +2089,7 @@ private enum UIScenarioBootstrap {
                 to: storedProject.id,
                 kind: .codex,
                 usesNativeUI: true,
-                title: "Update status fixture",
+                title: title,
                 id: sessionID
             ) else {
                 return .refused("could not persist the fixture conversation")
