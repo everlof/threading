@@ -123,6 +123,55 @@ final class SidebarTreeBuilderTests: XCTestCase {
         XCTAssertEqual(controller.outlineRowCount, 2, "a repeated lifecycle signal remounted the tree")
     }
 
+    /// The no-project prompt is an empty-data branch, not part of the populated sidebar's
+    /// launch cost. In particular, hiding it must not instantiate and theme two labels merely
+    /// so they can remain invisible.
+    func testAPopulatedInitialTreeDoesNotMaterializeTheEmptyState() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "threading-sidebar-populated-empty-state-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let manager = StateManager(appSupportDirectory: directory)
+        defer { manager.closeDatabase() }
+        let stored = project("Populated", sessions: [session("Visible")])
+        XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [stored])))
+
+        let controller = ProjectSidebarViewController(
+            projectStore: ProjectStore(stateManager: manager)
+        )
+        _ = controller.view
+
+        XCTAssertFalse(controller.emptyStateIsMaterialized)
+        controller.setSettingsMode(true)
+        controller.setSettingsMode(false)
+        XCTAssertFalse(
+            controller.emptyStateIsMaterialized,
+            "a settings round-trip constructed the hidden no-project prompt"
+        )
+    }
+
+    /// The lazy branch still has to cross on the one state that needs it.
+    func testAnEmptyInitialTreeMaterializesTheEmptyState() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "threading-sidebar-empty-state-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let manager = StateManager(appSupportDirectory: directory)
+        defer { manager.closeDatabase() }
+        XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [])))
+
+        let controller = ProjectSidebarViewController(
+            projectStore: ProjectStore(stateManager: manager)
+        )
+        _ = controller.view
+
+        XCTAssertTrue(controller.emptyStateIsMaterialized)
+    }
+
     // MARK: - Earning a level
 
     /// One checkout is a plain project row. The repository level exists to tell *several*

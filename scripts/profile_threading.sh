@@ -1612,6 +1612,10 @@ run_startup_profile() (
       -derivedDataPath "${derived_data}" \
       -jobs "${jobs}" \
       -quiet \
+      ENABLE_CODE_COVERAGE=NO \
+      CLANG_COVERAGE_MAPPING=NO \
+      ARCHS="${architecture}" \
+      ONLY_ACTIVE_ARCH=YES \
       build
   ) 2>&1 | tee "${output_directory}/startup-build.log"
 

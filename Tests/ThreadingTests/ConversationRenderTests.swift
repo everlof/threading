@@ -3106,6 +3106,35 @@ final class SubagentSummaryViewTests: XCTestCase {
         )
     }
 
+    func testDocumentTableKeepsRaggedRowsRectangular() {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: Design.Typography.body(surface: .conversation),
+            .foregroundColor: Design.Text.label
+        ]
+        let value: (String) -> NSAttributedString = {
+            NSAttributedString(string: $0, attributes: attributes)
+        }
+        let table = ThemedDocumentTableView(
+            headers: [value("One"), value("Two")],
+            rows: [
+                [value("short")],
+                [value("wide"), value("row"), value("wins")]
+            ],
+            alignments: [.left, .center, .right],
+            availableWidth: 480,
+            minimumColumnWidth: MarkdownDefaults.tableColumnWidth
+        )
+
+        let fields = descendants(of: table).compactMap { $0 as? NSTextField }
+        XCTAssertEqual(fields.count, 9, "the widest row did not establish a three-column grid")
+        XCTAssertEqual(
+            fields.filter { $0.stringValue.isEmpty }.count,
+            3,
+            "missing header and body cells were not preserved as empty selectable cells"
+        )
+        XCTAssertEqual(fields.suffix(3).map(\.alignment), [.left, .center, .right])
+    }
+
     /// A pane narrower than the readable column still has to wrap to *itself*.
     ///
     /// The row host is the only place that decides a row's measure, and a table cell is free to

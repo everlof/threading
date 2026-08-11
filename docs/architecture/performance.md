@@ -553,6 +553,10 @@ lock, marker, log and write belongs to temporary state that is removed after the
 `THREADING_STARTUP_PROFILE_CONFIGURATION` selects the build configuration (Debug by default).
 Set `THREADING_STARTUP_PROFILE_DERIVED_DATA` to a trusted existing DerivedData directory for fast
 incremental tuning runs; omitting it keeps each retained artifact self-contained.
+The startup build explicitly disables code coverage and builds only the measured host architecture.
+The scheme's test plan otherwise leaks `-profile-generate` into a standalone launch build, while a
+universal Release binary spends build time on a slice the selected destination cannot execute.
+Coverage-instrumented launch totals are not comparable to the uninstrumented baselines below.
 
 The three scaling-audit commands run System and Neo Brutalism by default and accept their printed
 `THREADING_*` variables as one-point overrides. Extension-settings virtualization removed the
@@ -1232,6 +1236,36 @@ to 76.62 ms (−5.2%)**. From the fresh baseline these two owned-phase changes r
 speedup is claimed. The final Time Profiler table contains visible `SessionRowView` construction
 but no `ComponentCustomizationHost`, `renderComposition`, or LabelMorph attachment rebuild.
 
+The first production-configuration audit corrected the profiler itself before interpreting the
+next stacks. With coverage disabled and only arm64 built, five direct Release launches against the
+same one-project / 100-session snapshot established this baseline:
+
+| Release cold-launch phase | Median |
+|---|---:|
+| Process entry → delegate | 103.51 ms |
+| State load | 18.62 ms |
+| Window construction | 143.43 ms |
+| Window ordering | 6.70 ms |
+| First ready turn | 62.33 ms |
+| Delegate → ready | 250.82 ms |
+| Process entry → ready | **354.33 ms** |
+
+The trace found one more invisible branch in window construction: every populated sidebar built,
+themed and constrained its two-label no-project prompt, then immediately hid it. The prompt now
+materializes only when the rebuilt root tree is actually empty. Hiding it, including entering
+Settings with projects present, does not cross that boundary; leaving Settings with an empty store
+still creates and shows it. The 29-test sidebar tree/lifecycle run reports 28 passes and one opt-in
+stress skip, including explicit populated, empty and Settings-round-trip coverage.
+
+The after trace has no `makeEmptyStateView`, empty-state label, `FontRoleApplying`, or appearance-
+variant stack below `ProjectSidebarViewController`. Its matched five direct Release launches ranged
+from 317.68 to 414.66 ms and had a **368.53 ms** total median; first-turn work moved from 62.33 to
+**61.59 ms**, while window construction moved from 143.43 to 146.23 ms. Dyld, state and native
+window variance was larger than the roughly one-sample branch removed, so no aggregate launch
+speedup is claimed. The firm result is that an unshown state no longer owns launch work; the current
+production baseline remains roughly **350–370 ms process entry to ready**, with about **62 ms** in
+the first visible-tree turn.
+
 ## Display-pane transition beside a live TUI
 
 Opening the right pane originally performed two consecutive 200 ms transitions: first the split
@@ -1440,6 +1474,14 @@ width path now uses `ThemedDocumentTableView`: selectable cell labels are measur
 directly, while the design component draws the themed header and separators, forwards vertical
 wheel momentum to the transcript and reflows when the pane width changes. The general Markdown
 path remains unchanged where no settled width is known.
+
+The Release startup build then exposed a compiler-sensitive allocation pattern in that component:
+Swift 6.3.2's ownership optimizer aborted in `ThemedDocumentTableCanvas.init` while optimizing the
+nested `map`/key-path pass that cloned and padded the complete attributed-string matrix before
+`super.init`. Grid preparation now uses a direct widest-row pass and constructs each final cell
+once, including an empty field only where a ragged row actually needs it. The arm64 Release build
+completes, and focused reflow plus ragged-row tests preserve width changes, rectangular geometry
+and per-column alignment.
 
 Three fresh exact-replay processes after both changes measured:
 

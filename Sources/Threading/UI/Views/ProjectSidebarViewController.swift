@@ -37,7 +37,9 @@ final class ProjectSidebarViewController: NSViewController {
         scroll.automaticallyAdjustsContentInsets = false
         return scroll
     }()
-    private lazy var emptyStateView: NSView = {
+    private var emptyStateView: NSView?
+
+    private func makeEmptyStateView() -> NSView {
         let title = NSTextField(labelWithString: SidebarStrings.emptyTitle)
         title.applyFont(.emphasizedBody)
         title.textColor = Design.Text.secondary
@@ -52,7 +54,7 @@ final class ProjectSidebarViewController: NSViewController {
         stack.spacing = SidebarDefaults.emptyStateSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
-    }()
+    }
     private let appEvents = AppEventObservations()
 
     /// The persisted tree this controller presents. Production uses the app-wide store; an
@@ -262,7 +264,6 @@ final class ProjectSidebarViewController: NSViewController {
         setupFooter()
         setupHeader()
         setupOutlineView()
-        setupEmptyState()
         observeStoreChanges()
         applySidebarSurface()
         if !defersInitialTreeMount {
@@ -339,10 +340,25 @@ private extension ProjectSidebarViewController {
         applyTreeDensity(initial: true)
     }
 
-    /// Shown centred in the list area while no project has been added, pointing at the two
-    /// ways to add one. Hidden the moment the list has content.
-    private func setupEmptyState() {
-        let stack = emptyStateView
+    /// Shows the prompt centred in the list area while no project has been added.
+    ///
+    /// The ordinary launch already has projects, so constructing and theming these labels in
+    /// `viewDidLoad` spent launch time on a branch that contributed no pixels. Keep absence
+    /// cheap: hiding an unbuilt prompt is a no-op, and the first genuinely empty tree installs
+    /// it exactly once.
+    private func setEmptyStateVisible(_ visible: Bool) {
+        guard visible else {
+            emptyStateView?.isHidden = true
+            return
+        }
+
+        if let emptyStateView {
+            emptyStateView.isHidden = false
+            return
+        }
+
+        let stack = makeEmptyStateView()
+        emptyStateView = stack
         view.addSubview(stack)
 
         NSLayoutConstraint.activate([
@@ -357,6 +373,7 @@ private extension ProjectSidebarViewController {
                 constant: -SidebarDefaults.emptyStateInset
             )
         ])
+        stack.isHidden = false
     }
 
     /// The global destination at the leading edge — icon *and* word, because it is a place the
@@ -565,7 +582,7 @@ extension ProjectSidebarViewController {
         renderedShape = shape
         rebuildNodeIndexes()
 
-        emptyStateView.isHidden = !rootNodes.isEmpty
+        setEmptyStateVisible(rootNodes.isEmpty)
 
         let outlineSpan = PerformanceRecorder.shared.begin(
             "sidebar.outline.apply-structure",
@@ -1045,6 +1062,10 @@ extension ProjectSidebarViewController {
     /// without exposing the outline view itself.
     var initialTreeIsMounted: Bool { hasMountedInitialTree }
 
+    /// Whether the no-project prompt paid its construction cost. A populated startup should
+    /// never cross this branch; deterministic lifecycle tests keep that scaling rule explicit.
+    var emptyStateIsMaterialized: Bool { emptyStateView != nil }
+
     var outlineRowCount: Int { outlineView.numberOfRows }
 
     var instantiatedRowCount: Int {
@@ -1363,7 +1384,7 @@ extension ProjectSidebarViewController {
             sidebar.isHidden = false
             sidebar.select(id: SettingsPages.generalID)
             scrollView.isHidden = true
-            emptyStateView.isHidden = true
+            setEmptyStateVisible(false)
             // The list's controls go with the list: they add to and arrange the projects,
             // which are not on screen. The band and the brand stay — the brand is the
             // window's signature, not a list control, and a header that vanished took the
@@ -1374,7 +1395,7 @@ extension ProjectSidebarViewController {
         } else {
             settingsSidebar?.isHidden = true
             scrollView.isHidden = false
-            emptyStateView.isHidden = !rootNodes.isEmpty
+            setEmptyStateVisible(rootNodes.isEmpty)
             addButton.isHidden = false
             arrangeButton.isHidden = false
             settingsButton.contentTintColor = Design.Text.secondary

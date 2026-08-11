@@ -1032,6 +1032,23 @@ private final class ThemedDocumentTableCanvas: NSView, ThemedComponent {
         let column: Int
     }
 
+    /// Everything the immutable grid needs before the `NSView` exists.
+    ///
+    /// Keeping this work out of the subclass initializer is not cosmetic. Swift 6.3's
+    /// ownership optimizer loses the initializer's `self` lifetime when the pre-`super`
+    /// path contains the former nested `map`/key-path normalization and aborts every Release
+    /// build in `OSSACompleteLifetime`. The direct pass also avoids cloning the complete
+    /// attributed-string matrix merely to pad ragged rows; missing cells are materialized only
+    /// where the finished grid actually needs one.
+    private struct PreparedGrid {
+        let cellsByRow: [[Cell]]
+        let rowHeights: [CGFloat]
+        let columnCount: Int
+        let columnWidth: CGFloat
+        let documentWidth: CGFloat
+        let documentHeight: CGFloat
+    }
+
     private let cellsByRow: [[Cell]]
     private let columnCount: Int
     private let minimumColumnWidth: CGFloat
@@ -1050,24 +1067,54 @@ private final class ThemedDocumentTableCanvas: NSView, ThemedComponent {
         availableWidth: CGFloat,
         minimumColumnWidth: CGFloat
     ) {
-        let columnCount = max(max(headers.count, rows.map(\.count).max() ?? 0), 1)
-        let documentWidth = max(availableWidth, CGFloat(columnCount) * minimumColumnWidth)
-        self.columnCount = columnCount
+        let prepared = Self.prepareGrid(
+            headers: headers,
+            rows: rows,
+            alignments: alignments,
+            availableWidth: availableWidth,
+            minimumColumnWidth: minimumColumnWidth
+        )
+        cellsByRow = prepared.cellsByRow
+        rowHeights = prepared.rowHeights
+        columnCount = prepared.columnCount
         self.minimumColumnWidth = minimumColumnWidth
-        columnWidth = documentWidth / CGFloat(columnCount)
+        columnWidth = prepared.columnWidth
+        super.init(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: prepared.documentWidth,
+            height: prepared.documentHeight
+        ))
+        themeRedraw = ThemeRedraw(self)
+        setAccessibilityRole(.table)
 
-        let normalizedRows = [headers] + rows.map { values in
-            values + Array(repeatElement(
-                NSAttributedString(string: ""),
-                count: max(0, columnCount - values.count)
-            ))
+        for row in cellsByRow {
+            for cell in row { addSubview(cell.field) }
         }
+        placeCells()
+    }
+
+    private static func prepareGrid(
+        headers: [NSAttributedString],
+        rows: [[NSAttributedString]],
+        alignments: [NSTextAlignment],
+        availableWidth: CGFloat,
+        minimumColumnWidth: CGFloat
+    ) -> PreparedGrid {
+        var widestRow = headers.count
+        for values in rows {
+            widestRow = max(widestRow, values.count)
+        }
+        let columnCount = max(widestRow, 1)
+        let documentWidth = max(availableWidth, CGFloat(columnCount) * minimumColumnWidth)
+        let columnWidth = documentWidth / CGFloat(columnCount)
         var builtRows: [[Cell]] = []
         var heights: [CGFloat] = []
-        builtRows.reserveCapacity(normalizedRows.count)
-        heights.reserveCapacity(normalizedRows.count)
+        builtRows.reserveCapacity(rows.count + 1)
+        heights.reserveCapacity(rows.count + 1)
 
-        for (rowIndex, values) in normalizedRows.enumerated() {
+        for rowIndex in 0...rows.count {
+            let values = rowIndex == 0 ? headers : rows[rowIndex - 1]
             var builtCells: [Cell] = []
             var rowHeight: CGFloat = 0
             builtCells.reserveCapacity(columnCount)
@@ -1119,22 +1166,15 @@ private final class ThemedDocumentTableCanvas: NSView, ThemedComponent {
             heights.append(rowHeight + Design.Spacing.small * 2)
         }
 
-        cellsByRow = builtRows
-        rowHeights = heights
         let separators = CGFloat(max(0, heights.count - 1)) * Design.Radius.border
-        super.init(frame: NSRect(
-            x: 0,
-            y: 0,
-            width: documentWidth,
-            height: heights.reduce(0, +) + separators
-        ))
-        themeRedraw = ThemeRedraw(self)
-        setAccessibilityRole(.table)
-
-        for row in cellsByRow {
-            for cell in row { addSubview(cell.field) }
-        }
-        placeCells()
+        return PreparedGrid(
+            cellsByRow: builtRows,
+            rowHeights: heights,
+            columnCount: columnCount,
+            columnWidth: columnWidth,
+            documentWidth: documentWidth,
+            documentHeight: heights.reduce(0, +) + separators
+        )
     }
 
     @available(*, unavailable)
