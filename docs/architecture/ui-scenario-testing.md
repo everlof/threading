@@ -56,23 +56,33 @@ can compile the runner but cannot enable UI automation reports an infrastructure
 any scenario method starts; that is not converted into a skipped or passing test.
 
 Every feature journey records named screenshots at semantic checkpoints with `keepAlways`.
-Captures are scoped to the Threading window rather than the full display, so a successful result
-does not retain pixels from unrelated applications. To keep and export them from a known path:
+Captures are rendered by Threading from its own AppKit window rather than read back from the
+display, so a successful result neither retains pixels from unrelated applications nor needs the
+macOS Screen Recording grant. A small JSON attachment beside each PNG carries its journey name,
+checkpoint order, title and description; the report never has to infer meaning from a filename.
+
+Every UI run gets a unique result bundle and a static HTML gallery under
+`.build/ui-test-reports/`. The runner prints the exact `index.html` path and an `open` command.
+The report has one navigable section per test, status and duration, lazy-loaded full-size images,
+descriptions, and a click-to-enlarge view. The `.xcresult` remains beside it for Xcode diagnostics.
+To choose a known location instead:
 
 ```bash
 scripts/test.sh ui -resultBundlePath /tmp/ThreadingUI.xcresult
-xcrun xcresulttool export attachments \
-  --path /tmp/ThreadingUI.xcresult \
-  --output-path /tmp/ThreadingUIAttachments
+# report: /tmp/ThreadingUI/report/index.html
 ```
 
-Both paths must be new for each run. Xcode 26 also attaches a full-display MP4 to a failed UI test,
-with `deleteOnSuccess` lifetime. That is useful failure triage, but it is neither durable evidence
-for a passing journey nor scoped to Threading; it can include unrelated private content. A video
-of a successful journey is possible with macOS `screencapture -v`, but it has the same full-display
-privacy boundary and requires Screen Recording permission for the invoking shell. Persistent video
-therefore remains an explicit local diagnostic while window-only screenshots are the automatic
-passing artifact.
+Result and report paths must be new for each run; generated output is never silently replaced.
+
+Xcode 26 otherwise starts a continuous full-display diagnostic recording for every UI test and
+keeps the MP4 only on failure. On an ad-hoc-signed Debug build, every rebuild changes the code
+requirement macOS associates with the capture, so the Screen Recording prompt can recur instead
+of behaving like a one-time grant. `Threading-UI.xctestplan` deliberately sets **Preferred Capture
+Format** to screenshots: passing runs use only Threading's in-process checkpoint renderer and do
+not start that recording. Xcode can still attempt its own full-display screenshot when a test
+fails, which may ask for the grant on that failure run. A diagnostic video remains possible by
+temporarily selecting video in the test plan, but it is explicitly opt-in because it can include
+unrelated private content.
 
 `scripts/ui-test.sh` builds the fixture-agent executable and asks Xcode to seal it into the Debug
 app's `Contents/Helpers` directory before code signing. The application will accept only that
@@ -80,6 +90,95 @@ exact bundled executable and mutable fixture files below the isolated scenario h
 load-bearing split: macOS refuses to execute code copied into the XCUITest runner's temporary
 container, and allowing an arbitrary executable path would let a malformed test launch a real
 provider. Non-UI and Release builds remove any helper left in a reused products directory.
+
+## The combined UI evidence catalogue
+
+Application journeys are only one of three kinds of review evidence. Component behavior and
+complete layout states stay in the fast, in-process AppKit lane, where the product can cover
+themes and sizes without multiplying fixture-agent processes. The checked-in
+`Tests/UIEvidence/coverage.json` is the inventory for all three kinds:
+
+- **component** entries capture every independently named Component Gallery story under System
+  light and dark;
+- **surface** entries select real controller and window render tests for the composer, sidebar,
+  Git Review, settings, onboarding and Usage dashboard;
+- **journey** entries name both implemented critical promises and the next known gaps. A journey
+  stays visible as implemented even when its slower result was not included in a particular
+  render run, and a planned journey is visible as a gap rather than disappearing from the list.
+
+Generate the component and surface catalogue with:
+
+```bash
+scripts/ui-evidence.sh
+```
+
+The command creates a unique directory under `.build/ui-evidence-reports/`, runs only the render
+tests selected by the manifest, and writes a self-contained `report/index.html`. Images are lazy
+loaded and independently described. The report filters by evidence kind and comparison status,
+and its Current/Baseline/Diff controls compute an amplified per-channel diff locally in the
+browser. It uploads nothing.
+
+`scripts/ui-test.sh` also writes `evidence.json` beside every journey gallery. Include one or more
+such runs in the combined report without rerunning their XCUITests:
+
+```bash
+scripts/ui-evidence.sh \
+  --journey-evidence .build/ui-test-reports/<run>/report
+```
+
+Approved references live under `Tests/UIEvidence/Baselines/` and mirror stable evidence paths;
+xcresult attachment UUIDs never become baseline names. Exact PNG equality is labelled Accepted,
+a missing reference New, and any other result Changed. These labels organize review rather than
+silently deciding that a visually acceptable change is a test failure. `--accept-new-baselines`
+copies only images with no existing reference and never overwrites an approved one. Replacing an
+existing baseline remains an explicit source change in an ordinary code review.
+
+The opt-in component walk is bounded by the fixed developer-authored gallery. Product surfaces
+whose data comes from transcripts, sessions, files or usage history still use their ordinary
+virtualized fixture controllers; the evidence runner does not build an unbounded visual stack to
+make a screenshot.
+
+### iOS evidence catalogue
+
+`Tests/UIEvidence/ios-coverage.json` is the companion inventory for the native iOS app. Its
+capture plan names DEBUG-only deterministic scenes that route through the shipping
+`ThreadingMobile` view tree: welcome and pairing, the populated session dashboard, the real UIKit
+conversation timeline, permissions, collaboration, SwiftTerm, Git Review, Workspace, Usage,
+session creation, Settings, dialogs and issue reporting. It deliberately does not recreate those
+screens in a snapshot-only target.
+
+Run it on the booted iPhone simulator with:
+
+```bash
+scripts/ui-evidence-ios.sh
+# choose an already installed simulator explicitly when needed
+scripts/ui-evidence-ios.sh --simulator <UDID>
+```
+
+The script builds one Debug app in its own Derived Data directory, installs it once, and launches
+each declared scene with a fresh evidence identifier. The app repeatedly renders its own key
+window and publishes a marker from its temporary container only after asynchronous fixture data
+has arrived and adjacent rendered frames agree. A focused UIKit text field is allowed to keep its
+system caret blink: the coordinator observes longer than one blink interval and asks for two
+equal adjacent frames, rather than requiring the entire screen to stop owning time forever. A
+timeout or an unstabilized marker fails the run; it never becomes a screenshot with a successful
+label.
+
+The canonical iPhone 17 Pro capture is 402×874 points / 1206×2622 pixels. Every image in one run
+must have that exact native scale. The capture is app-owned, so it does not start a full-display
+recording or require the macOS Screen Recording grant. Simulator status furniture is fixed for
+repeatability even though the app-window image ordinarily excludes it.
+
+Each run writes a unique static report under `.build/ui-evidence-ios-reports/` using the same
+Current/Baseline/Diff viewer as macOS. Approved iOS references live separately under
+`Tests/UIEvidence/iOSBaselines/`; `--accept-new-baselines` has the same create-only rule and never
+overwrites an approved image. Do the explicit image-review lap first. Generated run images remain
+in `.build` and are not committed merely because capture succeeded.
+
+The current catalogue is surface evidence, not a substitute for application journeys. The
+manifest keeps the adaptive compact/Dynamic-Type/iPad matrix and the owner-only workspace detail
+recovery journey visible as planned gaps until they have their own deterministic interaction and
+durable-result assertions.
 
 ## A session tape is not a transcript
 

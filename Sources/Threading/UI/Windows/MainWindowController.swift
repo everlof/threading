@@ -2,6 +2,32 @@ import AppKit
 import ThreadingExtensionKit
 import ThreadingRemoteKit
 
+/// Coarse owners inside `MainWindowController` construction for the opt-in Release startup run.
+///
+/// These are deliberately one timestamp per semantic phase, never per view or row. The App Launch
+/// sampler runs at 5 ms and can distinguish native window creation from split setup, but not the
+/// several independently removable pieces inside that setup. The startup metric prints this value
+/// beside the aggregate so a harness or OS shift cannot be mistaken for product work.
+struct MainWindowStartupPerformance: Sendable {
+    var createWindowNanoseconds: UInt64 = 0
+    var baseInitializationNanoseconds: UInt64 = 0
+    var splitTotalNanoseconds: UInt64 = 0
+    var splitSidebarNanoseconds: UInt64 = 0
+    var splitContentNanoseconds: UInt64 = 0
+    var splitDisplayAndToolsNanoseconds: UInt64 = 0
+    var splitContentInstallNanoseconds: UInt64 = 0
+    var splitToolbarNanoseconds: UInt64 = 0
+    var splitToolbarConstructionNanoseconds: UInt64 = 0
+    var splitToolbarAttachmentNanoseconds: UInt64 = 0
+    var splitToolbarItemNanoseconds: UInt64 = 0
+    var splitToolbarStyleNanoseconds: UInt64 = 0
+    var splitHeaderNanoseconds: UInt64 = 0
+    var splitFinalizeNanoseconds: UInt64 = 0
+    var chromeCoordinatorNanoseconds: UInt64 = 0
+    var initialFrameNanoseconds: UInt64 = 0
+    var initialTitleNanoseconds: UInt64 = 0
+}
+
 /// The application's single window: a project sidebar beside the active session's terminal.
 final class MainWindowController: ThemedWindowController, RemoteWorkspaceProviding {
 
@@ -12,6 +38,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         var toolbarNanoseconds: UInt64 = 0
     }
 #endif
+
+    private(set) var startupPerformance = MainWindowStartupPerformance()
+    private var isMeasuringStartupToolbarItems = false
 
     // MARK: - Properties
 
@@ -46,7 +75,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// The window's permanent content root: the app-drawn chrome, collapsed to nothing in
     /// native dress, around the extension hook and the workspace inside it.
     private lazy var chromeHostViewController = WindowChromeHostViewController(
-        workspace: extensionHookViewController
+        workspace: extensionHookViewController,
+        initialTakeoverActive: window?.styleMask.contains(.titled) == false
     )
 
     /// Retained so the sidebar can be collapsed and restored directly.
@@ -176,13 +206,32 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// The *same* class the pane strips use, inked from the backdrop rather than the chrome
     /// because the header floats over the terminal's own palette — which is the only thing
     /// that differs between the two, and now the only thing stated. See `ThemedTabItemView`.
-    let pageTabView = ThemedTabItemView(
-        title: "",
-        symbolName: SessionTitleDefaults.projectSymbolName,
-        placement: .horizontal,
-        showsClose: true,
-        inkSource: .backdrop
-    )
+    var materializedPageTabView: ThemedTabItemView?
+    var pageTabView: ThemedTabItemView {
+        if let materializedPageTabView { return materializedPageTabView }
+
+        let tab = ThemedTabItemView(
+            title: "",
+            symbolName: SessionTitleDefaults.projectSymbolName,
+            placement: .horizontal,
+            showsClose: true,
+            inkSource: .backdrop
+        )
+        tab.onClose = { [weak self] in self?.closeActivePageTab() }
+        tab.onSelect = { [weak self] in self?.revealActivePageInSidebar() }
+        tab.isSelected = true
+        tab.isHidden = containerViewController.isShowingSettings
+        tab.maxWidth = SessionTitleDefaults.maxWidth
+        NSLayoutConstraint.activate([
+            tab.widthAnchor.constraint(greaterThanOrEqualToConstant: SessionTitleDefaults.minWidth),
+            tab.widthAnchor.constraint(lessThanOrEqualToConstant: SessionTitleDefaults.maxWidth)
+        ])
+
+        materializedPageTabView = tab
+        paneHeaderStackView?.insertArrangedSubview(tab, at: 0)
+        return tab
+    }
+    var pageTabViewIsMaterialized: Bool { materializedPageTabView != nil }
 
     /// Settings replaces the workspace temporarily rather than opening a document. Its header
     /// therefore states the mode and the way back without borrowing tab selection or close
@@ -208,7 +257,29 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }()
 
     /// Toolbar pill showing the current account's rate-limit usage.
-    let accountUsageItemView = AccountUsageItemView()
+    ///
+    /// A composer or empty launch has no account to meter. Building the pill anyway used to
+    /// install its event observation and repeating refresh timer before the first frame, then
+    /// leave the view hidden. Keep the source-compatible accessor for callers that genuinely
+    /// need the pill, but do not materialize it until a session supplies an account.
+    var materializedAccountUsageItemView: AccountUsageItemView?
+    weak var paneHeaderStackView: NSStackView?
+    var accountUsageItemView: AccountUsageItemView {
+        if let materializedAccountUsageItemView { return materializedAccountUsageItemView }
+
+        let item = AccountUsageItemView()
+        materializedAccountUsageItemView = item
+        if let paneHeaderStackView {
+            paneHeaderStackView.insertArrangedSubview(
+                item,
+                at: paneHeaderStackView.arrangedSubviews.count - 2
+            )
+        }
+        return item
+    }
+    var accountUsageItemIsMaterialized: Bool {
+        materializedAccountUsageItemView != nil
+    }
 
     /// App-owned chrome controls, retained so pane visibility and session state stay reflected.
     var sidebarToolbarButton: ThemedIconButton?
@@ -315,12 +386,34 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     convenience init() {
-        self.init(window: Self.createWindow())
+        let constructionStarted = DispatchTime.now().uptimeNanoseconds
+        let createdWindow = Self.createWindow()
+        let windowCreated = DispatchTime.now().uptimeNanoseconds
+        self.init(window: createdWindow)
+        let baseInitialized = DispatchTime.now().uptimeNanoseconds
+        startupPerformance.createWindowNanoseconds = windowCreated - constructionStarted
+        startupPerformance.baseInitializationNanoseconds = baseInitialized - windowCreated
+
+        let splitStarted = DispatchTime.now().uptimeNanoseconds
         setupSplitViewController()
+        startupPerformance.splitTotalNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - splitStarted
+
+        let chromeStarted = DispatchTime.now().uptimeNanoseconds
         setupChromeCoordinator()
+        startupPerformance.chromeCoordinatorNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - chromeStarted
         window?.delegate = self
+
+        let frameStarted = DispatchTime.now().uptimeNanoseconds
         applyInitialFrame()
+        startupPerformance.initialFrameNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - frameStarted
+
+        let titleStarted = DispatchTime.now().uptimeNanoseconds
         updateWindowTitle()
+        startupPerformance.initialTitleNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - titleStarted
     }
 
     // MARK: - Window Creation
@@ -429,6 +522,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     // MARK: - Setup
 
     private func setupSplitViewController() {
+        let sidebarStarted = DispatchTime.now().uptimeNanoseconds
         sidebarViewController.delegate = self
 
         // Provider archive can change while Threading is not frontmost. The store notification
@@ -479,46 +573,73 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         sidebarItem.holdingPriority = SidebarDefaults.holdingPriority
         splitViewController.addSplitViewItem(sidebarItem)
         configureWorkspaceNavigator()
+        startupPerformance.splitSidebarNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - sidebarStarted
 
+        let contentStarted = DispatchTime.now().uptimeNanoseconds
         containerViewController.delegate = self
 
         containerViewController.composerDelegate = sessionCoordinator
-        pageTabView.onClose = { [weak self] in self?.closeActivePageTab() }
-        pageTabView.onSelect = { [weak self] in self?.revealActivePageInSidebar() }
-        // The header shows exactly one page, and it is always the current one.
-        pageTabView.isSelected = true
-
         let contentItem = NSSplitViewItem(viewController: containerViewController)
         contentItem.canCollapse = false
         contentItem.minimumThickness = MainWindowDefaults.minContentWidth
         splitViewController.addSplitViewItem(contentItem)
+        startupPerformance.splitContentNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - contentStarted
 
+        let displayAndToolsStarted = DispatchTime.now().uptimeNanoseconds
         setupDisplayPane()
         setupAgentToolCoordinator()
+        startupPerformance.splitDisplayAndToolsNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - displayAndToolsStarted
 
+        let contentInstallStarted = DispatchTime.now().uptimeNanoseconds
         window?.contentViewController = chromeHostViewController
+        startupPerformance.splitContentInstallNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - contentInstallStarted
 
+        let toolbarStarted = DispatchTime.now().uptimeNanoseconds
         // A frameless window has nowhere to mount a toolbar — under a takeover theme the
         // coordinator reinstalls it the moment the native frame returns.
         if window?.styleMask.contains(.titled) == true {
             // Installed after the split view exists: the tracking separator item needs it.
-            window?.toolbar = makeToolbar()
-            updateToolbarControlStates()
+            let toolbarConstructionStarted = DispatchTime.now().uptimeNanoseconds
+            let toolbar = makeToolbar()
+            startupPerformance.splitToolbarConstructionNanoseconds =
+                DispatchTime.now().uptimeNanoseconds - toolbarConstructionStarted
+
+            let toolbarAttachmentStarted = DispatchTime.now().uptimeNanoseconds
+            isMeasuringStartupToolbarItems = true
+            window?.toolbar = toolbar
+            isMeasuringStartupToolbarItems = false
+            startupPerformance.splitToolbarAttachmentNanoseconds =
+                DispatchTime.now().uptimeNanoseconds - toolbarAttachmentStarted
 
             // Compact, not `.unified`: the large style reserves a title-scale toolbar row,
             // which dwarfs the deliberately quiet session tab and its compact app-owned
             // actions.
+            let toolbarStyleStarted = DispatchTime.now().uptimeNanoseconds
             window?.toolbarStyle = .unifiedCompact
+            startupPerformance.splitToolbarStyleNanoseconds =
+                DispatchTime.now().uptimeNanoseconds - toolbarStyleStarted
         }
+        startupPerformance.splitToolbarNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - toolbarStarted
 
+        let headerStarted = DispatchTime.now().uptimeNanoseconds
         // The pane's own header, built here because the window controller owns what these
         // controls do, and installed there because the pane owns where they sit.
         containerViewController.installHeader(makePaneHeaderView())
         configureTabTransfer()
-        // The first update above can only reach the real NSToolbar button. Initialize the pane
-        // controls now that they exist too, especially the surface button whose glyph depends
-        // on the restored session and which must disappear when there is no session.
+        // Both sets of controls now exist. Initialize them once, especially the surface button
+        // whose glyph depends on the restored session and which must disappear when there is no
+        // session. Updating after the toolbar and then again here repeated the same main-thread
+        // state walk during every launch.
         updateToolbarControlStates()
+        startupPerformance.splitHeaderNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - headerStarted
+
+        let finalizeStarted = DispatchTime.now().uptimeNanoseconds
         splitViewController.paneCollapseStateDidChange = { [weak self] item, collapsed in
             guard let self else { return }
             self.updatePaneToggleSelection()
@@ -545,12 +666,27 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // mount its persisted tree: doing that after the window frame but before this width
         // restoration laid out every visible row at the default divider and immediately laid it
         // out again at the user's divider.
+        // Snapshot the user's divider before yielding. The test host can have older window
+        // controllers draining resize notifications on the same main queue; more importantly,
+        // the value being restored is launch input, not mutable state to re-read after default
+        // layout has had a chance to report itself.
+        let initialSidebarWidth = SidebarWidth.stored
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.updateSidebarMinimumThickness()
-            self.restoreSidebarWidth()
+            self.restoreSidebarWidth(initialSidebarWidth)
             self.sidebarViewController.mountInitialTreeIfNeeded()
         }
+        startupPerformance.splitFinalizeNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - finalizeStarted
+    }
+
+    /// Attributes only the delegate work nested inside the initial `NSWindow.setToolbar` call.
+    /// Theme reinstalls and later AppKit requests are deliberately excluded from the launch
+    /// metric, so the sub-phase remains comparable with `splitToolbarAttachmentNanoseconds`.
+    func recordStartupToolbarItemConstruction(_ elapsedNanoseconds: UInt64) {
+        guard isMeasuringStartupToolbarItems else { return }
+        startupPerformance.splitToolbarItemNanoseconds += elapsedNanoseconds
     }
 
     /// Wires the frame exchange up once the window and split view exist.
@@ -707,7 +843,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func extensionHostSignal(_ signal: ExtensionHostSignal) -> Double? {
         switch signal {
         case .activeAccountUsageRemaining:
-            guard let account = accountUsageItemView.account,
+            guard let account = materializedAccountUsageItemView?.account,
                   let used = AccountUsageService.shared
                     .usage(for: account)?
                     .peakWindow()?
@@ -998,9 +1134,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// `setPosition` clamps against the other items' minimums itself, which is also the whole of
     /// the sidebar's ceiling — a width wider than the terminal can spare arrives as the widest
     /// the terminal can spare.
-    private func restoreSidebarWidth() {
+    private func restoreSidebarWidth(_ width: CGFloat?) {
         defer { recordsSidebarWidth = true }
-        guard let width = SidebarWidth.stored, !sidebarItem.isCollapsed else { return }
+        guard let width, !sidebarItem.isCollapsed else { return }
 
         splitView.layoutSubtreeIfNeeded()
         splitView.setPosition(width, ofDividerAt: 0)
@@ -1545,7 +1681,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// its sidebar row and page heading, and changing it does not create a new document.
     func updateSessionTitleItem() {
         if containerViewController.isShowingSettings {
-            pageTabView.isHidden = true
+            materializedPageTabView?.isHidden = true
             settingsModeHeaderView.isHidden = false
             updateAccountUsageItem(session: nil)
             updateToolbarControlStates()
@@ -1585,7 +1721,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 toolTip: project?.name
             )
         } else {
-            pageTabView.isHidden = true
+            materializedPageTabView?.isHidden = true
         }
         updateAccountUsageItem(session: session)
         updateToolbarControlStates()
@@ -1599,6 +1735,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         toolTip: String? = nil
     ) {
         settingsModeHeaderView.isHidden = true
+        let pageTabView = pageTabView
         pageTabView.isHidden = false
         pageTabView.update(
             title: title,
@@ -2310,8 +2447,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// account is configured to use — since that is what the next turn will actually spend.
     private func updateAccountUsageItem(session: AgentSession?) {
         guard let session else {
-            if accountUsageItemView.account != nil {
-                accountUsageItemView.configure(account: nil)
+            if materializedAccountUsageItemView?.account != nil {
+                materializedAccountUsageItemView?.configure(account: nil)
             }
             return
         }
@@ -2324,12 +2461,20 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         let model = session.model
             ?? AgentModels.defaultModel(for: session.kind, account: account)
 
+        guard let account else {
+            if materializedAccountUsageItemView?.account != nil {
+                materializedAccountUsageItemView?.configure(account: nil)
+            }
+            return
+        }
+
+        let usageItem = accountUsageItemView
+
         // Re-configured when either half changes: switching model inside a session moves which
         // limit binds it, without the account moving at all.
-        guard accountUsageItemView.account?.id != accountID
-            || accountUsageItemView.model != model else { return }
+        guard usageItem.account?.id != accountID || usageItem.model != model else { return }
 
-        accountUsageItemView.configure(account: account, model: model)
+        usageItem.configure(account: account, model: model)
     }
 
     /// Opens Settings, or does nothing if already open. What a *door* to a page needs — see
@@ -3308,6 +3453,8 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         workspaceSidebarViewController.synchronizeSelection(
             with: currentWorkspaceNavigatorDestination
         )
+        updateSessionTitleItem()
+        updateWindowTitle()
         if let previousSessionID {
             sidebar.refreshRow(sessionID: previousSessionID)
         }
@@ -3636,7 +3783,8 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
             // It also just spent tokens, so the finish is the moment the pill is most
             // likely stale. The service's spacing keeps a chatty session polite.
-            if sessionID == currentSessionID, let account = accountUsageItemView.account {
+            if sessionID == currentSessionID,
+               let account = materializedAccountUsageItemView?.account {
                 AccountUsageService.shared.refresh(account, force: true)
             }
         }

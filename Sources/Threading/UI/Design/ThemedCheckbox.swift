@@ -107,6 +107,14 @@ final class ThemedCheckbox: ThemedControl {
         )
     }
 
+    /// The outer margin exists only so the keyboard ring is not clipped. Excluding it from the
+    /// alignment rectangle lets a checkbox's visible box share the host's leading column with
+    /// field and card borders; otherwise every checkbox is indented by its invisible focus
+    /// gutter even when it is not focused.
+    override var alignmentRectInsets: NSEdgeInsets {
+        NSEdgeInsets(top: 0, left: boxInset, bottom: 0, right: boxInset)
+    }
+
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
         window?.makeFirstResponder(self)
@@ -151,6 +159,16 @@ final class ThemedCheckbox: ThemedControl {
     override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
 
     override func draw(_ dirtyRect: NSRect) {
+        if !usesHistoricalGadget {
+            DisabledControlDrawing.draw(isEnabled: isEnabled) {
+                drawContents()
+            }
+            return
+        }
+        drawContents()
+    }
+
+    private func drawContents() {
         if !usesHistoricalGadget, isEnabled, isHovered || isPressed {
             ThemedSurface.draw(
                 bounds,
@@ -198,10 +216,17 @@ final class ThemedCheckbox: ThemedControl {
             }
         } else {
             corner = Design.Radius.control(fitting: box.size)
+            let material = AppThemePalette.current.material(for: effectiveAppearance)
+            let emptyBorder = material.controlGlow == nil
+                ? Design.Surface.border
+                : Design.Surface.accent
             ThemedSurface.draw(
                 box,
                 fill: filled ? Design.Surface.accent : Design.Surface.controlResting,
-                border: filled ? nil : Design.Surface.border,
+                // Neon materials outline every interactive control with their authored light.
+                // Leaving the smallest control on the ordinary structural border made an
+                // unchecked Cyberpunk box disappear into its near-black ground.
+                border: filled ? nil : emptyBorder,
                 radius: corner
             )
             let markName = state == .mixed ? "minus" : "checkmark"
@@ -214,7 +239,7 @@ final class ThemedCheckbox: ThemedControl {
                 TemplateImageDrawing.draw(
                     mark,
                     in: box.insetBy(dx: Layout.markInset, dy: Layout.markInset),
-                    tint: isEnabled ? Design.Text.selected : Design.Text.tertiary
+                    tint: Design.Text.selected
                 )
             }
         }
@@ -230,7 +255,9 @@ final class ThemedCheckbox: ThemedControl {
         let font = Design.Typography.controlRegular()
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: isEnabled ? Design.Text.label : Design.Text.tertiary
+            .foregroundColor: usesHistoricalGadget && !isEnabled
+                ? Design.Text.tertiary
+                : Design.Text.label
         ]
         let x = box.maxX + Layout.gap
         // The line box, so the words share the box's own centre. Sized from
@@ -431,6 +458,10 @@ final class ThemedRadioButton: ThemedControl {
         )
     }
 
+    override var alignmentRectInsets: NSEdgeInsets {
+        NSEdgeInsets(top: 0, left: boxInset, bottom: 0, right: boxInset)
+    }
+
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
         window?.makeFirstResponder(self)
@@ -493,10 +524,14 @@ final class ThemedRadioButton: ThemedControl {
             )
             if selected { drawHistoricalDot(in: box) }
         } else {
+            let material = AppThemePalette.current.material(for: effectiveAppearance)
+            let emptyBorder = material.controlGlow == nil
+                ? Design.Surface.border
+                : Design.Surface.accent
             shape = ThemedSurface.draw(
                 box,
                 fill: Design.Surface.controlResting,
-                border: Design.Surface.border,
+                border: emptyBorder,
                 radius: boxSize / 2
             )
             if selected { drawModernDot(in: box) }

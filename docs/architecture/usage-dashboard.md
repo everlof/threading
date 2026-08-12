@@ -41,6 +41,47 @@ projection summary and observed-history chart:
 The dashboard receives immutable report and limit-series values. It does not read transcripts,
 launch CLIs, call provider endpoints or perform journal I/O.
 
+`UsageDashboardProjector` is the Foundation-only seam between those feeds and presentation. It
+prepares all three Overview ranges and both metric rankings on a utility task, including the
+top-three-plus-Other daily composition and zero-filled days. It also groups the limit journal and
+prepares independent 7/30/90-day histories before AppKit sees them. Range and metric changes are
+therefore bounded local model changes rather than a main-actor fold over report cells or journal
+records. The same semantic values are the input intended for the owner-only remote bridge; neither
+platform renderer receives raw transcript cells or the raw journal.
+
+## Cross-platform delivery boundary
+
+macOS and iOS share `UsageDashboardProjector` values, not a view hierarchy. AppKit keeps the
+desktop chart renderer, pointer inspection and theme-specific motion. The iPhone uses a native
+SwiftUI sheet and Swift Charts over the already bounded values, with the same Overview and Limit
+History subjects. Both renderers present banked-reset inventory as three distinct states:
+positive, authoritative zero, and unavailable (`nil`). Historical `.bankedCredit` evidence and
+the next current-credit expiry remain separately typed markers.
+
+The Mac advertises the additive `usage-dashboard` feature only to paired owner devices with
+whole-host read access. `/api/me` carries only that small identifier; it does not acquire Usage
+data. The phone fetches data only while the Usage sheet is visible:
+
+- `GET /api/usage` returns the three prepared Overview ranges, coverage and one page of limit
+  summaries. Pages default to 48 summaries and are capped at 64; each breakdown kind is capped at
+  64 rows, and the encoded response is capped at 384 KiB.
+- `GET /api/usage/limit?series=<id>&days=<7|30|90>` prepares only the selected account/window and
+  returns at most 280 observations and 118 reset-evidence markers. The encoded detail response is
+  capped at 192 KiB.
+
+Both routes authorize before loading report or journal data. A view-only or interactive one-chat
+guest receives 403 and never sees the feature identifier; a revoked bearer follows the existing
+401 path. The bridge omits raw transcript cells, filesystem paths, provider credentials, credit
+identity and the raw history journal.
+
+`RemoteUsageDashboardView` uses a lazy vertical stack and adaptive metric grids. Overview range
+and metric changes are local because all three bounded ranges arrive together. Limit range changes
+fetch only the selected series. A build-state poll backs off from two to twelve seconds, preserves
+the last successful snapshot with its observation time, and stops when the sheet disappears.
+Structured load/detail work and explicit pagination work are all cancelled on dismissal. The
+deterministic `THREADING_MOBILE_DEMO=usage` family covers Overview plus positive, zero and
+unavailable banked-reset inventory.
+
 ## Transcript ledger
 
 `UsageLedgerRecord` is the response-level interchange between provider adapters and aggregation.
@@ -202,6 +243,13 @@ daily total. The hero remains a compact top-three split while its total, the cha
 coverage all retain every route. Dashboard charts receive daily or pre-downsampled data and then
 apply their own hard geometry bound as a second line of defence.
 
+Projection output has named budgets before it crosses to a renderer: 500 rows plus one aggregate
+omission row per breakdown, 256 account/window series, 280 observed limit points and 118 reset
+events per range. The last two slots in the chart's 120-marker budget remain available for credit
+expiry and projected exhaustion. A series retains the full reset count and restored-pace total for
+its summary even when its visible reset markers are sampled. `nil` reset-credit inventory remains
+distinct from authoritative zero throughout this value boundary.
+
 `UsageDashboardPerformanceTests` is part of the fast plan at meaningful default sizes. The opt-in
 `scripts/profile_usage_dashboard.sh` builds the test bundle, then invokes `xctest` directly so the
 stress environment reaches the test host (ordinary `xcodebuild test` sanitizes it). The 2026-08-09
@@ -216,6 +264,13 @@ Debug run on the local Apple-silicon Mac measured:
 | 1,000 interrupted transitions, five 2,000-point series per switch | 13.544 s | < 60 s and ≤ 1,200 retained points |
 | 120 rendered independent-chart animation frames while retaining five 50,000-point source series | 5.985 s | < 20 s and ≤ 1,200 retained points |
 | 120 rendered Classic Player stacked-spectrum frames while retaining five aligned 50,000-point source series | 2.187 s | < 25 s and ≤ 1,200 retained points |
+
+The 2026-08-11 matched projection run used the same 100,000 aggregate cells, 250,000 limit samples
+and 50,000 reset events across 300 account/window series, then also built and encoded the bounded
+remote page. Its three Debug passes were 3.923 s cold, 2.693 s and 2.658 s.
+`UsageDashboardProjectionTests` keeps a < 12 s per-pass alarm and asserts every output budget
+above; `scripts/profile_usage_dashboard.sh` runs it after the existing renderer suite under the
+same opt-in stress environment.
 
 The thresholds are regression alarms, not target frame times. The actual page switches between at
 most 90 daily points per provider or 280 prepared history points; the larger transition fixture is
@@ -234,3 +289,10 @@ there to expose accidental raw-array work in animation and interaction paths.
   Cyberpunk dark, Neo Brutalism light and Classic Player, with all five coverage rows, top-three
   plus Other chart bounds, selected-tab checks and virtualized breakdown assertions.
 - `UsageDashboardPerformanceTests`: default regression sizes and the opt-in stress contracts above.
+- `UsageDashboardProjectionTests`: range equality, capped breakdown conservation, nil-versus-zero
+  banked-reset inventory, remote encoded-size/page ceilings and three matched 100k/250k/50k
+  projection passes.
+- `RemoteProtocolTests` and `RemoteServerIntegrationTests`: additive DTO compatibility, owner-only
+  feature and route authorization, URL construction and response ceilings.
+- `RemoteUsageDashboardTests`: deterministic mobile range/chart budgets plus positive, zero and
+  unavailable banked-reset states.

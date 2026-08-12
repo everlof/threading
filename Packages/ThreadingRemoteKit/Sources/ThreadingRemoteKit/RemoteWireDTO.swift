@@ -500,6 +500,414 @@ public struct RemoteHostDTO: Codable, Equatable, Sendable {
     }
 }
 
+/// Optional REST surfaces advertised by `GET /api/me`. Raw strings keep discovery additive:
+/// older clients ignore the field and newer clients can ignore feature names they do not know.
+public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
+    case usageDashboard = "usage-dashboard"
+}
+
+// MARK: - Usage dashboard
+
+/// Provider-neutral token categories. Reasoning is included in output and must not be added to
+/// `processed` a second time.
+public struct RemoteUsageTokenCountsDTO: Codable, Equatable, Sendable {
+    public let uncachedInput: Int64
+    public let cachedInput: Int64
+    public let cacheWrite: Int64
+    public let output: Int64
+    public let reasoning: Int64
+
+    public init(
+        uncachedInput: Int64,
+        cachedInput: Int64,
+        cacheWrite: Int64,
+        output: Int64,
+        reasoning: Int64
+    ) {
+        self.uncachedInput = uncachedInput
+        self.cachedInput = cachedInput
+        self.cacheWrite = cacheWrite
+        self.output = output
+        self.reasoning = reasoning
+    }
+
+    public var processed: Int64 { uncachedInput + cachedInput + cacheWrite + output }
+}
+
+public struct RemoteUsageCostQualityDTO: Codable, Equatable, Sendable {
+    public let providerReportedUSD: Double
+    public let catalogPricedUSD: Double
+    public let unpricedTokens: Int64
+    public let cacheSavingsUSD: Double
+
+    public init(
+        providerReportedUSD: Double,
+        catalogPricedUSD: Double,
+        unpricedTokens: Int64,
+        cacheSavingsUSD: Double
+    ) {
+        self.providerReportedUSD = providerReportedUSD
+        self.catalogPricedUSD = catalogPricedUSD
+        self.unpricedTokens = unpricedTokens
+        self.cacheSavingsUSD = cacheSavingsUSD
+    }
+
+    public var totalUSD: Double { providerReportedUSD + catalogPricedUSD }
+}
+
+public enum RemoteUsageBreakdownKindDTO: String, Codable, CaseIterable, Sendable {
+    case models
+    case projects
+    case accounts
+    case providers
+}
+
+public struct RemoteUsageBreakdownRowDTO: Codable, Equatable, Sendable {
+    public let title: String
+    public let tokens: Int64
+    public let costUSD: Double
+    public let records: Int
+
+    public init(title: String, tokens: Int64, costUSD: Double, records: Int) {
+        self.title = title
+        self.tokens = tokens
+        self.costUSD = costUSD
+        self.records = records
+    }
+}
+
+public struct RemoteUsageBreakdownDTO: Codable, Equatable, Sendable {
+    public let kind: RemoteUsageBreakdownKindDTO
+    public let rows: [RemoteUsageBreakdownRowDTO]
+    public let omittedRowCount: Int
+    public let omittedTokens: Int64
+    public let omittedCostUSD: Double
+    public let omittedRecords: Int
+
+    public init(
+        kind: RemoteUsageBreakdownKindDTO,
+        rows: [RemoteUsageBreakdownRowDTO],
+        omittedRowCount: Int,
+        omittedTokens: Int64,
+        omittedCostUSD: Double,
+        omittedRecords: Int
+    ) {
+        self.kind = kind
+        self.rows = rows
+        self.omittedRowCount = omittedRowCount
+        self.omittedTokens = omittedTokens
+        self.omittedCostUSD = omittedCostUSD
+        self.omittedRecords = omittedRecords
+    }
+}
+
+public struct RemoteUsageProviderDTO: Codable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let tokens: RemoteUsageTokenCountsDTO
+    public let costUSD: Double
+    public let records: Int
+    public let styleIndex: Int
+
+    public init(
+        id: String,
+        name: String,
+        tokens: RemoteUsageTokenCountsDTO,
+        costUSD: Double,
+        records: Int,
+        styleIndex: Int
+    ) {
+        self.id = id
+        self.name = name
+        self.tokens = tokens
+        self.costUSD = costUSD
+        self.records = records
+        self.styleIndex = styleIndex
+    }
+}
+
+public struct RemoteUsageChartPointDTO: Codable, Equatable, Sendable {
+    public let at: Double
+    public let value: Double
+
+    public init(at: Double, value: Double) {
+        self.at = at
+        self.value = value
+    }
+}
+
+public struct RemoteUsageChartSeriesDTO: Codable, Equatable, Sendable {
+    public let id: String
+    public let title: String?
+    public let isOther: Bool
+    public let styleIndex: Int
+    public let points: [RemoteUsageChartPointDTO]
+
+    public init(
+        id: String,
+        title: String?,
+        isOther: Bool,
+        styleIndex: Int,
+        points: [RemoteUsageChartPointDTO]
+    ) {
+        self.id = id
+        self.title = title
+        self.isOther = isOther
+        self.styleIndex = styleIndex
+        self.points = points
+    }
+}
+
+public struct RemoteUsageMetricProjectionDTO: Codable, Equatable, Sendable {
+    public let providers: [RemoteUsageProviderDTO]
+    public let chartSeries: [RemoteUsageChartSeriesDTO]
+
+    public init(
+        providers: [RemoteUsageProviderDTO],
+        chartSeries: [RemoteUsageChartSeriesDTO]
+    ) {
+        self.providers = providers
+        self.chartSeries = chartSeries
+    }
+}
+
+public struct RemoteUsageRangeDTO: Codable, Equatable, Sendable {
+    public let days: Int
+    public let start: Double
+    public let end: Double
+    public let tokens: RemoteUsageTokenCountsDTO
+    public let records: Int
+    public let cost: RemoteUsageCostQualityDTO
+    public let activeDayCount: Int
+    public let costMetric: RemoteUsageMetricProjectionDTO
+    public let tokenMetric: RemoteUsageMetricProjectionDTO
+    public let breakdowns: [RemoteUsageBreakdownDTO]
+
+    public init(
+        days: Int,
+        start: Double,
+        end: Double,
+        tokens: RemoteUsageTokenCountsDTO,
+        records: Int,
+        cost: RemoteUsageCostQualityDTO,
+        activeDayCount: Int,
+        costMetric: RemoteUsageMetricProjectionDTO,
+        tokenMetric: RemoteUsageMetricProjectionDTO,
+        breakdowns: [RemoteUsageBreakdownDTO]
+    ) {
+        self.days = days
+        self.start = start
+        self.end = end
+        self.tokens = tokens
+        self.records = records
+        self.cost = cost
+        self.activeDayCount = activeDayCount
+        self.costMetric = costMetric
+        self.tokenMetric = tokenMetric
+        self.breakdowns = breakdowns
+    }
+}
+
+public struct RemoteUsageCoverageDTO: Codable, Equatable, Sendable {
+    public let runtimeID: String
+    public let runtimeName: String
+    public let state: String
+    public let sourceCount: Int
+    public let recordCount: Int
+    public let detail: String?
+
+    public init(
+        runtimeID: String,
+        runtimeName: String,
+        state: String,
+        sourceCount: Int,
+        recordCount: Int,
+        detail: String?
+    ) {
+        self.runtimeID = runtimeID
+        self.runtimeName = runtimeName
+        self.state = state
+        self.sourceCount = sourceCount
+        self.recordCount = recordCount
+        self.detail = detail
+    }
+}
+
+public struct RemoteUsageLimitSeriesSummaryDTO: Codable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let runtimeName: String
+    public let accountName: String
+    public let windowLabel: String
+    public let currentFraction: Double?
+    public let resetsAt: Double?
+    /// Nil means the provider did not report inventory; zero is authoritative empty inventory.
+    public let bankedResetCount: Int?
+    public let nextBankedResetExpiresAt: Double?
+
+    public init(
+        id: String,
+        runtimeName: String,
+        accountName: String,
+        windowLabel: String,
+        currentFraction: Double?,
+        resetsAt: Double?,
+        bankedResetCount: Int?,
+        nextBankedResetExpiresAt: Double?
+    ) {
+        self.id = id
+        self.runtimeName = runtimeName
+        self.accountName = accountName
+        self.windowLabel = windowLabel
+        self.currentFraction = currentFraction
+        self.resetsAt = resetsAt
+        self.bankedResetCount = bankedResetCount
+        self.nextBankedResetExpiresAt = nextBankedResetExpiresAt
+    }
+
+    public var title: String { "\(runtimeName) · \(accountName) · \(windowLabel)" }
+}
+
+/// The bounded `GET /api/usage` response. The limit index is one page; `nextLimitCursor` is
+/// passed back unchanged to request the next page.
+public struct RemoteUsageDashboardDTO: Codable, Equatable, Sendable {
+    public let isBuilding: Bool
+    public let builtAt: Double?
+    public let pricingCatalogVersion: String?
+    public let ranges: [RemoteUsageRangeDTO]
+    public let coverage: [RemoteUsageCoverageDTO]
+    public let limitSeries: [RemoteUsageLimitSeriesSummaryDTO]
+    public let nextLimitCursor: String?
+    public let omittedLimitSeriesCount: Int
+    public let preparedAt: Double
+
+    public init(
+        isBuilding: Bool,
+        builtAt: Double?,
+        pricingCatalogVersion: String?,
+        ranges: [RemoteUsageRangeDTO],
+        coverage: [RemoteUsageCoverageDTO],
+        limitSeries: [RemoteUsageLimitSeriesSummaryDTO],
+        nextLimitCursor: String?,
+        omittedLimitSeriesCount: Int,
+        preparedAt: Double
+    ) {
+        self.isBuilding = isBuilding
+        self.builtAt = builtAt
+        self.pricingCatalogVersion = pricingCatalogVersion
+        self.ranges = ranges
+        self.coverage = coverage
+        self.limitSeries = limitSeries
+        self.nextLimitCursor = nextLimitCursor
+        self.omittedLimitSeriesCount = omittedLimitSeriesCount
+        self.preparedAt = preparedAt
+    }
+}
+
+public struct RemoteUsageLimitPointDTO: Codable, Equatable, Sendable {
+    public let at: Double
+    public let fraction: Double
+    public let segment: Int
+
+    public init(at: Double, fraction: Double, segment: Int) {
+        self.at = at
+        self.fraction = fraction
+        self.segment = segment
+    }
+}
+
+public struct RemoteUsageLimitProjectionDTO: Codable, Equatable, Sendable {
+    public let observedAt: Double
+    public let observedFraction: Double
+    public let resetsAt: Double
+    public let projectedFractionAtReset: Double
+    public let projectedExhaustionAt: Double?
+    public let bankedResetExpiresAt: Double?
+
+    public init(
+        observedAt: Double,
+        observedFraction: Double,
+        resetsAt: Double,
+        projectedFractionAtReset: Double,
+        projectedExhaustionAt: Double?,
+        bankedResetExpiresAt: Double?
+    ) {
+        self.observedAt = observedAt
+        self.observedFraction = observedFraction
+        self.resetsAt = resetsAt
+        self.projectedFractionAtReset = projectedFractionAtReset
+        self.projectedExhaustionAt = projectedExhaustionAt
+        self.bankedResetExpiresAt = bankedResetExpiresAt
+    }
+}
+
+public struct RemoteUsageLimitResetDTO: Codable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let detectedAt: Double
+    public let previousObservedAt: Double
+    /// `scheduled`, `provider`, or `bankedCredit`.
+    public let cause: String
+    public let restoredFraction: Double
+    public let elapsedFraction: Double
+    public let paceGainFraction: Double
+
+    public init(
+        id: String,
+        detectedAt: Double,
+        previousObservedAt: Double,
+        cause: String,
+        restoredFraction: Double,
+        elapsedFraction: Double,
+        paceGainFraction: Double
+    ) {
+        self.id = id
+        self.detectedAt = detectedAt
+        self.previousObservedAt = previousObservedAt
+        self.cause = cause
+        self.restoredFraction = restoredFraction
+        self.elapsedFraction = elapsedFraction
+        self.paceGainFraction = paceGainFraction
+    }
+}
+
+/// One selected and already-downsampled limit range. Historical reset markers remain distinct
+/// from current banked-reset inventory and projected/expiry timestamps.
+public struct RemoteUsageLimitDTO: Codable, Equatable, Sendable {
+    public let series: RemoteUsageLimitSeriesSummaryDTO
+    public let days: Int
+    public let start: Double
+    public let end: Double
+    public let observed: [RemoteUsageLimitPointDTO]
+    public let resets: [RemoteUsageLimitResetDTO]
+    public let recordedResetCount: Int
+    public let restoredPaceFraction: Double
+    public let projection: RemoteUsageLimitProjectionDTO?
+    public let preparedAt: Double
+
+    public init(
+        series: RemoteUsageLimitSeriesSummaryDTO,
+        days: Int,
+        start: Double,
+        end: Double,
+        observed: [RemoteUsageLimitPointDTO],
+        resets: [RemoteUsageLimitResetDTO],
+        recordedResetCount: Int,
+        restoredPaceFraction: Double,
+        projection: RemoteUsageLimitProjectionDTO?,
+        preparedAt: Double
+    ) {
+        self.series = series
+        self.days = days
+        self.start = start
+        self.end = end
+        self.observed = observed
+        self.resets = resets
+        self.recordedResetCount = recordedResetCount
+        self.restoredPaceFraction = restoredPaceFraction
+        self.projection = projection
+        self.preparedAt = preparedAt
+    }
+}
+
 /// The `GET /api/me` payload: the protocol the server speaks, what this share is, and the
 /// sessions it reaches. The protocol pair is included so a client can verify compatibility even
 /// on a request the server chose to answer.
@@ -567,6 +975,8 @@ public struct RemoteMeDTO: Codable, Equatable, Sendable {
     public let archivedSessions: [RemoteSessionSummaryDTO]?
     /// Present only for an interactive owner, which is the only share that may create tasks.
     public let newSessionCatalog: RemoteNewSessionCatalogDTO?
+    /// Optional host-wide reads available to this authorization. Guest responses omit it.
+    public let features: [String]?
 
     public init(
         serverProtocol: RemoteProtocolInfo,
@@ -576,7 +986,8 @@ public struct RemoteMeDTO: Codable, Equatable, Sendable {
         theme: RemoteThemeDTO? = nil,
         themeCatalog: RemoteThemeCatalogDTO? = nil,
         archivedSessions: [RemoteSessionSummaryDTO]? = nil,
-        newSessionCatalog: RemoteNewSessionCatalogDTO? = nil
+        newSessionCatalog: RemoteNewSessionCatalogDTO? = nil,
+        features: [String]? = nil
     ) {
         self.serverProtocol = serverProtocol
         self.share = share
@@ -586,6 +997,7 @@ public struct RemoteMeDTO: Codable, Equatable, Sendable {
         self.themeCatalog = themeCatalog
         self.archivedSessions = archivedSessions
         self.newSessionCatalog = newSessionCatalog
+        self.features = features
     }
 }
 

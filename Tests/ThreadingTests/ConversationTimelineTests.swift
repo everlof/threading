@@ -77,6 +77,8 @@ final class ConversationTimelineTests: XCTestCase {
                         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                         "\(fixture.rawValue) produced an empty row"
                     )
+                case .turnOutcome:
+                    break
                 case .toolCall(let call):
                     XCTAssertFalse(call.name.isEmpty, "\(fixture.rawValue) produced a nameless tool call")
                 }
@@ -395,6 +397,41 @@ final class ConversationTimelineTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(edits, 10, "Fixtures no longer cover edits; re-pick them")
     }
 
+    func testSettledTurnRetainsRecordedFileChangesForReplay() {
+        let patch = """
+        *** Begin Patch
+        *** Update File: status.txt
+        @@
+        -before
+        +after
+        *** End Patch
+        """
+        var timeline = ConversationTimeline(sessionID: SessionID())
+
+        _ = timeline.apply(.userMessage("Update status.txt"))
+        _ = timeline.apply(.assistantMessage(blocks: [
+            .toolUse(
+                id: "edit-1",
+                tool: .edit,
+                input: ["patch": .string(patch)]
+            )
+        ]))
+        _ = timeline.apply(.toolResults([
+            ToolResult(toolUseID: "edit-1", text: "Applied patch", isError: false)
+        ]))
+        _ = timeline.apply(.assistantMessage(blocks: [.text("Updated status.txt.")]))
+        _ = timeline.apply(.turnFinished(
+            text: nil,
+            outcome: .completed,
+            metrics: .empty
+        ))
+
+        let changes = timeline.fileChanges(inTurnStartingAt: 0)
+        XCTAssertEqual(changes.map(\.path), ["status.txt"])
+        XCTAssertEqual(changes.flatMap(\.lines).filter { $0.kind == .removed }.map(\.text), ["before"])
+        XCTAssertEqual(changes.flatMap(\.lines).filter { $0.kind == .added }.map(\.text), ["after"])
+    }
+
     func testAnEditDiffContainsBothSides() throws {
         // A diff of only additions is what `Write` produces; an `Edit` that shows no removals
         // means the alignment walk collapsed and the reader cannot see what was replaced.
@@ -537,6 +574,48 @@ final class ConversationTimelineTests: XCTestCase {
         XCTAssertTrue(timeline.streamingText.isEmpty)
     }
 
+    func testAStoppedTurnPreservesItsPartialReplyAndRecordsTheInterruption() {
+        var timeline = ConversationTimeline(sessionID: SessionID())
+        _ = timeline.apply(.userMessage("Keep working."))
+        _ = timeline.apply(.textDelta("Working until stopped…"))
+
+        let changes = timeline.apply(.turnFinished(
+            text: nil,
+            outcome: .stopped,
+            metrics: .empty
+        ))
+
+        XCTAssertEqual(timeline.rows, [
+            .userMessage("Keep working."),
+            .assistant(markdown: "Working until stopped…"),
+            .turnOutcome(.stopped)
+        ])
+        XCTAssertTrue(timeline.streamingText.isEmpty)
+        XCTAssertEqual(changes.prefix(3), [
+            .streaming(nil),
+            .appended(index: 1),
+            .appended(index: 2)
+        ])
+        XCTAssertTrue(changes.contains(.turnSettled(startIndex: 0, outcome: .stopped)))
+    }
+
+    func testTerminalReplySupersedesAnUnfinishedDeltaWithoutDuplicatingIt() {
+        var timeline = ConversationTimeline(sessionID: SessionID())
+        _ = timeline.apply(.userMessage("Q"))
+        _ = timeline.apply(.textDelta("Draft"))
+
+        _ = timeline.apply(.turnFinished(
+            text: "Authoritative answer",
+            outcome: .completed,
+            metrics: .empty
+        ))
+
+        XCTAssertEqual(timeline.rows, [
+            .userMessage("Q"),
+            .assistant(markdown: "Authoritative answer")
+        ])
+    }
+
     func testEmptyTextBlocksAroundToolCallsAddNoRows() {
         var timeline = ConversationTimeline(sessionID: SessionID())
         _ = timeline.apply(.assistantMessage(blocks: [
@@ -591,7 +670,10 @@ final class ConversationTimelineTests: XCTestCase {
             outcome: .failed,
             metrics: .empty
         ))
-        XCTAssertEqual(failed.rows, [.notice("Rate limited.", kind: .error)])
+        XCTAssertEqual(failed.rows, [
+            .notice("Rate limited.", kind: .error),
+            .turnOutcome(.failed)
+        ])
     }
 
     // MARK: - Tool Outcome
@@ -731,9 +813,10 @@ final class ConversationTimelineTests: XCTestCase {
         // change carrying `interrupted` is what tells it to.
         var timeline = ConversationTimeline(sessionID: SessionID())
         _ = timeline.apply(.userMessage("Q"))
-        let changes = timeline.apply(.turnFinished(text: nil, outcome: .failed, metrics: .empty))
+        let changes = timeline.apply(.turnFinished(text: nil, outcome: .stopped, metrics: .empty))
 
-        XCTAssertTrue(changes.contains(.turnSettled(startIndex: 0, outcome: .failed)))
+        XCTAssertTrue(changes.contains(.turnSettled(startIndex: 0, outcome: .stopped)))
+        XCTAssertTrue(timeline.rows.contains(.turnOutcome(.stopped)))
     }
 
     func testATurnEndWithNoOpenTurnSettlesNothing() {

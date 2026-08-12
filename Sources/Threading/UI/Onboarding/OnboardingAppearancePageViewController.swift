@@ -10,19 +10,25 @@ final class OnboardingAppearancePageViewController: NSViewController, Onboarding
         /// engine broke when thirteen tiles plus the header brushed the window's height —
         /// it slid off the top of the page while everything else held.
         static let markSide: CGFloat = 26
-        /// Thirteen tiles have to fit a fixed 760×560 window under the flow's footer: five
-        /// columns of 104-point swatches is the largest grid that does, measured on the
-        /// render — four columns of 128 clipped the first row off the top.
-        static let swatchSize = NSSize(width: 104, height: 72)
-        static let columns = 5
+        /// A name is product information on this screen, so tiles use four readable columns
+        /// and the grid scrolls instead of truncating thirteen choices into five cramped ones.
+        static let swatchSize = NSSize(width: 124, height: 72)
+        static let columns = 4
         static let contentWidth: CGFloat = 640
+        static let nameHeight: CGFloat = 34
     }
 
     var pageTitle: String { L10n.string("Appearance") }
 
     private let mark = ThreadingMarkView()
     private let grid = NSGridView()
-    private var tiles: [(theme: AppTheme, item: NavigatorGridItemView, swatch: NSImageView)] = []
+    private let gridScroll = ThemedScrollView()
+    private var tiles: [(
+        theme: AppTheme,
+        item: NavigatorGridItemView,
+        swatch: NSImageView,
+        selectionMark: NSTextField
+    )] = []
     private let appEvents = AppEventObservations()
 
     override func loadView() {
@@ -67,7 +73,16 @@ final class OnboardingAppearancePageViewController: NSViewController, Onboarding
         grid.translatesAutoresizingMaskIntoConstraints = false
         buildTiles()
 
-        let stack = NSStackView(views: [headingRow, caption, grid])
+        let document = SettingsFlippedView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(grid)
+
+        gridScroll.hasVerticalScroller = true
+        gridScroll.automaticallyAdjustsContentInsets = false
+        gridScroll.documentView = document
+        gridScroll.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = NSStackView(views: [headingRow, caption, gridScroll])
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = Design.Spacing.inset
@@ -83,6 +98,17 @@ final class OnboardingAppearancePageViewController: NSViewController, Onboarding
                 constant: -Design.Spacing.pane
             ),
             caption.widthAnchor.constraint(lessThanOrEqualToConstant: Layout.contentWidth),
+            gridScroll.widthAnchor.constraint(equalToConstant: Layout.contentWidth),
+
+            document.topAnchor.constraint(equalTo: gridScroll.contentView.topAnchor),
+            document.leadingAnchor.constraint(equalTo: gridScroll.contentView.leadingAnchor),
+            document.trailingAnchor.constraint(equalTo: gridScroll.contentView.trailingAnchor),
+            grid.topAnchor.constraint(equalTo: document.topAnchor, constant: Design.Spacing.small),
+            grid.centerXAnchor.constraint(equalTo: document.centerXAnchor),
+            grid.bottomAnchor.constraint(
+                equalTo: document.bottomAnchor,
+                constant: -Design.Spacing.small
+            ),
             mark.widthAnchor.constraint(equalToConstant: Layout.markSide),
             mark.heightAnchor.constraint(equalToConstant: Layout.markSide)
         ])
@@ -102,11 +128,22 @@ final class OnboardingAppearancePageViewController: NSViewController, Onboarding
             let name = NSTextField(labelWithString: theme.name)
             name.applyFont(.control)
             name.textColor = Design.Text.label
-            name.lineBreakMode = .byTruncatingTail
+            name.lineBreakMode = .byWordWrapping
+            name.maximumNumberOfLines = 2
             name.alignment = .center
             name.setAccessibilityElement(false)
+            name.widthAnchor.constraint(equalToConstant: Layout.swatchSize.width).isActive = true
+            name.heightAnchor.constraint(equalToConstant: Layout.nameHeight).isActive = true
 
-            let content = NSStackView(views: [swatch, name])
+            // A decorative tile border can resemble selection in several authored themes.
+            // Reserve a stable one-line mark so the current choice is stated, not inferred.
+            let selectionMark = NSTextField(labelWithString: " ")
+            selectionMark.applyFont(.caption)
+            selectionMark.textColor = Design.Surface.accent
+            selectionMark.alignment = .center
+            selectionMark.setAccessibilityElement(false)
+
+            let content = NSStackView(views: [swatch, name, selectionMark])
             content.orientation = .vertical
             content.alignment = .centerX
             content.spacing = Design.Spacing.small
@@ -116,16 +153,12 @@ final class OnboardingAppearancePageViewController: NSViewController, Onboarding
                 bottom: Design.Spacing.small,
                 right: Design.Spacing.small
             )
-            name.widthAnchor.constraint(
-                lessThanOrEqualToConstant: Layout.swatchSize.width
-            ).isActive = true
-
             let item = NavigatorGridItemView(content: content)
             item.setAccessibilityTitle(theme.name)
             item.onActivate = {
                 AppThemeLibrary.apply(theme)
             }
-            return (theme, item, swatch)
+            return (theme, item, swatch, selectionMark)
         }
 
         for row in stride(from: 0, to: tiles.count, by: Layout.columns) {
@@ -142,7 +175,9 @@ final class OnboardingAppearancePageViewController: NSViewController, Onboarding
     private func refreshTiles() {
         let current = AppThemeLibrary.current.id
         for tile in tiles {
-            tile.item.isSelected = tile.theme.id == current
+            let selected = tile.theme.id == current
+            tile.item.isSelected = selected
+            tile.selectionMark.stringValue = selected ? "✓" : " "
             let appearance = tile.theme.mode.appearance
                 ?? view.effectiveAppearance
             tile.swatch.image = ThemeSwatchImage.appSwatch(
@@ -150,6 +185,10 @@ final class OnboardingAppearancePageViewController: NSViewController, Onboarding
                 size: Layout.swatchSize,
                 appearance: appearance
             )
+        }
+        view.layoutSubtreeIfNeeded()
+        if let selectedItem = tiles.first(where: { $0.theme.id == current })?.item {
+            selectedItem.scrollToVisible(selectedItem.bounds)
         }
     }
 }

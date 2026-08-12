@@ -9,6 +9,7 @@
     }
   ],
   "defaultOptions" : {
+    "preferredScreenCaptureFormat" : "screenshots",
     "targetForVariableExpansion" : {
       "containerPath" : "container:Threading.xcodeproj",
       "identifier" : "F6000001000000000000001",

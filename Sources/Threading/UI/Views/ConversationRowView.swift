@@ -66,6 +66,9 @@ enum ConversationRowView {
         case .thinking(let text):
             return (thinking(text), false)
 
+        case .turnOutcome(let outcome):
+            return (turnOutcome(outcome), false)
+
         case .notice(let text, let kind):
             return (notice(text, kind: kind), false)
 
@@ -158,6 +161,21 @@ enum ConversationRowView {
     /// Reasoning, quieter than the reply it precedes — an aside, not the answer.
     static func thinking(_ text: String) -> NSView {
         label(text, role: .body, color: Design.Text.tertiary)
+    }
+
+    /// The durable end marker for a turn that did not produce an ordinary completed answer.
+    /// User interruption is neutral; provider failure is an error. The distinction comes from
+    /// the provider's typed outcome, never from matching its prose.
+    static func turnOutcome(_ outcome: TurnOutcome) -> NSView {
+        let (text, color): (String, NSColor) = switch outcome {
+        case .completed:
+            (L10n.string("Completed"), Design.Text.tertiary)
+        case .stopped:
+            (L10n.string("Interrupted"), Design.Text.tertiary)
+        case .failed:
+            (L10n.string("Failed"), Design.Status.negative)
+        }
+        return label(text, role: .subheading, color: color)
     }
 
     /// Neither said nor tool output: a truncation banner, a failed turn, an orphan result.

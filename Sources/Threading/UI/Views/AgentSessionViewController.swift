@@ -56,6 +56,25 @@ final class AgentSessionViewController: NSViewController {
     private var isDiscoveringIdentifier = false
     private var nextIdentifierDiscoveryAt = Date.distantPast
     private let remoteViewportBanner = RemoteViewportBannerView()
+
+    /// The one-tap way past a spent usage limit, under the terminal rather than over it.
+    ///
+    /// A terminal pane has no composer of its own — the box is inside the TUI — so the strip
+    /// takes the place the composer occupies in a rendered conversation: the bottom of the
+    /// column, on the terminal's own margins, directly under where the user types. It **pushes**
+    /// rather than covers, the rule `PaneNoticeView` states: nothing it has to say is said over
+    /// output somebody is reading.
+    private lazy var limitEscapeStrip = LimitEscapeStripView()
+
+    /// The terminal's lower edge, which belongs to the pane until the strip stands under it.
+    private lazy var terminalAbovePane = session.terminalView.bottomAnchor.constraint(
+        equalTo: view.bottomAnchor,
+        constant: -TerminalPadding.bottom
+    )
+    private lazy var terminalAboveStrip = session.terminalView.bottomAnchor.constraint(
+        equalTo: limitEscapeStrip.topAnchor,
+        constant: -Design.Spacing.small
+    )
     private var attachmentObserver: TerminalAttachmentObserver?
     private var transcriptAttachmentObserver: TerminalTranscriptAttachmentObserver?
     private var activityHadTurnInFlight = false
@@ -174,6 +193,7 @@ final class AgentSessionViewController: NSViewController {
         session.terminalView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(session.terminalView)
         view.addSubview(remoteViewportBanner)
+        view.addSubview(limitEscapeStrip)
 
         let terminalAtTopConstraint = session.terminalView.topAnchor.constraint(
             equalTo: view.topAnchor,
@@ -182,10 +202,7 @@ final class AgentSessionViewController: NSViewController {
 
         NSLayoutConstraint.activate([
             terminalAtTopConstraint,
-            session.terminalView.bottomAnchor.constraint(
-                equalTo: view.bottomAnchor,
-                constant: -TerminalPadding.bottom
-            ),
+            terminalAbovePane,
             session.terminalView.leadingAnchor.constraint(
                 equalTo: view.leadingAnchor,
                 constant: TerminalPadding.leading
@@ -201,9 +218,25 @@ final class AgentSessionViewController: NSViewController {
             remoteViewportBanner.bottomAnchor.constraint(
                 equalTo: view.bottomAnchor,
                 constant: -Design.Spacing.large
+            ),
+
+            // On the terminal's own margins, so the strip and the text it sits under share a
+            // column rather than reading as two differently indented things.
+            limitEscapeStrip.leadingAnchor.constraint(
+                equalTo: view.leadingAnchor,
+                constant: TerminalPadding.leading
+            ),
+            limitEscapeStrip.trailingAnchor.constraint(
+                equalTo: view.trailingAnchor,
+                constant: -TerminalPadding.trailing
+            ),
+            limitEscapeStrip.bottomAnchor.constraint(
+                equalTo: view.bottomAnchor,
+                constant: -TerminalPadding.bottom
             )
         ])
 
+        wireLimitEscapeStrip()
         applyBackgroundColor()
         selectedSubagentID = subagentState.selectedThreadID
         refreshSubagentState()
@@ -220,6 +253,58 @@ final class AgentSessionViewController: NSViewController {
         // A session set to "Follow App Theme" draws with a palette the app theme owns, so an app
         // theme switch is a terminal theme switch for it — and a no-op for every other session.
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.themeDidChange() }
+    }
+
+    // MARK: - Limit Escape
+
+    /// Draws the escape offer from the store, and reports both gestures back to it.
+    ///
+    /// One direction, like every other strip here: the store is the truth, this is drawn from it,
+    /// and pressing is an announcement rather than an action — `SessionCoordinator` owns
+    /// migrating a conversation and putting its pane back. See `SessionCoordinator+LimitEscape`.
+    private func wireLimitEscapeStrip() {
+        limitEscapeStrip.onContinue = { [weak self] in
+            guard let self else { return }
+            NotificationCenter.default.post(LimitEscapeRequested(sessionID: self.sessionID))
+        }
+        limitEscapeStrip.onDismiss = { [weak self] in
+            guard let self else { return }
+            LimitEscapeSuggestionStore.shared.dismiss(self.sessionID)
+        }
+        appEvents.observe(LimitEscapeSuggestionDidChange.self) { [weak self] event in
+            guard let self, event.sessionID == self.sessionID else { return }
+            self.refreshLimitEscapeStrip()
+        }
+        refreshLimitEscapeStrip()
+    }
+
+    private func refreshLimitEscapeStrip() {
+        let offer = LimitEscapeSuggestionStore.shared.offer(for: sessionID).map {
+            LimitEscapeStripView.Offer(
+                accountName: $0.accountName,
+                reading: $0.reading,
+                resetHint: $0.resetHint,
+                problem: $0.problem,
+                isBusy: $0.isBusy
+            )
+        }
+        limitEscapeStrip.setOffer(offer)
+
+        // The terminal gives up the rows the strip stands in rather than being drawn over, so
+        // the PTY is resized exactly once as the offer appears and once as it leaves.
+        let isShowing = offer != nil
+        guard terminalAboveStrip.isActive != isShowing else { return }
+
+        // Deactivated before its replacement is activated, both ways round: two lower edges
+        // active at once is an unsatisfiable pair, and AppKit says so in the log rather than
+        // waiting for the next pass to sort it out.
+        if isShowing {
+            terminalAbovePane.isActive = false
+            terminalAboveStrip.isActive = true
+        } else {
+            terminalAboveStrip.isActive = false
+            terminalAbovePane.isActive = true
+        }
     }
 
     /// Fills the inset area with the terminal's own background so the padding reads as part

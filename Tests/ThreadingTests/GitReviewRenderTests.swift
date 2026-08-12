@@ -173,6 +173,53 @@ final class GitReviewRenderTests: XCTestCase {
         }
     }
 
+    func testSingleHunkDoesNotRepeatTheFileDiffStat() throws {
+        let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+        XCTAssertEqual(file.hunks.count, 1, "the regression fixture must remain a single hunk")
+
+        let host = laidOut([file])
+        XCTAssertEqual(
+            descendants(in: host).filter {
+                $0.accessibilityIdentifier() == "git-review.file.stats"
+            }.count,
+            1
+        )
+        XCTAssertTrue(
+            descendants(in: host).allSatisfy {
+                $0.accessibilityIdentifier() != "git-review.hunk.stats"
+            },
+            "a one-hunk file already states +/− in its file header"
+        )
+    }
+
+    func testMultiHunkFileKeepsPerHunkDiffStats() throws {
+        let source = """
+        diff --git a/Example.swift b/Example.swift
+        index 1111111..2222222 100644
+        --- a/Example.swift
+        +++ b/Example.swift
+        @@ -1,2 +1,2 @@
+        -let first = 1
+        +let first = 2
+         let middle = true
+        @@ -20,2 +20,2 @@
+        -let last = 1
+        +let last = 2
+         let end = true
+        """
+        let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: source).first)
+        XCTAssertEqual(file.hunks.count, 2)
+
+        let host = laidOut([file])
+        XCTAssertEqual(
+            descendants(in: host).filter {
+                $0.accessibilityIdentifier() == "git-review.hunk.stats"
+            }.count,
+            2,
+            "each hunk needs its own +/− once there is more than one"
+        )
+    }
+
     /// The nested horizontal scroller is the one piece of this that a compile says nothing
     /// about: get its height binding wrong and every unwrapped diff measures zero, which looks
     /// exactly like a collapsed row. Both halves are asserted — the row still has a height, and
@@ -280,6 +327,48 @@ final class GitReviewRenderTests: XCTestCase {
 
         assertColor(actual.added, equals: expected.addedWash)
         assertColor(actual.removed, equals: expected.removedWash)
+    }
+
+    /// The TextKit body is not the only frozen surface in a virtualized row: the card and each
+    /// hunk header are layer-backed too. Construct the row under dark ambient state, attach it
+    /// to a light pane, and require the entire recorded surface tree to adopt that pane.
+    func testAFileRowRepairsAmbientAppearanceWhenItJoinsAWindow() throws {
+        let previousTheme = AppThemePalette.current
+        let previousAppearance = NSApp.appearance
+        defer {
+            AppThemePalette.set(previousTheme)
+            NSApp.appearance = previousAppearance
+        }
+
+        AppThemePalette.set(.system)
+        NSApp.appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let files = GitDiffParser.files(fromUnifiedDiff: fixture)
+        let pane = laidOutPane(files, appearance: lightAppearance)
+        let fileRow = try XCTUnwrap(
+            descendants(in: pane.view).compactMap { $0 as? GitReviewFileRow }.first
+        )
+
+        var expectedCard: NSColor?
+        var expectedHunk: NSColor?
+        lightAppearance.performAsCurrentDrawingAppearance {
+            // Freeze the dynamic system colours while light is current. Resolving these after
+            // the closure would merely re-read the deliberately dark ambient application.
+            expectedCard = NSColor(cgColor: Design.Surface.controlResting.cgColor)
+            expectedHunk = NSColor(cgColor: Design.Surface.background.cgColor)
+        }
+        let expectedCardColor = try XCTUnwrap(expectedCard)
+        let expectedHunkColor = try XCTUnwrap(expectedHunk)
+        let cardCGColor = try XCTUnwrap(fileRow.layer?.backgroundColor)
+        let cardColor = try XCTUnwrap(NSColor(cgColor: cardCGColor))
+        assertColor(cardColor, equals: expectedCardColor)
+        let childSurfaces = descendants(in: fileRow)
+            .compactMap { $0.layer?.backgroundColor }
+            .compactMap(NSColor.init(cgColor:))
+        XCTAssertTrue(
+            childSurfaces.contains { colorsEqual($0, expectedHunkColor) },
+            "the detached hunk header kept the ambient dark surface in its light window"
+        )
     }
 
     /// Highlighting must not change what a diff *is*: same row count, same order.
@@ -530,5 +619,18 @@ final class GitReviewRenderTests: XCTestCase {
         XCTAssertEqual(actual.greenComponent, expected.greenComponent, accuracy: 0.001, file: file, line: line)
         XCTAssertEqual(actual.blueComponent, expected.blueComponent, accuracy: 0.001, file: file, line: line)
         XCTAssertEqual(actual.alphaComponent, expected.alphaComponent, accuracy: 0.001, file: file, line: line)
+    }
+
+    private func colorsEqual(_ lhs: NSColor, _ rhs: NSColor) -> Bool {
+        guard let lhs = lhs.usingColorSpace(.sRGB),
+              let rhs = rhs.usingColorSpace(.sRGB) else { return false }
+        return abs(lhs.redComponent - rhs.redComponent) < 0.001
+            && abs(lhs.greenComponent - rhs.greenComponent) < 0.001
+            && abs(lhs.blueComponent - rhs.blueComponent) < 0.001
+            && abs(lhs.alphaComponent - rhs.alphaComponent) < 0.001
+    }
+
+    private func descendants(in root: NSView) -> [NSView] {
+        root.subviews + root.subviews.flatMap { descendants(in: $0) }
     }
 }

@@ -198,6 +198,20 @@ final class ThemedTimeSeriesChartTests: XCTestCase {
         XCTAssertTrue((chart.accessibilityValue() as? String)?.contains("tokens") == true)
     }
 
+    func testAutomaticYAxisUsesReadableGridIntervals() {
+        let chart = ThemedTimeSeriesChartView(
+            frame: NSRect(x: 0, y: 0, width: 700, height: 260)
+        )
+        chart.setModel(model(points: [
+            ThemedChartPoint(at: start, value: 184_453.3)
+        ]), animated: false)
+
+        let range = chart.resolvedYRangeForTesting
+        XCTAssertEqual(range, 0...200_000)
+        let interval = range.upperBound / Double(Design.Chart.gridLineCount - 1)
+        XCTAssertEqual(interval, 50_000)
+    }
+
     private func points(count: Int, slope: Double) -> [ThemedChartPoint] {
         (0..<count).map { index in
             ThemedChartPoint(

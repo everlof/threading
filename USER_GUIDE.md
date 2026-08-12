@@ -246,16 +246,17 @@ The **Project Icon** submenu (right-click a project, or its hover buttons) offer
   favicon; counts as your choice, like a picked file
 - **Find Icon Automatically** — re-run the free discovery, replacing the current icon
 - **Research Icon with Codex** — shown when a Codex login exists: asks Codex (headless,
-  read-only, low reasoning effort) to identify the project's mark. **This spends your own
-  Codex usage, so it never runs on its own** — each run is one explicit menu click, and a
-  run in flight shows as a disabled *Researching…*
+  read-only, low reasoning effort) to identify the project's mark. It works for ordinary folders
+  as well as Git repositories. **This spends your own Codex usage, so it never runs on its own**
+  — each run is one explicit menu click, and a run in flight shows as a disabled *Researching…*
 - **Open Last Research Log** — the full record of the last research run
 - **Remove Icon** — back to the generated tile
 
 **Understanding a research run.** Every run writes its complete output — the JSONL event
 stream plus the CLI's own diagnostics — to
 `~/Library/Application Support/Threading/IconResearch/<project>.jsonl`, openable from the menu
-above. Each stage also logs live, viewable with
+above. If Codex exits abnormally, the alert includes its last short diagnostic while this file
+keeps the complete output. Each stage also logs live, viewable with
 `log stream --predicate 'subsystem == "codes.threading" AND category == "agent"'`. Codex itself
 keeps its usual rollout under `~/.codex/sessions/`, like any other run.
 
@@ -766,7 +767,9 @@ confirmation in the foreground.
 you are reading. The first time it opens it holds the session's shell; the **+** at the end of
 its strip adds more — another shell, or a browser (private too). Drag the strip above it to
 resize; push it on past the drawer's floor and the drawer closes, the same gesture that closes
-the sidebar and the display panel at their dividers. Tabs reorder by drag or their
+the sidebar and the display panel at their dividers. A divider says when it is grabbable: the
+seam lights in the accent while the pointer is where a drag would pick it up, alongside the
+resize cursor, and stays lit for the whole drag. Tabs reorder by drag or their
 secondary-click menu, exactly as the display panel's do, and **⌘⇧[ / ⌘⇧]** and **⌘1–⌘9** work
 here when the drawer has focus.
 
@@ -1105,6 +1108,40 @@ shows in the strip above the composer, obeys the has-the-window-really-reset rul
 can be removed there like any other scheduled send. Upgrading your plan is never chosen, under
 any setting. Every step is written to the diagnostics journal (**Help ▸ Reveal Diagnostics
 Log**), so if a recovery ever stands down you can read exactly what it saw and why.
+
+### Continuing on another login, in one press
+
+When a session stops at its limit and you have another login for the same agent with room left,
+a strip appears at the bottom of that session's pane:
+
+> ⚠ Limit reached · resets 9:40pm (Europe/Rome)  ·  **Continue as Daniel Block · 5h 12% · 7d 40%**  ·  ✕
+
+Pressing the button moves the conversation to that login and sends it a **continue**, so the work
+carries on where it stopped. It is the same move as **Move to Account** above with the follow-up
+message attached, and it asks nothing further: the button already names the login, its current
+usage, and what pressing will do.
+
+Which login is offered is not simply the emptiest one. Threading ranks your other logins for that
+agent by how far each is *behind its own burn* — an account 40% spent four hours into a five-hour
+window has more left in practice than one 30% spent in the first hour — and judges each on the
+window that would stop it first, including a window that meters only the model this session runs.
+A login with no reading, one whose reading has gone stale, or one already past three quarters of
+any window is not offered at all. If none qualifies, no strip appears.
+
+Before anything moves, the target's usage is re-read from the provider. If it turns out to be
+close to its own limit after all, nothing is moved: the strip says so and the button dims. It
+will not quietly pick a third account for you — when the readings move and another login
+qualifies, that is a fresh offer for you to press.
+
+✕ puts the offer away for this refusal. It comes back if the session is refused again.
+
+This needs no setting and does not run on its own. It is the one-press version of a recovery
+Threading will not do unattended: automatic account switching would spend a second login's quota
+with nobody watching, and your press is what makes the difference.
+
+Both surfaces offer it: a session running in Threading's own chat view shows the strip above its
+composer, and one running in the agent's terminal shows it under the terminal, where you would
+have typed the answer yourself. Sessions whose agent has only one login never see it.
 
 ## Accounts
 
@@ -1671,6 +1708,15 @@ remembers the selected Mac and the last open session. Because continuity uses th
 identity rather than its current URL, switching between Tailscale and relay keeps the same saved
 state, while two different Macs that happen to expose the same provider session id remain
 separate.
+
+On your own paired iPhone, open the dashboard's **…** menu and choose **Usage**. The native sheet
+contains the same **Overview** and **Limit History** subjects as the Mac, with independent 7-, 30-
+and 90-day controls. Overview shows measured cost/tokens, provider composition, totals, coverage
+and pricing provenance. Limit History shows one selected account/window's observations,
+projection, reset evidence and **Banked resets**. A positive number is current inventory, zero
+means none are available, and **Unavailable** means the provider did not report a count. A marker
+in the history is separate evidence that a banked reset was previously used. Usage is owner-only;
+a one-chat guest never sees the menu item or the whole-Mac data behind it.
 
 For a shared session, choose its live input mode in the Mac's **Sharing** pane (or from the
 control menu on iPhone/browser):
@@ -3214,45 +3260,29 @@ recovers the past week from disk the first time it looks. Claude records none, s
 projection appears after Threading has watched the window for a while.
 
 ### Usage
-Where your tokens went, read from the agents' own transcripts — the question the header's
-usage pill provokes and cannot answer. It says the week is 85% spent; this says what spent it.
+The page has two independent subjects. **Overview** answers where measured tokens and cost went;
+**Limit History** answers how each provider window is moving. They stay separate because a local
+list-price estimate is not a provider limit and a limit percentage is not a token count.
 
-It opens with the windows you are actually metered on — the join neither source can make
-alone, since the rate-limit API reports no tokens and the transcripts know nothing about
-windows:
+Overview starts at 30 days and can switch between 7, 30 and 90 days and between **Cost** and
+**Tokens**. The total and stacked daily chart lead, followed by provider/billing-route shares,
+token and cache totals, project/account/model breakdowns and coverage. Coverage remains visible
+when an agent source is partial or unavailable. Provider-reported cost wins; otherwise a versioned
+exact-model catalog may estimate it. Unmatched tokens remain visibly unpriced, and the page says
+that estimates are not an invoice.
 
-```
-RATE LIMITS · EVERLOF
-  5 hours · 62%        4.0M      513 turns · resets in 1h 48m
-  7 days · 85%        62.0M   10,865 turns · resets in 17h
-```
+Limit History chooses one account/window and shows its current usage, scheduled reset, projection
+when enough history exists, recorded resets and restored pace. **Banked resets** is current
+inventory for that account: a positive count includes the nearest known expiry, zero says none are
+available, and **Unavailable** means the provider reported no count. A banked marker on the chart
+is historical evidence that a credit count decreased across a proven early clear; it is not the
+same fact as inventory and never means Threading will apply a reset automatically.
 
-Then by **checkout**, since a repository's worktrees are separate places doing separate work,
-and by account, day and model:
-
-```
-300.0M                                    [Rebuild]
-56,594 turns · measured 20 min ago
-
-BY CHECKOUT
-  sonda                            113.8M   ████████████
-  inristo                           28.9M   ███
-  AnotherTerminal                   24.6M   ██▌
-```
-
-Counts input, output and cache writes — the tokens a plan is charged for. **Cache reads are
-excluded**, because they are the cheap path and would drown everything else.
-
-Two things it gets right that are easy to get wrong, and both were measured here rather than
-assumed. A turn copied forward by a resume, a compaction or a side chat is **counted once** —
-on this machine 52.9% of all turns were copies, and counting them made the total look 157%
-too big. And **subagent threads are counted**: a Task keeps its own transcript nested a level
-deeper, its turns appear in no other file, and missing them understated the total by 56%.
-
-The report is built in the background and remembered between launches, so the page opens on
-what is already known. **Rebuild** re-reads every transcript now, which takes about a minute.
-
-Claude only — Codex records its usage differently, and is not in these totals yet.
+The report is built in the background, deduplicates copied, resumed and subagent responses, and is
+remembered between launches. The page keeps the last completed snapshot visible while a rebuild
+is in progress. Claude, Codex, OpenCode and OpenRouter contribute where their supported sources
+provide authoritative data; Grok remains explicitly partial until an authoritative token export
+exists.
 
 ### Usage Windows
 When the day's usage window opens. Off until you turn it on; the full explanation is under

@@ -26,7 +26,7 @@ enum ProjectIconResearch {
     enum ResearchError: Error {
         case alreadyRunning
         case launchFailed
-        case exitedAbnormally(Int32)
+        case exitedAbnormally(status: Int32, diagnostic: String?)
         case timedOut
         case noAnswer
         case nothingFound
@@ -38,8 +38,10 @@ enum ProjectIconResearch {
                 return "A research run for this project is already in progress."
             case .launchFailed:
                 return "Codex could not be launched. Check that the codex CLI is installed."
-            case .exitedAbnormally(let status):
-                return "Codex exited with status \(status) before answering."
+            case .exitedAbnormally(let status, let diagnostic):
+                let summary = "Codex exited with status \(status) before answering."
+                guard let diagnostic else { return summary }
+                return "\(summary)\n\nCodex reported: \(diagnostic)"
             case .timedOut:
                 return "Codex did not finish within \(Int(IconResearchDefaults.timeout)) seconds."
             case .noAnswer:
@@ -218,10 +220,76 @@ enum ProjectIconResearch {
         case .timedOut:
             return (output, .timedOut)
         case .exited(let status) where status != 0:
-            return (output, .exitedAbnormally(status))
+            return (
+                output,
+                .exitedAbnormally(
+                    status: status,
+                    diagnostic: failureDiagnostic(from: output)
+                )
+            )
         case .exited:
             return (output, nil)
         }
+    }
+
+    /// One useful line for the alert, taken from the same complete output kept in the research
+    /// record. Codex's JSONL events are implementation detail, while a plain stderr line or a
+    /// structured error message is the CLI's explanation. The child capture is already capped
+    /// at 8 MiB and this scan runs on the research queue; the result is capped again for UI.
+    static func failureDiagnostic(from output: String) -> String? {
+        for rawLine in output.split(separator: "\n").reversed() {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+
+            if let object = try? JSONSerialization.jsonObject(
+                with: Data(line.utf8)
+            ) as? [String: Any] {
+                guard let message = errorMessage(from: object) else { continue }
+                return sanitizedDiagnostic(message)
+            }
+
+            if let diagnostic = sanitizedDiagnostic(line) {
+                return diagnostic
+            }
+        }
+        return nil
+    }
+
+    private static func errorMessage(from object: [String: Any]) -> String? {
+        if let error = object["error"] as? String, !error.isEmpty {
+            return error
+        }
+        if let error = object["error"] as? [String: Any],
+           let message = error["message"] as? String,
+           !message.isEmpty {
+            return message
+        }
+
+        let eventKind = (object["type"] as? String) ?? (object["level"] as? String) ?? ""
+        guard eventKind.localizedCaseInsensitiveContains("error")
+                || eventKind.localizedCaseInsensitiveContains("fail"),
+              let message = object["message"] as? String,
+              !message.isEmpty else { return nil }
+        return message
+    }
+
+    private static func sanitizedDiagnostic(_ value: String) -> String? {
+        let printable = value.unicodeScalars.reduce(into: "") { result, scalar in
+            if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                result.append(" ")
+            } else if !CharacterSet.controlCharacters.contains(scalar) {
+                result.unicodeScalars.append(scalar)
+            }
+        }
+        let oneLine = printable
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+        guard !oneLine.isEmpty else { return nil }
+
+        let limit = IconResearchDefaults.failureDiagnosticCharacterLimit
+        guard oneLine.count > limit else { return oneLine }
+        let mark = IconResearchDefaults.truncationMark
+        return String(oneLine.prefix(max(0, limit - mark.count))) + mark
     }
 
     /// The last completed `agent_message` in the run's JSONL — the model's final say.
@@ -306,6 +374,8 @@ enum IconResearchDefaults {
     /// Generous: a cold `codex exec` includes login-shell startup and a model round trip.
     static let timeout: TimeInterval = 180
     static let maximumOutputBytes = 8 * 1024 * 1024
+    static let failureDiagnosticCharacterLimit = 400
+    static let truncationMark = "…"
 
     static let recordDirectoryName = "IconResearch"
     static let recordExtension = "jsonl"

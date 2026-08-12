@@ -183,12 +183,12 @@ final class OnboardingNotificationsPageViewController: NSViewController, Onboard
             toggle.isEnabled = granted
             toggle.state = granted
                 ? (AppSettings.shared.notifies(on: alert) ? .on : .off)
-                : .on // the would-be state: everything on, visibly waiting on the grant
+                : .off
         }
         soundToggle.isEnabled = granted
         soundToggle.state = granted
             ? (AppSettings.shared.playsAttentionAlertSound ? .on : .off)
-            : .on
+            : .off
 
         switch status {
         case .authorized, .provisional:

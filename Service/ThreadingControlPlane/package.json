@@ -1,0 +1,23 @@
+{
+  "name": "threading-control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "types": "wrangler types"
+  },
+  "dependencies": {
+    "jose": "6.2.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260811.1",
+    "@cloudflare/vitest-pool-workers": "0.21.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10",
+    "wrangler": "4.121.0"
+  }
+}

@@ -114,7 +114,10 @@ enum TurnStatusText {
         }
 
         var details: [String] = []
-        if let value = lastTurn.duration { details.append(duration(value)) }
+        // Sub-second wrapper measurements round down to `0s`, which is bookkeeping noise rather
+        // than a useful receipt. Keep the other facts if present; otherwise the status is simply
+        // Ready instead of the misleading “last turn 0s”.
+        if let value = lastTurn.duration, value >= 1 { details.append(duration(value)) }
         if let tokens = lastTurn.outputTokens {
             details.append("↓ \(tokenCount(tokens)) tokens")
         }

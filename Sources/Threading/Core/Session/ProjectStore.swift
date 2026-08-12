@@ -916,11 +916,15 @@ final class ProjectStore {
         guard projects[location.projectIndex].sessions[location.sessionIndex].customTitle != stored
         else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].customTitle = stored
+        let sidebarImpact: ProjectsDidChange.SidebarImpact =
+            AppSettings.sidebarSessionOrder == .name
+                ? .sessionOrder(sessionID)
+                : .sessionRow(sessionID)
         guard save() else {
-            notifyChanged()
+            notifyChanged(sidebarImpact: sidebarImpact)
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: sidebarImpact)
         return .applied
     }
 
@@ -1007,7 +1011,9 @@ final class ProjectStore {
         let titleCanReorderSidebar = AppSettings.sidebarSessionOrder == .name
             && AppSettings.usesAgentTitleInSidebar
         notifyChanged(
-            sidebarImpact: titleCanReorderSidebar ? .structure : .sessionRow(sessionID)
+            sidebarImpact: titleCanReorderSidebar
+                ? .sessionOrder(sessionID)
+                : .sessionRow(sessionID)
         )
         return cleaned == nil ? .cleared : .accepted
     }
@@ -1035,7 +1041,11 @@ final class ProjectStore {
 
         projects[location.projectIndex].sessions[location.sessionIndex].title = title
         save()
-        notifyChanged()
+        notifyChanged(
+            sidebarImpact: AppSettings.sidebarSessionOrder == .name
+                ? .sessionOrder(sessionID)
+                : .sessionRow(sessionID)
+        )
     }
 
     /// Removes the decorative glyph agents prefix their terminal title with.

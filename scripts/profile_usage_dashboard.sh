@@ -38,3 +38,12 @@ DYLD_FRAMEWORK_PATH="${stress_app}/Contents/Frameworks" \
   xcrun xctest \
     -XCTest ThreadingTests.UsageDashboardPerformanceTests \
     "${stress_bundle}"
+
+# Exercise the same 100k aggregate cells / 250k limit samples / 50k reset events through the
+# Foundation-only projection that now sits between those stores and both platform renderers.
+THREADING_USAGE_STRESS=1 \
+DYLD_LIBRARY_PATH="${stress_app}/Contents/MacOS" \
+DYLD_FRAMEWORK_PATH="${stress_app}/Contents/Frameworks" \
+  xcrun xctest \
+    -XCTest ThreadingTests.UsageDashboardProjectionTests \
+    "${stress_bundle}"

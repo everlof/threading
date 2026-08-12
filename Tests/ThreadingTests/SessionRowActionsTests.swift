@@ -693,9 +693,9 @@ final class SessionRowActionsTests: XCTestCase {
 
         XCTAssertEqual(
             slot.frame.width,
-            SidebarRowDefaults.sessionTrailingSlotWidth,
+            SidebarRowDefaults.sessionTrailingSlotWithStatusWidth,
             accuracy: 0.5,
-            "the hovered row did not expand to contain both action targets"
+            "the hovered working row did not contain both actions and its status target"
         )
         XCTAssertGreaterThan(
             restingTitleWidth,
@@ -723,23 +723,39 @@ final class SessionRowActionsTests: XCTestCase {
         )
     }
 
-    /// The dot must not move when the slot widens to carry a second button: it is shown on every
-    /// row at rest, and the pair is shown on one row under the pointer.
+    /// The dot must not move or disappear when actions arrive. Activity is durable state, so the
+    /// pair moves inboard while status keeps the list's stable trailing edge.
     func testTheStatusDotKeepsTheRowsTrailingEdge() throws {
         let (host, row) = hostedRow()
         row.configure(with: session(), activity: .working)
         host.layoutSubtreeIfNeeded()
 
         let status = try view(named: "sidebar.session.status", in: row)
+        let restingStatusCentre = row.convert(
+            NSPoint(x: status.bounds.midX, y: status.bounds.midY),
+            from: status
+        )
+
+        enter(row)
+        defer { leave(row) }
+        host.layoutSubtreeIfNeeded()
+
         let archive = try view(named: "sidebar.session.archive", in: row)
         let statusCentre = row.convert(NSPoint(x: status.bounds.midX, y: status.bounds.midY), from: status)
         let archiveCentre = row.convert(NSPoint(x: archive.bounds.midX, y: archive.bounds.midY), from: archive)
 
         XCTAssertEqual(
             statusCentre.x,
-            archiveCentre.x,
+            restingStatusCentre.x,
             accuracy: 0.5,
             "the status dot left the row's trailing edge when the slot widened"
+        )
+        XCTAssertGreaterThan(statusCentre.x, archiveCentre.x)
+        XCTAssertEqual(status.alphaValue, 1, accuracy: 0.01)
+        XCTAssertFalse(
+            row.convert(status.bounds, from: status)
+                .intersects(row.convert(archive.bounds, from: archive)),
+            "the persistent status overlapped the action moved inboard beside it"
         )
     }
 

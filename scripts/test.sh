@@ -23,6 +23,30 @@ fi
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_directory="$(cd "${script_directory}/.." && pwd)"
 
+# Render tests are part of the ordinary plans, not only the evidence command. Xcode launches the
+# test host with `/` as its working directory, so their documented relative-path fallback tries
+# to write `/component.png` and turns a healthy suite into dozens of read-only-volume failures.
+# Give an ordinary run a disposable output root; an explicit evidence destination still wins.
+render_scratch=""
+if [[ -z "${THREADING_RENDER_OUT:-}" ]]; then
+  render_scratch="$(mktemp -d -t threading-test-renders)"
+  export THREADING_RENDER_OUT="${render_scratch}"
+fi
+if [[ -z "${THREADING_UI_EVIDENCE_OUT:-}" ]]; then
+  export THREADING_UI_EVIDENCE_OUT="${THREADING_RENDER_OUT}"
+fi
+
+scratch_list=""
+cleanup() {
+  if [[ -n "${scratch_list}" ]]; then
+    rm -f "${scratch_list}"
+  fi
+  if [[ -n "${render_scratch}" && -d "${render_scratch}" ]]; then
+    find "${render_scratch}" -depth -delete
+  fi
+}
+trap cleanup EXIT
+
 # An unregistered source produces a passing Xcode run with zero cases from that file. Refuse the
 # command before selecting a plan so focused runs cannot accidentally provide false evidence.
 python3 "${script_directory}/check_test_registration.py"
@@ -76,7 +100,6 @@ set -e
 # without emitting the paths, so the count read zero on runs that had just swept a hundred files
 # and the line never printed. A sweep that cannot say what it removed is one nobody can audit.
 scratch_list="$(mktemp -t threading-scratch-prefs)"
-trap 'rm -f "${scratch_list}"' EXIT
 
 find -E "${HOME}/Library/Preferences" -maxdepth 1 -type f \
   -regex '.*[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\.plist' \

@@ -194,6 +194,10 @@ final class RemoteAppModel: ObservableObject {
             && me?.newSessionCatalog != nil
     }
 
+    var canReadUsage: Bool {
+        me?.features?.contains(RemoteRESTFeature.usageDashboard.rawValue) == true
+    }
+
     func pair(_ invitationLink: RemoteConnectionLink, displayName: String) async throws {
         phase = .connecting
         MobileDiagnostics.record(.hostPairingStarted)
@@ -1090,7 +1094,8 @@ final class RemoteAppModel: ObservableObject {
                         supportsConversation: true
                     ),
                 ]
-            )
+            ),
+            features: [RemoteRESTFeature.usageDashboard.rawValue]
         )
     }
 }
@@ -1105,7 +1110,8 @@ private extension RemoteMeDTO {
             theme: theme,
             themeCatalog: themeCatalog,
             archivedSessions: archivedSessions,
-            newSessionCatalog: newSessionCatalog
+            newSessionCatalog: newSessionCatalog,
+            features: features
         )
     }
 
@@ -1140,7 +1146,8 @@ private extension RemoteMeDTO {
             theme: theme,
             themeCatalog: themeCatalog,
             archivedSessions: archivedSessions,
-            newSessionCatalog: newSessionCatalog
+            newSessionCatalog: newSessionCatalog,
+            features: features
         )
     }
 
@@ -1173,7 +1180,8 @@ private extension RemoteMeDTO {
             theme: theme,
             themeCatalog: themeCatalog,
             archivedSessions: archivedSessions?.map(replace),
-            newSessionCatalog: newSessionCatalog
+            newSessionCatalog: newSessionCatalog,
+            features: features
         )
     }
 }

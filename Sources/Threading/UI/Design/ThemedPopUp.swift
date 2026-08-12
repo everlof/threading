@@ -43,6 +43,10 @@ final class ThemedPopUp: ThemedControl {
 
     // MARK: - Configuration
 
+    override var isEnabled: Bool {
+        didSet { alphaValue = isEnabled ? 1 : Layout.disabledAlpha }
+    }
+
     /// Mirrors `NSPopUpButton.pullsDown`: the first item is a fixed label rather than a choice,
     /// which is what an actions or gear button wants. No selection is recorded, and the button
     /// keeps showing item 0 whatever is picked.
@@ -260,8 +264,6 @@ final class ThemedPopUp: ThemedControl {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        alphaValue = isEnabled ? 1 : Layout.disabledAlpha
-
         var content = bounds.insetBy(dx: contentInset, dy: 0)
 
         if isBordered {
@@ -361,7 +363,10 @@ final class ThemedPopUp: ThemedControl {
         path.lineWidth = Layout.chevronLineWidth
         path.lineCapStyle = .round
         path.lineJoinStyle = .round
-        Design.Text.tertiary.setStroke()
+        // This glyph is the control's only indication that another surface will open. Tertiary
+        // ink landed below 2:1 on the System light field and nearly disappeared at catalogue
+        // scale; secondary stays quiet beside the title while remaining an affordance.
+        Design.Text.secondary.setStroke()
         path.stroke()
     }
 

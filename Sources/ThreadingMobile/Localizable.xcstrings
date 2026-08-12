@@ -4525,6 +4525,258 @@
         }
       }
     },
+    "%@ across %lld provider series": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ över %lld leverantörsserier" } } }
+    },
+    "%@ of cost · %@ tokens": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ av kostnaden · %@ token" } } }
+    },
+    "%@ of tokens · %lld requests": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ av token · %lld förfrågningar" } } }
+    },
+    "%@ restored pace": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ återställd takt" } } }
+    },
+    "%@ tokens could not be priced · Local estimate": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ token kunde inte prissättas · Lokal uppskattning" } } }
+    },
+    "%lld active days": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld aktiva dagar" } } }
+    },
+    "%lld observations, %lld recorded resets, %@ currently used": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld observationer, %lld registrerade återställningar, %@ används just nu" } } }
+    },
+    "%lld records from %lld sources": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld poster från %lld källor" } } }
+    },
+    "%lld requests": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld förfrågningar" } } }
+    },
+    "30 days": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "30 dagar" } } }
+    },
+    "7 days": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "7 dagar" } } }
+    },
+    "90 days": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "90 dagar" } } }
+    },
+    "About these numbers": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Om de här siffrorna" } } }
+    },
+    "Account and window": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Konto och fönster" } } }
+    },
+    "Banked reset": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bankad återställning" } } }
+    },
+    "Banked reset expiry": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Utgång för bankad återställning" } } }
+    },
+    "Banked resets": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bankade återställningar" } } }
+    },
+    "Cache savings": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Cachebesparing" } } }
+    },
+    "Cache writes": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Cacheskrivningar" } } }
+    },
+    "Cached input": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Cachad indata" } } }
+    },
+    "Complete": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fullständig" } } }
+    },
+    "Cost": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kostnad" } } }
+    },
+    "Current window": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktuellt fönster" } } }
+    },
+    "Daily %@ chart": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dagligt diagram för %@" } } }
+    },
+    "Data coverage": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Datatäckning" } } }
+    },
+    "Day": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dag" } } }
+    },
+    "Estimate from recent burn": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppskattning från den senaste förbrukningen" } } }
+    },
+    "Estimated at public API list prices": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppskattat med offentliga API-listpriser" } } }
+    },
+    "Expiry": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Utgång" } } }
+    },
+    "Failed": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Misslyckad" } } }
+    },
+    "Limit History": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Gränshistorik" } } }
+    },
+    "Limit history": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Gränshistorik" } } }
+    },
+    "Limit history chart": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Diagram över gränshistorik" } } }
+    },
+    "Load more accounts": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Läs in fler konton" } } }
+    },
+    "Loading limit history…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Läser in gränshistorik…" } } }
+    },
+    "Local transcript measurements and list-price estimates are not an invoice. Coverage below shows what the Mac could measure.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lokala transkriptmätningar och uppskattningar med listpriser är ingen faktura. Täckningen nedan visar vad Mac-datorn kunde mäta." } } }
+    },
+    "Measured token cost": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppmätt tokenkostnad" } } }
+    },
+    "Measured from provider-reported cost": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppmätt från leverantörsrapporterad kostnad" } } }
+    },
+    "Metric": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mått" } } }
+    },
+    "More history is needed": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mer historik behövs" } } }
+    },
+    "Next expiry %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nästa utgång %@" } } }
+    },
+    "No completed usage report is available yet.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det finns ingen färdig användningsrapport ännu." } } }
+    },
+    "No expiry reported": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen utgång rapporterad" } } }
+    },
+    "No limit history": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen gränshistorik" } } }
+    },
+    "None available": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inga tillgängliga" } } }
+    },
+    "Observed": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Observerat" } } }
+    },
+    "Observed at": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Observerat vid" } } }
+    },
+    "Observed segment": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Observerat segment" } } }
+    },
+    "Offline · Showing snapshot from %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Offline · Visar ögonblicksbild från %@" } } }
+    },
+    "Output": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Utdata" } } }
+    },
+    "Overview": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Översikt" } } }
+    },
+    "Partial": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Partiell" } } }
+    },
+    "Preparing selected history…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Förbereder vald historik…" } } }
+    },
+    "Preparing Usage…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Förbereder användning…" } } }
+    },
+    "Pricing catalog %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Priskatalog %@" } } }
+    },
+    "Processed tokens": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bearbetade token" } } }
+    },
+    "Projected at reset": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognos vid återställning" } } }
+    },
+    "Projected exhaustion": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognostiserad förbrukning" } } }
+    },
+    "Projected from": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognos från" } } }
+    },
+    "Projected to": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognos till" } } }
+    },
+    "Projected use": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognostiserad användning" } } }
+    },
+    "Projection": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognos" } } }
+    },
+    "Provider totals plus local list-price estimates": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörstotaler plus lokala uppskattningar med listpriser" } } }
+    },
+    "Providers": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörer" } } }
+    },
+    "Range": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Intervall" } } }
+    },
+    "Reasoning is included in output · %lld requests": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Resonemang ingår i utdata · %lld förfrågningar" } } }
+    },
+    "Recorded resets": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Registrerade återställningar" } } }
+    },
+    "Reset-credit count was not reported": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Antalet återställningskrediter rapporterades inte" } } }
+    },
+    "Resets %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återställs %@" } } }
+    },
+    "Resets %@\n%@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återställs %@\n%@" } } }
+    },
+    "The Mac has not recorded a provider limit window yet.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn har inte registrerat något gränsfönster från en leverantör ännu." } } }
+    },
+    "The Mac is indexing local usage. Pull to refresh in a moment.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn indexerar lokal användning. Dra för att uppdatera om en stund." } } }
+    },
+    "Tokens": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Token" } } }
+    },
+    "Totals": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Totalt" } } }
+    },
+    "Uncached input": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Icke-cachad indata" } } }
+    },
+    "Updated %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdaterad %@" } } }
+    },
+    "Updated now": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdaterad nu" } } }
+    },
+    "Updating · Showing snapshot from %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdaterar · Visar ögonblicksbild från %@" } } }
+    },
+    "unknown": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "okänt" } } }
+    },
+    "Unpriced tokens": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ej prissatta token" } } }
+    },
+    "Usage": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användning" } } }
+    },
+    "Usage is being prepared": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användning förbereds" } } }
+    },
+    "Usage section": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användningsavsnitt" } } }
+    },
+    "Used": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använt" } } }
+    },
     "This file previews on your Mac.": {
       "localizations": {
         "sv": {

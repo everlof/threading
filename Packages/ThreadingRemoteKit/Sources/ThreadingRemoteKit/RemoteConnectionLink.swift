@@ -137,6 +137,29 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         baseURL.appendingPathComponent("api/me")
     }
 
+    public var usageURL: URL {
+        baseURL.appendingPathComponent("api/usage")
+    }
+
+    public func usageURL(cursor: String?, limit: Int? = nil) -> URL {
+        var components = URLComponents(url: usageURL, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            cursor.map { URLQueryItem(name: "cursor", value: $0) },
+            limit.map { URLQueryItem(name: "limit", value: String($0)) },
+        ].compactMap { $0 }
+        return components?.url ?? usageURL
+    }
+
+    public func usageLimitURL(seriesID: String, days: Int) -> URL {
+        let endpoint = usageURL.appendingPathComponent("limit")
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "series", value: seriesID),
+            URLQueryItem(name: "days", value: String(days)),
+        ]
+        return components?.url ?? endpoint
+    }
+
     public var appThemeURL: URL {
         baseURL.appendingPathComponent("api/theme")
     }

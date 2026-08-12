@@ -1958,6 +1958,28 @@ final class ThemedIndicatorsTests: XCTestCase {
     /// room" there hides the card for the whole of the first layout pass.
     func testAPaneThatHasNotBeenLaidOutYetIsNotCalledTooNarrow() {
         XCTAssertTrue(GitStatusOverlayDefaults.hasRoom(forCardWidth: 200, inPaneWidth: 0))
+        XCTAssertTrue(GitStatusOverlayDefaults.hasRoomBesideConversation(
+            forCardWidth: 200,
+            inPaneWidth: 0
+        ))
+    }
+
+    /// Conversation content is capped and centred, so the relevant room is its trailing gutter,
+    /// not an arbitrary share of the pane. Opening the display panel can leave a card under half
+    /// the pane while removing the gutter entirely.
+    func testConversationCardWithdrawsBeforeItCanCoverTheReadableColumn() {
+        XCTAssertTrue(GitStatusOverlayDefaults.hasRoomBesideConversation(
+            forCardWidth: 120,
+            inPaneWidth: 1_000
+        ))
+        XCTAssertFalse(GitStatusOverlayDefaults.hasRoomBesideConversation(
+            forCardWidth: 120,
+            inPaneWidth: 760
+        ), "the card fit the pane but covered the conversation column")
+        XCTAssertFalse(GitStatusOverlayDefaults.hasRoomBesideConversation(
+            forCardWidth: 40,
+            inPaneWidth: 620
+        ), "a narrow conversation has no floating-card gutter")
     }
 
     /// Every row of the card is one height, and the hover wash is that height.

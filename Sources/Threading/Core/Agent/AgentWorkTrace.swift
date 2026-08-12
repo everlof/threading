@@ -582,7 +582,14 @@ struct AgentWorkPresentation: Equatable, Sendable {
             )
         }
         .filter { $0.touchedFileCount > 0 || $0.actionCount > 0 }
-        .sorted { ($0.lastActivity ?? .distantPast) > ($1.lastActivity ?? .distantPast) }
+        .sorted {
+            let lhs = $0.lastActivity ?? .distantPast
+            let rhs = $1.lastActivity ?? .distantPast
+            guard lhs == rhs else { return lhs > rhs }
+            // A tie must not fall through to dictionary order: two agents last active in
+            // the same instant would swap places between refreshes and between captures.
+            return ($0.sessionTitle, $0.agentLabel) < ($1.sessionTitle, $1.agentLabel)
+        }
 
         return AgentWorkPresentation(
             scope: .project(projectID), isDetailed: detailed, bins: bins,

@@ -12,6 +12,45 @@ import XCTest
 @MainActor
 final class AppDelegateTests: XCTestCase {
 
+    func testUIScenarioEvidenceConfigurationStaysInsideScenarioHome() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("UIScenarioEvidence-\(UUID().uuidString)", isDirectory: true)
+        let evidence = root.appendingPathComponent("evidence", isDirectory: true)
+        let outside = root.appendingPathComponent("outside", isDirectory: true)
+        try FileManager.default.createDirectory(at: evidence, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let token = UUID().uuidString
+        let accepted = UIScenarioEvidenceCapture.Configuration.resolve(
+            environment: [
+                "THREADING_UI_SCENARIO_EVIDENCE_DIR": evidence.path,
+                "THREADING_UI_SCENARIO_EVIDENCE_TOKEN": token,
+            ],
+            scenarioRoot: root
+        )
+        XCTAssertEqual(try accepted.get().outputDirectory, evidence.resolvingSymlinksInPath())
+
+        let refused = UIScenarioEvidenceCapture.Configuration.resolve(
+            environment: [
+                "THREADING_UI_SCENARIO_EVIDENCE_DIR": outside.path,
+                "THREADING_UI_SCENARIO_EVIDENCE_TOKEN": token,
+            ],
+            scenarioRoot: root
+        )
+        guard case .failure(let error) = refused else {
+            return XCTFail("an evidence directory beside the allowed directory was accepted")
+        }
+        XCTAssertEqual(error, .unsafeOutputDirectory)
+    }
+
+    func testUIScenarioEvidenceNamesCannotBecomePaths() {
+        XCTAssertTrue(UIScenarioEvidenceCapture.isSafeEvidenceName("stop-turn-01-working"))
+        XCTAssertFalse(UIScenarioEvidenceCapture.isSafeEvidenceName("../outside"))
+        XCTAssertFalse(UIScenarioEvidenceCapture.isSafeEvidenceName("Uppercase"))
+        XCTAssertFalse(UIScenarioEvidenceCapture.isSafeEvidenceName("1-leading-number"))
+    }
+
     func testSwedishStringCatalogCompilesAndKeepsPerStringFallback() throws {
         let appBundle = Bundle(for: AppDelegate.self)
         let path = try XCTUnwrap(

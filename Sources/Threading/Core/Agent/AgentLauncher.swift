@@ -425,7 +425,9 @@ enum AgentLauncher {
     }
 
     /// Builds a one-shot, headless `codex exec` run used for background research — icon
-    /// discovery today.
+    /// discovery today. Project folders do not have to be Git repositories, so the run
+    /// explicitly skips Codex's repository preflight; the read-only sandbox remains the
+    /// authority that bounds what the helper may do.
     ///
     /// Routed to the default account (research belongs to a project, not any session — the
     /// same `env -u` rule as `routed`), sandboxed read-only because research must
@@ -451,6 +453,7 @@ enum AgentLauncher {
         )
         command.append(word: "exec")
         command.append(flag: "--json")
+        command.append(flag: AgentDefaults.codexSkipGitRepoCheckFlag)
         command.append(operand: prompt)
 
         return launchPlan(command: command, in: folder, resumeState: .unavailable)

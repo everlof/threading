@@ -146,6 +146,7 @@ enum ThemedChartMarkerKind: Equatable, Sendable {
     case reset
     case expiry
     case projection
+    case now
 }
 
 struct ThemedChartMarker: Equatable, Sendable, Identifiable {
@@ -337,7 +338,7 @@ enum ThemedChartGeometry {
             maximumValue = stacked.totals.reduce(0) { max($0, $1.value) }
         }
 
-        let automaticY = 0...max(maximumValue * 1.08, 1)
+        let automaticY = niceAutomaticY(maximumValue: maximumValue)
         let y = nonEmpty(model.yRange ?? automaticY)
         guard hasPoint else { return Layout(series: [], xRange: xRange, yRange: y) }
 
@@ -592,6 +593,21 @@ enum ThemedChartGeometry {
         return range
     }
 
+    /// Choose an upper bound whose four grid intervals land on readable values. Padding an
+    /// arbitrary maximum by a percentage produced labels such as `184,453.3`; a chart scale is
+    /// navigation, so it should use the familiar 1/2/2.5/5 progression and keep the raw value
+    /// only in the tooltip.
+    private static func niceAutomaticY(maximumValue: Double) -> ClosedRange<Double> {
+        let padded = max(maximumValue * 1.08, 1)
+        let intervalCount = Double(max(Design.Chart.gridLineCount - 1, 1))
+        let rawStep = padded / intervalCount
+        let magnitude = pow(10, floor(log10(rawStep)))
+        let normalized = rawStep / magnitude
+        let multiplier = [1.0, 2.0, 2.5, 5.0, 10.0]
+            .first(where: { $0 >= normalized }) ?? 10
+        return 0...(multiplier * magnitude * intervalCount)
+    }
+
     private static func nonEmpty(_ range: ClosedRange<Date>) -> ClosedRange<Date> {
         guard range.upperBound > range.lowerBound else {
             return range.lowerBound...range.lowerBound.addingTimeInterval(1)
@@ -612,6 +628,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
     private(set) var renderedPointCount = 0
     private(set) var renderedMarkerCount = 0
     var displayedGeometryForTesting: [ThemedChartRenderedSeries] { displayedGeometry }
+    var resolvedYRangeForTesting: ClosedRange<Double> { resolvedYRange }
 
     private var transitionFrom: [ThemedChartRenderedSeries] = []
     private var targetGeometry: [ThemedChartRenderedSeries] = []
@@ -1626,6 +1643,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
             case .reset: glyph = "↻"
             case .expiry: glyph = "◆"
             case .projection: glyph = "◇"
+            case .now: glyph = L10n.string("Now")
             }
             draw(
                 glyph,
@@ -1803,6 +1821,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
         case .reset: return Design.Status.positive
         case .expiry: return Design.Status.warning
         case .projection: return Design.Surface.accent
+        case .now: return Design.Text.secondary
         }
     }
 

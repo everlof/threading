@@ -3,8 +3,8 @@ import Foundation
 // MARK: - Usage Report
 
 /// Persisted, provider-neutral input for every range the Usage page can present.
-struct TranscriptUsageReport: Codable, Equatable {
-    struct Checkout: Codable, Equatable {
+struct TranscriptUsageReport: Codable, Equatable, Sendable {
+    struct Checkout: Codable, Equatable, Sendable {
         let path: String
         let label: String
         var billedTokens: Int64
@@ -12,7 +12,7 @@ struct TranscriptUsageReport: Codable, Equatable {
         var costUSD: Double = 0
     }
 
-    struct Slice: Codable, Equatable {
+    struct Slice: Codable, Equatable, Sendable {
         let name: String
         var billedTokens: Int64
         var tokens: UsageTokenCounts = .init()
@@ -20,13 +20,13 @@ struct TranscriptUsageReport: Codable, Equatable {
         var records: Int = 0
     }
 
-    struct Bucket: Codable, Equatable {
+    struct Bucket: Codable, Equatable, Sendable {
         let at: Date
         var billedTokens: Int64
         var turns: Int
     }
 
-    struct Cell: Codable, Equatable {
+    struct Cell: Codable, Equatable, Sendable {
         let day: Date
         let origin: UsageOrigin
         let accountID: String
@@ -44,7 +44,7 @@ struct TranscriptUsageReport: Codable, Equatable {
         var costUSD: Double { providerReportedCostUSD + catalogCostUSD }
     }
 
-    struct ScanStatistics: Codable, Equatable {
+    struct ScanStatistics: Codable, Equatable, Sendable {
         var sourceFiles: Int = 0
         var cacheHits: Int = 0
         var cacheMisses: Int = 0
@@ -96,22 +96,22 @@ struct TranscriptUsageReport: Codable, Equatable {
 
 // MARK: - Range Selection
 
-struct UsageReportSelection: Equatable {
-    struct Provider: Equatable {
+struct UsageReportSelection: Equatable, Sendable {
+    struct Provider: Equatable, Sendable {
         let origin: UsageOrigin
         var tokens: UsageTokenCounts
         var costUSD: Double
         var records: Int
     }
 
-    struct Daily: Equatable {
+    struct Daily: Equatable, Sendable {
         let day: Date
         let origin: UsageOrigin
         var tokens: UsageTokenCounts
         var costUSD: Double
     }
 
-    struct CostQuality: Equatable {
+    struct CostQuality: Equatable, Sendable {
         var providerReportedUSD: Double = 0
         var catalogPricedUSD: Double = 0
         var unpricedTokens: Int64 = 0

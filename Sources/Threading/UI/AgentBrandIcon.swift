@@ -5,10 +5,10 @@ import AppKit
 /// The agents' own marks — Claude's coral starburst, OpenAI's knot — used wherever a session,
 /// chip, or list row identifies its agent.
 ///
-/// Loaded as loose PNGs from the app bundle's `Icons/` folder rather than the asset catalogue.
-/// Claude's mark keeps its brand colour; OpenAI's is monochrome by design, so it ships as a
-/// template image and tints with its context exactly like the SF Symbols it sits beside — which
-/// is also what keeps it visible in dark mode.
+/// Loaded from the compiled asset catalogue so constructing the first visible sidebar rows does
+/// not synchronously decode two loose PNG files. Claude's mark keeps its brand colour; OpenAI's
+/// is monochrome by design, so it ships as a template image and tints with its context exactly
+/// like the SF Symbols it sits beside — which is also what keeps it visible in dark mode.
 enum AgentBrandIcons {
 
     static let claude = load(
@@ -22,13 +22,14 @@ enum AgentBrandIcons {
         accessibility: AgentKind.codex.displayName
     )
 
-    /// Bundled at 2× the nominal point size, so the mark stays crisp on Retina displays.
+    /// Pixel analysis belongs to the mark, not to every row that happens to display it. Claude's
+    /// non-template artwork is the only built-in mark whose contrast plate needs this value;
+    /// template marks take their tint from the surface and never ask for a plate.
+    static let claudeTone = claude.flatMap(IconBackplate.tone(of:))
+
+    /// Compiled from a 2× source, so the mark stays crisp on Retina displays.
     private static func load(_ name: String, isTemplate: Bool, accessibility: String) -> NSImage? {
-        guard let url = Bundle.main.url(
-            forResource: name,
-            withExtension: AgentIconDefaults.resourceExtension,
-            subdirectory: AgentIconDefaults.resourceSubdirectory
-        ), let image = NSImage(contentsOf: url) else { return nil }
+        guard let image = NSImage(named: NSImage.Name(name)) else { return nil }
 
         image.size = NSSize(
             width: AgentIconDefaults.pointSize,
@@ -48,6 +49,14 @@ extension AgentKind {
         case .claude: return AgentBrandIcons.claude
         case .codex: return AgentBrandIcons.codex
         case .grok, .openCode: return nil
+        }
+    }
+
+    /// The immutable built-in mark's measured tone, shared by every viewport row.
+    var brandIconTone: CGFloat? {
+        switch self {
+        case .claude: return AgentBrandIcons.claudeTone
+        case .codex, .grok, .openCode: return nil
         }
     }
 

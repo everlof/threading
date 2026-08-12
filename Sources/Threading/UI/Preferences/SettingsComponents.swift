@@ -392,6 +392,16 @@ enum SettingsUI {
             ink: { Design.Text.label },
             highlighting: query
         )
+        // A control is the operable half of the row, so narrow layouts must make the title
+        // yield before they move that control beyond the card. Plain `NSTextField` labels keep
+        // AppKit's 750 horizontal resistance and an unbounded single-line width by default;
+        // one long title was therefore strong enough to break the row's trailing pin at 420pt,
+        // clipping every control on the General page. Search-match labels use the same column
+        // and need the same pressure contract.
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        if let titleLabel = titleLabel as? NSTextField {
+            titleLabel.lineBreakMode = .byTruncatingTail
+        }
 
         var labelViews: [NSView] = [titleLabel]
         var highlighted: [NSView] = query == nil ? [] : [titleLabel]

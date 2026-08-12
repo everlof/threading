@@ -242,6 +242,22 @@ The filesystem rows expose spoken read/edit totals as well as their compact labe
 the only encoding because reads, edits, overlap and activity categories also differ in shape,
 position, or text.
 
+The summary card learned figure-ground the hard way (2026-08-11). Untouched files once drew two
+tertiary-based resting tiers, and at 2,400 cells that ground summed into a checkerboard louder
+than the 94 marks resting on it; both tiers now derive from the quietest label tier
+(`FileActivityInk`), still alternating per directory run, so the touched files own the light. The
+counts are the encoding's own legend: the number leads in fixed-width digits, and the little mark
+beside "59 edits" / "53 reads" is drawn with the atlas' exact ink recipe, while each action count
+wears its ribbon hue — which retired the three-clause prose legend down to the one fact no mark
+carries alone, the multi-agent cap, shown in project scope only. The ribbon itself draws only
+non-file actions (file work is the atlas' story) as merged same-category runs at one height in
+dimmed ink; the hues it does not name fold into a muted "other", the `CodeStatsBar` rule. Two
+mechanical lessons live beside those decisions: the detail grid re-derives its column count from
+the rounded row count, because sizing for an aspect heuristic's phantom columns stopped the grid
+visibly short of the ribbon's edge below it; and the card's wrapping labels take
+`preferredMaxLayoutWidth` from their laid-out width, because a fixed popover-width guess clipped
+the contributor list to one line ending in a dangling separator.
+
 **A translucent glyph tint composites over the ground, not into the artwork.**
 `TemplateImageDrawing` filled the symbol `.sourceAtop` inside its transparency layer, which is
 right for an opaque tint and wrong for every other one: a template's own artwork is black, so atop

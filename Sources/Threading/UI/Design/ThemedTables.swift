@@ -1018,7 +1018,10 @@ final class ThemedDocumentTableView: NSView, ThemedComponent {
         translatesAutoresizingMaskIntoConstraints = false
         themeRedraw = ThemeRedraw(self)
         applySurface(
-            fill: Design.Surface.panel.withAlphaComponent(0.45),
+            // The panel role already states its intended strength. Replacing its alpha here
+            // amplified System's deliberately quiet 5% label wash to 45%, producing the same
+            // heavy mid-gray slab in light and dark appearances.
+            fill: Design.Surface.panel,
             radius: .control
         )
 

@@ -243,6 +243,8 @@ enum SidebarTreeBuilder {
         at date: Date = Date()
     ) -> [NSObject] {
         let identities = projects.map { GitInfo.repositoryIdentity(for: $0.folderPath) }
+        let order = AppSettings.sidebarSessionOrder
+        let isReversed = AppSettings.sidebarSessionOrderIsReversed
 
         var checkoutCounts: [String: Int] = [:]
         for identity in identities.compactMap({ $0 }) {
@@ -252,51 +254,20 @@ enum SidebarTreeBuilder {
         var roots: [NSObject] = []
         var groupsByIdentity: [String: RepoGroupNode] = [:]
 
-        var terminalsByDisplayProject: [ProjectID: [ProjectTerminal]] = [:]
-        for homeProject in projects {
-            for terminal in homeProject.terminals {
-                let displayProjectID = ProjectTerminalPlacement.projectID(
-                    for: terminal,
-                    homeProject: homeProject,
-                    projects: projects
-                )
-                terminalsByDisplayProject[displayProjectID, default: []].append(terminal)
-            }
-        }
+        let terminalsByDisplayProject = terminalsByDisplayProject(from: projects)
 
         for (project, identity) in zip(projects, identities) {
-            let node = ProjectNode(projectID: project.id)
-            // Archived sessions are gathered separately, below the projects.
-            let order = AppSettings.sidebarSessionOrder
-            let isReversed = AppSettings.sidebarSessionOrderIsReversed
-            let activeSessions = project.sessions
-                .filter {
-                    guard !$0.isArchived else { return false }
-                    let isSnoozed = $0.isSnoozed(at: date)
-                    return visibility == .snoozed ? isSnoozed : !isSnoozed
-                }
-                .enumerated()
-                .sorted { precedes($0, $1, order: order, isReversed: isReversed) }
-                .map(\.element)
-            node.sessionNodes = activeSessions.map { SessionNode(sessionID: $0.id) }
-            // Standalone terminals are not sessions and cannot be snoozed. They remain in the
-            // ordinary attention view, never leaking into the dedicated Snoozed scope.
-            let terminals = visibility == .attention
-                ? terminalsByDisplayProject[project.id] ?? []
-                : []
-            node.terminalNodes = terminals.map {
-                TerminalNode(terminalID: $0.id, displayProjectFolderPath: project.folderPath)
-            }
-
-            // Side chats hang off the session they were forked from, so only what remains
-            // at the project's own level is grouped by branch below.
-            let top = attachSideChats(sessions: activeSessions, nodes: node.sessionNodes)
-            node.childNodes = childNodes(
-                projectID: project.id,
-                sessions: top.sessions,
-                sessionNodes: top.nodes,
-                terminals: terminals,
-                terminalNodes: node.terminalNodes
+            // Standalone terminals are not sessions and cannot be snoozed, so they stay in the
+            // ordinary attention view and never leak into the dedicated Snoozed scope.
+            let node = makeProjectNode(
+                from: project,
+                terminals: visibility == .attention
+                    ? terminalsByDisplayProject[project.id] ?? []
+                    : [],
+                order: order,
+                isReversed: isReversed,
+                visibility: visibility,
+                date: date
             )
 
             guard let identity, checkoutCounts[identity, default: 0] > 1 else {
@@ -321,6 +292,156 @@ enum SidebarTreeBuilder {
         // Archived sessions are not shown here at all — they live in Settings, so the sidebar
         // stays a list of what is active.
         return roots
+    }
+
+    /// Rebuilds only one project's descendants for a content change that can alter their
+    /// ordering but cannot add or remove a project/repository row. This keeps a session rename
+    /// in Name order proportional to its project rather than every conversation in the app.
+    static func projectNode(for projectID: ProjectID, from projects: [Project]) -> ProjectNode? {
+        guard let project = projects.first(where: { $0.id == projectID }) else { return nil }
+        let terminals = terminalsByDisplayProject(from: projects)[projectID] ?? []
+        return makeProjectNode(
+            from: project,
+            terminals: terminals,
+            order: AppSettings.sidebarSessionOrder,
+            isReversed: AppSettings.sidebarSessionOrderIsReversed
+        )
+    }
+
+    private static func terminalsByDisplayProject(
+        from projects: [Project]
+    ) -> [ProjectID: [ProjectTerminal]] {
+        var result: [ProjectID: [ProjectTerminal]] = [:]
+        for homeProject in projects {
+            for terminal in homeProject.terminals {
+                let displayProjectID = ProjectTerminalPlacement.projectID(
+                    for: terminal,
+                    homeProject: homeProject,
+                    projects: projects
+                )
+                result[displayProjectID, default: []].append(terminal)
+            }
+        }
+        return result
+    }
+
+    private static func makeProjectNode(
+        from project: Project,
+        terminals: [ProjectTerminal],
+        order: SidebarSessionOrder,
+        isReversed: Bool,
+        visibility: SidebarSessionVisibility = .attention,
+        date: Date = Date()
+    ) -> ProjectNode {
+        let node = ProjectNode(projectID: project.id)
+        // Archived sessions are gathered separately, below the projects.
+        let activeSessions = orderedActiveSessions(
+            project.sessions,
+            order: order,
+            isReversed: isReversed,
+            visibility: visibility,
+            date: date
+        )
+        node.sessionNodes = activeSessions.map { SessionNode(sessionID: $0.id) }
+        node.terminalNodes = terminals.map {
+            TerminalNode(terminalID: $0.id, displayProjectFolderPath: project.folderPath)
+        }
+
+        // Side chats hang off the session they were forked from, so only what remains
+        // at the project's own level is grouped by branch below.
+        let top = attachSideChats(sessions: activeSessions, nodes: node.sessionNodes)
+        node.childNodes = childNodes(
+            projectID: project.id,
+            sessions: top.sessions,
+            sessionNodes: top.nodes,
+            terminals: terminals,
+            terminalNodes: node.terminalNodes
+        )
+        return node
+    }
+
+    /// Filters and orders one project's visible sessions.
+    ///
+    /// Manual order is already encoded by the store array. Running it through comparison sort
+    /// merely rediscovers every element's index at O(n log n), which made a rare full sidebar
+    /// rebuild pay tens of milliseconds at several thousand sessions. Pinning only requires a
+    /// stable partition, and the overwhelmingly common no-pin case can return the filtered array
+    /// directly (or reverse it once).
+    private static func orderedActiveSessions(
+        _ sessions: [AgentSession],
+        order: SidebarSessionOrder,
+        isReversed: Bool,
+        visibility: SidebarSessionVisibility = .attention,
+        date: Date = Date()
+    ) -> [AgentSession] {
+        let active = sessions.filter {
+            guard !$0.isArchived else { return false }
+            let isSnoozed = $0.isSnoozed(at: date)
+            return visibility == .snoozed ? isSnoozed : !isSnoozed
+        }
+
+        if order == .manual {
+            let pinnedCount = active.reduce(into: 0) { count, session in
+                if session.isPinned { count += 1 }
+            }
+            guard pinnedCount > 0 else {
+                return isReversed ? Array(active.reversed()) : active
+            }
+
+            var pinned: [AgentSession] = []
+            var unpinned: [AgentSession] = []
+            pinned.reserveCapacity(pinnedCount)
+            unpinned.reserveCapacity(active.count - pinnedCount)
+            for session in active {
+                if session.isPinned {
+                    pinned.append(session)
+                } else {
+                    unpinned.append(session)
+                }
+            }
+            if isReversed {
+                pinned.reverse()
+                unpinned.reverse()
+            }
+            pinned.append(contentsOf: unpinned)
+            return pinned
+        }
+
+        // Sort lightweight offsets rather than repeatedly moving the comparatively large
+        // session value. Name order also derives each display title once: that property reads
+        // the agent-title preference, and doing so from every comparison turned one 5,000-row
+        // rebuild into tens of thousands of defaults reads.
+        let displayTitles = order == .name ? active.map(\.displayTitle) : []
+        let orderedOffsets = active.indices.sorted { lhsOffset, rhsOffset in
+            let lhs = active[lhsOffset]
+            let rhs = active[rhsOffset]
+            if lhs.isPinned != rhs.isPinned {
+                return lhs.isPinned
+            }
+
+            switch order {
+            case .manual:
+                // Handled by the linear path above.
+                break
+            case .recentActivity:
+                if lhs.lastActiveAt != rhs.lastActiveAt {
+                    let isNewer = lhs.lastActiveAt > rhs.lastActiveAt
+                    return isReversed ? !isNewer : isNewer
+                }
+            case .name:
+                let comparison = displayTitles[lhsOffset]
+                    .localizedCaseInsensitiveCompare(displayTitles[rhsOffset])
+                if comparison != .orderedSame {
+                    let isEarlier = comparison == .orderedAscending
+                    return isReversed ? !isEarlier : isEarlier
+                }
+            }
+
+            // This tie-break stays forward under a reversed derived order, because it stops
+            // indistinguishable rows from jittering; it is not part of the selected sort.
+            return lhsOffset < rhsOffset
+        }
+        return orderedOffsets.map { active[$0] }
     }
 
     /// The rows that must be open for a session's row to exist at all, outermost first.
@@ -370,50 +491,6 @@ enum SidebarTreeBuilder {
     /// properties are reconciled by `SidebarOutlineNode`; anything else has no children.
     static func children(of node: NSObject) -> [NSObject] {
         (node as? any SidebarOutlineNode)?.sidebarChildren ?? []
-    }
-
-    /// Whether `lhs` sorts ahead of `rhs` under the chosen order and direction.
-    ///
-    /// Pinned sessions are hoisted first under every order — pinning is a stronger statement
-    /// than any sort, and than any direction: reversing reverses the sort, not the list. The
-    /// store offset breaks every tie, so orders built on fields that can collide (two untouched
-    /// sessions share a `lastActiveAt` second, two prompts start with the same line) stay stable
-    /// instead of jittering between rebuilds.
-    ///
-    /// That tie-break stays forward under a reversed order, because it is there to stop jitter
-    /// rather than to sort: flipping it would swap two sessions the user cannot tell apart by
-    /// the field they are sorting on. The one exception is `.manual`, where the offset *is* the
-    /// sort — there the flip has to reach it, and no tie is left for the fallthrough to break.
-    private static func precedes(
-        _ lhs: (offset: Int, element: AgentSession),
-        _ rhs: (offset: Int, element: AgentSession),
-        order: SidebarSessionOrder,
-        isReversed: Bool
-    ) -> Bool {
-        if lhs.element.isPinned != rhs.element.isPinned {
-            return lhs.element.isPinned
-        }
-
-        switch order {
-        case .manual:
-            if lhs.offset != rhs.offset {
-                return isReversed ? lhs.offset > rhs.offset : lhs.offset < rhs.offset
-            }
-        case .recentActivity:
-            if lhs.element.lastActiveAt != rhs.element.lastActiveAt {
-                let isNewer = lhs.element.lastActiveAt > rhs.element.lastActiveAt
-                return isReversed ? !isNewer : isNewer
-            }
-        case .name:
-            let comparison = lhs.element.displayTitle
-                .localizedCaseInsensitiveCompare(rhs.element.displayTitle)
-            if comparison != .orderedSame {
-                let isEarlier = comparison == .orderedAscending
-                return isReversed ? !isEarlier : isEarlier
-            }
-        }
-
-        return lhs.offset < rhs.offset
     }
 
     /// Moves every side chat under the node it was forked from, returning what is left at the

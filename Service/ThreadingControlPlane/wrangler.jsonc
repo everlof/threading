@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "threading-control-plane",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "HOST_RENDEZVOUS",
+        "class_name": "HostRendezvous"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["HostRendezvous"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "threading-control-plane",
+      "database_id": "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "APPLE_CLIENT_IDS": "codes.threading.app,codes.threading.mobile"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.05
+  }
+}

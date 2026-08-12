@@ -74,6 +74,23 @@ struct RemoteClient {
         return try decodeMe(data: data, response: response)
     }
 
+    func fetchUsage(
+        cursor: String? = nil,
+        limit: Int? = nil
+    ) async throws -> RemoteUsageDashboardDTO {
+        try await get(
+            RemoteUsageDashboardDTO.self,
+            from: link.usageURL(cursor: cursor, limit: limit)
+        )
+    }
+
+    func fetchUsageLimit(seriesID: String, days: Int) async throws -> RemoteUsageLimitDTO {
+        try await get(
+            RemoteUsageLimitDTO.self,
+            from: link.usageLimitURL(seriesID: seriesID, days: days)
+        )
+    }
+
     func acceptInvitation(
         displayName: String,
         requestID: String = UUID().uuidString.lowercased()

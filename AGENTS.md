@@ -20,11 +20,12 @@ Five rules that are cheapest to learn before you start:
   never constructs or subclasses an AppKit control or chrome-drawing surface; new UI is built
   from `Sources/Threading/UI/Design/`. `scripts/check_theme_boundaries.sh` fails the build
   otherwise.
-- **Before implementing a surface or callback whose size or frequency comes from files,
-  transcripts, extensions, accounts, sessions, processes, or provider data, apply the scaling
-  gate in [`CLAUDE.md`](CLAUDE.md#scaling-gate).** Collapsed or hidden content is not lazy if its
-  views were already built; the detailed rules and current audit live in
-  [`performance.md`](docs/architecture/performance.md#implementation-time-scaling-gate).
+- **Performance is a product requirement, not a cleanup pass.** Follow the measured workflow in
+  [`CLAUDE.md`](CLAUDE.md#performance-is-a-product-requirement). Before implementing a surface or
+  callback whose size or frequency comes from files, transcripts, extensions, accounts, sessions,
+  processes, or provider data, apply its [scaling gate](CLAUDE.md#scaling-gate). Collapsed or
+  hidden content is not lazy if its views were already built; the detailed rules and current audit
+  live in [`performance.md`](docs/architecture/performance.md#implementation-time-scaling-gate).
 - **A new test file must be registered in `project.pbxproj` by hand**
   (`scripts/add_test_file.py` does it). `Tests/ThreadingTests` is not a synchronized folder, and
   an unregistered file fails silently — it builds nothing and reports "Executed 0 tests".

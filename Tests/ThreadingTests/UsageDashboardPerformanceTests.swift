@@ -288,7 +288,7 @@ final class UsageDashboardPerformanceTests: XCTestCase {
         )
         XCTAssertGreaterThan(dashboard.breakdownVisibleSubviewCountForTesting, 0)
         XCTAssertLessThan(dashboard.breakdownVisibleSubviewCountForTesting, 100)
-        XCTAssertEqual(dashboard.topToolCountForTesting, 3)
+        XCTAssertEqual(dashboard.topToolCountForTesting, 4)
         XCTAssertEqual(dashboard.usageChartCompositionForTesting, .stackedBands)
         XCTAssertEqual(dashboard.limitChartCompositionForTesting, .independent)
         XCTAssertLessThan(elapsed, isStressRun ? 30 : 8, "Dashboard update took \(elapsed)s")
@@ -481,15 +481,25 @@ final class UsageDashboardPerformanceTests: XCTestCase {
         }
         let decodeEnded = DispatchTime.now().uptimeNanoseconds
 
-        let paneStarted = DispatchTime.now().uptimeNanoseconds
-        let pane = ChartPaneViewController(spec: initial, subtitle: initial.subtitle)
+        // A chart pane opens inside the application's existing display-pane host. Creating the
+        // first NSWindow in a fresh XCTest process pays unrelated process-wide AppKit startup
+        // (roughly 90 ms on the current runner), so keep that useful diagnostic separate from
+        // the product operation. Otherwise a fast pane appears to regress whenever AppKit's cold
+        // window initialization changes.
+        let paneWindowStarted = DispatchTime.now().uptimeNanoseconds
         let paneWindow = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 520),
             styleMask: .borderless,
             backing: .buffered,
             defer: false
         )
+        let paneWindowCreated = DispatchTime.now().uptimeNanoseconds
+
+        let paneStarted = DispatchTime.now().uptimeNanoseconds
+        let pane = ChartPaneViewController(spec: initial, subtitle: initial.subtitle)
+        let paneInitialized = DispatchTime.now().uptimeNanoseconds
         paneWindow.contentViewController = pane
+        let paneAttached = DispatchTime.now().uptimeNanoseconds
         pane.view.layoutSubtreeIfNeeded()
         let paneEnded = DispatchTime.now().uptimeNanoseconds
         let card = try XCTUnwrap(
@@ -545,6 +555,10 @@ final class UsageDashboardPerformanceTests: XCTestCase {
                 + "json_kb=\(encoded.count / 1024) decode_iterations=\(decodeIterations) "
                 + "decode_model_ms=\(Self.milliseconds(decodeEnded - decodeStarted)) "
                 + "cold_pane_ms=\(Self.milliseconds(paneEnded - paneStarted)) "
+                + "pane_init_ms=\(Self.milliseconds(paneInitialized - paneStarted)) "
+                + "host_window_ms=\(Self.milliseconds(paneWindowCreated - paneWindowStarted)) "
+                + "pane_attach_ms=\(Self.milliseconds(paneAttached - paneInitialized)) "
+                + "pane_layout_ms=\(Self.milliseconds(paneEnded - paneAttached)) "
                 + "updates=\(updateCount) update_ms=\(Self.milliseconds(updateEnded - updateStarted)) "
                 + "frames=\(frameCount) draw_ms=\(Self.milliseconds(drawEnded - drawStarted)) "
                 + "descendants=\(Self.descendants(of: pane.view).count) "

@@ -113,6 +113,19 @@ final class IconBackplateTests: XCTestCase {
         XCTAssertTrue(result === mark)
     }
 
+    /// A shared immutable brand mark can carry one measured tone into every row instead of
+    /// rendering its pixels again for each background-style pass.
+    func testAProvidedMarkToneIsUsedWithoutRemeasuringTheImage() {
+        let mark = swatch(.black)
+        let result = IconBackplate.plated(
+            mark,
+            knownMarkTone: 0.95,
+            against: ground(0.95)
+        )
+
+        XCTAssertFalse(result === mark)
+    }
+
     /// The plate appears *around* the mark: the ink keeps exactly the size it draws at with
     /// no plate, and only the plate spans the slot. The first version inset the ink by a
     /// ratio of the plate instead, so a mark visibly shrank the moment its row was selected.

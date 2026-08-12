@@ -11,6 +11,7 @@ import ThreadingRemoteKit
 private struct StartupProfileMeasurement: Sendable {
     let processMainEntryNanoseconds: UInt64
     let delegateEntryNanoseconds: UInt64
+    var ledgerOpenNanoseconds: UInt64 = 0
     var stateReadyNanoseconds: UInt64 = 0
     var preAppearanceReadyNanoseconds: UInt64 = 0
     var appearanceReadyNanoseconds: UInt64 = 0
@@ -22,7 +23,8 @@ private struct StartupProfileMeasurement: Sendable {
         firstReadyTurnNanoseconds: UInt64,
         mode: String,
         projectCount: Int,
-        sessionCount: Int
+        sessionCount: Int,
+        window: MainWindowStartupPerformance
     ) {
 #if DEBUG
         let configuration = "debug"
@@ -33,6 +35,7 @@ private struct StartupProfileMeasurement: Sendable {
             + "configuration=\(configuration) mode=\(mode) "
             + "projects=\(projectCount) sessions=\(sessionCount) "
             + "main_to_delegate_ms=\(milliseconds(processMainEntryNanoseconds, delegateEntryNanoseconds)) "
+            + "ledger_open_ms=\(milliseconds(ledgerOpenNanoseconds)) "
             + "state_ms=\(milliseconds(delegateEntryNanoseconds, stateReadyNanoseconds)) "
             + "preappearance_ms=\(milliseconds(stateReadyNanoseconds, preAppearanceReadyNanoseconds)) "
             + "appearance_ms=\(milliseconds(preAppearanceReadyNanoseconds, appearanceReadyNanoseconds)) "
@@ -41,13 +44,34 @@ private struct StartupProfileMeasurement: Sendable {
             + "window_order_ms=\(milliseconds(windowConstructedNanoseconds, windowOrderedNanoseconds)) "
             + "first_turn_ms=\(milliseconds(windowOrderedNanoseconds, firstReadyTurnNanoseconds)) "
             + "delegate_to_ready_ms=\(milliseconds(delegateEntryNanoseconds, firstReadyTurnNanoseconds)) "
-            + "total_ms=\(milliseconds(processMainEntryNanoseconds, firstReadyTurnNanoseconds))\n"
+            + "total_ms=\(milliseconds(processMainEntryNanoseconds, firstReadyTurnNanoseconds)) "
+            + "mw_create_ms=\(milliseconds(window.createWindowNanoseconds)) "
+            + "mw_base_ms=\(milliseconds(window.baseInitializationNanoseconds)) "
+            + "mw_split_ms=\(milliseconds(window.splitTotalNanoseconds)) "
+            + "mw_sidebar_ms=\(milliseconds(window.splitSidebarNanoseconds)) "
+            + "mw_content_ms=\(milliseconds(window.splitContentNanoseconds)) "
+            + "mw_display_tools_ms=\(milliseconds(window.splitDisplayAndToolsNanoseconds)) "
+            + "mw_content_install_ms=\(milliseconds(window.splitContentInstallNanoseconds)) "
+            + "mw_toolbar_ms=\(milliseconds(window.splitToolbarNanoseconds)) "
+            + "mw_toolbar_construct_ms=\(milliseconds(window.splitToolbarConstructionNanoseconds)) "
+            + "mw_toolbar_attach_ms=\(milliseconds(window.splitToolbarAttachmentNanoseconds)) "
+            + "mw_toolbar_items_ms=\(milliseconds(window.splitToolbarItemNanoseconds)) "
+            + "mw_toolbar_style_ms=\(milliseconds(window.splitToolbarStyleNanoseconds)) "
+            + "mw_header_ms=\(milliseconds(window.splitHeaderNanoseconds)) "
+            + "mw_finalize_ms=\(milliseconds(window.splitFinalizeNanoseconds)) "
+            + "mw_chrome_ms=\(milliseconds(window.chromeCoordinatorNanoseconds)) "
+            + "mw_frame_ms=\(milliseconds(window.initialFrameNanoseconds)) "
+            + "mw_title_ms=\(milliseconds(window.initialTitleNanoseconds))\n"
         try? FileHandle.standardOutput.write(contentsOf: Data(line.utf8))
     }
 
     private func milliseconds(_ start: UInt64, _ end: UInt64) -> String {
         let elapsed = end >= start ? end - start : 0
         return String(format: "%.3f", Double(elapsed) / 1_000_000)
+    }
+
+    private func milliseconds(_ elapsed: UInt64) -> String {
+        String(format: "%.3f", Double(elapsed) / 1_000_000)
     }
 }
 
@@ -233,9 +257,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // **Opening and beginning are two steps now**, because the `begin` record carries the
         // mode and the mode is decided from what the opening returns. Everything between them
         // reads and decides; nothing between them writes.
+        let ledgerOpenStart = startupProfile.map { _ in DispatchTime.now().uptimeNanoseconds }
         let opening = LaunchLedger.shared.openLaunch(
             previousOutcome: EventLog.shared.previousLaunchOutcome
         )
+        if let ledgerOpenStart {
+            startupProfile?.ledgerOpenNanoseconds =
+                DispatchTime.now().uptimeNanoseconds - ledgerOpenStart
+        }
         let decision = CrashLoopPolicy.decide(opening.read)
         launchDecision = decision
         launchLedgerRead = opening.read
@@ -410,12 +439,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             let projects = ProjectStore.shared.projects
             let projectCount = projects.count
             let sessionCount = projects.reduce(0) { $0 + $1.sessions.count }
+            let windowPerformance = mainWindowController.startupPerformance
             DispatchQueue.main.async {
                 startupProfile.writeResult(
                     firstReadyTurnNanoseconds: DispatchTime.now().uptimeNanoseconds,
                     mode: plan.isRecovery ? "recovery" : "normal",
                     projectCount: projectCount,
-                    sessionCount: sessionCount
+                    sessionCount: sessionCount,
+                    window: windowPerformance
                 )
                 NSApp.terminate(nil)
             }
@@ -2513,6 +2544,17 @@ private enum UIScenarioBootstrap {
         guard executable.deletingLastPathComponent() == helpers,
               fileManager.isExecutableFile(atPath: executable.path) else {
             return .refused("the signed UI scenario helper is not embedded")
+        }
+
+        switch UIScenarioEvidenceCapture.installIfRequested(
+            environment: environment,
+            scenarioRoot: root,
+            fileManager: fileManager
+        ) {
+        case .installed:
+            break
+        case .refused(let reason):
+            return .refused(reason)
         }
 
         guard let storedProject = ProjectStore.shared.addProject(folderURL: project) else {

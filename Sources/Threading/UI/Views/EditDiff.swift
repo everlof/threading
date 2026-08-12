@@ -10,6 +10,28 @@ import Foundation
 /// diff is known before the tool even runs.
 enum EditDiff {
 
+    /// The file-level form retained on a timeline tool call. The ordinary row still draws the
+    /// flattened diff, while replay uses these exact sections to rebuild the card the live Git
+    /// baseline produced. No checkout read is involved in replay.
+    struct FileChange: Equatable {
+        let path: String
+        let lines: [DiffLine]
+    }
+
+    static func fileChanges(forTool name: String, input: [String: Any]) -> [FileChange] {
+        if let patch = input["patch"] as? String {
+            return CodexPatch.fileChanges(in: patch).map {
+                FileChange(path: $0.path, lines: $0.lines)
+            }
+        }
+
+        guard let path = (input["file_path"] ?? input["notebook_path"]) as? String,
+              !path.isEmpty,
+              let lines = lines(forTool: name, input: input),
+              !lines.isEmpty else { return [] }
+        return [FileChange(path: path, lines: lines)]
+    }
+
     /// The diff for a tool call, or nil when the tool does not edit a file.
     static func lines(forTool name: String, input: [String: Any]) -> [DiffLine]? {
         // Codex states its change as a patch rather than as two strings, and a patch already

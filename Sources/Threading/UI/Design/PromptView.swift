@@ -810,17 +810,7 @@ final class PromptView: NSView, ThemedComponent {
         completionQuery = query
         workspaceFileQuery = nil
         completionActions = suggestions.map(CompletionAction.capability)
-        completionItems = suggestions.map { capability in
-            let argument = capability.argumentHint.isEmpty ? "" : "  \(capability.argumentHint)"
-            return PromptCompletionItem(
-                id: capability.id,
-                title: capability.invocationText + argument,
-                accessibilityTitle: capability.displayName,
-                detail: capability.unavailableReason ?? capability.description,
-                kind: capability.kind == .skill ? L10n.string("Skill") : L10n.string("Command"),
-                isEnabled: capability.isEnabled
-            )
-        }
+        completionItems = suggestions.map(PromptCompletionItem.init(capability:))
         if let previousSelectionID,
            let matchingIndex = completionItems.firstIndex(where: {
                $0.id == previousSelectionID && $0.isEnabled

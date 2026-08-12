@@ -24,6 +24,7 @@
 #   scripts/profile_threading.sh attachment-format-stress
 #   scripts/profile_threading.sh window-resize-stress
 #   scripts/profile_threading.sh display-pane-stress
+#   scripts/profile_threading.sh launch-ledger-stress
 #   scripts/profile_threading.sh startup
 #   scripts/profile_threading.sh sample [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh trace "Time Profiler" [seconds] [process-name-or-pid]
@@ -692,6 +693,29 @@ build_macos_stress_test_bundle() {
   }
 }
 
+run_launch_ledger_stress() {
+  local output_directory="$1"
+  local log="${output_directory}/launch-ledger-stress.log"
+  echo "Running the deterministic 512-record launch-ledger parser sweep…"
+
+  (
+    cd "${repository_directory}"
+    build_macos_stress_test_bundle "${output_directory}"
+
+    THREADING_LAUNCH_LEDGER_STRESS=1 \
+    DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
+      xcrun xctest \
+        -XCTest ThreadingTests.LaunchLedgerTests/testStressParserAtRetentionCeilingWhenEnabled \
+        "${THREADING_STRESS_TEST_BUNDLE}"
+  ) 2>&1 | tee "${log}"
+
+  rg -q '^THREADING_PERF launch-ledger-parser records=512 ' "${log}" || {
+    echo "The launch-ledger fixture produced no complete metric." >&2
+    return 1
+  }
+}
+
 run_component_gallery_stress() {
   local output_directory="$1"
   echo "Running deterministic Component Gallery construction and scroll sweep…"
@@ -1209,22 +1233,28 @@ run_sidebar_stress() {
     }
 
     local workloads=(
-      "5:100"
-      "10:100"
-      "20:100"
-      "20:250"
+      "manual:5:100"
+      "manual:10:100"
+      "manual:20:100"
+      "manual:20:250"
+      "recentActivity:20:250"
+      "name:20:250"
     )
     if [[ -n "${THREADING_SIDEBAR_STRESS_PROJECTS:-}" \
-       || -n "${THREADING_SIDEBAR_STRESS_SESSIONS:-}" ]]; then
+       || -n "${THREADING_SIDEBAR_STRESS_SESSIONS:-}" \
+       || -n "${THREADING_SIDEBAR_STRESS_ORDER:-}" ]]; then
       workloads=(
-        "${THREADING_SIDEBAR_STRESS_PROJECTS:-10}:${THREADING_SIDEBAR_STRESS_SESSIONS:-100}"
+        "${THREADING_SIDEBAR_STRESS_ORDER:-manual}:${THREADING_SIDEBAR_STRESS_PROJECTS:-10}:${THREADING_SIDEBAR_STRESS_SESSIONS:-100}"
       )
     fi
-    local workload projects sessions
+    local workload order remainder projects sessions
     for workload in "${workloads[@]}"; do
-      projects="${workload%%:*}"
-      sessions="${workload##*:}"
+      order="${workload%%:*}"
+      remainder="${workload#*:}"
+      projects="${remainder%%:*}"
+      sessions="${remainder##*:}"
       THREADING_SIDEBAR_STRESS=1 \
+      THREADING_SIDEBAR_STRESS_ORDER="${order}" \
       THREADING_SIDEBAR_STRESS_PROJECTS="${projects}" \
       THREADING_SIDEBAR_STRESS_SESSIONS="${sessions}" \
       DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
@@ -1585,6 +1615,63 @@ clone_startup_profile_home() {
   /bin/cp -cR "${template_home}" "${run_home}"
 }
 
+# `xctrace record --template "App Launch"` can return with the process it launched still
+# suspended. A suspended target ignores TERM until it is continued, so merely waiting for
+# xctrace—or restarting the Dock—leaves one live app per capture. Match the complete executable
+# path: startup captures use a throwaway app identity precisely so cleanup must never reach the
+# installed Threading process or another capture's isolated copy.
+startup_profile_process_ids() {
+  local executable="$1"
+  /bin/ps -axww -o pid=,command= | /usr/bin/awk -v executable="${executable}" '
+    {
+      pid = $1
+      sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "")
+      if ($0 == executable || index($0, executable " ") == 1) {
+        print pid
+      }
+    }
+  '
+}
+
+signal_startup_profile_processes() {
+  local executable="$1"
+  local signal="$2"
+  local pid
+  while IFS= read -r pid; do
+    [[ "${pid}" =~ ^[0-9]+$ ]] || continue
+    kill "-${signal}" "${pid}" 2>/dev/null || true
+  done < <(startup_profile_process_ids "${executable}")
+}
+
+terminate_startup_profile_processes() {
+  local executable="$1"
+  local attempt
+
+  # Queue termination while the target is still stopped, then let it run just far enough for
+  # the signal to take effect. This order avoids briefly resuming a profiled copy into ordinary
+  # application work.
+  signal_startup_profile_processes "${executable}" TERM
+  signal_startup_profile_processes "${executable}" CONT
+
+  for ((attempt = 0; attempt < 20; attempt += 1)); do
+    if [[ -z "$(startup_profile_process_ids "${executable}")" ]]; then
+      return
+    fi
+    sleep 0.05
+  done
+
+  # TERM is normally immediate. Keep cleanup bounded for a wedged AppKit shutdown, and re-match
+  # the executable path before KILL so a recycled pid can never widen the target.
+  signal_startup_profile_processes "${executable}" KILL
+}
+
+cleanup_startup_profile() {
+  local executable="$1"
+  local snapshot_root="$2"
+  terminate_startup_profile_processes "${executable}"
+  rm -rf -- "${snapshot_root}"
+}
+
 run_startup_profile() (
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
@@ -1641,12 +1728,15 @@ run_startup_profile() (
   # while Threading is open, this prevents run 2 from inheriting run 1's launch-ledger writes.
   local snapshot_root
   snapshot_root="$(mktemp -d "${TMPDIR:-/tmp}/threading-startup-state.XXXXXX")"
-  trap 'rm -rf -- "${snapshot_root}"' EXIT HUP INT TERM
+  local executable="${profile_app}/Contents/MacOS/Threading"
+  trap 'cleanup_startup_profile "${executable}" "${snapshot_root}"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   local template_home="${snapshot_root}/template"
   echo "Snapshotting startup state without disturbing the running app…"
   prepare_startup_profile_home "${profile_identifier}" "${template_home}"
 
-  local executable="${profile_app}/Contents/MacOS/Threading"
   echo "Running ${runs} direct cold-launch measurements…"
   local run
   for ((run = 1; run <= runs; run += 1)); do
@@ -1664,6 +1754,14 @@ run_startup_profile() (
     echo "Expected ${runs} startup metrics, found ${metric_count:-0}." >&2
     return 1
   }
+  local settled_metric_count
+  settled_metric_count="$(
+    rg -c '^THREADING_PERF app-startup .* total_to_frame_ms=[0-9]' "${direct_log}" || true
+  )"
+  [[ "${settled_metric_count}" == "${runs}" ]] || {
+    echo "Expected ${runs} settled-frame startup metrics, found ${settled_metric_count:-0}." >&2
+    return 1
+  }
 
   echo "Recording one isolated App Launch trace…"
   local trace_home="${snapshot_root}/trace"
@@ -1678,8 +1776,8 @@ run_startup_profile() (
     --no-prompt \
     --launch -- "${profile_app}"
 
-  rg '^THREADING_PERF app-startup ' "${trace_stdout}" || {
-    echo "The App Launch trace produced no startup metric." >&2
+  rg '^THREADING_PERF app-startup .* total_to_frame_ms=[0-9]' "${trace_stdout}" || {
+    echo "The App Launch trace produced no settled-frame startup metric." >&2
     return 1
   }
 )
@@ -1796,6 +1894,11 @@ case "${command}" in
     run_display_pane_stress "${output_directory}"
     ;;
 
+  launch-ledger-stress)
+    output_directory="$(new_run_directory launch-ledger-stress)"
+    run_launch_ledger_stress "${output_directory}"
+    ;;
+
   startup)
     output_directory="$(new_run_directory startup)"
     run_startup_profile "${output_directory}"
@@ -1905,6 +2008,7 @@ case "${command}" in
     run_attachment_format_stress "${output_directory}"
     run_window_resize_stress "${output_directory}"
     run_display_pane_stress "${output_directory}"
+    run_launch_ledger_stress "${output_directory}"
     capture_sample "${seconds}" "${target}" "${output_directory}"
 
     full_templates=(

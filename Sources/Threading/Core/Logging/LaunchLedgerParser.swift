@@ -54,19 +54,24 @@ enum LaunchLedgerParser {
                 continue
             }
 
-            // The version first and on its own, because a record this build cannot read must be
-            // skippable without its unknown fields being decoded at all.
-            guard let probe = try? decoder.decode(LaunchLedgerVersionProbe.self, from: bytes) else {
+            // Decode the version and, only for a format this build owns, the record through the
+            // same Decoder. The former two-pass path parsed every healthy JSON line twice just
+            // to learn that its version was current. A later format still stops after `version`,
+            // so fields this build does not understand are never decoded.
+            guard let decoded = try? decoder.decode(
+                LaunchLedgerVersionedRecord.self,
+                from: bytes
+            ) else {
                 if isFinal { history.droppedTrailingPartial = true } else { foundDamage = true }
                 continue
             }
 
-            guard probe.version <= LaunchLedgerDefaults.formatVersion else {
-                newestFormatSeen = max(newestFormatSeen, probe.version)
+            guard decoded.version <= LaunchLedgerDefaults.formatVersion else {
+                newestFormatSeen = max(newestFormatSeen, decoded.version)
                 continue
             }
 
-            guard let record = try? decoder.decode(LaunchLedgerRecord.self, from: bytes) else {
+            guard let record = decoded.record else {
                 if isFinal { history.droppedTrailingPartial = true } else { foundDamage = true }
                 continue
             }
@@ -138,9 +143,23 @@ enum LaunchLedgerParser {
 
 // MARK: - Version Probe
 
-/// Just enough of a record to decide whether the rest of it may be read.
-private struct LaunchLedgerVersionProbe: Decodable {
+/// Reads the format discriminator first, then decodes a current record from that same decoder.
+/// A future record deliberately leaves `record` nil without asking for any of its other keys.
+private struct LaunchLedgerVersionedRecord: Decodable {
     let version: Int
+    let record: LaunchLedgerRecord?
+
+    private enum CodingKeys: String, CodingKey {
+        case version
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        record = version <= LaunchLedgerDefaults.formatVersion
+            ? try LaunchLedgerRecord(from: decoder)
+            : nil
+    }
 }
 
 // MARK: - Launch Ledger Parser Defaults

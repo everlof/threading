@@ -27,6 +27,14 @@ final class UsageDashboardRenderTests: XCTestCase {
             Fixture(name: "neo-brutalism", theme: AppThemeStyles.neoBrutalism, appearance: .aqua),
             Fixture(name: "classic-player", theme: AppThemeStyles.classicPlayer, appearance: .darkAqua)
         ]
+        let report = reportFixture()
+        let recordsByModel = Dictionary(grouping: report.cells, by: \.model)
+            .mapValues { cells in cells.reduce(0) { $0 + $1.records } }
+        XCTAssertEqual(
+            Set(recordsByModel.values).count,
+            recordsByModel.count,
+            "the visual fixture gives every model the same request count"
+        )
         var files: [URL] = []
 
         for fixture in fixtures {
@@ -35,7 +43,7 @@ final class UsageDashboardRenderTests: XCTestCase {
                 let appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
                 let dashboard = UsageDashboardView()
                 dashboard.update(
-                    report: reportFixture(),
+                    report: report,
                     limits: limitFixtures(),
                     isBuilding: false,
                     animated: false
@@ -54,7 +62,7 @@ final class UsageDashboardRenderTests: XCTestCase {
                     Design.Chart.maximumRenderedPoints + 2
                 )
                 XCTAssertEqual(dashboard.visibleTabForTesting, tab)
-                XCTAssertEqual(dashboard.topToolCountForTesting, 3)
+                XCTAssertEqual(dashboard.topToolCountForTesting, 4)
                 XCTAssertEqual(dashboard.usageChartCompositionForTesting, .stackedBands)
                 XCTAssertEqual(dashboard.limitChartCompositionForTesting, .independent)
                 if tab == .overview {
@@ -159,7 +167,7 @@ final class UsageDashboardRenderTests: XCTestCase {
                     unpricedTokens: origin.runtimeID == AgentKind.grok.rawValue
                         ? Int64(cost * 20_000) : 0,
                     cacheSavingsUSD: cost * 2.4,
-                    records: 12 + dayIndex % 28
+                    records: 4 + (dayIndex * (routeIndex + 2) + routeIndex * 7) % 29
                 ))
             }
         }

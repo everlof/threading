@@ -134,7 +134,10 @@ final class RemoteSessionMirrorRegistry {
                 ? RemoteThemeBridge.catalog()
                 : nil,
             archivedSessions: archived,
-            newSessionCatalog: ownsSessionLifecycle ? newSessionCatalog() : nil
+            newSessionCatalog: ownsSessionLifecycle ? newSessionCatalog() : nil,
+            features: authorization.canReadHostUsage
+                ? [RemoteRESTFeature.usageDashboard.rawValue]
+                : nil
         )
     }
 

@@ -161,6 +161,7 @@ final class ChipView: ThemedControl {
     private let contentStack = NSStackView()
     private var contentLeadingConstraint: NSLayoutConstraint?
     private var contentTrailingConstraint: NSLayoutConstraint?
+    private var classicTitleWidthConstraint: NSLayoutConstraint?
     private var configuredIcon: NSImage?
     private var appliedChoiceStyle: AppTheme.Material.ChoiceStyle?
     private var appliedChoiceHeight: CGFloat?
@@ -193,6 +194,66 @@ final class ChipView: ThemedControl {
     /// What this chip is actually drawn at.
     private var controlHeight: CGFloat { rowHeight ?? heightStyle.value }
 
+    /// `NSTextField` lays out its alignment rectangle inside a slightly wider cell frame. The
+    /// classic chooser draws its arrow outside Auto Layout, so reserving only the nominal text
+    /// inset lets that private frame overhang enter the arrow well by a few points. Keep the
+    /// overhang in the chooser's geometry contract instead of relying on a particular AppKit
+    /// font or cell implementation to happen to fit. `NSStackView` places the integral cell
+    /// frame one point beyond that reported inset, so the frame edge belongs here too.
+    private var classicTitleTrailingOverhang: CGFloat {
+        max(0, titleLabel.alignmentRectInsets.right) + 1
+    }
+
+    /// The integral frame width AppKit needs to draw the complete title. Text cells report
+    /// fractional natural widths (`27.49` for “Auto” in OpenStep, for example), while stack
+    /// layout may round the arranged frame down. The control's outer intrinsic width cannot
+    /// repair that inner rounding after the fact, so classic choosers state this minimum on
+    /// the label itself. Its high (rather than required) priority still permits genuine row
+    /// compression in a narrow window.
+    private var naturalTitleCellWidth: CGFloat {
+        let font = titleLabel.font ?? Design.Typography.controlRegular()
+        let stringWidth = titleLabel.stringValue.size(withAttributes: [.font: font]).width
+        let probeBounds = NSRect(
+            x: 0,
+            y: 0,
+            width: 10_000,
+            height: max(controlHeight, titleLabel.intrinsicContentSize.height)
+        )
+        let cellDrawingInset: CGFloat
+        let unboundedCellWidth: CGFloat
+        if let cell = titleLabel.cell {
+            cellDrawingInset = max(
+                0,
+                probeBounds.width - cell.titleRect(forBounds: probeBounds).width
+            )
+            unboundedCellWidth = cell.cellSize(forBounds: probeBounds).width
+        } else {
+            cellDrawingInset = 0
+            unboundedCellWidth = 0
+        }
+        let intrinsicWidth = titleLabel.intrinsicContentSize.width
+        let cellWidth = titleLabel.cell?.cellSize.width ?? 0
+        return ceil(max(
+            stringWidth + cellDrawingInset,
+            intrinsicWidth > 0 && intrinsicWidth < 10_000 ? intrinsicWidth : 0,
+            cellWidth > 0 && cellWidth < 10_000 ? cellWidth : 0,
+            unboundedCellWidth > 0 && unboundedCellWidth < 10_000 ? unboundedCellWidth : 0
+        ))
+    }
+
+    private func updateClassicTitleWidthConstraint(for style: AppTheme.Material.ChoiceStyle) {
+        classicTitleWidthConstraint?.isActive = false
+        classicTitleWidthConstraint = nil
+        guard style.isClassic else { return }
+
+        let constraint = titleLabel.widthAnchor.constraint(
+            greaterThanOrEqualToConstant: naturalTitleCellWidth
+        )
+        constraint.priority = .defaultHigh
+        constraint.isActive = true
+        classicTitleWidthConstraint = constraint
+    }
+
     /// Restates the height wherever it is held: the constraint, the intrinsic size, and the
     /// pill radius the background is drawn from — which is a function of the height, so a chip
     /// that resized without this kept the silhouette of the size it used to be.
@@ -220,7 +281,65 @@ final class ChipView: ThemedControl {
     var menuPresentationOverride: ((ThemedMenuPresentation) -> ThemedMenuItem?)?
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: controlHeight)
+        // The row may compress a chooser, but it first needs an honest natural width to
+        // compress *from*. Returning no width made `NSStackView` treat the classic chooser as
+        // if its value cost no space: the row's spring absorbed hundreds of spare points while
+        // the title stopped at the independently drawn arrow well. Every period popup then
+        // clipped its last glyph beside an otherwise empty footer.
+        //
+        // Do not ask the pinned stack for `fittingSize` here. At initialization the chip has no
+        // width, so the stack has already compressed its label to satisfy the chip's leading and
+        // trailing constraints; using that compressed answer as the chip's intrinsic width is a
+        // circular measurement. Sum the visible children's own natural widths instead.
+        let visibleContent = contentStack.arrangedSubviews.filter { !$0.isHidden }
+        let contentWidth = visibleContent.enumerated().reduce(CGFloat.zero) { result, entry in
+            let (index, view) = entry
+            // The source string is the floor, while the text field's intrinsic width also
+            // carries the cell's private drawing inset. A classic field needs that last couple
+            // of points even when the glyphs themselves fit; omitting them makes AppKit choose
+            // an ellipsis before the independently drawn arrow well.
+            let alignmentWidth: CGFloat
+            if view === iconView {
+                alignmentWidth = Design.Symbol.control
+            } else if view === chevronView {
+                alignmentWidth = Design.Symbol.chevron
+            } else if let field = view as? NSTextField {
+                if field === titleLabel {
+                    alignmentWidth = naturalTitleCellWidth
+                } else {
+                    let candidate = field.intrinsicContentSize.width
+                    alignmentWidth = candidate > 0 && candidate < 10_000 ? candidate : 0
+                }
+            } else {
+                let candidate = view.intrinsicContentSize.width
+                // AppKit uses very large fitting values as an unconstrained sentinel. Never
+                // turn one into window geometry if another arranged child is added later.
+                alignmentWidth = candidate > 0 && candidate < 10_000 ? candidate : 0
+            }
+            // Auto Layout places a text field's alignment rectangle, while AppKit draws the
+            // cell in its wider frame. Include both frame overhangs in the natural size; the
+            // trailing one is otherwise free to reach into a classic arrow well.
+            let width = alignmentWidth
+                + max(0, view.alignmentRectInsets.left)
+                + max(0, view.alignmentRectInsets.right)
+            guard index > 0 else { return result + width }
+            let previous = visibleContent[index - 1]
+            let customSpacing = contentStack.customSpacing(after: previous)
+            // `customSpacing(after:)` returns a very large sentinel when the arranged view has
+            // no override. It is an instruction to use `spacing`, not a distance to add.
+            let spacing = customSpacing == NSStackView.useDefaultSpacing
+                ? contentStack.spacing
+                : customSpacing
+            return result + spacing + width
+        }
+        let outerWidth: CGFloat = if choiceStyle == .chip {
+            Design.Spacing.medium * 2
+        } else {
+            ClassicChoiceDrawing.textInset * 2
+                + ClassicChoiceDrawing.arrowWidth
+                + classicTitleTrailingOverhang
+        }
+        return NSSize(width: ceil(contentWidth + outerWidth), height: controlHeight)
     }
 
     /// A neighbouring reading can align to the title's ink rather than the pill's geometric
@@ -364,6 +483,8 @@ final class ChipView: ThemedControl {
         iconView.isHidden = icon == nil || choiceStyle.isClassic
         titleLabel.stringValue = title
         toolTip = title
+        updateClassicTitleWidthConstraint(for: choiceStyle)
+        invalidateIntrinsicContentSize()
     }
 
     /// Selects an item by its represented value, so a rebuilt menu keeps its choice.
@@ -559,9 +680,12 @@ final class ChipView: ThemedControl {
             chevronView.isHidden = true
             contentLeadingConstraint?.constant = ClassicChoiceDrawing.textInset
             contentTrailingConstraint?.constant = -(
-                ClassicChoiceDrawing.arrowWidth + ClassicChoiceDrawing.textInset
+                ClassicChoiceDrawing.arrowWidth
+                    + ClassicChoiceDrawing.textInset
+                    + classicTitleTrailingOverhang
             )
         }
+        updateClassicTitleWidthConstraint(for: style)
         invalidateIntrinsicContentSize()
     }
 

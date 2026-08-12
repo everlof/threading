@@ -105,6 +105,7 @@ final class ComponentGalleryViewController: NSViewController {
         "HoverPopoverScheduler",
         "ImageCompareCanvas",
         "ImageCompareView",
+        "LimitEscapeStripView",
         "MediaInspectorCanvas",
         "MediaInspectorDocumentView",
         "MediaInspectorView",
@@ -135,6 +136,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedClipView",
         "ThemedControl",
         "ThemedDisclosureRow",
+        "ThemedDocumentTableView",
         "ThemedFileIconView",
         "ThemedFloatingGlyphView",
         "ThemedGroupedTableView",
@@ -263,6 +265,7 @@ final class ComponentGalleryViewController: NSViewController {
     private var clickCount = 0
     private var morphDemoCursor = 0
     private var didSetInitialScrollPosition = false
+    private var didPrepareDataFixtures = false
     private(set) var appearanceMode: AppearanceMode
 
     init() {
@@ -329,10 +332,35 @@ final class ComponentGalleryViewController: NSViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        guard !didSetInitialScrollPosition else { return }
-        didSetInitialScrollPosition = true
-        galleryScrollView.contentView.scroll(to: .zero)
-        galleryScrollView.reflectScrolledClipView(galleryScrollView.contentView)
+        if !didPrepareDataFixtures {
+            didPrepareDataFixtures = true
+            prepareDataFixtures(in: view)
+        }
+        if !didSetInitialScrollPosition {
+            didSetInitialScrollPosition = true
+            galleryScrollView.contentView.scroll(to: .zero)
+            galleryScrollView.reflectScrolledClipView(galleryScrollView.contentView)
+        }
+    }
+
+    /// AppKit does not create table cells until a table has both entered a laid-out hierarchy
+    /// and been reloaded. Reloading while the gallery is assembled produces a header and blank
+    /// body in off-screen evidence, even though the model already has rows. Prepare every bounded
+    /// fixture once at the first real layout so the catalogue proves cell reuse and hierarchy,
+    /// rather than merely proving that an empty table can draw its frame.
+    private func prepareDataFixtures(in root: NSView) {
+        func tables(below view: NSView) -> [NSTableView] {
+            view.subviews.flatMap { child in
+                ((child as? NSTableView).map { [$0] } ?? []) + tables(below: child)
+            }
+        }
+        for table in tables(below: root) {
+            table.reloadData()
+            if let outline = table as? NSOutlineView {
+                outline.expandItem(nil, expandChildren: true)
+            }
+            table.layoutSubtreeIfNeeded()
+        }
     }
 
     // MARK: Header
@@ -1311,6 +1339,44 @@ final class ComponentGalleryViewController: NSViewController {
             scheduledStrip.setRows(scheduledRows)
         }
 
+        // The three states of one strip, stacked: the offer as it arrives, the same offer while
+        // the migration runs, and the one that was pressed and could not be taken. The last is
+        // the state worth looking at — the button keeps its numbers and dims rather than being
+        // replaced by a different login nobody chose.
+        let limitEscapeOffers: [LimitEscapeStripView.Offer] = [
+            LimitEscapeStripView.Offer(
+                accountName: "Daniel Block",
+                reading: "5h 12% · 7d 40%",
+                resetHint: "9:40pm (Europe/Rome)"
+            ),
+            LimitEscapeStripView.Offer(
+                accountName: "Daniel Block",
+                reading: "5h 12% · 7d 40%",
+                resetHint: "9:40pm (Europe/Rome)",
+                isBusy: true
+            ),
+            LimitEscapeStripView.Offer(
+                accountName: "Daniel Block",
+                reading: "5h 94% · 7d 40%",
+                resetHint: "9:40pm (Europe/Rome)",
+                problem: "Daniel Block is close to its own limit now."
+            )
+        ]
+        let limitEscapeStrips = NSStackView(views: limitEscapeOffers.map { offer in
+            let strip = LimitEscapeStripView()
+            strip.setOffer(offer)
+            strip.onDismiss = { [weak self] in
+                self?.showReceipt(L10n.string("Escape suggestion dismissed."))
+            }
+            strip.onContinue = { [weak self] in
+                self?.showReceipt(L10n.string("Continuing on the other login."))
+            }
+            return strip
+        })
+        limitEscapeStrips.orientation = .vertical
+        limitEscapeStrips.alignment = .leading
+        limitEscapeStrips.spacing = Design.Spacing.small
+
         let outboxRail = ConversationOutboxRailView()
         var outboxRows: [ConversationOutboxRailView.Row] = [
             ConversationOutboxRailView.Row(
@@ -1432,6 +1498,13 @@ final class ComponentGalleryViewController: NSViewController {
                         + "click one to open it, ✕ to unschedule it, and Send now where the "
                         + "clock has stopped being the thing to say.",
                     scheduledStrip
+                ),
+                story(
+                    "LimitEscapeStripView",
+                    "The way past a spent usage limit. Three states: the offer, the same offer "
+                        + "being carried out, and one that could not be taken. The button names "
+                        + "the whole action, which is why pressing it asks nothing further.",
+                    limitEscapeStrips
                 )
             ]
         )
@@ -1491,6 +1564,17 @@ final class ComponentGalleryViewController: NSViewController {
         let vertical = SeparatorView(.vertical)
         vertical.translatesAutoresizingMaskIntoConstraints = false
         vertical.heightAnchor.constraint(equalToConstant: 34).isActive = true
+
+        submissionStatus.show(L10n.string("Filing the issue on GitHub…"), tone: .working)
+        let submitted = SubmissionStatusView()
+        submitted.show(L10n.format("Filed as issue #%lld.", 42), tone: .done)
+        let refused = SubmissionStatusView()
+        refused.show(L10n.format("GitHub refused the report (%lld).", 403), tone: .failed)
+        let submissionSamples = NSStackView(views: [submissionStatus, submitted, refused])
+        submissionSamples.orientation = .vertical
+        submissionSamples.alignment = .leading
+        submissionSamples.spacing = Design.Spacing.small
+        submissionSamples.setAccessibilityIdentifier("gallery.preview.submission-statuses")
 
         return section(
             "Feedback & separation",
@@ -1565,7 +1649,7 @@ final class ComponentGalleryViewController: NSViewController {
                     "How a submitted thing ended. Press each: the wording and the glyph carry "
                         + "the outcome, so it survives Differentiate Without Colour — and every "
                         + "change announces itself to VoiceOver.",
-                    row([submissionStatus, submissionButtons()])
+                    row([submissionSamples, submissionButtons()])
                 )
             ]
         )
@@ -1696,7 +1780,10 @@ final class ComponentGalleryViewController: NSViewController {
                     title: L10n.string("Codex"),
                     points: comparison,
                     style: .categorical(1),
-                    fillsArea: true
+                    // A second translucent area turns the overlap into an unlabeled third
+                    // colour. Keep the primary as the area and the comparison as a line, the
+                    // same grammar the limit chart uses for measured versus projected data.
+                    fillsArea: false
                 )
             ],
             markers: [ThemedChartMarker(
@@ -1707,7 +1794,8 @@ final class ComponentGalleryViewController: NSViewController {
                 kind: .reset
             )],
             xRange: start...today,
-            valueFormat: .number
+            valueFormat: .number,
+            showsLegend: true
         )
     }
 
@@ -2097,17 +2185,23 @@ final class ComponentGalleryViewController: NSViewController {
                 story(
                     "ThemedAlert",
                     "App-owned transient surfaces with themed chrome, Escape, focus return, and accessibility.",
-                    alert
+                    previewWithLauncher(makeInlineAlertPreview(), launcher: alert)
                 ),
                 story(
                     "ThemedPopover & ThemedPopoverChromeView",
                     "App-owned transient surfaces with themed chrome, Escape, focus return, and accessibility.",
-                    popover
+                    previewWithLauncher(makeInlinePopoverPreview(), launcher: popover)
                 ),
                 story(
                     "PromptCompletionPresenter",
                     "Non-key command and skill suggestions that keep the composer focused while keyboard selection moves.",
-                    completions
+                    previewWithLauncher(
+                        galleryCompletionPresenter.makeInlinePreview(
+                            items: galleryCompletionRows(),
+                            selectedIndex: 0
+                        ),
+                        launcher: completions
+                    )
                 ),
                 story(
                     "Command Palette",
@@ -2121,6 +2215,48 @@ final class ComponentGalleryViewController: NSViewController {
                 )
             ]
         )
+    }
+
+    private func previewWithLauncher(_ preview: NSView, launcher: NSView) -> NSView {
+        let stack = NSStackView(views: [preview, launcher])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        return stack
+    }
+
+    private func makeInlineAlertPreview() -> NSView {
+        let content = makeGalleryAlert().makeContentView()
+        content.setAccessibilityIdentifier("gallery.preview.alert")
+        content.layoutSubtreeIfNeeded()
+        content.frame = NSRect(origin: .zero, size: content.fittingSize)
+        return content
+    }
+
+    private func makeInlinePopoverPreview() -> NSView {
+        let contentSize = NSSize(width: 292, height: 126)
+        let material = AppThemePalette.current.material(for: view.effectiveAppearance)
+        let placement = ThemedPopoverLayout.place(
+            anchor: NSRect(x: 150, y: 24, width: 40, height: 20),
+            contentSize: contentSize,
+            visibleFrame: NSRect(x: 0, y: 0, width: 360, height: 220),
+            preferredEdge: .maxY,
+            style: material.popoverStyle,
+            hasMaterialShadow: material.glow != nil,
+            bevelWidth: material.bevel?.width
+        )
+        let chrome = ThemedPopoverChromeView(
+            frame: NSRect(origin: .zero, size: placement.panelFrame.size)
+        )
+        chrome.translatesAutoresizingMaskIntoConstraints = false
+        chrome.placement = placement
+        chrome.contentView = makeGalleryPopoverContent()
+        chrome.setAccessibilityIdentifier("gallery.preview.popover")
+        NSLayoutConstraint.activate([
+            chrome.widthAnchor.constraint(equalToConstant: placement.panelFrame.width),
+            chrome.heightAnchor.constraint(equalToConstant: placement.panelFrame.height)
+        ])
+        return chrome
     }
 
     /// The three shipped hover policies, each on its own live anchor.
@@ -2215,6 +2351,8 @@ final class ComponentGalleryViewController: NSViewController {
         groupedScroll.heightAnchor.constraint(equalToConstant: 156).isActive = true
         groupedTable.reloadData()
 
+        let documentTable = makeDocumentTableSample()
+
         return section(
             "Data containers",
             note: "The table, outline, header, scroll, and clip boundaries are real AppKit views.",
@@ -2261,6 +2399,13 @@ final class ComponentGalleryViewController: NSViewController {
                         + "viewport boundary. Scroll it to exercise real cell reuse rather than "
                         + "a retained stack disguised as a list.",
                     groupedScroll
+                ),
+                story(
+                    "ThemedDocumentTableView",
+                    "A fixed semantic grid for transcript content. Narrow the gallery to make "
+                        + "cells wrap; the horizontal scroller appears only after the columns "
+                        + "reach their readable floor, and every value remains selectable.",
+                    documentTable
                 ),
                 story(
                     "CodeContextPreviewView",
@@ -2348,8 +2493,41 @@ final class ComponentGalleryViewController: NSViewController {
         )
     }
 
+    private func makeDocumentTableSample() -> NSView {
+        func value(_ string: String, weight: NSFont.Weight = .regular) -> NSAttributedString {
+            NSAttributedString(
+                string: L10n.string(string),
+                attributes: [
+                    .font: weight == .regular
+                        ? Design.Typography.body()
+                        : Design.Typography.emphasizedBody(),
+                    .foregroundColor: Design.Text.secondary
+                ]
+            )
+        }
+
+        return ThemedDocumentTableView(
+            headers: [
+                value("Surface", weight: .semibold),
+                value("Owner", weight: .semibold),
+                value("State", weight: .semibold)
+            ],
+            rows: [
+                [value("Conversation"), value("Agent"), value("Streaming")],
+                [value("Git Review"), value("Checkout"), value("1 changed file")],
+                [value("Display panel"), value("Session"), value("Ready")]
+            ],
+            alignments: [.left, .left, .right],
+            availableWidth: 520,
+            minimumColumnWidth: 120
+        )
+    }
+
     private func makeAgentWorkSummarySample() -> NSView {
-        let now = Date()
+        // A fixed moment, not `Date()`: heat decay and action retention are measured against
+        // the clock, and a wall-clock fixture rendered the light and dark evidence captures
+        // as two different components — different marks, different label wraps.
+        let now = Date(timeIntervalSinceReferenceDate: 776_000_000)
         let files = (0..<2_400).map { index in
             "Sources/Feature\(index / 120)/Area\(index / 24)/file-\(index).swift"
         }
@@ -2413,6 +2591,10 @@ final class ComponentGalleryViewController: NSViewController {
         let summary = AgentWorkSummaryView()
         summary.setClock { now }
         summary.setPresentation(presentation)
+        // The gallery is evidence, not a fitting-size benchmark. Pin this sidebar-shaped
+        // component to one realistic review width so light and dark captures prove the same
+        // layout instead of inheriting appearance-dependent text fitting from the host stack.
+        summary.widthAnchor.constraint(equalToConstant: 520).isActive = true
         return summary
     }
 
@@ -2487,13 +2669,32 @@ final class ComponentGalleryViewController: NSViewController {
 
         let footer = PaneFooterView()
         pane.addSubview(footer)
+        let previewToast = ToastView(request: makeGalleryToastRequest())
+        previewToast.setAccessibilityIdentifier("gallery.preview.toast")
+        pane.addSubview(previewToast, positioned: .above, relativeTo: footer)
 
         NSLayoutConstraint.activate([
             pane.widthAnchor.constraint(equalToConstant: SidebarDefaults.defaultWidth),
             pane.heightAnchor.constraint(equalToConstant: 170),
             footer.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
             footer.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
-            footer.bottomAnchor.constraint(equalTo: pane.bottomAnchor)
+            footer.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
+            previewToast.leadingAnchor.constraint(
+                equalTo: pane.leadingAnchor,
+                constant: ToastDefaults.hostInset
+            ),
+            previewToast.trailingAnchor.constraint(
+                equalTo: pane.trailingAnchor,
+                constant: -ToastDefaults.hostInset
+            ),
+            previewToast.bottomAnchor.constraint(
+                equalTo: footer.topAnchor,
+                constant: -ToastDefaults.hostInset
+            ),
+            previewToast.topAnchor.constraint(
+                greaterThanOrEqualTo: pane.topAnchor,
+                constant: ToastDefaults.hostInset
+            )
         ])
 
         toastPresenter = ToastPresenter(host: pane, above: footer.topAnchor)
@@ -2529,13 +2730,17 @@ final class ComponentGalleryViewController: NSViewController {
     /// wording that could drift from the one that ships.
     @objc private func showGalleryToast(_ sender: NSButton) {
         toastPresenter?.present(
-            SessionCoordinator.archiveToast(
-                for: Self.gallerySession,
-                wasRunning: true
-            ) { [weak self] in
-                self?.showReceipt(L10n.string("Undo"))
-            }
+            makeGalleryToastRequest()
         )
+    }
+
+    private func makeGalleryToastRequest() -> ToastRequest {
+        SessionCoordinator.archiveToast(
+            for: Self.gallerySession,
+            wasRunning: true
+        ) { [weak self] in
+            self?.showReceipt(L10n.string("Undo"))
+        }
     }
 
     /// The same archive, performed by the agent whose session it is.
@@ -3484,6 +3689,15 @@ final class ComponentGalleryViewController: NSViewController {
     }
 
     @objc private func showGalleryAlert(_ sender: ThemedButton) {
+        let alert = makeGalleryAlert()
+        if let window = view.window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+    }
+
+    private func makeGalleryAlert() -> ThemedAlert {
         let alert = ThemedAlert()
         alert.messageText = L10n.string("Presentation chrome")
         alert.informativeText = L10n.string(
@@ -3492,11 +3706,7 @@ final class ComponentGalleryViewController: NSViewController {
         alert.alertStyle = .warning
         alert.addButton(withTitle: L10n.string("Continue"))
         alert.addButton(withTitle: L10n.string("Cancel"))
-        if let window = view.window {
-            alert.beginSheetModal(for: window)
-        } else {
-            alert.runModal()
-        }
+        return alert
     }
 
     @objc private func showGalleryPopover(_ sender: ThemedButton) {
@@ -3505,6 +3715,25 @@ final class ComponentGalleryViewController: NSViewController {
             return
         }
 
+        let stack = makeGalleryPopoverContent()
+        stack.frame = NSRect(x: 0, y: 0, width: 292, height: 126)
+
+        let controller = NSViewController()
+        controller.view = stack
+        controller.preferredContentSize = stack.frame.size
+
+        let popover = ThemedPopover()
+        popover.behavior = .transient
+        popover.contentViewController = controller
+        popover.onClose = { [weak self, weak popover] in
+            guard self?.galleryPopover === popover else { return }
+            self?.galleryPopover = nil
+        }
+        galleryPopover = popover
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+    }
+
+    private func makeGalleryPopoverContent() -> NSView {
         let title = NSTextField(labelWithString: L10n.string("Popover"))
         title.applyFont(.heading)
         title.textColor = Design.Text.label
@@ -3529,20 +3758,7 @@ final class ComponentGalleryViewController: NSViewController {
             right: Design.Spacing.inset
         )
         stack.frame = NSRect(x: 0, y: 0, width: 292, height: 126)
-
-        let controller = NSViewController()
-        controller.view = stack
-        controller.preferredContentSize = stack.frame.size
-
-        let popover = ThemedPopover()
-        popover.behavior = .transient
-        popover.contentViewController = controller
-        popover.onClose = { [weak self, weak popover] in
-            guard self?.galleryPopover === popover else { return }
-            self?.galleryPopover = nil
-        }
-        galleryPopover = popover
-        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+        return stack
     }
 
     @objc private func closeGalleryPopover(_ sender: ThemedButton) {
@@ -3554,7 +3770,23 @@ final class ComponentGalleryViewController: NSViewController {
             galleryCompletionPresenter.dismiss()
             return
         }
-        let items = [
+        galleryCompletionPresenter.present(
+            items: galleryCompletionRows(),
+            selectedIndex: 0,
+            from: sender,
+            onChoose: { [weak self] _ in self?.galleryCompletionPresenter.dismiss() },
+            onDismiss: {}
+        )
+    }
+
+    /// The fixture is written as capabilities, because that is what the composer feeds the
+    /// panel; the story and its launcher both preview the rows those capabilities become.
+    private func galleryCompletionRows() -> [PromptCompletionItem] {
+        galleryCompletionItems().map(PromptCompletionItem.init(capability:))
+    }
+
+    private func galleryCompletionItems() -> [ComposerCapability] {
+        [
             ComposerCapability(
                 id: "gallery.command:compact",
                 name: "compact",
@@ -3574,23 +3806,6 @@ final class ComponentGalleryViewController: NSViewController {
                 presentation: .turn
             )
         ]
-        galleryCompletionPresenter.present(
-            items: items.map { item in
-                PromptCompletionItem(
-                    id: item.id,
-                    title: item.invocationText
-                        + (item.argumentHint.isEmpty ? "" : "  \(item.argumentHint)"),
-                    accessibilityTitle: item.displayName,
-                    detail: item.description,
-                    kind: item.kind == .skill ? L10n.string("Skill") : L10n.string("Command"),
-                    isEnabled: item.isEnabled
-                )
-            },
-            selectedIndex: 0,
-            from: sender,
-            onChoose: { [weak self] _ in self?.galleryCompletionPresenter.dismiss() },
-            onDismiss: {}
-        )
     }
 
     @objc private func showGalleryCommandPalette(_ sender: ThemedButton) {

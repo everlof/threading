@@ -130,6 +130,53 @@ final class SidebarTreeBuilderTests: XCTestCase {
         XCTAssertEqual(controller.outlineRowCount, 2, "a repeated lifecycle signal remounted the tree")
     }
 
+    /// Suppressing the viewport during the atomic first mount must not change disclosure
+    /// semantics. Persisted project closure wins initially, while the branch and side-chat
+    /// descendants keep their default-open state for the moment the project is opened.
+    func testADeferredInitialMountPreservesExpansionInsideACollapsedProject() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "threading-sidebar-collapsed-first-mount-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let parent = session("Parent", branch: "main")
+        let child = session("Child", branch: "main", forkedFrom: parent.id)
+        let sibling = session("Sibling", branch: "main")
+        var stored = project("Collapsed", sessions: [parent, child, sibling])
+        stored.isExpanded = false
+
+        let manager = StateManager(appSupportDirectory: directory)
+        defer { manager.closeDatabase() }
+        XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [stored])))
+
+        let controller = ProjectSidebarViewController(
+            projectStore: ProjectStore(stateManager: manager),
+            defersInitialTreeMount: true
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 320, height: 720)
+        controller.view.layoutSubtreeIfNeeded()
+        controller.mountInitialTreeIfNeeded()
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(controller.presentedRowKeys, [.project(stored.id)])
+
+        controller.setExpanded(true, forProject: stored.id)
+
+        XCTAssertEqual(
+            Set(controller.presentedRowKeys),
+            Set([
+                .project(stored.id),
+                .branch(stored.id, "main"),
+                .session(parent.id),
+                .session(child.id),
+                .session(sibling.id)
+            ]),
+            "opening the persisted-closed project left a cold descendant collapsed"
+        )
+    }
+
     /// The no-project prompt is an empty-data branch, not part of the populated sidebar's
     /// launch cost. In particular, hiding it must not instantiate and theme two labels merely
     /// so they can remain invisible.
@@ -157,6 +204,95 @@ final class SidebarTreeBuilderTests: XCTestCase {
             controller.emptyStateIsMaterialized,
             "a settings round-trip constructed the hidden no-project prompt"
         )
+    }
+
+    /// Cold expansion follows hierarchy, not the selected sort order. A newer nested chat can
+    /// sort ahead of its parent in the flat session list, but AppKit cannot expand it until the
+    /// parent row exists.
+    func testColdMountExpandsNestedSideChatsInTreeOrder() {
+        withDefault(
+            SidebarSessionOrder.recentActivity.rawValue,
+            forKey: "sidebarSessionOrder"
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "threading-sidebar-tree-expansion-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            defer { try? FileManager.default.removeItem(at: directory) }
+
+            let parent = session(
+                "parent",
+                lastActiveAt: Date(timeIntervalSinceReferenceDate: 100)
+            )
+            let child = session(
+                "child",
+                forkedFrom: parent.id,
+                lastActiveAt: Date(timeIntervalSinceReferenceDate: 200)
+            )
+            let grandchild = session(
+                "grandchild",
+                forkedFrom: child.id,
+                lastActiveAt: Date(timeIntervalSinceReferenceDate: 300)
+            )
+            let manager = StateManager(appSupportDirectory: directory)
+            defer { manager.closeDatabase() }
+            XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [
+                project("Nested", sessions: [parent, child, grandchild])
+            ])))
+
+            let controller = ProjectSidebarViewController(
+                projectStore: ProjectStore(stateManager: manager)
+            )
+            _ = controller.view
+            controller.view.frame = NSRect(x: 0, y: 0, width: 320, height: 720)
+            controller.view.layoutSubtreeIfNeeded()
+
+            XCTAssertEqual(controller.outlineRowCount, 4)
+        }
+    }
+
+    /// A rename under Name order updates the affected project's ordering without disturbing
+    /// the rest of the presented tree.
+    func testNameOrderedRenameMovesTheSessionWithinItsProject() {
+        withDefault(SidebarSessionOrder.name.rawValue, forKey: "sidebarSessionOrder") {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "threading-sidebar-name-reorder-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            defer { try? FileManager.default.removeItem(at: directory) }
+
+            let later = session("Zulu")
+            let earlier = session("Alpha")
+            let untouched = session("Other project")
+            let firstProject = project("First", sessions: [later, earlier])
+            let secondProject = project("Second", sessions: [untouched])
+            let manager = StateManager(appSupportDirectory: directory)
+            defer { manager.closeDatabase() }
+            XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [
+                firstProject, secondProject
+            ])))
+            let store = ProjectStore(stateManager: manager)
+            let controller = ProjectSidebarViewController(projectStore: store)
+            _ = controller.view
+
+            XCTAssertEqual(
+                controller.presentedRowKeys,
+                [
+                    .project(firstProject.id), .session(earlier.id), .session(later.id),
+                    .project(secondProject.id), .session(untouched.id)
+                ]
+            )
+
+            XCTAssertEqual(store.renameSession(id: later.id, to: "0 First"), .applied)
+
+            XCTAssertEqual(
+                controller.presentedRowKeys,
+                [
+                    .project(firstProject.id), .session(later.id), .session(earlier.id),
+                    .project(secondProject.id), .session(untouched.id)
+                ]
+            )
+        }
     }
 
     /// The lazy branch still has to cross on the one state that needs it.
@@ -555,6 +691,55 @@ final class SidebarTreeBuilderTests: XCTestCase {
         }
     }
 
+    /// Manual order is a stable partition rather than a comparison sort: pins lead, while each
+    /// side of that boundary keeps the exact order represented by the store.
+    func testOrderAddedPreservesStoreOrderWithinPinnedAndUnpinnedSessions() throws {
+        try withDefault(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder") {
+            try withDefault(false, forKey: "sidebarSessionOrderIsReversed") {
+                let first = session("first")
+                let firstPinned = session("first pinned", isPinned: true)
+                let second = session("second")
+                let secondPinned = session("second pinned", isPinned: true)
+
+                let roots = SidebarTreeBuilder.rootNodes(
+                    from: [project(
+                        "p",
+                        sessions: [first, firstPinned, second, secondPinned]
+                    )]
+                )
+                let node = try XCTUnwrap(roots.first as? ProjectNode)
+
+                XCTAssertEqual(
+                    node.sessionNodes.map(\.sessionID),
+                    [firstPinned.id, secondPinned.id, first.id, second.id]
+                )
+            }
+        }
+    }
+
+    /// Reversing Order Added reverses each partition, not pin priority itself.
+    func testReversedOrderAddedPreservesPinPriority() throws {
+        try withReversedOrder(.manual) {
+            let first = session("first")
+            let firstPinned = session("first pinned", isPinned: true)
+            let second = session("second")
+            let secondPinned = session("second pinned", isPinned: true)
+
+            let roots = SidebarTreeBuilder.rootNodes(
+                from: [project(
+                    "p",
+                    sessions: [first, firstPinned, second, secondPinned]
+                )]
+            )
+            let node = try XCTUnwrap(roots.first as? ProjectNode)
+
+            XCTAssertEqual(
+                node.sessionNodes.map(\.sessionID),
+                [secondPinned.id, firstPinned.id, second.id, first.id]
+            )
+        }
+    }
+
     func testReversedNameOrderRunsZToA() throws {
         try withReversedOrder(.name) {
             let banana = session("banana")
@@ -640,8 +825,11 @@ final class SidebarTreeBuilderTests: XCTestCase {
         )
 
         let defaults = UserDefaults.standard
+        let stressOrder = ProcessInfo.processInfo.environment["THREADING_SIDEBAR_STRESS_ORDER"]
+            .flatMap(SidebarSessionOrder.init(rawValue:))
+            ?? .manual
         let deterministicDefaults: [(String, Any)] = [
-            ("sidebarSessionOrder", SidebarSessionOrder.manual.rawValue),
+            ("sidebarSessionOrder", stressOrder.rawValue),
             ("groupsSessionsByBranch", true),
             ("groupsLoneBranches", true)
         ]
@@ -684,12 +872,25 @@ final class SidebarTreeBuilderTests: XCTestCase {
         let manager = StateManager(appSupportDirectory: directory)
         XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: fixture.projects)))
         let store = ProjectStore(stateManager: manager)
-        let controller = ProjectSidebarViewController(projectStore: store)
+        // Match MainWindowController: construct and lay out the sidebar shell at its permanent
+        // geometry, then cross the explicit initial-tree boundary. Eagerly mounting into a
+        // zero-sized standalone view measured a transient layout the product deliberately avoids.
+        let controller = ProjectSidebarViewController(
+            projectStore: store,
+            defersInitialTreeMount: true
+        )
 
         let loadStarted = DispatchTime.now().uptimeNanoseconds
         _ = controller.view
-        let loadEnded = DispatchTime.now().uptimeNanoseconds
+        let shellLoaded = DispatchTime.now().uptimeNanoseconds
         controller.view.frame = NSRect(x: 0, y: 0, width: 300, height: 720)
+        controller.view.layoutSubtreeIfNeeded()
+        let shellLaidOut = DispatchTime.now().uptimeNanoseconds
+        controller.mountInitialTreeIfNeeded()
+        let loadEnded = DispatchTime.now().uptimeNanoseconds
+        #if DEBUG
+        let coldReload = controller.lastReloadPerformance
+        #endif
         controller.view.layoutSubtreeIfNeeded()
         let layoutEnded = DispatchTime.now().uptimeNanoseconds
 
@@ -751,6 +952,12 @@ final class SidebarTreeBuilderTests: XCTestCase {
         let roots = SidebarTreeBuilder.rootNodes(from: store.projects)
         let treeElapsed = DispatchTime.now().uptimeNanoseconds - treeStarted
 
+        func nodeCount(_ nodes: [NSObject]) -> Int {
+            nodes.reduce(0) { count, node in
+                count + 1 + nodeCount(SidebarTreeBuilder.children(of: node))
+            }
+        }
+
         // A divider drag changes the sidebar's width once per pointer/display update. Drive the
         // production controller through a complete widening and narrowing pass, keeping each
         // tick separate so one long layout cannot hide inside a cheap total. This deliberately
@@ -778,16 +985,34 @@ final class SidebarTreeBuilderTests: XCTestCase {
 
         XCTAssertFalse(roots.isEmpty)
         XCTAssertEqual(controller.selectedSessionID, fixture.deepSessionID)
-        XCTAssertGreaterThan(controller.outlineRowCount, projectCount * sessionsPerProject)
+        XCTAssertEqual(
+            controller.outlineRowCount,
+            nodeCount(roots),
+            "the chosen sort order left an expandable ancestor closed"
+        )
         XCTAssertLessThan(controller.instantiatedRowCount, controller.outlineRowCount)
 
-        print(
+        var performanceLine =
             "THREADING_PERF project-sidebar "
+                + "order=\(stressOrder.rawValue) "
                 + "projects=\(projectCount) sessions=\(projectCount * sessionsPerProject) "
                 + "rows=\(controller.outlineRowCount) "
                 + "instantiated=\(controller.instantiatedRowCount) "
                 + "load_ms=\(Self.milliseconds(loadEnded - loadStarted)) "
-                + "layout_ms=\(Self.milliseconds(layoutEnded - loadEnded)) "
+                + "shell_load_ms=\(Self.milliseconds(shellLoaded - loadStarted)) "
+                + "shell_layout_ms=\(Self.milliseconds(shellLaidOut - shellLoaded)) "
+                + "cold_mount_ms=\(Self.milliseconds(loadEnded - shellLaidOut)) "
+        #if DEBUG
+        performanceLine += "cold_reload_ms=\(Self.milliseconds(coldReload.totalNanoseconds)) "
+                + "cold_tree_ms=\(Self.milliseconds(coldReload.treeNanoseconds)) "
+                + "cold_shape_ms=\(Self.milliseconds(coldReload.shapeNanoseconds)) "
+                + "cold_adopt_ms=\(Self.milliseconds(coldReload.adoptionNanoseconds)) "
+                + "cold_indexes_ms=\(Self.milliseconds(coldReload.indexingNanoseconds)) "
+                + "cold_outline_ms=\(Self.milliseconds(coldReload.outlineNanoseconds)) "
+                + "cold_other_ms=\(Self.milliseconds(coldReload.unclassifiedNanoseconds)) "
+        #endif
+        performanceLine += "layout_ms=\(Self.milliseconds(layoutEnded - loadEnded)) "
+                + "cold_total_ms=\(Self.milliseconds(layoutEnded - loadStarted)) "
                 + "all_rows_refresh_ms=\(Self.milliseconds(allRowsRefreshElapsed)) "
                 + "visible_rows_refresh_ms=\(Self.milliseconds(visibleRowsRefreshElapsed)) "
                 + "same_shape_refresh_ms=\(Self.milliseconds(refreshElapsed)) "
@@ -802,7 +1027,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 + "resize_p50_ms=\(Self.milliseconds(Self.percentile(0.50, in: orderedResizeSamples))) "
                 + "resize_p95_ms=\(Self.milliseconds(Self.percentile(0.95, in: orderedResizeSamples))) "
                 + "resize_max_ms=\(Self.milliseconds(orderedResizeSamples.last ?? 0))"
-        )
+        print(performanceLine)
     }
 
     private func stressProjects(

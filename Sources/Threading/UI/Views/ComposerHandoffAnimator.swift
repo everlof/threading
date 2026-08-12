@@ -175,11 +175,19 @@ final class ComposerHandoffAnimator {
     /// window, which is the one thing a ghost of live content cannot get wrong.
     private static func image(of view: NSView) -> NSImage? {
         let bounds = view.bounds
-        guard bounds.width >= 1, bounds.height >= 1,
-              let representation = view.bitmapImageRepForCachingDisplay(in: bounds)
-        else { return nil }
+        guard bounds.width >= 1, bounds.height >= 1 else { return nil }
 
         let appearance = view.window?.effectiveAppearance ?? view.effectiveAppearance
+        // Layer colours are CGColors frozen when a surface was last configured. A composer can
+        // be constructed before its dark window owns it, so merely drawing under the window's
+        // appearance leaves a light field baked into the snapshot. Re-resolve the whole source
+        // tree at the capture boundary; a ghost is only truthful if it has the same lifecycle
+        // repair as the live view it depicts.
+        AppThemeRefresh.repaint(view)
+
+        guard let representation = view.bitmapImageRepForCachingDisplay(in: bounds) else {
+            return nil
+        }
         appearance.performAsCurrentDrawingAppearance {
             view.cacheDisplay(in: bounds, to: representation)
         }

@@ -172,8 +172,12 @@ struct RootView: View {
 
     private var theme: RemoteThemePalette {
 #if DEBUG
-        if ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"] == "fallback" {
+        let requestedTheme = ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"]
+        if requestedTheme == "fallback" {
             return RemoteThemePalette(nil)
+        }
+        if requestedTheme == "light" {
+            return RemoteThemePalette(RemoteAppModel.demoLightTheme)
         }
         if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
             .hasPrefix("conversation") == true

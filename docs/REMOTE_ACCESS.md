@@ -70,6 +70,14 @@ private-only. Guest shares never receive the Mac's private endpoint list.
 The iOS app shows all unarchived
 sessions grouped by project or ordered by recent activity, including dormant sessions. Pinned sessions
 stay at the top on both Mac and iPhone, and the archive is available from the dashboard.
+On a paired owner device, the dashboard's options menu also offers **Usage** when the Mac
+advertises support. It opens the Mac's prepared 7-, 30- and 90-day Overview and Limit History in a
+native iPhone sheet. The phone receives bounded semantic totals and chart points, not transcripts,
+filesystem paths, credentials or the raw limit journal. Banked resets show the selected
+account/window's current inventory and nearest expiry; zero is distinct from unavailable, and a
+historical banked-reset marker means a credit was observed being used rather than merely being
+available. One-chat guest links cannot discover or read this whole-host data.
+
 Opening a dormant session resumes it
 in its existing agent UI or Native surface. Agent UI sessions mirror the CLI's terminal
 scrollback and accept keyboard input; Native sessions render user messages, assistant responses, code and tool

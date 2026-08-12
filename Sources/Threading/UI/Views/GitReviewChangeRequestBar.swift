@@ -82,6 +82,7 @@ final class GitReviewChangeRequestBar: NSView {
         statusLabel.stringValue = status
         statusLabel.textColor = statusColor
         actionButton.title = actionTitle ?? ""
+        actionButton.emphasis = .primary
         actionButton.isEnabled = actionTitle != nil && actionEnabled
         actionButton.isHidden = actionTitle == nil
         openButton.isHidden = !showsOpen
@@ -99,6 +100,10 @@ final class GitReviewChangeRequestBar: NSView {
             showsOpen: false,
             policy: policy
         )
+        // Retrying a background metadata read is recovery, not the pane's primary workflow.
+        // Keeping the failure action at primary emphasis made a transient GitHub problem the
+        // loudest thing in Git Review.
+        actionButton.emphasis = .secondary
     }
 
     private func setup() {

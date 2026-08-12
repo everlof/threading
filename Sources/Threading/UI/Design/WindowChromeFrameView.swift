@@ -67,8 +67,9 @@ final class WindowChromeFrameView: NSView, ThemedComponent {
         // The window's edge wears the raised construction, not a hairline: measured off a
         // real 98 screenshot, a window's bottom-right runs #808080 then pure black to the
         // very edge, the same build as its buttons. Under a bevel material the theme's own
-        // edge colours draw it; without one the border role seats a plain single ring, so a
-        // future takeover theme without bevels still gets an edge.
+        // edge colours draw it; without one a stronger structural ring seats the window. The
+        // ordinary border role is intentionally as quiet as an in-panel separator under System
+        // and was effectively invisible at the outermost window edge in both appearances.
         guard AppThemePalette.current.material.bevel != nil else {
             let seatRect = frameRect.insetBy(dx: 0.5, dy: 0.5)
             let seat = NSBezierPath(
@@ -77,7 +78,7 @@ final class WindowChromeFrameView: NSView, ThemedComponent {
                 yRadius: max(0, cornerRadius - 0.5)
             )
             seat.lineWidth = 1
-            Design.Surface.border.setStroke()
+            Design.Text.tertiary.setStroke()
             seat.stroke()
             return
         }

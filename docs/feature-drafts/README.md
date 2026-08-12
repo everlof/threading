@@ -28,6 +28,9 @@ short pointer to the durable record so this directory does not become a competin
 - [Cross-platform Usage dashboard](cross-platform-usage-dashboard.md) — bring the Mac's measured
   usage and limit history to the iOS companion through bounded owner-only snapshots, with banked
   reset inventory and evidence presented consistently on both platforms.
+- [Hosted remote service](hosted-remote-service.md) — operate accounts, push, widgets and an
+  optional managed public relay while preserving local use and Tailscale, with explicit service
+  boundaries and cost ceilings.
 - [CCS launch profiles and GLM](ccs-launch-profiles-and-glm.md) — adopt CCS-managed launch
   profiles without importing credentials, with route-safe account support and a gated GLM path.
 - [Pasteboard-aware prompt suggestions](pasteboard-prompt-suggestions.md) — offer a short-lived,

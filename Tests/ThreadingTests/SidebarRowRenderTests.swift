@@ -110,7 +110,30 @@ final class SidebarRowRenderTests: XCTestCase {
             pinned: true
         )
 
-        XCTAssertEqual(written, 20, "Every story should render in both appearances")
+        // Pinning is orthogonal to activity and hover. These combinations used to be absent
+        // from the visual catalogue, which let the pin collide with the working indicator and
+        // disappear when the trailing actions arrived.
+        written += try write(
+            story: "11-pinned-and-working",
+            activity: .working,
+            hovered: false,
+            pinned: true
+        )
+        written += try write(
+            story: "12-pinned-and-hovered",
+            activity: .idle,
+            hovered: true,
+            pinned: true
+        )
+        written += try write(
+            story: "13-pinned-hovered-long-title",
+            activity: .working,
+            hovered: true,
+            pinned: true,
+            title: "Refactor the sidebar trailing slot and its hover controls"
+        )
+
+        XCTAssertEqual(written, 26, "Every story should render in both appearances")
         print("Rendered sidebar-row storybook to \(Render.directory.path)")
     }
 
@@ -699,8 +722,11 @@ final class SidebarRowRenderTests: XCTestCase {
 
             var data: Data?
             let render = {
-                let row = SessionRowView(customizationLookup: { _ in .empty })
+                let cell = SessionRowView(customizationLookup: { _ in .empty })
+                cell.translatesAutoresizingMaskIntoConstraints = false
+                let row = SidebarHoverRowView()
                 row.translatesAutoresizingMaskIntoConstraints = false
+                row.addSubview(cell)
 
                 let host = NSView(
                     frame: NSRect(x: 0, y: 0, width: Fixture.width, height: Fixture.height)
@@ -713,29 +739,38 @@ final class SidebarRowRenderTests: XCTestCase {
                     row.topAnchor.constraint(equalTo: host.topAnchor),
                     row.bottomAnchor.constraint(equalTo: host.bottomAnchor)
                 ])
+                NSLayoutConstraint.activate([
+                    cell.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+                    cell.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+                    cell.topAnchor.constraint(equalTo: row.topAnchor),
+                    cell.bottomAnchor.constraint(equalTo: row.bottomAnchor)
+                ])
 
                 // Configured before the hover is asserted, then again after: `configure`
                 // reapplies the hover state without animating, which is what makes the
                 // hovered stories deterministic rather than a race with the crossfade.
                 var session = AgentSession(kind: .claude, title: title)
                 session.isPinned = pinned
-                row.configure(with: session, activity: activity)
+                cell.configure(with: session, activity: activity)
                 if hovered, let entered = Self.enterEvent() {
                     row.mouseEntered(with: entered)
-                    row.configure(with: session, activity: activity)
+                    cell.mouseEntered(with: entered)
+                    cell.configure(with: session, activity: activity)
                 }
-                // The selection is two things and the row owns only one of them: the ground is
-                // the sidebar's row view's to paint, and `backgroundStyle` is what the cell is
-                // told about it.
-                if selected { row.backgroundStyle = .emphasized }
+                // The row view owns hover and selection ground; the cell owns the ink that
+                // must read on it. Keeping both in the evidence fixture prevents a hover story
+                // from proving only that its buttons appeared while omitting their hit region.
+                row.isSelected = selected
+                if selected {
+                    row.isEmphasized = true
+                    cell.backgroundStyle = .emphasized
+                }
 
                 AppThemeRefresh.repaint(host)
                 host.layoutSubtreeIfNeeded()
 
                 host.wantsLayer = true
-                host.layer?.backgroundColor = selected
-                    ? Design.Surface.selectionFill.cgColor
-                    : Design.Surface.background.cgColor
+                host.layer?.backgroundColor = Design.Surface.background.cgColor
 
                 guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
                     return

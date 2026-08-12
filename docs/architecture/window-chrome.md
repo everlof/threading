@@ -130,6 +130,9 @@ reasons as `DisplayPaneWidth` — it is a choice made with a divider, and a host
 write it into the developer's own preferences. Two orderings are load-bearing: the restore runs
 in the same run-loop turn that claims the floor, and `recordsSidebarWidth` stays false until it
 has, or launch's default layout would overwrite the stored width one turn before it was read.
+The stored value is snapshotted before that turn is queued. It is launch input; re-reading the
+shared preference after yielding lets a late resize from another window replace the value being
+restored with default geometry.
 
 `NSTrackingSeparatorToolbarItem` hid that for years, and stopped the day the sidebar became a
 plain split item: measured on macOS 26 across all three split-item kinds, it follows the divider
@@ -408,6 +411,19 @@ theme's border on chrome, or neutral ink measured from an unrelated terminal bac
 overrides `dividerThickness` so the seam between two panes matches the rules drawn inside them
 (see [`themes.md`](themes.md)); AppKit's `.thin` divider is a fixed point,
 which under a heavy-ruling style was the one hairline in a window of 2pt rules.
+
+**The seam also answers the pointer.** Wherever a press would begin dragging it, the divider
+draws in the accent — the one control ready to act, and an extra hint beside the resize cursor
+for a grab target that is otherwise the quietest line in the window; the shell drawer's strip
+already made the same promise with its hover wash. "Wherever a press would attach" is asked of
+`NSSplitView.hitTest` — the platform's own claim on the points around a divider, the same one
+that turns the press into a drag and flips the cursor — rather than restated as a constant that
+would drift the day AppKit widens its own. Measured, that claim runs about two points to either
+side of a hairline. The seam stays lit for the whole of a drag (the overshoot past a pane's
+floor generates an exit while the hand is still on the divider), goes out where the backdrop
+would swallow the accent by stepping to the measured neutral instead, and never lights beside a
+collapsed pane, whose hidden divider is not a target. `AppThemeTests`' pointer sweep asserts the
+hint against `hitTest`'s answer point by point, so the two cannot disagree.
 
 Three things the behaviour supplied and now have to be stated, each found by losing it:
 

@@ -1633,9 +1633,21 @@ private extension TerminalContainerViewController {
     /// been laid out at that size all along, and asking the frame would make the answer depend
     /// on the answer — the card comes back, which makes it wide, which sends it away again.
     private var paneHasRoomForGitStatusOverlay: Bool {
-        GitStatusOverlayDefaults.hasRoom(
-            forCardWidth: gitStatusOverlay.fittingSize.width,
-            inPaneWidth: view.bounds.width
+        let cardWidth = gitStatusOverlay.fittingSize.width
+        let paneWidth = view.bounds.width
+        guard GitStatusOverlayDefaults.hasRoom(
+            forCardWidth: cardWidth,
+            inPaneWidth: paneWidth
+        ) else { return false }
+
+        // Terminal text owns the whole pane and accepts the half-width annotation rule above.
+        // Conversation ink owns a centred readable column; a corner card is safe only in the
+        // actual gutter beside that column. The display panel can narrow this pane without
+        // making the card itself wide, which is the collision the generic share cannot see.
+        guard currentConversation != nil else { return true }
+        return GitStatusOverlayDefaults.hasRoomBesideConversation(
+            forCardWidth: cardWidth,
+            inPaneWidth: paneWidth
         )
     }
 

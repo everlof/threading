@@ -74,7 +74,13 @@ final class MainWindowSizingTests: XCTestCase {
             "the viewport mounted before the deferred divider-geometry turn"
         )
 
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        // This is an ordering contract, not a 50 ms timing contract. Other window fixtures in
+        // the same test process may already have legitimate geometry turns queued; a fixed run-
+        // loop delay can expire before this controller's turn. A sentinel enqueued after init is
+        // FIFO behind the restore-and-mount block we are asserting.
+        let geometryTurnCompleted = expectation(description: "deferred sidebar geometry turn")
+        DispatchQueue.main.async { geometryTurnCompleted.fulfill() }
+        wait(for: [geometryTurnCompleted], timeout: 1)
         window.contentView?.layoutSubtreeIfNeeded()
 
         let sidebar = try XCTUnwrap(controller.splitViewController.splitViewItems.first)

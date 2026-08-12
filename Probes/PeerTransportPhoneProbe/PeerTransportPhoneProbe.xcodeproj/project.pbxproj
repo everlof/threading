@@ -1,0 +1,436 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		4B955EB69657FD926B19C4C6 /* PeerTransportProbePhone.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C6FE42A3242B5CE6F2B5A14 /* PeerTransportProbePhone.swift */; };
+		5766F58BB024674D6BCC2529 /* ThreadingPeerTransport in Frameworks */ = {isa = PBXBuildFile; productRef = 8F99198D8AF071B8A352EA6D /* ThreadingPeerTransport */; };
+		5F3BCBC66936748907DEE7F1 /* ProbeRendezvous.swift in Sources */ = {isa = PBXBuildFile; fileRef = 321E8FE647DD3D012E98B1C3 /* ProbeRendezvous.swift */; };
+		69F8004115AD24BF3853E608 /* ProbeWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = E303DD55DF8C7989ABEF3961 /* ProbeWire.swift */; };
+		788B198E22B353A8BCDAF8B8 /* PeerTransportProbeHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FB3BDC6806BA4B137A9C285 /* PeerTransportProbeHost.swift */; };
+		7F20050D23F24C986A305207 /* ProbeWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = E303DD55DF8C7989ABEF3961 /* ProbeWire.swift */; };
+		B9278BB564FE0FD7A444E6D7 /* ProbeRendezvous.swift in Sources */ = {isa = PBXBuildFile; fileRef = 321E8FE647DD3D012E98B1C3 /* ProbeRendezvous.swift */; };
+		E5AD02F5DC511DB060225174 /* ThreadingPeerTransport in Frameworks */ = {isa = PBXBuildFile; productRef = 68202DB49A5580EE666EC141 /* ThreadingPeerTransport */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		321E8FE647DD3D012E98B1C3 /* ProbeRendezvous.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProbeRendezvous.swift; sourceTree = "<group>"; };
+		5437B640514B805C3460E621 /* PeerTransportProbePhone.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PeerTransportProbePhone.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6C4172308D1AEF9CADDF2B9B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		8C6FE42A3242B5CE6F2B5A14 /* PeerTransportProbePhone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerTransportProbePhone.swift; sourceTree = "<group>"; };
+		8FB3BDC6806BA4B137A9C285 /* PeerTransportProbeHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerTransportProbeHost.swift; sourceTree = "<group>"; };
+		A82D17E66271DC5ECC813E12 /* PeerTransportProbeHost */ = {isa = PBXFileReference; includeInIndex = 0; path = PeerTransportProbeHost; sourceTree = BUILT_PRODUCTS_DIR; };
+		BD94043985C38AC9A4BAE072 /* ThreadingPeerTransport */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ThreadingPeerTransport; path = ../../Packages/ThreadingPeerTransport; sourceTree = SOURCE_ROOT; };
+		E303DD55DF8C7989ABEF3961 /* ProbeWire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProbeWire.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3A4E9FF9C80A479327E25754 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E5AD02F5DC511DB060225174 /* ThreadingPeerTransport in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8DDC004899848F29FFFAB5FD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5766F58BB024674D6BCC2529 /* ThreadingPeerTransport in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		873182CB243051E6E6150620 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A82D17E66271DC5ECC813E12 /* PeerTransportProbeHost */,
+				5437B640514B805C3460E621 /* PeerTransportProbePhone.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		B30B11EC1BE9F575CB01D7C1 = {
+			isa = PBXGroup;
+			children = (
+				DE9628376316B3BFFB741EDF /* Host */,
+				FE68B9D754E45FE055BC6D3A /* Packages */,
+				B455DFE363F3B94294AC25F6 /* Phone */,
+				CCE74D2C9D35CB1B3661F3A2 /* Shared */,
+				873182CB243051E6E6150620 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		B455DFE363F3B94294AC25F6 /* Phone */ = {
+			isa = PBXGroup;
+			children = (
+				6C4172308D1AEF9CADDF2B9B /* Info.plist */,
+				8C6FE42A3242B5CE6F2B5A14 /* PeerTransportProbePhone.swift */,
+			);
+			path = Phone;
+			sourceTree = "<group>";
+		};
+		CCE74D2C9D35CB1B3661F3A2 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				321E8FE647DD3D012E98B1C3 /* ProbeRendezvous.swift */,
+				E303DD55DF8C7989ABEF3961 /* ProbeWire.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		DE9628376316B3BFFB741EDF /* Host */ = {
+			isa = PBXGroup;
+			children = (
+				8FB3BDC6806BA4B137A9C285 /* PeerTransportProbeHost.swift */,
+			);
+			path = Host;
+			sourceTree = "<group>";
+		};
+		FE68B9D754E45FE055BC6D3A /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				BD94043985C38AC9A4BAE072 /* ThreadingPeerTransport */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		5FBEEBD14FE0A57C48F6DAE6 /* PeerTransportProbeHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A313A192EA9DE49C32F607DF /* Build configuration list for PBXNativeTarget "PeerTransportProbeHost" */;
+			buildPhases = (
+				A2ECFDEBCAC6CC53AE96BB5C /* Sources */,
+				8DDC004899848F29FFFAB5FD /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PeerTransportProbeHost;
+			packageProductDependencies = (
+				8F99198D8AF071B8A352EA6D /* ThreadingPeerTransport */,
+			);
+			productName = PeerTransportProbeHost;
+			productReference = A82D17E66271DC5ECC813E12 /* PeerTransportProbeHost */;
+			productType = "com.apple.product-type.tool";
+		};
+		A1B9228E47025CC4E388EE1C /* PeerTransportProbePhone */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 08B6A4F1BB0CDFB54B9BC7BA /* Build configuration list for PBXNativeTarget "PeerTransportProbePhone" */;
+			buildPhases = (
+				C968470CA16D5CD32F748298 /* Sources */,
+				3A4E9FF9C80A479327E25754 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PeerTransportProbePhone;
+			packageProductDependencies = (
+				68202DB49A5580EE666EC141 /* ThreadingPeerTransport */,
+			);
+			productName = PeerTransportProbePhone;
+			productReference = 5437B640514B805C3460E621 /* PeerTransportProbePhone.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		6F9A001B052DECC97D2D63A3 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					A1B9228E47025CC4E388EE1C = {
+						DevelopmentTeam = SMQ3E8Y57T;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 6F92543699018015395DF629 /* Build configuration list for PBXProject "PeerTransportPhoneProbe" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = B30B11EC1BE9F575CB01D7C1;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				BB361A82B2F71018E5A8BA3E /* XCLocalSwiftPackageReference "../../Packages/ThreadingPeerTransport" */,
+			);
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				5FBEEBD14FE0A57C48F6DAE6 /* PeerTransportProbeHost */,
+				A1B9228E47025CC4E388EE1C /* PeerTransportProbePhone */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A2ECFDEBCAC6CC53AE96BB5C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				788B198E22B353A8BCDAF8B8 /* PeerTransportProbeHost.swift in Sources */,
+				5F3BCBC66936748907DEE7F1 /* ProbeRendezvous.swift in Sources */,
+				7F20050D23F24C986A305207 /* ProbeWire.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C968470CA16D5CD32F748298 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4B955EB69657FD926B19C4C6 /* PeerTransportProbePhone.swift in Sources */,
+				B9278BB564FE0FD7A444E6D7 /* ProbeRendezvous.swift in Sources */,
+				69F8004115AD24BF3853E608 /* ProbeWire.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		2F91F44B3724ED1176AC9655 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = SMQ3E8Y57T;
+				INFOPLIST_FILE = Phone/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.probe.phone;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		5A23B065B51895D5DF078138 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		BFC392071B6A9E7996ADA925 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		C227588B1FC42B7D660D71BF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.probe.host;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		C9CF2900680B3563382B669D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.probe.host;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		DF666DC6C6C50047E2F595D4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = SMQ3E8Y57T;
+				INFOPLIST_FILE = Phone/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.probe.phone;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		08B6A4F1BB0CDFB54B9BC7BA /* Build configuration list for PBXNativeTarget "PeerTransportProbePhone" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2F91F44B3724ED1176AC9655 /* Debug */,
+				DF666DC6C6C50047E2F595D4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6F92543699018015395DF629 /* Build configuration list for PBXProject "PeerTransportPhoneProbe" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BFC392071B6A9E7996ADA925 /* Debug */,
+				5A23B065B51895D5DF078138 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A313A192EA9DE49C32F607DF /* Build configuration list for PBXNativeTarget "PeerTransportProbeHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C227588B1FC42B7D660D71BF /* Debug */,
+				C9CF2900680B3563382B669D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		BB361A82B2F71018E5A8BA3E /* XCLocalSwiftPackageReference "../../Packages/ThreadingPeerTransport" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../Packages/ThreadingPeerTransport;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		68202DB49A5580EE666EC141 /* ThreadingPeerTransport */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingPeerTransport;
+		};
+		8F99198D8AF071B8A352EA6D /* ThreadingPeerTransport */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingPeerTransport;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 6F9A001B052DECC97D2D63A3 /* Project object */;
+}

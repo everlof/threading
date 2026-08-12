@@ -346,7 +346,7 @@
       "path": "Sources/Threading/UI/Design/ThemedSplitView.swift",
       "kind": "interactiveComponent",
       "symbol": "ThemedSplitView",
-      "reason": "The divider drag stays AppKit's — super runs the whole tracking loop, and the override only reads where it ended. There is no activation to route: the panes it shuts are reachable by keyboard and by the toolbar's own themed controls."
+      "reason": "The divider drag stays AppKit's — super runs the whole tracking loop, and the override only reads where it ended. The pointer overrides are presentation, not activation: they light the seam exactly where hitTest says a press would attach, which is the hint the resize cursor already gives. There is no activation to route: the panes it shuts are reachable by keyboard and by the toolbar's own themed controls."
     },
     {
       "path": "Sources/Threading/UI/Design/WindowTitleBandView.swift",

@@ -64,6 +64,7 @@ final class LaunchLedgerTests: XCTestCase {
         boot: String = "boot-1",
         fingerprint: String? = nil,
         checkpoint: String? = nil,
+        detail: [String: String]? = nil,
         disposition: String? = nil
     ) throws -> String {
         var record: [String: Any] = [
@@ -76,6 +77,7 @@ final class LaunchLedgerTests: XCTestCase {
         ]
         if let fingerprint { record["fingerprint"] = fingerprint }
         if let checkpoint { record["checkpoint"] = checkpoint }
+        if let detail { record["detail"] = detail }
         if let disposition { record["disposition"] = disposition }
 
         let data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
@@ -194,6 +196,20 @@ final class LaunchLedgerTests: XCTestCase {
 
         XCTAssertEqual(ledger().read(), .unsupportedVersion(newestFormatSeen: 2))
         XCTAssertEqual(try Data(contentsOf: ledgerURL), before)
+    }
+
+    /// The version discriminator is the only field an older build may ask a future record to
+    /// decode. Its payload is allowed to have a shape the current `LaunchLedgerRecord` cannot
+    /// represent without turning a downgrade into false corruption.
+    func testALaterFormatDoesNotDecodeItsPayload() throws {
+        try write([
+            """
+            {"version":2,"kind":{"future":"shape"},"launch":["also","future"]}
+            """
+        ])
+
+        XCTAssertEqual(ledger().read(), .unsupportedVersion(newestFormatSeen: 2))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: ledgerURL.path))
     }
 
     /// A later format wins over damage in the same file, for that reason: the cost of being wrong
@@ -497,6 +513,79 @@ final class LaunchLedgerTests: XCTestCase {
         XCTAssertEqual(kept.count, LaunchLedgerDefaults.maximumLaunches)
         XCTAssertLessThanOrEqual(kept.count, LaunchLedgerDefaults.maximumRecords)
         XCTAssertEqual(kept.last?.launch, "launch-39", "the newest launch must be the one kept")
+    }
+
+    /// Keeps the parser's externally sized boundary reproducible without charging every fast
+    /// suite for repeated JSON decoding. Twenty complete launches exercise the launch budget;
+    /// their checkpoint distribution reaches the independent 512-record retention ceiling.
+    func testStressParserAtRetentionCeilingWhenEnabled() throws {
+        guard ProcessInfo.processInfo.environment["THREADING_LAUNCH_LEDGER_STRESS"] == "1" else {
+            throw XCTSkip("Set THREADING_LAUNCH_LEDGER_STRESS=1 to run the ledger parser sweep")
+        }
+
+        let environment = ProcessInfo.processInfo.environment
+        let runs = environment["THREADING_LAUNCH_LEDGER_STRESS_RUNS"]
+            .flatMap(Int.init) ?? 40
+        guard runs > 0 else {
+            return XCTFail("THREADING_LAUNCH_LEDGER_STRESS_RUNS must be positive")
+        }
+
+        let launchCount = LaunchLedgerDefaults.maximumLaunches
+        let checkpointCount = LaunchLedgerDefaults.maximumRecords - launchCount * 2
+        let checkpointsPerLaunch = checkpointCount / launchCount
+        let extraCheckpoints = checkpointCount % launchCount
+        var lines: [String] = []
+        lines.reserveCapacity(LaunchLedgerDefaults.maximumRecords)
+
+        for launchIndex in 0..<launchCount {
+            let id = "stress-launch-\(launchIndex)"
+            lines.append(try line(kind: "begin", launch: id, fingerprint: "stress-build"))
+            let count = checkpointsPerLaunch + (launchIndex < extraCheckpoints ? 1 : 0)
+            for checkpointIndex in 0..<count {
+                lines.append(try line(
+                    kind: "checkpoint",
+                    launch: id,
+                    checkpoint: "migrationDone",
+                    detail: ["ordinal": "\(checkpointIndex)"]
+                ))
+            }
+            lines.append(try line(kind: "end", launch: id, disposition: "clean"))
+        }
+
+        XCTAssertEqual(lines.count, LaunchLedgerDefaults.maximumRecords)
+        let data = Data((lines.joined(separator: "\n") + "\n").utf8)
+        guard case .valid(let initial) = LaunchLedgerParser.parse(data) else {
+            return XCTFail("the retention-ceiling fixture did not parse")
+        }
+        XCTAssertEqual(initial.launches.count, launchCount)
+        XCTAssertEqual(initial.records.count, LaunchLedgerDefaults.maximumRecords)
+
+        var samples: [UInt64] = []
+        samples.reserveCapacity(runs)
+        var parsedRecordCount = 0
+        for _ in 0..<runs {
+            let started = DispatchTime.now().uptimeNanoseconds
+            let result = LaunchLedgerParser.parse(data)
+            samples.append(DispatchTime.now().uptimeNanoseconds - started)
+            if case .valid(let history) = result {
+                parsedRecordCount += history.records.count
+            }
+        }
+        XCTAssertEqual(parsedRecordCount, runs * LaunchLedgerDefaults.maximumRecords)
+
+        let sorted = samples.sorted()
+        let median = sorted[sorted.count / 2]
+        let p95Index = min(sorted.count - 1, Int(ceil(Double(sorted.count) * 0.95)) - 1)
+        let milliseconds: (UInt64) -> String = {
+            String(format: "%.3f", Double($0) / 1_000_000)
+        }
+        print(
+            "THREADING_PERF launch-ledger-parser "
+                + "records=\(lines.count) bytes=\(data.count) launches=\(launchCount) "
+                + "runs=\(runs) median_ms=\(milliseconds(median)) "
+                + "p95_ms=\(milliseconds(sorted[p95Index])) "
+                + "max_ms=\(milliseconds(sorted.last ?? 0))"
+        )
     }
 
     // MARK: - The Hosted Bundle

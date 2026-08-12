@@ -219,7 +219,10 @@ private final class SegmentView: ThemedControl {
             let rect = bounds.insetBy(dx: inset, dy: inset)
             ThemedSurface.draw(
                 rect,
-                fill: isHovered ? Design.Surface.controlHover : Design.Surface.controlResting,
+                // Selection is the lifted step above the shared resting track. Using the
+                // track colour again made flat materials (notably Cyberpunk) communicate the
+                // active choice through text contrast alone.
+                fill: Design.Surface.controlHover,
                 radius: Design.Radius.pill(height: rect.height)
             )
         } else {

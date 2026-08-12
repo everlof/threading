@@ -53,7 +53,7 @@ final class AgentActivityBeamTests: XCTestCase {
     func testOneWorkingAgentLightsTheFloorInAdaptiveMono() {
         let view = beam(workingCount: 1)
         XCTAssertTrue(view.isBeamMountedAndShowingForTesting)
-        XCTAssertEqual(view.appliedStrengthForTesting, 0.3)
+        XCTAssertEqual(view.appliedStrengthForTesting, ActivityBeamDefaults.baseStrength)
         XCTAssertEqual(view.appliedActiveForTesting, true)
         XCTAssertEqual(view.appliedVariantIsColorfulForTesting, false)
         XCTAssertEqual(view.appliedVariantIsMonoForTesting, true)

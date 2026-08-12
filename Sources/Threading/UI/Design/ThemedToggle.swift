@@ -166,6 +166,18 @@ final class ThemedToggle: ThemedControl {
         )
     }
 
+    /// Layout aligns the visible track, not the invisible gutter reserved for keyboard focus.
+    /// Without this, a settings row that trails a switch and one that trails a field use the
+    /// same frame edge but paint their controls several points apart.
+    override var alignmentRectInsets: NSEdgeInsets {
+        NSEdgeInsets(
+            top: focusMargin,
+            left: focusMargin,
+            bottom: focusMargin,
+            right: focusMargin
+        )
+    }
+
     // MARK: - Interaction
 
     override func mouseDown(with event: NSEvent) {
@@ -271,6 +283,12 @@ final class ThemedToggle: ThemedControl {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
+        DisabledControlDrawing.draw(isEnabled: isEnabled) {
+            drawContents()
+        }
+    }
+
+    private func drawContents() {
         let bodySize = bodySize
         let rect = NSRect(
             x: floor((bounds.width - bodySize.width) / 2),
@@ -285,8 +303,6 @@ final class ThemedToggle: ThemedControl {
         case .onOffButton:
             drawOnOffButton(in: rect)
         }
-
-        alphaValue = isEnabled ? 1 : 0.5
     }
 
     private func drawAutomaticSwitch(in rect: NSRect) {

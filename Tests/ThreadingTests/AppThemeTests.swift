@@ -1829,6 +1829,214 @@ final class AppThemeTests: XCTestCase {
         )
     }
 
+    // MARK: - The Divider Under the Pointer
+
+    /// The same two panes inside an unshown window, which is what hover needs that the bare
+    /// fixture lacks: a fabricated crossing carries window coordinates, and the attach zone is
+    /// asked of `hitTest` through a superview.
+    private func hoverableSplitFixture() -> (window: NSWindow, split: ThemedSplitView) {
+        let split = ThemedSplitView(frame: NSRect(x: 0, y: 0, width: 200, height: 60))
+        split.addArrangedSubview(PaintedPane())
+        split.addArrangedSubview(PaintedPane())
+        split.adjustSubviews()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 60),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = split
+        split.layoutSubtreeIfNeeded()
+        return (window, split)
+    }
+
+    /// Delivers the crossing a tracking area would: the view re-derives the hovered divider
+    /// from the event's own location, so the fabricated event needs no tracking number.
+    private func pointer(
+        crosses type: NSEvent.EventType,
+        at point: NSPoint,
+        over split: ThemedSplitView,
+        in window: NSWindow
+    ) throws {
+        let event = try XCTUnwrap(
+            NSEvent.enterExitEvent(
+                with: type,
+                location: split.convert(point, to: nil),
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: window.windowNumber,
+                context: nil,
+                eventNumber: 0,
+                trackingNumber: 0,
+                userData: nil
+            )
+        )
+        switch type {
+        case .mouseEntered: split.mouseEntered(with: event)
+        case .mouseExited: split.mouseExited(with: event)
+        default: split.mouseMoved(with: event)
+        }
+    }
+
+    /// The colour actually standing in the middle of the seam, off the drawn pixels.
+    private func seamPixel(of split: ThemedSplitView) throws -> NSColor {
+        let rep = try XCTUnwrap(split.bitmapImageRepForCachingDisplay(in: split.bounds))
+        split.cacheDisplay(in: split.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / split.bounds.width
+        let seam = try XCTUnwrap(split.arrangedSubviews.first).frame.maxX
+        let x = Int((seam + split.dividerThickness / 2) * scale)
+        return try XCTUnwrap(rep.colorAt(x: x, y: rep.pixelsHigh / 2)?.usingColorSpace(.sRGB))
+    }
+
+    /// Whether a drawn pixel is the given token's ink, compared by hue, saturation and
+    /// brightness rather than by channel: the cached bitmap comes back in the window's colour
+    /// space — measured, a pure sRGB red reads back as (0.94, 0.29, 0.18) — so a channel-exact
+    /// comparison asserts the conversion rather than the ink. Hue survives the shift; the wide
+    /// saturation and brightness bands are what separate a vivid accent from the fixture's
+    /// white panes and the theme's near-black rule.
+    private func pixel(_ pixel: NSColor, draws expected: NSColor, under view: NSView) -> Bool {
+        var matches = false
+        view.effectiveAppearance.performAsCurrentDrawingAppearance {
+            guard let drawn = pixel.usingColorSpace(.sRGB),
+                  let ink = expected.usingColorSpace(.sRGB) else { return }
+            let spin = abs(drawn.hueComponent - ink.hueComponent)
+            matches = min(spin, 1 - spin) < 0.06
+                && abs(drawn.saturationComponent - ink.saturationComponent) < 0.25
+                && abs(drawn.brightnessComponent - ink.brightnessComponent) < 0.25
+        }
+        return matches
+    }
+
+    /// The seam lights with the accent exactly where a drag would attach, and nowhere else.
+    ///
+    /// "Where a drag would attach" is the platform's own claim — `NSSplitView.hitTest` takes the
+    /// points around a divider from its panes, and that claim is what turns a press into a drag
+    /// and flips the resize cursor. The sweep asserts agreement point by point rather than a
+    /// restated zone, so the hint and the cursor cannot drift apart; the two counters keep the
+    /// sweep honest about having crossed both sides of the boundary.
+    func testTheSeamLightsWithTheAccentExactlyWhereADragWouldAttach() throws {
+        let original = WindowBackdrop.ground
+        defer { WindowBackdrop.set(original) }
+        WindowBackdrop.set(.chrome)
+        AppThemePalette.set(AppThemeStyles.neoBrutalism)
+
+        let (window, split) = hoverableSplitFixture()
+        let seam = try XCTUnwrap(split.arrangedSubviews.first).frame.maxX
+        let superview = try XCTUnwrap(split.superview)
+
+        var attachable = 0
+        var handedToAPane = 0
+        for dx in stride(from: CGFloat(-8), through: 8, by: 1) {
+            let point = NSPoint(x: seam + dx, y: split.bounds.midY)
+            let attaches = split.hitTest(split.convert(point, to: superview)) === split
+            try pointer(crosses: .mouseEntered, at: point, over: split, in: window)
+
+            let drawn = pixel(try seamPixel(of: split), draws: Design.Surface.accent, under: split)
+            XCTAssertEqual(
+                drawn,
+                attaches,
+                attaches
+                    ? "a point the platform grabs from (seam \(dx)) left the seam unlit"
+                    : "a point the platform hands to a pane (seam \(dx)) lit the seam"
+            )
+            if attaches { attachable += 1 } else { handedToAPane += 1 }
+        }
+
+        XCTAssertGreaterThan(attachable, 0, "the sweep never crossed the attach zone")
+        XCTAssertGreaterThan(handedToAPane, 0, "the sweep never left the attach zone")
+    }
+
+    /// Leaving puts the rule ink back: the accent means "ready to act", and a pointer elsewhere
+    /// is not that.
+    func testLeavingTheSeamPutsTheRuleInkBack() throws {
+        let original = WindowBackdrop.ground
+        defer { WindowBackdrop.set(original) }
+        WindowBackdrop.set(.chrome)
+        AppThemePalette.set(AppThemeStyles.neoBrutalism)
+
+        let (window, split) = hoverableSplitFixture()
+        let seam = try XCTUnwrap(split.arrangedSubviews.first).frame.maxX
+        let onTheSeam = NSPoint(x: seam, y: split.bounds.midY)
+
+        try pointer(crosses: .mouseEntered, at: onTheSeam, over: split, in: window)
+        XCTAssertTrue(
+            pixel(try seamPixel(of: split), draws: Design.Surface.accent, under: split),
+            "the pointer arrived on the seam and nothing lit"
+        )
+
+        try pointer(
+            crosses: .mouseExited,
+            at: NSPoint(x: 30, y: split.bounds.midY),
+            over: split,
+            in: window
+        )
+        XCTAssertFalse(
+            pixel(try seamPixel(of: split), draws: Design.Surface.accent, under: split),
+            "the pointer left and the seam stayed lit"
+        )
+    }
+
+    /// A drag moves the seam without moving the split view's own frame, which is the one
+    /// geometry change AppKit does not re-ask tracking areas for on its own — measured, a
+    /// `setPosition` move calls neither `updateTrackingAreas()` nor (without a run-loop turn)
+    /// `layout()`, and only `didResizeSubviewsNotification` arrives with the frames already
+    /// moved. The hover strip has to follow the seam, or the hint would keep pointing at where
+    /// the divider used to be.
+    func testTheHoverStripFollowsTheSeamAfterADividerMove() throws {
+        let (_, split) = hoverableSplitFixture()
+        let oldSeam = try XCTUnwrap(split.arrangedSubviews.first).frame.maxX
+
+        split.setPosition(40, ofDividerAt: 0)
+        split.layoutSubtreeIfNeeded()
+        let newSeam = try XCTUnwrap(split.arrangedSubviews.first).frame.maxX
+        XCTAssertNotEqual(oldSeam, newSeam, "the fixture's divider did not move")
+
+        let mid = split.bounds.midY
+        XCTAssertTrue(
+            split.trackingAreas.contains { $0.rect.contains(NSPoint(x: newSeam + 1, y: mid)) },
+            "no hover strip follows the seam to where it moved"
+        )
+        XCTAssertFalse(
+            split.trackingAreas.contains { $0.rect.contains(NSPoint(x: oldSeam + 1, y: mid)) },
+            "a hover strip stayed at the seam's old position"
+        )
+    }
+
+    /// A pane that is not on screen has no seam to grab — `SidebarSplitViewController` hides the
+    /// divider beside a collapsed pane — so nothing near where it stood may light. Driven at the
+    /// view level with a hidden pane, which is how a split view expresses a collapsed neighbour.
+    func testASeamBesideAHiddenPaneDoesNotLight() throws {
+        let original = WindowBackdrop.ground
+        defer { WindowBackdrop.set(original) }
+        WindowBackdrop.set(.chrome)
+        AppThemePalette.set(AppThemeStyles.neoBrutalism)
+
+        let (window, split) = hoverableSplitFixture()
+        try XCTUnwrap(split.arrangedSubviews.first).isHidden = true
+        split.adjustSubviews()
+        split.layoutSubtreeIfNeeded()
+
+        for x in stride(from: CGFloat(0), through: 8, by: 1) {
+            try pointer(
+                crosses: .mouseEntered,
+                at: NSPoint(x: x, y: split.bounds.midY),
+                over: split,
+                in: window
+            )
+        }
+
+        let rep = try XCTUnwrap(split.bitmapImageRepForCachingDisplay(in: split.bounds))
+        split.cacheDisplay(in: split.bounds, to: rep)
+        let row = rep.pixelsHigh / 2
+        for x in 0..<rep.pixelsWide {
+            let drawn = try XCTUnwrap(rep.colorAt(x: x, y: row)?.usingColorSpace(.sRGB))
+            XCTAssertFalse(
+                pixel(drawn, draws: Design.Surface.accent, under: split),
+                "a hidden pane's seam lit up at x = \(x)"
+            )
+        }
+    }
+
     /// The fixture proves the view; this proves the window. Its panes are placed by
     /// `NSSplitViewController` through constraints, which is a different path from a fixture's
     /// arranged subviews and the only one the user ever looks at.

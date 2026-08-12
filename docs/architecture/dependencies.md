@@ -249,7 +249,14 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     elements — and whose `rendersStatically` pins the internal frozen-time environment. That
     pin now also *pauses* the driving `TimelineView` (t and fade are both constants there),
     so the Reduce Motion mode is a genuinely static picture rather than 60 identical frames
-    a second.
+    a second. AppKit's recursive `cacheDisplay` does not preserve a transparent
+    `NSHostingView` root: it rasterizes the centre white even though the live compositor is
+    correct. `BorderBeamHostView.withCachedDisplayFallback` is therefore the explicit
+    offscreen-render contract. It hides only the live shader host for the synchronous draw and
+    paints a deterministic spec-derived ring, preserving every surface pixel beneath it. The
+    package regression samples the centre after a parent-view cache, and application screenshot
+    code reaches the contract only through `AgentActivityBeamView` so the package type remains
+    contained at the design-system boundary.
   - **The platform floor is ours.** The Shader APIs need macOS 14 but Threading deploys to
     13, so the package declares `.macOS(.v13)` and every SwiftUI view carries
     `@available(macOS 14.0, *)`. `AgentActivityBeamView` (in `UI/Design/`) is the theme

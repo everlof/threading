@@ -119,7 +119,9 @@ rule refuses one: a mark we cannot measure is one we decline to change.
 sandbox, low reasoning effort, default account. Codex-only for the *sandbox*, not for policy:
 the run reads an unfamiliar project's files and `--sandbox read-only` bounds it in one flag,
 where Claude's headless mode — permitted, see `supportsNativeUI` — would need its tool surface
-constrained explicitly for no gain here.
+constrained explicitly for no gain here. A Threading project is a folder, not necessarily a Git
+repository, so the helper also passes `--skip-git-repo-check`; that skips Codex's repository
+preflight, not the read-only sandbox or the host's later project-containment check.
 It is **manual-only** because it spends the user's own usage: each run is one explicit
 "Research Icon with Codex" menu click, never a background default. A file path in its
 answer is admitted only from inside the project's own folder — the run is sandboxed, but
@@ -130,8 +132,10 @@ child's stdout and stderr — merged into one pipe, so a single reader can never
 and the record holds the whole story — land in `IconResearch/<projectID>.jsonl` under
 Application Support, written *before* the verdict so failed runs are exactly the ones
 whose record survives. Stages log through `ThreadingLogger.agent`, and the sidebar exposes
-the record as "Open Last Research Log". This observability exists because the first real
-run failed silently and nothing could say where.
+the record as "Open Last Research Log". An abnormal exit also surfaces the last plain CLI
+diagnostic (or structured error message), stripped of controls and capped at 400 characters;
+provider JSONL remains in the record instead of spilling into an alert. This observability exists
+because the first real run failed silently and nothing could say where.
 
 Agents can set the icon from inside a session via the `set_project_icon` MCP tool, its own
 group on the Tools page.

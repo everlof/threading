@@ -458,6 +458,13 @@ answer depend on itself — the card returns, which makes it wide, which sends i
 `TerminalContainerViewController.viewDidLayout` is the single place both halves are re-asked,
 because a layout pass is what a divider drag and a rename of the branch have in common.
 
+A **native conversation has a stricter room test**. Its ink owns a centred 620-point readable
+column, and user bubbles reach that column's trailing edge; therefore a card may show only when
+its fitting width, the pane-edge inset, and a full inset of separation all fit in the trailing
+gutter beside that column. The generic half-pane rule cannot answer this: opening the display
+panel can leave the card well under half the narrowed pane while putting it directly over a user
+bubble. A pane narrower than the readable measure has no such gutter, so the card withdraws.
+
 The switch is `StatusCardVisibility`, through `PreferenceStore` for the same reason
 `DisplayPaneWidth` is, and it is read as an *optional* — absent has to mean on, and
 `bool(forKey:)` cannot tell "switched off" from "never asked". The header button reflects the

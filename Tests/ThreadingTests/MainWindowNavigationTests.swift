@@ -91,6 +91,71 @@ final class MainWindowNavigationTests: XCTestCase {
         XCTAssertTrue(forward.isEnabled)
     }
 
+    func testAccountUsagePillIsLazyUntilAConsumerNeedsIt() throws {
+        let controller = makeController()
+
+        XCTAssertFalse(
+            controller.accountUsageItemIsMaterialized,
+            "An empty/composer launch must not start the hidden usage pill's timer"
+        )
+
+        let item = controller.accountUsageItemView
+
+        XCTAssertTrue(controller.accountUsageItemIsMaterialized)
+        XCTAssertTrue(item.superview === controller.paneHeaderStackView)
+        let arranged = try XCTUnwrap(controller.paneHeaderStackView?.arrangedSubviews)
+        let index = try XCTUnwrap(arranged.firstIndex(of: item))
+        XCTAssertTrue(
+            arranged[index + 1] === controller.openInSplitControl,
+            "The late pill keeps its place between the flexible spacer and Open In control"
+        )
+    }
+
+    func testPageTabIsLazyUntilARealPageNeedsIt() throws {
+        let controller = makeController()
+
+        XCTAssertFalse(controller.pageTabViewIsMaterialized)
+
+        controller.showSettingsPage(id: SettingsPages.generalID)
+        XCTAssertFalse(
+            controller.pageTabViewIsMaterialized,
+            "Settings has its own mode header and must not build an empty document tab"
+        )
+
+        controller.toggleSettings()
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(
+            folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("threading-lazy-page-tab-\(UUID().uuidString)")
+        ))
+        defer { ProjectStore.shared.removeProject(id: project.id) }
+
+        controller.projectSidebar(ProjectSidebarViewController(), didSelectProject: project.id)
+
+        let tab = try XCTUnwrap(controller.materializedPageTabView)
+        XCTAssertTrue(controller.pageTabViewIsMaterialized)
+        XCTAssertTrue(tab.superview === controller.paneHeaderStackView)
+        XCTAssertTrue(controller.paneHeaderStackView?.arrangedSubviews.first === tab)
+        XCTAssertTrue(tab.isSelected)
+        XCTAssertFalse(tab.isHidden, "The first real page must reveal its late-created tab")
+    }
+
+    func testInitiallyHiddenPaneHeaderGlyphsStayDeferred() throws {
+        let controller = makeController()
+
+        XCTAssertFalse(try XCTUnwrap(controller.openInToolbarButton).hasMaterializedGlyph)
+        XCTAssertFalse(try XCTUnwrap(controller.openInMenuToolbarButton).hasMaterializedGlyph)
+        XCTAssertFalse(try XCTUnwrap(controller.surfaceToggleToolbarButton).hasMaterializedGlyph)
+
+        XCTAssertTrue(
+            try XCTUnwrap(controller.newSessionButton).hasMaterializedGlyph,
+            "The visible New Session action still belongs to first paint"
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(controller.statusCardToolbarButton).hasMaterializedGlyph,
+            "Standing pane controls remain complete even without a session"
+        )
+    }
+
     // MARK: - The settings detour
 
     /// ⌘, is a *detour*: it opens Settings over whatever the pane was showing and puts that back

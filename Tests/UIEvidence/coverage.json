@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 1,
+  "title": "Threading UI evidence",
+  "entries": [
+    {
+      "id": "design-system-components",
+      "kind": "component",
+      "status": "implemented",
+      "priority": "supporting",
+      "title": "Design-system components",
+      "description": "Every interactive Component Gallery story, captured independently so component states remain legible without finding them inside a whole application window.",
+      "states": [
+        "Every checked-in gallery story",
+        "System light appearance",
+        "System dark appearance"
+      ],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Adaptive Light", "Adaptive Dark", "Each fixed theme's authored appearance"],
+        "sizes": ["Gallery story width"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/UIEvidenceRenderTests.swift",
+        "test": "ThreadingTests/UIEvidenceRenderTests/testCapturesEveryComponentGalleryStory"
+      },
+      "capture": {
+        "metadata": "component-evidence.json"
+      }
+    },
+    {
+      "id": "session-composer-layout",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Session composer",
+      "description": "The opening composer at full and constrained heights, including its empty-project refusal state and deliberately dissimilar themes.",
+      "states": ["Tall", "Short", "No project selected"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist", "Hard-retro family"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Tall", "Short"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SessionComposerRenderTests.swift",
+        "test": "ThreadingTests/SessionComposerRenderTests/testRendersTallAndShortUnderSystemAndStyledThemes"
+      },
+      "capture": {
+        "glob": "composer-*.png"
+      }
+    },
+    {
+      "id": "sidebar-session-rows",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Sidebar session rows",
+      "description": "Session rows at rest, working, hovered, selected, pinned and under title truncation pressure. Each image is one named row state in light or dark appearance.",
+      "states": ["Idle", "Working", "Hovered", "Selected", "Pinned", "Long title"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["240×28 points"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SidebarRowRenderTests.swift",
+        "test": "ThreadingTests/SidebarRowRenderTests/testRendersTheStorybook"
+      },
+      "capture": {
+        "glob": "sidebar-row-*.png"
+      }
+    },
+    {
+      "id": "git-review-pane",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Git Review pane",
+      "description": "The real virtualized Git Review pane after a diff arrives, proving file cards fill the pane rather than rendering only isolated row fixtures.",
+      "states": ["Changed files loaded"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["720-point pane"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/GitReviewRenderTests.swift",
+        "test": "ThreadingTests/GitReviewRenderTests/testRendersTheFilePaneItselfInBothAppearances"
+      },
+      "capture": {
+        "glob": "git-review-pane-*.png"
+      }
+    },
+    {
+      "id": "general-settings-layout",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "General settings",
+      "description": "The complete General settings page at both supported review widths, including its alert, confirmation and provider configuration rows.",
+      "states": ["Complete settings form"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Regular", "Constrained"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/GeneralSettingsRenderTests.swift",
+        "test": "ThreadingTests/GeneralSettingsRenderTests/testRendersGeneralSettingsToImages"
+      },
+      "capture": {
+        "glob": "general-*.png"
+      }
+    },
+    {
+      "id": "onboarding-layouts",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Onboarding",
+      "description": "Appearance selection, provider discovery, import results and every notification authorization state across the representative visual matrix.",
+      "states": [
+        "Appearance selection",
+        "Provider discovery",
+        "Conversation import",
+        "Notifications undetermined",
+        "Notifications granted",
+        "Notifications denied"
+      ],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Onboarding window"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/OnboardingRenderTests.swift",
+        "tests": [
+          "ThreadingTests/OnboardingRenderTests/testRendersTheFlowUnderSystemAndTwoStyledThemes",
+          "ThreadingTests/OnboardingRenderTests/testRendersTheOtherPages"
+        ]
+      },
+      "capture": {
+        "glob": "onboarding-*.png"
+      }
+    },
+    {
+      "id": "usage-dashboard-layout",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Usage dashboard",
+      "description": "The Overview and Limits tabs with bounded chart data and the real virtualized breakdown under four contrasting materials.",
+      "states": ["Overview", "Limits"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Neo Brutalism", "Classic Player"],
+        "appearances": ["Theme representative appearance"],
+        "sizes": ["932-point dashboard"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/UsageDashboardRenderTests.swift",
+        "test": "ThreadingTests/UsageDashboardRenderTests/testRendersFullUsageDashboardAcrossSystemAndCustomThemes"
+      },
+      "capture": {
+        "glob": "usage-dashboard-*.png"
+      }
+    },
+    {
+      "id": "file-change-relaunch",
+      "kind": "journey",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "File change and relaunch recovery",
+      "description": "A recorded Codex turn mutates the synthetic checkout, exposes Git Review and survives an application relaunch with its transcript intact.",
+      "states": ["Streaming file change", "Completed review", "Recovered after relaunch"],
+      "matrix": {
+        "providers": ["Codex fixture agent"],
+        "sizes": ["1400×900 points"]
+      },
+      "source": {
+        "path": "Tests/ThreadingUITests/CodexFileChangeJourneyUITests.swift",
+        "test": "ThreadingUITests/CodexFileChangeJourneyUITests/testRecordedCodexTurnMutatesFileAndRecoversAfterRelaunch"
+      },
+      "capture": {
+        "journey": "File change and relaunch recovery"
+      }
+    },
+    {
+      "id": "stop-and-continue",
+      "kind": "journey",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Stop and continue",
+      "description": "Stopping the exact active Codex turn leaves the checkout unchanged and the same conversation able to complete a follow-up turn.",
+      "states": ["Working", "Interrupted and ready", "Follow-up completed"],
+      "matrix": {
+        "providers": ["Codex fixture agent"],
+        "sizes": ["1400×900 points"]
+      },
+      "source": {
+        "path": "Tests/ThreadingUITests/CodexStopTurnJourneyUITests.swift",
+        "test": "ThreadingUITests/CodexStopTurnJourneyUITests/testStoppingCodexTurnLeavesConversationUsable"
+      },
+      "capture": {
+        "journey": "Stop and continue"
+      }
+    },
+    {
+      "id": "permission-refusal-recovery",
+      "kind": "journey",
+      "status": "planned",
+      "priority": "critical",
+      "title": "Permission refusal and recovery",
+      "description": "A permission request is visible, refusal performs no side effect, and the conversation remains usable afterwards.",
+      "states": ["Permission requested", "Refused", "Ready for another turn"],
+      "matrix": {
+        "providers": ["Representative native provider"],
+        "sizes": ["1400×900 points"]
+      }
+    },
+    {
+      "id": "provider-failure-retry",
+      "kind": "journey",
+      "status": "planned",
+      "priority": "critical",
+      "title": "Provider failure and retry",
+      "description": "A provider process or protocol failure is shown as an actionable error and a later turn succeeds without recreating the application state.",
+      "states": ["Provider failed", "Actionable error", "Retry completed"],
+      "matrix": {
+        "providers": ["Representative native provider"],
+        "sizes": ["1400×900 points"]
+      }
+    }
+  ]
+}

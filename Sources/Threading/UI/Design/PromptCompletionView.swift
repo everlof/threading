@@ -24,6 +24,22 @@ struct PromptCompletionItem: Equatable {
         self.kind = kind
         self.isEnabled = isEnabled
     }
+
+    /// The one place a capability becomes a row. The composer and the gallery previewed the
+    /// same panel from two hand-written mappings, which is how a preview drifts from the
+    /// surface it is supposed to stand for. An unavailable capability leads with its reason,
+    /// because that is the answer to the question its dimmed row provokes.
+    init(capability: ComposerCapability) {
+        let argument = capability.argumentHint.isEmpty ? "" : "  \(capability.argumentHint)"
+        self.init(
+            id: capability.id,
+            title: capability.invocationText + argument,
+            accessibilityTitle: capability.displayName,
+            detail: capability.unavailableReason ?? capability.description,
+            kind: capability.kind == .skill ? L10n.string("Skill") : L10n.string("Command"),
+            isEnabled: capability.isEnabled
+        )
+    }
 }
 
 /// A non-key, app-owned completion panel. It lives in the presenting window rather than in a
@@ -40,6 +56,28 @@ final class PromptCompletionPresenter {
     private var onDismiss: (() -> Void)?
 
     var isVisible: Bool { panel?.superview != nil }
+
+    /// Builds the same completion surface used by `present`, without installing event monitors
+    /// or requiring a window anchor. The component gallery and rendered-state tests need the
+    /// actual rows to be visible in a still frame; a launcher button cannot prove that the
+    /// private panel's typography, selection, or unavailable state still renders correctly.
+    func makeInlinePreview(
+        items: [PromptCompletionItem],
+        selectedIndex: Int,
+        width: CGFloat = 360
+    ) -> NSView {
+        let panel = PromptCompletionPanel()
+        panel.configure(items: items, selectedIndex: selectedIndex) { _ in }
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        panel.setAccessibilityIdentifier("prompt-completion.inline-preview")
+        NSLayoutConstraint.activate([
+            panel.widthAnchor.constraint(equalToConstant: max(PromptCompletionMetrics.minimumWidth, width)),
+            panel.heightAnchor.constraint(
+                equalToConstant: min(panel.desiredHeight, PromptCompletionMetrics.maximumHeight)
+            )
+        ])
+        return panel
+    }
 
     func present(
         items: [PromptCompletionItem],

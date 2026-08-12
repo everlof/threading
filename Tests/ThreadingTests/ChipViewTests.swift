@@ -122,6 +122,73 @@ final class ChipViewTests: XCTestCase {
         XCTAssertEqual(chip.fittingSize.height, 18, "the fixed chooser constraint kept an old theme's height")
     }
 
+    /// A classic popup draws its arrow independently of the content stack. Its natural width
+    /// must therefore include that arrow well before a `ControlRowView` decides how to spend
+    /// spare space; otherwise the spring grows while the last title glyph is clipped.
+    func testAClassicChooserNaturalWidthReservesItsArrowWell() throws {
+        AppThemePalette.set(AppThemeStyles.platinum)
+        let chip = ChipView()
+        chip.configure(icon: nil, title: "Everlof")
+        chip.frame.size = chip.intrinsicContentSize
+        chip.layoutSubtreeIfNeeded()
+
+        let label = try XCTUnwrap(
+            descendants(in: chip).compactMap { $0 as? NSTextField }.first
+        )
+        let labelFrame = chip.convert(label.bounds, from: label)
+        let arrow = ClassicChoiceDrawing.arrowRect(in: chip.bounds, style: .popup)
+
+        XCTAssertGreaterThan(chip.intrinsicContentSize.width, label.intrinsicContentSize.width)
+        XCTAssertLessThanOrEqual(
+            labelFrame.maxX,
+            arrow.minX - ClassicChoiceDrawing.textInset + 0.5,
+            "the popup label entered the independently drawn arrow well "
+                + "(chip=\(chip.intrinsicContentSize.width), label=\(label.frame), "
+                + "intrinsic=\(label.intrinsicContentSize.width), fitting=\(label.fittingSize.width), "
+                + "cell=\(label.cell?.cellSize.width ?? -1), insets=\(label.alignmentRectInsets))"
+        )
+        XCTAssertGreaterThanOrEqual(
+            label.frame.width,
+            label.intrinsicContentSize.width - 0.5,
+            "the popup truncated despite being laid out at its natural width"
+        )
+    }
+
+    /// The period themes scale Helvetica independently of the system font. Measuring the
+    /// label's plain attributed value used AppKit's default font instead of the font on its
+    /// cell, leaving a control that claimed to be natural width while visibly drawing `A…` or
+    /// `Extra Hi…` in the composer footer.
+    func testClassicChooserNaturalWidthUsesTheFontItActuallyDraws() throws {
+        for theme in [AppThemeStyles.openStep, AppThemeStyles.irix] {
+            AppThemePalette.set(theme)
+            for title in ["Auto", "Extra High"] {
+                let chip = ChipView()
+                chip.configure(icon: nil, title: title)
+                chip.frame.size = chip.intrinsicContentSize
+                chip.layoutSubtreeIfNeeded()
+
+                let label = try XCTUnwrap(
+                    descendants(in: chip).compactMap { $0 as? NSTextField }.first
+                )
+                let font = try XCTUnwrap(label.font)
+                let drawnTitleWidth = title.size(withAttributes: [.font: font]).width
+                let cell = try XCTUnwrap(label.cell)
+                let titleRect = cell.titleRect(forBounds: label.bounds)
+                XCTAssertGreaterThanOrEqual(
+                    titleRect.width,
+                    drawnTitleWidth - 0.5,
+                    "\(theme.name) truncated \(title) at its own natural width "
+                        + "(frame=\(label.frame.width), titleRect=\(titleRect.width), "
+                        + "glyphs=\(drawnTitleWidth), cell=\(cell.cellSize.width))"
+                )
+                XCTAssertTrue(
+                    cell.expansionFrame(withFrame: label.bounds, in: label).isEmpty,
+                    "\(theme.name) still asked AppKit to expand the truncated \(title) cell"
+                )
+            }
+        }
+    }
+
     /// An unknown SF Symbol name resolves to no image, and must be treated as the iconless
     /// case rather than drawing an empty slot — symbol names are string literals and a
     /// renamed one should degrade quietly.

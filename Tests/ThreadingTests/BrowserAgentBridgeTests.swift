@@ -446,39 +446,38 @@ final class BrowserAgentBridgeTests: XCTestCase {
         let table = try XCTUnwrap(
             descendants(in: controller.view).compactMap { $0 as? ThemedGroupedTableView }.first
         )
-        // With the injected empty tool catalogue the fixed Website Access section is row three.
-        // Reach it through the production viewport rather than assuming a virtualized page has
-        // eagerly built every row below the fold.
-        XCTAssertGreaterThan(table.numberOfRows, 3)
-        table.scrollRowToVisible(3)
-        window.contentView?.layoutSubtreeIfNeeded()
-        var websiteCell = try XCTUnwrap(
-            table.view(atColumn: 0, row: 3, makeIfNecessary: true),
-            "the virtualized Website Access row was not materialized"
+        // Website grants are individual virtual rows. Locate them by their semantic content:
+        // Browser Sign-In may gain or lose rows without changing what this test is proving.
+        func websiteCell(containing origin: String) -> NSView? {
+            for row in 0..<table.numberOfRows {
+                table.scrollRowToVisible(row)
+                window.contentView?.layoutSubtreeIfNeeded()
+                guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: true) else {
+                    continue
+                }
+                let labels = descendants(in: cell)
+                    .compactMap { ($0 as? NSTextField)?.stringValue }
+                if labels.contains(origin) { return cell }
+            }
+            return nil
+        }
+
+        let firstWebsiteCell = try XCTUnwrap(
+            websiteCell(containing: first.key),
+            "the first virtualized Website Access row was not materialized"
         )
-        var labels = descendants(in: websiteCell)
-            .compactMap { ($0 as? NSTextField)?.stringValue }
-        XCTAssertTrue(labels.contains(first.key))
-        XCTAssertTrue(labels.contains(second.key))
+        XCTAssertNotNil(websiteCell(containing: second.key))
 
         let revoke = try XCTUnwrap(
-            descendants(in: websiteCell)
+            descendants(in: firstWebsiteCell)
                 .compactMap { $0 as? ThemedButton }
                 .first { $0.title == "Revoke" }
         )
         _ = revoke.sendAction(revoke.action, to: revoke.target)
 
         XCTAssertEqual(store.allowedOrigins, [second.key])
-        table.scrollRowToVisible(3)
-        window.contentView?.layoutSubtreeIfNeeded()
-        websiteCell = try XCTUnwrap(
-            table.view(atColumn: 0, row: 3, makeIfNecessary: true),
-            "the reloaded Website Access row was not materialized"
-        )
-        labels = descendants(in: websiteCell)
-            .compactMap { ($0 as? NSTextField)?.stringValue }
-        XCTAssertFalse(labels.contains(first.key))
-        XCTAssertTrue(labels.contains(second.key))
+        XCTAssertNil(websiteCell(containing: first.key))
+        XCTAssertNotNil(websiteCell(containing: second.key))
     }
 
     func testBrowserToolArgumentsDecodeAndScreenshotCarriesAnImageBlock() throws {

@@ -29,6 +29,11 @@ final class LimitRecoveryCoordinator {
     /// cannot start a second one.
     private var recovering: Set<SessionID> = []
 
+    /// The refusal currently standing over each flagged session, held only until the policy has
+    /// decided what to do with it — the durable half is `LimitEscapeSuggestionStore`, which both
+    /// this and the rendered-conversation surface feed.
+    private var parked: [SessionID: UsageLimitStop] = [:]
+
     // MARK: - Initialization
 
     private init() {}
@@ -75,6 +80,8 @@ final class LimitRecoveryCoordinator {
             // arrived has no other way back, and the mark is the one thing on the row that
             // would otherwise outlive what it describes.
             recovering.remove(sessionID)
+            parked.removeValue(forKey: sessionID)
+            LimitEscapeSuggestionStore.shared.refusalCleared(for: sessionID)
             AgentRuntime.shared.controller(for: sessionID)?
                 .activityTracker.noteLimitCleared()
             ThreadingLogger.agent.debug(
@@ -84,6 +91,7 @@ final class LimitRecoveryCoordinator {
         }
         guard !recovering.contains(sessionID) else { return }
         recovering.insert(sessionID)
+        parked[sessionID] = stop
 
         EventLog.shared.record(.limitRecovery, "Usage-limit refusal read from a transcript", [
             "session": sessionID.uuidString,
@@ -98,6 +106,7 @@ final class LimitRecoveryCoordinator {
             EventLog.shared.record(.limitRecovery, "Refusal seen with no live process", [
                 "session": sessionID.uuidString
             ])
+            parked.removeValue(forKey: sessionID)
             recovering.remove(sessionID)
             return
         }
@@ -108,6 +117,7 @@ final class LimitRecoveryCoordinator {
             EventLog.shared.record(.limitRecovery, "Session flagged, policy leaves it to the user", [
                 "session": sessionID.uuidString
             ])
+            offerEscape(for: sessionID)
             recovering.remove(sessionID)
 
         case .waitForReset:
@@ -330,7 +340,26 @@ final class LimitRecoveryCoordinator {
             \(reason, privacy: .private(mask: .hash))
             """
         )
+        // A session left flagged is exactly the session the interactive offer is for, whichever
+        // policy put it there. This is the second of the two places `recoveryArmed: false`
+        // lands, and both make the same offer.
+        offerEscape(for: sessionID)
         recovering.remove(sessionID)
+    }
+
+    // MARK: - Private Methods — The Interactive Escape
+
+    /// Publishes the one-tap offer for a session left flagged.
+    ///
+    /// Called from both places `noteLimitParked(recoveryArmed: false)` lands, and from nowhere
+    /// else: an armed recovery already has a plan and does not need a second one offered over it.
+    ///
+    /// The offer needs no settings opt-in, which is the whole difference between it and the
+    /// unbuilt `resumeVia` policy: `limit-recovery.md` refuses automatic recovery because it
+    /// "types into the user's session with nobody watching", and here the press is the watching.
+    private func offerEscape(for sessionID: SessionID) {
+        guard let stop = parked[sessionID] else { return }
+        LimitEscapeSuggestionStore.shared.refusalStands(stop, for: sessionID)
     }
 
     /// The screen's tail, for the journal — enough rows to see what stood where the chooser

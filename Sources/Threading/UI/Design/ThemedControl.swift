@@ -218,6 +218,24 @@ class ThemedControl: NSControl, ThemedComponent {
     override func isAccessibilityEnabled() -> Bool { isEnabled }
 }
 
+/// Applies the design system's disabled recipe before any part of a modern control is drawn.
+/// Keeping this at the drawing boundary dims plate, mark and ink together and avoids each
+/// control inventing a different replacement colour. Callers whose material has a historically
+/// authored disabled gadget do not use this wrapper.
+@MainActor
+enum DisabledControlDrawing {
+    static func draw(isEnabled: Bool, _ body: () -> Void) {
+        guard !isEnabled, let context = NSGraphicsContext.current?.cgContext else {
+            body()
+            return
+        }
+        context.saveGState()
+        context.setAlpha(Design.Opacity.disabledControl)
+        body()
+        context.restoreGState()
+    }
+}
+
 // MARK: - Keyboard Focus Origin
 
 /// Whether the focus a control holds arrived from the keyboard — opt-in, for the few controls the

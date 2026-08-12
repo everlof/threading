@@ -2,6 +2,34 @@ import AppKit
 import ThreadingExtensionKit
 import UniformTypeIdentifiers
 
+// MARK: - Performance diagnostics
+
+#if DEBUG
+/// Phase timings from the most recent sidebar reload.
+///
+/// The production recorder keeps the always-on coarse spans. This Debug-only value lets the
+/// deterministic stress fixture print the same reload's internal phases without exporting and
+/// reparsing a trace, so a cold-load regression can be assigned to model projection, indexing,
+/// or AppKit rather than hidden inside one controller-load number.
+struct ProjectSidebarReloadPerformance {
+    var totalNanoseconds: UInt64 = 0
+    var treeNanoseconds: UInt64 = 0
+    var shapeNanoseconds: UInt64 = 0
+    var adoptionNanoseconds: UInt64 = 0
+    var indexingNanoseconds: UInt64 = 0
+    var outlineNanoseconds: UInt64 = 0
+
+    var unclassifiedNanoseconds: UInt64 {
+        let classified = treeNanoseconds
+            &+ shapeNanoseconds
+            &+ adoptionNanoseconds
+            &+ indexingNanoseconds
+            &+ outlineNanoseconds
+        return totalNanoseconds >= classified ? totalNanoseconds - classified : 0
+    }
+}
+#endif
+
 // MARK: - Project Sidebar View Controller
 
 /// Source list of projects and the agent sessions inside them.
@@ -37,6 +65,7 @@ final class ProjectSidebarViewController: NSViewController {
         scroll.automaticallyAdjustsContentInsets = false
         return scroll
     }()
+    private var scrollViewBottomConstraint: NSLayoutConstraint?
     private var emptyStateView: NSView?
 
     private func makeEmptyStateView() -> NSView {
@@ -241,6 +270,10 @@ final class ProjectSidebarViewController: NSViewController {
     /// chats has no disclosure triangle to remember a state for.
     private var collapsedSideChatParents: Set<SessionID> = []
 
+    #if DEBUG
+    private(set) var lastReloadPerformance = ProjectSidebarReloadPerformance()
+    #endif
+
     // MARK: - Lifecycle
 
     init(
@@ -329,6 +362,8 @@ private extension ProjectSidebarViewController {
         // which itself starts below the traffic lights via the safe area. Still no app-name
         // label or section heading: the band holds controls that act on the list, not a
         // repetition of what the list already shows.
+        let bottomConstraint = scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor)
+        scrollViewBottomConstraint = bottomConstraint
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(
                 equalTo: header.bottomAnchor,
@@ -336,7 +371,7 @@ private extension ProjectSidebarViewController {
             ),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor)
+            bottomConstraint
         ])
 
         // Before the first `reload()`, so the first tree is drawn at the chosen density
@@ -500,7 +535,26 @@ extension ProjectSidebarViewController {
         _ = view
         guard !hasMountedInitialTree else { return }
         hasMountedInitialTree = true
+
+        // A correctly sized live viewport makes every programmatic disclosure materialize and
+        // retain rows from each intermediate tree height. None of those intermediate states is
+        // presented: the complete first tree lands synchronously in this call. Replace only the
+        // list's bottom constraint while constructing it, keeping the final width and the rest
+        // of the window in force, then restore the real viewport before the next display pass.
+        guard let bottomConstraint = scrollViewBottomConstraint,
+              scrollView.frame.height > 0 else {
+            reload()
+            return
+        }
+
+        let suppressedHeight = scrollView.heightAnchor.constraint(equalToConstant: 0)
+        bottomConstraint.isActive = false
+        suppressedHeight.isActive = true
+        view.layoutSubtreeIfNeeded()
         reload()
+        suppressedHeight.isActive = false
+        bottomConstraint.isActive = true
+        view.needsLayout = true
     }
 
     /// Shows a receipt for something the list just did, with the way back on it.
@@ -533,7 +587,15 @@ extension ProjectSidebarViewController {
             return
         }
         isReloading = true
+        #if DEBUG
+        let reloadStarted = DispatchTime.now().uptimeNanoseconds
+        var measuredReload = ProjectSidebarReloadPerformance()
+        #endif
         defer {
+            #if DEBUG
+            measuredReload.totalNanoseconds = DispatchTime.now().uptimeNanoseconds - reloadStarted
+            lastReloadPerformance = measuredReload
+            #endif
             isReloading = false
             if needsReloadAfterCurrent {
                 needsReloadAfterCurrent = false
@@ -558,6 +620,9 @@ extension ProjectSidebarViewController {
             ])
         }
 
+        #if DEBUG
+        let treeStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
         let treeSpan = PerformanceRecorder.shared.begin(
             "sidebar.tree.build",
             category: "sidebar",
@@ -568,7 +633,14 @@ extension ProjectSidebarViewController {
             visibility: sessionVisibility
         )
         treeSpan.end(metadata: ["roots": String(rebuilt.count)])
+        #if DEBUG
+        measuredReload.treeNanoseconds = DispatchTime.now().uptimeNanoseconds - treeStarted
+        let shapeStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
         let shape = SidebarTreeShape(roots: rebuilt)
+        #if DEBUG
+        measuredReload.shapeNanoseconds = DispatchTime.now().uptimeNanoseconds - shapeStarted
+        #endif
 
         if shape == renderedShape, !rootNodes.isEmpty {
             // The presented nodes are kept deliberately: the outline identifies rows by
@@ -585,12 +657,29 @@ extension ProjectSidebarViewController {
         let previousShape = renderedShape
         // The rebuild's *content*, on the rows already on screen wherever the identity
         // survived — see `SidebarOutlineUpdate.adopt`.
+        #if DEBUG
+        let adoptionStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
         rootNodes = SidebarOutlineUpdate.adopt(rebuilt, reusing: rootNodes)
+        #if DEBUG
+        measuredReload.adoptionNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - adoptionStarted
+        #endif
         renderedShape = shape
+        #if DEBUG
+        let indexingStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
         rebuildNodeIndexes()
+        #if DEBUG
+        measuredReload.indexingNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - indexingStarted
+        #endif
 
         setEmptyStateVisible(rootNodes.isEmpty)
 
+        #if DEBUG
+        let outlineStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
         let outlineSpan = PerformanceRecorder.shared.begin(
             "sidebar.outline.apply-structure",
             category: "sidebar",
@@ -607,7 +696,11 @@ extension ProjectSidebarViewController {
         let steps = isFirstList
             ? []
             : SidebarOutlineUpdate.steps(from: previousShape, to: shape)
-        applyStructure(steps: steps, wholesale: isFirstList)
+        applyStructure(
+            steps: steps,
+            wholesale: isFirstList,
+            recursivelyExpandStandingRows: isFirstList
+        )
 
         if let selectedTerminalID {
             select(terminalID: selectedTerminalID, notifyDelegate: false)
@@ -618,6 +711,59 @@ extension ProjectSidebarViewController {
             "rows": String(outlineView.numberOfRows),
             "steps": String(steps.count)
         ])
+        #if DEBUG
+        measuredReload.outlineNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - outlineStarted
+        #endif
+    }
+
+    /// Reorders the one project whose session title changed while Name order is active.
+    ///
+    /// A title cannot add a row, change repository grouping, move a terminal, or change a
+    /// session's branch/lineage. Rebuilding all projects for it made one 5,000-session title
+    /// event sort thousands of unrelated names. Rebuild the affected project's projection,
+    /// preserve every presented node identity, then apply the same outline diff as `reload`.
+    /// Unexpected identity drift falls back to the complete path rather than leaving indexes
+    /// that do not describe the tree.
+    private func applySessionOrderChange(_ sessionID: SessionID) {
+        guard let presentedProject = projectNodesBySessionID[sessionID],
+              let rebuiltProject = SidebarTreeBuilder.projectNode(
+                  for: presentedProject.projectID,
+                  from: projectStore.projects
+              )
+        else {
+            reload()
+            return
+        }
+
+        let presentedProjectShape = SidebarTreeShape(roots: [presentedProject])
+        let rebuiltProjectShape = SidebarTreeShape(roots: [rebuiltProject])
+        guard presentedProjectShape.keys == rebuiltProjectShape.keys else {
+            reload()
+            return
+        }
+
+        let span = PerformanceRecorder.shared.begin(
+            "sidebar.session-order.apply",
+            category: "sidebar",
+            metadata: ["project_sessions": String(rebuiltProject.sessionNodes.count)]
+        )
+        let steps = SidebarOutlineUpdate.steps(
+            from: presentedProjectShape,
+            to: rebuiltProjectShape
+        )
+        _ = SidebarOutlineUpdate.adopt([rebuiltProject], reusing: [presentedProject])
+        renderedShape.replaceSubtreeOrdering(with: rebuiltProjectShape)
+
+        guard !steps.isEmpty else {
+            refreshRow(sessionID: sessionID)
+            span.end(metadata: ["steps": "0"])
+            return
+        }
+
+        applyStructure(steps: steps, wholesale: false)
+        refreshRow(sessionID: sessionID)
+        span.end(metadata: ["steps": String(steps.count)])
     }
 
     /// Tells the outline what moved, then opens whatever should be open.
@@ -634,7 +780,11 @@ extension ProjectSidebarViewController {
     /// nothing here waits on a completion, row animations were measured running and settling in
     /// an unshown window, and standing down would make every hosted fixture assert a motion the
     /// app does not perform.
-    private func applyStructure(steps: [SidebarOutlineStep], wholesale: Bool) {
+    private func applyStructure(
+        steps: [SidebarOutlineStep],
+        wholesale: Bool,
+        recursivelyExpandStandingRows: Bool = false
+    ) {
         let animated = !Design.Motion.reducesMotion && !wholesale
         let animation: NSTableView.AnimationOptions = animated ? [.effectFade] : []
         let insertedKeys = steps.flatMap { step -> [SidebarNodeKey] in
@@ -675,7 +825,10 @@ extension ProjectSidebarViewController {
                 outlineView.endUpdates()
             }
 
-            expandStandingRows(animated: animated)
+            expandStandingRows(
+                animated: animated,
+                recursively: recursivelyExpandStandingRows
+            )
         }
 
         if animated, !insertedKeys.isEmpty {
@@ -705,32 +858,67 @@ extension ProjectSidebarViewController {
     /// Opens the rows that are meant to be open. Idempotent — `expandItem` on a row that is
     /// already open does nothing — so this runs after every structural change and only the rows
     /// that just arrived actually move.
-    private func expandStandingRows(animated: Bool) {
+    private func expandStandingRows(animated: Bool, recursively: Bool = false) {
         let outline = animated ? outlineView.animator() : outlineView
 
-        for node in rootNodes {
-            outline.expandItem(node)
+        // Repository headings have no persisted disclosure state. A project can also be a root
+        // when it is the repository's only checkout, but its persisted state is handled below;
+        // expanding every root here silently reopened those standalone projects on launch.
+        for case let repository as RepoGroupNode in rootNodes {
+            outline.expandItem(repository)
         }
 
         for node in allProjectNodes {
             let project = projectStore.project(withID: node.projectID)
             if project?.isExpanded ?? true {
+                // The first tree has no transient disclosure choices to preserve. Asking AppKit
+                // once per project to expand its descendants avoids hundreds of live row-count
+                // mutations and keeps that expansion batched whether or not the host arrived
+                // with a live viewport.
+                if recursively,
+                   collapsedBranchKeys.isEmpty,
+                   collapsedSideChatParents.isEmpty {
+                    outline.expandItem(node, expandChildren: true)
+                    continue
+                }
                 outline.expandItem(node)
+                expandStandingDescendants(of: node, in: outline)
             }
+        }
+    }
 
-            // Branch groups open with their project; only ones collapsed by hand stay shut.
-            for case let branchNode as BranchGroupNode in node.childNodes
-            where !collapsedBranchKeys.contains(Self.branchKey(branchNode)) {
-                outline.expandItem(branchNode)
+    /// Opens one project's default-open groups after the project itself is visible. AppKit does
+    /// not remember an expansion request made beneath a closed ancestor, so this same path runs
+    /// both during reload and when the user later opens a project persisted as closed.
+    private func expandStandingDescendants(of project: ProjectNode, in outline: NSOutlineView) {
+        func expandSideChat(_ session: SessionNode) {
+            guard !session.childNodes.isEmpty,
+                  !collapsedSideChatParents.contains(session.sessionID)
+            else { return }
+            outline.expandItem(session)
+            for child in session.childNodes {
+                expandSideChat(child)
             }
+        }
 
-            // Side chats do the same beneath the session they were forked from. Read from
-            // the flat list, since a parent may sit under a branch group rather than the
-            // project itself.
-            for sessionNode in node.sessionNodes
-            where !sessionNode.childNodes.isEmpty
-                && !collapsedSideChatParents.contains(sessionNode.sessionID) {
-                outline.expandItem(sessionNode)
+        // Branch groups open with their project; only ones collapsed by hand stay shut.
+        for case let branchNode as BranchGroupNode in project.childNodes
+        where !collapsedBranchKeys.contains(Self.branchKey(branchNode)) {
+            outline.expandItem(branchNode)
+        }
+
+        // Side chats do the same beneath the session they were forked from. Walk the presented
+        // tree rather than `sessionNodes`' flat sort order: recent/name ordering can put a
+        // descendant before its parent, and AppKit cannot expand an item whose ancestor has not
+        // made it into the outline yet.
+        for child in project.childNodes {
+            if let branch = child as? BranchGroupNode,
+               !collapsedBranchKeys.contains(Self.branchKey(branch)) {
+                for session in branch.sessionNodes {
+                    expandSideChat(session)
+                }
+            } else if let session = child as? SessionNode {
+                expandSideChat(session)
             }
         }
     }
@@ -1655,6 +1843,8 @@ private extension ProjectSidebarViewController {
             // Archive, add, remove, reorder, branch and grouping changes add, drop or move rows.
             // `reload` preserves selection and expansion around that structural rebuild.
             reload()
+        case .sessionOrder(let sessionID):
+            applySessionOrderChange(sessionID)
         case .sessionRow(let sessionID):
             refreshRow(sessionID: sessionID)
         case .terminalRow(let terminalID):
@@ -2180,6 +2370,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
         guard let node = notification.userInfo?["NSObject"] as? ProjectNode else { return }
         projectStore.setProject(id: node.projectID, expanded: true)
+        expandStandingDescendants(of: node, in: outlineView)
         reloadRow(for: node)
     }
 

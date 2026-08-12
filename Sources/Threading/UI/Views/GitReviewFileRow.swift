@@ -266,6 +266,21 @@ final class GitReviewFileRow: NSView {
         contextDiffs.forEach { $0.fit(toWidth: bodyContainer.bounds.width) }
     }
 
+    /// Virtual table rows are constructed before AppKit attaches them to the pane. Every
+    /// `applySurface` in that detached tree therefore resolves against the app's ambient
+    /// appearance, which may be the opposite of the window the row is about to enter. Repair
+    /// the recorded card and hunk surfaces once their actual appearance is known.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        AppThemeRefresh.repaint(self)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        AppThemeRefresh.repaint(self)
+    }
+
     // MARK: - Setup
 
     private func setupViews() {
@@ -305,6 +320,7 @@ final class GitReviewFileRow: NSView {
         directoryLabel.isHidden = directoryText.isEmpty
 
         let metaLabel = NSTextField.label(attributed: metaText)
+        metaLabel.setAccessibilityIdentifier("git-review.file.stats")
         metaLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         // Shown rather than hover-revealed: these appear only in the two modes whose whole
@@ -766,18 +782,24 @@ final class GitReviewFileRow: NSView {
         label.toolTip = hunk.header
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let summary = hunk.summary
-        let countText = NSMutableAttributedString()
-        countText.append(NSAttributedString(string: "+\(summary.added)", attributes: [
-            .foregroundColor: Design.Diff.added,
-            .font: Design.Typography.caption(),
-        ]))
-        countText.append(NSAttributedString(string: " −\(summary.removed)", attributes: [
-            .foregroundColor: Design.Diff.removed,
-            .font: Design.Typography.caption(),
-        ]))
-        let counts = NSTextField.label(attributed: countText)
-        counts.setContentHuggingPriority(.required, for: .horizontal)
+        // A one-hunk file's counts are already the file counts directly above this row. Repeat
+        // them only when several hunks make the per-hunk distribution new information.
+        let counts: NSTextField? = file.hunks.count > 1 ? {
+            let summary = hunk.summary
+            let countText = NSMutableAttributedString()
+            countText.append(NSAttributedString(string: "+\(summary.added)", attributes: [
+                .foregroundColor: Design.Diff.added,
+                .font: Design.Typography.caption(),
+            ]))
+            countText.append(NSAttributedString(string: " −\(summary.removed)", attributes: [
+                .foregroundColor: Design.Diff.removed,
+                .font: Design.Typography.caption(),
+            ]))
+            let label = NSTextField.label(attributed: countText)
+            label.setAccessibilityIdentifier("git-review.hunk.stats")
+            label.setContentHuggingPriority(.required, for: .horizontal)
+            return label
+        }() : nil
 
         let button: ThemedButton?
         if let staging, staging.allowsHunks, GitPatch.supportsHunkStaging(file) {
@@ -793,7 +815,8 @@ final class GitReviewFileRow: NSView {
         }
 
         [disclosure, label, counts, button].compactMap { $0 }.forEach(row.addSubview)
-        let trailingView: NSView = button ?? counts
+        let trailingView: NSView? = button.map { $0 as NSView }
+            ?? counts.map { $0 as NSView }
 
         NSLayoutConstraint.activate([
             disclosure.leadingAnchor.constraint(
@@ -810,22 +833,33 @@ final class GitReviewFileRow: NSView {
             label.topAnchor.constraint(equalTo: row.topAnchor, constant: Design.Spacing.small),
             label.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -Design.Spacing.small),
 
-            counts.leadingAnchor.constraint(
-                greaterThanOrEqualTo: label.trailingAnchor,
-                constant: Design.Spacing.small
-            ),
-            counts.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            label.trailingAnchor.constraint(
+                lessThanOrEqualTo: row.trailingAnchor,
+                constant: -Design.Spacing.small
+            )
+        ])
 
+        if let trailingView {
             trailingView.trailingAnchor.constraint(
                 equalTo: row.trailingAnchor,
                 constant: -Design.Spacing.small
-            ),
-        ])
+            ).isActive = true
+        }
+
+        if let counts {
+            NSLayoutConstraint.activate([
+                counts.leadingAnchor.constraint(
+                    greaterThanOrEqualTo: label.trailingAnchor,
+                    constant: Design.Spacing.small
+                ),
+                counts.centerYAnchor.constraint(equalTo: label.centerYAnchor)
+            ])
+        }
 
         if let button {
             NSLayoutConstraint.activate([
                 button.leadingAnchor.constraint(
-                    equalTo: counts.trailingAnchor,
+                    equalTo: counts?.trailingAnchor ?? label.trailingAnchor,
                     constant: Design.Spacing.small
                 ),
                 button.centerYAnchor.constraint(equalTo: label.centerYAnchor),

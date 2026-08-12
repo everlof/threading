@@ -15,6 +15,14 @@ struct UIScenarioSandbox {
 
     let root: URL
 
+    private var evidenceDirectory: URL {
+        root.appendingPathComponent("evidence", isDirectory: true)
+    }
+
+    private var evidenceToken: String {
+        root.lastPathComponent
+    }
+
     struct CodexScenarioFixture {
         let project: URL
         let freshTape: URL
@@ -37,6 +45,10 @@ struct UIScenarioSandbox {
             .appendingPathComponent("ThreadingUITests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        try fileManager.createDirectory(
+            at: root.appendingPathComponent("evidence", isDirectory: true),
+            withIntermediateDirectories: true
+        )
         try Data(Defaults.markerContents.utf8).write(
             to: root.appendingPathComponent(Defaults.markerName),
             options: .atomic
@@ -50,12 +62,56 @@ struct UIScenarioSandbox {
         application.launchEnvironment["CFFIXED_USER_HOME"] = root.path
         application.launchEnvironment["HOME"] = root.path
         application.launchEnvironment["THREADING_UI_SCENARIO_HOME"] = root.path
+        application.launchEnvironment["THREADING_UI_SCENARIO_EVIDENCE_DIR"] = evidenceDirectory.path
+        application.launchEnvironment["THREADING_UI_SCENARIO_EVIDENCE_TOKEN"] = evidenceToken
         application.launchArguments += [
             "-ApplePersistenceIgnoreState", "YES",
             "-NSQuitAlwaysKeepsWindows", "NO",
             "-\(Defaults.onboardingCompletedVersion)", "1",
         ]
         return UIWindowContract.configure(application)
+    }
+
+    func captureScenarioEvidence(named name: String) throws -> Data {
+        let imageURL = evidenceDirectory
+            .appendingPathComponent(name)
+            .appendingPathExtension("png")
+        let errorURL = evidenceDirectory
+            .appendingPathComponent(name)
+            .appendingPathExtension("error.txt")
+        let request = EvidenceCaptureRequest(
+            id: UUID(),
+            token: evidenceToken,
+            name: name
+        )
+        try JSONEncoder().encode(request).write(
+            to: evidenceDirectory.appendingPathComponent("capture-request.json"),
+            options: .atomic
+        )
+
+        let completed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                FileManager.default.fileExists(atPath: imageURL.path)
+                    || FileManager.default.fileExists(atPath: errorURL.path)
+            },
+            object: nil
+        )
+        guard XCTWaiter.wait(for: [completed], timeout: 5) == .completed else {
+            throw UIScenarioSandboxError.evidenceTimedOut(name)
+        }
+        if let message = try? String(contentsOf: errorURL, encoding: .utf8) {
+            throw UIScenarioSandboxError.evidenceCaptureFailed(
+                name: name,
+                detail: message.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        }
+        return try Data(contentsOf: imageURL)
+    }
+
+    private struct EvidenceCaptureRequest: Encodable {
+        let id: UUID
+        let token: String
+        let name: String
     }
 
     /// Builds the smallest real checkout and copies every mutable fixture below the isolated
@@ -188,6 +244,8 @@ enum UIScenarioSandboxError: LocalizedError {
     case refusedUnsafeRemoval(URL)
     case gitUnavailable
     case gitFailed(arguments: [String], detail: String)
+    case evidenceTimedOut(String)
+    case evidenceCaptureFailed(name: String, detail: String)
 
     var errorDescription: String? {
         switch self {
@@ -197,6 +255,10 @@ enum UIScenarioSandboxError: LocalizedError {
             return "the UI scenario host has no executable Git binary"
         case .gitFailed(let arguments, let detail):
             return "git \(arguments.joined(separator: " ")) failed: \(detail)"
+        case .evidenceTimedOut(let name):
+            return "Threading did not produce UI evidence for \(name)"
+        case .evidenceCaptureFailed(let name, let detail):
+            return "Threading could not capture UI evidence for \(name): \(detail)"
         }
     }
 }

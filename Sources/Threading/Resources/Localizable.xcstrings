@@ -331,6 +331,78 @@
         }
       }
     },
+    "A newer turn began before this turn’s checkpoint was complete.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En nyare tur började innan den här turens kontrollpunkt var fullständig." } } }
+    },
+    "Capturing turn start…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparar turens start…" } } }
+    },
+    "Checkpoint incomplete": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ofullständig kontrollpunkt" } } }
+    },
+    "Couldn’t persist this turn’s checkpoint metadata.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det gick inte att spara turens kontrollpunktsmetadata." } } }
+    },
+    "No turn recorded yet.\nThe checkpoint is captured before the agent starts working.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen tur har registrerats ännu.\nKontrollpunkten sparas innan agenten börjar arbeta." } } }
+    },
+    "The checkpoint repository is no longer available.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollpunktens kodförråd är inte längre tillgängligt." } } }
+    },
+    "The provider did not admit this turn.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantören startade inte turen." } } }
+    },
+    "The provider process exited before the turn end checkpoint was captured.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsprocessen avslutades innan turens slutkontrollpunkt sparades." } } }
+    },
+    "The session’s execution checkout is not a git repository.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionens arbetskopia är inte ett git-kodförråd." } } }
+    },
+    "The turn end was captured, but its metadata could not be persisted.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens sluttillstånd sparades, men dess metadata kunde inte beständiggöras." } } }
+    },
+    "The turn start was captured, but its metadata could not be persisted.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens starttillstånd sparades, men dess metadata kunde inte beständiggöras." } } }
+    },
+    "This turn belongs to a different repository.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här turen tillhör ett annat kodförråd." } } }
+    },
+    "This turn did not reach a complete checkpoint.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här turen nådde inte en fullständig kontrollpunkt." } } }
+    },
+    "This turn’s checkpoint is missing from the repository.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens kontrollpunkt saknas i kodförrådet." } } }
+    },
+    "Threading exited before this turn’s checkpoint was complete.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading avslutades innan turens kontrollpunkt blev fullständig." } } }
+    },
+    "Turn %lld": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tur %lld" } } }
+    },
+    "Turn End": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens slut" } } }
+    },
+    "Turn Start → Turn End": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens start → turens slut" } } }
+    },
+    "Turn not admitted": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turen startades inte" } } }
+    },
+    "Limit reached": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Gränsen är nådd" } } } },
+    "Limit reached · resets %@": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Gränsen är nådd · återställs %@" } } } },
+    "Continue as %@": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fortsätt som %@" } } } },
+    "Continue as %@ · %@": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fortsätt som %@ · %@" } } } },
+    "Continuing…": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fortsätter…" } } } },
+    "Dismiss this suggestion": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Avfärda det här förslaget" } } } },
+    "Usage limit suggestion": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Förslag vid användningsgräns" } } } },
+    "That login could not be found.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den inloggningen kunde inte hittas." } } } },
+    "%@ is close to its own limit now.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ är nära sin egen gräns nu." } } } },
+    "The conversation could not be moved.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Konversationen kunde inte flyttas." } } } },
+    "%@. %@": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@. %@" } } } },
+    "LimitEscapeStripView": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "LimitEscapeStripView" } } } },
+    "The way past a spent usage limit. Three states: the offer, the same offer being carried out, and one that could not be taken. The button names the whole action, which is why pressing it asks nothing further.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vägen förbi en förbrukad användningsgräns. Tre lägen: erbjudandet, samma erbjudande medan det utförs, och ett som inte gick att ta. Knappen namnger hela sin åtgärd, vilket är varför ett tryck inte frågar något mer." } } } },
+    "Escape suggestion dismissed.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Förslaget avfärdades." } } } },
+    "Continuing on the other login.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fortsätter på den andra inloggningen." } } } },
     "The stored baseline image no longer matches its approved revision.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den sparade baslinjebilden stämmer inte längre med den godkända revisionen." } } } },
     "the baseline record exceeded its storage limit": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "baslinjeposten överskred sin lagringsgräns" } } } },
     "the captured manifest exceeded its storage limit": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "det fångade manifestet överskred sin lagringsgräns" } } } },
@@ -407,6 +479,7 @@
     "%lld days · %lld requests": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld dagar · %lld anrop" } } } },
     "%lld requests": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld anrop" } } } },
     "%lld records": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld poster" } } } },
+    "%lld resets available · No expiry reported": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld återställningar tillgängliga · Ingen giltighetstid rapporterad" } } } },
     "%lld sources": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld källor" } } } },
     "Appears when a supported OpenCode export reports OpenRouter as its billing route.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Visas när en OpenCode-export som stöds anger OpenRouter som faktureringsväg." } } } },
     "Grok": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Grok" } } } },
@@ -419,8 +492,10 @@
     "No transcript source was found.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen transkriptkälla hittades." } } } },
     "One or more OpenCode exports could not be read.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En eller flera OpenCode-exporter kunde inte läsas." } } } },
     "At the observed weekly pace": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Med den observerade veckotakten" } } } },
+    "1 reset available · No expiry reported": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 återställning tillgänglig · Ingen giltighetstid rapporterad" } } } },
     "Banked reset expires": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparad återställning löper ut" } } } },
     "Banked reset": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparad återställning" } } } },
+    "Banked resets": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparade återställningar" } } } },
     "Breakdown": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fördelning" } } } },
     "Cache saved": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparat med cache" } } } },
     "Cached input": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Cachelagrad indata" } } } },
@@ -447,7 +522,10 @@
     "No authoritative limit history yet": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen auktoritativ gränshistorik ännu" } } } },
     "No data in this range": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inga data i intervallet" } } } },
     "No expiry reported": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen giltighetstid rapporterad" } } } },
+    "None available": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inga tillgängliga" } } } },
     "No usage recorded yet": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen användning registrerad ännu" } } } },
+    "Now": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nu" } } } },
+    "Current day is incomplete": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dagens data är ofullständiga" } } } },
     "Observed reset boundaries": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Observerade återställningsgränser" } } } },
     "Observed": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Observerat" } } } },
     "Observed limits, resets, projections, and expiring banked resets.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Observerade gränser, återställningar, prognoser och sparade återställningar som löper ut." } } } },
@@ -458,6 +536,7 @@
     "Personal": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Personligt" } } } },
     "Project %lld": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Projekt %lld" } } } },
     "Projected 100%": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognos till 100 %" } } } },
+    "Projected at reset": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognos vid återställning" } } } },
     "Projected at the scheduled reset": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognos vid planerad återställning" } } } },
     "Projection": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognos" } } } },
     "Processed tokens": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bearbetade tokens" } } } },
@@ -471,7 +550,9 @@
     "Reported + exact catalog rates": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Rapporterat + exakta katalogpriser" } } } },
     "Requests": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Anrop" } } } },
     "Reset time unavailable": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återställningstid saknas" } } } },
+    "Reset-credit count was not reported": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Antalet sparade återställningar rapporterades inte" } } } },
     "Resets %@": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återställs %@" } } } },
+    "Resets %@ · %@": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återställs %@ · %@" } } } },
     "Switch data": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Byt data" } } } },
     "Switched the chart data.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bytte diagramdata." } } } },
     "ThemedTimeSeriesChartView": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ThemedTimeSeriesChartView" } } } },
@@ -491,63 +572,6 @@
     "Use Left and Right Arrow to inspect points.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använd vänster- och högerpil för att granska punkter." } } } },
     "Weekly": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Veckovis" } } } },
     "What Threading could measure, including unsupported and partial sources.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vad Threading kunde mäta, inklusive källor som saknas eller bara stöds delvis." } } } },
-    "A newer turn began before this turn’s checkpoint was complete.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En nyare tur började innan den här turens kontrollpunkt var fullständig." } } }
-    },
-    "Capturing turn start…": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparar turens start…" } } }
-    },
-    "Checkpoint incomplete": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ofullständig kontrollpunkt" } } }
-    },
-    "Couldn’t persist this turn’s checkpoint metadata.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det gick inte att spara turens kontrollpunktsmetadata." } } }
-    },
-    "No turn recorded yet.\nThe checkpoint is captured before the agent starts working.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen tur har registrerats ännu.\nKontrollpunkten sparas innan agenten börjar arbeta." } } }
-    },
-    "The checkpoint repository is no longer available.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollpunktens kodförråd är inte längre tillgängligt." } } }
-    },
-    "The provider did not admit this turn.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantören startade inte turen." } } }
-    },
-    "The provider process exited before the turn end checkpoint was captured.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsprocessen avslutades innan turens slutkontrollpunkt sparades." } } }
-    },
-    "The session’s execution checkout is not a git repository.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionens arbetskopia är inte ett git-kodförråd." } } }
-    },
-    "The turn end was captured, but its metadata could not be persisted.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens sluttillstånd sparades, men dess metadata kunde inte beständiggöras." } } }
-    },
-    "The turn start was captured, but its metadata could not be persisted.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens starttillstånd sparades, men dess metadata kunde inte beständiggöras." } } }
-    },
-    "This turn belongs to a different repository.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här turen tillhör ett annat kodförråd." } } }
-    },
-    "This turn did not reach a complete checkpoint.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här turen nådde inte en fullständig kontrollpunkt." } } }
-    },
-    "This turn’s checkpoint is missing from the repository.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens kontrollpunkt saknas i kodförrådet." } } }
-    },
-    "Threading exited before this turn’s checkpoint was complete.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading avslutades innan turens kontrollpunkt blev fullständig." } } }
-    },
-    "Turn %lld": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tur %lld" } } }
-    },
-    "Turn End": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens slut" } } }
-    },
-    "Turn Start → Turn End": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turens start → turens slut" } } }
-    },
-    "Turn not admitted": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Turen startades inte" } } }
-    },
     "A bounded diff-shaped slice for a code comment: target rows keep their marker, additions and removals keep theirs, and a large source never turns into a large sheet.": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ett begränsat, diff-format utdrag för en kodkommentar: målrader behåller sin markör, tillägg och borttagningar sina, och en stor källfil blir aldrig ett stort blad." } } }
@@ -695,6 +719,38 @@
     "Thin marks are reads; solid marks are edits; a cap means agents overlap.": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tunna markeringar är läsningar; fyllda är redigeringar; en toppmarkering betyder att agenter överlappar." } } }
+    },
+    "A capped mark means more than one agent touched it.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En toppmarkering betyder att fler än en agent rört filen." } } }
+    },
+    "of %@ files": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "av %@ filer" } } }
+    },
+    "edits": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "redigeringar" } } }
+    },
+    "reads": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "läsningar" } } }
+    },
+    "actions": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "åtgärder" } } }
+    },
+    "web": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "webb" } } }
+    },
+    "subagent": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "underagenter" } } }
+    },
+    "other": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "övriga" } } }
     },
     "Capture an HTML attachment — tables, charts, diagrams, rich reports.": {
       "extractionState": "manual",
@@ -3134,6 +3190,9 @@
     "Dwell (sidebar cards)": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dröjning (sidofältets kort)" } } }
     },
+    "A fixed semantic grid for transcript content. Narrow the gallery to make cells wrap; the horizontal scroller appears only after the columns reach their readable floor, and every value remains selectable.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ett fast semantiskt rutnät för transkriptinnehåll. Gör galleriet smalare för att radbryta cellerna; den vågräta rullisten visas först när kolumnerna når sin läsbara minimibredd, och alla värden förblir markerbara." } } }
+    },
     "Extensions are copied into Threading before they can run. Import a .threadingextension package or an unpacked development directory; importing leaves one disabled, and enabling it starts a supervised process with the capabilities declared in its manifest.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tillägg kopieras till Threading innan de kan köras. Importera ett .threadingextension-paket eller en uppackad utvecklingsmapp; ett importerat tillägg lämnas inaktiverat, och när det aktiveras startas en övervakad process med funktionerna som anges i manifestet." } } }
     },
@@ -3142,6 +3201,9 @@
     },
     "ThemedDisclosureRow": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ThemedDisclosureRow" } } }
+    },
+    "ThemedDocumentTableView": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ThemedDocumentTableView" } } }
     },
     "Updating": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdaterar" } } }
@@ -20777,11 +20839,12 @@
       }
     },
     "Turn Start": {
+      "extractionState": "stale",
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Turens start"
+            "value": "Vrid Start"
           }
         }
       }
@@ -24958,6 +25021,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld konversationsmappar kunde inte läsas; resultaten är ofullständiga."
+          }
+        }
+      }
+    },
+    "1 conversation folder could not be read; these results are incomplete.": {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 konversationsmapp kunde inte läsas; resultatet är ofullständigt."
           }
         }
       }

@@ -115,6 +115,27 @@ enum GitStatusOverlayDefaults {
         return cardWidth <= paneWidth * maximumPaneShare
     }
 
+    /// Whether a floating card fits wholly in the trailing gutter beside a conversation's
+    /// readable column. A conversation can be much wider than the card and still have no free
+    /// corner: its user bubbles reach the column's trailing edge, so the ordinary half-pane
+    /// rule lets the card cover their ink as soon as the display panel narrows the pane.
+    ///
+    /// Keep one pane inset between the column and card and another between card and edge. In a
+    /// pane narrower than the readable measure, the column yields to its own side insets and
+    /// there is deliberately no spare gutter to spend.
+    static func hasRoomBesideConversation(
+        forCardWidth cardWidth: CGFloat,
+        inPaneWidth paneWidth: CGFloat
+    ) -> Bool {
+        guard paneWidth > 0 else { return true }
+        let contentWidth = min(
+            Design.Size.readableWidth,
+            max(0, paneWidth - Design.Spacing.inset * 2)
+        )
+        let trailingGutter = max(0, (paneWidth - contentWidth) / 2)
+        return cardWidth + Design.Spacing.inset * 2 <= trailingGutter
+    }
+
     /// How far the card lifts while it is off screen.
     ///
     /// Toward the edge it is pinned to, so it tucks away rather than drifting in a direction
@@ -360,6 +381,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         isHidden = true
         toolTip = L10n.string("Open Git Review (⇧⌘R)")
         setAccessibilityRole(.button)
+        setAccessibilityIdentifier("git.status.overlay")
 
         wantsLayer = true
         layer?.cornerCurve = .continuous

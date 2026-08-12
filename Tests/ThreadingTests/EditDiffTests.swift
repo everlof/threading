@@ -138,6 +138,34 @@ final class EditDiffTests: XCTestCase {
         XCTAssertEqual(texts(lines, .added), ["new line"])
     }
 
+    /// The flattened tool-row diff is not enough to restore a changed-files card: once two
+    /// files are joined, there is no safe way to infer which counts or preview lines belong to
+    /// either one. Keep the provider's file sections typed at the point the patch is read.
+    func testAMultiFilePatchRetainsEachFilesOwnDiff() {
+        let patch = """
+        *** Begin Patch
+        *** Update File: Sources/A.swift
+        @@
+        -let a = 1
+        +let a = 2
+        *** Add File: Sources/B.swift
+        +let b = 1
+        *** End Patch
+        """
+
+        let changes = EditDiff.fileChanges(forTool: "Edit", input: ["patch": patch])
+
+        XCTAssertEqual(changes.map(\.path), ["Sources/A.swift", "Sources/B.swift"])
+        XCTAssertEqual(EditDiff.counts(changes[0].lines).added, 1)
+        XCTAssertEqual(EditDiff.counts(changes[0].lines).removed, 1)
+        XCTAssertEqual(EditDiff.counts(changes[1].lines).added, 1)
+        XCTAssertEqual(EditDiff.counts(changes[1].lines).removed, 0)
+        XCTAssertFalse(
+            changes[0].lines.contains { $0.text.contains("Sources/B.swift") },
+            "the next file's patch leaked into the first file's replay evidence"
+        )
+    }
+
     /// A tool that edits nothing has no diff, and neither does an edit whose arguments are
     /// missing — nil, so the row shows its output instead of an empty diff that claims a file
     /// changed by nothing.

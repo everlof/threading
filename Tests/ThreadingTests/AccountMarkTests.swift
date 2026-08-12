@@ -34,6 +34,34 @@ final class AccountMarkTests: XCTestCase {
         }
     }
 
+    /// The first visible sidebar rows load these marks while the launch-ready marker is still
+    /// pending. Keep them in the compiled catalogue rather than falling back to synchronous PNG
+    /// file decoding on the main thread.
+    func testBrandMarksComeFromTheCompiledAssetCatalogue() throws {
+        let claude = try XCTUnwrap(
+            NSImage(named: NSImage.Name(AgentIconDefaults.claudeResource))
+        )
+        let codex = try XCTUnwrap(
+            NSImage(named: NSImage.Name(AgentIconDefaults.codexResource))
+        )
+
+        XCTAssertFalse(claude.isTemplate)
+        XCTAssertTrue(codex.isTemplate)
+    }
+
+    /// Claude's immutable colour mark is the only built-in provider image that needs pixel
+    /// contrast analysis. Keep that result at the brand boundary so a viewport of Claude rows
+    /// does not rasterize the same artwork once per cell and background-style pass.
+    func testOnlyTheNonTemplateBrandMarkPublishesAKnownTone() throws {
+        let claude = try XCTUnwrap(AgentKind.claude.brandIcon)
+        let measured = try XCTUnwrap(IconBackplate.tone(of: claude))
+
+        XCTAssertEqual(try XCTUnwrap(AgentKind.claude.brandIconTone), measured, accuracy: 0.001)
+        XCTAssertNil(AgentKind.codex.brandIconTone)
+        XCTAssertNil(AgentKind.grok.brandIconTone)
+        XCTAssertNil(AgentKind.openCode.brandIconTone)
+    }
+
     /// A login whose usage has not landed keeps its runtime. The meter is what goes missing —
     /// losing the mark instead would make the row's identity depend on a network round trip.
     func testAMarkSurvivesAnAccountWithNoReading() {

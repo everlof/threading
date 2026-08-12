@@ -63,6 +63,15 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
             UIApplication.LaunchOptionsKey: Any
         ]? = nil
     ) -> Bool {
+#if DEBUG
+        // Catalogue captures exercise the shipping view tree, but motion makes two otherwise
+        // identical frames differ forever. Disable UIKit animation before the root controller is
+        // built; the capture coordinator still waits for asynchronous fixture data and several
+        // identical rendered frames before accepting an image.
+        if MobileUIEvidenceCapture.isRequested {
+            UIView.setAnimationsEnabled(false)
+        }
+#endif
         MobileDiagnostics.record(.appLaunched, fields: [
             .protocolVersion: String(RemoteProtocol.current),
             .minimumProtocolVersion: String(RemoteProtocol.minimumSupported),
@@ -242,11 +251,181 @@ final class ThreadingMobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = appDelegate.makeRootViewController()
         self.window = window
         window.makeKeyAndVisible()
+#if DEBUG
+        MobileUIEvidenceCapture.startIfRequested(in: window)
+#endif
         if let response = connectionOptions.notificationResponse {
             appDelegate.openNotification(from: response)
         }
     }
 }
+
+#if DEBUG
+/// Captures deterministic, app-only simulator evidence for the browsable iOS catalogue.
+///
+/// The host script never guesses that a launch is ready. This coordinator renders the real key
+/// window repeatedly and publishes its marker only after the pixels have remained identical over
+/// several layout cycles. Output stays inside the app's temporary container; the host resolves
+/// that exact container through `simctl` and copies only the named run.
+@MainActor
+private enum MobileUIEvidenceCapture {
+    private enum Environment {
+        static let run = "THREADING_MOBILE_UI_EVIDENCE_RUN"
+        static let identifier = "THREADING_MOBILE_UI_EVIDENCE_ID"
+        static let demo = "THREADING_MOBILE_DEMO"
+    }
+
+    private enum Contract {
+        static let schemaVersion = 1
+        static let kind = "threading-mobile-ui-evidence"
+        static let directoryName = "threading-ui-evidence"
+        static let maximumSegmentLength = 96
+        static let sampleInterval = Duration.milliseconds(200)
+        static let maximumSamples = 75
+        // Observe the fixture for more than one ordinary caret-blink interval before accepting
+        // it, then require the same pixels twice. Requiring four identical samples made a focused
+        // text field impossible to capture: its UIKit-owned caret is expected to blink forever,
+        // even with application animation disabled. Two adjacent frames still prove the view has
+        // stopped laying itself out, while the minimum observation window prevents an empty
+        // launch frame from winning early.
+        static let minimumSamples = 8
+        static let stableSamplesRequired = 2
+        static let minimumPNGBytes = 8_000
+    }
+
+    private struct Request {
+        let run: String
+        let identifier: String
+        let demo: String
+
+        static func current() -> Request? {
+            let environment = ProcessInfo.processInfo.environment
+            guard let run = safeSegment(environment[Environment.run]),
+                  let identifier = safeSegment(environment[Environment.identifier]) else {
+                return nil
+            }
+            return Request(
+                run: run,
+                identifier: identifier,
+                demo: environment[Environment.demo] ?? "standard"
+            )
+        }
+
+        private static func safeSegment(_ value: String?) -> String? {
+            guard let value, !value.isEmpty, value.count <= Contract.maximumSegmentLength,
+                  value.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") })
+            else { return nil }
+            return value
+        }
+    }
+
+    private struct Marker: Encodable {
+        let schemaVersion: Int
+        let kind: String
+        let identifier: String
+        let demo: String
+        let image: String
+        let pointWidth: Double
+        let pointHeight: Double
+        let pixelWidth: Int
+        let pixelHeight: Int
+        let sampleCount: Int
+        let stabilized: Bool
+    }
+
+    static var isRequested: Bool { Request.current() != nil }
+
+    static func startIfRequested(in window: UIWindow) {
+        guard let request = Request.current() else { return }
+        Task { @MainActor in
+            await capture(request, window: window)
+        }
+    }
+
+    private static func capture(_ request: Request, window: UIWindow) async {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(Contract.directoryName, isDirectory: true)
+            .appendingPathComponent(request.run, isDirectory: true)
+        let imageURL = directory.appendingPathComponent("\(request.identifier).png")
+        let markerURL = directory.appendingPathComponent("\(request.identifier).json")
+
+        do {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            guard !FileManager.default.fileExists(atPath: imageURL.path),
+                  !FileManager.default.fileExists(atPath: markerURL.path) else {
+                return
+            }
+
+            var previous: Data?
+            var last: Data?
+            var stableCount = 0
+            var sampleCount = 0
+            var stabilized = false
+
+            while sampleCount < Contract.maximumSamples, !Task.isCancelled {
+                try await Task.sleep(for: Contract.sampleInterval)
+                window.layoutIfNeeded()
+                let data = try png(of: window)
+                sampleCount += 1
+                last = data
+
+                if data == previous {
+                    stableCount += 1
+                } else {
+                    stableCount = 1
+                    previous = data
+                }
+                if sampleCount >= Contract.minimumSamples,
+                   stableCount >= Contract.stableSamplesRequired {
+                    stabilized = true
+                    break
+                }
+            }
+
+            guard let last else { return }
+            try last.write(to: imageURL, options: .atomic)
+            let scale = window.screen.scale
+            let marker = Marker(
+                schemaVersion: Contract.schemaVersion,
+                kind: Contract.kind,
+                identifier: request.identifier,
+                demo: request.demo,
+                image: imageURL.lastPathComponent,
+                pointWidth: window.bounds.width,
+                pointHeight: window.bounds.height,
+                pixelWidth: Int((window.bounds.width * scale).rounded()),
+                pixelHeight: Int((window.bounds.height * scale).rounded()),
+                sampleCount: sampleCount,
+                stabilized: stabilized
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(marker).write(to: markerURL, options: .atomic)
+        } catch {
+            // Absence of the marker is the failure contract. The host retains stdout/stderr and
+            // reports the exact fixture whose app-owned capture did not complete.
+            return
+        }
+    }
+
+    private static func png(of window: UIWindow) throws -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = window.screen.scale
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(bounds: window.bounds, format: format)
+        let image = renderer.image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        guard let data = image.pngData(), data.count >= Contract.minimumPNGBytes else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        return data
+    }
+}
+#endif
 
 @MainActor
 final class RemoteNotificationManager: ObservableObject {

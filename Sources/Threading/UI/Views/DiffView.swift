@@ -449,7 +449,9 @@ final class GitReviewDiffTextView: ThemedTextView {
         ])
 
         let numberRange = NSRange(location: 0, length: paddedNumber.utf16.count)
-        result.addAttribute(.foregroundColor, value: Design.Text.tertiary, range: numberRange)
+        // Line numbers are navigation, not decoration. Tertiary ink fell below readable
+        // contrast on the dark review wash and made unchanged context look disabled.
+        result.addAttribute(.foregroundColor, value: Design.Text.secondary, range: numberRange)
         let signLocation = paddedNumber.utf16.count + 1
         result.addAttribute(
             .foregroundColor,
@@ -749,7 +751,10 @@ final class GitReviewDiffTextView: ThemedTextView {
         case .type: Design.Syntax.type
         case .string: Design.Syntax.string
         case .number: Design.Syntax.number
-        case .comment: Design.Syntax.comment
+        // Comments are deliberately hue-free in the design grammar. Using the palette's raw
+        // syntax role here let an authored near-black comment land on a dark context row;
+        // semantic secondary ink keeps the annotation quiet without making it disappear.
+        case .comment: Design.Text.secondary
         }
     }
 
@@ -806,7 +811,7 @@ private extension DiffAppKitTheme {
             syntaxType: Design.Syntax.type,
             syntaxString: Design.Syntax.string,
             syntaxNumber: Design.Syntax.number,
-            syntaxComment: Design.Syntax.comment
+            syntaxComment: Design.Text.secondary
         )
     }
 }

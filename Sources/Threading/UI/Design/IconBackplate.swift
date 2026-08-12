@@ -139,12 +139,15 @@ enum IconBackplate {
     /// put a light square behind a label-coloured glyph that was never in trouble.
     static func plated(
         _ image: NSImage,
+        knownMarkTone: CGFloat? = nil,
         against ground: Ground,
         size: CGFloat = Defaults.displaySize,
         cornerRadius: CGFloat = Defaults.cornerRadius
     ) -> NSImage {
         guard !image.isTemplate,
-              isNeeded(markTone: tone(of: image), ground: ground) else { return image }
+              isNeeded(markTone: knownMarkTone ?? tone(of: image), ground: ground) else {
+            return image
+        }
 
         return compose(
             image,

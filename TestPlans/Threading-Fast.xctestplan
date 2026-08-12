@@ -13,6 +13,14 @@
       {
         "key" : "THREADING_GITHUB_E2E_REPOSITORY",
         "value" : "$(THREADING_GITHUB_E2E_REPOSITORY)"
+      },
+      {
+        "key" : "THREADING_RENDER_OUT",
+        "value" : "$(THREADING_RENDER_OUT)"
+      },
+      {
+        "key" : "THREADING_UI_EVIDENCE_OUT",
+        "value" : "$(THREADING_UI_EVIDENCE_OUT)"
       }
     ],
     "targetForVariableExpansion" : {

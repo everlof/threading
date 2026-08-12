@@ -376,6 +376,32 @@ final class AgentLaunchQuotingTests: XCTestCase {
     /// just gain a `--`.
     // MARK: - Settings research one-shots
 
+    /// Projects are folders, not necessarily repositories. The helper must therefore opt out
+    /// of Codex's Git preflight without weakening the read-only sandbox that bounds the run.
+    func testCodexProjectResearchSupportsNonRepositoryFoldersReadOnly() throws {
+        let words = try Self.tokenizing(
+            XCTUnwrap(
+                AgentLauncher.codexResearchPlan(
+                    in: "/tmp/not-a-repository",
+                    prompt: "find the mark"
+                ).arguments.last
+            )
+        )
+
+        XCTAssertEqual(words, [
+            "cd", "/tmp/not-a-repository",
+            "&&", "exec",
+            "env", "-u", "CODEX_HOME",
+            AgentDefaults.codexExecutable,
+            "--config", "model_reasoning_effort=\"low\"",
+            "--sandbox", "read-only",
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--", "find the mark"
+        ])
+    }
+
     /// `.headlessResearch` and the settings-research command builder are the claim and the
     /// delivery — the same pairing rule the permission vocabulary follows. A runtime claiming
     /// the capability must produce a one-shot line, and one that does not must refuse even

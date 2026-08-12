@@ -1,6 +1,7 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This is the canonical repository guidance for every coding agent. The filename is historical; the
+rules are not specific to one tool.
 
 **This file is an index.** The reasoning behind each subsystem — what was measured, what was
 wrong first, and which rules are load-bearing — lives in `docs/architecture/`. Those notes are
@@ -211,6 +212,54 @@ The vocabulary — flat over bezelled, quiet until relevant, content leads, syst
 [`docs/architecture/design-system.md`](docs/architecture/design-system.md). **Read it before
 building any new UI**: a screen assembled from stock `NSPopUpButton`, `NSBox` and bezelled
 buttons will not match anything else in the app, and will fail the build lint.
+
+## Performance Is a Product Requirement
+
+Threading should feel immediate with real working sets, not only with an empty project or a short
+conversation. Responsiveness, stable scrolling, bounded memory, and launch time are product
+behavior. The person implementing a feature owns those properties from design through
+verification; performance is not a cleanup phase after the UI works.
+
+This does not mean speculative micro-optimization. It means naming the scaling contract before
+coding and using measurements whenever work may be user-visible or data-dependent. Our usual
+workflow is:
+
+1. **State the contract.** Record expected and stress cardinalities, event frequency, the bounded
+   unit of rendering, and the interaction that must remain exact (for example a line jump, scroll
+   momentum, bottom position, selection, or reconnect). Apply the [Scaling Gate](#scaling-gate)
+   whenever data size or callback frequency is not a small fixed constant.
+2. **Reproduce the real path deterministically.** Add an opt-in stress fixture that drives the
+   production model and presentation code with generated data or a sanitized replay. Preserve the
+   shape that made the client slow: many rich rows, one enormous row, rapid updates, deep jumps,
+   cold caches, or simultaneous retained surfaces. Add coarse phase spans around actionable
+   owners, never per-row instrumentation in a hot loop.
+3. **Take a matched baseline.** Measure the isolated action more than once with the same build,
+   configuration, fixture, and initial state. Report a median plus tail/max behavior where it
+   matters, along with live-view count and footprint when those can grow. Time fixture manufacture,
+   process/framework bootstrap, and test-host creation separately from the production operation;
+   otherwise a harness cost can masquerade as an app regression. Use Release builds for shipping
+   launch conclusions; Debug measurements are useful for iteration but are not a substitute.
+4. **Attribute before changing code.** Semantic spans identify the slow product phase; stack
+   samples and command-line `xctrace` identify the CPU, layout, allocation, I/O, or concurrency
+   owner. Separate background preparation from main-thread mount, mutation, layout, and draw so a
+   faster aggregate does not hide a worse interaction.
+5. **Fix the owner structurally.** Prefer removing work, moving discovery off-main, caching stable
+   results, virtualizing at the repeating unit, preserving stable identities, and coalescing only
+   genuinely redundant events. A debounce, spinner, hidden eager subtree, or lower-quality result
+   does not make an unbounded operation fast. Do not trade away exact navigation, accessibility,
+   scroll momentum, bottom correctness, or fresh data to improve a number.
+6. **Run the matched after case and leave a regression boundary.** Re-run the identical fixture,
+   record before/after results and the reason in
+   [`docs/architecture/performance.md`](docs/architecture/performance.md), and keep the focused
+   stress test. Run `scripts/profile_threading.sh full` when shared interaction infrastructure
+   changed; reserve `full+` for release or investigation sweeps whose specialist extremes are
+   intentionally expensive. Document flat or reverted experiments too, so the next person does
+   not repeat them.
+
+The complete self-profiling design, existing workloads, privacy limits, artifact locations, and
+CLI-only `sample`/`xctrace` commands are in
+[`docs/architecture/performance.md`](docs/architecture/performance.md). Interactive Instruments is
+not required.
 
 ## Scaling Gate
 

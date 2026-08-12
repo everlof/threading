@@ -4,7 +4,7 @@ import BorderBeamKit
 enum ActivityBeamDefaults {
     /// One working agent reads clearly (the beam library's own playground
     /// defaults to 0.7); each additional agent adds a step until the cap of 1.
-    static let baseStrength: Double = 0.3
+    static let baseStrength: Double = 0.7
     static let strengthPerAdditionalAgent: Double = 0.1
 }
 
@@ -72,6 +72,17 @@ final class AgentActivityBeamView: NSView {
 
     /// Never claims a click; the surface this rings stays interactive.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// Keeps application-owned offscreen renders faithful even though the
+    /// embedded SwiftUI host cannot cache a transparent root through AppKit.
+    /// The package owns the fallback pixels; this boundary keeps its type from
+    /// leaking into screenshot infrastructure.
+    func withCachedDisplayFallback<Result>(_ body: () throws -> Result) rethrows -> Result {
+        guard #available(macOS 14.0, *),
+              let host = beamHost as? BorderBeamHostView
+        else { return try body() }
+        return try host.withCachedDisplayFallback(body)
+    }
 
     // MARK: - Private Methods
 

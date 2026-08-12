@@ -1,24 +1,23 @@
 import AppKit
 
-// MARK: - Limit presentation input
+private extension UsageDashboardMetric {
+    var title: String {
+        switch self {
+        case .cost: return L10n.string("Cost")
+        case .tokens: return L10n.string("Tokens")
+        }
+    }
+}
 
-/// The dashboard's provider-neutral view of one metered window. It carries observations and
-/// separately-classified estimates/events; the chart decides how to ink them, never what they
-/// mean.
-struct UsageLimitDashboardSeries: Equatable, Sendable, Identifiable {
-    let id: String
-    let runtimeName: String
-    let accountName: String
-    let windowLabel: String
-    let samples: [UsageSample]
-    let resets: [UsageLimitResetEvent]
-    let projection: UsageLimitProjection?
-    let currentFraction: Double?
-    let resetsAt: Date?
-    let resetCreditCount: Int?
-    let nextResetCreditExpiresAt: Date?
-
-    var title: String { "\(runtimeName) · \(accountName) · \(windowLabel)" }
+private extension UsageDashboardBreakdownKind {
+    var title: String {
+        switch self {
+        case .models: return L10n.string("Models")
+        case .projects: return L10n.string("Projects")
+        case .accounts: return L10n.string("Accounts")
+        case .providers: return L10n.string("Providers")
+        }
+    }
 }
 
 // MARK: - Dashboard
@@ -28,6 +27,9 @@ struct UsageLimitDashboardSeries: Equatable, Sendable, Identifiable {
 /// All potentially long breakdowns live in a recycling table; provider and coverage rows are
 /// bounded by the runtime/route set.
 final class UsageDashboardView: NSView, ThemedComponent {
+    private typealias Metric = UsageDashboardMetric
+    private typealias Breakdown = UsageDashboardBreakdownKind
+
     enum DashboardTab: Int, CaseIterable {
         case overview
         case limitHistory
@@ -40,35 +42,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
         }
     }
 
-    enum Metric: Int, CaseIterable {
-        case cost
-        case tokens
-
-        var title: String {
-            switch self {
-            case .cost: return L10n.string("Cost")
-            case .tokens: return L10n.string("Tokens")
-            }
-        }
-    }
-
-    enum Breakdown: Int, CaseIterable {
-        case models
-        case projects
-        case accounts
-        case providers
-
-        var title: String {
-            switch self {
-            case .models: return L10n.string("Models")
-            case .projects: return L10n.string("Projects")
-            case .accounts: return L10n.string("Accounts")
-            case .providers: return L10n.string("Providers")
-            }
-        }
-    }
-
-    private var report: TranscriptUsageReport?
+    private var overview: UsageDashboardOverviewProjection?
     private var limits: [UsageLimitDashboardSeries] = []
     private var isBuilding = false
     private var selectedDays = 30
@@ -115,12 +89,12 @@ final class UsageDashboardView: NSView, ThemedComponent {
     }
 
     func update(
-        report: TranscriptUsageReport?,
+        overview: UsageDashboardOverviewProjection?,
         limits: [UsageLimitDashboardSeries],
         isBuilding: Bool,
         animated: Bool
     ) {
-        self.report = report
+        self.overview = overview
         self.limits = limits.sorted { $0.title < $1.title }
         self.isBuilding = isBuilding
 
@@ -131,8 +105,24 @@ final class UsageDashboardView: NSView, ThemedComponent {
         configureLimitChooser()
         refreshUsage(animated: animated && hasPresentedUsage)
         refreshLimits(animated: animated && hasPresentedLimits)
-        hasPresentedUsage = report != nil
+        hasPresentedUsage = overview != nil
         hasPresentedLimits = !limits.isEmpty
+    }
+
+    /// Deterministic fixture compatibility. Production prepares the projection on a utility task
+    /// before calling the overload above.
+    func update(
+        report: TranscriptUsageReport?,
+        limits: [UsageLimitDashboardSeries],
+        isBuilding: Bool,
+        animated: Bool
+    ) {
+        update(
+            overview: report.flatMap { UsageDashboardProjector.overview(report: $0) },
+            limits: limits,
+            isBuilding: isBuilding,
+            animated: animated
+        )
     }
 
     var usageRenderedPointCountForTesting: Int { usageChart.renderedPointCount }
@@ -405,7 +395,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
     }
 
     private func refreshUsage(animated: Bool) {
-        guard let report else {
+        guard let range = overview?.range(days: selectedDays) else {
             let status = isBuilding ? L10n.string("Reading usage sources…") : L10n.string("No usage recorded yet")
             consumptionHero.show(
                 metric: selectedMetric == .cost ? L10n.string("Total cost") : L10n.string("Processed tokens"),
@@ -434,183 +424,161 @@ final class UsageDashboardView: NSView, ThemedComponent {
             return
         }
 
-        let selection = report.selection(days: selectedDays)
-        let rankedProviders = rankedProviders(in: selection)
+        let metric = range.metric(selectedMetric)
+        let rankedProviders = metric.providers
         let metricTotal = selectedMetric == .cost
-            ? selection.cost.totalUSD
-            : Double(selection.tokens.processed)
-        let heroTools = rankedProviders.prefix(3).map { provider in
+            ? range.cost.totalUSD
+            : Double(range.tokens.processed)
+        var heroTools = rankedProviders.prefix(3).map { provider in
             let value = selectedMetric == .cost
                 ? provider.costUSD
                 : Double(provider.tokens.processed)
-            let styleIndex = selection.providers.firstIndex { $0.origin == provider.origin } ?? 0
             return UsageToolSummary(
                 title: provider.origin.seriesName,
                 value: selectedMetric == .cost
                     ? currency(value)
                     : UsageFormat.tokens(Int64(value.rounded())),
                 share: metricTotal > 0 ? value / metricTotal : 0,
-                style: .categorical(styleIndex)
+                style: .categorical(provider.styleIndex)
             )
+        }
+        let remainingProviders = rankedProviders.dropFirst(heroTools.count)
+        if !remainingProviders.isEmpty {
+            let value = remainingProviders.reduce(0.0) { total, provider in
+                total + (selectedMetric == .cost
+                    ? provider.costUSD
+                    : Double(provider.tokens.processed))
+            }
+            let styleIndex = metric.chartSeries.first(where: { $0.isOther })?.styleIndex
+                ?? rankedProviders.count
+            heroTools.append(UsageToolSummary(
+                title: L10n.string("Other"),
+                value: selectedMetric == .cost
+                    ? currency(value)
+                    : UsageFormat.tokens(Int64(value.rounded())),
+                share: metricTotal > 0 ? value / metricTotal : 0,
+                style: .categorical(styleIndex)
+            ))
         }
         consumptionHero.show(
             metric: selectedMetric == .cost ? L10n.string("Total cost") : L10n.string("Processed tokens"),
             value: selectedMetric == .cost
-                ? currency(selection.cost.totalUSD)
-                : UsageFormat.tokens(selection.tokens.processed),
+                ? currency(range.cost.totalUSD)
+                : UsageFormat.tokens(range.tokens.processed),
             scope: L10n.format(
                 "%lld days · %lld requests",
-                Int64(selection.range),
-                Int64(selection.records)
+                Int64(range.days),
+                Int64(range.records)
             ),
-            quality: selection.cost.unpricedTokens > 0
-                ? L10n.format("* %@ remain unpriced", UsageFormat.tokens(selection.cost.unpricedTokens))
+            quality: range.cost.unpricedTokens > 0
+                ? L10n.format("* %@ remain unpriced", UsageFormat.tokens(range.cost.unpricedTokens))
                 : L10n.string("Provider-reported + official catalog rates"),
             tools: heroTools,
-            remainingToolCount: max(0, rankedProviders.count - heroTools.count)
+            remainingToolCount: 0
         )
 
         metricCards[0].show(
             title: L10n.string("Processed tokens"),
-            value: UsageFormat.tokens(selection.tokens.processed),
-            detail: L10n.format("%lld active days", Int64(selection.days.count))
+            value: UsageFormat.tokens(range.tokens.processed),
+            detail: L10n.format("%lld active days", Int64(range.activeDayCount))
         )
-        let observedInput = selection.tokens.uncachedInput
-            + selection.tokens.cachedInput
-            + selection.tokens.cacheWrite
+        let observedInput = range.tokens.uncachedInput
+            + range.tokens.cachedInput
+            + range.tokens.cacheWrite
         let cachedShare = observedInput > 0
-            ? Double(selection.tokens.cachedInput) / Double(observedInput)
+            ? Double(range.tokens.cachedInput) / Double(observedInput)
             : 0
         metricCards[1].show(
             title: L10n.string("Cached input"),
-            value: UsageFormat.tokens(selection.tokens.cachedInput),
+            value: UsageFormat.tokens(range.tokens.cachedInput),
             detail: L10n.format("%@ of observed input", percent(cachedShare))
         )
         metricCards[2].show(
             title: L10n.string("Uncached input"),
-            value: UsageFormat.tokens(selection.tokens.uncachedInput),
-            detail: L10n.format("%@ cache writes", UsageFormat.tokens(selection.tokens.cacheWrite))
+            value: UsageFormat.tokens(range.tokens.uncachedInput),
+            detail: L10n.format("%@ cache writes", UsageFormat.tokens(range.tokens.cacheWrite))
         )
         metricCards[3].show(
             title: L10n.string("Output"),
-            value: UsageFormat.tokens(selection.tokens.output),
-            detail: L10n.format("%@ reasoning", UsageFormat.tokens(selection.tokens.reasoning))
+            value: UsageFormat.tokens(range.tokens.output),
+            detail: L10n.format("%@ reasoning", UsageFormat.tokens(range.tokens.reasoning))
         )
-        let savingsMultiple = selection.cost.totalUSD > 0
-            ? selection.cost.cacheSavingsUSD / selection.cost.totalUSD
+        let savingsMultiple = range.cost.totalUSD > 0
+            ? range.cost.cacheSavingsUSD / range.cost.totalUSD
             : 0
         metricCards[4].show(
             title: L10n.string("Cache saved"),
-            value: currency(selection.cost.cacheSavingsUSD),
+            value: currency(range.cost.cacheSavingsUSD),
             detail: L10n.format("%@× measured cost", savingsMultiple.formatted(.number.precision(.fractionLength(1))))
         )
 
-        usageChart.setModel(chartModel(selection), animated: animated)
+        usageChart.setModel(chartModel(range), animated: animated)
         refreshBreakdown()
-        coverageView.show(report.coverage)
+        coverageView.show(overview?.coverage ?? [])
     }
 
-    private func chartModel(_ selection: UsageReportSelection) -> ThemedChartModel {
-        let ranked = rankedProviders(in: selection)
-        let leaders = Array(ranked.prefix(3))
-        let remaining = Array(ranked.dropFirst(leaders.count))
-        let routes: [(id: String, title: String, origins: Set<UsageOrigin>, style: ThemedChartSeriesStyle)]
-            = leaders.map { provider in
-                (
-                    id: provider.origin.seriesID,
-                    title: provider.origin.seriesName,
-                    origins: [provider.origin],
-                    style: .categorical(
-                        selection.providers.firstIndex { $0.origin == provider.origin } ?? 0
-                    )
-                )
-            } + (remaining.isEmpty ? [] : [(
-                id: "usage|other",
-                title: L10n.string("Other"),
-                origins: Set(remaining.map(\.origin)),
-                style: .categorical(selection.providers.count)
-            )])
-
-        let dailyByOrigin = Dictionary(grouping: selection.daily, by: \.origin).mapValues { days in
-            Dictionary(uniqueKeysWithValues: days.map { ($0.day, $0) })
-        }
-        let calendar = Calendar.autoupdatingCurrent
-        var days: [Date] = []
-        days.reserveCapacity(selection.range)
-        var day = selection.start
-        while day < selection.end, days.count < selection.range {
-            days.append(day)
-            day = calendar.date(byAdding: .day, value: 1, to: day) ?? selection.end
-        }
-
-        let series = routes.map { route in
-            let points = days.map { day in
-                let value = route.origins.reduce(0.0) { total, origin in
-                    guard let daily = dailyByOrigin[origin]?[day] else { return total }
-                    return total + (selectedMetric == .cost
-                        ? daily.costUSD
-                        : Double(daily.tokens.processed))
-                }
-                return ThemedChartPoint(
-                    at: day,
-                    value: value,
-                    label: selectedMetric == .cost
-                        ? currency(value)
-                        : UsageFormat.tokens(Int64(value.rounded())),
-                    detail: route.title
-                )
-            }
+    private func chartModel(_ range: UsageDashboardRangeProjection) -> ThemedChartModel {
+        let series = range.metric(selectedMetric).chartSeries.map { projected in
+            let title = projected.isOther ? L10n.string("Other") : (projected.title ?? "")
             return ThemedChartSeries(
-                id: route.id,
-                title: route.title,
-                points: points,
-                style: route.style,
+                id: projected.id,
+                title: title,
+                points: projected.points.map { point in
+                    ThemedChartPoint(
+                    at: point.at,
+                    value: point.value,
+                    label: selectedMetric == .cost
+                        ? currency(point.value)
+                        : UsageFormat.tokens(Int64(point.value.rounded())),
+                    detail: title
+                )
+                },
+                style: .categorical(projected.styleIndex),
                 fillsArea: true,
                 curve: .smooth
             )
         }
         let summary = selectedMetric == .cost
-            ? L10n.format("%@ total over %lld days", currency(selection.cost.totalUSD), Int64(selection.range))
-            : L10n.format("%@ total over %lld days", UsageFormat.tokens(selection.tokens.processed), Int64(selection.range))
+            ? L10n.format("%@ total over %lld days", currency(range.cost.totalUSD), Int64(range.days))
+            : L10n.format("%@ total over %lld days", UsageFormat.tokens(range.tokens.processed), Int64(range.days))
         return ThemedChartModel(
             title: selectedMetric == .cost ? L10n.string("Daily cost") : L10n.string("Daily tokens"),
             accessibilitySummary: summary,
             series: series,
-            xRange: selection.start...selection.end,
-            valueFormat: selectedMetric == .cost ? .currency : .tokens
+            markers: overview.map { snapshot in
+                [ThemedChartMarker(
+                    id: "usage|now",
+                    at: min(max(snapshot.builtAt, range.start), range.end),
+                    title: L10n.string("Now"),
+                    detail: L10n.string("Current day is incomplete"),
+                    kind: .now
+                )]
+            } ?? [],
+            xRange: range.start...range.end,
+            valueFormat: selectedMetric == .cost ? .currency : .tokens,
+            showsLegend: true
         )
     }
 
-    private func rankedProviders(
-        in selection: UsageReportSelection
-    ) -> [UsageReportSelection.Provider] {
-        selection.providers.sorted { old, new in
-            let oldValue = selectedMetric == .cost
-                ? old.costUSD : Double(old.tokens.processed)
-            let newValue = selectedMetric == .cost
-                ? new.costUSD : Double(new.tokens.processed)
-            if oldValue != newValue { return oldValue > newValue }
-            return old.origin.seriesName < new.origin.seriesName
-        }
-    }
-
     private func refreshBreakdown() {
-        guard let selection = report?.selection(days: selectedDays) else {
+        guard let range = overview?.range(days: selectedDays) else {
             breakdownTable.show([])
             return
         }
-        let rows: [UsageBreakdownRow]
-        switch selectedBreakdown {
-        case .models:
-            rows = selection.models.map { row(name: $0.name, tokens: $0.tokens.processed, cost: $0.costUSD, records: $0.records) }
-        case .accounts:
-            rows = selection.accounts.map { row(name: $0.name, tokens: $0.tokens.processed, cost: $0.costUSD, records: $0.records) }
-        case .projects:
-            rows = selection.checkouts.map { row(name: $0.label, tokens: $0.billedTokens, cost: $0.costUSD, records: $0.turns) }
-        case .providers:
-            rows = selection.providers.map {
-                row(name: $0.origin.seriesName, tokens: $0.tokens.processed, cost: $0.costUSD, records: $0.records)
-            }
+        let breakdown = range.breakdown(selectedBreakdown)
+        var rows = breakdown.rows.map {
+            row(name: $0.title, tokens: $0.tokens, cost: $0.costUSD, records: $0.records)
+        }
+        if breakdown.omittedRowCount > 0 {
+            rows.append(row(
+                name: L10n.format(
+                    "+%lld more included in total",
+                    Int64(breakdown.omittedRowCount)
+                ),
+                tokens: breakdown.omittedTokens,
+                cost: breakdown.omittedCostUSD,
+                records: breakdown.omittedRecords
+            ))
         }
         breakdownTable.show(rows)
     }
@@ -628,7 +596,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
             for (index, card) in limitCards.enumerated() {
                 let titles = [
                     L10n.string("Current"), L10n.string("Projected 100%"),
-                    L10n.string("Recorded resets"), L10n.string("Banked reset")
+                    L10n.string("Recorded resets"), L10n.string("Banked resets")
                 ]
                 card.show(
                     title: titles[index],
@@ -646,16 +614,13 @@ final class UsageDashboardView: NSView, ThemedComponent {
             return
         }
 
-        let now = Date()
-        let start = now.addingTimeInterval(TimeInterval(-selectedLimitDays) * 86_400)
-        let observed = UsageLimitHistoryAnalysis.downsample(
-            selected.samples.filter { $0.at >= start && $0.at <= now }
-        )
-        let segmented = UsageLimitHistoryAnalysis.segmented(observed)
+        guard let range = selected.range(days: selectedLimitDays) else { return }
+        let now = range.end
+        let start = range.start
         var chartSeries = [ThemedChartSeries(
             id: selected.id,
             title: selected.windowLabel,
-            points: segmented.map {
+            points: range.observed.map {
                 ThemedChartPoint(
                     at: $0.sample.at,
                     value: $0.sample.fraction,
@@ -681,12 +646,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
             ))
         }
 
-        let resets = selected.resets.filter { $0.detectedAt >= start }
-        let chartResets = evenlySpaced(
-            resets,
-            maximumCount: Design.Chart.maximumRenderedMarkers - 2
-        )
-        var markers = chartResets.map {
+        var markers = range.resetMarkers.map {
             ThemedChartMarker(
                 id: $0.id,
                 at: $0.detectedAt,
@@ -727,41 +687,61 @@ final class UsageDashboardView: NSView, ThemedComponent {
             markers: markers,
             xRange: start...chartEnd,
             yRange: 0...1,
-            valueFormat: .percent
+            valueFormat: .percent,
+            showsLegend: true
         ), animated: animated)
 
+        let projectedTitle: String
         let projected: String
         let projectedDetail: String
         if let exhaustion = selected.projection?.projectedExhaustionAt {
+            projectedTitle = L10n.string("Projected 100%")
             projected = relative(exhaustion)
             projectedDetail = L10n.string("At the observed weekly pace")
         } else if let fraction = selected.projection?.projectedFractionAtReset {
+            projectedTitle = L10n.string("Projected at reset")
             projected = percent(fraction)
             projectedDetail = L10n.string("Projected at the scheduled reset")
         } else {
+            projectedTitle = L10n.string("Projection")
             projected = "—"
             projectedDetail = L10n.string("More observations needed")
         }
 
-        let pace = resets.reduce(0) { $0 + $1.paceGainFraction }
         limitCards[0].show(
             title: L10n.string("Current"),
             value: selected.currentFraction.map(percent) ?? "—",
-            detail: selected.resetsAt.map { L10n.format("Resets %@", relative($0)) }
+            detail: selected.resetsAt.map {
+                L10n.format("Resets %@ · %@", relative($0), exactDateTime($0))
+            }
                 ?? L10n.string("Reset time unavailable")
         )
-        limitCards[1].show(title: L10n.string("Projected 100%"), value: projected, detail: projectedDetail)
+        limitCards[1].show(title: projectedTitle, value: projected, detail: projectedDetail)
         limitCards[2].show(
             title: L10n.string("Recorded resets"),
-            value: resets.count.formatted(),
-            detail: pace > 0 ? L10n.format("%@ pace restored", percent(pace)) : L10n.string("Observed reset boundaries")
+            value: range.resetCount.formatted(),
+            detail: range.restoredPaceFraction > 0
+                ? L10n.format("%@ pace restored", percent(range.restoredPaceFraction))
+                : L10n.string("Observed reset boundaries")
         )
-        limitCards[3].show(
-            title: L10n.string("Banked reset"),
-            value: selected.resetCreditCount.map(String.init) ?? "—",
-            detail: selected.nextResetCreditExpiresAt.map {
+        let banked: (value: String, detail: String)
+        switch selected.resetCreditCount {
+        case nil:
+            banked = (L10n.string("Unavailable"), L10n.string("Reset-credit count was not reported"))
+        case 0:
+            banked = ("0", L10n.string("None available"))
+        case let count?:
+            let detail = selected.nextResetCreditExpiresAt.map {
                 L10n.format("Next expires %@", relative($0))
-            } ?? L10n.string("No expiry reported")
+            } ?? (count == 1
+                ? L10n.string("1 reset available · No expiry reported")
+                : L10n.format("%lld resets available · No expiry reported", Int64(count)))
+            banked = (count.formatted(), detail)
+        }
+        limitCards[3].show(
+            title: L10n.string("Banked resets"),
+            value: banked.value,
+            detail: banked.detail
         )
     }
 
@@ -776,7 +756,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
     }
 
     private func currency(_ value: Double) -> String {
-        value.formatted(.currency(code: "USD").precision(.fractionLength(0...2)))
+        value.formatted(.currency(code: "USD").precision(.fractionLength(2)))
     }
 
     private func percent(_ value: Double) -> String {
@@ -787,18 +767,10 @@ final class UsageDashboardView: NSView, ThemedComponent {
         relativeDateFormatter.localizedString(for: date, relativeTo: Date())
     }
 
-    private func evenlySpaced<Element>(_ values: [Element], maximumCount: Int) -> [Element] {
-        guard maximumCount > 0, values.count > maximumCount else { return values }
-        guard maximumCount > 1 else { return [values[values.count / 2]] }
-
-        let last = values.count - 1
-        return (0..<maximumCount).map { position in
-            let index = Int(
-                (Double(position) * Double(last) / Double(maximumCount - 1)).rounded()
-            )
-            return values[index]
-        }
+    private func exactDateTime(_ date: Date) -> String {
+        date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
+
 }
 
 // MARK: - Metric cards
@@ -940,7 +912,7 @@ private final class UsageConsumptionHeroView: NSView, ThemedComponent {
             toolsStack.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
-        for tool in tools.prefix(3) {
+        for tool in tools.prefix(4) {
             let row = UsageToolShareRowView(tool)
             toolsStack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: toolsStack.widthAnchor).isActive = true

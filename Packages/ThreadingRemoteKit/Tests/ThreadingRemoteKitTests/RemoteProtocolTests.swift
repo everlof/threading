@@ -399,6 +399,60 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(me.themeCatalog)
         XCTAssertNil(me.archivedSessions)
         XCTAssertNil(me.newSessionCatalog)
+        XCTAssertNil(me.features)
+    }
+
+    func testUsageDTOsRoundTripWithoutCollapsingBankedResetInventory() throws {
+        let unknown = RemoteUsageLimitSeriesSummaryDTO(
+            id: "codex|personal|weekly",
+            runtimeName: "Codex",
+            accountName: "Personal",
+            windowLabel: "Weekly",
+            currentFraction: 0.42,
+            resetsAt: 200,
+            bankedResetCount: nil,
+            nextBankedResetExpiresAt: nil
+        )
+        let empty = RemoteUsageLimitSeriesSummaryDTO(
+            id: "codex|work|weekly",
+            runtimeName: "Codex",
+            accountName: "Work",
+            windowLabel: "Weekly",
+            currentFraction: 0.73,
+            resetsAt: 300,
+            bankedResetCount: 0,
+            nextBankedResetExpiresAt: nil
+        )
+        let dashboard = RemoteUsageDashboardDTO(
+            isBuilding: false,
+            builtAt: 123,
+            pricingCatalogVersion: "test",
+            ranges: [],
+            coverage: [],
+            limitSeries: [unknown, empty],
+            nextLimitCursor: "2",
+            omittedLimitSeriesCount: 3,
+            preparedAt: 124
+        )
+
+        let decoded = try JSONDecoder().decode(
+            RemoteUsageDashboardDTO.self,
+            from: JSONEncoder().encode(dashboard)
+        )
+        XCTAssertEqual(decoded, dashboard)
+        XCTAssertNil(decoded.limitSeries[0].bankedResetCount)
+        XCTAssertEqual(decoded.limitSeries[1].bankedResetCount, 0)
+
+        let me = RemoteMeDTO(
+            serverProtocol: RemoteProtocolInfo(),
+            share: .init(label: "owner", scope: "all", capability: "view", expiresAt: nil),
+            sessions: [],
+            features: [RemoteRESTFeature.usageDashboard.rawValue]
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteMeDTO.self, from: JSONEncoder().encode(me)),
+            me
+        )
     }
 
     func testLiveThemeUpdateRoundTrips() throws {
@@ -814,6 +868,18 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(link.baseURL.absoluteString, "https://quiet-river.trycloudflare.com/")
         XCTAssertEqual(link.token, "private-token")
         XCTAssertEqual(link.meURL.absoluteString, "https://quiet-river.trycloudflare.com/api/me")
+        XCTAssertEqual(
+            link.usageURL.absoluteString,
+            "https://quiet-river.trycloudflare.com/api/usage"
+        )
+        XCTAssertEqual(
+            link.usageURL(cursor: "48", limit: 24).absoluteString,
+            "https://quiet-river.trycloudflare.com/api/usage?cursor=48&limit=24"
+        )
+        XCTAssertEqual(
+            link.usageLimitURL(seriesID: "codex|personal|weekly", days: 30).absoluteString,
+            "https://quiet-river.trycloudflare.com/api/usage/limit?series=codex%7Cpersonal%7Cweekly&days=30"
+        )
         XCTAssertEqual(
             link.appThemeURL.absoluteString,
             "https://quiet-river.trycloudflare.com/api/theme"

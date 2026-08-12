@@ -104,6 +104,12 @@ struct RemoteAuthorization: Equatable, Sendable {
             && scope == .allSessions
     }
 
+    /// Host usage includes whole-machine spend and provider account labels. It is an owner read,
+    /// independent of whether that paired owner credential may mutate host settings.
+    var canReadHostUsage: Bool {
+        principal == .ownerDevice && scope == .allSessions
+    }
+
     var isExpired: Bool {
         expiresAt.map { $0 <= Date() } ?? false
     }

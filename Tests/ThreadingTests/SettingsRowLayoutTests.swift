@@ -97,6 +97,40 @@ final class SettingsRowLayoutTests: XCTestCase {
                                     "the control was squeezed by the labels beside it")
     }
 
+    /// A long title is allowed to truncate; moving the setting's control outside the card is
+    /// not. This is the exact pressure shape the 420pt General-page evidence exposed.
+    func testALongTitleKeepsTheControlInsideANarrowRow() throws {
+        let control = popUp()
+        control.translatesAutoresizingMaskIntoConstraints = false
+        control.widthAnchor.constraint(
+            equalToConstant: SettingsUIDefaults.controlWidth
+        ).isActive = true
+        let width: CGFloat = 420
+        let built = SettingsUI.row(
+            title: "A deliberately long setting title that cannot keep its natural width",
+            subtitle: "The explanation wraps while the setting itself remains reachable.",
+            control: control,
+            localizes: false
+        )
+        built.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 200))
+        container.addSubview(built)
+        NSLayoutConstraint.activate([
+            built.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            built.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            built.topAnchor.constraint(equalTo: container.topAnchor)
+        ])
+        container.layoutSubtreeIfNeeded()
+
+        let frame = control.convert(control.bounds, to: built)
+        XCTAssertLessThanOrEqual(
+            frame.maxX,
+            width - Design.Spacing.inset + 0.5,
+            "the title pushed the control beyond the narrow card"
+        )
+        XCTAssertGreaterThan(frame.minX, Design.Spacing.inset)
+    }
+
     /// The real Themes-page failure used the opposite fixture from the long App theme line:
     /// a short subtitle beside the standard fixed-width picker. Under the stack's default
     /// gravity distribution those two views clustered at the leading edge, leaving the rest

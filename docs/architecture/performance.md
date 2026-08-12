@@ -554,8 +554,12 @@ open. It builds an isolated app copy, changes only that copy's bundle identity, 
 and gives each repetition a fresh copy-on-write snapshot of the real Application Support tree.
 SQLite's backup API replaces the independently cloned database/WAL/SHM family with one consistent
 image, and the real preferences are copied into the throwaway bundle domain. The measured process
-therefore sees the real project/session, extension, icon, theme and window-state shape while every
-lock, marker, log and write belongs to temporary state that is removed after the sweep.
+therefore sees the real project/session, extension, icon, theme and window-state shape, while every
+lock, marker, log and write belongs to temporary state that is removed after the sweep. Every
+capture remains owned by the CLI: the exit trap matches only that copy's complete executable path,
+queues `TERM` before `CONT` when App Launch leaves the target suspended, and uses a bounded `KILL`
+fallback. This ownership is part of the harness contract—a completed or interrupted profile must
+leave neither a process nor a Dock tile behind.
 `THREADING_STARTUP_PROFILE_RUNS` controls the repetition count (three by default);
 `THREADING_STARTUP_PROFILE_CONFIGURATION` selects the build configuration (Debug by default).
 Set `THREADING_STARTUP_PROFILE_DERIVED_DATA` to a trusted existing DerivedData directory for fast
@@ -1037,12 +1041,16 @@ keep terminal content tracking the pointer.
 
 ## Cold launch to the first ready window
 
-`THREADING_STARTUP_PROFILE=1` follows the production launch path through state loading, appearance
-restore, menu construction, `MainWindowController`, ordering the first window, and the next main
-queue turn. It then terminates cleanly before session restoration, extension processes, polling,
-or background services begin. The one bounded `THREADING_PERF app-startup` line reports every
-phase separately and includes the project/session counts that define the measured store. The
-ordinary always-on `app.launch` signpost remains unchanged.
+`THREADING_STARTUP_PROFILE=1` follows the production launch path through launch-ledger open, state
+loading, appearance restore, menu construction, `MainWindowController`, ordering the first window,
+and the next main queue turn. It then settles the pending content layout and display before
+terminating cleanly, so visible outline rows cannot first materialize inside AppKit's termination
+flush after the metric has already printed. `total_ms` retains the run-loop readiness boundary;
+`settle_layout_ms`, `settle_display_ms`, and `total_to_frame_ms` describe the complete settled-frame
+boundary. The one bounded `THREADING_PERF app-startup` line reports every phase separately and
+includes the project/session counts that define the measured store. Session restoration, extension
+processes, polling, and background services still begin after the profile exits. The ordinary
+always-on `app.launch` signpost remains unchanged.
 
 The first Debug trace against one project and 99 sessions found two pieces of invisible eager work
 inside the 352–356 ms window-construction phase:
@@ -1272,6 +1280,176 @@ window variance was larger than the roughly one-sample branch removed, so no agg
 speedup is claimed. The firm result is that an unshown state no longer owns launch work; the current
 production baseline remains roughly **350–370 ms process entry to ready**, with about **62 ms** in
 the first visible-tree turn.
+
+The next Release audit split `MainWindowController` construction into coarse semantic phases on the
+existing one-line startup metric. Against a cloned one-project / 104-session store, the root-content
+install and native toolbar were the largest removable pieces of split setup. The command-line Time
+Profiler trace explained why: `WindowChromeHostViewController.viewDidLoad` built a complete
+`WindowTitleBandView` and `WindowCommandBandView` even in native dress, where both were hidden at
+zero height. App-icon lookup, workspace appearance queries, chrome font registration, the command
+controls, their constraints, and their observers therefore all ran for pixels that did not exist.
+
+Native dress now installs only two lightweight zero-height structural slots. The actual title and
+command bands materialize when takeover chrome first becomes active. A window launched directly
+under a takeover theme passes that initial state into the host, so its visible chrome is still built
+as part of the first root attachment; native launch and a later native → takeover transition retain
+the title and control behavior. Regression tests hold all three boundaries: setting a native title
+and laying out the host does not materialize the bands, entering takeover does, and covering-surface
+geometry remains identical in both dresses.
+
+To separate this owner from dyld and native-window variance, six eager and six lazy Release binaries
+were alternated against pristine clones of the same store. Each binary already contained the same
+single toolbar-state update, so the comparison isolates chrome materialization:
+
+| Release cold-launch phase, six-run paired median | Eager hidden chrome | Lazy takeover chrome | Change |
+|---|---:|---:|---:|
+| Root content installation | 25.52 ms | **18.92 ms** | **−6.61 ms (−25.9%)** |
+| Complete split setup | 62.04 ms | **52.10 ms** | **−9.94 ms (−16.0%)** |
+| Window construction | 135.23 ms | **126.46 ms** | **−8.77 ms (−6.5%)** |
+| Process entry → ready | 302.98 ms | **291.12 ms** | **−11.87 ms (−3.9%)** |
+| First ready turn | 30.81 ms | 31.98 ms | +1.17 ms (within run variance) |
+
+The independent five-run lazy sweep measured **272.22 ms** total, **114.97 ms** window
+construction, and **17.07 ms** root installation; its App Launch trace measured 262.43, 121.56,
+and 18.15 ms respectively. Those absolute totals are reported as a state-and-machine snapshot, not
+a universal launch promise. The paired phase delta is the attribution result.
+
+Two nearby experiments are recorded to prevent repetition. Attaching the complete content tree only
+after building the toolbar and pane header merely shifted layout between phases and saved about
+4 ms of window setup, so that ordering was reverted. Removing the first of two identical
+`updateToolbarControlStates` calls was flat within roughly 0–2 ms; the single post-header update is
+kept because both toolbar and pane controls exist then, but no launch win is attributed to it.
+
+The native-toolbar phase was then split at its actual ownership boundaries. In five direct Release
+launches, its 18.87 ms median comprised **0.03 ms** constructing `NSToolbar`, **18.30 ms** inside
+`NSWindow.setToolbar`, **1.84 ms** of app-owned delegate item construction nested inside that call,
+and **0.46 ms** applying the compact style. The saved Time Profiler trace places the remaining
+attachment time in `NSToolbarView` creation and `_windowWillShowToolbar`. The toolbar is the system
+primitive that keeps the sidebar control beside the traffic lights, and its three visible symbols
+belong to first paint; replacing it or deferring those pixels would trade correctness or move work
+behind the marker for, at most, the 1.84 ms app-owned slice. Treat the roughly 16 ms remainder as a
+native floor unless a later OS trace changes that attribution. The sub-phase fields remain in the
+one startup metric so a future AppKit change is visible without opening Instruments.
+
+The next removable owner was smaller but entirely invisible. `AccountUsageItemView` used to build
+its ring, label, constraints, event observation and repeating refresh timer during every
+`MainWindowController` initialization, although an empty or composer launch has no metered account
+and never displays it. The pane header now omits the item until a session first supplies an account;
+late materialization inserts it in the same arranged position. Reads for extension signals and
+session-stop refreshes inspect the optional materialized item and do not cross the boundary.
+
+Six balanced AB/BA Release pairs against clones of the same one-project / 105-session store measured
+the owned phases as follows:
+
+| Release cold-launch phase | Eager hidden usage item | Lazy usage item | Change |
+|---|---:|---:|---:|
+| Controller base initialization | 3.29 ms | **2.76 ms** | −0.53 ms |
+| Pane-header construction | 5.91 ms | **5.57 ms** | −0.34 ms |
+
+The median paired deltas were −0.54 and −0.33 ms respectively. Window construction and total launch
+also moved in the favourable direction, but by much larger amounts than the removed subtree and
+with divergent state/native-window timings, so no aggregate speedup is attributed to this change.
+The retained claim is structural plus the approximately **0.9 ms** owned-phase reduction: a hidden
+timer-owning view no longer exists at launch. Focused navigation and chrome suites ran 56 tests;
+the lazy regression asserts both non-materialization on an empty window and the exact arranged
+position after first access.
+
+The same header audit did **not** treat the whole action group as hidden. New Session, the status
+card choice and the display-pane control are standing first-paint actions; session context and shell
+also retain their real control shells for keyboard/accessibility behavior. Only three glyphs have no
+launch pixels: the hidden native/terminal surface switch and both halves of the hidden Open In
+control. Those buttons now use `ThemedIconButton`'s existing deferred-presentation boundary. Their
+geometry, actions and accessibility metadata remain eager, and the latest symbol or application
+icon materializes when the control is first revealed.
+
+Six balanced AB/BA Release pairs measured pane-header construction at **5.92 → 4.16 ms**, with a
+median paired delta of **−1.79 ms**. Complete split setup and total launch moved in the opposite
+direction because content installation, native window construction and first-turn scheduling varied
+by much more than this subtree; no aggregate claim is made. The after trace contains no symbol stack
+beneath `makePaneHeaderView`; its remaining sampled launch symbol is the separate, eagerly created
+`ThemedTabItemView` in controller base initialization. Eight focused navigation tests verify the
+three hidden glyphs stay unmaterialized while visible/standing actions remain complete.
+
+The remaining sampled symbol stack was the page tab itself. An empty launch constructed a complete
+`ThemedTabItemView`—including its SF Symbol, close button, theme observation and constraints—even
+though no session, terminal or project composer existed to name. Settings has a separate mode
+header and likewise does not need a document tab. The pane header now starts without that subtree
+and inserts it at the leading edge only when `updateSessionTitleItem` first has a real workspace
+page. A tab first requested while Settings is active inherits the hidden state rather than flashing
+through the mode header.
+
+Six balanced AB/BA Release pairs against the same one-project / 105-session snapshot measured
+controller base initialization at **2.814 → 0.433 ms**, a median paired reduction of **2.382 ms
+(84.6%)**. Every pair moved in the same direction. Window construction and total launch also moved
+favourably, but those deltas include native-window, dyld and scheduling variance and are not
+attributed to this subtree. The after trace contains zero `ThemedTabItemView` or `pageTabView`
+startup samples; the one remaining sampled `Design.Symbol.image` belongs to the visible project
+sidebar header. The focused 29-test navigation/Open In/header run passed, and a production-route
+regression now proves that Settings leaves the tab unbuilt while selecting a real project creates,
+positions and reveals it. That stronger test also exposed and fixed a pre-existing omission where
+selecting an existing project opened its composer without refreshing the page header or window
+title.
+
+The next trace exposed work that was visible but unnecessarily expensive rather than hidden. The
+first Claude and Codex rows loaded their 32 px brand marks with two synchronous
+`NSImage(contentsOf:)` calls from loose bundle files. The retained post-page-tab Time Profiler
+capture assigned **9.17 ms** of main-thread weight to those two `AgentBrandIcons.load` stacks,
+including ImageIO plug-in and PNG metadata work. Both marks now also live in the compiled asset
+catalogue and the runtime path uses `NSImage(named:)`; the loose resources remain because the
+component gallery intentionally attaches them as sample files. The Codex rendition is compiled as
+a template image, while the Claude rendition retains its colour.
+
+The after Release trace contains zero `AgentBrandIcons`, `SessionRowView.applyAgentIcon`,
+`NSImage(contentsOf:)`, or `ERROR_ImageIO_DataBufferIsNotReadable` samples. Its sole ImageIO sample
+is AppKit initializing image suffix support while constructing the native titlebar, not a session
+row. Six balanced launch pairs were too noisy to claim an aggregate improvement: the owned sidebar
+phase had a +0.47 ms median paired delta because two after runs were system-load outliers, while the
+other four pairs ranged from −1.26 to +1.07 ms. The retained claim is therefore deliberately
+limited to removing the measured synchronous file-decode stack, not an end-to-end launch delta.
+The six-test account-mark suite verifies catalogue presence, template semantics, sizing and the
+rendered provider strip.
+
+The next invisible startup owner was the launch ledger itself. Every healthy JSONL line first
+decoded a version-only probe and then decoded the complete `LaunchLedgerRecord`, so the ordinary
+current-format path parsed the same bytes twice on the main thread. The parser now uses one custom
+`Decodable` wrapper: it reads `version` and asks the same decoder for the complete record only when
+this build owns that format. A later-format line still stops after the discriminator and remains
+byte-for-byte untouched; a regression supplies deliberately incompatible `kind` and `launch`
+payload shapes to prove an old build never asks for them.
+
+The startup line retains `ledger_open_ms` as a permanent coarse attribution field. Six balanced
+AB/BA Release pairs against the same 153-record, 33.8 KiB production snapshot measured ledger open
+at **8.102 → 6.442 ms (−1.659 ms, −20.5%)**, with a **−1.712 ms** median paired change. The matched
+Time Profiler capture reduced `LaunchLedgerParser.parse` from 5 to 3 ms of sampled weight,
+`JSONDecoder.decode` from 6 to 4 ms, and `LaunchLedger.openLaunch` from 7 to 6 ms. Total launch moved
+in the favourable direction, but unrelated state, native-window and scheduling phases varied too
+widely to attribute that aggregate.
+
+The scaling boundary was measured separately rather than inferred from the ordinary file. A cold
+synthetic fixture at the 512-record retention ceiling (91.6 KiB, 20 complete launches with rich
+checkpoint detail) measured **8.706 → 7.660 ms (−1.047 ms, −12.0%)**, with a **−0.966 ms** median
+paired change across six Release pairs. The retained
+`scripts/profile_threading.sh launch-ledger-stress` fixture drives the same 512-record / 20-launch
+shape repeatedly through the production parser and emits median, p95 and max latency; routine
+`full` runs it.
+
+That trace also corrected the endpoint it was measuring. The `app-startup` line printed before
+AppKit's first display cycle: the metric appeared at 23:31:06.645, while visible session rows were
+still resolving account identity at 23:31:06.688–06.695, and the Time Profiler placed row
+construction below the subsequent `NSApplication.terminate` flush. The profile path now settles
+the pending content layout and display before printing and terminating. The original run-loop
+readiness fields remain for comparison, while `total_to_frame_ms` is the number to use for
+first-frame work.
+
+The newly visible row work included repeated `IconBackplate.tone(of:)` calls for Claude's one
+immutable colour mark. A row measured the same pixels during configuration and again when AppKit
+assigned its background style. `AgentBrandIcons` now measures that mark once; session rows pass the
+known tone through every later plate decision. Extension images still measure their own pixels
+because their provider may replace the bytes. An isolated 1,000-iteration microbenchmark using the
+real 32 px Claude asset and a 23-row viewport with two style passes measured **7.278 ms median /
+7.709 ms p95** for per-row measurement versus **0.177 ms / 0.230 ms** with the shared tone. This is
+an owned primitive comparison, not an attributed end-to-end launch delta; the existing
+`sidebar-stress` fixture carries the production viewport path.
 
 ## Display-pane transition beside a live TUI
 
@@ -1793,7 +1971,7 @@ The five default workloads are grouped bars, stacked bars, ranking, line and are
 the fixture clamps overrides to the mark product cap rather than benchmarking an input validation
 failure.
 
-A current-source Debug sweep on 2026-08-09 measured:
+A current-source Debug sweep on 2026-08-09 originally measured:
 
 | Shape | Decode + model, 250× | Cold pane | Updates, 250× | Draw, 60 frames | Draw / frame | Footprint delta |
 |---|---:|---:|---:|---:|---:|---:|
@@ -1805,10 +1983,31 @@ A current-source Debug sweep on 2026-08-09 measured:
 
 Decode/model and stable updates stay below roughly 0.45 ms per spec, and synchronous drawing stays
 below 5.5 ms per sampled frame at the product cap. The card has six live descendants, not one view
-per mark: the renderer owns bounded prepared geometry. Cold mount is the only phase above one 60 Hz
-frame, at 42–47 ms. That is a contained open-time target rather than a scrolling or live-update
-scaling failure; optimize it only against a trace of an actual pane-open hitch. `cacheDisplay` is a
-deliberately synchronous paint stress and must not be presented as compositor frame timing.
+per mark: the renderer owns bounded prepared geometry. `cacheDisplay` is a deliberately synchronous
+paint stress and must not be presented as compositor frame timing.
+
+The apparent 42–47 ms cold-pane owner was a measurement error. The fixture started its clock before
+creating the first `NSWindow` in a fresh XCTest process even though production installs a chart in
+an existing display-pane host. On 2026-08-11 that mixed aggregate rose to 84–98 ms across every
+shape, but a phase split attributed 74–94 ms to process-wide AppKit window initialization and only
+8–10 ms to the chart. Optimizing geometry against that aggregate would have been placebo.
+
+The fixture now creates and reports its offscreen host before starting the product clock. Five
+fresh XCTest processes against the same isolated Debug product measured:
+
+| Shape | Decode + model, 250× | Host window diagnostic | Cold pane | Updates, 250× | Draw / frame | Footprint delta |
+|---|---:|---:|---:|---:|---:|---:|
+| Grouped bar | 65.9 ms | 73.7 ms | **9.7 ms** | 65.5 ms | 4.33 ms | 12.8 MB |
+| Stacked bar | 69.2 ms | 87.5 ms | **10.1 ms** | 76.8 ms | 2.73 ms | 13.0 MB |
+| Ranking | 65.3 ms | 85.1 ms | **10.3 ms** | 66.0 ms | 3.59 ms | 12.8 MB |
+| Line | 73.7 ms | 80.3 ms | **7.7 ms** | 73.5 ms | 3.18 ms | 12.8 MB |
+| Area | 73.9 ms | 84.8 ms | **10.0 ms** | 73.0 ms | 4.66 ms | 12.8 MB |
+
+The product clock splits further into 0.16–0.19 ms controller initialization, 6.56–8.90 ms view
+load/attachment including categorical geometry, and 0.97–1.24 ms first layout. The complete chart
+mount is inside one 60 Hz frame at the largest valid contract, so there is no current chart-open
+bottleneck to repair. Keep `host_window_ms` as a harness-health diagnostic, but never add it to
+`cold_pane_ms` again.
 
 ## Project sidebar stress target
 
@@ -1816,15 +2015,26 @@ deliberately synchronous paint stress and must not be presented as compositor fr
 database and loads the production `ProjectSidebarViewController`. It measures cold load and layout,
 same-shape content refresh, collapse/re-expand, a reveal through branch and nested side-chat levels,
 one targeted title event, 250 repeated row updates, and the pure tree builder. The fixture fixes the
-session order and grouping defaults and never reads or changes the user's projects.
+grouping defaults, parameterizes manual/recent/name order, and never reads or changes the user's
+projects. It also asserts that the expanded outline contains exactly as many rows as the pure tree;
+this catches an ancestor that a sort order accidentally left closed, not just slow work.
 
-`scripts/profile_threading.sh sidebar-stress` runs 500, 1,000, 2,000 and 5,000 sessions in fresh
-`xctest` processes. The profiler's DerivedData lives inside that run's artifact directory: parallel
-developer builds cannot lock its build database, while the deterministic workloads in `full`
-reuse the same isolated build. Results are `THREADING_PERF project-sidebar` lines in
-`project-sidebar-stress.log`.
+The cold fixture follows `MainWindowController`'s production lifecycle: load the deferred sidebar
+shell, give it its final 300 × 720 geometry, cross the explicit initial-tree mount boundary, then
+perform final layout. Shell construction and shell layout are reported separately from tree mount,
+because fresh-process AppKit initialization is variable and is not sidebar work. Keep small semantic
+tests beside this large fixture. The persisted-closed-project case, nested side-chat ordering, exact
+row count, selection, and reveal assertions prevent a faster result from silently changing what is
+expanded or addressable.
 
-At 5,000 sessions the outline contains 5,120 logical rows but materializes only 21 cells, so row-view
+`scripts/profile_threading.sh sidebar-stress` runs manual order at 500, 1,000, 2,000 and 5,000
+sessions, plus recent-activity and name order at 5,000, in fresh `xctest` processes.
+`THREADING_SIDEBAR_STRESS_ORDER`, `..._PROJECTS`, and `..._SESSIONS` narrow it to one point. The
+profiler's DerivedData lives inside that run's artifact directory: parallel developer builds cannot
+lock its build database, while the deterministic workloads in `full` reuse the same isolated
+build. Results are `THREADING_PERF project-sidebar` lines in `project-sidebar-stress.log`.
+
+At 5,000 sessions the outline contains 5,120 logical rows but materializes only 23 cells, so row-view
 virtualization is already doing its job. The measured fixes are above that layer:
 
 - rendered project, session, owner and ancestor indexes replace repeated flattened and recursive
@@ -1833,8 +2043,10 @@ virtualization is already doing its job. The measured fixes are above that layer
   model lookup used by every live row constant-time;
 - content refresh touches only the viewport, since an off-screen row reads current store state when
   AppKit eventually asks for its view;
-- `ProjectsDidChange` carries a session-row impact for agent titles, unless name ordering means the
-  title can move the row. This keeps the ordinary title path out of the complete builder;
+- `ProjectsDidChange` carries a session-row impact for ordinary title repainting and a
+  session-order impact under Name order. The latter rebuilds, adopts and diffs only the affected
+  project's subtree; an identity-set guard falls back to the complete builder if a supposedly
+  title-only event ever adds or removes a row;
 - outline expansion callbacks ignore disclosure state that already matches the model, and an actual
   disclosure change upserts only that project row. It never walks or rewrites the session table.
 
@@ -1851,24 +2063,58 @@ representative 5,000-session controller load from about 3,165 ms to 200 ms and c
 from about 303 ms to 3.8 ms. A repeated sweep measured 135 ms load, 72 ms first layout and 7.3 ms
 disclosure. These figures are regression-scale evidence, not release-build launch claims.
 
-A later sweep after deferring absent account and pin subtrees kept materialized cell count bound to
-the viewport and exercised 120 consecutive resize ticks:
+A later sweep after deferring absent account and pin subtrees appeared to keep materialized cell
+count bound to the viewport and exercised 120 consecutive resize ticks:
 
 | Sessions | Logical rows | Materialized cells | Load | First layout | Resize p95 / max |
 |---:|---:|---:|---:|---:|---:|
 | 1,000 | 1,060 | 24 | 84.8 ms | 51.2 ms | 5.12 / 5.84 ms |
 | 5,000 | 5,120 | 23 | 157.3 ms | 46.5 ms | 5.12 / 5.60 ms |
 
-The resize tail remains inside a 60 Hz frame even at 5,000 sessions, and the constructed view count
-does not grow with the model. The two stress runs and 131 focused sidebar-row tests passed; the
-numbers remain Debug regression fixtures rather than launch measurements.
+Those values came from an eager standalone controller mounted while its view still had zero
+geometry. They were useful for model work but did not reproduce the product lifecycle. Moving the
+fixture to the final-width deferred mount exposed the real AppKit cliff: sequential disclosure in a
+live 720pt viewport retained cells from intermediate tree heights. At 5,000 sessions the corrected
+before case took 232–234 ms for cold mount, including 183–185 ms in outline application; it retained
+54 cells, took roughly 47 ms for final layout, and made resize p95 18–19 ms.
 
-`sidebar.outline.apply-structure` and `sidebar.disclosure.persist` keep the remaining AppKit and
-SQLite costs separable in a trace. A recursive `expandChildren` experiment remains reverted: before
-the persistence cause was isolated it made both paths slightly slower. The current roughly 200 ms
-cold total at this deliberately extreme scale does not justify replacing `NSOutlineView`; a
-flattened visible-row table remains an option only if a future product target demands substantially
-less than that.
+Cold mount now constructs the complete tree while only the list viewport is synchronously held at
+zero height, then restores its real bottom constraint before the next display pass. Final width and
+the rest of the window remain in force. The first expansion is one recursive request per open
+project, and adoption returns the rebuilt tree directly when no presented tree exists. Clean matched
+5,000-session runs now take roughly 82–99 ms for cold mount, including 33–42 ms in outline
+application, retain 23 cells, lay out in 38–46 ms, and keep resize p95 around 1.6–3.8 ms. Cold
+adoption fell from about 7 ms to effectively zero. Collapse/re-expand remains about 4–5 ms and a
+deep reveal about 13–18 ms. A machine-contention outlier reached 147 ms mount/66 ms outline, which is
+why phase metrics and repeated runs are kept instead of quoting one aggregate.
+
+The 2026-08-11 order sweep found two costs the manual-only fixture had hidden. Manual order was
+comparison-sorting an array already in manual order, and Name order re-derived each display title
+(including a defaults read) for every comparison. Manual order is now a linear stable partition for
+pins; derived orders sort lightweight offsets; Name order computes each title once. Fresh-process
+5,000-session medians were:
+
+| Order | Tree build before | Tree build now | Targeted title event now |
+|---|---:|---:|---:|
+| Manual | 46.0 ms | **25.3 ms** | 6.3 ms |
+| Recent activity | 42.8 ms | **27.5 ms** | 6.4 ms |
+| Name | 174.3 ms | **61–68 ms** | **13.7 ms** |
+
+The Name-order title event was about 196.5 ms before cached names and project-local rebuilding; it
+is now inside one 60 Hz frame even at 5,000 sessions. At 500/1,000/2,000 sessions it measured
+9.8/11.0/15.2 ms. All three 5,000-session variants now expose the complete 5,120-row tree. Before
+tree-ordered expansion, recent/name ordering could ask AppKit to expand a descendant before its
+parent existed and silently exposed only 5,063 rows; expansion now walks the presented hierarchy.
+
+`sidebar.outline.apply-structure`, `sidebar.session-order.apply`, and
+`sidebar.disclosure.persist` keep the remaining AppKit, local reorder, and SQLite costs separable in
+a trace. The earlier recursive `expandChildren` experiment was initially reverted because the old
+fixture made it look slower. With persisted disclosure fixed and the production lifecycle in the
+fixture, batching the first expansion is now retained. A focused semantic test also caught and fixed
+two adjacent disclosure errors: a lone root project had ignored persisted closure, and groups below
+a project opened later did not regain their default-open state. A flattened visible-row table
+remains an option only if a future product target demands substantially less than the now-bounded
+AppKit mount and resize phases.
 
 ## File pane stress target
 

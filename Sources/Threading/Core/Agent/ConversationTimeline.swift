@@ -29,6 +29,13 @@ struct ConversationTimeline {
         case thinking(String)
         case toolCall(ToolCall)
 
+        /// A terminal fact for a turn that did not complete. Kept typed rather than flattened
+        /// into a notice string so live rendering, replay, remote snapshots and later folding
+        /// cannot disagree about whether the user stopped or the provider failed.
+        ///
+        /// Completed turns need no row: their finished answer is the visible terminal state.
+        case turnOutcome(TurnOutcome)
+
         /// Neither said nor tool output: a truncation note, a failed turn, an orphan result.
         case notice(String, kind: NoticeKind)
 
@@ -60,6 +67,11 @@ struct ConversationTimeline {
         /// Present only for tools that change a file. Built from the call's own arguments, so
         /// it is known before the tool runs and the result merely confirms it landed.
         let diff: [DiffLine]?
+
+        /// The same edit separated by file. Live rendering gets a Git-derived card; replay has
+        /// no safe historical checkout baseline, so this provider-recorded form is its bounded,
+        /// deterministic source instead.
+        let fileChanges: [EditDiff.FileChange]
 
         /// Present only when this call *is* a chart Threading was asked to draw.
         ///
@@ -271,19 +283,26 @@ struct ConversationTimeline {
             return changes
 
         case .turnFinished(let text, let outcome, let metrics):
+            // A completed assistant message is authoritative and clears its own placeholder.
+            // When a provider is interrupted before sending that terminal message, however,
+            // the delta buffer is the only copy of prose the user already saw. Materialize it
+            // instead of treating the terminal event as permission to discard provider data.
+            let unfinishedReply = streamingText
             var changes = clearStreaming()
             changes.append(contentsOf: settleUnansweredToolCalls())
+
+            let terminalReply = outcome.isError ? nil : text?.nilIfEmpty
+            if !hasAssistantMessageInCurrentTurn,
+               let reply = terminalReply ?? unfinishedReply.nilIfEmpty {
+                changes.append(appendAssistant(reply))
+            }
             if let text, !text.isEmpty {
                 if outcome.isError {
                     changes.append(append(.notice(text, kind: .error)))
-                } else if !hasAssistantMessageInCurrentTurn {
-                    // Session commands such as Claude's /context return their useful output only
-                    // on the terminal result event. Ordinary model turns already emitted an
-                    // assistant message, so this fills the command-only shape without repeating
-                    // a normal answer.
-                    changes.append(append(.assistant(markdown: text)))
-                    compactedAssistantTextByRow[rows.count - 1] = Self.compact(text)
                 }
+            }
+            if outcome.isIncomplete {
+                changes.append(append(.turnOutcome(outcome)))
             }
             if let startIndex = currentTurnStartIndex {
                 if let duration = metrics.duration {
@@ -344,6 +363,21 @@ struct ConversationTimeline {
     /// no interior to navigate.
     func steps(inTurnStartingAt startIndex: Int) -> [Int] {
         toolCallRowsByTurnStart[startIndex] ?? []
+    }
+
+    /// The provider-recorded edits a turn made, in call order and still separated by file.
+    ///
+    /// This is deliberately transcript data rather than a checkout query. During replay the
+    /// working tree may contain many later turns, so asking Git would falsely attribute those
+    /// edits to this historical turn. The arguments of each edit call are the durable fact.
+    func fileChanges(inTurnStartingAt startIndex: Int) -> [EditDiff.FileChange] {
+        guard let turn = turn(startingAt: startIndex), turn.endIndex > startIndex else {
+            return []
+        }
+        return rows[(startIndex + 1)...turn.endIndex].flatMap { row -> [EditDiff.FileChange] in
+            guard case .toolCall(let call) = row else { return [] }
+            return call.fileChanges
+        }
     }
 
     /// The tool call a row sits under: the nearest one at or before it **within the same turn**.
@@ -429,9 +463,7 @@ struct ConversationTimeline {
     private mutating func apply(_ block: ContentBlock) -> [Change] {
         switch block {
         case .text(let text) where !text.isEmpty:
-            let change = append(.assistant(markdown: text))
-            compactedAssistantTextByRow[rows.count - 1] = Self.compact(text)
-            return [change]
+            return [appendAssistant(text)]
 
         case .thinking(let text) where !text.isEmpty:
             return [append(.thinking(text))]
@@ -448,6 +480,10 @@ struct ConversationTimeline {
                 tool: tool,
                 summary: request.oneLineSummary,
                 diff: EditDiff.lines(forTool: tool.rawName, input: foundationInput),
+                fileChanges: EditDiff.fileChanges(
+                    forTool: tool.rawName,
+                    input: foundationInput
+                ),
                 chart: ChartSpec.decoded(fromToolNamed: tool.rawName, input: foundationInput),
                 result: nil
             )
@@ -531,4 +567,17 @@ struct ConversationTimeline {
         rows.append(row)
         return .appended(index: rows.count - 1)
     }
+
+    /// One write path keeps the row and its minimap preview cache inseparable. Terminal-only
+    /// replies and ordinary content blocks used to duplicate this pair of mutations, which is
+    /// how an interrupted delta could be repaired in one path but remain invisible to turns.
+    private mutating func appendAssistant(_ text: String) -> Change {
+        let change = append(.assistant(markdown: text))
+        compactedAssistantTextByRow[rows.count - 1] = Self.compact(text)
+        return change
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

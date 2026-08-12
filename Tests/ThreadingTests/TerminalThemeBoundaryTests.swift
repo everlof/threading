@@ -104,34 +104,6 @@ final class TerminalThemeBoundaryTests: XCTestCase {
         XCTAssertEqual(view.getTerminal().buffer.scrollBottom, 14)
     }
 
-    /// A pane transition changes the terminal's pixel frame many times but has only one stable
-    /// character-grid answer. Intermediate frames must not reflow or reset a full-screen TUI;
-    /// ending the transition applies the last proposed grid once.
-    func testFrameGridDeferralAppliesOnlyTheStableGrid() {
-        let view = terminal()
-        let original = view.getTerminal().getDims()
-        var accepted = 0
-        var refused = 0
-        view.onFrameGridChangeDecision = { _, _, applies in
-            if applies { accepted += 1 } else { refused += 1 }
-        }
-
-        view.beginDeferringFrameGridChanges()
-        view.frame.size = NSSize(width: 520, height: 360)
-        view.frame.size = NSSize(width: 700, height: 500)
-
-        XCTAssertEqual(view.getTerminal().getDims().cols, original.cols)
-        XCTAssertEqual(view.getTerminal().getDims().rows, original.rows)
-        XCTAssertEqual(accepted, 0)
-        XCTAssertGreaterThanOrEqual(refused, 2)
-
-        view.endDeferringFrameGridChanges()
-        let final = view.getTerminal().getDims()
-        XCTAssertGreaterThan(final.cols, original.cols)
-        XCTAssertGreaterThan(final.rows, original.rows)
-        XCTAssertEqual(accepted, 1)
-    }
-
     // MARK: - Profile boundary
 
     /// Terminal type is intentionally outside the app/conversation font cascade: this surface

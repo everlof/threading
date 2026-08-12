@@ -486,11 +486,11 @@ enum DisplayPaneDefaults {
 
     /// The floor for a panel opening for the first time. What the panel is *for* — an image, a
     /// rendered report, a comparison — stops being legible below about this.
-    static let defaultWidth: CGFloat = 380
+    static let defaultWidth: CGFloat = 440
 
     /// A first open takes this share of the window rather than one fixed number, clamped
     /// between `defaultWidth` and `widestOpening`. A panel that is a third of a 1600pt window is
-    /// the same panel as a third of a 1200pt one; 380pt of either is two different panels, and
+    /// the same panel as a third of a 1200pt one; 440pt of either is two different panels, and
     /// on a large display it reads as a sliver stuck to the edge. Once the divider has been
     /// dragged, that width is the answer and this is not consulted again.
     static let openingFraction: CGFloat = 0.32
@@ -797,6 +797,11 @@ enum SidebarRowDefaults {
     /// while the buttons are visible, when yielding that title space describes what is actually
     /// on screen rather than taxing every truncated title for controls nobody can see.
     static let sessionTrailingSlotWidth: CGFloat = trailingSlotSize * 2 + hoverButtonSpacing
+    /// A working/attention state is durable information, not chrome to trade for actions. On a
+    /// hovered active row the two action targets move inboard and the status keeps the stable
+    /// outer target it occupies at rest.
+    static let sessionTrailingSlotWithStatusWidth: CGFloat =
+        trailingSlotSize * 3 + hoverButtonSpacing * 2
     static let projectTrailingSlotWidth: CGFloat = sessionTrailingSlotWidth
 
     /// Matches the inset of the source list's own selection shape.
@@ -1019,6 +1024,8 @@ struct ProjectsDidChange: AppEvent {
     /// nodes for a title that can only repaint one row.
     enum SidebarImpact {
         case structure
+        /// One session's display name can move it among otherwise unchanged siblings.
+        case sessionOrder(SessionID)
         case sessionRow(SessionID)
         case terminalRow(TerminalID)
     }

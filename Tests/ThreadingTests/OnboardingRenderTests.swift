@@ -77,9 +77,20 @@ final class OnboardingRenderTests: XCTestCase {
         let themes = try [AppTheme.system] + styled.map { try XCTUnwrap($0) }
 
         var written = 0
+        var expected = 0
         for theme in themes {
             AppThemePalette.set(theme)
-            for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let appearances: [(String, NSAppearance.Name)]
+            switch theme.mode {
+            case .system:
+                appearances = [("light", .aqua), ("dark", .darkAqua)]
+            case .light:
+                appearances = [("light", .aqua)]
+            case .dark:
+                appearances = [("dark", .darkAqua)]
+            }
+            expected += appearances.count
+            for (suffix, appearanceName) in appearances {
                 let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
                 var data: Data?
                 appearance.performAsCurrentDrawingAppearance {
@@ -93,7 +104,7 @@ final class OnboardingRenderTests: XCTestCase {
             }
         }
         print("Rendered \(written) onboarding pages to \(directory.path)")
-        XCTAssertEqual(written, themes.count * 2)
+        XCTAssertEqual(written, expected)
     }
 
     /// The remaining pages, each in its telling state, drawn once in light and dark: the
@@ -131,13 +142,10 @@ final class OnboardingRenderTests: XCTestCase {
             ]
         )
 
-        var pages: [(String, () -> NSViewController)] = [
-            ("discovery", { OnboardingDiscoveryPageViewController() }),
-            ("import", {
-                let page = OnboardingImportPageViewController()
-                _ = page.view
-                page.apply(result: fixtureScan)
-                return page
+        var pages: [(String, () -> any OnboardingPage, ((any OnboardingPage) -> Void)?)] = [
+            ("discovery", { OnboardingDiscoveryPageViewController() }, nil),
+            ("import", { OnboardingImportPageViewController() }, { page in
+                (page as? OnboardingImportPageViewController)?.apply(result: fixtureScan)
             })
         ]
         for (name, status) in [
@@ -150,16 +158,21 @@ final class OnboardingRenderTests: XCTestCase {
                 _ = page.view
                 page.apply(authorization: status)
                 return page
-            }))
+            }, nil))
         }
 
         var written = 0
-        for (name, make) in pages {
+        for (name, make, afterMount) in pages {
             for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
                 let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
                 var data: Data?
                 appearance.performAsCurrentDrawingAppearance {
-                    data = pageImage(make(), appearance: appearance)
+                    data = flowImage(
+                        page: make(),
+                        appearance: appearance,
+                        theme: .system,
+                        afterMount: afterMount
+                    )
                 }
                 let url = directory.appendingPathComponent("onboarding-\(name)-\(suffix).png")
                 try XCTUnwrap(data, "Failed to render \(name) \(suffix)").write(to: url)
@@ -184,36 +197,28 @@ final class OnboardingRenderTests: XCTestCase {
         )
     }
 
-    private func pageImage(_ page: NSViewController, appearance: NSAppearance) -> Data? {
-        let host = NSView(frame: NSRect(origin: .zero, size: Render.size))
-        host.appearance = appearance
-        let view = page.view
-        view.translatesAutoresizingMaskIntoConstraints = false
-        host.addSubview(view)
-        NSLayoutConstraint.activate([
-            view.topAnchor.constraint(equalTo: host.topAnchor),
-            view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
-            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
-        ])
-        host.layoutSubtreeIfNeeded()
-
-        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
-        host.wantsLayer = true
-        host.layer?.backgroundColor = AppTheme.system
-            .resolved(.ground, appearance: appearance).cgColor
-        host.cacheDisplay(in: host.bounds, to: rep)
-        return rep.representation(using: .png, properties: [:])
+    private func flowImage(appearance: NSAppearance, theme: AppTheme) -> Data? {
+        flowImage(
+            page: OnboardingAppearancePageViewController(),
+            appearance: appearance,
+            theme: theme
+        )
     }
 
-    private func flowImage(appearance: NSAppearance, theme: AppTheme) -> Data? {
+    private func flowImage(
+        page: any OnboardingPage,
+        appearance: NSAppearance,
+        theme: AppTheme,
+        afterMount: ((any OnboardingPage) -> Void)? = nil
+    ) -> Data? {
         let flow = OnboardingFlowViewController(
-            pages: [OnboardingAppearancePageViewController()],
+            pages: [page],
             onFinish: {}
         )
         let host = NSView(frame: NSRect(origin: .zero, size: Render.size))
         host.appearance = appearance
         let view = flow.view
+        afterMount?(page)
         view.translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(view)
         NSLayoutConstraint.activate([

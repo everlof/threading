@@ -231,7 +231,7 @@ extension ConversationViewController {
                 content: customizedView,
                 speaker: .agent
             )
-        case .thinking, .notice, .toolCall:
+        case .thinking, .turnOutcome, .notice, .toolCall:
             view = customizedView
         }
         configureContextActions(in: view, row: row, rowIndex: index)
@@ -278,19 +278,41 @@ extension ConversationViewController {
 
     // MARK: - Changed Files Card
 
-    /// Asks git what the settled turn changed and, when the answer is non-empty, leaves the
-    /// summary card at the end of the turn.
+    /// Leaves a summary of what a settled turn changed at the end of that turn.
     ///
     /// Live turns bind the card to the exact durable checkpoint handed through their completion
-    /// boundary. Replayed transcripts do not expose stable provider row ids, so historical
-    /// selection after relaunch lives in Git Review rather than guessing an association by row.
+    /// boundary, so an older card still describes its own turn instead of going stale the moment
+    /// the next one lands. A replayed transcript has no checkpoint to bind to: it reconstructs
+    /// the same bounded card from the edit calls the provider recorded, and that historical card
+    /// keeps its previews but offers no diff, because only Git Review can scope a turn whose
+    /// baseline predates the relaunch.
     func appendChangedFilesCard(
         forTurnStartingAt startIndex: Int,
         checkpointID: GitTurnCheckpointID?
     ) {
-        guard !isReplaying,
-              !changedFilesCardTurns.contains(startIndex),
-              let checkpointID,
+        guard !changedFilesCardTurns.contains(startIndex) else { return }
+
+        if isReplaying {
+            let files = Self.recordedChangedFiles(
+                from: timeline.fileChanges(inTurnStartingAt: startIndex)
+            )
+            guard !files.isEmpty else { return }
+
+            changedFilesCardTurns.insert(startIndex)
+            let tree = ChangedFilesTree.build(from: files.map {
+                ChangedFilesTree.File(path: $0.path, added: $0.added, removed: $0.removed)
+            })
+            insertChangedFilesCard(
+                tree,
+                previews: ChangedFileDiffPreview.previews(from: files),
+                checkpointID: nil,
+                after: presentationItems.last?.id,
+                offersViewDiff: false
+            )
+            return
+        }
+
+        guard let checkpointID,
               let checkpoint = GitTurnBaselineStore.shared.checkpoint(id: checkpointID),
               checkpoint.isComplete,
               let root = GitTurnBaselineStore.shared.repositoryRoot(for: checkpoint)
@@ -324,15 +346,18 @@ extension ConversationViewController {
     private func insertChangedFilesCard(
         _ tree: ChangedFilesTree,
         previews: [String: ChangedFileDiffPreview],
-        checkpointID: GitTurnCheckpointID,
-        after anchor: PresentationID?
+        checkpointID: GitTurnCheckpointID?,
+        after anchor: PresentationID?,
+        offersViewDiff: Bool = true
     ) {
         let cardID = PresentationID.retained(UUID())
         let card = ChangedFilesCardView(
             tree: tree,
             previews: previews,
             onViewDiff: { [weak self] in
-                guard let self else { return }
+                // A replayed card has no checkpoint and its button is hidden below, so the
+                // absence is the same fact twice rather than a case to invent behaviour for.
+                guard let self, let checkpointID else { return }
                 self.delegate?.conversation(
                     self,
                     didRequestTurnDiff: checkpointID
@@ -342,6 +367,12 @@ extension ConversationViewController {
                 self?.notePresentationHeightChanged(cardID)
             }
         )
+
+        // Each card names its own checkpoint, so an older one still describes the turn it
+        // belongs to and keeps its diff — that is what durable checkpoints bought. Only a
+        // replayed card, which has no checkpoint to name, goes without.
+        if !offersViewDiff || checkpointID == nil { card.hideViewDiff() }
+        latestChangedFilesCard = card
 
         let position = anchor
             .flatMap { anchor in presentationItems.firstIndex { $0.id == anchor } }
@@ -354,6 +385,33 @@ extension ConversationViewController {
         ), at: position)
         reloadConversationRows()
         scrollToBottom()
+    }
+
+    /// Coalesces repeated edits to one path while preserving their provider order. The result
+    /// deliberately makes no claims about historical line numbers or file kind: an edit call
+    /// records the changed lines, which is enough for an honest tree, counts and hover preview.
+    private static func recordedChangedFiles(
+        from changes: [EditDiff.FileChange]
+    ) -> [GitFileDiff] {
+        var paths: [String] = []
+        var linesByPath: [String: [DiffLine]] = [:]
+
+        for change in changes where !change.path.isEmpty && !change.lines.isEmpty {
+            if linesByPath[change.path] == nil { paths.append(change.path) }
+            linesByPath[change.path, default: []].append(contentsOf: change.lines)
+        }
+
+        return paths.compactMap { path in
+            guard let lines = linesByPath[path], !lines.isEmpty else { return nil }
+            let counts = EditDiff.counts(lines)
+            return GitFileDiff(
+                path: path,
+                change: .modified,
+                hunks: [GitHunk(header: "", lines: lines)],
+                added: counts.added,
+                removed: counts.removed
+            )
+        }
     }
 
     /// Conversation contracts are scoped to the session, not to message text or row indexes.
@@ -370,7 +428,7 @@ extension ConversationViewController {
             return .conversationAssistantMessage(sessionID: sessionID)
         case .toolCall:
             return .conversationToolCall(sessionID: sessionID)
-        case .thinking, .notice:
+        case .thinking, .turnOutcome, .notice:
             return nil
         }
     }

@@ -6,7 +6,9 @@ import AppKit
 final class UsagePreferencesViewController: NSViewController {
     private let appEvents = AppEventObservations()
     private let dashboard = UsageDashboardView()
+    private var overviewProjection: UsageDashboardOverviewProjection?
     private var limitSeries: [UsageLimitDashboardSeries] = []
+    private var overviewTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
 
     override func loadView() {
@@ -27,7 +29,7 @@ final class UsagePreferencesViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         appEvents.observe(TranscriptUsageDidChange.self) { [weak self] _ in
-            self?.present(animated: true)
+            self?.prepareOverview(animated: true)
         }
         appEvents.observe(AccountUsageDidChange.self) { [weak self] _ in
             self?.loadLimitHistory(animated: true)
@@ -35,12 +37,12 @@ final class UsagePreferencesViewController: NSViewController {
         appEvents.observe(UsageLimitHistoryDidChange.self) { [weak self] _ in
             self?.loadLimitHistory(animated: true)
         }
-        present(animated: false)
+        prepareOverview(animated: false)
     }
 
     override func viewWillAppear() {
         super.viewWillAppear()
-        present(animated: false)
+        prepareOverview(animated: false)
         loadLimitHistory(animated: false)
         TranscriptUsageService.shared.refresh()
         refreshAuthoritativeLimits(force: false)
@@ -48,16 +50,39 @@ final class UsagePreferencesViewController: NSViewController {
 
     override func viewDidDisappear() {
         super.viewDidDisappear()
+        overviewTask?.cancel()
         historyTask?.cancel()
     }
 
     private func present(animated: Bool) {
         dashboard.update(
-            report: TranscriptUsageService.shared.report,
+            overview: overviewProjection,
             limits: limitSeries,
             isBuilding: TranscriptUsageService.shared.isBuilding,
             animated: animated
         )
+    }
+
+    private func prepareOverview(animated: Bool) {
+        overviewTask?.cancel()
+        guard let report = TranscriptUsageService.shared.report else {
+            overviewProjection = nil
+            present(animated: animated)
+            return
+        }
+        overviewTask = Task { [weak self] in
+            let preparation = Task.detached(priority: .utility) {
+                UsageDashboardProjector.overview(report: report)
+            }
+            let prepared = await withTaskCancellationHandler {
+                await preparation.value
+            } onCancel: {
+                preparation.cancel()
+            }
+            guard !Task.isCancelled, let prepared, let self else { return }
+            self.overviewProjection = prepared
+            self.present(animated: animated)
+        }
     }
 
     private func loadLimitHistory(animated: Bool) {
@@ -69,7 +94,7 @@ final class UsagePreferencesViewController: NSViewController {
                 now: now
             )
             let preparation = Task.detached(priority: .utility) {
-                Self.limitSeries(from: snapshot)
+                UsageDashboardProjector.limits(from: snapshot)
             }
             let prepared = await withTaskCancellationHandler {
                 await preparation.value
@@ -77,7 +102,7 @@ final class UsagePreferencesViewController: NSViewController {
                 preparation.cancel()
             }
             guard !Task.isCancelled, let self else { return }
-            self.limitSeries = prepared
+            self.limitSeries = prepared.series
             self.present(animated: animated)
         }
     }
@@ -95,44 +120,6 @@ final class UsagePreferencesViewController: NSViewController {
         loadLimitHistory(animated: true)
     }
 
-    nonisolated static func limitSeries(
-        from snapshot: UsageLimitHistorySnapshot
-    ) -> [UsageLimitDashboardSeries] {
-        var samplesBySeries: [String: [UsageSample]] = [:]
-        var resetsBySeries: [String: [UsageLimitResetEvent]] = [:]
-        for (index, sample) in snapshot.samples.enumerated() {
-            if index.isMultiple(of: 4_096), Task.isCancelled { return [] }
-            guard let id = sample.limitSeriesID else { continue }
-            samplesBySeries[id, default: []].append(sample)
-        }
-        for (index, event) in snapshot.resets.enumerated() {
-            if index.isMultiple(of: 4_096), Task.isCancelled { return [] }
-            resetsBySeries[event.seriesID, default: []].append(event)
-        }
-
-        return samplesBySeries.compactMap { id, raw -> UsageLimitDashboardSeries? in
-                let samples = raw.sorted { $0.at < $1.at }
-                guard let latest = samples.last,
-                      let runtimeID = latest.runtimeID,
-                      let accountID = latest.accountID,
-                      let windowID = latest.windowID else { return nil }
-                let runtimeName = AgentKind(rawValue: runtimeID)?.displayName ?? runtimeID
-                let events = resetsBySeries[id] ?? []
-                return UsageLimitDashboardSeries(
-                    id: id,
-                    runtimeName: runtimeName,
-                    accountName: latest.accountName ?? accountID,
-                    windowLabel: latest.windowLabel ?? windowID,
-                    samples: samples,
-                    resets: events,
-                    projection: UsageLimitHistoryAnalysis.weeklyProjection(for: samples),
-                    currentFraction: latest.fraction,
-                    resetsAt: latest.resetsAt,
-                    resetCreditCount: latest.resetCreditCount,
-                    nextResetCreditExpiresAt: latest.nextResetCreditExpiresAt
-                )
-            }
-    }
 }
 
 private enum UsageStrings {

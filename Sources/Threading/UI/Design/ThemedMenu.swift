@@ -594,6 +594,17 @@ private final class ThemedMenuSession: NSObject {
         window.makeFirstResponder(overlay)
         overlay.animateIn()
 
+        // AppKit can apply a window's deferred initial-first-responder choice on the next run-
+        // loop turn, after the menu has already taken focus synchronously. A menu is modal
+        // keyboard UI while it is open: if that deferred choice wins, Escape and arrow keys go
+        // back to the underlying control and the overlay reads as hung. Reassert ownership once
+        // attachment and window focus bookkeeping have both settled. The closed-session guard
+        // prevents a menu dismissed in the same event from stealing focus on its way out.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.isClosed, let window = self.window else { return }
+            window.makeFirstResponder(self.overlay)
+        }
+
         // `willClose` joined the list when the roster became the session's owner: a session
         // that outlived a closing window would otherwise sit in the roster holding its dead
         // overlay, because nothing else ends a session whose window simply left.

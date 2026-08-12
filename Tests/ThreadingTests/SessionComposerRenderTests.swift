@@ -66,6 +66,11 @@ final class SessionComposerRenderTests: XCTestCase {
             "Choose a project first",
             "a dimmed button with nothing to explain itself is the state this replaced"
         )
+        XCTAssertEqual(
+            prompt.placeholder,
+            "Choose a project first",
+            "the refusal must be visible without discovering the disabled button's tooltip"
+        )
 
         let store = ProjectStore.shared
         let project = try XCTUnwrap(store.addProject(
@@ -77,6 +82,7 @@ final class SessionComposerRenderTests: XCTestCase {
         composer.show(projectID: project.id)
         XCTAssertTrue(prompt.isSubmissionEnabled)
         XCTAssertNil(prompt.submissionDisabledReason, "the reason outlived the reason")
+        XCTAssertEqual(prompt.placeholder, "Describe a task or ask a question")
         XCTAssertTrue(start.isEnabled)
         XCTAssertNil(start.toolTip, "with nothing left to explain, the button says its own title")
         XCTAssertEqual(
@@ -149,6 +155,68 @@ final class SessionComposerRenderTests: XCTestCase {
             Design.Spacing.large,
             "the row has to finish on the box's own edge"
         )
+    }
+
+    /// A classic theme gives its popup a separate arrow well. The composer's flexible footer
+    /// must spend its empty middle before it shortens the small posture choices at the leading
+    /// edge; otherwise "Auto" and "Extra High" become ellipses despite hundreds of free points.
+    func testClassicComposerFooterKeepsPostureChoicesReadableWhenTheSpacerHasRoom() throws {
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
+        defer { store.removeProject(id: project.id) }
+
+        for theme in [AppThemeStyles.openStep, AppThemeStyles.irix] {
+            AppThemePalette.set(theme)
+            let composer = SessionComposerViewController()
+            let host = host(composer, size: Render.short)
+            composer.show(projectID: project.id)
+
+            let mode = try XCTUnwrap(
+                chip(named: "composer.session-start.mode", in: composer.view)
+            )
+            let effort = try XCTUnwrap(
+                chip(named: "composer.session-start.effort", in: composer.view)
+            )
+            mode.configure(icon: nil, title: PermissionModePresentation.agentSettingTitle)
+            effort.configure(icon: nil, title: "Extra High")
+            mode.isHidden = false
+            effort.isHidden = false
+            host.layoutSubtreeIfNeeded()
+
+            for chip in [mode, effort] {
+                let label = try XCTUnwrap(
+                    descendants(of: chip).compactMap { $0 as? NSTextField }.first
+                )
+                let font = try XCTUnwrap(label.font)
+                let drawnTitleWidth = label.stringValue.size(withAttributes: [.font: font]).width
+                let cell = try XCTUnwrap(label.cell)
+                let titleRect = cell.titleRect(forBounds: label.bounds)
+                XCTAssertGreaterThanOrEqual(
+                    titleRect.width,
+                    drawnTitleWidth - 0.5,
+                    "\(theme.name) compressed \(label.stringValue) in a roomy footer "
+                        + "(chip frame=\(chip.frame.width), intrinsic=\(chip.intrinsicContentSize.width), "
+                        + "label=\(label.frame.width), titleRect=\(titleRect.width), "
+                        + "drawn=\(drawnTitleWidth), cell=\(cell.cellSize.width))"
+                )
+                XCTAssertTrue(
+                    cell.expansionFrame(withFrame: label.bounds, in: label).isEmpty,
+                    "\(theme.name) still rendered \(label.stringValue) as truncated"
+                )
+                let labelFrame = chip.convert(label.bounds, from: label)
+                let arrow = ClassicChoiceDrawing.arrowRect(
+                    in: chip.bounds,
+                    style: theme.material(for: chip.effectiveAppearance).choiceStyle
+                )
+                XCTAssertLessThanOrEqual(
+                    labelFrame.maxX,
+                    arrow.minX - ClassicChoiceDrawing.textInset + 0.5,
+                    "\(theme.name) let \(label.stringValue) run under its arrow well "
+                        + "(chip frame=\(chip.frame.width), intrinsic=\(chip.intrinsicContentSize.width), "
+                        + "label=\(labelFrame), insets=\(label.alignmentRectInsets), arrow=\(arrow))"
+                )
+            }
+        }
     }
 
     /// The row the composer *configures* is the row the user *sees*.
@@ -1079,14 +1147,34 @@ final class SessionComposerRenderTests: XCTestCase {
         let themes = try [AppTheme.system] + styled.map { try XCTUnwrap($0) }
 
         var written = 0
+        var expected = 0
         for theme in themes {
             AppThemePalette.set(theme)
-            for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let appearances: [(String, NSAppearance.Name)]
+            switch theme.mode {
+            case .system:
+                appearances = [("light", .aqua), ("dark", .darkAqua)]
+            case .light:
+                appearances = [("light", .aqua)]
+            case .dark:
+                appearances = [("dark", .darkAqua)]
+            }
+            // A fixed theme is one authored appearance. Calling Swiss's paper-white palette
+            // “dark” produced a byte-for-byte duplicate in the catalogue and implied a state the
+            // product cannot enter; adaptive themes alone owe the reviewer both appearances.
+            expected += appearances.count * 3
+            for (suffix, appearanceName) in appearances {
                 let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
-                for (label, size, projectID) in [
-                    ("tall", Render.tall, project.id as ProjectID?),
-                    ("short", Render.short, project.id as ProjectID?),
-                    ("empty", Render.tall, nil)
+                for (label, size, projectID, promptText) in [
+                    (
+                        "tall",
+                        Render.tall,
+                        project.id as ProjectID?,
+                        "Review the session restoration path and preserve every changed-file card.\n"
+                            + "Add a regression test for relaunching after an interrupted turn."
+                    ),
+                    ("short", Render.short, project.id as ProjectID?, "Audit session restoration."),
+                    ("empty", Render.tall, nil, nil)
                 ] {
                     var data: Data?
                     appearance.performAsCurrentDrawingAppearance {
@@ -1094,7 +1182,8 @@ final class SessionComposerRenderTests: XCTestCase {
                             size: size,
                             appearance: appearance,
                             theme: theme,
-                            projectID: projectID
+                            projectID: projectID,
+                            promptText: promptText
                         )
                     }
                     let url = directory.appendingPathComponent(
@@ -1107,7 +1196,7 @@ final class SessionComposerRenderTests: XCTestCase {
             }
         }
         print("Rendered \(written) composers to \(directory.path)")
-        XCTAssertEqual(written, themes.count * 2 * 3)
+        XCTAssertEqual(written, expected)
     }
 
     // MARK: - Fixtures
@@ -1194,7 +1283,8 @@ final class SessionComposerRenderTests: XCTestCase {
         size: NSSize,
         appearance: NSAppearance,
         theme: AppTheme,
-        projectID: ProjectID?
+        projectID: ProjectID?,
+        promptText: String?
     ) -> Data? {
         let composer = SessionComposerViewController()
         let renderHost = host(composer, size: size)
@@ -1206,7 +1296,56 @@ final class SessionComposerRenderTests: XCTestCase {
         // while every non-layer control beside it rendered correctly.
         AppThemeRefresh.repaint(renderHost)
         composer.show(projectID: projectID)
+        if let promptText, let prompt = promptView(in: composer.view) {
+            prompt.stringValue = promptText
+        }
         renderHost.layoutSubtreeIfNeeded()
+
+        // Assert in the exact lifecycle that writes the catalogue image. A standalone chip and
+        // even a normally hosted composer can both measure correctly while a scoped appearance
+        // repaint leaves the saved PNG with a stale natural width. The rendered image is the
+        // acceptance artifact, so it owns this last line of defence.
+        if theme.id == AppThemeStyles.openStep.id || theme.id == AppThemeStyles.irix.id {
+            for identifier in [
+                "composer.session-start.mode",
+                "composer.session-start.effort"
+            ] {
+                guard let chip = chip(named: identifier, in: composer.view), !chip.isHidden,
+                      let label = descendants(of: chip).compactMap({ $0 as? NSTextField }).first,
+                      let font = label.font else { continue }
+                let drawnTitleWidth = label.stringValue.size(withAttributes: [.font: font]).width
+                let titleRect = label.cell?.titleRect(forBounds: label.bounds) ?? .zero
+                XCTAssertGreaterThanOrEqual(
+                    titleRect.width,
+                    drawnTitleWidth - 0.5,
+                    "\(theme.name) catalogue render compressed \(label.stringValue) "
+                        + "(chip frame=\(chip.frame.width), intrinsic=\(chip.intrinsicContentSize.width), "
+                        + "label=\(label.frame.width), titleRect=\(titleRect.width), "
+                        + "drawn=\(drawnTitleWidth), cell=\(label.cell?.cellSize.width ?? 0))"
+                )
+                XCTAssertTrue(
+                    label.cell?.expansionFrame(withFrame: label.bounds, in: label).isEmpty ?? false,
+                    "\(theme.name) catalogue render still truncated \(label.stringValue) "
+                        + "(chip=\(chip.frame.width), intrinsic=\(chip.intrinsicContentSize.width), "
+                        + "compression=\(chip.contentCompressionResistancePriority(for: .horizontal).rawValue), "
+                        + "label=\(label.frame.width), titleRect=\(titleRect.width), "
+                        + "cell=\(label.cell?.cellSize.width ?? 0), fitting=\(label.fittingSize.width))"
+                )
+                let labelFrame = chip.convert(label.bounds, from: label)
+                let arrow = ClassicChoiceDrawing.arrowRect(
+                    in: chip.bounds,
+                    style: theme.material(for: chip.effectiveAppearance).choiceStyle
+                )
+                XCTAssertLessThanOrEqual(
+                    labelFrame.maxX,
+                    arrow.minX - ClassicChoiceDrawing.textInset + 0.5,
+                    "\(theme.name) catalogue render let \(label.stringValue) run under its "
+                        + "arrow well (chip frame=\(chip.frame.width), "
+                        + "intrinsic=\(chip.intrinsicContentSize.width), label=\(labelFrame), "
+                        + "insets=\(label.alignmentRectInsets), arrow=\(arrow))"
+                )
+            }
+        }
 
         guard let rep = renderHost.bitmapImageRepForCachingDisplay(in: renderHost.bounds) else {
             return nil

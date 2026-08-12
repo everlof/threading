@@ -11,6 +11,18 @@ import XCTest
 @MainActor
 final class ComposerHandoffTests: XCTestCase {
 
+    /// `cacheDisplay` asks AppKit views to draw; it does not promise to composite a bare
+    /// backing layer into the cache. Draw the layer fill explicitly so the snapshot assertion
+    /// observes the colour the handoff repaired rather than the window background underneath.
+    private final class CachedLayerSurfaceView: NSView {
+        override func draw(_ dirtyRect: NSRect) {
+            guard let background = layer?.backgroundColor,
+                  let color = NSColor(cgColor: background) else { return }
+            color.setFill()
+            NSBezierPath(rect: dirtyRect).fill()
+        }
+    }
+
     private enum Fixture {
         static let paneSize = NSSize(width: 900, height: 640)
         static let boxSize = NSSize(width: 600, height: 90)
@@ -109,6 +121,64 @@ final class ComposerHandoffTests: XCTestCase {
         XCTAssertTrue(ghosts(in: stage.host).isEmpty, "a ghost outlived the handoff")
         XCTAssertEqual(stage.destinationBox.alphaValue, 1)
         XCTAssertEqual(stage.content.alphaValue, 1)
+    }
+
+    /// A layer-backed composer can be built before its window supplies an appearance. The
+    /// snapshot boundary must repair those frozen CGColors; drawing under Dark Aqua alone does
+    /// not mutate a layer that was filled under Aqua.
+    func testSnapshotRepairsAFieldBuiltUnderTheWrongAppearance() throws {
+        let light = try XCTUnwrap(NSAppearance(named: .aqua))
+        let dark = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let stage = makeStage()
+
+        light.performAsCurrentDrawingAppearance {
+            stage.sourceBox.applySurface(fill: Design.Surface.field, radius: .panel)
+        }
+        stage.window.appearance = dark
+
+        let snapshot = try handoffSnapshot(stage)
+        let bitmap = try XCTUnwrap(
+            snapshot.boxImage.representations.first as? NSBitmapImageRep,
+            "the handoff box did not retain its cached bitmap"
+        )
+        let actual = try XCTUnwrap(bitmap.colorAt(
+            x: bitmap.pixelsWide / 2,
+            y: bitmap.pixelsHigh / 2
+        )?.usingColorSpace(.sRGB))
+        var resolvedExpected: NSColor?
+        var resolvedLight: NSColor?
+        dark.performAsCurrentDrawingAppearance {
+            resolvedExpected = NSColor(cgColor: Design.Surface.field.cgColor)?.usingColorSpace(.sRGB)
+        }
+        light.performAsCurrentDrawingAppearance {
+            resolvedLight = NSColor(cgColor: Design.Surface.field.cgColor)?.usingColorSpace(.sRGB)
+        }
+        let expected = try XCTUnwrap(resolvedExpected)
+        let stale = try XCTUnwrap(resolvedLight)
+        let repairedCGColor = try XCTUnwrap(stage.sourceBox.layer?.backgroundColor)
+        let repairedLayer = try XCTUnwrap(
+            NSColor(cgColor: repairedCGColor)?.usingColorSpace(.sRGB)
+        )
+
+        XCTAssertEqual(repairedLayer.redComponent, expected.redComponent, accuracy: 0.01)
+        XCTAssertEqual(repairedLayer.greenComponent, expected.greenComponent, accuracy: 0.01)
+        XCTAssertEqual(repairedLayer.blueComponent, expected.blueComponent, accuracy: 0.01)
+
+        func squaredDistance(_ lhs: NSColor, _ rhs: NSColor) -> CGFloat {
+            pow(lhs.redComponent - rhs.redComponent, 2)
+                + pow(lhs.greenComponent - rhs.greenComponent, 2)
+                + pow(lhs.blueComponent - rhs.blueComponent, 2)
+        }
+        XCTAssertLessThan(
+            squaredDistance(actual, expected),
+            squaredDistance(actual, stale),
+            "the cached ghost remained closer to the light field than the dark one"
+        )
+        XCTAssertLessThan(
+            (actual.redComponent + actual.greenComponent + actual.blueComponent) / 3,
+            0.35,
+            "the cached composer ghost is still a light rectangle over a dark conversation"
+        )
     }
 
     /// Something else taking the pane cancels the move. It lands on the same end state the
@@ -251,7 +321,7 @@ final class ComposerHandoffTests: XCTestCase {
         host.wantsLayer = true
 
         let composer = NSView(frame: host.bounds)
-        let sourceBox = NSView(
+        let sourceBox = CachedLayerSurfaceView(
             frame: NSRect(
                 x: (Fixture.paneSize.width - Fixture.boxSize.width) / 2,
                 y: 24,

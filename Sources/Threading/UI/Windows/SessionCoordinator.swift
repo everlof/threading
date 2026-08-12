@@ -50,6 +50,13 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         appEvents.observe(ScheduledMessageDidBecomeDue.self) { [weak self] event in
             self?.performScheduledSend(event.id)
         }
+
+        // And once more: the strip offering a way past a spent usage limit lives inside a
+        // session's own pane and knows nothing about migrating, reopening or scheduling. See
+        // `SessionCoordinator+LimitEscape`.
+        appEvents.observe(LimitEscapeRequested.self) { [weak self] event in
+            self?.performLimitEscape(for: event.sessionID)
+        }
     }
 
     func takePendingPrompt() -> String? {
@@ -563,12 +570,28 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// which read as the move having done nothing.
     func moveSession(_ sessionID: SessionID, to account: AgentAccount) {
         guard confirmMoveIfRunning(sessionID: sessionID, to: account) else { return }
+        moveSessionWithoutConfirmation(sessionID, to: account)
+    }
 
+    /// The same move, for a caller whose own control already named the whole action.
+    ///
+    /// The confirmation exists because a menu item reading "Daniel Block" says nothing about
+    /// stopping the agent; the usage-limit escape's button says *Continue as Daniel Block* on
+    /// its face and is pressed by somebody looking at a session that has already stopped, so a
+    /// second dialog would only ask them to agree with what they just pressed. Everything else
+    /// is identical, the failure alert included — a move that could not be saved is news
+    /// whoever asked for it.
+    @discardableResult
+    func moveSessionWithoutConfirmation(
+        _ sessionID: SessionID,
+        to account: AgentAccount
+    ) -> Bool {
         switch SessionMigration.move(sessionID: sessionID, to: account) {
         case .success:
             container.reopenIfShowing(sessionID: sessionID)
             sidebar.reload()
             onPresentationChanged()
+            return true
         case .failure(let error):
             container.reopenIfShowing(sessionID: sessionID)
             let alert = ThemedAlert()
@@ -576,6 +599,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             alert.informativeText = error.message
             alert.alertStyle = .warning
             alert.runModal()
+            return false
         }
     }
 

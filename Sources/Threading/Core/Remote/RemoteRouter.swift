@@ -71,6 +71,8 @@ struct RemoteRouter {
     }
 
     static let apiSessionsPath = "/api/me"
+    static let usagePath = "/api/usage"
+    static let usageLimitPath = "/api/usage/limit"
     static let createSessionPath = "/api/session"
     static let notificationRegistrationPath = "/api/notifications"
     static let diagnosticUploadPath = "/api/diagnostics"
@@ -249,7 +251,12 @@ struct RemoteRouter {
         return hardened
     }
 
-    static func json<Value: Encodable>(_ value: Value, status: Int = 200, reason: String = "OK") -> HTTPResponse {
+    static func json<Value: Encodable>(
+        _ value: Value,
+        status: Int = 200,
+        reason: String = "OK",
+        maximumBytes: Int? = nil
+    ) -> HTTPResponse {
         let body: Data
         do {
             body = try JSONEncoder().encode(value)
@@ -266,6 +273,12 @@ struct RemoteRouter {
                 ),
                 isDocument: false
             )
+        }
+        if let maximumBytes, body.count > maximumBytes {
+            ThreadingLogger.remote.error(
+                "Remote JSON response exceeded its encoded ceiling bytes=\(body.count, privacy: .public) maximum=\(maximumBytes, privacy: .public)"
+            )
+            return error(503, "Response Too Large")
         }
         return harden(
             HTTPResponse(status: status, reason: reason, contentType: "application/json", body: body),

@@ -1,8 +1,8 @@
 # Cross-platform Usage dashboard
 
-> Status: feature draft — implementation-ready direction for bringing the macOS Usage dashboard
-> to the iOS companion while making banked resets a first-class, consistent part of both
-> platforms. Nothing here is scheduled or committed product behavior yet.
+> Status: implemented 2026-08-11 — retained as the delivery plan and architectural decision
+> record for the shared projection, owner-only remote surface, native iOS renderer and the
+> banked-reset contract on both platforms.
 
 ## Decision
 
@@ -291,7 +291,7 @@ allowing a corrupt store to become a relay-sized allocation.
 
 ## Implementation slices
 
-### Slice 1 — Shared projection and macOS banked-reset contract
+### Slice 1 — Shared projection and macOS banked-reset contract (complete)
 
 - Extract Foundation-only Overview and Limit History projections.
 - Move `UsageLimitDashboardSeries` and history preparation out of UI files.
@@ -299,28 +299,28 @@ allowing a corrupt store to become a relay-sized allocation.
 - Make zero/unavailable banked-reset states and pluralized labels explicit.
 - Preserve rendered output and existing performance budgets.
 
-### Slice 2 — Additive remote surface
+### Slice 2 — Additive remote surface (complete)
 
 - Add usage DTOs and tolerant Codable tests to `ThreadingRemoteKit`.
 - Advertise `usage-dashboard` to owner devices.
 - Add owner-only routes, background projection and response-size limits.
 - Add server authorization, compatibility and stress tests.
 
-### Slice 3 — iOS Overview
+### Slice 3 — iOS Overview (complete)
 
 - Add the Usage sheet and client fetch state.
 - Implement the mobile hierarchy: controls, hero/chart, providers, totals and coverage.
 - Add loading, stale, empty, offline and partial-coverage states.
 - Add the deterministic demo fixture and screenshots.
 
-### Slice 4 — iOS Limit History and banked resets
+### Slice 4 — iOS Limit History and banked resets (complete)
 
 - Add the account/window index and selected-series fetch.
 - Add current/projected/reset/banked-reset summary cards.
 - Render observed, projected, reset and expiry semantics.
 - Verify positive, zero, unavailable and expiring reset inventories.
 
-### Slice 5 — Verification and documentation
+### Slice 5 — Verification and documentation (complete)
 
 - Run macOS fast tests and the Usage stress profiler.
 - Run `ThreadingMobileTests` and simulator accessibility/layout checks.

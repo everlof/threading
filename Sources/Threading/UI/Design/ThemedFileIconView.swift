@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// One file-system mark whose rendering belongs to the active app theme.
 ///
@@ -158,7 +159,40 @@ final class ThemedFileIconView: NSView, ThemedComponent {
 
     private func loadNativeImageIfNeeded() {
         guard nativeImage == nil else { return }
-        nativeImage = NSWorkspace.shared.icon(forFile: url.path)
+        if FileManager.default.fileExists(atPath: url.path) {
+            nativeImage = NSWorkspace.shared.icon(forFile: url.path)
+            return
+        }
+
+        // Gallery stories, restored transcript paths and newly-created diff rows can describe
+        // a path before it exists locally. Asking Finder for that nonexistent path returns the
+        // same generic document for every kind, making a type-aware file list visually blind.
+        // LaunchServices can still supply its native artwork from the semantic content type.
+        let type: UTType = if kind == .directory {
+            .folder
+        } else if let inferred = UTType(filenameExtension: url.pathExtension),
+                  inferred != .data {
+            inferred
+        } else {
+            fallbackContentType
+        }
+        nativeImage = NSWorkspace.shared.icon(for: type)
+    }
+
+    private var fallbackContentType: UTType {
+        switch kind {
+        case .directory: .folder
+        case .source: .sourceCode
+        case .text: .plainText
+        case .data: .json
+        case .image: .image
+        case .audio: .audio
+        case .video: .movie
+        case .archive: .archive
+        case .package: .package
+        case .executable: .executable
+        case .generic: .data
+        }
     }
 
     private func alignedRect(for image: NSImage) -> NSRect {

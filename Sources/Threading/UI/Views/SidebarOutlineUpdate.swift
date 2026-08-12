@@ -45,6 +45,22 @@ struct SidebarTreeShape: Equatable {
     func children(of parent: SidebarNodeKey?) -> [SidebarNodeKey] {
         childrenByParent[parent] ?? []
     }
+
+    /// Replaces only child ordering/parentage inside an identity-equivalent subtree.
+    ///
+    /// The caller proves the key sets match first. That invariant means the global `keys` set
+    /// and the root list under `nil` stay untouched; only mappings whose parent belongs to the
+    /// replacement need updating. This is what lets one title reorder remain proportional to
+    /// its project instead of reconstructing the shape of every project in the sidebar.
+    mutating func replaceSubtreeOrdering(with replacement: SidebarTreeShape) {
+        for key in replacement.keys {
+            if let children = replacement.childrenByParent[key] {
+                childrenByParent[key] = children
+            } else {
+                childrenByParent.removeValue(forKey: key)
+            }
+        }
+    }
 }
 
 // MARK: - Outline Steps
@@ -148,6 +164,11 @@ enum SidebarOutlineUpdate {
     /// row's expansion. Reusing the object for each surviving identity is what makes the
     /// difference between "these rows moved" and "this list is now a different list".
     static func adopt(_ rebuilt: [NSObject], reusing presented: [NSObject]) -> [NSObject] {
+        // A cold outline has no identities to preserve. Walking every rebuilt node twice to
+        // prove that, then asking each node to adopt its own children, made initial mounting pay
+        // the full structural-update machinery for a list that had never been presented.
+        guard !presented.isEmpty else { return rebuilt }
+
         var presentedByKey: [SidebarNodeKey: NSObject] = [:]
         func index(_ nodes: [NSObject]) {
             for node in nodes {

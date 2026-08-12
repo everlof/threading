@@ -2,6 +2,7 @@ import XCTest
 
 @MainActor
 final class CodexFileChangeJourneyUITests: XCTestCase {
+    private static let journey = "File change and relaunch recovery"
     private static let prompt = "In this synthetic repository, replace the exact contents of status.txt from before to after."
 
     private var application: XCUIApplication?
@@ -48,8 +49,17 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
             firstLaunch.staticTexts["Updated status.txt."].waitForExistence(timeout: 15),
             "the streamed Codex answer never reached the conversation"
         )
+        assertTurnEvidenceRecovered(in: firstLaunch, context: "the live turn")
         assertFile(statusFile, eventuallyEquals: "after\n")
-        recordScenarioScreenshot(named: "file-change-01-completed-turn", of: firstWindow)
+        try recordScenarioScreenshot(
+            checkpoint: "file-change-01-completed-turn",
+            order: 1,
+            title: "Completed agent turn",
+            description: "The streamed Codex reply is complete and the changed status.txt file is visible in the conversation.",
+            journey: Self.journey,
+            in: sandbox,
+            of: firstWindow
+        )
 
         firstLaunch.typeKey("r", modifierFlags: [.command, .shift])
         let reviewedFile = firstLaunch.staticTexts["git-review.file.name"]
@@ -62,7 +72,19 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
             "status.txt",
             "Git Review showed the wrong changed file"
         )
-        recordScenarioScreenshot(named: "file-change-02-git-review", of: firstWindow)
+        XCTAssertFalse(
+            firstLaunch.descendants(matching: .any)["git.status.overlay"].exists,
+            "the branch card covered conversation ink after Git Review narrowed the pane"
+        )
+        try recordScenarioScreenshot(
+            checkpoint: "file-change-02-git-review",
+            order: 2,
+            title: "Changed file in Git Review",
+            description: "Git Review identifies status.txt in the synthetic checkout after the agent mutation.",
+            journey: Self.journey,
+            in: sandbox,
+            of: firstWindow
+        )
 
         firstLaunch.typeKey("q", modifierFlags: .command)
         XCTAssertTrue(
@@ -87,8 +109,49 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
             secondLaunch.staticTexts["Updated status.txt."].waitForExistence(timeout: 10),
             "the recorded assistant answer was not recovered after relaunch"
         )
+        assertTurnEvidenceRecovered(in: secondLaunch, context: "the replayed turn")
         assertFile(statusFile, eventuallyEquals: "after\n")
-        recordScenarioScreenshot(named: "file-change-03-relaunch-recovery", of: secondWindow)
+        try recordScenarioScreenshot(
+            checkpoint: "file-change-03-relaunch-recovery",
+            order: 3,
+            title: "Conversation recovered after relaunch",
+            description: "A clean quit and relaunch restores both the user's prompt and the completed agent response.",
+            journey: Self.journey,
+            in: sandbox,
+            of: secondWindow
+        )
+    }
+
+    private func assertTurnEvidenceRecovered(
+        in application: XCUIApplication,
+        context: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        // AppKit exposes the fold's visible NSTextField as the stable child in a table row;
+        // XCUI does not preserve the custom NSView disclosure role through that container.
+        // Assert the user-visible semantic title rather than an implementation-specific role.
+        let worked = application.staticTexts.matching(
+            NSPredicate(format: "value BEGINSWITH %@", "Worked")
+        ).firstMatch
+        XCTAssertTrue(
+            worked.waitForExistence(timeout: 10),
+            "\(context) lost its work disclosure",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            application.staticTexts["1 changed file"].waitForExistence(timeout: 10),
+            "\(context) lost its changed-files summary",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            application.descendants(matching: .any)["status.txt"].waitForExistence(timeout: 10),
+            "\(context) lost the changed path",
+            file: file,
+            line: line
+        )
     }
 
     private func assertFile(

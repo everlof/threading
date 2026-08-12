@@ -56,6 +56,13 @@ extension MainWindowController: NSToolbarDelegate {
         itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
         willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
+        let constructionStarted = DispatchTime.now().uptimeNanoseconds
+        defer {
+            recordStartupToolbarItemConstruction(
+                DispatchTime.now().uptimeNanoseconds - constructionStarted
+            )
+        }
+
         switch itemIdentifier {
         case .threadingToggleSidebar:
             let button = ThemedIconButton(
@@ -120,31 +127,25 @@ extension MainWindowController: NSToolbarDelegate {
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let header = NSStackView(views: [
-            pageTabView,
+        var headerItems: [NSView] = [
             settingsModeHeaderView,
             newSessionButton,
             spacer,
-            accountUsageItemView,
             makeOpenInControl(),
             makeSessionActionsGroup()
-        ])
+        ]
+        if let materializedPageTabView {
+            headerItems.insert(materializedPageTabView, at: 0)
+        }
+        if let materializedAccountUsageItemView {
+            headerItems.insert(materializedAccountUsageItemView, at: headerItems.count - 2)
+        }
+
+        let header = NSStackView(views: headerItems)
         header.orientation = .horizontal
         header.alignment = .centerY
         header.spacing = Design.Spacing.small
-
-        // The cap as the tab's own number as well as a constraint on it, so a long session name
-        // shortens to a tab that ends where its title does — see `ThemedTabItemView.maxWidth`.
-        pageTabView.maxWidth = SessionTitleDefaults.maxWidth
-
-        NSLayoutConstraint.activate([
-            pageTabView.widthAnchor.constraint(
-                greaterThanOrEqualToConstant: SessionTitleDefaults.minWidth
-            ),
-            pageTabView.widthAnchor.constraint(
-                lessThanOrEqualToConstant: SessionTitleDefaults.maxWidth
-            )
-        ])
+        paneHeaderStackView = header
 
         return header
     }
@@ -208,7 +209,8 @@ extension MainWindowController: NSToolbarDelegate {
     private func makeOpenInControl() -> SplitIconButtonView {
         let open = ThemedIconButton(
             symbolName: OpenInToolbarDefaults.fallbackSymbol,
-            accessibility: L10n.string("Open in external app")
+            accessibility: L10n.string("Open in external app"),
+            glyphMaterialization: .deferred
         )
         open.onPress = { [weak self] in self?.openInPreferredApp() }
         openInToolbarButton = open
@@ -216,7 +218,8 @@ extension MainWindowController: NSToolbarDelegate {
         let choose = ThemedIconButton(
             symbolName: DesignSymbols.chevron,
             accessibility: L10n.string("Choose an app to open in"),
-            target: .splitMenu
+            target: .splitMenu,
+            glyphMaterialization: .deferred
         )
         // Names what the chevron adds rather than repeating the button beside it: the press
         // already says where it goes, and this is the way to somewhere else.
@@ -292,7 +295,8 @@ extension MainWindowController: NSToolbarDelegate {
     private func makeSurfaceToggleButton() -> ThemedIconButton {
         let button = ThemedIconButton(
             symbolName: SessionSurfaceTogglePresentation.nativeSymbol,
-            accessibility: L10n.string("Switch session interface")
+            accessibility: L10n.string("Switch session interface"),
+            glyphMaterialization: .deferred
         )
         button.onPress = { [weak self] in
             self?.toggleCurrentSessionSurface()

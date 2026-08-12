@@ -71,6 +71,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
 
     private let appEvents = AppEventObservations()
     private let windowStateObservations = AppEventObservations()
+    private let appIconProvider: () -> NSImage?
     private var centeredTitleConstraint: NSLayoutConstraint?
     private var leadingTitleConstraint: NSLayoutConstraint?
     private var titleContentWidthConstraint: NSLayoutConstraint?
@@ -84,7 +85,10 @@ final class WindowTitleBandView: NSView, ThemedComponent {
 
     // MARK: - Initialization
 
-    init() {
+    init(appIconProvider: @escaping () -> NSImage? = {
+        NSApplication.shared.applicationIconImage
+    }) {
+        self.appIconProvider = appIconProvider
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setup()
@@ -155,7 +159,6 @@ final class WindowTitleBandView: NSView, ThemedComponent {
 
     private func setup() {
         addLayoutGuide(contentGuide)
-        appIcon.image = NSApplication.shared.applicationIconImage
         appIcon.imageScaling = .scaleProportionallyUpOrDown
         appIcon.translatesAutoresizingMaskIntoConstraints = false
         appIcon.setAccessibilityElement(false)
@@ -321,7 +324,11 @@ final class WindowTitleBandView: NSView, ThemedComponent {
             leadingTitleConstraint?.isActive = true
         }
 
-        appIcon.isHidden = resolved?.showsAppIcon == false
+        let showsAppIcon = resolved?.showsAppIcon == true
+        appIcon.isHidden = !showsAppIcon
+        if showsAppIcon, appIcon.image == nil {
+            appIcon.image = appIconProvider()
+        }
         applyButtonPlacement(
             resolved?.buttonPlacement ?? .trailing,
             visible: resolved?.visibleButtons

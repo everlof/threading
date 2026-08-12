@@ -1,5 +1,46 @@
 import AppKit
 
+// MARK: - File Activity Ink
+
+/// The atlas' ink recipe, shared with the summary card's legend marks — the little squares
+/// beside "59 edits" and "53 reads" draw with exactly these, so the counts *are* the legend
+/// and a prose sentence no longer has to explain the encoding.
+@MainActor
+enum FileActivityInk {
+    /// An edit fills its whole cell in the accent.
+    static var edit: NSColor { Design.Surface.accent }
+
+    /// A read is the same family held back — thickness and position, not a second hue,
+    /// tell the two facts apart, so a read-only session stays visible under System too.
+    static var read: NSColor {
+        let accent = Design.Surface.accent
+        return accent.withAlphaComponent(accent.alphaComponent * readDimming)
+    }
+
+    static let readDimming: CGFloat = 0.7
+
+    /// The fraction of a detail cell the read strip occupies.
+    static let readStripFraction: CGFloat = 0.32
+
+    /// Untouched files are ground, not figure. Both resting tiers derive from the quietest
+    /// label tier: at 2,400 cells the old tertiary-based tier summed into a checkerboard
+    /// louder than the marks it was resting under. The even/odd gap survives — directory
+    /// runs still read as regions — but the whole ground recedes so the touched files own
+    /// the light. Accessibility's increased-contrast promotion is inherited from the tier.
+    static var restingEven: NSColor {
+        let quaternary = Design.Text.quaternary
+        return quaternary.withAlphaComponent(quaternary.alphaComponent * evenRunDimming)
+    }
+
+    static var restingOdd: NSColor {
+        let quaternary = Design.Text.quaternary
+        return quaternary.withAlphaComponent(quaternary.alphaComponent * oddRunDimming)
+    }
+
+    static let evenRunDimming: CGFloat = 0.9
+    static let oddRunDimming: CGFloat = 0.5
+}
+
 // MARK: - File Activity Map View
 
 /// The repo strip: every tracked file as a mark, reads glowing quietly and edits in the
@@ -17,13 +58,6 @@ final class FileActivityMapView: NSView {
     fileprivate enum Metrics {
         /// The dimmest a glowing mark draws; the residual floor must stay visible.
         static let minimumGlowAlpha: CGFloat = 0.25
-
-        /// The two resting shades, multiplied onto their tiers' own alpha —
-        /// `withAlphaComponent` replaces rather than scales, so the resolved alpha is read
-        /// first. Alternating directory runs take one each; the gap between the tiers is
-        /// what makes the runs read as regions rather than as one undifferentiated column.
-        static let evenRunDimming: CGFloat = 0.55
-        static let oddRunDimming: CGFloat = 0.8
 
         /// How often the fade is repainted while anything still glows. Heat eases over
         /// tens of seconds, so a film-rate timer would burn the battery repainting
@@ -165,14 +199,8 @@ final class FileActivityMapView: NSView {
         // per frame is the kind of cost that only shows up on the largest repo.
         let accent = Design.Surface.accent
         let read = Design.Text.secondary
-        let tertiary = Design.Text.tertiary
-        let quaternary = Design.Text.quaternary
-        let restingEven = tertiary.withAlphaComponent(
-            tertiary.alphaComponent * Metrics.evenRunDimming
-        )
-        let restingOdd = quaternary.withAlphaComponent(
-            quaternary.alphaComponent * Metrics.oddRunDimming
-        )
+        let restingEven = FileActivityInk.restingEven
+        let restingOdd = FileActivityInk.restingOdd
 
         for index in map.entries.indices {
             let entry = map.entries[index]
@@ -204,19 +232,12 @@ final class FileActivityMapView: NSView {
     private func draw(_ presentation: AgentWorkPresentation, dirtyRect: NSRect) {
         guard !presentation.bins.isEmpty else { return }
         let now = clock()
-        let accent = Design.Surface.accent
-        // Reads and edits belong to one semantic family. Sharing the accent makes a read-only
-        // session visible under System too; thickness, rather than a fragile second hue, tells
-        // the two facts apart.
-        let read = accent.withAlphaComponent(accent.alphaComponent * 0.7)
-        let tertiary = Design.Text.tertiary
-        let quaternary = Design.Text.quaternary
-        let restingEven = tertiary.withAlphaComponent(
-            tertiary.alphaComponent * Metrics.evenRunDimming
-        )
-        let restingOdd = quaternary.withAlphaComponent(
-            quaternary.alphaComponent * Metrics.oddRunDimming
-        )
+        // Resolved once per pass; the recipe lives in `FileActivityInk` so the summary's
+        // legend marks cannot drift from what the atlas actually draws.
+        let accent = FileActivityInk.edit
+        let read = FileActivityInk.read
+        let restingEven = FileActivityInk.restingEven
+        let restingOdd = FileActivityInk.restingOdd
         let layout = WorkProjectionLayout(
             count: presentation.bins.count,
             bounds: bounds,
@@ -241,7 +262,7 @@ final class FileActivityMapView: NSView {
             if readHeat > 0 {
                 read.withAlphaComponent(read.alphaComponent * glowAlpha(readHeat)).setFill()
                 let height = presentation.isDetailed
-                    ? max(1, floor(rect.height * 0.32))
+                    ? max(1, floor(rect.height * FileActivityInk.readStripFraction))
                     : min(rect.height, Metrics.railReadHeight)
                 NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: height).fill()
             }
@@ -543,7 +564,9 @@ private extension AgentWorkPresentation.Scope {
     }
 }
 
-private struct WorkProjectionLayout {
+/// Internal rather than private for its tests: the grid must genuinely fill the width it was
+/// given, and that is a property worth pinning (see below).
+struct WorkProjectionLayout {
     let count: Int
     let bounds: NSRect
     let detailed: Bool
@@ -555,10 +578,16 @@ private struct WorkProjectionLayout {
         self.bounds = bounds
         self.detailed = detailed
         if detailed, count > 0, bounds.width > 0, bounds.height > 0 {
-            columns = max(1, Int(ceil(sqrt(
+            let provisional = max(1, Int(ceil(sqrt(
                 Double(count) * Double(bounds.width / max(bounds.height, 1))
             ))))
-            rows = max(1, Int(ceil(Double(count) / Double(columns))))
+            rows = max(1, Int(ceil(Double(count) / Double(provisional))))
+            // The provisional column count is an aspect heuristic; rounding the row count up
+            // can leave it holding columns no index ever reaches, and a grid sized for
+            // phantom columns stops short of its own trailing edge — visibly, because the
+            // ribbon below draws to the full width. The drawn grid uses the column count the
+            // rounded row count actually fills.
+            columns = max(1, Int(ceil(Double(count) / Double(rows))))
         } else {
             columns = max(1, count)
             rows = 1

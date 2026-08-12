@@ -213,6 +213,51 @@ final class ProjectIconTests: XCTestCase {
         )
     }
 
+    func testProjectIconResearchSurfacesTheLastCLIDiagnostic() {
+        let output = """
+        {"type":"thread.started","thread_id":"fixture"}
+        Reading additional input from stdin...
+        Not inside a trusted directory and --skip-git-repo-check was not specified.
+        """
+
+        let diagnostic = ProjectIconResearch.failureDiagnostic(from: output)
+        XCTAssertEqual(
+            diagnostic,
+            "Not inside a trusted directory and --skip-git-repo-check was not specified."
+        )
+        XCTAssertEqual(
+            ProjectIconResearch.ResearchError.exitedAbnormally(
+                status: 1,
+                diagnostic: diagnostic
+            ).message,
+            "Codex exited with status 1 before answering.\n\n"
+                + "Codex reported: Not inside a trusted directory and "
+                + "--skip-git-repo-check was not specified."
+        )
+    }
+
+    func testProjectIconResearchReadsStructuredErrorsAndBoundsAlertText() {
+        let structured = """
+        {"type":"thread.started","thread_id":"fixture"}
+        {"type":"turn.failed","error":{"message":"Network unavailable."}}
+        """
+        XCTAssertEqual(
+            ProjectIconResearch.failureDiagnostic(from: structured),
+            "Network unavailable."
+        )
+
+        let noisy = String(
+            repeating: "x",
+            count: IconResearchDefaults.failureDiagnosticCharacterLimit * 2
+        ) + "\u{0007}"
+        let bounded = ProjectIconResearch.failureDiagnostic(from: noisy)
+        XCTAssertEqual(bounded?.count, IconResearchDefaults.failureDiagnosticCharacterLimit)
+        XCTAssertTrue(bounded?.hasSuffix(IconResearchDefaults.truncationMark) == true)
+        XCTAssertFalse(bounded?.unicodeScalars.contains(where: {
+            CharacterSet.controlCharacters.contains($0)
+        }) == true)
+    }
+
     func testRefusedProjectWriteLeavesTheStandingIconBytesAndRecordTogether() throws {
         let stateDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "project-icon-transaction-\(UUID().uuidString)",

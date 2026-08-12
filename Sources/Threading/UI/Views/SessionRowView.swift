@@ -52,6 +52,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// for the status target alone; under the pointer it expands to contain both actions.
     private let trailingSlot = NSView()
     private var trailingSlotWidthConstraint: NSLayoutConstraint?
+    private var hoverControlsAtEdgeConstraint: NSLayoutConstraint?
+    private var hoverControlsBeforeStatusConstraint: NSLayoutConstraint?
+    private var presentsStatus = false
 
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
@@ -202,6 +205,10 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// The agent's mark before any plate, kept so the plate can be decided again when the
     /// ground moves. Re-plating a plated image would measure the plate.
     private var agentMark: NSImage?
+    /// Built-in brand artwork is immutable and shared. Measuring its pixels once per row — and
+    /// again when AppKit assigns the row's background style — made contrast detection scale with
+    /// the first viewport. Extension images remain uncached because their bytes may change.
+    private var agentMarkTone: CGFloat?
 
     // MARK: - Initialization
 
@@ -504,19 +511,30 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             equalToConstant: SidebarRowDefaults.trailingSlotSize
         )
         trailingSlotWidthConstraint = width
+        let hoverAtEdge = hoverControls.trailingAnchor.constraint(
+            equalTo: trailingSlot.trailingAnchor
+        )
+        let hoverBeforeStatus = hoverControls.trailingAnchor.constraint(
+            equalTo: trailingSlot.trailingAnchor,
+            constant: -(SidebarRowDefaults.trailingSlotSize + SidebarRowDefaults.hoverButtonSpacing)
+        )
+        hoverControlsAtEdgeConstraint = hoverAtEdge
+        hoverControlsBeforeStatusConstraint = hoverBeforeStatus
         NSLayoutConstraint.activate([
             width,
             trailingSlot.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize),
 
-            // On the archive button's centre rather than the slot's: the archive button holds
-            // the row's trailing edge, which is exactly where the dot sat when it was the only
-            // thing in the slot. Centred in the widened slot it would drift inboard, moving
-            // the status of every row in the list to buy a button nobody is hovering.
-            statusSlot.centerXAnchor.constraint(equalTo: archiveButton.centerXAnchor),
+            // The outer target remains the status target even when working-row actions appear.
+            // Pinning to the slot instead of an action keeps status truth stable while those
+            // actions move inboard.
+            statusSlot.centerXAnchor.constraint(
+                equalTo: trailingSlot.trailingAnchor,
+                constant: -SidebarRowDefaults.trailingSlotSize / 2
+            ),
             statusSlot.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor),
             statusSlot.widthAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
             statusSlot.heightAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
-            hoverControls.trailingAnchor.constraint(equalTo: trailingSlot.trailingAnchor),
+            hoverAtEdge,
             hoverControls.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
         ])
     }
@@ -526,6 +544,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// so any former mark disappears; rows that have only ever been idle keep the empty slot.
     private func updateStatus(for activity: SessionActivity, isLoading: Bool) {
         let presentsStatus = isLoading || ![.idle, .dormant].contains(activity)
+        self.presentsStatus = presentsStatus
         guard presentsStatus || statusIndicator != nil else { return }
 
         let indicator: SessionStatusIndicator
@@ -705,8 +724,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         popover = nil
     }
 
-    /// Crossfades the trailing slot between status and actions. The resting row reserves one
-    /// inline target; the title yields the second target only while both actions are visible.
+    /// Reveals the action pair without erasing durable activity. An idle row gives the pair the
+    /// edge; an active row keeps its status at that edge and shifts both actions inboard.
     private func setActionVisible(_ visible: Bool, animated: Bool) {
         if visible {
             actionButton.materializeGlyphIfNeeded()
@@ -716,7 +735,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
         guard animated else {
             hoverControls.alphaValue = visible ? 1 : 0
-            statusSlot.alphaValue = visible ? 0 : 1
+            statusSlot.alphaValue = presentsStatus ? 1 : 0
             setTrailingSlotExpanded(visible)
             return
         }
@@ -724,7 +743,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = Design.Motion.quick
             hoverControls.animator().alphaValue = visible ? 1 : 0
-            statusSlot.animator().alphaValue = visible ? 0 : 1
+            statusSlot.animator().alphaValue = presentsStatus ? 1 : 0
         }, completionHandler: { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !visible, !self.isHovered else { return }
@@ -737,9 +756,17 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// fade in so both targets remain inside the hit-tested parent; collapse waits until the fade
     /// out completes so a visible button never overhangs it.
     private func setTrailingSlotExpanded(_ expanded: Bool) {
-        let target = expanded
-            ? SidebarRowDefaults.sessionTrailingSlotWidth
-            : SidebarRowDefaults.trailingSlotSize
+        let showsStatusBesideActions = expanded && presentsStatus
+        hoverControlsAtEdgeConstraint?.isActive = !showsStatusBesideActions
+        hoverControlsBeforeStatusConstraint?.isActive = showsStatusBesideActions
+        let target: CGFloat
+        if showsStatusBesideActions {
+            target = SidebarRowDefaults.sessionTrailingSlotWithStatusWidth
+        } else if expanded {
+            target = SidebarRowDefaults.sessionTrailingSlotWidth
+        } else {
+            target = SidebarRowDefaults.trailingSlotSize
+        }
         guard trailingSlotWidthConstraint?.constant != target else { return }
         trailingSlotWidthConstraint?.constant = target
         layoutSubtreeIfNeeded()
@@ -894,22 +921,28 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     private func applyAgentIcon(for session: AgentSession, account: AgentAccount?) {
         let builtInProviderImage = session.kind.icon
         let image: NSImage?
+        let knownMarkTone: CGFloat?
         if session.isSideChat {
             image = NSImage(
                 systemSymbolName: SidebarRowDefaults.sideChatSymbol,
                 accessibilityDescription: SidebarRowDefaults.sideChatAccessibilityLabel
             )
+            knownMarkTone = nil
         } else if let resolution = ExtensionIdentityResolverProviderSlot.shared.providerIcon(
             providerID: session.kind.rawValue
         ) {
-            image = resolveIdentityImage(
+            let resolved = resolveIdentityImage(
                 resolution.image,
                 extensionIdentifier: resolution.extensionIdentifier
-            ) ?? builtInProviderImage
+            )
+            image = resolved ?? builtInProviderImage
+            knownMarkTone = resolved == nil ? session.kind.brandIconTone : nil
         } else {
             image = builtInProviderImage
+            knownMarkTone = session.kind.brandIconTone
         }
         agentMark = image.map(slotSized)
+        agentMarkTone = knownMarkTone
         iconView.image = plated(agentMark)
         iconView.setAccessibilityLabel(
             session.isSideChat
@@ -1004,8 +1037,18 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// it: the ink stays `iconSize` either way — see `IconBackplate.compose`.
     private func plated(_ image: NSImage?) -> NSImage? {
         guard let image else { return nil }
+        if backgroundStyle == .emphasized, !image.isTemplate,
+           let selected = image.copy() as? NSImage {
+            // Selection already supplies the row's strongest plate. Turning a provider mark
+            // into selection ink keeps its identity readable without stacking a second neutral
+            // tile inside that fill. Account avatars remain separate corner chips and retain
+            // their pixels; this conversion applies only to the provider mark in the main slot.
+            selected.isTemplate = true
+            return selected
+        }
         return IconBackplate.plated(
             image,
+            knownMarkTone: agentMarkTone,
             against: IconBackplate.Ground(rowGround()),
             size: SidebarRowDefaults.iconSlotWidth
         )
@@ -1133,6 +1176,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // fill is named: the unemphasized one is the accent held far back over the sidebar's
         // surface, where the chrome's ink is still the ink that reads.
         let ground: InkSource? = backgroundStyle == .emphasized ? .selection : nil
+        iconView.contentTintColor = backgroundStyle == .emphasized
+            ? Design.Ink.selection.label
+            : (isDormant ? Design.Text.tertiary : Design.Text.secondary)
         pinnedIndicator?.contentTintColor = backgroundStyle == .emphasized
             ? Design.Ink.selection.label
             : Design.Surface.accent

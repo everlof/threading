@@ -150,7 +150,9 @@ nobody watching; that is opted into, never discovered.
   plus a row that says why.
 - **`waitForReset`** — answer the chooser with stop-and-wait, park, and schedule the
   continuation for the binding window's reset (below).
-- **`resumeVia(account)` / `resumeOnBestAccount`** — *designed, not yet built.* Migrate the
+- **`resumeVia(account)` / `resumeOnBestAccount`** — *designed, not yet built as a policy.* Its
+  ranking and its guards **are** built and ship as the interactive escape below, which is this
+  policy with the user's press where the setting would have been. Migrate the
   conversation (`SessionMigration` — the transcript is client-side state, verified in
   [`accounts.md`](accounts.md)) and continue immediately under a login with headroom. "Best" is
   the enabled same-provider login whose metering windows all have headroom, ranked by **pace
@@ -164,6 +166,122 @@ nobody watching; that is opted into, never discovered.
 
 Never, under any policy or parse result: the chooser's "Upgrade your plan" option. No automated
 path may spend money.
+
+## The interactive escape
+
+`resumeOnBestAccount`'s ranking is built and shipped; the *policy* is not. What ships is the same
+choice offered as a strip over the refused session's composer, pressed by hand:
+
+> ⚠ Limit reached · resets 9:40pm (Europe/Rome)  ·  **Continue as Daniel Block · 5h 12% · 7d 40%**  ·  ✕
+
+**It needs no settings opt-in, and that is not an oversight.** The reason the automatic policies
+are opted into is stated above: they type into the user's session and spend their quota *with
+nobody watching*. A press is the watching. Everything the automatic version would need permission
+for — stopping the agent, moving the conversation, spending a second login's window — is named on
+the button's own face before it is pressed, so a confirmation sheet behind it would only ask the
+user to agree with what they just read. `SessionCoordinator.moveSessionWithoutConfirmation` exists
+for exactly that one caller; `moveSession` keeps `.moveRunningSessionToAccount`, because the
+sidebar's **Move to Account** submenu names a login and says nothing about stopping an agent.
+
+The **per-session recovery budget** in the automatic design is not needed here and is deliberately
+absent. It exists so a defect above the rules cannot become an account-hopping loop; a loop needs
+somebody pressing a button once per hop, which is a user changing their mind rather than a bug.
+
+### The ranking is pure, and it is the automatic policy's
+
+`LimitEscapeRanking` takes accounts, readings and a model as values and answers with an order —
+`preferred(among:)`'s shape, for `preferred(among:)`'s reason: a rule that decides where somebody's
+conversation goes is testable with no home directory to scan and no network to answer.
+
+- **Candidates** are `SessionMigration.destinations(for:)`: the enabled logins of the session's own
+  runtime, minus the one that refused. That list is already capability-gated, which is why nothing
+  in this feature names a provider — a runtime that routes no accounts offers none and the strip
+  never appears.
+- **Eligibility** is decided on every window metering the session's *effective* model — the
+  account's own windows and the model-scoped ones together, `bindingWindow`'s list rather than
+  `peakWindow`'s. All of them must sit below `LimitEscapeDefaults.headroomFraction`, which **is**
+  `UsageDefaults.warningFraction` rather than a second number beside it: an account the pill
+  already tints as pressured is not a place to move a conversation that has just run out, and two
+  thresholds a few points apart would eventually disagree about one login on one screen.
+- **Three shapes are refused rather than guessed at**: a login with no reading, a login whose
+  reading names no windows, and a window whose `resetsAt` has passed. The last is the subtle one —
+  a stale percentage describes the *previous* window ([`accounts.md`](accounts.md)) and is very
+  likely to be generous, which is exactly why it must not be believed by the one reader that would
+  move a conversation on the strength of it.
+- **The order is pace deficit**, `elapsedFraction − usedFraction`, taken on each account's *worst*
+  metering window, furthest behind its own burn first. The same comparison `weeklyAheadOfPace`
+  already makes for the usage-window poke, and the reason it is not "the emptiest account": 40%
+  spent four hours into a five-hour window has more left in practice than 30% spent in the first
+  hour. A window whose length the provider did not state contributes a deficit of zero rather than
+  a number invented from one side of the subtraction. Ties keep the order the candidates arrived
+  in, so an unchanged discovery order cannot make the offer flicker between two logins.
+
+### One store, both surfaces
+
+`LimitEscapeSuggestionStore` holds the standing refusal and the offer computed from it, keyed by
+session, **in memory only** — a refusal is a fact about a live process, the transcript still says
+so on the next launch, and restoring an offer would be answering a question nobody re-asked.
+
+Both producers call the same entry point. `LimitRecoveryCoordinator` calls `refusalStands` from
+both places `noteLimitParked(recoveryArmed: false)` lands — the `flagOnly` branch and `flag()`,
+which is where `waitForReset` degrades to — and from nowhere else, since an armed recovery already
+has a plan. `ConversationViewController` calls it where the stream's own refusal sets `usageLimit`:
+nothing recovers a rendered conversation automatically, so that surface is permanently the
+`flagOnly` case this is written for. Both call `refusalCleared` on the same edge that clears the
+park.
+
+Two more edges close the loop. Detection **warms** every candidate's reading through
+`AccountUsageService.refresh` at the moment the refusal is read, because that is minutes before
+anybody looks at the strip and it is the only moment a fetch has time to land; and
+`AccountUsageDidChange` re-ranks the standing refusals with the answer, over a set that is almost
+always empty. A re-rank keeps the dismissal — it is the same refusal — while a *new* refusal
+clears it, which is the whole of the dismissal rule: ✕ waves away one refusal, not the state of
+being refused.
+
+### The press
+
+1. The button goes busy so a second press cannot start a second migration.
+2. The **target's** reading is force-refreshed and eligibility asked again. This is the guard the
+   automatic design states, unchanged: a cached figure must not move a conversation onto a login
+   that is also spent. `AccountUsageService.refresh(_:force:settled:)` is the receipt that made it
+   possible — it fires when the reading is as fresh as the account's pacing allows, including
+   immediately when the endpoint's own `notBefore` refuses the fetch, because a user pressing a
+   button must not be a way to spend a rate limit faster.
+3. A target that turns out to be spent **degrades and says so**: the sentence states it, the button
+   dims keeping the fresh reading it was refused on, and no other login is chosen. A better
+   candidate becomes a new offer at the next reading, pressed the same way this one was — which is
+   the policy rule "never silently escalating to a different escape", with the user in the loop.
+4. The move runs through `SessionCoordinator`, which reopens the pane (`reopenIfShowing`) exactly
+   as the menu route does, and keeps its failure alert.
+5. The continuation is a `ScheduledMessage` — `LimitRecoveryDefaults.continuationText`, due
+   `LimitEscapeDefaults.continuationDelay` from now, wall-clock anchored. **Not typed**: everything
+   hard about typing into a just-relaunched TUI is already solved in
+   [`scheduled-messages.md`](scheduled-messages.md) and is inherited rather than restated — a send
+   arriving mid-turn parks `.waiting` and is retried on the activity edge, and a send whose process
+   is gone waits visibly rather than being typed into a woken terminal. The delay is not the
+   safety; it only spares the store an attempt that could not have landed. The anchor is
+   deliberately `wallClock` and not the window's reset: the window this send is aimed past belongs
+   to the account it is *leaving*.
+
+Everything above journals to `EventLog.Category.limitRecovery` in the same style as the rest of
+this subsystem: the suggestion with its account, deciding window and reading; the absence of one;
+the dismissal; the press; and each of the three ways the press can end.
+
+### The strip
+
+`LimitEscapeStripView` is the component (`UI/Design/`), drawn from the store and reporting both
+gestures back — the one-direction rule `ScheduledMessageStripView` states. It is deliberately not a
+`PaneNoticeView`: that band is a condition the *pane* found, spans it, and pushes its header apart
+from its content, while this is a condition of one conversation and belongs on that conversation's
+own column. It draws its own ground for `PaneNoticeView`'s other reason — in a terminal pane the
+surface behind it is the *terminal's* palette, which the app theme knows nothing about.
+
+Its hosts are the two composer areas. A rendered conversation puts it above the scheduled strip, on
+the prompt's column. A terminal session has no composer of its own — the box is inside the TUI — so
+`AgentSessionViewController` puts it at the bottom of the pane on the terminal's own margins, and
+the terminal gives up the rows rather than being drawn over: the lower edge is one of two
+constraints, swapped rather than both left active, so the PTY resizes exactly once as the offer
+arrives and once as it leaves.
 
 ## The chooser is answered by label, never by position
 

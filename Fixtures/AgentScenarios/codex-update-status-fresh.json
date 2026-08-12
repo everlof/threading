@@ -73,7 +73,7 @@
       "payload": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"fixture-thread-1\",\"turnId\":\"fixture-turn-1\",\"item\":{\"id\":\"fixture-file-change-1\",\"type\":\"fileChange\",\"status\":\"completed\",\"changes\":[{\"path\":\"status.txt\",\"kind\":\"update\",\"diff\":\"@@ -1 +1 @@\\n-before\\n+after\\n\"}]}}}\n"
     },
     {
-      "contents": "{\"timestamp\":\"2026-08-11T08:44:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"In this synthetic repository, replace the exact contents of status.txt from before to after.\"}}\n{\"timestamp\":\"2026-08-11T08:44:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"Updated status.txt.\"}}\n",
+      "contents": "{\"timestamp\":\"2026-08-11T08:44:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"In this synthetic repository, replace the exact contents of status.txt from before to after.\"}}\n{\"timestamp\":\"2026-08-11T08:44:01.100Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call\",\"id\":\"fixture-file-change-record-1\",\"call_id\":\"fixture-file-change-1\",\"status\":\"completed\",\"name\":\"apply_patch\",\"input\":\"*** Begin Patch\\n*** Update File: status.txt\\n@@\\n-before\\n+after\\n*** End Patch\"}}\n{\"timestamp\":\"2026-08-11T08:44:01.200Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call_output\",\"call_id\":\"fixture-file-change-1\",\"output\":\"Applied patch\"}}\n{\"timestamp\":\"2026-08-11T08:44:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"Updated status.txt.\"}}\n",
       "kind": "writeFixtureFile",
       "path": ".codex/sessions/2026/08/11/rollout-2026-08-11T08-44-00-fixture-thread-1.jsonl"
     },

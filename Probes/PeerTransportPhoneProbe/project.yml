@@ -1,0 +1,57 @@
+name: PeerTransportPhoneProbe
+
+options:
+  bundleIdPrefix: codes.threading.probe
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+
+packages:
+  ThreadingPeerTransport:
+    path: ../../Packages/ThreadingPeerTransport
+
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    SWIFT_STRICT_CONCURRENCY: complete
+
+targets:
+  PeerTransportProbeHost:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Shared
+      - path: Host
+    dependencies:
+      - package: ThreadingPeerTransport
+        product: ThreadingPeerTransport
+    settings:
+      base:
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
+        PRODUCT_BUNDLE_IDENTIFIER: codes.threading.probe.host
+
+  PeerTransportProbePhone:
+    type: application
+    platform: iOS
+    sources:
+      - path: Shared
+      - path: Phone
+    dependencies:
+      - package: ThreadingPeerTransport
+        product: ThreadingPeerTransport
+    info:
+      path: Phone/Info.plist
+      properties:
+        CFBundleDisplayName: Peer Transport Probe
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        NSBonjourServices:
+          - _threading-ice._tcp
+        NSLocalNetworkUsageDescription: Finds the one-use Threading transport probe running on your Mac.
+        UILaunchScreen: {}
+    settings:
+      base:
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: SMQ3E8Y57T
+        PRODUCT_BUNDLE_IDENTIFIER: codes.threading.probe.phone
+        TARGETED_DEVICE_FAMILY: "1"

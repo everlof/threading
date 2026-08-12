@@ -24,6 +24,14 @@ import Foundation
 /// invisible until whole rollouts were rendered and looked at.
 enum CodexPatch {
 
+    /// One file section of a patch. Kept separate before the renderer flattens the complete
+    /// patch so a replay can reconstruct the per-turn changed-files card without reading the
+    /// current checkout or attributing later edits to an older turn.
+    struct FileChange: Equatable {
+        let path: String
+        let lines: [DiffLine]
+    }
+
     private enum Marker {
         static let begin = "*** Begin Patch"
         static let end = "*** End Patch"
@@ -78,6 +86,38 @@ enum CodexPatch {
 
     static func firstPath(in patch: String) -> String? {
         paths(in: patch).first
+    }
+
+    /// Splits a multi-file patch into the exact file-level changes it recorded.
+    static func fileChanges(in patch: String) -> [FileChange] {
+        var changes: [FileChange] = []
+        var path: String?
+        var section: [String] = []
+
+        func flush() {
+            guard let path else { return }
+            let lines = self.lines(in: section.joined(separator: "\n"))
+            if !lines.isEmpty { changes.append(FileChange(path: path, lines: lines)) }
+        }
+
+        for line in envelopeLines(patch) {
+            if let header = Marker.fileHeaders.first(where: { line.hasPrefix($0) }) {
+                flush()
+                let value = line.dropFirst(header.count).trimmingCharacters(in: .whitespaces)
+                path = value.isEmpty ? nil : value
+                section = []
+            } else if line.hasPrefix(Marker.moveTo) {
+                let value = line.dropFirst(Marker.moveTo.count)
+                    .trimmingCharacters(in: .whitespaces)
+                if !value.isEmpty { path = value }
+            } else if path != nil,
+                      !line.hasPrefix(Marker.begin),
+                      !line.hasPrefix(Marker.end) {
+                section.append(line)
+            }
+        }
+        flush()
+        return changes
     }
 
     /// The patch as diff lines, ready to draw.

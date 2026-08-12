@@ -11,6 +11,15 @@ typealias RemoteClientDiagnosticsReceiver = @Sendable (
     _ deviceID: String
 ) -> Bool
 
+typealias RemoteUsageDashboardLoader = @MainActor @Sendable (
+    _ offset: Int,
+    _ count: Int
+) async -> RemoteUsageDashboardDTO
+typealias RemoteUsageLimitLoader = @MainActor @Sendable (
+    _ seriesID: String,
+    _ days: Int
+) async -> RemoteUsageLimitDTO?
+
 /// Cross-executor dependencies have their own synchronization because tests and the main-actor
 /// coordinator configure them while the server reads them from its network queue.
 private final class RemoteAccessServerDependencies: @unchecked Sendable {
@@ -21,6 +30,8 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
         records, source, deviceID in
         MacRemoteDiagnostics.receive(records, source: source, deviceID: deviceID)
     }
+    private var usageDashboardLoaderStorage: RemoteUsageDashboardLoader?
+    private var usageLimitLoaderStorage: RemoteUsageLimitLoader?
 
     var authorizer: (any RemoteAuthorizing)? {
         get { lock.withLock { authorizerStorage } }
@@ -35,6 +46,16 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
     var diagnosticsReceiver: RemoteClientDiagnosticsReceiver {
         get { lock.withLock { diagnosticsReceiverStorage } }
         set { lock.withLock { diagnosticsReceiverStorage = newValue } }
+    }
+
+    var usageDashboardLoader: RemoteUsageDashboardLoader? {
+        get { lock.withLock { usageDashboardLoaderStorage } }
+        set { lock.withLock { usageDashboardLoaderStorage = newValue } }
+    }
+
+    var usageLimitLoader: RemoteUsageLimitLoader? {
+        get { lock.withLock { usageLimitLoaderStorage } }
+        set { lock.withLock { usageLimitLoaderStorage = newValue } }
     }
 }
 
@@ -67,6 +88,17 @@ final class RemoteAccessServer: @unchecked Sendable {
     var receiveClientDiagnostics: RemoteClientDiagnosticsReceiver {
         get { dependencies.diagnosticsReceiver }
         set { dependencies.diagnosticsReceiver = newValue }
+    }
+
+    /// Deterministic integration-test seams. Production leaves these nil and reads the app's
+    /// immutable projections through the background preparation paths below.
+    var usageDashboardLoader: RemoteUsageDashboardLoader? {
+        get { dependencies.usageDashboardLoader }
+        set { dependencies.usageDashboardLoader = newValue }
+    }
+    var usageLimitLoader: RemoteUsageLimitLoader? {
+        get { dependencies.usageLimitLoader }
+        set { dependencies.usageLimitLoader = newValue }
     }
 
     var port: UInt16? {
@@ -328,6 +360,16 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        if request.method == "GET", path == RemoteRouter.usagePath {
+            handleUsage(request, respond: respond)
+            return
+        }
+
+        if request.method == "GET", path == RemoteRouter.usageLimitPath {
+            handleUsageLimit(request, respond: respond)
+            return
+        }
+
         if request.method == "POST", path == RemoteRouter.createSessionPath {
             handleCreateSession(request, respond: respond)
             return
@@ -571,6 +613,137 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         DispatchQueue.main.async {
             let payload = RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
             respond(.respond(RemoteRouter.json(payload)))
+        }
+    }
+
+    private func handleUsage(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canReadHostUsage else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+
+        let rawCursor = RemoteRouter.queryValue(named: "cursor", in: request.path)
+        let rawCount = RemoteRouter.queryValue(named: "limit", in: request.path)
+        let offset: Int
+        if let rawCursor {
+            guard let parsed = Int(rawCursor) else {
+                respond(.respond(RemoteRouter.error(400, "Bad Request")))
+                return
+            }
+            offset = max(0, parsed)
+        } else {
+            offset = 0
+        }
+        let count: Int
+        if let rawCount {
+            guard let parsed = Int(rawCount) else {
+                respond(.respond(RemoteRouter.error(400, "Bad Request")))
+                return
+            }
+            count = parsed
+        } else {
+            count = RemoteUsageBridge.defaultLimitPageSize
+        }
+
+        if let loader = usageDashboardLoader {
+            Task { @MainActor in
+                let payload = await loader(offset, count)
+                respond(.respond(RemoteRouter.json(
+                    payload,
+                    maximumBytes: RemoteUsageBridge.maximumOverviewResponseBytes
+                )))
+            }
+            return
+        }
+
+        Task { @MainActor in
+            let now = Date()
+            TranscriptUsageService.shared.refresh()
+            let report = TranscriptUsageService.shared.report
+            let isBuilding = TranscriptUsageService.shared.isBuilding
+            let snapshot = await UsageHistoryStore.shared.loadSnapshot(
+                since: now.addingTimeInterval(-90 * 86_400),
+                now: now
+            )
+            let preparation = Task.detached(priority: .utility) {
+                let overview = report.flatMap {
+                    UsageDashboardProjector.overview(report: $0, now: now)
+                }
+                let index = UsageDashboardProjector.limitIndex(from: snapshot, now: now)
+                return RemoteUsageBridge.dashboard(
+                    overview: overview,
+                    limitIndex: index,
+                    isBuilding: isBuilding,
+                    limitOffset: offset,
+                    limitCount: count
+                )
+            }
+            let payload = await preparation.value
+            respond(.respond(RemoteRouter.json(
+                payload,
+                maximumBytes: RemoteUsageBridge.maximumOverviewResponseBytes
+            )))
+        }
+    }
+
+    private func handleUsageLimit(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canReadHostUsage else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        guard let seriesID = RemoteRouter.queryValue(named: "series", in: request.path),
+              !seriesID.isEmpty,
+              seriesID.utf8.count <= 512,
+              let days = RemoteRouter.queryValue(named: "days", in: request.path).flatMap(Int.init),
+              UsageDashboardProjectionDefaults.overviewRanges.contains(days) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        if let loader = usageLimitLoader {
+            Task { @MainActor in
+                guard let payload = await loader(seriesID, days) else {
+                    respond(.respond(RemoteRouter.error(404, "Not Found")))
+                    return
+                }
+                respond(.respond(RemoteRouter.json(
+                    payload,
+                    maximumBytes: RemoteUsageBridge.maximumLimitResponseBytes
+                )))
+            }
+            return
+        }
+
+        Task { @MainActor in
+            let now = Date()
+            let snapshot = await UsageHistoryStore.shared.loadSnapshot(
+                since: now.addingTimeInterval(-90 * 86_400),
+                now: now
+            )
+            let preparation = Task.detached(priority: .utility) {
+                guard let series = UsageDashboardProjector.limitSeries(
+                    from: snapshot,
+                    seriesID: seriesID,
+                    now: now
+                ) else { return nil as RemoteUsageLimitDTO? }
+                return RemoteUsageBridge.limit(series: series, days: days, preparedAt: now)
+            }
+            guard let payload = await preparation.value else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            respond(.respond(RemoteRouter.json(
+                payload,
+                maximumBytes: RemoteUsageBridge.maximumLimitResponseBytes
+            )))
         }
     }
 

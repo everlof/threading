@@ -15,11 +15,28 @@ import AppKit
 final class WindowChromeHostViewController: NSViewController {
 
     private let workspaceViewController: NSViewController
-    private(set) lazy var bandView = WindowTitleBandView()
-    private(set) lazy var commandBandView = WindowCommandBandView()
+    private let bandHost = NSView()
+    private let commandBandHost = NSView()
+    private var installedBandView: WindowTitleBandView?
+    private var installedCommandBandView: WindowCommandBandView?
+    private var pendingTitle = ""
+
+    /// A native window carries only two zero-height structural slots. App-icon lookup, title-band
+    /// fonts and takeover controls do not exist until a theme actually exposes them.
+    private(set) var takeoverChromeIsMaterialized = false
+
+    var bandView: WindowTitleBandView {
+        materializeTakeoverChromeIfNeeded()
+        return installedBandView!
+    }
+
+    var commandBandView: WindowCommandBandView {
+        materializeTakeoverChromeIfNeeded()
+        return installedCommandBandView!
+    }
 
     private let appEvents = AppEventObservations()
-    private(set) var isTakeoverActive = false
+    private(set) var isTakeoverActive: Bool
 
     private var bandHeight: NSLayoutConstraint?
     private var commandBandHeight: NSLayoutConstraint?
@@ -38,8 +55,9 @@ final class WindowChromeHostViewController: NSViewController {
 
     // MARK: - Initialization
 
-    init(workspace: NSViewController) {
+    init(workspace: NSViewController, initialTakeoverActive: Bool = false) {
         workspaceViewController = workspace
+        isTakeoverActive = initialTakeoverActive
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -56,15 +74,17 @@ final class WindowChromeHostViewController: NSViewController {
         addChild(workspaceViewController)
         let workspace = workspaceViewController.view
         workspace.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(bandView)
-        view.addSubview(commandBandView)
+        bandHost.translatesAutoresizingMaskIntoConstraints = false
+        commandBandHost.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bandHost)
+        view.addSubview(commandBandHost)
         view.addSubview(workspace)
 
-        let bandTop = bandView.topAnchor.constraint(equalTo: view.topAnchor)
-        let bandLeading = bandView.leadingAnchor.constraint(equalTo: view.leadingAnchor)
-        let bandTrailing = bandView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        let bandHeight = bandView.heightAnchor.constraint(equalToConstant: 0)
-        let commandBandHeight = commandBandView.heightAnchor.constraint(equalToConstant: 0)
+        let bandTop = bandHost.topAnchor.constraint(equalTo: view.topAnchor)
+        let bandLeading = bandHost.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+        let bandTrailing = bandHost.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        let bandHeight = bandHost.heightAnchor.constraint(equalToConstant: 0)
+        let commandBandHeight = commandBandHost.heightAnchor.constraint(equalToConstant: 0)
         let workspaceLeading = workspace.leadingAnchor.constraint(equalTo: view.leadingAnchor)
         let workspaceTrailing = workspace.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         let workspaceBottom = workspace.bottomAnchor.constraint(equalTo: view.bottomAnchor)
@@ -79,18 +99,15 @@ final class WindowChromeHostViewController: NSViewController {
 
         NSLayoutConstraint.activate([
             bandTop, bandLeading, bandTrailing, bandHeight,
-            commandBandView.topAnchor.constraint(equalTo: bandView.bottomAnchor),
-            commandBandView.leadingAnchor.constraint(equalTo: bandView.leadingAnchor),
-            commandBandView.trailingAnchor.constraint(equalTo: bandView.trailingAnchor),
+            commandBandHost.topAnchor.constraint(equalTo: bandHost.bottomAnchor),
+            commandBandHost.leadingAnchor.constraint(equalTo: bandHost.leadingAnchor),
+            commandBandHost.trailingAnchor.constraint(equalTo: bandHost.trailingAnchor),
             commandBandHeight,
-            workspace.topAnchor.constraint(equalTo: commandBandView.bottomAnchor),
+            workspace.topAnchor.constraint(equalTo: commandBandHost.bottomAnchor),
             workspaceLeading, workspaceTrailing, workspaceBottom
         ])
 
         installOverlayArea(around: workspace)
-
-        bandView.isHidden = true
-        commandBandView.isHidden = true
 
         // The theme's chrome measures may change while worn — an agent editing the live theme
         // through `update_app_theme` — so the chrome re-measures on every theme event, not
@@ -98,6 +115,38 @@ final class WindowChromeHostViewController: NSViewController {
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             self?.applyMeasures()
         }
+        applyMeasures()
+    }
+
+    private func materializeTakeoverChromeIfNeeded() {
+        guard !takeoverChromeIsMaterialized else { return }
+        // Accessing `view` is the macOS 13-compatible way to force this controller's
+        // programmatic view load (`loadViewIfNeeded` is only available from macOS 14).
+        _ = view
+        guard !takeoverChromeIsMaterialized else { return }
+
+        let band = WindowTitleBandView()
+        let commandBand = WindowCommandBandView()
+        band.translatesAutoresizingMaskIntoConstraints = false
+        commandBand.translatesAutoresizingMaskIntoConstraints = false
+        band.setTitle(pendingTitle)
+        band.isHidden = !isTakeoverActive
+        commandBand.isHidden = !isTakeoverActive
+        bandHost.addSubview(band)
+        commandBandHost.addSubview(commandBand)
+        NSLayoutConstraint.activate([
+            band.topAnchor.constraint(equalTo: bandHost.topAnchor),
+            band.bottomAnchor.constraint(equalTo: bandHost.bottomAnchor),
+            band.leadingAnchor.constraint(equalTo: bandHost.leadingAnchor),
+            band.trailingAnchor.constraint(equalTo: bandHost.trailingAnchor),
+            commandBand.topAnchor.constraint(equalTo: commandBandHost.topAnchor),
+            commandBand.bottomAnchor.constraint(equalTo: commandBandHost.bottomAnchor),
+            commandBand.leadingAnchor.constraint(equalTo: commandBandHost.leadingAnchor),
+            commandBand.trailingAnchor.constraint(equalTo: commandBandHost.trailingAnchor)
+        ])
+        installedBandView = band
+        installedCommandBandView = commandBand
+        takeoverChromeIsMaterialized = true
     }
 
     // MARK: - Overlay Area
@@ -137,7 +186,7 @@ final class WindowChromeHostViewController: NSViewController {
     /// The band is the only chrome here that must stay reachable — in takeover it carries the
     /// close, minimize and zoom. Everything under it, the command row included, is behind the
     /// modal and dims with the workspace. In native dress the band is zero-height at the very top,
-    /// so `bandView.bottomAnchor` *is* the content view's top and the wash takes the whole of it,
+    /// so `bandHost.bottomAnchor` *is* the content view's top and the wash takes the whole of it,
     /// including the strip under AppKit's transparent titlebar that the surface has to clear. The
     /// theme's drawn frame stays out of it: a border dimmed on three sides reads as the window
     /// having lost its edge rather than as something opened in front of it.
@@ -145,7 +194,7 @@ final class WindowChromeHostViewController: NSViewController {
         view.addLayoutGuide(overlayScrimAreaGuide)
 
         NSLayoutConstraint.activate([
-            overlayScrimAreaGuide.topAnchor.constraint(equalTo: bandView.bottomAnchor),
+            overlayScrimAreaGuide.topAnchor.constraint(equalTo: bandHost.bottomAnchor),
             overlayScrimAreaGuide.leadingAnchor.constraint(equalTo: workspace.leadingAnchor),
             overlayScrimAreaGuide.trailingAnchor.constraint(equalTo: workspace.trailingAnchor),
             overlayScrimAreaGuide.bottomAnchor.constraint(equalTo: workspace.bottomAnchor)
@@ -164,11 +213,15 @@ final class WindowChromeHostViewController: NSViewController {
     /// The window controller's title push — the one place the window's name is decided
     /// already calls this beside setting `window.title`.
     func setTitle(_ title: String) {
-        bandView.setTitle(title)
+        pendingTitle = title
+        installedBandView?.setTitle(title)
     }
 
     private func applyMeasures() {
         let resolved = isTakeoverActive ? WindowChromeAppearance.resolve() : nil
+        if resolved != nil {
+            materializeTakeoverChromeIfNeeded()
+        }
 
         let cornerRadius = resolved?.frameCornerRadius ?? 0
         if cornerRadius > 0 { view.wantsLayer = true }
@@ -185,8 +238,10 @@ final class WindowChromeHostViewController: NSViewController {
 
         bandHeight?.constant = resolved?.bandHeight ?? 0
         commandBandHeight?.constant = resolved == nil ? 0 : WindowCommandBandView.bandHeight
-        bandView.isHidden = resolved == nil
-        commandBandView.isHidden = resolved == nil
+        bandHost.isHidden = resolved == nil
+        commandBandHost.isHidden = resolved == nil
+        installedBandView?.isHidden = resolved == nil
+        installedCommandBandView?.isHidden = resolved == nil
         view.needsDisplay = true
     }
 }

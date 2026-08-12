@@ -100,6 +100,7 @@ struct SessionDashboard: View {
     @State private var surfaceChangeRequest: SurfaceChangeRequest?
     @State private var sharingSession: RemoteSessionSummaryDTO?
     @State private var sharedLink: SharedSessionLink?
+    @State private var showsUsage = false
     let openSettings: () -> Void
 
     private var organization: SessionOrganization {
@@ -241,6 +242,15 @@ struct SessionDashboard: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { dashboardToolbar }
         .task(id: model.activeHostID) { await model.poll() }
+        .onAppear {
+#if DEBUG
+            if model.isDemo,
+               ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
+                .hasPrefix("usage") == true {
+                showsUsage = true
+            }
+#endif
+        }
     }
 
     private var dashboardSheets: some View {
@@ -253,6 +263,12 @@ struct SessionDashboard: View {
         .sheet(item: $sharedLink) { link in
             SharedSessionLinkView(link: link)
                 .environment(\.remoteTheme, theme)
+        }
+        .sheet(isPresented: $showsUsage) {
+            if let link = model.activeHost?.link {
+                RemoteUsageDashboardView(link: link, isDemo: model.isDemo)
+                    .environment(\.remoteTheme, theme)
+            }
         }
     }
 
@@ -467,6 +483,14 @@ struct SessionDashboard: View {
                         }
                     } label: {
                         Label("Appearance", systemImage: "paintpalette")
+                    }
+                }
+
+                if model.canReadUsage {
+                    Button {
+                        showsUsage = true
+                    } label: {
+                        Label("Usage", systemImage: "chart.bar.xaxis")
                     }
                 }
 

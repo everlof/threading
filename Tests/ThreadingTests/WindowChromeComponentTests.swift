@@ -501,6 +501,25 @@ final class WindowChromeComponentTests: XCTestCase {
 
     // MARK: - Band Behaviour
 
+    /// Native dress collapses this band to zero height. It must not ask AppKit to render the
+    /// application icon until a takeover style actually exposes that identity slot.
+    func testTheBandDefersItsApplicationIconUntilAStyleShowsIt() {
+        AppThemePalette.set(.system)
+        var iconRequestCount = 0
+        let band = WindowTitleBandView(appIconProvider: {
+            iconRequestCount += 1
+            return NSImage(size: NSSize(width: 16, height: 16))
+        })
+
+        XCTAssertEqual(iconRequestCount, 0)
+        XCTAssertFalse(band.showsApplicationIcon)
+
+        band.fixtureStyle = fixtureStyle()
+
+        XCTAssertEqual(iconRequestCount, 1)
+        XCTAssertTrue(band.showsApplicationIcon)
+    }
+
     /// Pushed, not observed: the window controller's `updateWindowTitle` calls the host's
     /// `setTitle` beside setting `window.title`, so the two never disagree — and the band
     /// holds no observation that would unregister against a deallocating window.
@@ -939,6 +958,24 @@ final class WindowChromeComponentTests: XCTestCase {
 
     // MARK: - Gallery
 
+    func testAPlainTakeoverFrameHasAVisibleOuterEdge() throws {
+        AppThemePalette.set(.system)
+        let frame = WindowChromeFrameView()
+        frame.fixtureStyle = fixtureStyle()
+        let rep = try XCTUnwrap(NSBitmapImageRep(data: try renderedPixels(
+            of: frame,
+            size: NSSize(width: 220, height: 96)
+        )))
+
+        let edge = try XCTUnwrap(rep.colorAt(x: 0, y: rep.pixelsHigh / 2))
+        let ground = try XCTUnwrap(rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2))
+        XCTAssertGreaterThanOrEqual(
+            ThemeContrast.ratio(edge, ground),
+            1.35,
+            "a non-bevelled takeover frame should still separate the window from its surround"
+        )
+    }
+
     func testGalleryTellsTheirStories() {
         for name in [
             "WindowTitleBandView", "WindowChromeButton", "WindowCommandBandView",
@@ -953,19 +990,20 @@ final class WindowChromeComponentTests: XCTestCase {
 
     // MARK: - Host
 
-    /// In native dress the chrome host must be geometrically invisible: the band hidden at
-    /// zero height, the command band hidden too, no frame inset, the workspace filling the root exactly.
+    /// In native dress the chrome host must be geometrically invisible *and structurally cheap*:
+    /// no title or command band exists, no frame is inset, and the workspace fills the root.
     func testTheHostCollapsesToNothingInNativeDress() {
         let workspace = NSViewController()
         workspace.view = NSView()
         let host = WindowChromeHostViewController(workspace: workspace)
+        host.setTitle("Remember this without building hidden chrome")
         host.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
         host.view.layoutSubtreeIfNeeded()
 
-        XCTAssertTrue(host.bandView.isHidden)
-        XCTAssertEqual(host.bandView.frame.height, 0)
-        XCTAssertTrue(host.commandBandView.isHidden)
-        XCTAssertEqual(host.commandBandView.frame.height, 0)
+        XCTAssertFalse(
+            host.takeoverChromeIsMaterialized,
+            "zero-height takeover controls are still eager work if their views were constructed"
+        )
         XCTAssertEqual(workspace.view.frame, host.view.bounds)
     }
 
@@ -990,20 +1028,27 @@ final class WindowChromeComponentTests: XCTestCase {
         workspace.view = NSView()
         let host = WindowChromeHostViewController(workspace: workspace)
         host.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+        XCTAssertFalse(host.takeoverChromeIsMaterialized)
         host.setTakeoverActive(true)
         host.view.layoutSubtreeIfNeeded()
 
+        XCTAssertTrue(host.takeoverChromeIsMaterialized)
         XCTAssertFalse(host.bandView.isHidden)
         XCTAssertFalse(host.commandBandView.isHidden)
+        let bandFrame = host.view.convert(host.bandView.bounds, from: host.bandView)
+        let commandBandFrame = host.view.convert(
+            host.commandBandView.bounds,
+            from: host.commandBandView
+        )
         XCTAssertEqual(
-            host.bandView.frame.height,
+            bandFrame.height,
             WindowChromeStyleLimits.defaultBandHeight
         )
-        XCTAssertEqual(host.commandBandView.frame.height, WindowCommandBandView.bandHeight)
-        XCTAssertEqual(workspace.view.frame.maxY, host.commandBandView.frame.minY)
+        XCTAssertEqual(commandBandFrame.height, WindowCommandBandView.bandHeight)
+        XCTAssertEqual(workspace.view.frame.maxY, commandBandFrame.minY)
         XCTAssertEqual(workspace.view.frame.minX, 4, "the frame's width insets the workspace")
         XCTAssertEqual(
-            host.view.bounds.maxY - host.bandView.frame.maxY,
+            host.view.bounds.maxY - bandFrame.maxY,
             4,
             "the frame's width seats the band below the top edge"
         )

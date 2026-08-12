@@ -86,6 +86,20 @@ final class WorkingWordsTests: XCTestCase {
         )
     }
 
+    func testFinishedStatusSuppressesAZeroSecondReceipt() {
+        XCTAssertEqual(
+            TurnStatusText.ready(model: nil, lastTurn: TurnMetrics(duration: 0.7)),
+            "Ready"
+        )
+        XCTAssertEqual(
+            TurnStatusText.ready(
+                model: nil,
+                lastTurn: TurnMetrics(duration: 0.7, outputTokens: 12)
+            ),
+            "Ready · last turn ↓ 12 tokens"
+        )
+    }
+
     func testReceiptFormattingScalesWithoutFalsePrecision() {
         XCTAssertEqual(TurnStatusText.duration(7_445), "2h 4m 5s")
         XCTAssertEqual(TurnStatusText.tokenCount(999), "999")

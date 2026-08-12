@@ -119,6 +119,14 @@ final class AccountUsageService {
     private var entries: [AccountID: Entry] = [:]
     private var inFlight: Set<AccountID> = []
 
+    /// Callers waiting for an account's reading to be as fresh as it is going to get.
+    ///
+    /// Only a caller that has to *decide* on the number needs this — the usage-limit escape
+    /// refuses to move a conversation onto a login on the strength of a cached figure. Everyone
+    /// else draws whatever is cached and redraws on `AccountUsageDidChange`, which stays the
+    /// ordinary way to follow a reading.
+    private var settlementWaiters: [AccountID: [@MainActor () -> Void]] = [:]
+
     /// Accounts whose history has already been recovered from disk this launch. The recovery is
     /// a filesystem walk and its answer does not change between readings.
     private var seededHistory: Set<AccountID> = []
@@ -162,17 +170,44 @@ final class AccountUsageService {
     /// and never before a `notBefore` the endpoint set by answering 429: a pause the server
     /// asked for is not the UI's to decline, forced or not.
     func refresh(_ account: AgentAccount, force: Bool = false) {
-        let id = account.id
-        guard !inFlight.contains(id) else { return }
+        refresh(account, force: force, settled: nil)
+    }
 
-        let now = Date()
-        if let notBefore = entries[id]?.notBefore, now < notBefore { return }
-        if let lastAttempt = entries[id]?.lastAttemptAt {
-            guard now.timeIntervalSince(lastAttempt) >= spacing(for: id, force: force) else {
-                return
-            }
+    /// The same refresh, with a receipt: `settled` runs once the cached reading is as current as
+    /// this account's pacing allows it to be.
+    ///
+    /// It fires **immediately** when no fetch was started — a floor, a `notBefore` the endpoint
+    /// set, or nothing to fetch with. That is not a failure and must not be reported as one: the
+    /// pacing rules are deliberate, `force` already respects the server's own pause, and the
+    /// answer for the caller is "this is the freshest reading you may have right now". A caller
+    /// that must not act on a stale figure reads `AccountUsageReading` afterwards and decides;
+    /// this only says when to look.
+    func refresh(
+        _ account: AgentAccount,
+        force: Bool = false,
+        settled: (@MainActor () -> Void)?
+    ) {
+        let id = account.id
+        guard !inFlight.contains(id) else {
+            // A fetch is already on its way to the same account. Joining it is both cheaper and
+            // more correct than declining: the caller wants the value that lands, not a second
+            // request for it.
+            if let settled { settlementWaiters[id, default: []].append(settled) }
+            return
         }
 
+        let now = Date()
+        if let notBefore = entries[id]?.notBefore, now < notBefore {
+            settled?()
+            return
+        }
+        if let lastAttempt = entries[id]?.lastAttemptAt,
+           now.timeIntervalSince(lastAttempt) < spacing(for: id, force: force) {
+            settled?()
+            return
+        }
+
+        if let settled { settlementWaiters[id, default: []].append(settled) }
         inFlight.insert(id)
         entries[id, default: Entry()].lastAttemptAt = now
 
@@ -244,6 +279,10 @@ final class AccountUsageService {
         entries[accountID] = entry
 
         NotificationCenter.default.post(AccountUsageDidChange(accountID: accountID))
+
+        // After the announcement, so a waiter reading the cache sees exactly what every other
+        // observer has already been shown.
+        for settled in settlementWaiters.removeValue(forKey: accountID) ?? [] { settled() }
     }
 
     /// The transition out of `.working` is a turn boundary: tokens were just spent, so the

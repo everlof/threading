@@ -360,11 +360,17 @@ final class SessionComposerViewController: NSViewController {
             "composer.session-start.managed-workspace.publication"
         )
 
-        // Chips shrink their labels to fit a tight row, which left a row of bare icons naming
-        // nothing. They hold their size here and the row stays short.
-        for chip in [locationChip, identityChip] {
-            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
-        }
+        // The identity is the stable trailing answer and keeps its natural width. The location
+        // is deliberately the pressure valve: its full value is already in the tooltip and it
+        // widens on hover. If both chips resist at `.required`, their honest intrinsic widths
+        // can overrule the pane's required edge pins at compact window sizes and make the prompt
+        // wider than the pane. Keep this below the column's optional measurement so the title
+        // truncates before any outer geometry breaks.
+        locationChip.setContentCompressionResistancePriority(
+            ComposerDefaults.locationChipCompressionPriority,
+            for: .horizontal
+        )
+        identityChip.setContentCompressionResistancePriority(.required, for: .horizontal)
         // The one chip made to shorten: a long location truncates before it can push the
         // identity out of the row. A hard cap rather than a lowered priority, because a chip's
         // width comes from its internal label's required edge pins — both labels resist
@@ -543,7 +549,16 @@ final class SessionComposerViewController: NSViewController {
         // window is tightest, which is the part that decides anything.
         usageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        for chip in [modelChip, modeChip, effortChip, speedChip, surfaceChip] {
+        // The model is the row's other pressure valve: it is normally the longest value, and
+        // ChipView keeps the complete title in its tooltip and reveals its natural width on
+        // hover. Making every chip required gave the footer a hidden 523pt minimum, which in
+        // turn widened a 560pt pane past its required insets. The shorter posture choices stay
+        // intact while the model name yields first.
+        modelChip.setContentCompressionResistancePriority(
+            ComposerDefaults.modelChipCompressionPriority,
+            for: .horizontal
+        )
+        for chip in [modeChip, effortChip, speedChip, surfaceChip] {
             chip.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
         modelChip.setAccessibilityIdentifier("composer.session-start.model")
@@ -900,6 +915,12 @@ final class SessionComposerViewController: NSViewController {
         promptView.submissionDisabledReason = project == nil
             ? ComposerDefaults.chooseProjectFirstReason
             : nil
+        // The disabled reason has to be visible without hovering or invoking VoiceOver. The
+        // prompt deliberately remains editable before a project is chosen, so its placeholder
+        // is the one stable place that can connect the location chip to the disabled send.
+        promptView.placeholder = project == nil
+            ? ComposerDefaults.chooseProjectFirstReason
+            : ComposerDefaults.promptPlaceholder
         startButton.isEnabled = project != nil
         startButton.toolTip = project == nil ? ComposerDefaults.chooseProjectFirstReason : nil
 
@@ -1908,6 +1929,15 @@ enum ComposerDefaults {
     /// its widest row — which is what a stack does the moment its own hugging outranks the
     /// measurement, and is the narrowing that measurement exists to prevent.
     static let columnHuggingPriority = NSLayoutConstraint.Priority(1)
+
+    /// Below `columnMeasurePriority`: a narrow pane shortens the location breadcrumb before it
+    /// abandons the column measurement or breaks the pane insets. The identity chip remains the
+    /// non-compressible answer at the trailing edge.
+    static let locationChipCompressionPriority = NSLayoutConstraint.Priority(239)
+
+    /// Gives the footer's longest choice the same narrow-pane contract as the location
+    /// breadcrumb: truncate its visible title before the prompt can acquire a minimum width.
+    static let modelChipCompressionPriority = NSLayoutConstraint.Priority(239)
 
     /// Below every control's own hugging, so a spacer is what stretches when a row has width to
     /// spare. Any real priority would leave the chips competing for the slack with it.

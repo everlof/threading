@@ -141,6 +141,10 @@ default.profraw
 # swallow it as a bare gitlink.
 /web/
 
+# Private marketing research and content drafts. This is intentionally local for now and can
+# become its own repository later.
+/.marketing/
+
 # Python tooling and one-off repository probes are generated artifacts.
 __pycache__/
 *.py[cod]

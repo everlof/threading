@@ -2,7 +2,9 @@ import XCTest
 
 @MainActor
 final class CodexStopTurnJourneyUITests: XCTestCase {
+    private static let journey = "Stop and continue"
     private static let interruptedPrompt = "Keep working until I stop this synthetic turn."
+    private static let partialReply = "Working until stopped…"
     private static let recoveryPrompt = "Reply with exactly: Ready for another turn."
     private static let recoveryAnswer = "Ready for another turn."
 
@@ -45,12 +47,36 @@ final class CodexStopTurnJourneyUITests: XCTestCase {
 
         let action = app.buttons["composer.prompt.submit"]
         assertEventually(action, labelBeginsWith: "Stop", timeout: 10)
-        recordScenarioScreenshot(named: "stop-turn-01-working", of: window)
+        try recordScenarioScreenshot(
+            checkpoint: "stop-turn-01-working",
+            order: 1,
+            title: "Turn is working",
+            description: "The active Codex turn exposes Stop as the composer's primary action.",
+            journey: Self.journey,
+            in: sandbox,
+            of: window
+        )
         action.click()
 
         assertEventually(action, labelBeginsWith: "Send", timeout: 10)
+        XCTAssertTrue(
+            app.staticTexts[Self.partialReply].waitForExistence(timeout: 5),
+            "the partial provider reply disappeared when the turn was interrupted"
+        )
+        XCTAssertTrue(
+            app.staticTexts["Interrupted"].waitForExistence(timeout: 5),
+            "the stopped turn has no durable terminal marker"
+        )
         XCTAssertEqual(try String(contentsOf: statusFile, encoding: .utf8), "before\n")
-        recordScenarioScreenshot(named: "stop-turn-02-interrupted-and-ready", of: window)
+        try recordScenarioScreenshot(
+            checkpoint: "stop-turn-02-interrupted-and-ready",
+            order: 2,
+            title: "Interrupted and ready",
+            description: "After Stop crosses the provider boundary, the same conversation returns to a send-ready state.",
+            journey: Self.journey,
+            in: sandbox,
+            of: window
+        )
 
         submit(Self.recoveryPrompt, through: prompt, in: app)
         XCTAssertTrue(
@@ -58,7 +84,15 @@ final class CodexStopTurnJourneyUITests: XCTestCase {
             "the conversation did not accept a turn after Stop"
         )
         XCTAssertEqual(try String(contentsOf: statusFile, encoding: .utf8), "before\n")
-        recordScenarioScreenshot(named: "stop-turn-03-next-turn-completed", of: window)
+        try recordScenarioScreenshot(
+            checkpoint: "stop-turn-03-next-turn-completed",
+            order: 3,
+            title: "Next turn completed",
+            description: "The interrupted conversation accepts another prompt and renders its exact successful response.",
+            journey: Self.journey,
+            in: sandbox,
+            of: window
+        )
     }
 
     private func submit(

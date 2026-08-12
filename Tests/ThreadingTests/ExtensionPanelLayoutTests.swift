@@ -257,6 +257,16 @@ final class ExtensionPanelLayoutTests: XCTestCase {
     func testToolsHostKeepsExtensionFieldsAsIndividualVirtualRows() throws {
         let identifier = "com.example.tools-settings-virtual"
         let fields = (0..<ExtensionSettingsContribution.maximumFields).map(stressSettingField)
+        _ = ExtensionManager.shared
+        ExtensionSettingsRegistry.shared.replace(enabledManifests: [])
+
+        // Count the host-owned rows rather than spelling their current product inventory here.
+        // Browser Sign-In and Website Access evolve independently of extension virtualization.
+        let bareController = ToolsPreferencesViewController(groups: [])
+        let bareWindow = performanceWindow(bareController.view, width: 620, height: 420)
+        bareWindow.contentView?.layoutSubtreeIfNeeded()
+        let hostRowCount = try XCTUnwrap(firstTableView(in: bareController.view)).numberOfRows
+
         let manifest = ExtensionManifest(
             identifier: identifier,
             name: "Tools Settings Virtual",
@@ -274,7 +284,6 @@ final class ExtensionPanelLayoutTests: XCTestCase {
             ])
         )
         try manifest.validate()
-        _ = ExtensionManager.shared
         ExtensionSettingsRegistry.shared.replace(enabledManifests: [manifest])
         defer { ExtensionSettingsRegistry.shared.replace(enabledManifests: []) }
 
@@ -285,8 +294,11 @@ final class ExtensionPanelLayoutTests: XCTestCase {
 
         let table = try XCTUnwrap(firstTableView(in: controller.view))
         let scroll = try XCTUnwrap(firstScrollView(in: controller.view))
-        // Note + three fixed browser sections + caption + one row per contributed field.
-        XCTAssertEqual(table.numberOfRows, fields.count + 5)
+        XCTAssertEqual(
+            table.numberOfRows - hostRowCount,
+            fields.count + 1,
+            "each extension field and its one visible caption should own a virtual row"
+        )
         XCTAssertLessThan(descendantCount(in: controller.view), fields.count * 4)
 
         let lastFrame = table.rect(ofRow: table.numberOfRows - 1)
@@ -305,7 +317,7 @@ final class ExtensionPanelLayoutTests: XCTestCase {
         )
         XCTAssertNotNil(finalControl.target)
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
-        withExtendedLifetime(window) {}
+        withExtendedLifetime((bareWindow, window)) {}
     }
 
     // MARK: - Performance

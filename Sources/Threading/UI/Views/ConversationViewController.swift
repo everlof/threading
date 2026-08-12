@@ -419,7 +419,49 @@ final class ConversationViewController: NSViewController {
         // A turn beginning is the limit lifting, whoever asked for it. Cleared on the opening
         // edge only: the closing edge is where a refusal is *recorded*, and clearing there
         // would wipe the state one event after setting it.
-        if isTurnInFlight { usageLimit = nil }
+        if isTurnInFlight {
+            usageLimit = nil
+            LimitEscapeSuggestionStore.shared.refusalCleared(for: sessionID)
+            refreshLimitEscapeStrip()
+        }
+    }
+
+    // MARK: - The Limit Escape Strip
+
+    /// Draws the escape offer from the store, and reports both gestures back to it.
+    ///
+    /// The same store the terminal path feeds, so a spent login is ranked once and the offer
+    /// reads the same on either surface. Pressing is an announcement rather than an action:
+    /// migrating a conversation and reopening it belongs to `SessionCoordinator`.
+    func wireLimitEscapeStrip() {
+        limitEscapeStrip.onContinue = { [weak self] in
+            guard let self else { return }
+            NotificationCenter.default.post(LimitEscapeRequested(sessionID: self.sessionID))
+        }
+        limitEscapeStrip.onDismiss = { [weak self] in
+            guard let self else { return }
+            LimitEscapeSuggestionStore.shared.dismiss(self.sessionID)
+        }
+        appEvents.observe(LimitEscapeSuggestionDidChange.self) { [weak self] event in
+            guard let self, event.sessionID == self.sessionID else { return }
+            self.refreshLimitEscapeStrip()
+        }
+        refreshLimitEscapeStrip()
+    }
+
+    func refreshLimitEscapeStrip() {
+        guard isViewLoaded else { return }
+        limitEscapeStrip.setOffer(
+            LimitEscapeSuggestionStore.shared.offer(for: sessionID).map {
+                LimitEscapeStripView.Offer(
+                    accountName: $0.accountName,
+                    reading: $0.reading,
+                    resetHint: $0.resetHint,
+                    problem: $0.problem,
+                    isBusy: $0.isBusy
+                )
+            }
+        )
     }
 
     /// Batches replay-only UI work. Four hundred items must not each scroll, rebuild controls,
@@ -541,6 +583,17 @@ final class ConversationViewController: NSViewController {
         strip.setAccessibilityIdentifier("composer.conversation-reply.scheduled")
         return strip
     }()
+
+    /// The one-tap way past a spent usage limit, above everything else waiting on this composer.
+    ///
+    /// Furthest from the box for the same reason the schedule sits above the queue: what is in
+    /// the way of the *next* message sits nearest what will send it, and this is a condition of
+    /// the conversation rather than something queued in it.
+    lazy var limitEscapeStrip = LimitEscapeStripView()
+
+    /// The newest turn's card — the only one whose View diff still describes what Git
+    /// Review's Last Turn scope shows. Superseded cards lose the button.
+    weak var latestChangedFilesCard: ChangedFilesCardView?
 
     /// Visible native tool rows waiting for their asynchronous result. Offscreen calls need no
     /// retained view: their result is already authoritative in `timeline` and is picked up when
@@ -797,9 +850,11 @@ final class ConversationViewController: NSViewController {
         view.addSubview(statusRow)
         view.addSubview(outboxRail)
         view.addSubview(scheduledStrip)
+        view.addSubview(limitEscapeStrip)
 
         wireOutboxRail()
         wireScheduledStrip()
+        wireLimitEscapeStrip()
         promptView.scheduleMenuProvider = { [weak self] in
             self?.scheduleMenuEntries() ?? []
         }
@@ -985,6 +1040,19 @@ final class ConversationViewController: NSViewController {
             ),
             scheduledStrip.bottomAnchor.constraint(
                 equalTo: outboxRail.topAnchor,
+                constant: -Design.Spacing.tight
+            ),
+
+            // Above the schedule, on the same column: the offer that unblocks the conversation
+            // stands over everything the conversation is holding.
+            limitEscapeStrip.leadingAnchor.constraint(
+                equalTo: promptContentContainer.leadingAnchor
+            ),
+            limitEscapeStrip.trailingAnchor.constraint(
+                equalTo: promptContentContainer.trailingAnchor
+            ),
+            limitEscapeStrip.bottomAnchor.constraint(
+                equalTo: scheduledStrip.topAnchor,
                 constant: -Design.Spacing.tight
             ),
 
@@ -1740,6 +1808,18 @@ final class ConversationViewController: NSViewController {
                     text: text,
                     isError: kind == .error
                 )
+            case .turnOutcome(let outcome):
+                let text = switch outcome {
+                case .completed: L10n.string("Completed")
+                case .stopped: L10n.string("Interrupted")
+                case .failed: L10n.string("Failed")
+                }
+                return RemoteConversationRowDTO(
+                    id: id,
+                    kind: "notice",
+                    text: text,
+                    isError: outcome == .failed
+                )
             }
         }
         return RemoteConversationSnapshotDTO(
@@ -2301,6 +2381,10 @@ final class ConversationViewController: NSViewController {
                         "message": usageLimit.message,
                         "resetHint": usageLimit.resetHint ?? ""
                     ])
+                    // The offer over the composer. Nothing recovers a rendered conversation
+                    // automatically — `LimitRecoveryPolicy` acts on terminal sessions only — so
+                    // this surface is exactly the `flagOnly` case the escape is written for.
+                    LimitEscapeSuggestionStore.shared.refusalStands(usageLimit, for: sessionID)
                 }
             } else if !isReplaying {
                 SessionSnoozeCenter.shared.record(.turnCompleted, for: sessionID)

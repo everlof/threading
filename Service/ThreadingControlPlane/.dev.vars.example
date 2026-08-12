@@ -1,0 +1,5 @@
+# Copy to .dev.vars. Never commit real values.
+SESSION_SIGNING_SECRET=at-least-32-random-bytes
+APPLE_CLIENT_IDS=codes.threading.app,codes.threading.mobile
+TURN_KEY_ID=cloudflare-realtime-turn-key-id
+TURN_KEY_API_TOKEN=cloudflare-realtime-turn-api-token

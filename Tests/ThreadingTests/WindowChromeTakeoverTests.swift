@@ -316,16 +316,21 @@ final class WindowChromeTakeoverTests: XCTestCase {
         coordinator.applyCurrentTheme()
         root.layoutSubtreeIfNeeded()
 
-        XCTAssertGreaterThan(host.bandView.frame.height, 0, "the takeover band has no height")
-        XCTAssertGreaterThan(host.commandBandView.frame.height, 0,
+        let bandFrame = host.view.convert(host.bandView.bounds, from: host.bandView)
+        let commandBandFrame = host.view.convert(
+            host.commandBandView.bounds,
+            from: host.commandBandView
+        )
+        XCTAssertGreaterThan(bandFrame.height, 0, "the takeover band has no height")
+        XCTAssertGreaterThan(commandBandFrame.height, 0,
                              "the takeover command band has no height")
-        XCTAssertEqual(probe.frame.maxY, host.commandBandView.frame.minY, accuracy: 1,
+        XCTAssertEqual(probe.frame.maxY, commandBandFrame.minY, accuracy: 1,
                        "the surface covered the app-drawn window chrome")
         XCTAssertGreaterThan(probe.frame.minX, 0, "the surface covered the theme's own frame")
 
         // In a takeover the band *is* this window's titlebar, so the wash stops under it: dimming
         // the way out of the window is allowed, swallowing the click that takes it is not.
-        XCTAssertEqual(presentation.scrim.frame.maxY, host.bandView.frame.minY, accuracy: 1,
+        XCTAssertEqual(presentation.scrim.frame.maxY, bandFrame.minY, accuracy: 1,
                        "the wash covered the takeover window's own close, minimize and zoom")
         XCTAssertEqual(presentation.scrim.frame.minY, probe.frame.minY, accuracy: 1,
                        "the wash and the surface disagree about the bottom of the window")

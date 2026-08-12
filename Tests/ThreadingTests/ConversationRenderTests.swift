@@ -1021,28 +1021,90 @@ final class ConversationRenderTests: XCTestCase {
             Self.firstDescendant(TurnFoldView.self, in: foldHost)
         )
 
-        XCTAssertEqual(controller.presentationItems.count, 3)
+        XCTAssertEqual(controller.presentationItems.count, 4)
+        XCTAssertEqual(
+            controller.presentationItems.filter {
+                if case .retained = $0.content { return true }
+                return false
+            }.count,
+            1,
+            "the recorded edit's changed-files card should stay visible when work is folded"
+        )
         XCTAssertTrue((1...4).allSatisfy {
             controller.presentationRow(forTimelineIndex: $0) == nil
         })
 
         fold.setExpanded(true)
-        XCTAssertEqual(controller.presentationItems.count, 7)
+        XCTAssertEqual(controller.presentationItems.count, 8)
         XCTAssertTrue((1...4).allSatisfy {
             controller.presentationRow(forTimelineIndex: $0) != nil
         })
         XCTAssertTrue(controller.expandedTurnStarts.contains(0))
 
         fold.setExpanded(false)
-        XCTAssertEqual(controller.presentationItems.count, 3)
+        XCTAssertEqual(controller.presentationItems.count, 4)
         XCTAssertTrue((1...4).allSatisfy {
             controller.presentationRow(forTimelineIndex: $0) == nil
         })
         XCTAssertFalse(controller.expandedTurnStarts.contains(0))
 
         fold.setExpanded(true)
-        XCTAssertEqual(controller.presentationItems.count, 7)
+        XCTAssertEqual(controller.presentationItems.count, 8)
         XCTAssertTrue(controller.expandedTurnStarts.contains(0))
+    }
+
+    func testReplayRestoresChangedFilesCardFromRecordedEdit() throws {
+        let controller = requireConversationViewController(
+            agentSession: AgentSession(
+                kind: .codex,
+                title: "Recorded edit replay",
+                usesNativeUI: true
+            ),
+            project: Project(
+                name: "Recorded edit replay",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+        controller.isReplaying = true
+        let patch = """
+        *** Begin Patch
+        *** Update File: status.txt
+        @@
+        -before
+        +after
+        *** End Patch
+        """
+
+        Self.apply([
+            .userMessage("Update status.txt"),
+            .assistantMessage(blocks: [
+                .toolUse(
+                    id: "edit-1",
+                    tool: .edit,
+                    input: ["patch": .string(patch)]
+                )
+            ]),
+            .toolResults([
+                ToolResult(toolUseID: "edit-1", text: "Applied patch", isError: false)
+            ]),
+            .assistantMessage(blocks: [.text("Updated status.txt.")]),
+            .turnFinished(text: nil, outcome: .completed, metrics: .empty)
+        ], to: controller)
+
+        let card = try XCTUnwrap(controller.presentationItems.compactMap { item -> ChangedFilesCardView? in
+            guard case .retained(let view) = item.content else { return nil }
+            return view as? ChangedFilesCardView
+        }.first)
+        let preview = try XCTUnwrap(card.preview(forNodeAt: 0))
+        XCTAssertEqual(preview.path, "status.txt")
+        XCTAssertEqual(preview.added, 1)
+        XCTAssertEqual(preview.removed, 1)
+        XCTAssertNotNil(
+            controller.presentationItems.first { $0.id == .fold(turnStart: 0) },
+            "the replayed work row was not restored as a disclosure"
+        )
     }
 
     func testReplayFinishAttachesAnUnfinishedTail() {
@@ -3133,6 +3195,38 @@ final class SubagentSummaryViewTests: XCTestCase {
             "missing header and body cells were not preserved as empty selectable cells"
         )
         XCTAssertEqual(fields.suffix(3).map(\.alignment), [.left, .center, .right])
+    }
+
+    func testDocumentTableUsesThePanelRolesAuthoredStrength() throws {
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+        AppThemePalette.set(.system)
+
+        let table = ThemedDocumentTableView(
+            headers: [NSAttributedString(string: "Header")],
+            rows: [[NSAttributedString(string: "Value")]],
+            alignments: [.left],
+            availableWidth: 240,
+            minimumColumnWidth: MarkdownDefaults.tableColumnWidth
+        )
+
+        for appearanceName in [NSAppearance.Name.aqua, .darkAqua] {
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+            table.appearance = appearance
+            AppThemeRefresh.repaint(table)
+
+            var expected: NSColor?
+            appearance.performAsCurrentDrawingAppearance {
+                expected = AppThemePalette.current
+                    .resolved(.panel, appearance: appearance)
+                    .usingColorSpace(.sRGB)
+            }
+            let layerColor = try XCTUnwrap(table.layer?.backgroundColor)
+            let actual = try XCTUnwrap(
+                NSColor(cgColor: layerColor)?.usingColorSpace(.sRGB)
+            )
+            XCTAssertEqual(actual.alphaComponent, try XCTUnwrap(expected).alphaComponent, accuracy: 0.001)
+        }
     }
 
     /// A pane narrower than the readable column still has to wrap to *itself*.

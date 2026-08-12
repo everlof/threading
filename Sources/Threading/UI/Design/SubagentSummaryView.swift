@@ -294,6 +294,9 @@ final class SubagentSummaryView: NSView {
             button.title = item.title
             button.isBordered = false
             button.hoverFill = Design.Surface.controlHover
+            // The chevron is this row's only disclosure affordance. Keep it in the readable
+            // secondary tier instead of the quaternary decoration tier a bare symbol defaults to.
+            button.contentTintColor = Design.Text.secondary
             button.setAccessibilityTitle(item.title)
             if selectionStyle == .navigation {
                 // The chevron is only a visual cue. Expose the same selected state as a Boolean
@@ -404,7 +407,7 @@ final class SubagentSummaryView: NSView {
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(
                 equalTo: row.leadingAnchor,
-                constant: Design.Spacing.large
+                constant: ThemedButton.plainTitleLeadingInset
             ),
             label.trailingAnchor.constraint(equalTo: row.trailingAnchor)
         ])

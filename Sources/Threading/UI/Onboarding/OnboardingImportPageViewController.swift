@@ -326,10 +326,13 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
             )
         }
         if result.totalFailureCount > 0 {
-            summary += " " + L10n.format(
-                "%lld conversation folders could not be read; these results are incomplete.",
-                Int64(result.totalFailureCount)
-            )
+            let failureSummary = result.totalFailureCount == 1
+                ? L10n.string("1 conversation folder could not be read; these results are incomplete.")
+                : L10n.format(
+                    "%lld conversation folders could not be read; these results are incomplete.",
+                    Int64(result.totalFailureCount)
+                )
+            summary += " " + failureSummary
         }
         summaryLabel.stringValue = summary
     }

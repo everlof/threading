@@ -1206,9 +1206,25 @@ enum Design {
 
     /// What a session's state is drawn in, and what a result that went wrong is drawn in.
     enum Status {
-        static var positive: NSColor { AppThemePalette.color(.statusPositive) }
-        static var warning: NSColor { AppThemePalette.color(.statusWarning) }
-        static var negative: NSColor { AppThemePalette.color(.statusNegative) }
+        static var positive: NSColor { readable(.statusPositive) }
+        static var warning: NSColor { readable(.statusWarning) }
+        static var negative: NSColor { readable(.statusNegative) }
+
+        /// Status roles are frequently words, not decoration. Preserve the authored hue, but
+        /// move it only as far as needed to read on both bare and structural app surfaces.
+        /// System green is intentionally vivid rather than body-text-safe in light mode; using
+        /// it verbatim made "CI passed" a 1.5:1 label.
+        private static func readable(_ role: AppThemeRole) -> NSColor {
+            NSColor(name: NSColor.Name("threading.status.\(role.rawValue)")) { appearance in
+                let theme = AppThemePalette.current
+                let authored = theme.resolved(role, appearance: appearance)
+                let ground = theme.resolved(.ground, appearance: appearance)
+                let surface = theme.resolved(.surface, appearance: appearance)
+                return authored
+                    .legible(on: ground, ratio: 4.5)
+                    .legible(on: surface, ratio: 4.5)
+            }
+        }
     }
 
     // MARK: - Categorical
@@ -1456,6 +1472,15 @@ enum Design {
     // MARK: - Opacity
 
     enum Opacity {
+        /// The emphasis retained by a control that cannot currently be operated.
+        ///
+        /// This is deliberately one recipe for the whole control, not a dim title beside a
+        /// saturated plate. The latter says both "unavailable" and "primary action" at once,
+        /// which is how disabled switches, checked boxes and submit buttons drifted apart.
+        /// Components with historically authored disabled gadgets may keep those explicit
+        /// materials; modern drawn controls multiply every surface and mark by this amount.
+        static let disabledControl: CGFloat = 0.42
+
         /// A dragged tab while the pointer is over another pane that will take it: still
         /// visible where it came from, clearly on its way out.
         static let dragAway: CGFloat = 0.5

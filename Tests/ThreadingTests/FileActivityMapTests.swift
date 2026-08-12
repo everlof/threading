@@ -472,6 +472,106 @@ final class FileActivityMapTests: XCTestCase {
         XCTAssertEqual(afterRemoval["Sources/UI/Button.swift"]?.contributorCount, 1)
     }
 
+    // MARK: - Detail Grid Geometry
+
+    /// The provisional column count is an aspect heuristic; rounding rows up can leave whole
+    /// columns no index reaches, and a grid sized for phantom columns stops visibly short of
+    /// the ribbon drawn to the full width below it. The drawn grid must fill its stated width.
+    func testDetailGridFillsItsStatedWidthWithoutPhantomColumns() {
+        let bounds = NSRect(x: 0, y: 0, width: 231, height: 94)
+        for count in [1, 2, 7, 96, 300, 512] {
+            let layout = WorkProjectionLayout(count: count, bounds: bounds, detailed: true)
+            XCTAssertEqual(
+                layout.columns,
+                Int(ceil(Double(count) / Double(layout.rows))),
+                "count \(count) sized for columns its rows never fill"
+            )
+            let maxX = (0..<count).map { layout.rect(at: $0).maxX }.max() ?? 0
+            XCTAssertEqual(
+                maxX, bounds.maxX, accuracy: 0.5,
+                "count \(count) leaves the grid short of its trailing edge"
+            )
+        }
+    }
+
+    // MARK: - Summary Labels
+
+    @MainActor
+    func testSummaryContributorLineWrapsInsteadOfClippingAndSkipsNamelessAgents() throws {
+        let files = (0..<40).map { "Sources/file-\($0).swift" }
+        let atlas = RepositoryFileAtlas(files: files)
+        let firstID = SessionID()
+        let secondID = SessionID()
+        var first = AgentSessionWorkTrace()
+        first.sessionTitle = "Refactor the sidebar hover affordances"
+        first.agentLabel = "Codex"
+        _ = first.recordFile(.edit, path: files[0], root: nil, at: now)
+        var second = AgentSessionWorkTrace()
+        second.sessionTitle = "Harden the render tests against churn"
+        second.agentLabel = "Claude"
+        _ = second.recordFile(.read, path: files[1], root: nil, at: now)
+
+        let traces = [firstID: first, secondID: second]
+        var presentation = AgentWorkPresentation.project(
+            AgentProjectWorkAggregate(traces: traces),
+            traces: traces,
+            projectID: ProjectID(),
+            atlas: atlas,
+            detailed: true
+        )
+        // A contributor whose session title and agent label are both empty must not leave a
+        // dangling "·" in the joined list.
+        presentation.recentContributors.append(AgentWorkContributor(
+            sessionID: SessionID(), sessionTitle: "", agentLabel: "",
+            touchedFileCount: 1, actionCount: 1, lastActivity: now
+        ))
+
+        let host = NSView()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        let summary = AgentWorkSummaryView()
+        summary.setClock { self.now }
+        summary.setPresentation(presentation)
+        host.addSubview(summary)
+        NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: 240),
+            summary.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            summary.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            summary.topAnchor.constraint(equalTo: host.topAnchor)
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        let labels = fields(in: summary)
+        let contributor = try XCTUnwrap(
+            labels.first { $0.stringValue.hasPrefix("Recent agents:") },
+            "the project-scope summary names its recent agents"
+        )
+        XCTAssertFalse(
+            contributor.stringValue.hasSuffix("·"),
+            "an unnamed contributor left a dangling separator"
+        )
+        XCTAssertTrue(contributor.stringValue.contains("Refactor the sidebar hover affordances"))
+        XCTAssertTrue(contributor.stringValue.contains("Harden the render tests against churn"))
+
+        // The label must be given the height its text needs at the width it was actually
+        // laid out at — the old fixed preferredMaxLayoutWidth clipped line two out entirely.
+        let needed = try XCTUnwrap(contributor.cell).cellSize(
+            forBounds: NSRect(x: 0, y: 0, width: contributor.frame.width, height: .infinity)
+        )
+        XCTAssertGreaterThanOrEqual(
+            contributor.frame.height + 0.5, needed.height,
+            "the contributor list is vertically clipped at its laid-out width"
+        )
+    }
+
+    @MainActor
+    private func fields(in root: NSView) -> [NSTextField] {
+        root.subviews.flatMap { view -> [NSTextField] in
+            var found = fields(in: view)
+            if let field = view as? NSTextField { found.append(field) }
+            return found
+        }
+    }
+
     /// Opt-in fixture used by `scripts/profile_threading.sh agent-work-stress`.
     func testAgentWorkProjectionStressBenchmark() throws {
         try XCTSkipUnless(

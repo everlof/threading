@@ -66,6 +66,16 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(toggle.state, .off, "a disabled toggle changed state")
     }
 
+    func testAToggleAlignsByItsVisibleTrackRatherThanItsFocusGutter() {
+        let toggle = ThemedToggle()
+        let frame = NSRect(origin: .zero, size: toggle.intrinsicContentSize)
+        let aligned = toggle.alignmentRect(forFrame: frame)
+
+        XCTAssertEqual(aligned.width, ThemedToggle.Layout.width, accuracy: 0.5)
+        XCTAssertEqual(aligned.height, ThemedToggle.Layout.height, accuracy: 0.5)
+        XCTAssertEqual(aligned.maxX, frame.maxX - toggle.alignmentRectInsets.right, accuracy: 0.5)
+    }
+
     func testToggleCanBeReachedAndActivatedWithoutAPointer() throws {
         let toggle = ThemedToggle()
         let target = ActionSpy()
@@ -387,6 +397,29 @@ final class ThemedControlTests: XCTestCase {
             try renderedPNG(of: first),
             try renderedPNG(of: second),
             "the selection is not visible on the control"
+        )
+    }
+
+    func testCyberpunkSelectionHasAPlateBeyondTextContrast() throws {
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        let (control, _) = makeSegmentedControl(selectedIndex: 0)
+        let rep = try XCTUnwrap(control.bitmapImageRepForCachingDisplay(in: control.bounds))
+        control.cacheDisplay(in: control.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / control.bounds.width
+
+        let selectedPlate = try XCTUnwrap(rep.colorAt(
+            x: Int(12 * scale),
+            y: Int(control.bounds.midY * scale)
+        ))
+        let restingTrack = try XCTUnwrap(rep.colorAt(
+            x: Int(72 * scale),
+            y: Int(control.bounds.midY * scale)
+        ))
+
+        XCTAssertNotEqual(
+            selectedPlate.usingColorSpace(.sRGB),
+            restingTrack.usingColorSpace(.sRGB),
+            "the active Cyberpunk segment is communicated by text brightness alone"
         )
     }
 
@@ -721,6 +754,13 @@ final class ThemedControlTests: XCTestCase {
             window.firstResponder as? NSView,
             "the open menu's overlay should hold the keyboard"
         )
+
+        // An unshown fixture window can still apply its initial responder on a deferred AppKit
+        // turn. The open menu must reclaim its modal keyboard contract after that bookkeeping,
+        // just as it must in a newly opened gallery or settings window.
+        XCTAssertTrue(window.makeFirstResponder(source))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        XCTAssertTrue(window.firstResponder === overlay, "the menu lost Escape to its source")
 
         overlay.keyDown(with: try keyEvent("\u{1b}", keyCode: 53))
 
@@ -6231,6 +6271,7 @@ final class ThemedControlTests: XCTestCase {
                 "HoverPopoverScheduler",
                 "ImageCompareCanvas",
                 "ImageCompareView",
+                "LimitEscapeStripView",
                 "MediaInspectorCanvas",
                 "MediaInspectorDocumentView",
                 "MediaInspectorView",
@@ -6261,6 +6302,7 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedClipView",
                 "ThemedControl",
                 "ThemedDisclosureRow",
+                "ThemedDocumentTableView",
                 "ThemedFileIconView",
                 "ThemedFloatingGlyphView",
                 "ThemedGroupedTableView",

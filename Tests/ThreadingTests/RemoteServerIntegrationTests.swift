@@ -24,6 +24,45 @@ final class RemoteServerIntegrationTests: XCTestCase {
         server = RemoteAccessServer()
         server.authorizer = authority
         server.receiveClientDiagnostics = { _, _, _ in true }
+        let usageSummary = RemoteUsageLimitSeriesSummaryDTO(
+            id: "codex|personal|weekly",
+            runtimeName: "Codex",
+            accountName: "Personal",
+            windowLabel: "Weekly",
+            currentFraction: 0.42,
+            resetsAt: 200,
+            bankedResetCount: 2,
+            nextBankedResetExpiresAt: 300
+        )
+        server.usageDashboardLoader = { offset, count in
+            let page = offset == 0 && count > 0 ? [usageSummary] : []
+            return RemoteUsageDashboardDTO(
+                isBuilding: false,
+                builtAt: 100,
+                pricingCatalogVersion: "test",
+                ranges: [],
+                coverage: [],
+                limitSeries: page,
+                nextLimitCursor: nil,
+                omittedLimitSeriesCount: 0,
+                preparedAt: 101
+            )
+        }
+        server.usageLimitLoader = { seriesID, days in
+            guard seriesID == usageSummary.id, days == 30 else { return nil }
+            return RemoteUsageLimitDTO(
+                series: usageSummary,
+                days: days,
+                start: 0,
+                end: 101,
+                observed: [.init(at: 100, fraction: 0.42, segment: 0)],
+                resets: [],
+                recordedResetCount: 0,
+                restoredPaceFraction: 0,
+                projection: nil,
+                preparedAt: 101
+            )
+        }
 
         let ready = expectation(description: "listening")
         server.start { resolved in
@@ -897,6 +936,65 @@ final class RemoteServerIntegrationTests: XCTestCase {
         )
     }
 
+    func testUsageIsAdvertisedAndReadableOnlyToWholeHostOwner() throws {
+        let meProbe = try XCTUnwrap(get("/api/me", bearer: "goodtoken"))
+        let me = try JSONDecoder().decode(RemoteMeDTO.self, from: meProbe.body)
+        XCTAssertEqual(me.features, [RemoteRESTFeature.usageDashboard.rawValue])
+
+        let overviewProbe = try XCTUnwrap(get("/api/usage?limit=1", bearer: "goodtoken"))
+        XCTAssertEqual(overviewProbe.status, 200)
+        let overview = try JSONDecoder().decode(
+            RemoteUsageDashboardDTO.self,
+            from: overviewProbe.body
+        )
+        XCTAssertEqual(overview.limitSeries.map(\.id), ["codex|personal|weekly"])
+        XCTAssertLessThanOrEqual(
+            overviewProbe.body.count,
+            RemoteUsageBridge.maximumOverviewResponseBytes
+        )
+
+        let detailProbe = try XCTUnwrap(get(
+            "/api/usage/limit?series=codex%7Cpersonal%7Cweekly&days=30",
+            bearer: "goodtoken"
+        ))
+        XCTAssertEqual(detailProbe.status, 200)
+        let detail = try JSONDecoder().decode(RemoteUsageLimitDTO.self, from: detailProbe.body)
+        XCTAssertEqual(detail.series.bankedResetCount, 2)
+        XCTAssertLessThanOrEqual(
+            detailProbe.body.count,
+            RemoteUsageBridge.maximumLimitResponseBytes
+        )
+
+        let sessionID = SessionID()
+        authority.set(
+            RemoteAuthorization(
+                shareID: "view-guest",
+                capability: .view,
+                scope: .session(sessionID),
+                principal: .guest
+            ),
+            forToken: "viewguesttoken"
+        )
+        authority.set(
+            RemoteAuthorization(
+                shareID: "interact-guest",
+                capability: .interact,
+                scope: .session(sessionID),
+                principal: .guest
+            ),
+            forToken: "interactguesttoken"
+        )
+        for token in ["viewguesttoken", "interactguesttoken"] {
+            XCTAssertEqual(try XCTUnwrap(get("/api/usage", bearer: token)).status, 403)
+            let guestMe = try JSONDecoder().decode(
+                RemoteMeDTO.self,
+                from: try XCTUnwrap(get("/api/me", bearer: token)).body
+            )
+            XCTAssertNil(guestMe.features)
+        }
+        XCTAssertEqual(try XCTUnwrap(get("/api/usage", bearer: "revoked")).status, 401)
+    }
+
     func testGuestShareCannotManageSessionLifecycle() throws {
         let sessionID = SessionID()
         authority.set(
@@ -1052,10 +1150,13 @@ final class RemoteServerIntegrationTests: XCTestCase {
         XCTAssertTrue(guest.scope.covers(sessionID))
         XCTAssertFalse(guest.canApprovePermissions)
         XCTAssertFalse(guest.canManageHost)
+        XCTAssertFalse(guest.canReadHostUsage)
         XCTAssertTrue(trustedGuest.canApprovePermissions)
         XCTAssertFalse(trustedGuest.canManageHost)
+        XCTAssertFalse(trustedGuest.canReadHostUsage)
         XCTAssertTrue(owner.canApprovePermissions)
         XCTAssertTrue(owner.canManageHost)
+        XCTAssertTrue(owner.canReadHostUsage)
     }
 
     func testGuestPermissionProjectionIsVisibleButNotActionable() {
