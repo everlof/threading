@@ -23,12 +23,12 @@ npm run dev
 ```
 
 The checked-in `wrangler.jsonc` intentionally contains a non-deployable D1 database ID. `npm run
-deploy` runs the production preflight, type-check and full Worker suite before making a remote
-change, applies D1 migrations, deploys the Worker, and then verifies `/ready` through the custom
-domain. The checked-in `secrets.required` contract makes Wrangler refuse local startup or
-deployment when a required encrypted binding is absent; the preflight pins that list so a
-configuration edit cannot silently weaken it. Create the production D1 database, replace that
-value, then set these encrypted secrets:
+deploy` runs the production preflight, type-check, full Worker suite and 100-object hibernation
+gate before making a remote change, applies D1 migrations, deploys the Worker, and then verifies
+`/ready` through the custom domain. The checked-in `secrets.required` contract makes Wrangler
+refuse local startup or deployment when a required encrypted binding is absent; the preflight
+pins that list so a configuration edit cannot silently weaken it. Create the production D1
+database, replace that value, then set these encrypted secrets:
 
 ```sh
 npx wrangler secret put SESSION_SIGNING_SECRET

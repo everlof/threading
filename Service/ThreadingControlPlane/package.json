@@ -10,7 +10,7 @@
     "dev": "wrangler dev",
     "preflight": "node scripts/preflight.mjs",
     "verify:production": "node scripts/verify-production.mjs",
-    "deploy": "npm run preflight && npm run check && npm test && wrangler d1 migrations apply threading-control-plane --remote && wrangler deploy && npm run verify:production",
+    "deploy": "npm run preflight && npm run check && npm test && npm run test:load && wrangler d1 migrations apply threading-control-plane --remote && wrangler deploy && npm run verify:production",
     "types": "wrangler types"
   },
   "dependencies": {
