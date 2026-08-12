@@ -430,10 +430,26 @@ sidebar it is meant to sit next to. So the pane is ours — flush to the window'
 height under the transparent titlebar, the split view's rule as the only seam. That rule is the
 theme's in weight and starts from its rule ink; when that ink falls below the seam's visibility
 floor — including System light on its own chrome ground — `ThemedSplitView` steps up to the
-theme's border on chrome, or neutral ink measured from an unrelated terminal backdrop. It
-overrides `dividerThickness` so the seam between two panes matches the rules drawn inside them
+theme's border, and only where that is swallowed too does it measure neutral ink from the ground.
+It overrides `dividerThickness` so the seam between two panes matches the rules drawn inside them
 (see [`themes.md`](themes.md)); AppKit's `.thin` divider is a fixed point,
 which under a heavy-ruling style was the one hairline in a window of 2pt rules.
+
+**The ladder is measured the whole way down, and asks nothing about who owns the ground.** It
+used to: a swallowed rule took the theme's border on the chrome and a neutral over a terminal
+palette. Under System dark those grounds are the same `#1E1E1E` — the theme's `ground` role *is*
+that palette's background — so the seam stood at (52, 52, 53) on a page with no session and
+(98, 98, 98) the moment a session painted the window, over pixels that had not changed, beside a
+sidebar whose own footer rule is (51, 51, 53). Selecting a session was enough to switch between
+them, which is how it was reported. Two things were wrong. Ownership cannot answer a question
+about visibility — and the first branch already keeps a theme's own hue over a foreign palette
+wherever it reads there. And the neutral was taken whole: `WindowBackdrop.ink.rule` is the derived
+*border* under a second name, 30% of whichever of black and white reads on the ground, so the
+seam carried three times the ink of the theme's border and six times its rule. It now takes the
+least of that tone which still clears the floor, bisected, never quieter than the theme's own rule
+and never louder than the derived neutral — with Increase Contrast keeping the neutral whole.
+`WindowBackdrop.isChromeGround` went with the branch; `Ground` stays an enum so the chrome case
+still resolves its dynamic system role when read rather than at the swap.
 
 **The seam also answers the pointer.** Wherever a press would begin dragging it, the divider
 draws in the accent — the one control ready to act, and an extra hint beside the resize cursor

@@ -17,11 +17,15 @@ import AppKit
 /// Deliberately *not* the same thing as a theme change. The backdrop moves when the selected
 /// session changes as well, since the session next to this one may draw with another palette.
 ///
-/// The backdrop is recorded as a `Ground` rather than as a bare colour for two reasons. The split
-/// divider must preserve the theme's own border on chrome but derive neutral ink over an unrelated
-/// terminal palette; equal colours cannot answer who owns them. And the chrome case must resolve
-/// its dynamic system role when it is read — storing the colour chosen during the swap would
-/// freeze a System window onto the previous light/dark appearance.
+/// The backdrop is recorded as a `Ground` rather than as a bare colour so the chrome case can
+/// resolve its dynamic system role when it is *read* — storing the colour chosen during the swap
+/// would freeze a System window onto the previous light/dark appearance.
+///
+/// It deliberately no longer says who *owns* the ground. `ThemedSplitView` asked that, taking the
+/// theme's border on the chrome and a measured neutral over a terminal palette, and under System
+/// dark the two grounds are the same `#1E1E1E`: the seam changed weight on pixels that had not
+/// changed at all. What ink reads is a question about the colour, and the colour is all this needs
+/// to answer.
 @MainActor
 enum WindowBackdrop {
 
@@ -35,9 +39,6 @@ enum WindowBackdrop {
     }
 
     private(set) static var ground: Ground = .chrome
-
-    /// Whether the backdrop is a ground the app theme states its roles against.
-    static var isChromeGround: Bool { ground == .chrome }
 
     /// The colour the window is painted with right now.
     static var color: NSColor {

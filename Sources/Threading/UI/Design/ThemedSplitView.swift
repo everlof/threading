@@ -13,8 +13,8 @@ import AppKit
 /// not.** The theme's rule is *measured* against the actual backdrop first, including when the
 /// theme owns that ground: System light deliberately makes an ordinary divider quieter than a
 /// border, but that five-percent hairline disappears as the only seam beside the sidebar. A rule
-/// that already reads keeps its theme's hue; one the chrome swallows steps up to the theme's own
-/// border, while one an unrelated terminal palette swallows gets neutral ink measured from that
+/// that already reads keeps its theme's hue; one the backdrop swallows steps up to the theme's
+/// own border, and only a backdrop that swallows *that* gets neutral ink measured from the
 /// ground. The backdrop moves when the selected session changes as well as when the theme does —
 /// both are observed, because a divider that keeps the previous session's ink is the bug this
 /// exists to fix, one palette later.
@@ -81,6 +81,11 @@ final class ThemedSplitView: NSSplitView {
     /// read — the System theme's own dark hairline sits at ~1.35:1.
     private static let visibleLineRatio: CGFloat = 1.2
 
+    /// How many halvings `measuredRule(on:noQuieterThan:)` spends finding the least ink that
+    /// clears that floor. Eight answer to within a 256th of the tone, which is under one level of
+    /// the eight-bit ground the line lands on — the pixel a closed form would have given.
+    private static let measuredInkBisections = 8
+
     /// The seam is also the drag handle, so it stays grabbable however fine a theme rules.
     private static let minimumGrab: CGFloat = 1
 
@@ -97,18 +102,74 @@ final class ThemedSplitView: NSSplitView {
 
     /// The theme's own line wherever it reads on the backdrop; measured ink where it cannot.
     ///
-    /// The theme's *rule* ink, not its border: the seam is a rule between panes, and the pane
-    /// headers' `SeparatorView`s it meets draw `Design.Surface.divider` — which is also where
-    /// the rule-ink budget is enforced. Drawn in `Surface.border` it was the one full-strength
-    /// rule left in a window whose every other rule had been held back, stepping in *ink* at
-    /// exactly the crossing where it once stepped in weight.
+    /// The theme's *rule* ink is asked first, not its border: the seam is a rule between panes,
+    /// and the pane headers' `SeparatorView`s it meets draw `Design.Surface.divider` — which is
+    /// also where the rule-ink budget is enforced. Drawn in `Surface.border` it was the one
+    /// full-strength rule left in a window whose every other rule had been held back, stepping in
+    /// *ink* at exactly the crossing where it once stepped in weight.
+    ///
+    /// **What the ground is decides the step past that, not who owns it.** A swallowed rule used
+    /// to ask `WindowBackdrop` whose colour lay underneath — the theme's border on the chrome, a
+    /// neutral measured from the ground over a terminal palette. Under System dark those are the
+    /// same `#1E1E1E`, because the theme's ground *is* that palette's background, so identical
+    /// pixels carried a 9.8% seam on a page with no session and a 30% one the moment a session
+    /// painted the window: (52, 52, 53) against (98, 98, 98), beside a sidebar whose own footer
+    /// rule stands at (51, 51, 53). Ownership cannot answer a question about visibility, and the
+    /// first branch already keeps a theme's hue over a foreign palette wherever it reads there.
+    /// So the ladder is measured the whole way down: the theme's rule, the theme's border, then
+    /// the least measured neutral that still registers.
     override var dividerColor: NSColor {
-        let rule = Design.Surface.divider
         let backdrop = WindowBackdrop.color
-        let drawn = backdrop.composited(under: rule)
-        return ThemeContrast.ratio(drawn, backdrop) >= Self.visibleLineRatio
-            ? rule
-            : (WindowBackdrop.isChromeGround ? Design.Surface.border : WindowBackdrop.ink.rule)
+
+        let rule = Design.Surface.divider
+        guard !Self.reads(rule, on: backdrop) else { return rule }
+
+        let border = Design.Surface.border
+        guard !Self.reads(border, on: backdrop) else { return border }
+
+        return Self.measuredRule(on: backdrop, noQuieterThan: rule)
+    }
+
+    /// Whether a hairline in this ink would register at all, drawn on this ground.
+    ///
+    /// Asked of the *composite* rather than of the ink: every rule here is translucent, and
+    /// contrast asked of a stored value answers for a colour nobody sees.
+    private static func reads(_ ink: NSColor, on ground: NSColor) -> Bool {
+        ThemeContrast.ratio(ground.composited(under: ink), ground) >= visibleLineRatio
+    }
+
+    /// The **least** of the measured tone that still registers on this backdrop.
+    ///
+    /// `WindowBackdrop.ink.rule` is the derived border under a second name — 30% of whichever of
+    /// black and white reads on the ground — and it answers "what will certainly show", not
+    /// "what is a rule here". Taken whole it drew a seam six times the ink of the theme's own
+    /// rules, which is the bug in `dividerColor` above seen from its other side.
+    ///
+    /// Bisected rather than solved: compositing is linear in the overlay's alpha and relative
+    /// luminance is not, so there is no closed form worth stating — and contrast against the
+    /// ground climbs monotonically with alpha, the tone being whichever of the two reads better
+    /// there, so the bisection is exact to the step it stops on.
+    ///
+    /// Never quieter than the theme's own rule, so the seam cannot come out lighter than the
+    /// rules it meets at the crossing, and never louder than the strongest measured neutral.
+    /// Increase Contrast keeps that neutral whole: contrast asked for is contrast given.
+    private static func measuredRule(on backdrop: NSColor, noQuieterThan rule: NSColor) -> NSColor {
+        let ink = Design.Text.on(backdrop)
+        guard !Design.Accessibility.increasesContrast,
+              let tone = ink.base.usingColorSpace(.sRGB),
+              let loudest = ink.rule.usingColorSpace(.sRGB)?.alphaComponent,
+              let quietest = rule.usingColorSpace(.sRGB)?.alphaComponent,
+              quietest < loudest
+        else { return ink.rule }
+
+        var silent = quietest
+        var visible = loudest
+        for _ in 0..<measuredInkBisections {
+            let alpha = (silent + visible) / 2
+            if reads(tone.withAlphaComponent(alpha), on: backdrop) { visible = alpha }
+            else { silent = alpha }
+        }
+        return tone.withAlphaComponent(visible)
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -142,11 +203,7 @@ final class ThemedSplitView: NSSplitView {
     /// like the seam it is meant to point out.
     private var activeDividerColor: NSColor {
         let accent = Design.Surface.accent
-        let backdrop = WindowBackdrop.color
-        let drawn = backdrop.composited(under: accent)
-        return ThemeContrast.ratio(drawn, backdrop) >= Self.visibleLineRatio
-            ? accent
-            : WindowBackdrop.ink.label
+        return Self.reads(accent, on: WindowBackdrop.color) ? accent : WindowBackdrop.ink.label
     }
 
     /// The seam, lit while a drag would attach to it.

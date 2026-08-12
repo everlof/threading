@@ -1663,6 +1663,10 @@ final class AppThemeTests: XCTestCase {
 
     // MARK: - The Divider's Ownership
 
+    /// `ThemedSplitView.visibleLineRatio`, restated: the view keeps its floor private, and a test
+    /// that asserted against a softer number would pass a seam the app calls invisible.
+    private static let visibleLineRatio: CGFloat = 1.2
+
     /// The theme's own line wherever it reads on the backdrop; the measured neutral only where
     /// it cannot. A neutral over the chrome drew a pale grey seam across themes whose every
     /// other rule is their own hue — and a themed line over a backdrop it vanishes against is
@@ -1672,7 +1676,7 @@ final class AppThemeTests: XCTestCase {
     /// enforced — not its border: drawn in `Surface.border` the seam was the one full-strength
     /// rule left in the window, stepping in ink at the same crossing it once stepped in weight.
     @MainActor
-    func testTheSplitDividerTakesTheThemeRuleInkWhereverItReadsOnTheBackdrop() {
+    func testTheSplitDividerTakesTheThemeRuleInkWhereverItReadsOnTheBackdrop() throws {
         let original = WindowBackdrop.ground
         defer { WindowBackdrop.set(original) }
 
@@ -1695,13 +1699,95 @@ final class AppThemeTests: XCTestCase {
             "a rule that reads on the backdrop should be the seam"
         )
 
-        // Swiss rules near-black lines; over a black terminal they vanish, so the seam falls
-        // back to the ink measured against that backdrop.
+        // Swiss rules and borders near-black alike; over a black terminal neither survives, so
+        // the seam falls back to ink cut from the tone that ground reads against.
         AppThemePalette.set(AppThemeStyles.swissMinimalist)
+        let measured = try XCTUnwrap(split.dividerColor.usingColorSpace(.sRGB))
+        let tone = try XCTUnwrap(WindowBackdrop.ink.base.usingColorSpace(.sRGB))
         XCTAssertEqual(
-            split.dividerColor.resolvedHex,
-            WindowBackdrop.ink.rule.resolvedHex,
+            [measured.redComponent, measured.greenComponent, measured.blueComponent],
+            [tone.redComponent, tone.greenComponent, tone.blueComponent],
             "a rule the backdrop swallows must fall back to the measured neutral"
+        )
+    }
+
+    /// The measured neutral is the **least** of that tone that still reads, not the strongest.
+    ///
+    /// `WindowBackdrop.ink.rule` is the derived border under a second name — 30% of the tone the
+    /// ground reads against — so reaching for it whole drew a seam three times the ink of the
+    /// theme's own border and six times its rule. Clearing the visibility floor is what the
+    /// fallback exists for; clearing it by a factor of three is a different bug in the fix's
+    /// clothes. Asserted from both sides, because "the least that reads" is two claims: this ink
+    /// reads, and a step under it does not.
+    func testTheMeasuredSeamCarriesTheLeastInkThatStillReads() throws {
+        let original = WindowBackdrop.ground
+        defer { WindowBackdrop.set(original) }
+
+        // System's own rule *and* border are swallowed by black — 1.07:1 and 1.19:1, the second
+        // only just — which is what leaves the measurement to answer.
+        AppThemePalette.set(.system)
+        WindowBackdrop.set(.terminal(.black))
+
+        let split = ThemedSplitView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        let backdrop = WindowBackdrop.color
+        let seam = try XCTUnwrap(split.dividerColor.usingColorSpace(.sRGB))
+        let strongest = try XCTUnwrap(WindowBackdrop.ink.rule.usingColorSpace(.sRGB))
+
+        func reads(_ ink: NSColor) -> CGFloat {
+            ThemeContrast.ratio(backdrop.composited(under: ink), backdrop)
+        }
+
+        XCTAssertGreaterThanOrEqual(
+            reads(seam),
+            Self.visibleLineRatio,
+            "the measured seam cannot be seen on the ground it was measured against"
+        )
+        XCTAssertLessThan(
+            reads(seam.withAlphaComponent(seam.alphaComponent - 0.02)),
+            Self.visibleLineRatio,
+            "the seam carried more ink than it takes to read"
+        )
+        XCTAssertLessThan(
+            seam.alphaComponent,
+            strongest.alphaComponent / 2,
+            "the seam took the derived border's ink where a rule's own weight would have read"
+        )
+    }
+
+    /// The same colour under the seam draws the same seam, whoever painted it.
+    ///
+    /// The step past a swallowed rule used to ask who owned the ground: the theme's border on the
+    /// chrome, a measured neutral over a terminal palette. Under System dark those are the same
+    /// `#1E1E1E` — the theme's ground *is* that palette's background — so selecting a session
+    /// lifted the seam from 9.8% ink to 30% over pixels that had not changed, and the window drew
+    /// a line six times the weight of the sidebar's own rules right where the two crossed.
+    /// Reported off a screenshot: (98, 98, 98) beside a footer rule at (51, 51, 53).
+    func testTheSeamDoesNotChangeWeightWhenATerminalPaintsTheThemesOwnGround() throws {
+        let original = WindowBackdrop.ground
+        defer { WindowBackdrop.set(original) }
+
+        AppThemePalette.set(.system)
+        let split = ThemedSplitView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+
+        var onChrome = ""
+        var onItsOwnColour = ""
+        var ground = NSColor.clear
+        appearance.performAsCurrentDrawingAppearance {
+            WindowBackdrop.set(.chrome)
+            ground = WindowBackdrop.color.usingColorSpace(.sRGB) ?? .clear
+            onChrome = (split.dividerColor.usingColorSpace(.sRGB) ?? .clear).hexString
+
+            // The very same colour, now painted by a session rather than by the chrome.
+            WindowBackdrop.set(.terminal(ground))
+            onItsOwnColour = (split.dividerColor.usingColorSpace(.sRGB) ?? .clear).hexString
+        }
+
+        XCTAssertEqual(ground.hexString, "#1E1E1E", "System dark restated its ground")
+        XCTAssertEqual(
+            onItsOwnColour,
+            onChrome,
+            "the seam changed ink over a ground that had not changed colour"
         )
     }
 

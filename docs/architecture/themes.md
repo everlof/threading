@@ -596,8 +596,12 @@ draw time, a custom or contributed theme cannot state its way past it — the ga
 floor. Three consequences to know about: the split seam starts from `Surface.divider` rather than
 `Surface.border` (it is a rule between panes, and in the eight hand-attenuated themes the seam
 was stepping in *ink* at the same crossing it once stepped in weight), then steps up to the
-theme's border on chrome — or neutral backdrop ink over a terminal palette — only when that
-authored rule falls below the seam's visibility floor; `Design.Ink` gained
+theme's border — and past that to the least neutral ink measured from the backdrop that still
+clears the floor — only when the authored rule falls below the seam's visibility floor. That
+ladder is measured, not owned: it used to ask whether the chrome or a terminal palette had
+painted the ground, which under System dark is the same `#1E1E1E` either way, so the same pixels
+carried a 9.8% seam and a 30% one depending on whether a session was selected (see
+[`window-chrome.md`](window-chrome.md)). `Design.Ink` gained
 `rule` beside `border` so backdrop-drawn rules (the shell drawer's strip) state the same
 decision; and `RemoteThemeBridge` applies the ceiling to the `divider` it projects, so remote
 clients inherit the discipline instead of re-learning it. The catalogue sweep is
