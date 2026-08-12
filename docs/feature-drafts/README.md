@@ -18,6 +18,9 @@ short pointer to the durable record so this directory does not become a competin
 
 ## Drafts
 
+- [Project Insights extension](project-insights-extension.md) — keep project hover glanceable
+  while exposing bounded composition, churn, coupling, and anonymized ownership through a reusable
+  safe-extension data and project-panel contract.
 - [Browser Focus](browser-focus.md) — let the live browser fill the main window while retaining a
   compact, live conversation dock.
 - [Skin and Chrome Imports](skin-and-chrome-imports.md) — translate established declarative theme
@@ -33,6 +36,9 @@ short pointer to the durable record so this directory does not become a competin
   boundaries and cost ceilings.
 - [CCS launch profiles and GLM](ccs-launch-profiles-and-glm.md) — adopt CCS-managed launch
   profiles without importing credentials, with route-safe account support and a gated GLM path.
+- [Scoped sound overrides](scoped-sound-overrides.md) — let a sound say which chat is calling and
+  why, by scoping the notification and bell sounds to the chat, the project or the app and
+  splitting each into the events the activity tracker already tells apart.
 - [Pasteboard-aware prompt suggestions](pasteboard-prompt-suggestions.md) — offer a short-lived,
   privacy-safe Paste action when Threading observed a recent pasteboard ownership change, while
   leaving content reads to the user's ordinary Paste action.
