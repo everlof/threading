@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && node --test scripts/*.test.mjs",
+    "test:load": "THREADING_RENDEZVOUS_LOAD=1 vitest run test/rendezvous-load.test.ts",
     "dev": "wrangler dev",
     "preflight": "node scripts/preflight.mjs",
-    "deploy": "npm run preflight && npm run check && npm test && wrangler deploy",
+    "verify:production": "node scripts/verify-production.mjs",
+    "deploy": "npm run preflight && npm run check && npm test && wrangler d1 migrations apply threading-control-plane --remote && wrangler deploy && npm run verify:production",
     "types": "wrangler types"
   },
   "dependencies": {

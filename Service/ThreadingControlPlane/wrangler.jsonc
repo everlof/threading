@@ -60,7 +60,7 @@
     }
   ],
   "vars": {
-    "APPLE_CLIENT_IDS": "codes.threading.app,codes.threading.mobile"
+    "APPLE_CLIENT_IDS": "codes.threading,codes.threading.mobile"
   },
   "secrets": {
     "required": [

@@ -70,9 +70,9 @@ loopback remote interface.
 | Selected route | host → host over UDP; no relay |
 | Trickle ICE and live STUN | Complete-SDP gathering hit the 15-second bound; bounded trickle signaling then gathered a Cloudflare server-reflexive candidate in 0.15 seconds |
 | Wi-Fi → cellular physical path | Passed: 32 KiB verified bidirectionally with service-mediated one-use signaling and no TURN configured, proving application bytes used direct ICE rather than the signaling tunnel |
-| Scaling bounds | 64 KiB/message, 2 MiB inbound/outbound bytes, 4,096 unread messages, 64 ICE candidates and 256 KiB SDP |
+| Scaling bounds | 64 KiB/message, 2 MiB inbound/outbound bytes, 4,096 unread messages, 64 ICE candidates, 256 KiB SDP, eight pending sessions per host and a 30-second first-message deadline |
 | First-install pairing | Passed in code: QR-carried rendezvous-only credential → ICE tunnel → one-time Mac bootstrap → durable device credential; no Tailscale or `cloudflared` dependency |
-| Strict concurrency | Peer transport 16/16 tests (one opt-in live STUN test skipped), shared remote protocol 87/87, Worker 23/23; macOS and physical-iOS targets build with complete concurrency checking |
+| Strict concurrency | Peer transport 17 tests (15 passed; opt-in live STUN and credentialed TURN probes skipped without environment credentials), shared remote protocol 87/87, Worker 36/36 plus deployment verifier 3/3; macOS and physical-iOS targets build with complete concurrency checking |
 | Binary input | Community Google WebRTC M151 XCFramework: about 28.4 MB macOS universal and 12.2 MB iOS device before app slicing/compression |
 
 This is a **provisional direct-path pass**, not a complete NAT matrix. Bonjour advertised on the
@@ -273,8 +273,10 @@ routing/data processing, abuse handling, support SLA and volume price.
    signaling, TURN provisioning, replay protection, race-safe quotas, Worker-native abuse limits,
    daily Apple grant validation, account deletion and scheduled bounded cleanup.
 3. **Deployment gate:** create production D1/Realtime resources, install independent secrets,
-   attach `remote.threading.codes`, apply migrations, confirm the rate-limit namespaces and Apple
-   server-to-server notifications. The checked-in D1 ID deliberately prevents accidental deploys.
+   attach `remote.threading.codes`, confirm the rate-limit namespaces and Apple server-to-server
+   notifications, then run the guarded deploy. It tests before applying ordered D1 migrations,
+   deploys, and requires the custom-domain readiness probe to pass. The checked-in D1 ID
+   deliberately prevents accidental deploys.
 4. **Network release gate:** force TURN-only, then cover representative home/carrier NATs, blocked
    UDP, IPv4/IPv6, VPN, sleep/wake and repeated Wi-Fi/cellular handoff.
 5. **App release gate:** complete Apple encryption-export determination, signed archive/device

@@ -8,6 +8,7 @@ import {
   handleSignOut,
   validateDueAppleSessions,
 } from "./auth";
+import { validateAppleConfiguration } from "./apple-tokens";
 import { sha256Hex, verifyRendezvousSessionToken } from "./crypto";
 import {
   authorizeRendezvousCredential,
@@ -30,6 +31,9 @@ export default {
         return json({ status: "ok", rendezvousProtocol: BOUNDS.protocolVersion });
       }
       await enforceRateLimit(request, url.pathname, env);
+      if (request.method === "GET" && url.pathname === "/ready") {
+        return await readinessResponse(env);
+      }
       if (request.method === "POST" && url.pathname === "/v1/auth/apple") {
         return await handleAppleSignIn(request, env);
       }
@@ -114,6 +118,58 @@ export default {
     ).bind(now, now).run();
   },
 } satisfies ExportedHandler<Env>;
+
+async function readinessResponse(env: Env): Promise<Response> {
+  try {
+    const clientIDs = env.APPLE_CLIENT_IDS.split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (clientIDs.length !== 2
+      || new Set(clientIDs).size !== clientIDs.length
+      || !clientIDs.includes("codes.threading")
+      || !clientIDs.includes("codes.threading.mobile")) {
+      throw new HttpError(503, "serviceConfiguration", "Apple audiences are not configured");
+    }
+    const signingSecret = requiredConfigurationSecret(env.SESSION_SIGNING_SECRET, 32, 4096);
+    const encryptionSecret = requiredConfigurationSecret(
+      env.APPLE_TOKEN_ENCRYPTION_SECRET,
+      32,
+      4096,
+    );
+    if (signingSecret === encryptionSecret) {
+      throw new HttpError(503, "serviceConfiguration", "Service secrets are not independent");
+    }
+    requiredConfigurationSecret(env.TURN_KEY_ID, 1, 1024);
+    requiredConfigurationSecret(env.TURN_KEY_API_TOKEN, 1, 4096);
+    await validateAppleConfiguration(clientIDs, env);
+    const database = await env.DB.prepare("SELECT 1 AS ready").first<{ ready: number }>();
+    if (database?.ready !== 1) throw new Error("D1 readiness query failed");
+    return json({ status: "ready", rendezvousProtocol: BOUNDS.protocolVersion });
+  } catch (error) {
+    console.warn("readiness_failed", {
+      reason: error instanceof HttpError ? error.code : "dependency",
+    });
+    return json({ status: "unavailable" }, 503);
+  }
+}
+
+function requiredConfigurationSecret(
+  value: string | undefined,
+  minimumBytes: number,
+  maximumBytes: number,
+): string {
+  if (typeof value !== "string") {
+    throw new HttpError(503, "serviceConfiguration", "Required service configuration is absent");
+  }
+  const bytes = new TextEncoder().encode(value);
+  if (bytes.byteLength < minimumBytes || bytes.byteLength > maximumBytes) {
+    throw new HttpError(503, "serviceConfiguration", "Required service configuration is invalid");
+  }
+  if (/[\u0000-\u0020\u007f]/u.test(value)) {
+    throw new HttpError(503, "serviceConfiguration", "Required service configuration is invalid");
+  }
+  return value;
+}
 
 async function routeRendezvous(
   request: Request,

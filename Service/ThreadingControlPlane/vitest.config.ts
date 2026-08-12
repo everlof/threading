@@ -34,6 +34,7 @@ export default defineConfig({
             APPLE_TOKEN_ENCRYPTION_SECRET: "test-only-apple-token-secret-at-least-32-bytes",
             TURN_KEY_ID: "",
             TURN_KEY_API_TOKEN: "",
+            TEST_RENDEZVOUS_LOAD: process.env.THREADING_RENDEZVOUS_LOAD ?? "0",
             TEST_MIGRATIONS: migrations,
           },
         },

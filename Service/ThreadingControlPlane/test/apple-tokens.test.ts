@@ -6,8 +6,13 @@ import {
   encryptAppleToken,
   validateAppleRefreshToken,
 } from "../src/apple-tokens";
-import { authenticateAccess, handleDeleteAccount, validateDueAppleSessions } from "../src/auth";
-import { signAccessToken } from "../src/crypto";
+import {
+  authenticateAccess,
+  handleDeleteAccount,
+  processAppleAccountEvent,
+  validateDueAppleSessions,
+} from "../src/auth";
+import { accountIDForAppleSubject, signAccessToken } from "../src/crypto";
 
 const testEnv = env as unknown as Env;
 let testApplePrivateKey = "";
@@ -57,7 +62,7 @@ describe("Apple token storage", () => {
     }));
     await expect(validateAppleRefreshToken(
       "apple-refresh-token",
-      "codes.threading.app",
+      "codes.threading",
       configuredEnv,
     )).resolves.toEqual({ kind: "valid", identityToken: "signed.identity.token" });
     const request = fetchSpy.mock.calls[0]?.[1];
@@ -70,7 +75,7 @@ describe("Apple token storage", () => {
     ));
     await expect(validateAppleRefreshToken(
       "revoked-refresh-token",
-      "codes.threading.app",
+      "codes.threading",
       configuredEnv,
     )).resolves.toEqual({ kind: "invalidGrant" });
   });
@@ -93,7 +98,7 @@ describe("Apple token storage", () => {
         "INSERT INTO apple_tokens "
           + "(account_id, client_id, encrypted_refresh_token, created_at, updated_at) "
           + "VALUES (?, ?, ?, ?, ?)",
-      ).bind(accountID, "codes.threading.app", encrypted, now, now),
+      ).bind(accountID, "codes.threading", encrypted, now, now),
       configuredEnv.DB.prepare(
         "INSERT INTO rendezvous_credentials "
           + "(digest, kind, account_id, host_id, device_id, expires_at, created_at) "
@@ -135,7 +140,7 @@ describe("Apple token storage", () => {
         "INSERT INTO apple_tokens "
           + "(account_id, client_id, encrypted_refresh_token, created_at, updated_at) "
           + "VALUES (?, ?, ?, ?, ?)",
-      ).bind(accountID, "codes.threading.app", encrypted, now, now),
+      ).bind(accountID, "codes.threading", encrypted, now, now),
     ]);
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("unavailable", { status: 503 }));
     const access = await signAccessToken(accountID, configuredEnv);
@@ -148,6 +153,63 @@ describe("Apple token storage", () => {
     expect(response.status).toBe(204);
     expect(await configuredEnv.DB.prepare("SELECT id FROM accounts WHERE id = ?")
       .bind(accountID).first()).toBeNull();
+  });
+
+  it("cascades consent revocation through every local authority row and is retry-safe", async () => {
+    const subject = `apple-subject-${crypto.randomUUID()}`;
+    const accountID = await accountIDForAppleSubject(subject);
+    const hostID = `host-${crypto.randomUUID()}`;
+    const now = Math.floor(Date.now() / 1000);
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        "INSERT INTO accounts (id, created_at, updated_at) VALUES (?, ?, ?)",
+      ).bind(accountID, now, now),
+      testEnv.DB.prepare(
+        "INSERT INTO hosts (id, account_id, display_name, created_at, updated_at) "
+          + "VALUES (?, ?, ?, ?, ?)",
+      ).bind(hostID, accountID, "Revoked Mac", now, now),
+      testEnv.DB.prepare(
+        "INSERT INTO refresh_sessions (digest, account_id, expires_at, created_at) "
+          + "VALUES (?, ?, ?, ?)",
+      ).bind(`refresh-${crypto.randomUUID()}`, accountID, now + 3600, now),
+      testEnv.DB.prepare(
+        "INSERT INTO rendezvous_credentials "
+          + "(digest, kind, account_id, host_id, device_id, expires_at, created_at) "
+          + "VALUES (?, 'host', ?, ?, NULL, ?, ?)",
+      ).bind(`credential-${crypto.randomUUID()}`, accountID, hostID, now + 3600, now),
+    ]);
+
+    await processAppleAccountEvent("consent-revoked", subject, testEnv);
+    await processAppleAccountEvent("consent-revoked", subject, testEnv);
+
+    expect(await testEnv.DB.prepare("SELECT id FROM accounts WHERE id = ?")
+      .bind(accountID).first()).toBeNull();
+    expect(await testEnv.DB.prepare("SELECT id FROM hosts WHERE account_id = ?")
+      .bind(accountID).first()).toBeNull();
+    expect(await testEnv.DB.prepare("SELECT digest FROM refresh_sessions WHERE account_id = ?")
+      .bind(accountID).first()).toBeNull();
+    expect(await testEnv.DB.prepare(
+      "SELECT digest FROM rendezvous_credentials WHERE account_id = ?",
+    ).bind(accountID).first()).toBeNull();
+  });
+
+  it("ignores unrelated Apple events but bounds revocation subjects", async () => {
+    const subject = `apple-subject-${crypto.randomUUID()}`;
+    const accountID = await accountIDForAppleSubject(subject);
+    const now = Math.floor(Date.now() / 1000);
+    await testEnv.DB.prepare(
+      "INSERT INTO accounts (id, created_at, updated_at) VALUES (?, ?, ?)",
+    ).bind(accountID, now, now).run();
+
+    await processAppleAccountEvent("email-disabled", subject, testEnv);
+
+    expect(await testEnv.DB.prepare("SELECT id FROM accounts WHERE id = ?")
+      .bind(accountID).first()).toEqual({ id: accountID });
+    await expect(processAppleAccountEvent(
+      "account-deleted",
+      "s".repeat(1025),
+      testEnv,
+    )).rejects.toMatchObject({ status: 400, code: "invalidRequest" });
   });
 });
 

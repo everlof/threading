@@ -16,6 +16,7 @@ type Attachment =
     accountID: string;
     hostID: string;
     credentialExpiresAt: number;
+    connectedAt: number;
   }
   | {
     role: "host";
@@ -29,6 +30,7 @@ type Attachment =
     hostID: string;
     deviceID: string;
     credentialExpiresAt: number;
+    connectedAt: number;
   }
   | {
     role: "device-waiting";
@@ -55,6 +57,7 @@ type Attachment =
     hostID: string;
     sessionID: string;
     expiresAt: number;
+    connectedAt: number;
   }
   | {
     role: "peer-paired";
@@ -69,6 +72,7 @@ type Attachment =
 
 export class HostRendezvous {
   private static readonly maximumAttachedSockets = 1 + BOUNDS.maximumSessionsPerHost * 2 + 4;
+  private static readonly maximumHandshakeDelayMilliseconds = 30_000;
 
   constructor(
     private readonly ctx: DurableObjectState,
@@ -184,6 +188,10 @@ export class HostRendezvous {
   }
 
   private registerHost(socket: WebSocket, attachment: Attachment & { role: "host-pending" }, envelope: Envelope): void {
+    if (this.pendingHandshakeExpired(attachment.connectedAt)) {
+      this.failSocket(socket, "handshakeTimeout", "The host handshake timed out");
+      return;
+    }
     if (attachment.credentialExpiresAt <= Date.now()) {
       this.failSocket(socket, "credentialExpired", "The host credential expired");
       return;
@@ -194,7 +202,12 @@ export class HostRendezvous {
     for (const existing of this.sockets("host")) {
       if (existing !== socket) existing.close(4001, "Host connection replaced");
     }
-    const ready: Attachment = { ...attachment, role: "host" };
+    const ready: Attachment = {
+      role: "host",
+      accountID: attachment.accountID,
+      hostID: attachment.hostID,
+      credentialExpiresAt: attachment.credentialExpiresAt,
+    };
     socket.serializeAttachment(ready);
     socket.send(encodeEnvelope({
       version: BOUNDS.protocolVersion,
@@ -208,6 +221,10 @@ export class HostRendezvous {
     attachment: Attachment & { role: "device-pending" },
     envelope: Envelope,
   ): Promise<void> {
+    if (this.pendingHandshakeExpired(attachment.connectedAt)) {
+      this.failSocket(socket, "handshakeTimeout", "The device handshake timed out");
+      return;
+    }
     if (attachment.credentialExpiresAt <= Date.now()) {
       this.failSocket(socket, "credentialExpired", "The device credential expired");
       return;
@@ -269,6 +286,10 @@ export class HostRendezvous {
     attachment: Attachment & { role: "peer-pending" },
     envelope: Envelope,
   ): Promise<void> {
+    if (this.pendingHandshakeExpired(attachment.connectedAt)) {
+      this.failSocket(socket, "handshakeTimeout", "The session handshake timed out");
+      return;
+    }
     if (attachment.expiresAt <= Date.now()) {
       this.failSocket(socket, "sessionExpired", "The signaling session expired");
       return;
@@ -410,7 +431,11 @@ export class HostRendezvous {
     const now = Date.now();
     for (const socket of this.ctx.getWebSockets()) {
       const state = this.attachment(socket);
-      if ((state.role === "host" || state.role === "host-pending"
+      if ((state.role === "host-pending" || state.role === "device-pending"
+          || state.role === "peer-pending") && this.pendingHandshakeExpired(state.connectedAt)) {
+        this.closeCounterpartIfWaiting(socket, "handshakeTimeout", "A handshake timed out");
+        this.failSocket(socket, "handshakeTimeout", "The signaling handshake timed out");
+      } else if ((state.role === "host" || state.role === "host-pending"
           || state.role === "device-pending") && state.credentialExpiresAt <= now) {
         this.closeCounterpartIfWaiting(socket, "credentialExpired", "A credential expired");
         this.failSocket(socket, "credentialExpired", "The rendezvous credential expired");
@@ -421,6 +446,10 @@ export class HostRendezvous {
         this.failSocket(socket, "sessionExpired", "The signaling session expired");
       }
     }
+  }
+
+  private pendingHandshakeExpired(connectedAt: number): boolean {
+    return connectedAt <= Date.now() - HostRendezvous.maximumHandshakeDelayMilliseconds;
   }
 
   private sockets(role: Attachment["role"]): WebSocket[] {
@@ -445,22 +474,23 @@ function attachmentFromInternalHeaders(headers: Headers): Attachment | null {
   if (!accountID || !hostID) return null;
   const rawCredentialExpiry = headers.get("X-Threading-Credential-Expires-At");
   const credentialExpiresAt = Number(rawCredentialExpiry);
+  const connectedAt = Date.now();
   if (role === "host") {
     return Number.isSafeInteger(credentialExpiresAt)
-      ? { role: "host-pending", accountID, hostID, credentialExpiresAt }
+      ? { role: "host-pending", accountID, hostID, credentialExpiresAt, connectedAt }
       : null;
   }
   if (role === "device") {
     const deviceID = headers.get("X-Threading-Device-ID");
     return deviceID && Number.isSafeInteger(credentialExpiresAt)
-      ? { role: "device-pending", accountID, hostID, deviceID, credentialExpiresAt }
+      ? { role: "device-pending", accountID, hostID, deviceID, credentialExpiresAt, connectedAt }
       : null;
   }
   if (role === "session") {
     const sessionID = headers.get("X-Threading-Session-ID");
     const expiresAt = Number(headers.get("X-Threading-Session-Expires-At"));
     return sessionID && Number.isSafeInteger(expiresAt)
-      ? { role: "peer-pending", accountID, hostID, sessionID, expiresAt }
+      ? { role: "peer-pending", accountID, hostID, sessionID, expiresAt, connectedAt }
       : null;
   }
   return null;

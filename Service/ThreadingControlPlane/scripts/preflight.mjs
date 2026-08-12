@@ -1,8 +1,29 @@
 import { readFile, readdir } from "node:fs/promises";
 
 const serviceRoot = new URL("../", import.meta.url);
+const repositoryRoot = new URL("../../", serviceRoot);
 const configuration = JSON.parse(await readFile(new URL("wrangler.jsonc", serviceRoot), "utf8"));
 const failures = [];
+const [xcodeProject, macInfoPlist, debugEntitlements, releaseEntitlements] = await Promise.all([
+  readFile(new URL("Threading.xcodeproj/project.pbxproj", repositoryRoot), "utf8"),
+  readFile(new URL("Sources/Threading/Resources/Info.plist", repositoryRoot), "utf8"),
+  readFile(
+    new URL("Sources/Threading/Resources/Threading-Debug.entitlements", repositoryRoot),
+    "utf8",
+  ),
+  readFile(new URL("Sources/Threading/Resources/Threading.entitlements", repositoryRoot), "utf8"),
+]);
+
+const exampleVariables = parseDotVariables(
+  await readFile(new URL(".dev.vars.example", serviceRoot), "utf8"),
+);
+const exampleSigningSecret = exampleVariables.get("SESSION_SIGNING_SECRET") ?? "";
+const exampleEncryptionSecret = exampleVariables.get("APPLE_TOKEN_ENCRYPTION_SECRET") ?? "";
+if (new TextEncoder().encode(exampleSigningSecret).byteLength < 32
+  || new TextEncoder().encode(exampleEncryptionSecret).byteLength < 32
+  || exampleSigningSecret === exampleEncryptionSecret) {
+  failures.push("local example secrets must satisfy the independent 32-byte runtime contract");
+}
 
 const databases = Array.isArray(configuration.d1_databases) ? configuration.d1_databases : [];
 const database = databases.find((candidate) => candidate?.binding === "DB");
@@ -15,6 +36,34 @@ const route = Array.isArray(configuration.routes)
   : undefined;
 if (configuration.workers_dev !== false || route?.custom_domain !== true) {
   failures.push("production deploys must disable workers.dev and bind remote.threading.codes");
+}
+
+if (configuration.vars?.APPLE_CLIENT_IDS !== "codes.threading,codes.threading.mobile") {
+  failures.push("Apple client IDs must match the shipping macOS and iOS bundle identifiers");
+}
+if (countMatches(
+  xcodeProject,
+  /^\s*PRODUCT_BUNDLE_IDENTIFIER = codes\.threading;\s*$/gmu,
+) !== 2 || countMatches(
+  xcodeProject,
+  /^\s*PRODUCT_BUNDLE_IDENTIFIER = codes\.threading\.mobile;\s*$/gmu,
+) !== 2) {
+  failures.push("shipping bundle identifiers differ from the reviewed Apple audiences");
+}
+const serviceURLPattern = /<key>ThreadingControlPlaneURL<\/key>\s*<string>https:\/\/remote\.threading\.codes<\/string>/u;
+if (!serviceURLPattern.test(macInfoPlist)
+  || countMatches(
+    xcodeProject,
+    /^\s*INFOPLIST_KEY_ThreadingControlPlaneURL = "https:\/\/remote\.threading\.codes";\s*$/gmu,
+  ) !== 2) {
+  failures.push("shipping macOS and iOS targets must use the production control-plane URL");
+}
+const appleSignInEntitlement = /<key>com\.apple\.developer\.applesignin<\/key>\s*<array>\s*<string>Default<\/string>\s*<\/array>/u;
+if (/<key>com\.apple\.developer\./u.test(debugEntitlements)) {
+  failures.push("macOS Debug builds must remain launchable with ad-hoc signing");
+}
+if (!appleSignInEntitlement.test(releaseEntitlements)) {
+  failures.push("macOS Release builds must retain the Sign in with Apple entitlement");
 }
 
 const expectedRateLimits = new Map([
@@ -53,6 +102,11 @@ const expectedSecrets = [
 if (JSON.stringify(configuration.secrets?.required) !== JSON.stringify(expectedSecrets)) {
   failures.push("the required production Worker secret bindings differ from the reviewed list");
 }
+const expectedExampleVariables = ["APPLE_CLIENT_IDS", ...expectedSecrets].sort();
+if (JSON.stringify([...exampleVariables.keys()].sort()) !== JSON.stringify(expectedExampleVariables)
+  || exampleVariables.get("APPLE_CLIENT_IDS") !== configuration.vars?.APPLE_CLIENT_IDS) {
+  failures.push(".dev.vars.example must mirror the reviewed variable and secret bindings");
+}
 
 const migrations = (await readdir(new URL("migrations/", serviceRoot)))
   .filter((name) => name.endsWith(".sql"))
@@ -79,4 +133,20 @@ if (failures.length > 0) {
 function isCloudflareIdentifier(value) {
   return typeof value === "string" && (/^[0-9a-f]{32}$/u.test(value)
     || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value));
+}
+
+function parseDotVariables(contents) {
+  const values = new Map();
+  for (const line of contents.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) continue;
+    values.set(trimmed.slice(0, separator), trimmed.slice(separator + 1));
+  }
+  return values;
+}
+
+function countMatches(contents, pattern) {
+  return [...contents.matchAll(pattern)].length;
 }

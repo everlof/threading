@@ -27,6 +27,23 @@ export type AppleRefreshValidation =
 const appleKeyCache = new WeakMap<object, Promise<CryptoKey>>();
 const appleClientSecretCache = new WeakMap<object, Map<string, { value: string; expiresAt: number }>>();
 
+/// Performs the local, non-network portion of the Apple service readiness check. Generating a
+/// client secret proves that the team/key configuration and P-256 private key are usable; deriving
+/// the encryption key proves the stored-token secret meets the runtime contract. The generated
+/// secrets and imported key are cached per Worker environment just like the request path.
+export async function validateAppleConfiguration(
+  clientIDs: string[],
+  env: Env,
+): Promise<void> {
+  if (clientIDs.length === 0) {
+    throw new HttpError(503, "serviceConfiguration", "Apple audience is not configured");
+  }
+  await Promise.all([
+    encryptionKey(env),
+    ...clientIDs.map((clientID) => appleClientSecret(clientID, env)),
+  ]);
+}
+
 export async function exchangeAppleAuthorizationCode(
   authorizationCode: string,
   clientID: string,

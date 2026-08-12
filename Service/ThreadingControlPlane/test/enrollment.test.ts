@@ -287,9 +287,11 @@ describe("host and device enrollment", () => {
   });
 
   it("rate limits repeated Apple sign-in attempts before authentication work", async () => {
-    const source = `198.51.100.${Math.floor(Math.random() * 200) + 1}`;
+    const source = `test-${crypto.randomUUID()}`;
     let response: Response | undefined;
-    for (let attempt = 0; attempt < 31; attempt += 1) {
+    // Rate-limit windows align to the wall clock. If this loop starts just before a window
+    // boundary, up to 30 requests can land in each of two windows before either rejects one.
+    for (let attempt = 0; attempt < 61; attempt += 1) {
       response = await worker.fetch(new Request("https://service.test/v1/auth/apple", {
         method: "POST",
         headers: {
@@ -298,7 +300,8 @@ describe("host and device enrollment", () => {
         },
         body: "{}",
       }), testEnv);
-      if (attempt < 30) expect(response.status).toBe(400);
+      if (response.status === 429) break;
+      expect(response.status).toBe(400);
     }
     if (!response) throw new Error("Expected a rate-limit response");
     expect(response.status).toBe(429);

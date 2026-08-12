@@ -22,11 +22,12 @@ npm run dev
 ```
 
 The checked-in `wrangler.jsonc` intentionally contains a non-deployable D1 database ID. `npm run
-deploy` runs the production preflight, type-check and full Worker suite before Wrangler and refuses
-a workers.dev-only deployment. The checked-in `secrets.required` contract makes Wrangler refuse
-local startup or deployment when a required encrypted binding is absent; the preflight pins that
-list so a configuration edit cannot silently weaken it. Create the production D1 database, replace
-that value, apply migrations, then set these encrypted secrets:
+deploy` runs the production preflight, type-check and full Worker suite before making a remote
+change, applies D1 migrations, deploys the Worker, and then verifies `/ready` through the custom
+domain. The checked-in `secrets.required` contract makes Wrangler refuse local startup or
+deployment when a required encrypted binding is absent; the preflight pins that list so a
+configuration edit cannot silently weaken it. Create the production D1 database, replace that
+value, then set these encrypted secrets:
 
 ```sh
 npx wrangler secret put SESSION_SIGNING_SECRET
@@ -61,11 +62,11 @@ the long-lived key and API token stay in Worker secrets. Clients receive only ge
 credentials. If TURN credential provisioning is temporarily unavailable, rendezvous continues
 with Cloudflare STUN so direct paths remain available.
 
-Before deployment, configure the final native Sign in with Apple bundle IDs in
-`APPLE_CLIENT_IDS`, attach the custom service domain, verify the checked-in rate-limit namespace
-IDs are unused in the production Cloudflare account, register Apple's server-to-server
-notification endpoint, and set log retention. Do not deploy with the example D1 ID or `.dev.vars`
-values.
+Before deployment, keep `APPLE_CLIENT_IDS` aligned with the shipping `codes.threading` macOS and
+`codes.threading.mobile` iOS bundle IDs, attach the custom service domain, verify the checked-in
+rate-limit namespace IDs are unused in the production Cloudflare account, register Apple's
+server-to-server notification endpoint, and set log retention. Do not deploy with the example D1
+ID or `.dev.vars` values.
 
 ## Production deployment checklist
 
@@ -83,12 +84,16 @@ values.
 3. Create the Sign in with Apple key and configure the macOS and iOS App IDs. Register
    `https://remote.threading.codes/v1/auth/apple/events` as Apple's server-to-server notification
    endpoint. The `.p8` private key is a Worker secret, never an app resource.
-4. Install every Worker secret listed above, then apply all migrations remotely:
+4. Install every Worker secret listed above, then run the guarded deployment:
 
    ```sh
-   npx wrangler d1 migrations apply threading-control-plane --remote
    npm run deploy
    ```
+
+   This validates the configuration and code before changing D1, then applies the ordered
+   migrations, deploys, and retries the public readiness check for bounded propagation time.
+   Production migrations must remain expand-compatible with the currently deployed Worker in
+   case Worker deployment fails after D1 accepts a migration.
 
 5. Ensure the `remote.threading.codes` zone or delegated subdomain is active in the same
    Cloudflare account. The checked-in Worker route attaches it as a custom domain during deploy;
@@ -99,7 +104,7 @@ values.
    per-location abuse protection rather than billing quotas. Do not rate-limit established
    WebSocket messages as independent HTTP requests. Retain only the metadata-only structured logs
    emitted by the Worker, with a documented short retention.
-7. Verify `GET /health`, Sign in with Apple, first-install QR pairing, direct ICE, forced TURN,
+7. Verify `GET /health`, `GET /ready`, Sign in with Apple, first-install QR pairing, direct ICE, forced TURN,
    device revoke, host sign-out, scheduled Apple refresh validation, Apple consent revocation and
    retryable account deletion from a signed release candidate. Run the credentialed relay-only
    package probe documented in `Packages/ThreadingPeerTransport/README.md` separately for the
@@ -110,3 +115,8 @@ values.
 Deployment is intentionally impossible until steps 1–4 replace the placeholder database ID and
 example secrets. A Worker preview or `workers.dev` hostname is useful for staging, but distributed
 app builds are configured for `https://remote.threading.codes`.
+
+`/health` is a cheap liveness response. `/ready` additionally proves that the independent signing
+and Apple-token secrets are usable, the Apple private key can sign both shipping client IDs, TURN
+configuration is present, and D1 answers a query. It returns only a generic 503 when unavailable;
+configuration details remain in metadata-only Worker logs.

@@ -1,5 +1,6 @@
 import CryptoKit
 import XCTest
+import ThreadingPeerTransport
 import ThreadingRemoteKit
 @testable import Threading
 
@@ -230,6 +231,93 @@ final class RemoteServerIntegrationTests: XCTestCase {
         XCTAssertEqual(anna.collaborationParticipantID, "member-anna")
     }
 
+    func testHostedServiceRequiresConfigurationAndSignInBeforeStarting() throws {
+        let unconfigured = RemoteHostedServiceController(
+            store: HostedServiceStore(record: nil),
+            endpoint: nil,
+            hostID: "host-test",
+            hostName: "Test Mac"
+        )
+        unconfigured.start(targetPort: 9_876)
+        XCTAssertEqual(unconfigured.state, .notConfigured)
+        XCTAssertFalse(unconfigured.canIssueDeviceCredentials)
+
+        let endpoint = try PeerControlPlaneServiceEndpoint(
+            XCTUnwrap(URL(string: "https://remote.example.test"))
+        )
+        let signedOut = RemoteHostedServiceController(
+            store: HostedServiceStore(record: nil),
+            endpoint: endpoint,
+            hostID: "host-test",
+            hostName: "Test Mac"
+        )
+        signedOut.start(targetPort: 9_876)
+        XCTAssertEqual(signedOut.state, .signInRequired)
+        XCTAssertFalse(signedOut.canIssueDeviceCredentials)
+    }
+
+    func testHostedServiceRestoresOnlyCredentialsForThisHostAndEndpoint() throws {
+        let endpoint = try PeerControlPlaneServiceEndpoint(
+            XCTUnwrap(URL(string: "https://remote.example.test"))
+        )
+        let validRecord = try hostedServiceRecord(
+            endpoint: endpoint.baseURL,
+            hostID: "host-test"
+        )
+        let restored = RemoteHostedServiceController(
+            store: HostedServiceStore(record: validRecord),
+            endpoint: endpoint,
+            hostID: "host-test",
+            hostName: "Test Mac"
+        )
+        XCTAssertTrue(restored.canIssueDeviceCredentials)
+
+        let wrongHost = RemoteHostedServiceController(
+            store: HostedServiceStore(record: validRecord),
+            endpoint: endpoint,
+            hostID: "different-host",
+            hostName: "Test Mac"
+        )
+        wrongHost.start(targetPort: 9_876)
+        XCTAssertEqual(wrongHost.state, .unavailable("credentials"))
+        XCTAssertFalse(wrongHost.canIssueDeviceCredentials)
+
+        let differentEndpoint = try PeerControlPlaneServiceEndpoint(
+            XCTUnwrap(URL(string: "https://different.example.test"))
+        )
+        let wrongService = RemoteHostedServiceController(
+            store: HostedServiceStore(record: validRecord),
+            endpoint: differentEndpoint,
+            hostID: "host-test",
+            hostName: "Test Mac"
+        )
+        wrongService.start(targetPort: 9_876)
+        XCTAssertEqual(wrongService.state, .unavailable("credentials"))
+        XCTAssertFalse(wrongService.canIssueDeviceCredentials)
+    }
+
+    func testHostedServiceRejectsTamperedPendingRevocationState() throws {
+        let endpoint = try PeerControlPlaneServiceEndpoint(
+            XCTUnwrap(URL(string: "https://remote.example.test"))
+        )
+        var tampered = try hostedServiceRecord(
+            endpoint: endpoint.baseURL,
+            hostID: "host-test"
+        )
+        tampered.pendingRevokedDeviceIDs = ["device-1", "device-1"]
+        let controller = RemoteHostedServiceController(
+            store: HostedServiceStore(record: tampered),
+            endpoint: endpoint,
+            hostID: "host-test",
+            hostName: "Test Mac"
+        )
+
+        controller.start(targetPort: 9_876)
+
+        XCTAssertEqual(controller.state, .unavailable("credentials"))
+        XCTAssertFalse(controller.canIssueDeviceCredentials)
+    }
+
     func testLiveAuthorityKeepsEveryAcceptedMemberCurrentAndRevokesExactlyOneCredential() {
         let sessionID = SessionID()
         let anna = RemoteAuthorization(
@@ -296,6 +384,42 @@ final class RemoteServerIntegrationTests: XCTestCase {
         server = nil
         authority = nil
         super.tearDown()
+    }
+
+    private final class HostedServiceStore: RemoteHostedServicePersisting {
+        private var record: RemoteHostedServiceRecord?
+
+        init(record: RemoteHostedServiceRecord?) {
+            self.record = record
+        }
+
+        func load() throws -> RemoteHostedServiceRecord? { record }
+        func save(_ record: RemoteHostedServiceRecord) throws { self.record = record }
+        func delete() throws { record = nil }
+    }
+
+    private func hostedServiceRecord(
+        endpoint: URL,
+        hostID: String
+    ) throws -> RemoteHostedServiceRecord {
+        let future = Date().addingTimeInterval(30 * 24 * 60 * 60)
+        return RemoteHostedServiceRecord(
+            version: 1,
+            endpoint: endpoint,
+            session: PeerControlPlaneSession(
+                accountID: "account-test",
+                accessToken: try PeerControlPlaneBearer("access-token"),
+                accessTokenExpiresAt: future,
+                refreshToken: try PeerControlPlaneBearer("refresh-token"),
+                refreshTokenExpiresAt: future
+            ),
+            hostCredential: PeerHostServiceCredential(
+                hostID: hostID,
+                credential: try PeerControlPlaneBearer("host-token"),
+                expiresAt: future
+            ),
+            pendingRevokedDeviceIDs: []
+        )
     }
 
     // MARK: - Probing
