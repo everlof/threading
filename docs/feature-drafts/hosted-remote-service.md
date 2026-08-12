@@ -72,7 +72,7 @@ loopback remote interface.
 | Wi-Fi → cellular physical path | Passed: 32 KiB verified bidirectionally with service-mediated one-use signaling and no TURN configured, proving application bytes used direct ICE rather than the signaling tunnel |
 | Scaling bounds | 64 KiB/message, 2 MiB inbound/outbound bytes, 4,096 unread messages, 64 ICE candidates, 256 KiB SDP, eight pending sessions per host and a 30-second first-message deadline |
 | First-install pairing | Passed in code: QR-carried rendezvous-only credential → ICE tunnel → one-time Mac bootstrap → durable device credential; no Tailscale or `cloudflared` dependency |
-| Strict concurrency | Peer transport 17 tests (15 passed; opt-in live STUN and credentialed TURN probes skipped without environment credentials), shared remote protocol 87/87, Worker 36/36 plus deployment verifier 3/3 and local 100-object hibernation gate 1/1; macOS and physical-iOS targets build with complete concurrency checking |
+| Strict concurrency | Peer transport 17 tests (15 passed; opt-in live STUN and credentialed TURN probes skipped without environment credentials), shared remote protocol 87/87, Worker 37/37 plus deployment verifier 3/3 and local 100-object hibernation gate 1/1; macOS and physical-iOS targets build with complete concurrency checking |
 | Binary input | Community Google WebRTC M151 XCFramework: about 28.4 MB macOS universal and 12.2 MB iOS device before app slicing/compression |
 
 This is a **provisional direct-path pass**, not a complete NAT matrix. Bonjour advertised on the

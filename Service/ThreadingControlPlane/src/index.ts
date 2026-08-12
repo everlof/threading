@@ -142,8 +142,19 @@ async function readinessResponse(env: Env): Promise<Response> {
     requiredConfigurationSecret(env.TURN_KEY_ID, 1, 1024);
     requiredConfigurationSecret(env.TURN_KEY_API_TOKEN, 1, 4096);
     await validateAppleConfiguration(clientIDs, env);
-    const database = await env.DB.prepare("SELECT 1 AS ready").first<{ ready: number }>();
-    if (database?.ready !== 1) throw new Error("D1 readiness query failed");
+    await env.DB.batch([
+      env.DB.prepare("SELECT auth_invalidated_at FROM accounts LIMIT 1"),
+      env.DB.prepare(
+        "SELECT last_validation_attempt_at, last_validated_at, invalidated_at "
+          + "FROM apple_tokens LIMIT 1",
+      ),
+      env.DB.prepare(
+        "SELECT replacement_digest, replacement_encrypted_token, replacement_expires_at "
+          + "FROM refresh_sessions LIMIT 1",
+      ),
+      env.DB.prepare("SELECT device_id, revoked_at FROM rendezvous_credentials LIMIT 1"),
+      env.DB.prepare("SELECT jti_digest FROM apple_notifications LIMIT 1"),
+    ]);
     return json({ status: "ready", rendezvousProtocol: BOUNDS.protocolVersion });
   } catch (error) {
     console.warn("readiness_failed", {

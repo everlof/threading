@@ -75,6 +75,33 @@ describe("service release surfaces", () => {
     await expect(response.json()).resolves.toEqual({ status: "unavailable" });
   });
 
+  it("refuses readiness when the required D1 schema probe fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const configured = Object.assign(Object.create(testEnv) as Env, {
+      APPLE_TEAM_ID: "TESTTEAM01",
+      APPLE_KEY_ID: "TESTKEY001",
+      APPLE_PRIVATE_KEY: testApplePrivateKey,
+      APPLE_TOKEN_ENCRYPTION_SECRET: "independent-schema-test-secret-at-least-32-bytes",
+      TURN_KEY_ID: "test-turn-key",
+      TURN_KEY_API_TOKEN: "test-turn-token",
+    });
+    const missingSchema = new Proxy(configured, {
+      get(target, property, receiver) {
+        if (property === "DB") {
+          return {
+            batch: async () => { throw new Error("missing migration"); },
+          } as unknown as D1Database;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    const response = await worker.fetch(new Request("https://service.test/ready"), missingSchema);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ status: "unavailable" });
+  });
+
   it("executes the daily bounded expiry cleanup through the scheduled entry point", async () => {
     const now = Math.floor(Date.now() / 1000);
     const suffix = crypto.randomUUID();
