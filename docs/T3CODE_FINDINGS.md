@@ -407,18 +407,28 @@ their decisions now live, and stay listed so the ranking's reasoning survives.
    `ToolOutcome`, documented in `native-conversations.md`. Narrowed twice for precision:
    sniffing is shell-output-only, and generic phrases are trusted only in the opening lines.
    Success stays quiet per the design language — the ✗ override is the only new per-row ink.
-6. **Settle/snooze + the recede rule** — §3.6. The biggest *idea* here, but it deserves its
-   own design pass: Threading's grouping (repo → checkout → branch → session) carries
-   information their flat inbox discards; the semantics (derived settling, raising a hand,
-   PR-merge + 1 h idle) could layer onto the tree without flattening it. *Open.* Note the
-   sidebar has since gained **Archive** (row button + ⋯ menu); a design pass must reconcile
-   settle-vs-archive semantics explicitly rather than adding a third shelf.
-7. **Per-turn checkpoints as hidden git refs** — generalizes `GitTurnBaselineStore` (refs
-   solve the gc-prunability that forced ours in-memory and single-turn) → Turn-N diff
-   history + revert-to-message. Interacts with Claude's `--resume-session-at` /
-   `rollbackThread` question — needs measurement. *Open.* Now also what the changed-files
-   card (#8) is waiting on: its View diff is latest-turn-only and its cards are live-only,
-   both because a single in-memory baseline is all there is.
+6. **Settle/snooze + the recede rule** — §3.6. The biggest *idea* here, and the design pass it
+   asked for is done: **decided 2026-08-12** →
+   [`docs/decisions/automatic-settling.md`](decisions/automatic-settling.md). **No-go** on a
+   settled/snoozed lifecycle state — the grouping (repo → checkout → branch → session) plus the
+   four attention marks already carry what their flat inbox is compensating for — with a
+   presentation-only **Needs Attention** view recommended instead and snooze deferred behind a
+   stated signal. Two corrections to §3.6 from re-reading their current code (`edc503a7a`): the
+   PR-merge rule no longer has its 1 h idle window (merged/closed settles immediately and the
+   *server* un-settles on real activity), and the settle-vs-archive reconciliation this note asked
+   for is §4.1 of the record.
+7. ~~**Per-turn checkpoints as hidden git refs**~~ — **Adopted** → `docs/architecture/git.md`.
+   Two immutable trees per turn under `refs/threading/turn-checkpoints/v1/`, ownership in
+   `git-turn-checkpoints.json`, browsed by Git Review's Turn N chip; the changed-files card (#8)
+   opens its own exact checkpoint rather than redirecting to the newest. The capture goes past
+   theirs in the way that matters later: the private alternate index admits non-ignored untracked
+   files, which `stash create` cannot. The **revert** half stayed a separate question and is now
+   **decided 2026-08-12** → [`docs/decisions/revert-to-message.md`](decisions/revert-to-message.md):
+   prototype a workspace-only restore, reject any claim that the conversation was reverted. The
+   `rollbackThread` question this note wanted measured has been measured — §3 of that record has
+   the numbers: Codex's `thread/rollback` is deprecated and reverts no files, Claude's
+   `rewind_conversation` is destructive while its `rewind_files` covers only its own tool edits,
+   and Grok and OpenCode have nothing.
 8. ~~**Per-turn changed-files card**~~ — §3.4. **Adopted 2026-07-28** →
    `ChangedFilesTree` / `ChangedFilesCardView`, documented in `native-conversations.md`.
    Auto-expand thresholds and single-child compression taken verbatim; the compact
@@ -464,18 +474,45 @@ their decisions now live, and stay listed so the ranking's reasoning survives.
 4. ~~Auto-scroll state machine for the native surface~~ — adopted
 5. ~~Tool-row outcome glyphs~~ — adopted
 
-All five landed by 2026-08-02, plus #8, #9, #11 and #13 from the longer list — ten of sixteen
-closed, one struck as overtaken. Still open: settle/snooze (#6, the design pass),
-checkpoints-as-refs (#7, needs measurement),
-steering (#10, needs a probe), and composer triggers (#12). Settle/snooze is deliberately
-*not* on the shortlist despite being the biggest idea — it changes the sidebar's philosophy
-and must be designed against our grouping model, not copied.
+All five landed by 2026-08-02, plus #8, #9, #11 and #13 from the longer list, and #7's storage
+half after them. Settle/snooze (#6) and the revert half of #7 are now **decided rather than open**
+— see the records linked in their entries; #16 travels with #6 and is therefore parked with it.
+Still genuinely open: steering (#10, probed, design in `COMPOSER_QUEUE_FINDINGS.md`) and composer
+triggers (#12). Settle/snooze was deliberately kept off the shortlist despite being the biggest
+idea, on the grounds that it changes the sidebar's philosophy and had to be designed against our
+grouping model rather than copied; that is what the design pass concluded.
+
+### Deferred ideas that were never ranked here
+
+Three things t3code does appear only in the inventory above, because in July they read as
+category differences rather than as borrowables. They were investigated in August and each has a
+record, so the reasoning does not have to be rebuilt the next time one is proposed:
+
+- **Editable file previews** (§2, *Files — browser + editable preview*) →
+  [`docs/decisions/editable-file-previews.md`](decisions/editable-file-previews.md). **Reject** on
+  the Mac — Open In already wins on every axis — with the host write contract specified for the one
+  slice that has no alternative, the iPhone's read-only Files browser. Their own implementation is
+  debounced autosave with no expected-content precondition and no conflict surface, which is safe
+  in a server-side product and a race here, where the agent writes the same bytes locally.
+- **`runOnWorktreeCreate` setup hooks** (§2, *Project scripts*) →
+  [`docs/decisions/repository-setup-hooks.md`](decisions/repository-setup-hooks.md). **Reject**
+  automatic execution; prototype an offer that still needs a press.
+  `docs/architecture/project-scripts.md` already refused this in the abstract, and reading their
+  188-line runner sharpened rather than softened the argument: no trust prompt, no content pinning,
+  no timeout, no cancellation, no completion receipt.
+- **DOM element picking with component + `file:line`** (§1, *their distinctive category we don't
+  play in*) → [`docs/decisions/dom-source-attribution.md`](decisions/dom-source-attribution.md).
+  **Reject** a bundled framework provider; wait for demand on reading attribution a page already
+  publishes. They do not implement it either — `react-grab@^0.1.32` does, through React's private
+  development-build fiber internals and source maps, inside an Electron preload.
 
 ---
 
 ## 8. Sources
 
-- Repo: https://github.com/pingdotgg/t3code (clone at `5719e8a`, 2026-07-24)
+- Repo: https://github.com/pingdotgg/t3code (clone at `5719e8a`, 2026-07-24; re-read at
+  `edc503a7a` on 2026-08-12 for the five decision records, which is where the §3.6 corrections
+  above come from)
 - Issues cited: #1397 (telemetry), #695 (speed), #3143 (idle power), #2256/#2140 (context
   loss), #3925 (auto-scroll), #231 (steering), #780 (notifications), #228 (usage), #330
   (import), #1404 (forking), #538 (subagents), #216 (raw output)

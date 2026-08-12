@@ -240,6 +240,14 @@ no metadata record owns. That reconciliation is what keeps retention bounded aft
 quarantine or an exit between the two halves of collection; it cannot name a branch, tag, remote,
 or any ref outside the private prefix.
 
+**The checkpoints are read-only, and putting the worktree back is a separate decision.** The store
+publishes and reads trees; nothing here restores one, which is the checkpoint half of the same rule
+that gives Git Review no discard. What a restore would cost — the recovery checkpoint that has to be
+captured before a byte moves, the "no turn in flight in any session standing in this checkout"
+precondition, the deletion set that must exclude ignored paths, and why the conversation half is a
+different feature the providers cannot currently support — is worked out in
+[`docs/decisions/revert-to-message.md`](../decisions/revert-to-message.md).
+
 Rendering shares the `NativeDiffCore` model with edit tools, but not their view-tree shape.
 `DiffView` still gives a short conversation edit one AppKit row per line. Git Review uses
 `GitReviewDiffTextView`: one selectable TextKit document per hunk, with the same syntax roles,

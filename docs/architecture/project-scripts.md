@@ -109,3 +109,15 @@ identity and reviewed configuration content, invalidation when that content chan
 and audit UI, a capability limit for environment/network/filesystem access, and a durable receipt
 that distinguishes queued, started, completed, refused and interrupted work. Until all of those
 exist, creating or opening a checkout must remain data-only.
+
+Those five requirements were worked through in full in
+[`docs/decisions/repository-setup-hooks.md`](../decisions/repository-setup-hooks.md), and the
+conclusion is that one of them has no answer today: an execution-authorizing grant cannot live in
+`UserDefaults`, because an agent in this app has a shell that can rewrite it — the same reasoning
+that put `BrowserSubmissionExemptions` in process memory. A capability limit is also unavailable
+rather than merely unbuilt: a setup command's job is network access, arbitrary writes inside the
+checkout and subprocess spawn, which is not a containment boundary. The record therefore rejects
+automatic execution outright, keeps it closed for scheduled, remote and unattended sessions under
+any future recommendation, and proposes instead that a repository may *name* its setup script so a
+freshly provisioned managed worktree can offer it — one press through the confirmation, terminal
+and receipt described above, with no new execution path.

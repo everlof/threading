@@ -815,7 +815,15 @@ say so. `supportedEntryTypes` is the question that actually has an answer.
 ### Deliberately not built
 
 CPU and network throttling stay unsupported in `WKWebView` and `browser_capabilities` keeps saying so;
-the honest path is Playwright through `browser_run_isolated`. No cloud baselines, approval service or
+the honest path is Playwright through `browser_run_isolated`. **No framework source attribution**:
+the picker answers with role, accessible name, test id, ref and box, and deliberately not with a
+React component and `file:line` — that would mean injecting a third-party bundle into the page world
+to read React's private development-build fiber internals, plus a source-map consumer, for a
+shortcut an agent can already reach by grepping. The alternative worth keeping — reading attribution
+a page already publishes, under `page_reported` provenance with the path containment-proved — and
+the measurements behind the rejection are in
+[`docs/decisions/dom-source-attribution.md`](../decisions/dom-source-attribution.md).
+No cloud baselines, approval service or
 review dashboard: the compare surface and the panel are the review surface. No reproducible DOM
 archive. No baking overlays or annotations into page pixels. Imported design images would need their
 own `imported_reference` provenance, alignment offset and scale contract — the provenance case exists,

@@ -10,6 +10,15 @@ crossing was a copied path. So the way out is a first-class control rather than 
 buried three levels down: the content pane's header carries it beside the session's actions,
 and ⌘O is bound to it, which is the platform's Open and the only opening this app does.
 
+That sentence is a decision, not a description, and it has been re-tested against the obvious
+counter-proposal: an editable file preview inside the app.
+[`docs/decisions/editable-file-previews.md`](../decisions/editable-file-previews.md) rejects one for
+the Mac — a deliberately limited editor competing with the good one a press away, at the cost of a
+new themed text surface and a repository-file write contract — and keeps the contract specified for
+the one surface with no way out, the iPhone's read-only Files browser. Two smaller things it points
+back here for: teaching Open In about a managed worktree, and the fact that a right-clicked review
+row already opens at the first changed line, which is the real answer to "let me fix this typo".
+
 `ExternalApp` is the registry, `ExternalAppLauncher` finds and opens, `OpenInMenu` is the one
 list every surface offers.
 

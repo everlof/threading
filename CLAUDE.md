@@ -495,6 +495,17 @@ One file per subsystem — see [Subsystems](#subsystems). **When a decision in o
 changes, update its file rather than this one**; CLAUDE.md keeps only what is true across the
 whole project. A new subsystem earns a new file plus one row in the table.
 
+### `docs/decisions/` and `docs/feature-drafts/`
+
+Two parking places, told apart by whether somebody intends to build the thing.
+[`docs/feature-drafts/`](docs/feature-drafts/README.md) holds researched proposals awaiting
+implementation. [`docs/decisions/`](docs/decisions/README.md) holds ideas investigated to a
+**recommendation** — build now, prototype, wait for demand, or reject — each with the evidence that
+should reopen it. **Before proposing a feature, check whether it already has a record**: five
+deferred ideas from the t3code research are answered there, three of them because Threading already
+has the machinery. Neither directory is a second source of truth; when an approved slice ships, its
+durable decisions move into `docs/architecture/` and a pointer stays behind.
+
 ### IMPROVEMENTS.md
 
 The prioritized reliability/type-safety roadmap from the July 2026 architectural review,

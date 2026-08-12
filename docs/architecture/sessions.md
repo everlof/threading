@@ -1136,6 +1136,14 @@ process: the agent stops, the terminal is released, and the row stays in the sid
 resumed. **Archive** acts on the record: the row moves out of the sidebar into
 Settings ▸ Archived, and the conversation content is untouched either way.
 
+There is deliberately **no third thing between them** — no settled shelf, no snooze, nothing that
+files a row away on a timer. The case for one, and why the answer here is a presentation-only
+filter over the activity marks rather than another lifecycle state, is
+[`docs/decisions/automatic-settling.md`](../decisions/automatic-settling.md). One rule from it is
+worth carrying at this level: nothing derived may reach `ProviderArchiveSync`. Archive stops a
+process and mutates provider state, and it happens because a person or a finishing agent's own
+handshake asked for it.
+
 ### The provider archive boundary
 
 Archive is provider-backed only where the capability matrix says the runtime exposes a

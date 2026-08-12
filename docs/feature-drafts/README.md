@@ -16,6 +16,12 @@ When work starts, re-check the draft against the current code and the relevant f
 implementation. When the feature ships or is abandoned, remove the draft or replace it with a
 short pointer to the durable record so this directory does not become a competing specification.
 
+**A draft is not a decision record.** Everything here is something somebody intends to build.
+An idea investigated to the point of *no*, *not yet*, or *only this much* belongs in
+[`docs/decisions/`](../decisions/README.md) instead, with its recommendation and the evidence that
+should reopen it. A draft that turns out to be a bad idea moves there rather than being deleted —
+the investigation is the value, and an idea deleted without a record comes back.
+
 ## Drafts
 
 - [Project Insights extension](project-insights-extension.md) — keep project hover glanceable
