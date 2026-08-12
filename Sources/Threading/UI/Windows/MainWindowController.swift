@@ -26,6 +26,9 @@ struct MainWindowStartupPerformance: Sendable {
     var chromeCoordinatorNanoseconds: UInt64 = 0
     var initialFrameNanoseconds: UInt64 = 0
     var initialTitleNanoseconds: UInt64 = 0
+    var initialSidebarGeometryNanoseconds: UInt64 = 0
+    var initialSidebarMountNanoseconds: UInt64 = 0
+    var initialSidebarLogicalRowCount: Int = 0
 }
 
 /// The application's single window: a project sidebar beside the active session's terminal.
@@ -673,9 +676,18 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         let initialSidebarWidth = SidebarWidth.stored
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            let geometryStarted = DispatchTime.now().uptimeNanoseconds
             self.updateSidebarMinimumThickness()
             self.restoreSidebarWidth(initialSidebarWidth)
+            self.startupPerformance.initialSidebarGeometryNanoseconds =
+                DispatchTime.now().uptimeNanoseconds - geometryStarted
+
+            let mountStarted = DispatchTime.now().uptimeNanoseconds
             self.sidebarViewController.mountInitialTreeIfNeeded()
+            self.startupPerformance.initialSidebarMountNanoseconds =
+                DispatchTime.now().uptimeNanoseconds - mountStarted
+            self.startupPerformance.initialSidebarLogicalRowCount =
+                self.sidebarViewController.outlineRowCount
         }
         startupPerformance.splitFinalizeNanoseconds = DispatchTime.now().uptimeNanoseconds
             - finalizeStarted

@@ -2376,7 +2376,7 @@ extension ProjectSidebarViewController: NSOutlineViewDataSource {
 
         if let group = item as? RepoGroupNode { return group.projectNodes.count }
         if let project = item as? ProjectNode { return project.childNodes.count }
-        if let branch = item as? BranchGroupNode { return branch.childNodes.count }
+        if let branch = item as? BranchGroupNode { return branch.outlineChildCount }
         if let session = item as? SessionNode { return session.childNodes.count }
         return 0
     }
@@ -2386,7 +2386,7 @@ extension ProjectSidebarViewController: NSOutlineViewDataSource {
 
         if let group = item as? RepoGroupNode { return group.projectNodes[index] }
         if let project = item as? ProjectNode { return project.childNodes[index] }
-        if let branch = item as? BranchGroupNode { return branch.childNodes[index] }
+        if let branch = item as? BranchGroupNode { return branch.outlineChild(at: index) }
         if let session = item as? SessionNode { return session.childNodes[index] }
         return rootNodes[index]
     }
@@ -2499,7 +2499,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         if let branchNode = item as? BranchGroupNode, let cell = view as? ProjectRowView {
             let hiddenItems = outlineView.isItemExpanded(branchNode)
                 ? 0
-                : branchNode.childNodes.count
+                : branchNode.outlineChildCount
 
             cell.configureAsBranch(
                 named: branchNode.branch,

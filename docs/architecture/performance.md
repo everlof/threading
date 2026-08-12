@@ -1507,6 +1507,45 @@ claimed as improved: native-window and machine-load variance dominated it. Bound
 the row-at-a-time path at 511 rows, ordering across batch and wave boundaries, and exact failure
 identity inside a valid-JSON batch.
 
+### Large-store first outline mount
+
+Removing the persistence decoder exposed the next cardinality owner one phase later. A matched
+Release App Launch trace against the same isolated two-project / 5,000-session snapshot put
+**180.316 ms** under `mountInitialTreeIfNeeded`, **153.892 ms** under `reload`, and **143.892 ms**
+under recursive standing expansion. Of that, **138.892 ms** was the outline data source serving
+children. Final layout and display were almost identical to the 131-session control; the scaling
+penalty lived in the first main-queue turn that installed logical outline rows.
+
+The branch data source had an allocation multiplier hidden behind a harmless-looking property.
+`BranchGroupNode.childNodes` maps all sessions and terminals into a fresh combined array. AppKit
+asks for the branch count once and then asks for each child by index, so the old implementation
+rebuilt an *n*-element array for each of *n* rows: quadratic work before row-view virtualization
+could help. Whole-tree traversals may still use `childNodes`; the outline's hot path now reads a
+constant-time count and indexes the two stored arrays directly, preserving sessions-then-terminals
+order and exact object identity.
+
+Five matched direct Release launches measured:
+
+| Two projects / 5,000 sessions | Rebuilt child array per row | Direct indexed child | Change |
+|---|---:|---:|---:|
+| First ready turn | 187.991 ms | **59.335 ms** | **−128.656 ms (−68.4%)** |
+| Process entry → first ready turn | 542.055 ms | **372.091 ms** | −169.964 ms (−31.4%) |
+| Settled first frame | 645.222 ms | **475.491 ms** | **−169.731 ms (−26.3%)** |
+
+The retained coarse clocks report the deferred divider geometry and first tree mount separately.
+The after median was **3.022 ms** of geometry and **30.495 ms** to mount 4,902 logical rows. In the
+matched after trace, mount/reload/standing-expansion fell to **30.648 / 10.648 / 5.648 ms**, and the
+outline child callback had no 5 ms sample. The ordinary 131-session control did not regress:
+first-turn median moved **47.681 → 37.094 ms**, settled-frame median **621.174 → 490.826 ms**, and
+its measured mount was **2.973 ms**. Those ordinary aggregate deltas include native-window and
+machine-load variance; they are a no-regression control, not an additional attributed speedup.
+
+The indexed-order regression lives in the registered sidebar tree suite. Its opt-in one-project /
+5,000-session stress shape also closes and fully reopens the project, proves all 5,000 logical
+session rows returned, then exactly reveals and materializes a selected row that began beyond the
+launch viewport. Persisted-closed projects remain closed on first mount while their default-open
+branch and side-chat descendants are ready when the project is later expanded.
+
 ## Display-pane transition beside a live TUI
 
 Opening the right pane originally performed two consecutive 200 ms transitions: first the split
