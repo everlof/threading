@@ -22,18 +22,31 @@ extension DisplayPaneController {
     case .image(_, let url):
       var entries: [ThemedMenuEntry] = []
       if QuickLookPresenter.canPreview(url) {
-        entries.append(item(L10n.string("Inspect")) { [weak self] in self?.inspectImage() })
+        entries.append(item(L10n.string("Inspect"), symbol: "magnifyingglass") {
+          [weak self] in self?.inspectImage()
+        })
         entries.append(.separator)
       }
-      entries.append(item(L10n.string("Copy Image")) { [weak self] in self?.copyImage() })
-      entries.append(item(L10n.string("Copy File Name")) { [weak self] in self?.copyFileName() })
-      entries.append(item(L10n.string("Copy File Path")) { [weak self] in self?.copyFilePath() })
+      entries.append(item(L10n.string("Copy Image"), symbol: "photo.on.rectangle") {
+        [weak self] in self?.copyImage()
+      })
+      entries.append(item(L10n.string("Copy File Name"), symbol: "textformat") {
+        [weak self] in self?.copyFileName()
+      })
+      entries.append(item(L10n.string("Copy File Path"), symbol: "folder") {
+        [weak self] in self?.copyFilePath()
+      })
       entries.append(.separator)
-      entries.append(item(L10n.string("Reveal in Finder")) { [weak self] in self?.revealInFinder() })
-      entries.append(item(L10n.string("Open in Default App")) { [weak self] in self?.openInDefaultApp() })
+      entries.append(item(L10n.string("Reveal in Finder"), symbol: "magnifyingglass") {
+        [weak self] in self?.revealInFinder()
+      })
+      entries.append(item(L10n.string("Open in Default App"), symbol: "arrow.up.forward.app") {
+        [weak self] in self?.openInDefaultApp()
+      })
       if QuickLookPresenter.canPreview(url) {
         entries.append(.separator)
-        entries.append(item(L10n.string("Open in System Quick Look")) { [weak self] in
+        entries.append(item(L10n.string("Open in System Quick Look"), symbol: "eye") {
+          [weak self] in
           self?.quickLookImage()
         })
       }
@@ -41,17 +54,21 @@ extension DisplayPaneController {
 
     case .html:
       return [
-        item(L10n.string("Copy HTML")) { [weak self] in self?.copyHTML() },
+        item(L10n.string("Copy HTML"), symbol: "doc.on.doc") { [weak self] in self?.copyHTML() },
         .separator,
-        item(L10n.string("Open in Browser")) { [weak self] in self?.openHTMLInBrowser() },
-        item(L10n.string("Reload")) { [weak self] in self?.reloadHTML() }
+        item(L10n.string("Open in Browser"), symbol: "globe") {
+          [weak self] in self?.openHTMLInBrowser()
+        },
+        item(L10n.string("Reload"), symbol: "arrow.clockwise") { [weak self] in self?.reloadHTML() }
       ]
 
     case .chart(let spec):
       // A chart is the one content kind whose source is small enough to hand back whole, and
       // the numbers are what a reader wants next — into a spreadsheet, or into a message.
       return [
-        item(L10n.string("Copy Chart Data")) { [weak self] in self?.copyChartData(spec) }
+        item(L10n.string("Copy Chart Data"), symbol: "tablecells") {
+          [weak self] in self?.copyChartData(spec)
+        }
       ]
 
     case .semanticScene, nil:
@@ -65,8 +82,16 @@ extension DisplayPaneController {
     pasteboard.setString(spec.tabSeparatedValues, forType: .string)
   }
 
-  private func item(_ title: String, action: @escaping () -> Void) -> ThemedMenuEntry {
-    .item(ThemedMenuItem(title: title, onChoose: action))
+  private func item(
+    _ title: String,
+    symbol: String? = nil,
+    action: @escaping () -> Void
+  ) -> ThemedMenuEntry {
+    .item(ThemedMenuItem(
+      title: title,
+      image: symbol.flatMap(ThemedMenuIcon.symbol),
+      onChoose: action
+    ))
   }
 
   @objc func contentMenuButtonClicked(_ sender: ThemedButton) {

@@ -2210,10 +2210,12 @@ private extension ProjectSidebarViewController {
             [
                 .item(ThemedMenuItem(
                     title: L10n.string("New Chat…"),
+                    image: ThemedMenuIcon.symbol("bubble.left"),
                     onChoose: pinnedAction(row) { $0.newProjectChatClicked() }
                 )),
                 .item(ThemedMenuItem(
                     title: L10n.string("New Terminal"),
+                    image: ThemedMenuIcon.symbol("terminal"),
                     onChoose: pinnedAction(row) { $0.newProjectTerminalClicked() }
                 ))
             ],
@@ -2770,6 +2772,7 @@ extension ProjectSidebarViewController {
         var entries: [ThemedMenuEntry] = [
             .item(ThemedMenuItem(
                 title: L10n.string("Rename Project…"),
+                image: ThemedMenuIcon.symbol("pencil"),
                 onChoose: pinnedAction(row) { $0.renameClicked() }
             ))
         ]
@@ -2784,6 +2787,7 @@ extension ProjectSidebarViewController {
         }
         entries.append(.item(ThemedMenuItem(
             title: L10n.string("Reveal in Finder"),
+            image: ThemedMenuIcon.symbol("magnifyingglass"),
             onChoose: pinnedAction(row) { $0.revealInFinderClicked() }
         )))
         entries.append(projectIconEntry(row: row))
@@ -2794,6 +2798,7 @@ extension ProjectSidebarViewController {
         }
         entries.append(.item(ThemedMenuItem(
             title: L10n.string("Reclaim Disk Space…"),
+            image: ThemedMenuIcon.symbol("internaldrive"),
             onChoose: pinnedAction(row) { $0.reclaimDiskSpaceClicked() }
         )))
         entries.append(.separator)
@@ -2806,6 +2811,7 @@ extension ProjectSidebarViewController {
         entries.append(.separator)
         entries.append(.item(ThemedMenuItem(
             title: L10n.string("Remove Project"),
+            image: ThemedMenuIcon.symbol("minus.circle"),
             onChoose: pinnedAction(row) { $0.removeClicked() }
         )))
 

@@ -108,7 +108,11 @@ final class ThemeMenuBuilder {
             onChoose: { [weak self] in self?.onEditThemes?() }
         )))
 
-        return .item(ThemedMenuItem(title: L10n.string("Theme"), submenu: rows))
+        return .item(ThemedMenuItem(
+            title: L10n.string("Theme"),
+            image: ThemedMenuIcon.symbol("paintpalette"),
+            submenu: rows
+        ))
     }
 
     private func themeChoiceEntry(

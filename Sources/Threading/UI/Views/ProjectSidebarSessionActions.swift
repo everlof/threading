@@ -610,17 +610,19 @@ extension ProjectSidebarViewController {
         var entries: [ThemedMenuEntry] = []
 
         entries.append(action(
-            session.isPinned ? L10n.string("Unpin") : L10n.string("Pin")
+            session.isPinned ? L10n.string("Unpin") : L10n.string("Pin"),
+            symbol: session.isPinned ? "pin.slash" : "pin"
         ) { [weak self] in self?.togglePinnedClicked() })
         entries.append(snoozeEntry(for: session))
         // The sidebar only ever lists unarchived sessions, so this is always "Archive";
         // restoring one happens from Settings, where the archived sessions live.
-        entries.append(action(L10n.string("Archive")) { [weak self] in
+        entries.append(action(L10n.string("Archive"), symbol: "archivebox") { [weak self] in
             self?.archiveClicked()
         })
 
         if AgentRuntime.shared.isRunning(sessionID: sessionID) {
-            entries.append(action(L10n.string("Close Session")) { [weak self] in
+            entries.append(action(L10n.string("Close Session"), symbol: "stop.circle") {
+                [weak self] in
                 self?.closeSessionClicked()
             })
         }
@@ -647,14 +649,15 @@ extension ProjectSidebarViewController {
            let openIn = OpenInMenu.submenuEntry(for: .folder(project.folderURL)) {
             entries.append(openIn)
         }
-        entries.append(action(L10n.string("Rename Session…")) { [weak self] in
+        entries.append(action(L10n.string("Rename Session…"), symbol: "pencil") { [weak self] in
             self?.renameSessionClicked()
         })
         // Absent rather than disabled when the agent is mid-turn or has no naming tool: a
         // greyed row here would be one more thing to read in a menu that already reads long,
         // and the reason it is unavailable is not something a disabled item could say.
         if SessionCoordinator.canAskAgentToRename(sessionID) {
-            entries.append(action(L10n.string("Rename with Agent")) { [weak self] in
+            entries.append(action(L10n.string("Rename with Agent"), symbol: "sparkles") {
+                [weak self] in
                 self?.askAgentToRenameClicked()
             })
         }
@@ -667,11 +670,13 @@ extension ProjectSidebarViewController {
             transcriptURL: copyProject.flatMap { SessionTranscript.url(for: session, in: $0) }
         ))
         if AppSettings.shared.remoteAccessEnabled {
-            entries.append(action(L10n.string("Share Chat…")) { [weak self] in
+            entries.append(action(L10n.string("Share Chat…"), symbol: "square.and.arrow.up") {
+                [weak self] in
                 self?.shareSessionClicked()
             })
             if RemoteAccessCoordinator.shared.hasSessionShares(sessionID) {
-                entries.append(action(L10n.string("Stop Sharing Chat")) { [weak self] in
+                entries.append(action(L10n.string("Stop Sharing Chat"), symbol: "eye.slash") {
+                    [weak self] in
                     self?.stopSharingSessionClicked()
                 })
             }
@@ -680,7 +685,7 @@ extension ProjectSidebarViewController {
         if let cont = continueWithProviderEntry(for: session) { entries.append(cont) }
 
         appendGroupSeparator(&entries)
-        entries.append(action(L10n.string("Delete Session")) { [weak self] in
+        entries.append(action(L10n.string("Delete Session"), symbol: "trash") { [weak self] in
             self?.deleteSessionClicked()
         })
 
@@ -697,9 +702,27 @@ extension ProjectSidebarViewController {
         return entries
     }
 
-    /// One plain action row.
-    private func action(_ title: String, _ body: @escaping () -> Void) -> ThemedMenuEntry {
-        .item(ThemedMenuItem(title: title, onChoose: body))
+    /// One plain action row, with the mark that names it.
+    ///
+    /// **The marks are not decoration here.** This menu is the longest in the app — past thirty
+    /// rows on a shared, running session — and read as an unbroken wall of words in which the
+    /// only way to find Archive was to read every title above it. A glyph column is what a menu
+    /// this long is scanned by: the eye lands on the shape and reads one title, rather than
+    /// reading eight. Grouping by separator was the first half of that fix; this is the second.
+    ///
+    /// Nil is allowed and means *this row has no honest mark*, which is better than a vaguely
+    /// related one — a column where two rows share a glyph they do not share a meaning with is
+    /// worse than a column with a gap in it.
+    private func action(
+        _ title: String,
+        symbol: String? = nil,
+        _ body: @escaping () -> Void
+    ) -> ThemedMenuEntry {
+        .item(ThemedMenuItem(
+            title: title,
+            image: symbol.flatMap(ThemedMenuIcon.symbol),
+            onChoose: body
+        ))
     }
 
     /// Snooze sits beside Pin and Archive because all three change how a row is found, while
@@ -707,7 +730,7 @@ extension ProjectSidebarViewController {
     /// header the same Snooze/Unsnooze contract.
     private func snoozeEntry(for session: AgentSession) -> ThemedMenuEntry {
         if session.isSnoozed(at: Date()) {
-            return action(L10n.string("Unsnooze")) {
+            return action(L10n.string("Unsnooze"), symbol: "bell") {
                 SessionSnoozeCenter.shared.unsnooze(session.id)
             }
         }
@@ -722,7 +745,7 @@ extension ProjectSidebarViewController {
             ))
         }
         submenu.append(.separator)
-        submenu.append(action(L10n.string("Custom time…")) { [weak self] in
+        submenu.append(action(L10n.string("Custom time…"), symbol: "calendar") { [weak self] in
             guard let self else { return }
             ScheduleMessageAlert.present(
                 over: view.window,
@@ -734,7 +757,11 @@ extension ProjectSidebarViewController {
                 SessionSnoozeCenter.shared.snooze(session.id, until: deadline)
             }
         })
-        return .item(ThemedMenuItem(title: L10n.string("Snooze"), submenu: submenu))
+        return .item(ThemedMenuItem(
+            title: L10n.string("Snooze"),
+            image: ThemedMenuIcon.symbol("moon.zzz"),
+            submenu: submenu
+        ))
     }
 
     /// Everything about a chat that is needed *elsewhere*, folded behind one Copy item: the
@@ -760,26 +787,34 @@ extension ProjectSidebarViewController {
         transcriptURL: URL?
     ) -> ThemedMenuEntry {
         var submenu: [ThemedMenuEntry] = []
+        // Two glyphs across four rows, and that is the point: the pair that are *identifiers*
+        // share one mark and the pair that are *paths on disk* share the other, so the fold's
+        // two kinds are told apart before any of the four titles is read.
         if session.resumeState.transcriptID != nil {
-            submenu.append(action(L10n.string("Agent Session ID")) { [weak self] in
+            submenu.append(action(L10n.string("Agent Session ID"), symbol: "number") {
+                [weak self] in
                 self?.copyAgentSessionIDClicked()
             })
         }
-        submenu.append(action(L10n.string("Threading ID")) { [weak self] in
+        submenu.append(action(L10n.string("Threading ID"), symbol: "number") { [weak self] in
             self?.copyThreadingIDClicked()
         })
         if let project {
             let path = project.folderPath
-            submenu.append(action(L10n.string("Worktree Path")) {
+            submenu.append(action(L10n.string("Worktree Path"), symbol: "folder") {
                 Self.copyToPasteboard(path)
             })
         }
         if let transcriptURL {
-            submenu.append(action(L10n.string("Transcript Path")) {
+            submenu.append(action(L10n.string("Transcript Path"), symbol: "folder") {
                 Self.copyToPasteboard(transcriptURL.path)
             })
         }
-        return .item(ThemedMenuItem(title: L10n.string("Copy"), submenu: submenu))
+        return .item(ThemedMenuItem(
+            title: L10n.string("Copy"),
+            image: ThemedMenuIcon.symbol("doc.on.doc"),
+            submenu: submenu
+        ))
     }
 
     /// The one pasteboard write every Copy row shares — cleared first, so a failed set never
@@ -809,6 +844,7 @@ extension ProjectSidebarViewController {
         submenu.append(attachmentsEntry())
         return .item(ThemedMenuItem(
             title: SessionActionMenuDefaults.sessionOptionsTitle,
+            image: ThemedMenuIcon.symbol("slider.horizontal.3"),
             submenu: submenu
         ))
     }
@@ -822,17 +858,20 @@ extension ProjectSidebarViewController {
         action(
             AttentionAlertScope.isMuted(sessionID: session.id)
                 ? L10n.string("Unmute Notifications")
-                : L10n.string("Mute Notifications")
+                : L10n.string("Mute Notifications"),
+            symbol: AttentionAlertScope.isMuted(sessionID: session.id)
+                ? "bell"
+                : "bell.slash"
         ) { [weak self] in self?.toggleMutedClicked() }
     }
 
     private func attachmentsEntry() -> ThemedMenuEntry {
+        // Through `ThemedMenuIcon` rather than a raw `NSImage`: an unconfigured symbol arrives
+        // at whatever size the system hands out, which is how this one row's paperclip came out
+        // a size off every mark beside it once the rest of the menu grew a column.
         .item(ThemedMenuItem(
             title: SessionActionMenuDefaults.attachmentsTitle,
-            image: NSImage(
-                systemSymbolName: SessionActionMenuDefaults.attachmentsSymbol,
-                accessibilityDescription: SessionActionMenuDefaults.attachmentsTitle
-            ),
+            image: ThemedMenuIcon.symbol(SessionActionMenuDefaults.attachmentsSymbol),
             onChoose: { [weak self] in self?.attachmentsClicked() }
         ))
     }
@@ -875,7 +914,10 @@ extension ProjectSidebarViewController {
         // not a side chat, parent archived, agent mid-turn or dormant, workspace tools off —
         // for the same reason Rename with Agent is: none of those reasons fits a greyed row.
         if SessionCoordinator.canAskForReportBack(session.id) {
-            entries.append(action(L10n.string("Send Result to Parent")) { [weak self] in
+            entries.append(action(
+                L10n.string("Send Result to Parent"),
+                symbol: "arrowshape.turn.up.left"
+            ) { [weak self] in
                 self?.sendResultToParentClicked()
             })
         }
@@ -884,10 +926,12 @@ extension ProjectSidebarViewController {
             return entries
         }
 
-        entries.append(action(L10n.string("New Side Chat")) { [weak self] in
+        entries.append(action(L10n.string("New Side Chat"), symbol: "bubble.left.and.bubble.right") {
+            [weak self] in
             self?.newSideChatClicked()
         })
-        entries.append(action(L10n.string("Ask on the Side…")) { [weak self] in
+        entries.append(action(L10n.string("Ask on the Side…"), symbol: "questionmark.bubble") {
+            [weak self] in
             self?.askOnTheSideClicked()
         })
         return entries
@@ -913,7 +957,11 @@ extension ProjectSidebarViewController {
                 onChoose: { [weak self] in self?.setSurface(usesNativeUI: usesNativeUI) }
             ))
         }
-        return .item(ThemedMenuItem(title: L10n.string("Interface"), submenu: rows))
+        return .item(ThemedMenuItem(
+            title: L10n.string("Interface"),
+            image: ThemedMenuIcon.symbol("macwindow"),
+            submenu: rows
+        ))
     }
 
     /// Adds a "Move to Account" submenu when the conversation can move — it resumes by id, has
@@ -938,6 +986,7 @@ extension ProjectSidebarViewController {
         }
         return .item(ThemedMenuItem(
             title: L10n.string("Claude Remote Control"),
+            image: ThemedMenuIcon.symbol("antenna.radiowaves.left.and.right"),
             submenu: rows
         ))
     }
@@ -966,6 +1015,7 @@ extension ProjectSidebarViewController {
 
         return .item(ThemedMenuItem(
             title: L10n.string("Permission Mode"),
+            image: ThemedMenuIcon.symbol(PermissionModePresentation.symbol),
             submenu: PermissionModePresentation.rows(
                 for: session.kind,
                 selected: session.permissionMode,
@@ -996,7 +1046,11 @@ extension ProjectSidebarViewController {
                 onChoose: { [weak self] in self?.moveToAccount(account) }
             ))
         }
-        return .item(ThemedMenuItem(title: L10n.string("Move to Account"), submenu: rows))
+        return .item(ThemedMenuItem(
+            title: L10n.string("Move to Account"),
+            image: ThemedMenuIcon.symbol("person.crop.circle"),
+            submenu: rows
+        ))
     }
 
     /// Cross-provider is deliberately a different verb from Move. Move preserves one native
@@ -1017,6 +1071,7 @@ extension ProjectSidebarViewController {
         }
         return .item(ThemedMenuItem(
             title: L10n.string("Continue with…"),
+            image: ThemedMenuIcon.symbol("arrow.triangle.branch"),
             submenu: rows
         ))
     }

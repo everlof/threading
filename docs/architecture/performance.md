@@ -1418,6 +1418,14 @@ positions and reveals it. That stronger test also exposed and fixed a pre-existi
 selecting an existing project opened its composer without refreshing the page header or window
 title.
 
+The measurement above stands as taken; only the subtree's name has changed since. The header's
+leading control is no longer a `ThemedTabItemView` — `PageTitleView` names the page instead (see
+[`window-chrome.md`](window-chrome.md)) — and it inherits this laziness unchanged: same lazy
+`pageTitleView` accessor, same insertion at the leading edge on the first real workspace page,
+same hidden-under-Settings inheritance, and `testPageTitleIsLazyUntilARealPageNeedsIt` is the
+same regression test renamed. It is a slightly smaller subtree than the one measured, having no
+close button.
+
 The next trace exposed work that was visible but unnecessarily expensive rather than hidden. The
 first Claude and Codex rows loaded their 32 px brand marks with two synchronous
 `NSImage(contentsOf:)` calls from loose bundle files. The retained post-page-tab Time Profiler

@@ -154,10 +154,12 @@ extension TabHosting {
         return [
             .item(ThemedMenuItem(
                 title: L10n.string("Close Tab"),
+                image: ThemedMenuIcon.symbol("xmark"),
                 onChoose: { [weak self] in _ = self?.closeTab(id: id, for: sessionID) }
             )),
             .item(ThemedMenuItem(
                 title: L10n.string("Close Other Tabs"),
+                image: ThemedMenuIcon.symbol("rectangle.on.rectangle.slash"),
                 isEnabled: !others.isEmpty,
                 onChoose: { [weak self] in
                     for other in others { _ = self?.closeTab(id: other, for: sessionID) }
@@ -165,6 +167,7 @@ extension TabHosting {
             )),
             .item(ThemedMenuItem(
                 title: L10n.string("Close Tabs to the Right"),
+                image: ThemedMenuIcon.symbol("arrow.right.to.line"),
                 isEnabled: !after.isEmpty,
                 onChoose: { [weak self] in
                     for trailing in after { _ = self?.closeTab(id: trailing, for: sessionID) }
@@ -174,6 +177,7 @@ extension TabHosting {
             // cheaper to read than an entry that greys out for a reason nobody can see.
             .item(ThemedMenuItem(
                 title: L10n.string("Close All Tabs"),
+                image: ThemedMenuIcon.symbol("xmark.square"),
                 onChoose: { [weak self] in
                     for tab in all { _ = self?.closeTab(id: tab, for: sessionID) }
                 }
@@ -181,6 +185,7 @@ extension TabHosting {
             .separator,
             .item(ThemedMenuItem(
                 title: L10n.string("Move Left"),
+                image: ThemedMenuIcon.symbol("arrow.left"),
                 isEnabled: index > 0,
                 onChoose: { [weak self] in
                     _ = self?.moveTab(id: id, toIndex: index - 1, for: sessionID)
@@ -188,6 +193,7 @@ extension TabHosting {
             )),
             .item(ThemedMenuItem(
                 title: L10n.string("Move Right"),
+                image: ThemedMenuIcon.symbol("arrow.right"),
                 isEnabled: index < tabs.count - 1,
                 onChoose: { [weak self] in
                     _ = self?.moveTab(id: id, toIndex: index + 1, for: sessionID)

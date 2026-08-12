@@ -1648,8 +1648,8 @@ Worth knowing:
 A session is not stuck on the surface it was created with. Use the interface button in the
 session header to switch directly to the other one: it shows a chat symbol in the agent's
 terminal UI and a terminal symbol in Threading's native UI. For an explicit choice, open
-**Session Options ▸ Interface** from either the session row's `⋯` or the header's **Context**
-menu. The two menus are the same menu, including their current-surface checkmark.
+**Session Options ▸ Interface** from either the session row's `⋯` or the `⋯` beside the page's
+name in the header. The two menus are the same menu, including their current-surface checkmark.
 
 The conversation carries over — the agent picks up exactly where it left off, with everything
 that was said before still in its context.
@@ -1990,19 +1990,20 @@ browser keeps its page — and the new home survives a relaunch. The panel-only 
 
 ### The session header
 
-Every session sits under a header of its own, at the top of the pane: the **page tab** naming
-what is on screen and a **+** for a new session on the left, then what the session's account
-has left to spend, then what can be done to it. It belongs to the pane rather than to the
-window, so it moves when the sidebar is dragged or collapsed instead of drifting over the
-project list.
+Every session sits under a header of its own, at the top of the pane: the agent's mark, the
+**name** of what is on screen, and the **⋯** that acts on it — then, further along, what the
+session's account has left to spend and which surfaces are showing. It belongs to the pane
+rather than to the window, so it moves when the sidebar is dragged or collapsed instead of
+drifting over the project list.
 
-There is deliberately **one** page tab, not a row of them: switching a session swaps the whole
-workspace — its drawer, its panel, its sidebar selection — so the sidebar is the session
-switcher, and this chip names where you are (a session or the new-session composer). Click it
-to reveal the current page's row in the sidebar; its × (or **⌘W**) closes the page back to the
-empty pane — which never stops the agent; the session stays in the sidebar. Settings is a
-temporary mode instead: the header shows **Settings** and **Done**, not a category-shaped tab.
-For hopping between recent sessions, use the **‹ ›** history pair or ⌃⌘←/→.
+There is deliberately **one** page named here, not a row of tabs: switching a session swaps the
+whole workspace — its drawer, its panel, its sidebar selection — so the sidebar is the session
+switcher, and this names where you are (a session or the new-session composer). Click the name
+to reveal its row in the sidebar; **⌘W** closes the page back to the empty pane, which never
+stops the agent — the session stays in the sidebar. Start another chat with **⌘N**, or with the
+**+** on a project's row in the sidebar, which starts one in that checkout. Settings is a
+temporary mode instead: the header shows **Settings** and **Done**. For hopping between recent
+sessions, use the **‹ ›** history pair or ⌃⌘←/→.
 
 The window's toolbar keeps only the controls that act on the window rather than on a pane,
 beside the traffic lights: the **sidebar toggle**, and the **‹ ›** history pair — Go Back and
@@ -2022,14 +2023,18 @@ The same **Open in ▸** submenu appears wherever a folder or a file is named: o
 and a session row in the sidebar, on a row of the **Activity** tab, and — the useful one — on a
 right-click in **Git Review**, where it opens the file *at the first line the diff changes*.
 
-Four buttons sit at the header's right edge:
+The **⋯** beside the page's name opens the same full menu as the session row's `⋯`:
+pinning, archiving, side chats, **Theme**, **Permission Mode**, **Session Options** (Interface,
+Claude Remote Control, Mute Notifications, Attachments), rename, the **Copy ▸** submenu, account
+moves, sharing, deletion, and any installed extension actions that apply. It sits with the name
+because it acts on the page named beside it, while everything at the other end of the header
+decides what is on screen.
 
-- **Context** (⋯) — the same full menu as the session row's `⋯`: pinning, archiving, side
-  chats, **Theme**, **Permission Mode**, **Session Options** (Interface, Claude Remote
-  Control, Mute Notifications, Attachments), rename, the **Copy ▸** submenu, account moves,
-  sharing, deletion, and any installed extension actions that apply.
+Four buttons sit at that end, and each one decides what this pane shows:
+
 - **Interface** — switches directly to the other renderer. Its icon points at the destination:
   chat for Threading's native UI, terminal for Claude Code's or Codex's own UI.
+- **Status card** — shows or hides the Git status card floating over the session.
 - **Shell** — shows or hides the shell drawer under the session (same as ⌃`).
 - **Panel** — shows or hides the display panel.
 
@@ -3122,7 +3127,7 @@ than borrowing an unrelated app translation.
   as long as you stay on it — one row at a time, and only after a short pause, so a pointer
   crossing the list leaves every name readable. Every transition can also be
   previewed on the page. It plays wherever a name you are already looking at changes: the
-  sidebar row, the session header's page tab, and project and checkout rows — whether the change
+  sidebar row, the page's name in the session header, and project and checkout rows — whether the change
   came from renaming the session yourself, from the agent naming the conversation, or from
   a checkout switching branch. A row being filled in for the first time, or scrolled back
   into view, simply shows its name.

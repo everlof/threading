@@ -216,6 +216,25 @@ struct ThemedMenuPreview {
     var highlightChanged: ((Bool) -> Void)?
 }
 
+/// The mark a menu row leads with, resolved once at the menu's own size and weight.
+///
+/// A row's `image` stays an `NSImage` because it is not always a symbol — an installed app's
+/// icon, an account's mark and a theme's swatch all arrive as artwork with colours of their own.
+/// Where it *is* a symbol, this is the single place that says how large and how heavy, so a menu
+/// built in one feature cannot draw its icons a point off the menu built in the next. The point
+/// size is `control` rather than the slot's nominal one: these sit beside a 13pt title, and that
+/// pairing is what `Design.Symbol.control` is measured for.
+@MainActor
+enum ThemedMenuIcon {
+    static func symbol(_ name: String) -> NSImage? {
+        Design.Symbol.image(
+            name,
+            slot: ThemedMenuMetrics.imageSize,
+            pointSize: Design.Symbol.control
+        )
+    }
+}
+
 enum ThemedMenuEntry {
     case item(ThemedMenuItem)
     case separator
@@ -548,7 +567,8 @@ private final class ThemedMenuSession: NSObject {
 
         let menuWidth = ThemedMenuMetrics.width(
             for: presentation.entries,
-            minimum: presentation.minimumWidth
+            minimum: presentation.minimumWidth,
+            selectedEntryIndex: selectedEntryIndex
         )
         let menuHeight = ThemedMenuMetrics.height(for: presentation.entries)
         let anchorRect: NSRect
@@ -1643,7 +1663,16 @@ enum ThemedMenuMetrics {
     static var leadingSlot: CGFloat {
         checkSize + (usesClassicGrammar ? 3 : Design.Spacing.small)
     }
-    static var imageSize: CGFloat { usesClassicGrammar ? 16 : 14 }
+    /// A row's leading mark — the **slot**, which caps the artwork rather than sizing it.
+    ///
+    /// It was 14, and that was a cap below what a symbol beside a label already renders at: SF
+    /// configured at `Design.Symbol.control` comes out around 14–15pt, so most glyphs were being
+    /// shrunk a little past their configuration, which thins the stroke off the weight the
+    /// optical size chose and off the pixel grid with it. One icon in a menu of words absorbs
+    /// that; a whole column of them does not, and the column is what these menus now have.
+    /// `Design.Size.tabIconSlot` is the same slot every other mark-that-names-something in the
+    /// chrome sits in.
+    static var imageSize: CGFloat { Design.Size.tabIconSlot }
     static var imageSlot: CGFloat {
         imageSize + (usesClassicGrammar ? 3 : Design.Spacing.small)
     }
@@ -1751,29 +1780,102 @@ enum ThemedMenuMetrics {
         }.max() ?? 0
     }
 
+    /// How a panel's rows carry their marks, which is the one thing that decides where every
+    /// title in it begins.
+    ///
+    /// The old answer was "always leave room for a checkmark", and it cost twice. An
+    /// icon-less menu of plain actions — which is most of them — began every title 16pt inside
+    /// the panel behind a gutter nothing was ever drawn in, which is the difference between a
+    /// column of names and a column of names that looks like it lost its icons. And it made
+    /// icons unaffordable: added behind a gutter that was always reserved, a glyph and its
+    /// title started 48pt in and the panel grew to hold a column of air.
+    ///
+    /// So a mark column is reserved only where something is going in it, and a check and an
+    /// icon **share** that column — which is what Win32 has always done, and what the row
+    /// drawing already assumed by putting the check at `contentInset`. Only a menu where one
+    /// row carries *both* needs two, and one exists: Open in marks the preferred app in a list
+    /// where every row wears that app's own icon.
+    enum CheckColumn {
+        /// No row in this panel is marked.
+        case none
+        /// Marks and icons share one leading column, because no row has both.
+        case shared
+        /// A column of its own, before the icons — some row carries a mark *and* an icon.
+        case separate
+    }
+
+    /// What this panel's marks need, before the appearance has its say.
+    ///
+    /// A row is marked by its own `isSelected` or by the index the presenter opened on; the rows
+    /// are built to treat those identically, so the measurement has to as well — a menu whose
+    /// only mark came from the presenter measured itself without one and drew the check into
+    /// the first title.
+    static func checkColumn(
+        _ entries: [ThemedMenuEntry],
+        selectedEntryIndex: Int? = nil
+    ) -> CheckColumn {
+        var marked = false
+        for (index, entry) in entries.enumerated() {
+            guard let item = entry.item else { continue }
+            guard item.isSelected || index == selectedEntryIndex else { continue }
+            if item.image != nil { return .separate }
+            marked = true
+        }
+        return marked ? .shared : .none
+    }
+
+    /// The same answer under the anatomy the current theme authors.
+    ///
+    /// The historical families do not negotiate this. Platinum and Workbench draw independent
+    /// mark and icon columns whether or not either is occupied — an icon-less System 7 Help
+    /// menu still starts its titles after the mark column — and Win32 draws exactly one, which
+    /// a row fills with its check *or* its bitmap. Both are part of the anatomy those
+    /// reconstructions are measured against, so only the modern menu asks the entries.
+    static func resolved(_ column: CheckColumn) -> CheckColumn {
+        switch appearance {
+        case .platinum, .amiga: return .separate
+        case .windows98: return .shared
+        default: return column
+        }
+    }
+
+    /// Where a row's leading mark begins — its icon, or its check where the two share a column.
+    static func markInset(checkColumn: CheckColumn) -> CGFloat {
+        contentInset + (resolved(checkColumn) == .separate ? leadingSlot : 0)
+    }
+
+    /// The leading mark column's width: the icon's slot where the panel has icons, else the
+    /// mark's own, else nothing at all.
+    static func markWidth(checkColumn: CheckColumn, hasImageColumn: Bool) -> CGFloat {
+        if hasImageColumn { return imageSlot }
+        return resolved(checkColumn) == .shared ? leadingSlot : 0
+    }
+
     /// Where a row's content begins, per column, so a *drawn* title and a *hosted* preview land
     /// in the same place. A preview replaces the text rather than joining it, and a column of
     /// names that shifted sideways when one of them animated would read as a layout bug in the
     /// menu rather than as the transition it is demonstrating.
-    static var imageInset: CGFloat {
-        // Win32 reserves one leading mark column: a row contains either its check/radio mark
-        // or its icon. Adding both slots moved every icon and title 11px right of the native
-        // Start-menu cascade. Other families retain the independent columns their references
-        // expose (Platinum's icon-less Help rows still start after the check column).
-        appearance == .windows98 ? contentInset : contentInset + leadingSlot
+    static func previewInset(checkColumn: CheckColumn, hasImageColumn: Bool) -> CGFloat {
+        markInset(checkColumn: checkColumn)
+            + markWidth(checkColumn: checkColumn, hasImageColumn: hasImageColumn)
     }
 
-    static func previewInset(hasImageColumn: Bool) -> CGFloat {
-        imageInset + (hasImageColumn ? imageSlot : 0)
-    }
-
-    static func titleInset(hasImageColumn: Bool, hasPreviewColumn: Bool) -> CGFloat {
+    static func titleInset(
+        checkColumn: CheckColumn,
+        hasImageColumn: Bool,
+        hasPreviewColumn: Bool
+    ) -> CGFloat {
+        let previewColumn = hasPreviewColumn ? previewSlot : 0
         if appearance == .windows98 {
-            let markColumn = hasImageColumn ? imageSlot : leadingSlot
-            let previewColumn = hasPreviewColumn ? previewSlot : 0
-            return contentInset + max(markColumn, previewColumn)
+            // One column, and the preview shares it rather than following it — the native
+            // cascade has a single leading slot whatever goes in it.
+            return contentInset + max(
+                markWidth(checkColumn: checkColumn, hasImageColumn: hasImageColumn),
+                previewColumn
+            )
         }
-        return previewInset(hasImageColumn: hasImageColumn) + (hasPreviewColumn ? previewSlot : 0)
+        return previewInset(checkColumn: checkColumn, hasImageColumn: hasImageColumn)
+            + previewColumn
     }
 
     static func height(of entry: ThemedMenuEntry) -> CGFloat {
@@ -1823,7 +1925,14 @@ enum ThemedMenuMetrics {
         return peeked + outerInset * 2
     }
 
-    static func width(for entries: [ThemedMenuEntry], minimum: CGFloat) -> CGFloat {
+    /// `selectedEntryIndex` participates because it is one of the two ways a row is marked, and
+    /// the panel's width has to reserve the same columns the rows will draw in. Measured without
+    /// it, a menu whose only mark comes from the presenter drew its check into the title.
+    static func width(
+        for entries: [ThemedMenuEntry],
+        minimum: CGFloat,
+        selectedEntryIndex: Int? = nil
+    ) -> CGFloat {
         let text = entries.compactMap { entry -> CGFloat? in
             guard case .item(let item) = entry else { return nil }
             let title = ceil(item.title.size(
@@ -1839,9 +1948,12 @@ enum ThemedMenuMetrics {
         let previewColumn = hasPreviewColumn(entries) ? previewSlot : 0
         let chevronColumn = hasSubmenuColumn(entries) ? submenuChevronSlot : 0
         let shortcutColumn = shortcutColumnWidth(entries)
+        let marks = checkColumn(entries, selectedEntryIndex: selectedEntryIndex)
+        let markColumn = markWidth(checkColumn: marks, hasImageColumn: imageColumn > 0)
+        let ownCheckColumn = resolved(marks) == .separate ? leadingSlot : 0
         let leadingColumns = appearance == .windows98
-            ? max(imageColumn == 0 ? leadingSlot : imageColumn, previewColumn)
-            : leadingSlot + imageColumn + previewColumn
+            ? max(markColumn, previewColumn)
+            : ownCheckColumn + markColumn + previewColumn
         let content = outerInset * 2 + contentInset * 2
             + leadingColumns + text + chevronColumn
             + (shortcutColumn > 0 ? shortcutGap + shortcutColumn : 0)
@@ -1904,6 +2016,10 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         var madeRows: [Int: ThemedMenuRowView] = [:]
         var views: [NSView] = []
         var selectable: [Int] = []
+        let checkColumn = ThemedMenuMetrics.checkColumn(
+            entries,
+            selectedEntryIndex: selectedEntryIndex
+        )
         let hasImageColumn = ThemedMenuMetrics.hasImageColumn(entries)
         let hasPreviewColumn = ThemedMenuMetrics.hasPreviewColumn(entries)
         let hasSubmenuColumn = ThemedMenuMetrics.hasSubmenuColumn(entries)
@@ -1918,6 +2034,7 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
                     entryIndex: index,
                     item: item,
                     isSelected: item.isSelected || index == selectedEntryIndex,
+                    checkColumn: checkColumn,
                     hasImageColumn: hasImageColumn,
                     hasPreviewColumn: hasPreviewColumn,
                     hasSubmenuColumn: hasSubmenuColumn,
@@ -2363,6 +2480,9 @@ private final class ThemedMenuRowView: ThemedControl {
     }
 
     private let selected: Bool
+    /// How *the menu* carries its marks — not whether this row is marked. A column belongs to
+    /// the panel, so an unmarked row in a menu of markable ones still starts after it.
+    private let checkColumn: ThemedMenuMetrics.CheckColumn
     private let hasImageColumn: Bool
     private let hasPreviewColumn: Bool
     private let hasSubmenuColumn: Bool
@@ -2384,6 +2504,7 @@ private final class ThemedMenuRowView: ThemedControl {
         entryIndex: Int,
         item: ThemedMenuItem,
         isSelected: Bool,
+        checkColumn: ThemedMenuMetrics.CheckColumn,
         hasImageColumn: Bool,
         hasPreviewColumn: Bool,
         hasSubmenuColumn: Bool,
@@ -2392,6 +2513,7 @@ private final class ThemedMenuRowView: ThemedControl {
         self.entryIndex = entryIndex
         self.item = item
         selected = isSelected
+        self.checkColumn = checkColumn
         self.hasImageColumn = hasImageColumn
         self.hasPreviewColumn = hasPreviewColumn
         self.hasSubmenuColumn = hasSubmenuColumn
@@ -2438,7 +2560,10 @@ private final class ThemedMenuRowView: ThemedControl {
             NSLayoutConstraint.activate([
                 preview.view.leadingAnchor.constraint(
                     equalTo: leadingAnchor,
-                    constant: ThemedMenuMetrics.previewInset(hasImageColumn: hasImageColumn)
+                    constant: ThemedMenuMetrics.previewInset(
+                        checkColumn: checkColumn,
+                        hasImageColumn: hasImageColumn
+                    )
                 ),
                 preview.view.centerYAnchor.constraint(equalTo: centerYAnchor),
                 preview.view.widthAnchor.constraint(
@@ -2465,6 +2590,7 @@ private final class ThemedMenuRowView: ThemedControl {
                 preview.view.leadingAnchor.constraint(
                     equalTo: leadingAnchor,
                     constant: ThemedMenuMetrics.titleInset(
+                        checkColumn: checkColumn,
                         hasImageColumn: hasImageColumn,
                         hasPreviewColumn: hasPreviewColumn
                     )
@@ -2673,6 +2799,10 @@ private final class ThemedMenuRowView: ThemedControl {
         // pair was missing comes from `ink` no longer flattening this role to opaque black, and
         // from the rhythm, not from taking the copy down another tier.
         let secondary = ink(selection?.ink.secondary ?? Design.Text.secondary, alpha)
+        // What a row's leading mark is drawn in. The historical grammars keep theirs at full
+        // ink: a Win32 menu bitmap and a Platinum icon are artwork at the label's weight, and
+        // dimming them would be a modern idea applied to a reconstruction.
+        let glyph = ThemedMenuMetrics.usesClassicGrammar ? label : secondary
 
         if selected {
             drawCheckMark(
@@ -2688,13 +2818,19 @@ private final class ThemedMenuRowView: ThemedControl {
 
         if hasImageColumn, let image = item.image {
             let imageRect = NSRect(
-                x: ThemedMenuMetrics.imageInset,
+                x: ThemedMenuMetrics.markInset(checkColumn: checkColumn),
                 y: bounds.midY - ThemedMenuMetrics.imageSize / 2
                     + ThemedMenuMetrics.imageBaselineOffset,
                 width: ThemedMenuMetrics.imageSize,
                 height: ThemedMenuMetrics.imageSize
             )
-            draw(image, in: imageRect, tint: label)
+            // **A row's mark is quieter than its name.** A menu whose glyphs are inked as loudly
+            // as the words doubles the number of things competing for the first glance, and the
+            // words are what is being chosen between. `secondary` is also what keeps a column of
+            // icons reading as a column rather than as a second column of content. Non-template
+            // artwork — an app's own icon, an account's mark — ignores the tint and keeps its
+            // colours, which is right: those *are* content.
+            draw(image, in: imageRect, tint: glyph)
         }
 
         if item.submenu != nil {
@@ -2713,6 +2849,7 @@ private final class ThemedMenuRowView: ThemedControl {
         guard drawsTitle else { return }
 
         let x = ThemedMenuMetrics.titleInset(
+            checkColumn: checkColumn,
             hasImageColumn: hasImageColumn,
             hasPreviewColumn: hasPreviewColumn
         )

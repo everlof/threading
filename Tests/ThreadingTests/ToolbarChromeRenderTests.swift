@@ -46,8 +46,9 @@ final class ToolbarChromeRenderTests: XCTestCase {
         written += try write(story: "03-drawer-seam") { Self.drawerSeam() }
         written += try write(story: "04-pane-header-hover") { Self.paneHeaderRow() }
         written += try write(story: "05-open-in-states") { Self.openInStates() }
+        written += try write(story: "06-page-title") { Self.pageTitleRow() }
 
-        XCTAssertEqual(written, 10, "Every story should render on both backdrops")
+        XCTAssertEqual(written, 12, "Every story should render on both backdrops")
         print("Rendered toolbar chrome storybook to \(Render.directory.path)")
     }
 
@@ -436,7 +437,7 @@ final class ToolbarChromeRenderTests: XCTestCase {
 
     /// The behaviour a shared constants enum could never have delivered, and the reason this is
     /// one class: a tab is clickable, wherever it is drawn.
-    func testThePageTabIsSelectableAndReachableFromTheKeyboard() {
+    func testATabIsSelectableAndReachableFromTheKeyboard() {
         var reveals = 0
         let pageTab = Self.pageTab(title: "sonda", symbolName: "folder")
         pageTab.onSelect = { reveals += 1 }
@@ -450,9 +451,10 @@ final class ToolbarChromeRenderTests: XCTestCase {
         XCTAssertEqual(reveals, 2, "the page tab is not reachable through accessibility")
     }
 
-    /// A rename morphs; a change of page does not. The tab decides from the identity it is
-    /// handed, which is what stops the toolbar animating between two unrelated pages.
-    func testOnlyARenameOfTheSamePageIsAnimated() {
+    /// A rename morphs; a change of what the tab shows does not. The tab decides from the
+    /// identity it is handed, which is what stops a strip animating between two unrelated names.
+    /// `PageTitleView` makes the same distinction the same way.
+    func testOnlyARenameOfTheSameTabIsAnimated() {
         let sessionA = UUID()
         let tab = Self.pageTab(title: "First", symbolName: "folder")
 
@@ -581,6 +583,31 @@ final class ToolbarChromeRenderTests: XCTestCase {
         [close, add].forEach { $0.mouseEntered(with: hoverEvent()) }
 
         return strip([close, add], spacing: Design.Spacing.large)
+    }
+
+    /// How the content pane names what it is showing: a mark, the page's name, and the `⋯`
+    /// that acts on it — at rest, then under the pointer.
+    ///
+    /// The pair is the story. At rest this is text on the pane's own ground, which is the whole
+    /// difference from the selected tab it replaced; the plate appears only where the pointer
+    /// says a press is about to be possible, and it stops short of the `⋯`, which answers a
+    /// press of its own.
+    private static func pageTitleRow() -> NSView {
+        func title(_ identity: Int) -> PageTitleView {
+            let view = PageTitleView(symbolName: "folder", inkSource: .backdrop)
+            view.update(
+                title: "Investigate icon rendering",
+                symbolName: "folder",
+                identity: identity
+            )
+            return view
+        }
+
+        let resting = title(1)
+        let hovered = title(2)
+        hovered.mouseEntered(with: hoverEvent())
+
+        return strip([resting, hovered], spacing: Design.Spacing.pane)
     }
 
     /// The display pane's own strip: one selected surface, one not.

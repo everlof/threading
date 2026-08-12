@@ -546,7 +546,7 @@ already draws a status dot and an agent icon. A title consisting only of symbols
 intact rather than reduced to nothing.
 
 **A name that changes is morphed into its replacement, not swapped** — the sidebar rows, the
-toolbar's page tab, and project and checkout rows all draw through `MorphingTitleLabel`. Two
+pane header's page name, and project and checkout rows all draw through `MorphingTitleLabel`. Two
 rules decide when, and both exist because the animation is only honest about a *change to
 something already on screen*:
 

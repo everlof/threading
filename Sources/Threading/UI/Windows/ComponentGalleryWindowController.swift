@@ -112,6 +112,7 @@ final class ComponentGalleryViewController: NSViewController {
         "MediaInspectorView",
         "MorphingTitleLabel",
         "NavigatorGridItemView",
+        "PageTitleView",
         "PaneFooterView",
         "PaneHeaderView",
         "PaneNoticeView",
@@ -708,14 +709,6 @@ final class ComponentGalleryViewController: NSViewController {
         sidebarTab.isSelected = true
         sidebarTab.widthAnchor.constraint(equalToConstant: 180).isActive = true
 
-        let newSessionButton = ThemedIconButton(
-            symbolName: "plus",
-            accessibility: L10n.string("New session")
-        )
-        newSessionButton.onPress = { [weak self] in
-            self?.showReceipt(L10n.string("Opened the new-session page."))
-        }
-
         let selectedToolbarButton = ThemedIconButton(
             symbolName: "sidebar.trailing",
             accessibility: L10n.string("Selected toolbar action")
@@ -725,26 +718,24 @@ final class ComponentGalleryViewController: NSViewController {
             self?.showReceipt(L10n.string("Pressed the selected toolbar action."))
         }
 
-        // The toolbar's page tab: the *same* class as the two above it, differing only in the
-        // ground it inks from. Shown beside them on purpose — this pair used to be two
-        // implementations, and the gallery is where that would show.
-        let activeSession = ThemedTabItemView(
-            title: L10n.string("Active session"),
+        // The content pane's header: not a tab, and shown beside them so the difference is
+        // visible rather than argued. It inks from the backdrop because the header floats over
+        // the terminal's own palette.
+        let activeSession = PageTitleView(
             symbolName: "chevron.left.forwardslash.chevron.right",
-            placement: .horizontal,
-            showsClose: true,
             inkSource: .backdrop
         )
-        activeSession.isSelected = true
-        activeSession.onSelect = { [weak self] in
+        activeSession.update(
+            title: L10n.string("Active session"),
+            symbolName: "chevron.left.forwardslash.chevron.right",
+            identity: 0
+        )
+        activeSession.onReveal = { [weak self] in
             self?.showReceipt(L10n.string("Revealed the active page in the sidebar."))
         }
-        activeSession.onClose = { [weak self] in
-            self?.showReceipt(
-                L10n.string("Closed the active page without stopping its session.")
-            )
+        activeSession.onActions = { [weak self] _ in
+            self?.showReceipt(L10n.string("Opened the page's actions."))
         }
-        activeSession.widthAnchor.constraint(equalToConstant: 190).isActive = true
 
         let groupedActions = ToolbarButtonGroupView(buttons: [
             galleryToolbarButton(symbol: "ellipsis", label: "Session options"),
@@ -809,9 +800,16 @@ final class ComponentGalleryViewController: NSViewController {
                     makeTabStripStory()
                 ),
                 story(
+                    "PageTitleView",
+                    "How the content pane names what it is showing: a mark, the page's name, and "
+                        + "the one menu that acts on it. Plain until the pointer is on it — it is "
+                        + "a label that answers a press, not a tab.",
+                    row([activeSession])
+                ),
+                story(
                     "ThemedIconButton",
-                    "Active page tab with its own close control, then New Session and selected pane actions.",
-                    row([activeSession, newSessionButton, selectedToolbarButton])
+                    "A selected pane action, filled while its pane is on screen.",
+                    row([selectedToolbarButton])
                 ),
                 story(
                     "ToolbarButtonGroupView",

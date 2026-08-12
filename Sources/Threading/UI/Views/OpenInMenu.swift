@@ -30,8 +30,13 @@ enum OpenInMenu {
         let apps = ExternalAppLauncher.shared.installed(for: target)
         guard !apps.isEmpty else { return nil }
 
+        // The fold takes the header control's own glyph rather than the preferred app's icon:
+        // the rows below it are the apps, and leading them with one of their number reads as
+        // "Open in Xcode ▸" — a claim about where the submenu goes that its first row then
+        // contradicts.
         return .item(ThemedMenuItem(
             title: OpenInMenuDefaults.title,
+            image: ThemedMenuIcon.symbol(OpenInToolbarDefaults.fallbackSymbol),
             submenu: apps.map { app in
                 .item(ThemedMenuItem(
                     title: app.name,

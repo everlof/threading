@@ -115,6 +115,8 @@ final class ThemedTabItemView: BackdropThemedControl {
     ///
     /// A host that also constrains the width should keep doing so: this makes the tab's own
     /// answer fit inside the cap, it does not enforce it.
+    ///
+    /// `PageTitleView` carries the same pair of properties, arrived at the same way.
     var maxWidth: CGFloat? {
         didSet {
             guard maxWidth != oldValue else { return }
@@ -192,9 +194,9 @@ final class ThemedTabItemView: BackdropThemedControl {
         content.alignment = .centerY
         content.spacing = Design.Spacing.small
         // **The title takes any room the tab has spare, so the × keeps the trailing inset.**
-        // A tab is not always free to be as wide as its content: the toolbar holds the page tab
-        // to `SessionTitleDefaults.minWidth` so the window's chrome does not resize itself around
-        // every session name. Under the stack's default `.gravityAreas` that extra width went
+        // A tab is not always free to be as wide as its content — a host may hold it to a floor
+        // so its strip does not resize itself around every name, as the window's header once did
+        // for the page tab. Under the stack's default `.gravityAreas` that extra width went
         // *after* the last view — a short name left the × sitting 43pt inboard of a tab whose
         // fill ran to the edge, which reads as a tab with its contents shoved left. Filling puts
         // the slack in the one view that can absorb it without moving anything: the title, whose

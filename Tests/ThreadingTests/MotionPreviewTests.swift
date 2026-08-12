@@ -316,21 +316,27 @@ final class MotionPreviewTests: XCTestCase {
     /// transition it is demonstrating.
     func testAPreviewColumnMovesTheTitleAndNothingElse() {
         let plain = ThemedMenuMetrics.titleInset(
+            checkColumn: .none,
             hasImageColumn: false,
             hasPreviewColumn: false
         )
         let withPreview = ThemedMenuMetrics.titleInset(
+            checkColumn: .none,
             hasImageColumn: false,
             hasPreviewColumn: true
         )
 
         XCTAssertEqual(withPreview, plain + ThemedMenuMetrics.previewSlot)
         XCTAssertEqual(
-            ThemedMenuMetrics.previewInset(hasImageColumn: false),
-            ThemedMenuMetrics.imageInset
+            ThemedMenuMetrics.previewInset(checkColumn: .none, hasImageColumn: false),
+            ThemedMenuMetrics.markInset(checkColumn: .none)
         )
         XCTAssertEqual(
-            ThemedMenuMetrics.titleInset(hasImageColumn: true, hasPreviewColumn: false),
+            ThemedMenuMetrics.titleInset(
+                checkColumn: .none,
+                hasImageColumn: true,
+                hasPreviewColumn: false
+            ),
             plain + ThemedMenuMetrics.imageSlot
         )
     }
@@ -368,9 +374,11 @@ final class MotionPreviewTests: XCTestCase {
         let row = try XCTUnwrap(orb.superview)
         window?.contentView?.layoutSubtreeIfNeeded()
 
+        // `.shared`: a pop-up always marks the choice it is currently showing, and no row here
+        // carries an icon, so the mark and the previews share one leading column.
         XCTAssertEqual(
             orb.frame.minX,
-            ThemedMenuMetrics.previewInset(hasImageColumn: false),
+            ThemedMenuMetrics.previewInset(checkColumn: .shared, hasImageColumn: false),
             accuracy: 0.5
         )
         XCTAssertEqual(orb.frame.midY, row.bounds.midY, accuracy: 0.5)

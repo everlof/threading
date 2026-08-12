@@ -1060,6 +1060,18 @@
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Läser in versionsinformation…" } } }
     },
+    "PageTitleView": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "PageTitleView" } } }
+    },
+    "A selected pane action, filled while its pane is on screen.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En vald panelåtgärd, ifylld medan dess panel visas." } } }
+    },
+    "How the content pane names what it is showing: a mark, the page's name, and the one menu that acts on it. Plain until the pointer is on it — it is a label that answers a press, not a tab.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Så namnger innehållspanelen det som visas: ett märke, sidans namn och den enda meny som verkar på den. Ren text tills pekaren är på den — det är en etikett som svarar på ett tryck, inte en flik." } } }
+    },
     "PaneNoticeView": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "PaneNoticeView" } } }
@@ -14255,6 +14267,10 @@
           }
         }
       }
+    },
+    "Opened the page's actions.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppnade sidans åtgärder." } } }
     },
     "Opened the new-session page.": {
       "extractionState": "stale",

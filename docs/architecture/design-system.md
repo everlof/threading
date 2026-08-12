@@ -116,11 +116,12 @@ Components so far:
 | `SplitButtonView` | The same weld for a **titled** press on the pane's own ground — the attachments footer's Copy Path with its menu chevron. The plate draws exactly what a secondary `ThemedButton` would (the material's resting fill, hairline and depth), and the halves — a `ThemedButton` press, a `ThemedIconButton` chevron (`Target.titledSplitMenu`) — bring no surface of their own (`SplitControlHalf`). **Welding follows emphasis, not the pairing**: two neutral secondaries can share a plate because nothing is drawn between them at rest, while an accent-filled primary against a neutral chevron would hold a permanent colour seam — the one thing the weld exists to remove. That is why the composer's Start Session keeps its clock *beside* it (`Target.besidePrimary`) and the prompt's compact send keeps its schedule chevron beside the glyph: the spread form is the primary's split control, not a missing weld. |
 | `WorkingOrbView` | The dotted "working" orb, tinted with the accent — the theme boundary for the `ThinkingOrbs` view. |
 | `AgentActivityBeamView` | The breathing border ring pinned over both composers — the theme boundary for `BorderBeamKit`, and the whole visual policy: one working agent lights the ring at 30% in adaptive mono, each additional agent adds 10% to a cap of 1, and it turns colorful while any working session runs at the top of its provider's reasoning ladder. Adaptive mono is load-bearing: the package's pulse palette stays light over a dark System surface but inverts its RGB channels over a light one, keeping ordinary activity neutral and visible while reserving the multicolor effect for top effort. System theme only — a styled theme (retro chrome especially) states its own idea of glow, so anything else removes the ring outright rather than fading it. Decorative by contract: `hitTest` nil, no accessibility elements, and under Reduce Motion it renders a genuinely static frame (the host's paused mode), not an animation drawing identical frames. Hosts feed it `AgentWorkload` from `AgentWorkloadDidChange`; see [`dependencies.md`](dependencies.md) and [`session-activity.md`](session-activity.md). |
-| `ThemedTabItemView` | **Every** tab: the display pane's strip, the settings sidebar, and the pane header's active workspace page. Settings itself is deliberately not a header tab: it is one temporary mode, shown by a static label and Done action while its categories remain destinations in the sidebar. A middle-button click closes a closable tab on release without selecting it first; dragging away cancels, and other auxiliary buttons keep their own meaning. |
+| `PageTitleView` | How the content pane names what it is showing: a mark, the page's name, and the `⋯` that acts on it. **Not a tab, and that is the point** — it *was* one, and a lone chip drawn as a selected tab promised a strip of siblings just out of view, with a `+` beside it that started a session taking this page's place rather than joining it. So there is no plate at rest, no `×` and no `+`: text on the pane's ground, with a quiet plate under the pointer because the name is still pressable (it reveals its row in the sidebar). The plate stops before the `⋯`, which answers a press of its own. See [`window-chrome.md`](window-chrome.md). |
+| `ThemedTabItemView` | **Every** tab: the display pane's strip and the settings sidebar. Settings itself is deliberately not a header tab: it is one temporary mode, shown by a static label and Done action while its categories remain destinations in the sidebar. A middle-button click closes a closable tab on release without selecting it first; dragging away cancels, and other auxiliary buttons keep their own meaning. |
 | `ThemedTabStripView` | **Every** horizontal run of those tabs: the scroll-not-shrink overflow, the clipped-edge fade, chip spacing, and drag-to-reorder, stated once. Chips are reused by id — a rename morphs, a drag survives its own re-render. Its live `bandHeight` is `PaneHeaderView.bandHeight`: tab, equal `Spacing.small` margins, then the theme's structural rule, so a heavy Bauhaus separator cannot consume the lower margin. Hosts hand it items and get selection/close/reorder back; a `chipDecorator` lets the display pane keep its extension slot around each chip without this component knowing extensions exist. Every pointer capability has a pointerless twin: the chip's secondary-click menu (also reached via accessibility "show menu") carries the standard closes (`TabHosting.standardTabEntries` — Close Tab / Close Other Tabs / Close Tabs to the Right / Close All Tabs), Move Left/Right, and the cross-pane moves — a rule, not a courtesy, for anything this strip grows next. While the reorder gesture holds a chip it is `isLifted`: its translucent fill flattens over `InkSource.ground` so the neighbour it crosses cannot show through it. A drag can also *leave*: `externalDropTarget`/`onDropOut`/`onDragEnded` let the window offer another strip's band as the drop, the chip dimming to `Design.Opacity.dragAway` while it would land, the receiving strip washing as a drop target (`isDropTarget`), and the slot named by the same midpoint rule as the reorder (`insertionIndex(forWindowPoint:)`) — and a lone chip may begin a drag exactly when that wiring exists, since with one tab there is nothing to reorder but still somewhere to go. A host that pins **both** of the strip's edges says so with `fillsHostWidth`: the default `.defaultHigh` hugging is what lets a control placed *after* the tabs follow them, and in a host that has no such control it is a *maximum on the host* — it capped the display panel at its own tab titles (see [`mcp-and-display.md`](mcp-and-display.md)). |
 | `ThemedDisclosureRow` | The header of a collapsible run of rows — the settings kit's folded cards (`SettingsUI.disclosureCard`/`disclosureRow`) are built on it. A real `ThemedControl`: whole-row click with slip-off cancel, Space/Return, focus ring, hover lift, pointing-hand cursor, and a `disclosureTriangle` accessibility role whose value is the expansion state. The chevron leads in a fixed slot so every header's title starts on one line, and it re-tints at draw time so a live theme switch reaches it. The caller's interactive accessory (a toggle, a Remove All button) stays a **sibling**, never a child: the row is one accessibility element, and a control nested inside it would vanish from the accessibility tree. Replaced Storage's hand-rolled click-gesture fold, which no keyboard or assistive technology could operate. Setting `isExpanded` does not fire `onToggle`, so an owner restores state without re-entrancy. |
 | `ThemedIconButton` | **Every** icon-only button: toolbar actions, a tab's `×`, a sidebar row's `⋯`. The role states a *slot* (layout: what the padding is measured from) and a *point size* (optics: what the symbol is configured at) — see the 2026-07-31 note for why those are two numbers. `setImage` is its one documented exception to "a symbol": artwork whose silhouette is not ours — an installed application's own icon, which is what the header's Open in control wears (see [`external-apps.md`](external-apps.md)). Foreign artwork is capped to the slot (`GlyphView.slot`); `setSymbol` clears the cap and configures to fit. A hidden but pointerless-accessible control may request deferred glyph materialization: its real geometry, action and accessibility shell remain installed, while CoreUI resolves only the latest symbol or image at first draw/reveal. |
-| `GlyphView` | A tinted glyph on the device pixel grid — `NSImageView` minus the fractional placement, inside `ThemedIconButton` and `ThemedTabItemView`. A symbol's natural size is fractional by design, so an image view centres it at a half-point offset: slight softness at 2×, a smeared stroke at 1×. This view centres the same rect and then `backingAlignedRect`s it (inward — nearest can push an edge past `bounds`, and a view clips its own drawing) before handing it to `TemplateImageDrawing`. Decorative; the control around it carries the name. |
+| `GlyphView` | A tinted glyph on the device pixel grid — `NSImageView` minus the fractional placement, inside `ThemedIconButton`, `ThemedTabItemView` and `PageTitleView`. A symbol's natural size is fractional by design, so an image view centres it at a half-point offset: slight softness at 2×, a smeared stroke at 1×. This view centres the same rect and then `backingAlignedRect`s it (inward — nearest can push an edge past `bounds`, and a view clips its own drawing) before handing it to `TemplateImageDrawing`. Decorative; the control around it carries the name. |
 | `ThemedFileIconView` | The File pane's one icon renderer. System keeps the path's native Finder artwork; authored themes use a semantic SF Symbol and theme roles, without paying LaunchServices for artwork they will not draw. It classifies from path metadata only, aligns either renderer to the device pixel grid, and switches live between them. |
 | `PaneFooterView` | The bottom band of a pane: hairline, band height, corner-aware insets, controls aligned by their ink (`OpticalInsetProviding`). |
 | `PaneHeaderView` | The footer's mirror at a pane's top. Its live height is the content pane's header-strip measure (`PaneHeaderDefaults.height` reads it): row, equal top and bottom air, then the theme's rule. It remeasures on a theme change, so the two panes' separators land on one line without using their ink as spacing. |
@@ -315,6 +316,30 @@ the release, and now also lets go of the press when the drag leaves it, which `T
 from the start and this one did not: the press was decided at the release and shown nowhere, so a
 slip off a 20-point target cancelled silently and left the button drawn as though held.
 
+**A menu row's mark column is reserved only when something goes in it, and a check and an icon
+share it.** The rule used to be "always leave room for a checkmark", and it cost twice. An
+icon-less menu of plain actions — which is most of them — began every title 16pt inside the panel
+behind a gutter nothing was ever drawn in, so a column of names read as a column of names that
+had lost its icons. And it made icons unaffordable: added behind a permanently reserved gutter, a
+glyph and its title started 48pt in and the panel grew to hold a column of air. `CheckColumn`
+answers `.none`, `.shared` or `.separate` per panel, and only `.separate` — some row carrying
+*both* a mark and an icon, which today is Open in marking the preferred app in a list where every
+row wears that app's own icon — pays for two columns. This is the rule Win32 has always used
+(`ThemedMenuMetrics.resolved` keeps the historical grammars on their own authored anatomy:
+Platinum and Workbench reserve both columns unconditionally, Win98 exactly one).
+
+**Icons on an action menu are structure, not decoration.** The session's menu is the longest in
+the app — past thirty rows on a shared, running session — and read as an unbroken wall of words
+in which finding Archive meant reading every title above it. Separators grouped it; the glyph
+column is what it is now *scanned* by, and the two together are why it fits in one glance. A mark
+is drawn in `Design.Text.secondary` rather than the label's ink, because the words are what is
+being chosen between and a glyph inked as loudly doubles what competes for the first look; real
+artwork (an app icon, an account's mark, a theme swatch) ignores the tint and keeps its colours,
+which is right, since those *are* content. Build one through `ThemedMenuIcon.symbol` — the single
+place that states the size and weight — never a bare `NSImage(systemSymbolName:)`, which arrives
+at whatever size the system hands out. A row with no honest mark is left without one: a gap in
+the column beats two rows sharing a glyph they do not share a meaning with.
+
 **The click that dismisses a menu lands on a sibling that opens one.** The dropdown's overlay
 swallows its dismissing click the way `NSMenu` does — a click on the terminal to let a menu go
 must not also type into it — with one exception it owes to hover. Hit testing is what the overlay
@@ -462,10 +487,11 @@ card's *contents*, never on the card. A new floating surface takes the same two 
 
 Two guards keep it: `MainWindowToolbar.makeOverlayItem` asserts that anything placed in the
 toolbar inks from `.backdrop` (the protocol can only say a view *can* be inked, not which ink it
-took, now that one component serves both), and `ToolbarChromeRenderTests` pins that the page tab
-and the pane tab are the same type rather than comparing two classes' measurements — a test that
-could only ever catch drift after it happened, and which passed for a long time over two tabs
-that visibly differed.
+took, now that one component serves both), and `ToolbarChromeRenderTests` pins that the display
+pane's and the settings sidebar's tabs are the same type rather than comparing two classes'
+measurements — a test that could only ever catch drift after it happened, and which passed for a
+long time over two tabs that visibly differed. The window's own header no longer draws a tab at
+all; `PageTitleView` names the page instead, and the same storybook renders it beside them.
 
 The rule behind the table now covers **every chrome-drawing AppKit class**, not just the seven
 that eroded first: content containers (`NSScrollView`, `NSTextView`, tables) because their
@@ -1049,14 +1075,15 @@ The vocabulary these encode, which new work should follow:
   narrower than the room it was offered — measured between 0.1 and 8.1pt for one tab title
   across the widths a cap can fall on. Sized to the cap, that remainder sat between the title
   and the ×, moving from tab to tab with the name; centred, half of it also became a leading
-  indent. Where the room is genuinely the host's — the toolbar holds the page tab to
-  `SessionTitleDefaults.minWidth` — the title is the view that absorbs it (`.fill` distribution,
-  lowest hugging), so the × keeps the trailing inset instead of the slack landing after it.
+  indent. Where the room is genuinely the host's — a strip holding its tabs to a floor so it does
+  not resize itself around every name — the title is the view that absorbs it (`.fill`
+  distribution, lowest hugging), so the × keeps the trailing inset instead of the slack landing
+  after it. `PageTitleView` carries the same pair of properties for the same reason.
 
 **One silhouette per strip.** `TabAppearance` states a tab's geometry and type scale in one
 place, because the app draws tabs in two views that cannot share a class: the pane's strip reads
-the chrome's roles, while the toolbar's active-page tab sits on the terminal backdrop and inks
-itself from there (`BackdropOverlay`). They differ by that alone and had drifted in everything
+the chrome's roles, while a surface over the terminal inks itself from the backdrop
+(`BackdropOverlay`) — which is what the header's page name does today. They differ by that alone and had drifted in everything
 else — a 13pt semibold pill beside a 12pt regular rounded rect — which is how one navigation
 idea came to look like two. The toolbar's controls join them: `ToolbarButtonView` and the usage
 pill draw at `Design.Radius.control` rather than a pill radius, because these buttons are square

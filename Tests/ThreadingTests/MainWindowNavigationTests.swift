@@ -111,15 +111,15 @@ final class MainWindowNavigationTests: XCTestCase {
         )
     }
 
-    func testPageTabIsLazyUntilARealPageNeedsIt() throws {
+    func testPageTitleIsLazyUntilARealPageNeedsIt() throws {
         let controller = makeController()
 
-        XCTAssertFalse(controller.pageTabViewIsMaterialized)
+        XCTAssertFalse(controller.pageTitleViewIsMaterialized)
 
         controller.showSettingsPage(id: SettingsPages.generalID)
         XCTAssertFalse(
-            controller.pageTabViewIsMaterialized,
-            "Settings has its own mode header and must not build an empty document tab"
+            controller.pageTitleViewIsMaterialized,
+            "Settings has its own mode header and must not build an empty page title"
         )
 
         controller.toggleSettings()
@@ -131,12 +131,11 @@ final class MainWindowNavigationTests: XCTestCase {
 
         controller.projectSidebar(ProjectSidebarViewController(), didSelectProject: project.id)
 
-        let tab = try XCTUnwrap(controller.materializedPageTabView)
-        XCTAssertTrue(controller.pageTabViewIsMaterialized)
-        XCTAssertTrue(tab.superview === controller.paneHeaderStackView)
-        XCTAssertTrue(controller.paneHeaderStackView?.arrangedSubviews.first === tab)
-        XCTAssertTrue(tab.isSelected)
-        XCTAssertFalse(tab.isHidden, "The first real page must reveal its late-created tab")
+        let title = try XCTUnwrap(controller.materializedPageTitleView)
+        XCTAssertTrue(controller.pageTitleViewIsMaterialized)
+        XCTAssertTrue(title.superview === controller.paneHeaderStackView)
+        XCTAssertTrue(controller.paneHeaderStackView?.arrangedSubviews.first === title)
+        XCTAssertFalse(title.isHidden, "The first real page must reveal its late-created title")
     }
 
     func testInitiallyHiddenPaneHeaderGlyphsStayDeferred() throws {
@@ -146,10 +145,9 @@ final class MainWindowNavigationTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(controller.openInMenuToolbarButton).hasMaterializedGlyph)
         XCTAssertFalse(try XCTUnwrap(controller.surfaceToggleToolbarButton).hasMaterializedGlyph)
 
-        XCTAssertTrue(
-            try XCTUnwrap(controller.newSessionButton).hasMaterializedGlyph,
-            "The visible New Session action still belongs to first paint"
-        )
+        // The `⋯` is deliberately absent from this list: it belongs to the page's own title
+        // view, which does not exist until there is a page to name — see
+        // `testPageTitleIsLazyUntilARealPageNeedsIt`.
         XCTAssertTrue(
             try XCTUnwrap(controller.statusCardToolbarButton).hasMaterializedGlyph,
             "Standing pane controls remain complete even without a session"

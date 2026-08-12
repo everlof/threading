@@ -365,12 +365,12 @@ final class OpenInTests: XCTestCase {
     /// finite: the content pane stops at `MainWindowDefaults.minContentWidth`.
     ///
     /// Measured against the running layout rather than added up by hand, because the answer
-    /// includes the page tab's floor, the optical insets and the stack's own gaps — the kind of
+    /// includes the page title's own width, the optical insets and the stack's own gaps — the kind of
     /// arithmetic that is wrong by one control and reads as right.
     func testTheHeaderStillFitsWithTheOpenInPairAtTheNarrowestPane() throws {
         let controller = MainWindowController()
         let root = try XCTUnwrap(controller.window?.contentView)
-        let header = try XCTUnwrap(controller.pageTabView.superview as? NSStackView)
+        let header = try XCTUnwrap(controller.pageTitleView.superview as? NSStackView)
 
         // Shown by hand: a fresh window has no checkout, so the control hides itself and the
         // measurement would be of the header *without* the thing being measured.
