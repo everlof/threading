@@ -389,8 +389,6 @@ final class AgentLaunchQuotingTests: XCTestCase {
         )
 
         XCTAssertEqual(words, [
-            "cd", "/tmp/not-a-repository",
-            "&&", "exec",
             "env", "-u", "CODEX_HOME",
             AgentDefaults.codexExecutable,
             "--config", "model_reasoning_effort=\"low\"",

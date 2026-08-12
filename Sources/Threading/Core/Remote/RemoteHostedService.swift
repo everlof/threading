@@ -1,0 +1,510 @@
+import Foundation
+import Security
+import ThreadingPeerTransport
+
+enum RemoteHostedServiceState: Equatable {
+    case stopped
+    case notConfigured
+    case signInRequired
+    case connecting
+    case ready
+    case unavailable(String)
+}
+
+private enum RemoteHostedServiceDefaults {
+    static let keychainService = "codes.threading.remote.hosted-service"
+    static let keychainAccount = "host-credentials-v1"
+    static let recordVersion = 1
+    static let maximumPendingRevocations = 64
+    static let credentialRenewalLeadTime: TimeInterval = 60 * 60
+    static let maximumReconnectDelay: TimeInterval = 60
+}
+
+struct RemoteHostedServiceRecord: Codable, Equatable {
+    let version: Int
+    let endpoint: URL
+    var session: PeerControlPlaneSession
+    var hostCredential: PeerHostServiceCredential
+    var pendingRevokedDeviceIDs: [String]
+}
+
+protocol RemoteHostedServicePersisting: AnyObject {
+    func load() throws -> RemoteHostedServiceRecord?
+    func save(_ record: RemoteHostedServiceRecord) throws
+    func delete() throws
+}
+
+private enum RemoteHostedServiceStoreError: LocalizedError {
+    case keychain(OSStatus)
+    case corrupt
+
+    var errorDescription: String? {
+        switch self {
+        case .keychain(let status):
+            return "The hosted-service Keychain item could not be accessed (\(status))."
+        case .corrupt:
+            return "The hosted-service Keychain item is unreadable and was left untouched."
+        }
+    }
+}
+
+private final class RemoteHostedServiceKeychainStore: RemoteHostedServicePersisting {
+    func load() throws -> RemoteHostedServiceRecord? {
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(readQuery as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw RemoteHostedServiceStoreError.keychain(status)
+        }
+        do {
+            return try JSONDecoder().decode(RemoteHostedServiceRecord.self, from: data)
+        } catch {
+            throw RemoteHostedServiceStoreError.corrupt
+        }
+    }
+
+    func save(_ record: RemoteHostedServiceRecord) throws {
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(record)
+        } catch {
+            throw RemoteHostedServiceStoreError.corrupt
+        }
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+        ]
+        let updated = SecItemUpdate(baseQuery as CFDictionary, attributes as CFDictionary)
+        if updated == errSecSuccess { return }
+        guard updated == errSecItemNotFound else {
+            throw RemoteHostedServiceStoreError.keychain(updated)
+        }
+        var item = baseQuery
+        attributes.forEach { item[$0.key] = $0.value }
+        let added = SecItemAdd(item as CFDictionary, nil)
+        guard added == errSecSuccess else {
+            throw RemoteHostedServiceStoreError.keychain(added)
+        }
+    }
+
+    func delete() throws {
+        let status = SecItemDelete(baseQuery as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw RemoteHostedServiceStoreError.keychain(status)
+        }
+    }
+
+    private var baseQuery: [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: RemoteHostedServiceDefaults.keychainService,
+            kSecAttrAccount as String: RemoteHostedServiceDefaults.keychainAccount,
+        ]
+    }
+
+    private var readQuery: [String: Any] {
+        var query = baseQuery
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        return query
+    }
+}
+
+private final class InMemoryRemoteHostedServiceStore: RemoteHostedServicePersisting {
+    private var record: RemoteHostedServiceRecord?
+    func load() throws -> RemoteHostedServiceRecord? { record }
+    func save(_ record: RemoteHostedServiceRecord) throws { self.record = record }
+    func delete() throws { record = nil }
+}
+
+/// Owns the Mac's low-frequency hosted control connection. The loopback remote server remains
+/// authoritative; this controller only publishes a direct ICE/TURN path to that same server.
+@MainActor
+final class RemoteHostedServiceController {
+    private(set) var state: RemoteHostedServiceState = .stopped {
+        didSet {
+            guard state != oldValue else { return }
+            onStateChange?()
+        }
+    }
+
+    var onStateChange: (() -> Void)?
+
+    private let store: RemoteHostedServicePersisting
+    private let endpoint: PeerControlPlaneServiceEndpoint?
+    private let hostID: String
+    private let hostName: String
+    private var record: RemoteHostedServiceRecord?
+    private var persistenceError: String?
+    private var listener: PeerHostedHostListener?
+    private var listenerEventsTask: Task<Void, Never>?
+    private var connectionTask: Task<Void, Never>?
+    private var retryTask: Task<Void, Never>?
+    private var desiredPort: UInt16?
+    private var lifecycleGeneration = 0
+    private var retryAttempt = 0
+
+    init(
+        store: (any RemoteHostedServicePersisting)? = nil,
+        endpoint: PeerControlPlaneServiceEndpoint? = RemoteHostedServiceController.configuredEndpoint(),
+        hostID: String = RemoteHostIdentity.current.id,
+        hostName: String = RemoteHostIdentity.current.name
+    ) {
+        self.store = store ?? Self.defaultStore()
+        self.endpoint = endpoint
+        self.hostID = hostID
+        self.hostName = hostName
+        do {
+            let loaded = try self.store.load()
+            if let loaded, Self.isValid(loaded, endpoint: endpoint, hostID: hostID) {
+                record = loaded
+            } else if loaded != nil {
+                persistenceError = RemoteHostedServiceStoreError.corrupt.localizedDescription
+            }
+        } catch {
+            persistenceError = error.localizedDescription
+        }
+    }
+
+    var canIssueDeviceCredentials: Bool {
+        guard persistenceError == nil, endpoint != nil, let record else { return false }
+        return record.hostCredential.hostID == hostID
+            && record.hostCredential.expiresAt > Date()
+    }
+
+    func start(targetPort: UInt16) {
+        desiredPort = targetPort
+        lifecycleGeneration &+= 1
+        let generation = lifecycleGeneration
+        stopConnection(keepingDesiredPort: true)
+        guard endpoint != nil else {
+            state = .notConfigured
+            return
+        }
+        guard persistenceError == nil else {
+            state = .unavailable("credentials")
+            return
+        }
+        guard record != nil else {
+            state = .signInRequired
+            return
+        }
+        state = .connecting
+        connectionTask = Task { [weak self] in
+            await self?.connect(targetPort: targetPort, generation: generation)
+        }
+    }
+
+    func stop() {
+        desiredPort = nil
+        lifecycleGeneration &+= 1
+        stopConnection(keepingDesiredPort: false)
+        state = .stopped
+    }
+
+    func signInWithApple(identityToken: String, rawNonce: String) async throws {
+        guard let endpoint else { throw PeerControlPlaneError.invalidEndpoint }
+        let generation = lifecycleGeneration
+        state = .connecting
+        let client = PeerControlPlaneClient(endpoint: endpoint)
+        let session = try await client.signInWithApple(
+            identityToken: identityToken,
+            rawNonce: rawNonce
+        )
+        let hostCredential = try await client.enrollHost(
+            accessToken: session.accessToken,
+            hostID: hostID,
+            displayName: hostName
+        )
+        let candidate = RemoteHostedServiceRecord(
+            version: RemoteHostedServiceDefaults.recordVersion,
+            endpoint: endpoint.baseURL,
+            session: session,
+            hostCredential: hostCredential,
+            pendingRevokedDeviceIDs: []
+        )
+        try persist(candidate)
+        guard generation == lifecycleGeneration else { return }
+        if let desiredPort {
+            start(targetPort: desiredPort)
+        } else {
+            state = .stopped
+        }
+    }
+
+    func signOut() throws {
+        stop()
+        try store.delete()
+        record = nil
+        persistenceError = nil
+    }
+
+    func issueDeviceCredential(deviceID: String) async throws -> PeerDeviceServiceCredential {
+        guard let endpoint else { throw PeerControlPlaneError.invalidEndpoint }
+        var current = try await validRecord(client: PeerControlPlaneClient(endpoint: endpoint))
+        if current.pendingRevokedDeviceIDs.contains(deviceID) {
+            current.pendingRevokedDeviceIDs.removeAll { $0 == deviceID }
+            try persist(current)
+        }
+        let credential = try await PeerControlPlaneClient(endpoint: endpoint).issueDeviceCredential(
+            hostCredential: current.hostCredential.credential,
+            hostID: hostID,
+            deviceID: deviceID
+        )
+        return credential
+    }
+
+    func revokeDevice(deviceID: String) {
+        Task { [weak self] in
+            await self?.revokeDeviceNow(deviceID: deviceID)
+        }
+    }
+
+    private func connect(targetPort: UInt16, generation: Int) async {
+        guard let endpoint else { return }
+        do {
+            let current = try await validRecord(client: PeerControlPlaneClient(endpoint: endpoint))
+            try await flushPendingRevocations(current: current)
+            guard generation == lifecycleGeneration, desiredPort == targetPort else { return }
+            let credential = try current.hostCredential.credential.withValue {
+                try PeerRendezvousCredential($0)
+            }
+            let listener = PeerHostedHostListener(
+                endpoint: endpoint.rendezvousEndpoint,
+                hostID: hostID,
+                credential: credential,
+                targetPort: targetPort
+            )
+            try await listener.start()
+            guard generation == lifecycleGeneration, desiredPort == targetPort else {
+                await listener.stop()
+                return
+            }
+            self.listener = listener
+            retryAttempt = 0
+            state = .ready
+            listenerEventsTask = Task { [weak self] in
+                for await event in listener.events {
+                    await self?.handle(event, listener: listener, generation: generation)
+                }
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            guard generation == lifecycleGeneration else { return }
+            ThreadingLogger.remote.error(
+                "Hosted remote connection failed code=\(Self.errorCode(error), privacy: .public)"
+            )
+            state = Self.requiresSignIn(error) ? .signInRequired : .unavailable("service")
+            if !Self.requiresSignIn(error) { scheduleReconnect(generation: generation) }
+        }
+    }
+
+    private func handle(
+        _ event: PeerHostedHostEvent,
+        listener: PeerHostedHostListener,
+        generation: Int
+    ) async {
+        guard generation == lifecycleGeneration, self.listener === listener else { return }
+        switch event {
+        case .ready:
+            state = .ready
+        case .sessionConnected(_, _, let route):
+            ThreadingLogger.remote.info(
+                "Hosted remote session connected relay=\(route?.usesRelay ?? false, privacy: .public)"
+            )
+        case .sessionClosed:
+            break
+        case .sessionFailed(_, let reason):
+            ThreadingLogger.remote.error(
+                "Hosted remote session failed reason=\(reason.rawValue, privacy: .public)"
+            )
+        case .listenerFailed(let reason):
+            ThreadingLogger.remote.error(
+                "Hosted remote listener failed reason=\(reason.rawValue, privacy: .public)"
+            )
+            self.listener = nil
+            listenerEventsTask = nil
+            state = reason == .unauthorized ? .signInRequired : .unavailable("service")
+            if reason != .unauthorized { scheduleReconnect(generation: generation) }
+        }
+    }
+
+    private func validRecord(client: PeerControlPlaneClient) async throws
+        -> RemoteHostedServiceRecord {
+        guard var current = record else { throw PeerControlPlaneError.invalidCredential }
+        let renewalDate = Date().addingTimeInterval(
+            RemoteHostedServiceDefaults.credentialRenewalLeadTime
+        )
+        if current.hostCredential.expiresAt > renewalDate { return current }
+
+        let session: PeerControlPlaneSession
+        if current.session.accessTokenExpiresAt > Date().addingTimeInterval(60) {
+            session = current.session
+        } else {
+            guard current.session.refreshTokenExpiresAt > Date().addingTimeInterval(60) else {
+                throw PeerControlPlaneError.invalidCredential
+            }
+            session = try await client.refresh(refreshToken: current.session.refreshToken)
+        }
+        let hostCredential = try await client.enrollHost(
+            accessToken: session.accessToken,
+            hostID: hostID,
+            displayName: hostName
+        )
+        current.session = session
+        current.hostCredential = hostCredential
+        try persist(current)
+        return current
+    }
+
+    private func revokeDeviceNow(deviceID: String) async {
+        if let listener { await listener.disconnect(deviceID: deviceID) }
+        guard var current = record else { return }
+        if !current.pendingRevokedDeviceIDs.contains(deviceID),
+           current.pendingRevokedDeviceIDs.count
+            < RemoteHostedServiceDefaults.maximumPendingRevocations {
+            current.pendingRevokedDeviceIDs.append(deviceID)
+            do {
+                try persist(current)
+            } catch {
+                state = .unavailable("credentials")
+                return
+            }
+        }
+        guard let endpoint else { return }
+        do {
+            current = try await validRecord(client: PeerControlPlaneClient(endpoint: endpoint))
+            try await revoke(deviceID: deviceID, current: &current, endpoint: endpoint)
+        } catch {
+            ThreadingLogger.remote.error(
+                "Hosted remote revocation deferred code=\(Self.errorCode(error), privacy: .public)"
+            )
+        }
+    }
+
+    private func flushPendingRevocations(current: RemoteHostedServiceRecord) async throws {
+        guard let endpoint else { return }
+        var candidate = current
+        for deviceID in current.pendingRevokedDeviceIDs {
+            try await revoke(deviceID: deviceID, current: &candidate, endpoint: endpoint)
+        }
+    }
+
+    private func revoke(
+        deviceID: String,
+        current: inout RemoteHostedServiceRecord,
+        endpoint: PeerControlPlaneServiceEndpoint
+    ) async throws {
+        try await PeerControlPlaneClient(endpoint: endpoint).revokeDeviceCredential(
+            hostCredential: current.hostCredential.credential,
+            hostID: hostID,
+            deviceID: deviceID
+        )
+        current.pendingRevokedDeviceIDs.removeAll { $0 == deviceID }
+        try persist(current)
+    }
+
+    private func persist(_ candidate: RemoteHostedServiceRecord) throws {
+        do {
+            try store.save(candidate)
+            record = candidate
+            persistenceError = nil
+        } catch {
+            persistenceError = error.localizedDescription
+            throw error
+        }
+    }
+
+    private func stopConnection(keepingDesiredPort: Bool) {
+        connectionTask?.cancel()
+        connectionTask = nil
+        retryTask?.cancel()
+        retryTask = nil
+        listenerEventsTask?.cancel()
+        listenerEventsTask = nil
+        if let listener {
+            Task { await listener.stop() }
+        }
+        listener = nil
+        retryAttempt = 0
+        if !keepingDesiredPort { desiredPort = nil }
+    }
+
+    private func scheduleReconnect(generation: Int) {
+        guard retryTask == nil, let targetPort = desiredPort else { return }
+        retryAttempt = min(retryAttempt + 1, 7)
+        let delay = min(
+            pow(2, Double(retryAttempt - 1)),
+            RemoteHostedServiceDefaults.maximumReconnectDelay
+        )
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self,
+                  generation == self.lifecycleGeneration,
+                  self.desiredPort == targetPort else { return }
+            self.retryTask = nil
+            self.state = .connecting
+            await self.connect(targetPort: targetPort, generation: generation)
+        }
+    }
+
+    private static func isValid(
+        _ record: RemoteHostedServiceRecord,
+        endpoint: PeerControlPlaneServiceEndpoint?,
+        hostID: String
+    ) -> Bool {
+        guard record.version == RemoteHostedServiceDefaults.recordVersion,
+              record.endpoint == endpoint?.baseURL,
+              record.hostCredential.hostID == hostID,
+              record.pendingRevokedDeviceIDs.count
+                <= RemoteHostedServiceDefaults.maximumPendingRevocations,
+              Set(record.pendingRevokedDeviceIDs).count == record.pendingRevokedDeviceIDs.count
+        else { return false }
+        return record.pendingRevokedDeviceIDs.allSatisfy { value in
+            !value.isEmpty && value.utf8.count <= PeerRendezvousBounds.maximumIdentifierBytes
+        }
+    }
+
+    private static func defaultStore() -> RemoteHostedServicePersisting {
+        NSClassFromString("XCTestCase") == nil
+            ? RemoteHostedServiceKeychainStore()
+            : InMemoryRemoteHostedServiceStore()
+    }
+
+    private static func configuredEndpoint(
+        bundle: Bundle = .main,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> PeerControlPlaneServiceEndpoint? {
+#if DEBUG
+        if let override = environment["THREADING_CONTROL_PLANE_URL"],
+           let url = URL(string: override) {
+            return try? PeerControlPlaneServiceEndpoint(url)
+        }
+#endif
+        guard let value = bundle.object(forInfoDictionaryKey: "ThreadingControlPlaneURL") as? String,
+              let url = URL(string: value) else { return nil }
+        return try? PeerControlPlaneServiceEndpoint(url)
+    }
+
+    private static func requiresSignIn(_ error: Error) -> Bool {
+        if error as? PeerControlPlaneError == .invalidCredential { return true }
+        if case .rejected(let status, _) = error as? PeerControlPlaneError, status == 401 {
+            return true
+        }
+        return false
+    }
+
+    private static func errorCode(_ error: Error) -> String {
+        switch error as? PeerControlPlaneError {
+        case .invalidCredential: "credential"
+        case .rejected(let status, _): "http_\(status)"
+        case .transport: "network"
+        case .responseTooLarge: "response_size"
+        case .invalidEndpoint: "endpoint"
+        case .invalidRequest: "request"
+        case .invalidResponse: "response"
+        case nil: "other"
+        }
+    }
+}

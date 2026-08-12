@@ -451,6 +451,10 @@ budget and the other is damage.
 # Deterministic Git Review file-index workloads, including 9k expanded generated files.
 scripts/profile_threading.sh git-stress
 
+# Real repository discovery, history, bounded range parsing, and production view mount.
+# The checkout is read-only; base, target, and run count are optional.
+scripts/profile_threading.sh git-repository-stress /path/to/linux HEAD~100 HEAD 5
+
 # Maximum-contract agent charts: decode/model, cold pane, updates, and rendered frames.
 scripts/profile_threading.sh chart-stress
 
@@ -1582,6 +1586,25 @@ More importantly, neither a watcher refresh nor exact-height discovery is allowe
 live momentum: both coalesce until `didEndLiveScroll`, which protects velocity independently of
 their eventual resting cost. The refresh span is `git.review.refresh-files` and reports inserted,
 removed, compared, changed and reordered path counts.
+
+The generated workload is the regression boundary, but it cannot reproduce the object database,
+index and history shape of Linux-scale repositories. `git-repository-stress` accepts an existing
+checkout and runs three complementary layers without modifying it:
+
+1. production `GitReviewReader` calls enumerate visible paths, compute the uncommitted summary and
+   parsed diff, and load the first 100 history rows;
+2. a bounded real revision-range command and `GitDiffParser` report process and parsing time
+   separately; and
+3. the resulting real models mount in `GitReviewViewController`, lay out, draw, and seek to the
+   bottom through the same virtual table as the application.
+
+The default range is `HEAD~100..HEAD`. A larger range that crosses the production 8 MiB diff cap
+reports `result=output-too-large` and the time to reach the bounded refusal; the harness does not
+raise the cap to manufacture a render result. Use a closer base to profile the visible pane, or a
+known large commit/range to test the bound deliberately. Results include first-run, median, p95
+and maximum wall latency so filesystem-cache effects stay visible. This case is manual because an
+external repository and its cache state are not reproducible enough for routine `full`; setting
+`THREADING_GIT_REPOSITORY_STRESS_PATH` includes it in `full+`.
 
 Height discovery is split at that boundary. AppKit automatic row height initially retained roughly
 twice the actual height for a 400-line body, creating blank content after the last glyph; and a

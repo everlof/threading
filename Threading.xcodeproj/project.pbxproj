@@ -93,9 +93,11 @@
 		F1000001000000000000042 /* BorderBeamKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000011 /* BorderBeamKit */; };
 		F1000001000000000000039 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
 		F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000009 /* ThreadingRemoteKit */; };
+		D3EE00010000000000000001 /* ThreadingPeerTransport in Frameworks */ = {isa = PBXBuildFile; productRef = D3EE00010000000000000004 /* ThreadingPeerTransport */; };
 		F1000001000000000000040 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
 		A20000010000000000000012 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000010 /* SwiftTerm */; };
 		A20000010000000000000013 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
+		D3EE00010000000000000002 /* ThreadingPeerTransport in Frameworks */ = {isa = PBXBuildFile; productRef = D3EE00010000000000000005 /* ThreadingPeerTransport */; };
 		A20000010000000000000017 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
 		A20000010000000000000016 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000015 /* AppIcon.icon */; };
 		B70000010000000000000002 /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = B70000010000000000000001 /* Fonts */; };
@@ -842,6 +844,7 @@
 				F1000001000000000000042 /* BorderBeamKit in Frameworks */,
 				F1000001000000000000039 /* ThreadingExtensionKit in Frameworks */,
 				F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */,
+				D3EE00010000000000000001 /* ThreadingPeerTransport in Frameworks */,
 				D1FF00010000000000000011 /* NativeDiffCore in Frameworks */,
 				D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */,
 				5AAA00010000000000000011 /* Sparkle in Frameworks */,
@@ -862,6 +865,7 @@
 			files = (
 				A20000010000000000000012 /* SwiftTerm in Frameworks */,
 				A20000010000000000000013 /* ThreadingRemoteKit in Frameworks */,
+				D3EE00010000000000000002 /* ThreadingPeerTransport in Frameworks */,
 				A20000010000000000000017 /* ThreadingExtensionKit in Frameworks */,
 				D1FF00010000000000000013 /* NativeDiffCore in Frameworks */,
 				D1FF00010000000000000014 /* NativeDiffUIKit in Frameworks */,
@@ -1411,6 +1415,7 @@
 				F4000001000000000000011 /* BorderBeamKit */,
 				F4000001000000000000007 /* ThreadingExtensionKit */,
 				F4000001000000000000009 /* ThreadingRemoteKit */,
+				D3EE00010000000000000004 /* ThreadingPeerTransport */,
 				D1FF00010000000000000001 /* NativeDiffCore */,
 				D1FF00010000000000000002 /* NativeDiffAppKit */,
 				5AAA00010000000000000001 /* Sparkle */,
@@ -1439,6 +1444,7 @@
 			packageProductDependencies = (
 				A20000010000000000000010 /* SwiftTerm */,
 				A20000010000000000000011 /* ThreadingRemoteKit */,
+				D3EE00010000000000000005 /* ThreadingPeerTransport */,
 				F4000001000000000000007 /* ThreadingExtensionKit */,
 				D1FF00010000000000000003 /* NativeDiffCore */,
 				D1FF00010000000000000004 /* NativeDiffUIKit */,
@@ -1538,6 +1544,7 @@
 				F4000001000000000000012 /* XCLocalSwiftPackageReference "BorderBeamKit" */,
 				F4000001000000000000008 /* XCLocalSwiftPackageReference "ThreadingExtensionKit" */,
 				F4000001000000000000010 /* XCLocalSwiftPackageReference "ThreadingRemoteKit" */,
+				D3EE00010000000000000003 /* XCLocalSwiftPackageReference "ThreadingPeerTransport" */,
 				D1FF00010000000000000020 /* XCRemoteSwiftPackageReference "NativeDiffKit" */,
 				5AAA00010000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				7A0000010000000000000090 /* XCLocalSwiftPackageReference "ThreadingWasmRuntime" */,
@@ -2682,6 +2689,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
+				INFOPLIST_KEY_ThreadingControlPlaneURL = "https://remote.threading.codes";
 				INFOPLIST_KEY_ThreadingReportIntakeToken = "$(THREADING_REPORT_INTAKE_TOKEN)";
 				INFOPLIST_KEY_ThreadingReportIntakeURL = "$(THREADING_REPORT_INTAKE_URL)";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -2744,6 +2752,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
+				INFOPLIST_KEY_ThreadingControlPlaneURL = "https://remote.threading.codes";
 				INFOPLIST_KEY_ThreadingReportIntakeToken = "$(THREADING_REPORT_INTAKE_TOKEN)";
 				INFOPLIST_KEY_ThreadingReportIntakeURL = "$(THREADING_REPORT_INTAKE_URL)";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -2981,6 +2990,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingRemoteKit;
 		};
+		D3EE00010000000000000003 /* XCLocalSwiftPackageReference "ThreadingPeerTransport" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ThreadingPeerTransport;
+		};
 		7A0000010000000000000090 /* XCLocalSwiftPackageReference "ThreadingWasmRuntime" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingWasmRuntime;
@@ -3043,6 +3056,14 @@
 		A20000010000000000000011 /* ThreadingRemoteKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ThreadingRemoteKit;
+		};
+		D3EE00010000000000000004 /* ThreadingPeerTransport */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingPeerTransport;
+		};
+		D3EE00010000000000000005 /* ThreadingPeerTransport */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingPeerTransport;
 		};
 		D1FF00010000000000000001 /* NativeDiffCore */ = {
 			isa = XCSwiftPackageProductDependency;

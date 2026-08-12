@@ -1414,6 +1414,200 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertGreaterThan(controller.instantiatedDeferredFileRowCount, 0)
     }
 
+    /// Opt-in end-to-end wall-latency sweep against a real, already-present repository. The
+    /// generated fixtures above isolate view scaling; this covers the other half of opening the
+    /// pane: spawning the production git reads, walking a large index/history, parsing a real
+    /// revision range, and then handing those models to the production table.
+    ///
+    /// The checkout is read-only. By default the range is `HEAD~100..HEAD`; set explicit
+    /// revisions when the repository is shallow or when a known large change is more useful.
+    func testStressRealRepositoryWhenEnabled() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let repositoryPath = environment["THREADING_GIT_REPOSITORY_STRESS_PATH"],
+              !repositoryPath.isEmpty else {
+            throw XCTSkip(
+                "Set THREADING_GIT_REPOSITORY_STRESS_PATH to an existing checkout."
+            )
+        }
+
+        let repository = URL(fileURLWithPath: repositoryPath, isDirectory: true)
+            .standardizedFileURL
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: repository.path, isDirectory: &isDirectory)
+                && isDirectory.boolValue,
+            "The real-repository stress path is not a directory: \(repository.path)"
+        )
+
+        let runs = environment["THREADING_GIT_REPOSITORY_STRESS_RUNS"]
+            .flatMap(Int.init)
+            .map { max($0, 1) }
+            ?? 3
+        let base = environment["THREADING_GIT_REPOSITORY_STRESS_BASE"] ?? "HEAD~100"
+        let target = environment["THREADING_GIT_REPOSITORY_STRESS_TARGET"] ?? "HEAD"
+
+        // Fail before the measured work if the path or either requested revision is invalid.
+        // A shallow clone should supply a nearer base rather than accidentally measuring an
+        // empty/fallback comparison.
+        for revision in [base, target] {
+            _ = try GitProcess.run(
+                GitReviewCommands.common + ["rev-parse", "--verify", "\(revision)^{tree}"],
+                in: repository,
+                maximumOutput: 16 * 1024
+            )
+        }
+
+        var repositoryFileDurations: [UInt64] = []
+        var summaryDurations: [UInt64] = []
+        var uncommittedDurations: [UInt64] = []
+        var historyDurations: [UInt64] = []
+        var repositoryFileCount = 0
+        var uncommittedFileCount = 0
+        var historyCount = 0
+
+        for _ in 0..<runs {
+            var started = DispatchTime.now().uptimeNanoseconds
+            let paths = try awaitGitValue {
+                GitReviewReader.repositoryFiles(in: repository, completion: $0)
+            }
+            repositoryFileDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+            repositoryFileCount = paths.count
+
+            started = DispatchTime.now().uptimeNanoseconds
+            _ = try awaitGitValue {
+                GitReviewReader.uncommittedSummary(in: repository, completion: $0)
+            }
+            summaryDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+
+            started = DispatchTime.now().uptimeNanoseconds
+            let uncommitted = try awaitGitValue {
+                GitReviewReader.diff(.uncommitted, in: repository, completion: $0)
+            }
+            uncommittedDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+            uncommittedFileCount = uncommitted.count
+
+            started = DispatchTime.now().uptimeNanoseconds
+            let history = try awaitGitValue {
+                GitReviewReader.log(skip: 0, in: repository, completion: $0)
+            }
+            historyDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+            historyCount = history.count
+        }
+
+        Self.printRealRepositoryMetric(
+            "git-repository-files",
+            durations: repositoryFileDurations,
+            fields: "paths=\(repositoryFileCount)"
+        )
+        Self.printRealRepositoryMetric(
+            "git-repository-summary",
+            durations: summaryDurations,
+            fields: "paths=\(repositoryFileCount)"
+        )
+        Self.printRealRepositoryMetric(
+            "git-repository-uncommitted",
+            durations: uncommittedDurations,
+            fields: "paths=\(repositoryFileCount) files=\(uncommittedFileCount)"
+        )
+        Self.printRealRepositoryMetric(
+            "git-repository-history",
+            durations: historyDurations,
+            fields: "paths=\(repositoryFileCount) commits=\(historyCount)"
+        )
+
+        var commandDurations: [UInt64] = []
+        var parseDurations: [UInt64] = []
+        var rangeFiles: [GitFileDiff] = []
+        var diffBytes = 0
+        for _ in 0..<runs {
+            let commandStarted = DispatchTime.now().uptimeNanoseconds
+            let data: Data
+            do {
+                data = try GitProcess.run(
+                    GitReviewCommands.common + GitReviewCommands.diff(
+                        from: base,
+                        to: target
+                    ),
+                    in: repository,
+                    maximumOutput: GitReviewDefaults.maximumDiffBytes
+                )
+            } catch GitFailure.outputTooLarge {
+                let elapsed = DispatchTime.now().uptimeNanoseconds - commandStarted
+                print(
+                    "THREADING_PERF git-repository-range "
+                        + "paths=\(repositoryFileCount) "
+                        + "result=output-too-large limit_bytes=\(GitReviewDefaults.maximumDiffBytes) "
+                        + "elapsed_ms=\(Self.milliseconds(elapsed))"
+                )
+                return
+            }
+            let commandEnded = DispatchTime.now().uptimeNanoseconds
+            let parsed = GitDiffParser.files(fromUnifiedDiff: GitDiffParser.decode(data))
+            let parseEnded = DispatchTime.now().uptimeNanoseconds
+            commandDurations.append(commandEnded - commandStarted)
+            parseDurations.append(parseEnded - commandEnded)
+            diffBytes = data.count
+            rangeFiles = parsed
+        }
+
+        let changedLines = rangeFiles.lazy.reduce(into: 0) { count, file in
+            count += file.hunks.lazy.reduce(into: 0) { $0 += $1.lines.count }
+        }
+        let rangeFields = "paths=\(repositoryFileCount) files=\(rangeFiles.count) "
+            + "lines=\(changedLines) bytes=\(diffBytes)"
+        Self.printRealRepositoryMetric(
+            "git-repository-range-command",
+            durations: commandDurations,
+            fields: rangeFields
+        )
+        Self.printRealRepositoryMetric(
+            "git-repository-range-parse",
+            durations: parseDurations,
+            fields: rangeFields
+        )
+
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: repository.path,
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+
+        let renderStarted = DispatchTime.now().uptimeNanoseconds
+        controller.show(.files(rangeFiles))
+        let renderEnded = DispatchTime.now().uptimeNanoseconds
+        controller.view.layoutSubtreeIfNeeded()
+        let layoutEnded = DispatchTime.now().uptimeNanoseconds
+
+        let viewport = controller.scrollView.bounds
+        if let bitmap = controller.scrollView.bitmapImageRepForCachingDisplay(in: viewport) {
+            controller.scrollView.cacheDisplay(in: viewport, to: bitmap)
+        }
+        let drawEnded = DispatchTime.now().uptimeNanoseconds
+
+        let seekStarted = DispatchTime.now().uptimeNanoseconds
+        if !rangeFiles.isEmpty {
+            controller.fileTableView.scrollRowToVisible(rangeFiles.count - 1)
+            controller.view.layoutSubtreeIfNeeded()
+            if let bitmap = controller.scrollView.bitmapImageRepForCachingDisplay(in: viewport) {
+                controller.scrollView.cacheDisplay(in: viewport, to: bitmap)
+            }
+        }
+        let seekEnded = DispatchTime.now().uptimeNanoseconds
+
+        print(
+            "THREADING_PERF git-repository-range-view "
+                + "paths=\(repositoryFileCount) files=\(rangeFiles.count) lines=\(changedLines) "
+                + "instantiated=\(controller.instantiatedFileRowCount) "
+                + "render_ms=\(Self.milliseconds(renderEnded - renderStarted)) "
+                + "layout_ms=\(Self.milliseconds(layoutEnded - renderEnded)) "
+                + "draw_ms=\(Self.milliseconds(drawEnded - layoutEnded)) "
+                + "bottom_seek_ms=\(Self.milliseconds(seekEnded - seekStarted))"
+        )
+        XCTAssertEqual(controller.fileTableView.numberOfRows, rangeFiles.count)
+    }
+
     // MARK: - The Pane's Own Ordering
 
     /// **The diff arrives after the pane is laid out, and the cards still span it.**
@@ -1591,6 +1785,39 @@ final class GitReviewViewTests: XCTestCase {
             if let match = firstDescendant(of: type, in: child) { return match }
         }
         return nil
+    }
+
+    private func awaitGitValue<Value>(
+        _ work: (@escaping @MainActor @Sendable (Result<Value, GitFailure>) -> Void) -> Void
+    ) throws -> Value {
+        let finished = expectation(description: "real repository git operation")
+        var outcome: Result<Value, GitFailure>?
+        work { result in
+            outcome = result
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 30)
+
+        switch try XCTUnwrap(outcome) {
+        case .success(let value): return value
+        case .failure(let failure): throw failure
+        }
+    }
+
+    private static func printRealRepositoryMetric(
+        _ name: String,
+        durations: [UInt64],
+        fields: String
+    ) {
+        guard let first = durations.first else { return }
+        let sorted = durations.sorted()
+        let median = sorted[sorted.count / 2]
+        let p95 = sorted[min(Int(Double(sorted.count - 1) * 0.95), sorted.count - 1)]
+        print(
+            "THREADING_PERF \(name) \(fields) runs=\(durations.count) "
+                + "first_ms=\(milliseconds(first)) median_ms=\(milliseconds(median)) "
+                + "p95_ms=\(milliseconds(p95)) max_ms=\(milliseconds(sorted.last ?? first))"
+        )
     }
 
     private static func milliseconds(_ nanoseconds: UInt64) -> String {

@@ -3,6 +3,7 @@
 # Non-interactive performance entry point for Threading.
 #
 #   scripts/profile_threading.sh git-stress
+#   scripts/profile_threading.sh git-repository-stress <checkout> [base] [target] [runs]
 #   scripts/profile_threading.sh agent-work-stress
 #   scripts/profile_threading.sh chart-stress
 #   scripts/profile_threading.sh tools-settings-stress
@@ -49,7 +50,7 @@ performance_directory="${THREADING_PROFILE_OUTPUT:-/tmp/threading-profiles}"
 built_in_directory="${HOME}/Library/Application Support/Threading/Performance"
 
 usage() {
-  sed -n '3,38p' "$0"
+  sed -n '3,40p' "$0"
 }
 
 resolve_pid() {
@@ -399,10 +400,44 @@ run_remote_conversation_stress() {
   ) 2>&1 | tee "${output_directory}/remote-conversation-stress.log"
 }
 
-run_git_stress() {
+prepare_git_stress_bundle() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
   local derived_data="${output_directory}/derived-data"
+
+  xcodebuild \
+    -project Threading.xcodeproj \
+    -scheme Threading \
+    -testPlan Threading-Fast \
+    -destination "platform=macOS" \
+    -configuration Debug \
+    -derivedDataPath "${derived_data}" \
+    -jobs "${jobs}" \
+    -quiet \
+    build-for-testing
+
+  local build_directory
+  build_directory="$(
+    xcodebuild \
+      -project Threading.xcodeproj \
+      -scheme Threading \
+      -configuration Debug \
+      -destination "platform=macOS" \
+      -derivedDataPath "${derived_data}" \
+      -showBuildSettings \
+      -json \
+      | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
+  )"
+  git_stress_app="${build_directory}/Threading.app"
+  git_stress_test_bundle="${git_stress_app}/Contents/PlugIns/ThreadingTests.xctest"
+  [[ -d "${git_stress_test_bundle}" ]] || {
+    echo "Built test bundle not found at ${git_stress_test_bundle}." >&2
+    return 1
+  }
+}
+
+run_git_stress() {
+  local output_directory="$1"
   echo "Running deterministic Git Review file-index sweeps…"
 
   # Xcode test plans intentionally sanitize the launched test process's environment. Build the
@@ -410,50 +445,59 @@ run_git_stress() {
   # receives its gate without permanently enabling a 1,000-row stress case in the fast suite.
   (
     cd "${repository_directory}"
-    xcodebuild \
-      -project Threading.xcodeproj \
-      -scheme Threading \
-      -testPlan Threading-Fast \
-      -destination "platform=macOS" \
-      -configuration Debug \
-      -derivedDataPath "${derived_data}" \
-      -jobs "${jobs}" \
-      -quiet \
-      build-for-testing
-
-    local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
-    local app="${build_directory}/Threading.app"
-    local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
-    [[ -d "${test_bundle}" ]] || {
-      echo "Built test bundle not found at ${test_bundle}." >&2
-      return 1
-    }
+    prepare_git_stress_bundle "${output_directory}"
 
     THREADING_GIT_STRESS=1 \
-    DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
-    DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+    DYLD_LIBRARY_PATH="${git_stress_app}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${git_stress_app}/Contents/Frameworks" \
       xcrun xctest \
         -XCTest ThreadingTests.GitReviewViewTests/testStressLargeFileIndexesWhenEnabled \
-        "${test_bundle}"
+        "${git_stress_test_bundle}"
 
     THREADING_GIT_MASSIVE_STRESS=1 \
-    DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
-    DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+    DYLD_LIBRARY_PATH="${git_stress_app}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${git_stress_app}/Contents/Frameworks" \
       xcrun xctest \
         -XCTest ThreadingTests.GitReviewViewTests/testStressMassiveExpandedFileIndexWhenEnabled \
-        "${test_bundle}"
+        "${git_stress_test_bundle}"
   ) 2>&1 | tee "${output_directory}/git-review-stress.log"
+}
+
+run_git_repository_stress() {
+  local output_directory="$1"
+  local checkout="$2"
+  local base="${3:-HEAD~100}"
+  local target="${4:-HEAD}"
+  local runs="${5:-3}"
+
+  [[ -d "${checkout}" ]] || {
+    echo "Git repository stress checkout is not a directory: ${checkout}" >&2
+    return 2
+  }
+  git -C "${checkout}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+    echo "Git repository stress path is not a worktree: ${checkout}" >&2
+    return 2
+  }
+  [[ "${runs}" =~ ^[1-9][0-9]*$ ]] || {
+    echo "Git repository stress runs must be a positive integer, got: ${runs}" >&2
+    return 2
+  }
+
+  echo "Running real Git Review sweep against the supplied checkout (${runs} runs)…"
+  (
+    cd "${repository_directory}"
+    prepare_git_stress_bundle "${output_directory}"
+
+    THREADING_GIT_REPOSITORY_STRESS_PATH="${checkout}" \
+    THREADING_GIT_REPOSITORY_STRESS_BASE="${base}" \
+    THREADING_GIT_REPOSITORY_STRESS_TARGET="${target}" \
+    THREADING_GIT_REPOSITORY_STRESS_RUNS="${runs}" \
+    DYLD_LIBRARY_PATH="${git_stress_app}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${git_stress_app}/Contents/Frameworks" \
+      xcrun xctest \
+        -XCTest ThreadingTests.GitReviewViewTests/testStressRealRepositoryWhenEnabled \
+        "${git_stress_test_bundle}"
+  ) 2>&1 | tee "${output_directory}/git-repository-stress.log"
 }
 
 run_tools_settings_stress() {
@@ -1789,6 +1833,25 @@ case "${command}" in
     run_git_stress "${output_directory}"
     ;;
 
+  git-repository-stress)
+    checkout="${2:-${THREADING_GIT_REPOSITORY_STRESS_PATH:-}}"
+    [[ -n "${checkout}" ]] || {
+      echo "git-repository-stress requires an existing checkout path." >&2
+      usage >&2
+      exit 2
+    }
+    base="${3:-${THREADING_GIT_REPOSITORY_STRESS_BASE:-HEAD~100}}"
+    target_revision="${4:-${THREADING_GIT_REPOSITORY_STRESS_TARGET:-HEAD}}"
+    repository_runs="${5:-${THREADING_GIT_REPOSITORY_STRESS_RUNS:-3}}"
+    output_directory="$(new_run_directory git-repository-stress)"
+    run_git_repository_stress \
+      "${output_directory}" \
+      "${checkout}" \
+      "${base}" \
+      "${target_revision}" \
+      "${repository_runs}"
+    ;;
+
   agent-work-stress)
     output_directory="$(new_run_directory agent-work-stress)"
     run_agent_work_stress "${output_directory}"
@@ -2029,6 +2092,18 @@ case "${command}" in
       run_conversation_active_turn_stress "${output_directory}"
       run_conversation_residency_stress "${output_directory}"
       run_window_resize_stress "${output_directory}" history-heavy
+
+      # A real checkout is deliberately opt-in: unlike the generated routine fixtures, its
+      # contents and filesystem cache are not reproducible. When supplied, full+ keeps the
+      # expensive real-world reader/parser/view sweep beside the specialist captures.
+      if [[ -n "${THREADING_GIT_REPOSITORY_STRESS_PATH:-}" ]]; then
+        run_git_repository_stress \
+          "${output_directory}" \
+          "${THREADING_GIT_REPOSITORY_STRESS_PATH}" \
+          "${THREADING_GIT_REPOSITORY_STRESS_BASE:-HEAD~100}" \
+          "${THREADING_GIT_REPOSITORY_STRESS_TARGET:-HEAD}" \
+          "${THREADING_GIT_REPOSITORY_STRESS_RUNS:-3}"
+      fi
 
       full_plus_templates=(
         "CPU Profiler"

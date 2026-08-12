@@ -33,6 +33,10 @@
 	-->
 	<key>ThreadingBuildChannel</key>
 	<string>$(THREADING_CHANNEL)</string>
+	<!-- Account, rendezvous, and short-lived TURN control plane. Ordinary remote traffic uses
+	     the negotiated peer path and does not transit this origin. -->
+	<key>ThreadingControlPlaneURL</key>
+	<string>https://remote.threading.codes</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSMainNibFile</key>

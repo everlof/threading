@@ -235,6 +235,11 @@ public final class PeerHostedHostTunnel: @unchecked Sendable {
 /// Long-lived Mac control connection. Session negotiations and retained tunnels are capped
 /// independently; the listener is one-shot and app reconnect policy creates a fresh instance.
 public actor PeerHostedHostListener {
+    private struct PendingSession: Sendable {
+        let deviceID: String
+        let task: Task<Void, Never>
+    }
+
     public nonisolated let events: AsyncStream<PeerHostedHostEvent>
 
     private let eventContinuation: AsyncStream<PeerHostedHostEvent>.Continuation
@@ -244,7 +249,7 @@ public actor PeerHostedHostListener {
     private let targetPort: UInt16
     private var controlSocket: PeerRendezvousWebSocket?
     private var controlTask: Task<Void, Never>?
-    private var pending: [String: Task<Void, Never>] = [:]
+    private var pending: [String: PendingSession] = [:]
     private var sessions: [String: PeerHostedHostTunnel] = [:]
     private var didStart = false
     private var isStopped = false
@@ -305,7 +310,7 @@ public actor PeerHostedHostListener {
         isStopped = true
         controlTask?.cancel()
         controlTask = nil
-        let pendingTasks = Array(pending.values)
+        let pendingTasks = pending.values.map(\.task)
         pending.removeAll(keepingCapacity: false)
         pendingTasks.forEach { $0.cancel() }
         let active = Array(sessions.values)
@@ -318,6 +323,26 @@ public actor PeerHostedHostListener {
 
     public func activeSessionCount() -> Int {
         sessions.count
+    }
+
+    /// Immediately removes every negotiating or active tunnel owned by `deviceID`.
+    /// Call this when the app revokes the corresponding remote-device capability.
+    public func disconnect(deviceID: String) {
+        let pendingSessionIDs = pending.compactMap { sessionID, session in
+            session.deviceID == deviceID ? sessionID : nil
+        }
+        for sessionID in pendingSessionIDs {
+            pending.removeValue(forKey: sessionID)?.task.cancel()
+        }
+
+        let activeSessionIDs = sessions.compactMap { sessionID, tunnel in
+            tunnel.deviceID == deviceID ? sessionID : nil
+        }
+        for sessionID in activeSessionIDs {
+            guard let tunnel = sessions.removeValue(forKey: sessionID) else { continue }
+            tunnel.stop()
+            eventContinuation.yield(.sessionClosed(sessionID: sessionID))
+        }
     }
 
     private func receiveControlMessages(_ socket: PeerRendezvousWebSocket) async {
@@ -353,14 +378,19 @@ public actor PeerHostedHostListener {
         sessionToken: String
     ) async {
         guard pending[sessionID] == nil, sessions[sessionID] == nil else { return }
-        guard pending.count + sessions.count < PeerHostedBounds.maximumConcurrentDeviceSessions,
-              let sessionCredential = try? PeerRendezvousCredential(sessionToken) else {
+        guard pending.count + sessions.count < PeerHostedBounds.maximumConcurrentDeviceSessions else {
             eventContinuation.yield(
                 .sessionFailed(sessionID: sessionID, reason: .hostBusy)
             )
             return
         }
-        pending[sessionID] = Task { [weak self] in
+        guard let sessionCredential = try? PeerRendezvousCredential(sessionToken) else {
+            eventContinuation.yield(
+                .sessionFailed(sessionID: sessionID, reason: .unauthorized)
+            )
+            return
+        }
+        let task = Task { [weak self] in
             guard let self else { return }
             do {
                 let tunnel = try await negotiateHostSession(
@@ -375,6 +405,7 @@ public actor PeerHostedHostListener {
                 await didFail(sessionID: sessionID, error: error)
             }
         }
+        pending[sessionID] = PendingSession(deviceID: deviceID, task: task)
     }
 
     private func didConnect(_ tunnel: PeerHostedHostTunnel) async {
@@ -382,6 +413,19 @@ public actor PeerHostedHostListener {
         guard !isStopped else {
             tunnel.stop()
             return
+        }
+
+        // A device owns at most one live direct tunnel. Keeping an older tunnel here would
+        // preserve a revoked/stale path and consume one of the listener's bounded slots.
+        let replacedSessionIDs = sessions.compactMap { sessionID, existing in
+            existing.deviceID == tunnel.deviceID && sessionID != tunnel.sessionID
+                ? sessionID
+                : nil
+        }
+        for sessionID in replacedSessionIDs {
+            guard let existing = sessions.removeValue(forKey: sessionID) else { continue }
+            existing.stop()
+            eventContinuation.yield(.sessionClosed(sessionID: sessionID))
         }
         sessions[tunnel.sessionID] = tunnel
         eventContinuation.yield(
