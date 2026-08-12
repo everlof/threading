@@ -291,6 +291,14 @@ are ignored until the resting viewport is known. Mutating table rows or calling
 `noteHeightOfRows` between momentum events made the pane appear to steal the wheel even when the
 individual operation was not a long hang. The end notification applies the newest model first,
 then measures only the rows that survived into the resting viewport.
+A scroller-thumb drag is the one stated exception, and only for row *content*: its transient
+rows wear the skeleton ghost, and a thumb held still for
+`GitReviewDefaults.scrollerSeekSettleDelay` replaces the visible rows with real content at the
+exact clip origin while the transaction stays open. That replacement is safe where a momentum
+mutation was not because the thumb is stationary — there is no wheel velocity to steal — and
+because geometry is untouched: heights and coalesced phases still wait for `didEndLiveScroll`.
+See [`performance.md`](performance.md) for the measured seek workload and the 2026-08-12
+refinement notes.
 The table's sole column is fitted by `SoleColumnFitting` on the list itself, not by this pane;
 an autoresizing column does not otherwise follow the clip width, which left full-pane rows
 drawing as narrow intrinsic cards. **It was fitted here, from `viewDidLayout`, and that is the

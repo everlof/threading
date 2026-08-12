@@ -1032,6 +1032,118 @@ final class GitReviewViewTests: XCTestCase {
         )
     }
 
+    /// The seek row's body area is a ghost, not bare card surface: scrubbing through one
+    /// enormous expanded diff used to show a screen of empty card, which read as the pane
+    /// failing to draw rather than declining to yet.
+    func testScrollerSeekRowsWearTheSkeletonGhost() throws {
+        let files = Self.stressSmallExpandedFiles(count: 80, linesPerFile: 9)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+        controller.show(.files(files))
+        controller.view.layoutSubtreeIfNeeded()
+
+        controller.beginFileScrollerSeek()
+        controller.scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: controller.fileTableView.rect(ofRow: 60).minY + 13
+        ))
+        controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertNotNil(
+            Self.firstDescendant(
+                of: DiffSkeletonView.self,
+                in: controller.scrollView.contentView
+            ),
+            "a deferred expanded row must ghost its body"
+        )
+        controller.finishFileLiveScrolling()
+    }
+
+    /// A thumb held still mid-drag is the reader pausing to look. The settle pass installs
+    /// the real viewport at the exact origin without ending the drag's transaction, without
+    /// moving the document's extent — and the next knob jump re-enters the cheap path.
+    func testAHeldStillScrollerThumbMaterializesTheViewportBeforeRelease() throws {
+        let files = Self.stressSmallExpandedFiles(count: 80, linesPerFile: 9)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+        controller.show(.files(files))
+        controller.view.layoutSubtreeIfNeeded()
+
+        controller.beginFileScrollerSeek()
+        controller.scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: controller.fileTableView.rect(ofRow: 60).minY + 13
+        ))
+        controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+        controller.view.layoutSubtreeIfNeeded()
+        let originDuringSeek = controller.scrollView.contentView.bounds.origin
+        let extentDuringSeek = controller.fileTableView.bounds.height
+        XCTAssertNil(
+            Self.firstDescendant(
+                of: GitReviewDiffTextView.self,
+                in: controller.scrollView.contentView
+            )
+        )
+
+        controller.settleFileScrollerSeek()
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertNotNil(
+            Self.firstDescendant(
+                of: GitReviewDiffTextView.self,
+                in: controller.scrollView.contentView
+            ),
+            "the pause must be answered with real content, not the ghost"
+        )
+        XCTAssertEqual(
+            controller.scrollView.contentView.bounds.origin.y,
+            originDuringSeek.y,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(
+            controller.fileTableView.bounds.height,
+            extentDuringSeek,
+            accuracy: 0.5,
+            "height discovery stays coalesced while the thumb is held"
+        )
+        XCTAssertTrue(controller.isFileLiveScrolling, "the drag's transaction is still open")
+        XCTAssertFalse(controller.isFileScrollerSeeking)
+
+        let deferredBeforeResume = controller.instantiatedDeferredFileRowCount
+        controller.beginFileScrollerSeek()
+        controller.scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: controller.fileTableView.rect(ofRow: 20).minY + 13
+        ))
+        controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+        controller.view.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(
+            controller.instantiatedDeferredFileRowCount,
+            deferredBeforeResume,
+            "resuming the drag must re-enter the cheap deferred path"
+        )
+
+        controller.finishFileLiveScrolling()
+        controller.view.layoutSubtreeIfNeeded()
+        XCTAssertNotNil(
+            Self.firstDescendant(
+                of: GitReviewDiffTextView.self,
+                in: controller.scrollView.contentView
+            )
+        )
+    }
+
     /// Opt-in rather than part of the fast suite: this is a repeatable workload for `sample`,
     /// `xctrace`, and before/after measurements of the pane's large-file-index path.
     ///

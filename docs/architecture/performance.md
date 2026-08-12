@@ -1705,6 +1705,24 @@ live momentum: both coalesce until `didEndLiveScroll`, which protects velocity i
 their eventual resting cost. The refresh span is `git.review.refresh-files` and reports inserted,
 removed, compared, changed and reordered path counts.
 
+The lightweight seek rows earned two refinements on 2026-08-12, after a real +20k-line
+uncommitted diff showed their degenerate case: the sweep's assumption of ~75 small files per
+viewport inverts when a handful of enormous expanded diffs own the document height, and a drag
+then shows nothing but bare card surface until mouse-up — reported as "scrolling shows nothing
+until I release the scroller". First, a deferred body now holds a `DiffSkeletonView` ghost —
+proportional added/removed bars drawn only for the rows intersecting `dirtyRect`, pulsing by a
+layer-opacity animation rather than a redraw timer — so the per-pointer-event workload is
+unchanged. Second, a thumb held still for `GitReviewDefaults.scrollerSeekSettleDelay` (0.15 s)
+materializes the visible rows for real at the exact clip origin *without* ending the drag's
+transaction: only `isFileScrollerSeeking` clears, so the next knob jump re-enters the cheap
+path, while exact-height discovery and any coalesced watched phase still wait for
+`didEndLiveScroll`. People scrub in drag–pause–look strokes; the settle pass answers the pause
+with content at the release path's own measured cost (13.5–15.7 ms), paid only once per pause.
+A ghost body is also excluded from exact-height recording (`hasEstimatedGhostBody`): the
+skeleton stretches to whatever the table gave the row, so measuring it would replace the
+model's honest line-weight estimate with the header's fitting height and collapse the
+scrollbar's extent.
+
 The generated workload is the regression boundary, but it cannot reproduce the object database,
 index and history shape of Linux-scale repositories. `git-repository-stress` accepts an existing
 checkout and runs three complementary layers without modifying it:

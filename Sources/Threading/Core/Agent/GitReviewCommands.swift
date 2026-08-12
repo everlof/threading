@@ -198,6 +198,11 @@ enum GitReviewDefaults {
     static let contextLines = 3
     static let logPageSize = 100
 
+    /// How long the scroller thumb must hold still, mid-drag, before the ghost viewport is
+    /// replaced with real rows. Short enough that a scrub's natural reading pause is answered;
+    /// long enough that a slow continuous drag never pays TextKit per pointer event.
+    static let scrollerSeekSettleDelay: TimeInterval = 0.15
+
     /// Lines one file's diff draws before truncating with a note.
     static let fileDisplayCap = 400
 

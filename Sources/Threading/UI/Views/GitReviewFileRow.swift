@@ -245,11 +245,7 @@ final class GitReviewFileRow: NSView {
         super.init(frame: .zero)
         setupViews()
         if expanded && canExpand {
-            if defersExpandedBody {
-                showDeferredExpandedState()
-            } else {
-                toggle()
-            }
+            defersExpandedBody ? showSkeletonExpandedState() : toggle()
         }
     }
 
@@ -563,20 +559,43 @@ final class GitReviewFileRow: NSView {
 
     /// A scroller-thumb drag can cross hundreds of expanded files per frame. Building TextKit
     /// for a row that exists for only that frame makes the thumb lag behind the pointer. Keep
-    /// the expanded geometry and disclosure state while leaving the body empty; the table
-    /// replaces the resting viewport with ordinary rows when the drag ends.
-    private func showDeferredExpandedState() {
+    /// the expanded geometry and disclosure state while the body holds a `DiffSkeletonView`
+    /// ghost instead of text; the table replaces the resting viewport with ordinary rows when
+    /// the drag ends.
+    private func showSkeletonExpandedState() {
         guard let headerBottom, let bodyBottom else { return }
+        installSkeletonBody()
         isExpanded = true
         headerBottom.isActive = false
         bodyContainer.isHidden = false
         bodyBottom.isActive = true
-        if !defersExpandedBody {
+        if !defersExpandedBody && canExpand {
             chevron.image = NSImage(
                 systemSymbolName: "chevron.down",
                 accessibilityDescription: nil
             )
         }
+    }
+
+    /// A ghost body has no exact height to report: the skeleton stretches to whatever the
+    /// table gave the row, so measuring it would replace the model's honest line-weight
+    /// estimate with the header's own fitting height and collapse the document extent.
+    var hasEstimatedGhostBody: Bool {
+        defersExpandedBody
+    }
+
+    /// The ghost the empty body area shows while the real document is deferred by a scroller
+    /// seek. Pinned over the body container rather than arranged in it, so it takes exactly
+    /// the space the row's geometry already reserves.
+    private func installSkeletonBody() {
+        let skeleton = DiffSkeletonView(added: file.added, removed: file.removed)
+        bodyContainer.addSubview(skeleton)
+        NSLayoutConstraint.activate([
+            skeleton.topAnchor.constraint(equalTo: bodyContainer.topAnchor),
+            skeleton.leadingAnchor.constraint(equalTo: bodyContainer.leadingAnchor),
+            skeleton.trailingAnchor.constraint(equalTo: bodyContainer.trailingAnchor),
+            skeleton.bottomAnchor.constraint(equalTo: bodyContainer.bottomAnchor)
+        ])
     }
 
     /// Whether this file's diff is currently open — read by "Collapse all" to decide which way

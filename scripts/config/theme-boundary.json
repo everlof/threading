@@ -289,6 +289,12 @@
       "reason": "The spinner stops before constructing its perpetual animation when Reduce Motion is enabled."
     },
     {
+      "path": "Sources/Threading/UI/Design/DiffSkeletonView.swift",
+      "kind": "motionDuration",
+      "symbol": "duration",
+      "reason": "The skeleton's breathing is a layer-opacity loop whose period is its own anatomy, like the spinner's; applyPulse returns before constructing it under Reduce Motion and removes an installed one when the preference changes, leaving the still bars as the status."
+    },
+    {
       "path": "Sources/Threading/UI/Views/BrowserViewController.swift",
       "kind": "confirmationResponse",
       "symbol": "firstButtonResponse",

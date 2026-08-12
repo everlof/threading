@@ -1578,6 +1578,13 @@ enum Design {
         /// The same wash under Increase Contrast, where a faint tint is the first thing to go.
         static let imageHoverWashIncreasedContrast: CGFloat = 0.34
 
+        /// How much of its diff hue a loading skeleton's bar keeps.
+        ///
+        /// The ghost has to whisper a file's added/removed weight without becoming content: at
+        /// full strength a screen of green and red bars reads as the diff having loaded, and the
+        /// pulse over it then reads as failure rather than loading.
+        static let skeletonDiffTint: CGFloat = 0.45
+
         /// How much ink a chart's loading ghost keeps, and how much the band behind it keeps.
         ///
         /// Far below what a bar-shaped skeleton can carry, and measured rather than guessed: at
