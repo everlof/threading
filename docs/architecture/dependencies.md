@@ -1,9 +1,28 @@
 # Dependencies
 
-The four local Swift packages plus one remote one of ours, and the seams in each that are
-ours.
+The application dependency boundaries and the seams in each that are ours.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
+
+- **WebRTC** (remote, prebuilt): native ICE/STUN/TURN, DTLS/SCTP and ordered data channels for
+  hosted Mac-to-iOS remote access.
+  - Location: exact SwiftPM version `151.0.0`, package revision
+    `19aa8c1fc7120d50df987b7111f42d5024df3d54`, wrapped only by
+    `Packages/ThreadingPeerTransport/`.
+  - The binary archive is pinned by SwiftPM checksum
+    `64a218fad3d84a0d783321aa9a1eec58ca266ac7879123f86b0b44b703b7d8dc`. The upstream release
+    identifies WebRTC source commit `f20ebb8adbf4fa781830e4384c61f732bd28a217`; those values must
+    be reviewed together on every update.
+  - **The bounded transport is ours.** Feature code never sees WebRTC objects. The package owns
+    signaling frames, trickle candidate limits, channel and byte high-water marks, stream
+    multiplexing, listener replacement, reconnect and shutdown. The Mac and iOS apps see only
+    loopback TCP endpoints, preserving the existing remote protocol and its authorization.
+  - The framework contains standards-based DTLS/SRTP cryptography. Keep the iOS export-compliance
+    declaration and the WebRTC legal notice in sync with this dependency; do not revert to a
+    system-crypto-only declaration.
+  - This is a community binary distribution of Google's source. Before changing the pin, verify
+    the package revision, release source commit, SwiftPM/archive checksum, license, privacy
+    manifest, OSV result, GitHub advisories, supported deployment slices and both app builds.
 
 - **SwiftTerm** (local fork): Terminal emulation engine handling VT100/xterm, ANSI parsing, PTY communication
   - Location: `./Packages/Vendor/SwiftTerm/` (vendored source in the main repository, not a git submodule)

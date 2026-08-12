@@ -1,12 +1,13 @@
-# ThreadingPeerTransport feasibility spike
+# ThreadingPeerTransport
 
-This package answers one question before the WebRTC binary affects either shipping target: can
-Threading establish an ordered, reliable native data channel, prefer a direct ICE path, force a
-TURN path for fallback tests, and keep all peer-controlled state bounded?
+This package provides Threading's bounded native WebRTC data channel, hosted rendezvous clients,
+and loopback stream bridge for macOS and iOS. It prefers direct ICE and uses TURN only when direct
+connectivity fails.
 
-It is deliberately not linked from `Threading.xcodeproj` and is not in the default CI package
-loop yet. The current dependency is a community-built Google WebRTC M151 XCFramework. That makes
-the spike fast, but it is not yet an acceptable production supply chain.
+It is linked into both shipping targets and runs in the default CI package loop. The community
+Google WebRTC M151 XCFramework is exact-version and checksum pinned; its upstream source commit,
+license inventory and update gate are recorded in `docs/DEPENDENCY_AUDIT.md` and
+`docs/architecture/dependencies.md`.
 
 Run the local host-candidate proof with:
 
@@ -23,9 +24,40 @@ THREADING_STUN_URL='stun:your-stun-host:3478' swift test \
   --filter PeerTransportTests/testConfiguredSTUNServerGathersServerReflexiveCandidate
 ```
 
+The forced-relay release probe is opt-in as well. It applies WebRTC's relay-only policy to both
+peers, transfers 32 KiB in one direction and a reply in the other, and fails unless both selected
+routes report a TURN relay candidate. Run it once for each transport returned by the production
+TURN provisioner; keep the ephemeral credential values in the environment rather than shell
+history or repository files:
+
+Prompt for the credential without echoing or recording it, and clear it after the three probes:
+
+```sh
+read -r -s -p 'TURN credential: ' THREADING_TURN_CREDENTIAL
+export THREADING_TURN_CREDENTIAL
+
+THREADING_TURN_URL='turn:your-turn-host:3478?transport=udp' \
+THREADING_TURN_USERNAME='ephemeral-username' \
+swift test --package-path Packages/ThreadingPeerTransport \
+  --filter PeerTransportTests/testConfiguredTURNServerOpensRelayOnlyChannel
+
+THREADING_TURN_URL='turn:your-turn-host:80?transport=tcp' \
+THREADING_TURN_USERNAME='ephemeral-username' \
+swift test --package-path Packages/ThreadingPeerTransport \
+  --filter PeerTransportTests/testConfiguredTURNServerOpensRelayOnlyChannel
+
+THREADING_TURN_URL='turns:your-turn-host:443?transport=tcp' \
+THREADING_TURN_USERNAME='ephemeral-username' \
+swift test --package-path Packages/ThreadingPeerTransport \
+  --filter PeerTransportTests/testConfiguredTURNServerOpensRelayOnlyChannel
+
+unset THREADING_TURN_CREDENTIAL
+```
+
 ## Scaling contract
 
-- Expected: 1-3 peer connections per Mac host. A production host cap is still required.
+- Expected: 1-3 peer connections per Mac host. The hosted rendezvous enforces eight concurrent
+  sessions per host; the transport keeps independent byte/message bounds below that service cap.
 - ICE negotiation: tens of events per reconnect; candidate count is capped at 64 and SDP at
   256 KiB.
 - Data path: potentially thousands of messages per second. Work is O(message bytes), each message
@@ -34,16 +66,17 @@ THREADING_STUN_URL='stun:your-stun-host:3478' swift test \
 - Hidden/collapsed UI is irrelevant here: no UI or main-actor work exists in the transport.
 - Route telemetry records only candidate kind and protocol, never peer addresses or credentials.
 
-## What the local test proves
+## What the tests prove
 
 - Offer/answer negotiation both with a complete SDP and with bounded trickle candidates.
 - DTLS/SCTP data-channel setup using host candidates.
 - Ordered, bidirectional binary messages under a multi-megabyte stress fixture.
 - Backpressure and input bounds.
 - Selected-route inspection, including whether TURN was used.
+- A credentialed, forced relay-only probe that cannot pass by falling back to a direct candidate.
 
-It does **not** yet prove NAT traversal. Before integration, run the same transport between devices
-on the network matrix below and record the route and setup time:
+Physical Wi-Fi-to-cellular direct NAT traversal has passed without TURN. Release still requires
+the full matrix below, including a forced TURN-only route, with route and setup time recorded:
 
 | Mac network | iPhone network | Expected route |
 |---|---|---|
@@ -59,13 +92,12 @@ bounded trickle path added after that finding gathered a Cloudflare server-refle
 must keep trickling candidates and race the direct path with a TURN-over-TCP/TLS fallback rather
 than waiting for every STUN transaction to finish.
 
-## Production gates
+## Remaining release gates
 
-1. Replace the ad-hoc SDP handoff with authenticated, one-use signaling through our service.
-2. Bridge bounded data-channel messages to the existing loopback HTTP/WebSocket server, keeping its
-   capability token and protocol unchanged.
-3. Measure the direct success rate and TURN bytes per connected hour across the matrix above.
-4. Decide between a reproducible in-house WebRTC build and a smaller maintained data-channel
-   implementation. The downloaded M151 framework is about 28.4 MB for macOS and 12.2 MB for iOS
-   before app-store compression and slicing.
-5. Add the accepted package to both app targets, legal notices, dependency documentation, and CI.
+1. Deploy the authenticated production rendezvous and TURN provisioner.
+2. Force and verify TURN-over-UDP, TCP and TLS, then complete the network matrix above.
+3. Measure direct success rate, TURN byte share, negotiation time and reconnect time at each rollout
+   gate.
+4. Re-run the pinned binary provenance, checksum, license and advisory audit for every WebRTC
+   update. The framework is about 28.4 MB for macOS and 12.2 MB for iOS before app slicing and
+   App Store compression.

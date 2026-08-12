@@ -402,6 +402,7 @@
   var terminalScrollSubscription = null;
   var pollTimer = null;
   var sessionListGeneration = 0;
+  var sessionSnapshot = null;
   var activeSurface = null;
   var activeCapability = "view";
   var conversationCanSend = false;
@@ -1456,7 +1457,9 @@
         hostTheme = message.theme;
         applyTheme(hostTheme, activeTerminalTheme);
       } else if (message.type === "sessionsChanged" && activeSurface === null) {
-        scheduleSessionLoad(sessionListGeneration, 0);
+        if (!applySessionDelta(message)) {
+          scheduleSessionLoad(sessionListGeneration, 0);
+        }
       }
     };
     opened.onclose = function () {
@@ -1549,6 +1552,7 @@
   }
 
   function renderSessions(me) {
+    sessionSnapshot = me;
     setContinuityHost(me);
     hostTheme = me.theme || null;
     applyTheme(hostTheme, null);
@@ -1603,6 +1607,25 @@
       renderSessionSection(t("sessions.snoozed"), snoozedSessions);
     }
     show("sessions");
+  }
+
+  function applySessionDelta(message) {
+    if (!sessionSnapshot || (!message.session && !message.removedSessionID)) {
+      return false;
+    }
+    var changedID = message.removedSessionID || message.session.id;
+    sessionSnapshot.sessions = (sessionSnapshot.sessions || []).filter(function (session) {
+      return session.id !== changedID;
+    });
+    if (message.session && !message.session.isArchived) {
+      sessionSnapshot.sessions.push(message.session);
+    }
+    sessionSnapshot.sessions.sort(function (left, right) {
+      if (left.isPinned !== right.isPinned) { return left.isPinned ? -1 : 1; }
+      return (right.lastActiveAt || 0) - (left.lastActiveAt || 0);
+    });
+    renderSessions(sessionSnapshot);
+    return true;
   }
 
   // A deadline is interpreted locally as well as on the host. A refresh or timer missed while

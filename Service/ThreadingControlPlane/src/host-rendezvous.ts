@@ -6,6 +6,7 @@ import {
   encodeEnvelope,
   parseEnvelope,
   type Envelope,
+  validateIdentifier,
 } from "./protocol";
 import { generateIceServers } from "./turn";
 
@@ -53,6 +54,7 @@ type Attachment =
     accountID: string;
     hostID: string;
     sessionID: string;
+    expiresAt: number;
   }
   | {
     role: "peer-paired";
@@ -76,8 +78,8 @@ export class HostRendezvous {
   }
 
   async fetch(request: Request): Promise<Response> {
-    if (request.method === "POST"
-      && request.headers.get("X-Threading-Internal-Action") === "disconnect-host") {
+    const internalAction = request.headers.get("X-Threading-Internal-Action");
+    if (request.method === "POST" && internalAction === "disconnect-host") {
       for (const socket of this.ctx.getWebSockets()) {
         const state = this.attachment(socket);
         if (state.role === "host" || state.role === "host-pending") {
@@ -88,12 +90,29 @@ export class HostRendezvous {
       }
       return new Response(null, { status: 204 });
     }
+    if (request.method === "POST" && internalAction === "disconnect-device") {
+      const deviceID = request.headers.get("X-Threading-Device-ID");
+      if (!validateIdentifier(deviceID)) return new Response("Invalid device", { status: 400 });
+      for (const socket of this.ctx.getWebSockets()) {
+        const state = this.attachment(socket);
+        if ("deviceID" in state && state.deviceID === deviceID) {
+          this.closeCounterpartIfWaiting(
+            socket,
+            "credentialRevoked",
+            "The device credential was revoked",
+          );
+          this.failSocket(socket, "credentialRevoked", "The device credential was revoked");
+        }
+      }
+      return new Response(null, { status: 204 });
+    }
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return new Response("WebSocket upgrade required", { status: 426 });
     }
+    this.sweepExpiredSockets();
     const attachment = attachmentFromInternalHeaders(request.headers);
     if (!attachment) return new Response("Unauthorized", { status: 401 });
-    const existing = this.ctx.getWebSockets();
+    const existing = this.ctx.getWebSockets().filter((socket) => socket.readyState === WebSocket.OPEN);
     if (existing.length >= HostRendezvous.maximumAttachedSockets) {
       return new Response("Too many signaling sockets", { status: 429 });
     }
@@ -165,6 +184,10 @@ export class HostRendezvous {
   }
 
   private registerHost(socket: WebSocket, attachment: Attachment & { role: "host-pending" }, envelope: Envelope): void {
+    if (attachment.credentialExpiresAt <= Date.now()) {
+      this.failSocket(socket, "credentialExpired", "The host credential expired");
+      return;
+    }
     if (envelope.kind !== "hostHello" || envelope.hostID !== attachment.hostID) {
       throw new ProtocolError("host-hello");
     }
@@ -185,6 +208,10 @@ export class HostRendezvous {
     attachment: Attachment & { role: "device-pending" },
     envelope: Envelope,
   ): Promise<void> {
+    if (attachment.credentialExpiresAt <= Date.now()) {
+      this.failSocket(socket, "credentialExpired", "The device credential expired");
+      return;
+    }
     if (envelope.kind !== "deviceConnect" || envelope.hostID !== attachment.hostID
       || envelope.deviceID !== attachment.deviceID) {
       throw new ProtocolError("device-connect");
@@ -242,6 +269,10 @@ export class HostRendezvous {
     attachment: Attachment & { role: "peer-pending" },
     envelope: Envelope,
   ): Promise<void> {
+    if (attachment.expiresAt <= Date.now()) {
+      this.failSocket(socket, "sessionExpired", "The signaling session expired");
+      return;
+    }
     if (envelope.kind !== "sessionJoin" || envelope.sessionID !== attachment.sessionID) {
       throw new ProtocolError("session-join");
     }
@@ -375,6 +406,23 @@ export class HostRendezvous {
     try { socket.close(1008, message.slice(0, 120)); } catch { /* already closed */ }
   }
 
+  private sweepExpiredSockets(): void {
+    const now = Date.now();
+    for (const socket of this.ctx.getWebSockets()) {
+      const state = this.attachment(socket);
+      if ((state.role === "host" || state.role === "host-pending"
+          || state.role === "device-pending") && state.credentialExpiresAt <= now) {
+        this.closeCounterpartIfWaiting(socket, "credentialExpired", "A credential expired");
+        this.failSocket(socket, "credentialExpired", "The rendezvous credential expired");
+      } else if ((state.role === "device-waiting" || state.role === "device-paired"
+          || state.role === "peer-pending" || state.role === "peer-paired")
+        && state.expiresAt <= now) {
+        this.closeCounterpartIfWaiting(socket, "sessionExpired", "The signaling session expired");
+        this.failSocket(socket, "sessionExpired", "The signaling session expired");
+      }
+    }
+  }
+
   private sockets(role: Attachment["role"]): WebSocket[] {
     return this.ctx.getWebSockets().filter((socket) => {
       try { return this.attachment(socket).role === role; } catch { return false; }
@@ -410,7 +458,10 @@ function attachmentFromInternalHeaders(headers: Headers): Attachment | null {
   }
   if (role === "session") {
     const sessionID = headers.get("X-Threading-Session-ID");
-    return sessionID ? { role: "peer-pending", accountID, hostID, sessionID } : null;
+    const expiresAt = Number(headers.get("X-Threading-Session-Expires-At"));
+    return sessionID && Number.isSafeInteger(expiresAt)
+      ? { role: "peer-pending", accountID, hostID, sessionID, expiresAt }
+      : null;
   }
   return null;
 }

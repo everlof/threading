@@ -106,6 +106,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     private let guestShareStore: RemoteGuestSharePersisting
     private(set) var guestSharePersistenceError: String?
     private var pairingBootstrapToken: String?
+    private static let hostedPairingDeviceID = "hosted-pairing"
+    private static let hostedPairingCredentialLifetimeSeconds = 5 * 60
+    private var hostedPairingLink: HostedPairingLink?
+    private var hostedPairingTask: Task<Void, Never>?
     private var pairingRedemptions: [String: PairingRedemption] = [:]
     private var sessionShares: [SessionID: [SessionShare]] = [:]
     private var pendingPublicShares: [UUID: PendingPublicShare] = [:]
@@ -127,7 +131,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         self.hostedService = hostedService ?? RemoteHostedServiceController()
         server.authorizer = authority
         server.invitationRedeemer = self
-        self.hostedService.onStateChange = {
+        self.hostedService.onStateChange = { [weak self] in
+            self?.refreshHostedPairingLink()
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         }
         restoreGuestShares()
@@ -385,12 +390,18 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     /// the case back on the way in, so both are the same credential.
     var pairingCodePayload: String? {
         guard ownerDevices.persistenceError == nil,
-              let origin = pairingOrigin,
-              let pairingBootstrapToken,
-              let link = RemoteConnectionLink(baseURL: origin, token: pairingBootstrapToken)
+              let pairingBootstrapToken
         else {
             return nil
         }
+        if let hostedPairingLink,
+           hostedPairingLink.bootstrapToken == pairingBootstrapToken,
+           !hostedPairingLink.isExpired {
+            return hostedPairingLink.scannablePayload
+        }
+        guard let origin = pairingOrigin,
+              let link = RemoteConnectionLink(baseURL: origin, token: pairingBootstrapToken)
+        else { return nil }
         return link.scannablePayload
     }
 
@@ -698,6 +709,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
                 "Remote credential generation failed stage=pairing_rotation"
             )
         }
+        retireHostedPairingLink(after: RemoteAccessDefaults.pairingRetrySeconds)
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         return redemption
     }
@@ -1274,11 +1286,99 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
 
     private func stopTransports() {
         transportGeneration += 1
+        hostedPairingTask?.cancel()
+        hostedPairingTask = nil
+        hostedService.revokeDevice(deviceID: Self.hostedPairingDeviceID)
+        hostedPairingLink = nil
         tunnel.stop()
         tailscale.stop()
         hostedService.stop()
         relayStatus = .stopped
         tailscaleStatus = .stopped
+    }
+
+    /// Produces the first-install QR route without requiring cloudflared or Tailscale. The
+    /// rendezvous bearer only reaches this Mac's loopback listener; the existing one-time owner
+    /// bootstrap still has to be redeemed before any remote API is authorized.
+    private func refreshHostedPairingLink() {
+        guard hostedService.state == .ready else {
+            hostedPairingTask?.cancel()
+            hostedPairingTask = nil
+            hostedPairingLink = nil
+            return
+        }
+        guard hostedPairingTask == nil,
+              hostedService.canIssueDeviceCredentials,
+              case .listening = status,
+              let bootstrap = pairingBootstrapToken else {
+            return
+        }
+        if let current = hostedPairingLink,
+           current.bootstrapToken == bootstrap,
+           !current.isExpired {
+            return
+        }
+
+        let generation = transportGeneration
+        hostedPairingTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let issued = try await hostedService.issueDeviceCredential(
+                    deviceID: Self.hostedPairingDeviceID,
+                    lifetimeSeconds: Self.hostedPairingCredentialLifetimeSeconds
+                )
+                guard !Task.isCancelled,
+                      generation == transportGeneration,
+                      pairingBootstrapToken == bootstrap,
+                      let serviceURL = hostedService.serviceURL else {
+                    return
+                }
+                let link = issued.credential.withValue { credential in
+                    HostedPairingLink(
+                        serviceURL: serviceURL,
+                        hostID: issued.hostID,
+                        deviceID: issued.deviceID,
+                        rendezvousCredential: credential,
+                        bootstrapToken: bootstrap,
+                        expiresAt: issued.expiresAt
+                    )
+                }
+                guard let link else { return }
+                hostedPairingLink = link
+                hostedPairingTask = nil
+                NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+            } catch is CancellationError {
+                hostedPairingTask = nil
+            } catch {
+                hostedPairingTask = nil
+                ThreadingLogger.remote.error("Hosted pairing credential issue failed code=service")
+            }
+        }
+    }
+
+    /// The pairing HTTP response and durable hosted-credential response need a moment to leave
+    /// the loopback bridge before its temporary transport credential is revoked.
+    func completeHostedPairingBootstrap() {
+        retireHostedPairingLink(after: 2)
+    }
+
+    private func retireHostedPairingLink(after delay: TimeInterval) {
+        guard hostedPairingLink != nil || hostedPairingTask != nil else { return }
+        hostedPairingLink = nil
+        hostedPairingTask?.cancel()
+        hostedPairingTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch {
+                return
+            }
+            guard let self else { return }
+            await hostedService.revokeDeviceImmediately(deviceID: Self.hostedPairingDeviceID)
+            hostedPairingTask = nil
+            refreshHostedPairingLink()
+            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+        }
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
 
     private func transportChanged(

@@ -58,10 +58,12 @@ The callback is deliberately deferred: invoking it inline while `start()` still 
 state lets a controller tear down the session reentrantly before construction has returned.
 
 Structured execution also crosses a separate boundary before presentation normalization. Claude's
-native tool blocks, Codex App Server item notifications and Grok ACP tool updates are handed to the
+native tool blocks, Codex App Server item notifications and ACP tool updates are handed to the
 [Execution Audit](execution-audit.md) adapters before `StreamEvent` turns them into shared timeline
 rows. This preserves exact native inputs/results without admitting prompt, reasoning or assistant
-prose into the audit store.
+prose into the audit store. `ACPProviderExecutionAdapter` serves every ACP CLI rather than one
+vendor: the audit category is derived from the neutral `ToolIdentity` a `tool_call` maps onto, so
+there is nothing provider-shaped left for a second ACP agent to specialize.
 
 **Claude was gated off here for most of this project's life, and no longer is.** The reason it
 was disabled — `claude -p` runs on the user's subscription, and Anthropic's terms reserved
@@ -83,13 +85,17 @@ explicitly as a pause. If it returns, native Claude sessions cost differently fr
                                   │
             ┌─────────────────┼─────────────────┐
             ▼                  ▼                  ▼
- CodexStreamSession    ClaudeStreamSession    GrokACPStreamSession
+ CodexStreamSession    ClaudeStreamSession    ACPStreamSession(.grok)
  codex app-server      claude stream-json     grok agent stdio (ACP)
             │                  │                  │
             └─────────────────┴─────────────────┘
                                   ▼
                     ConversationViewController
 ```
+
+The third leg is one runtime and one value: `ACPStreamSession` speaks the protocol, and
+`ACPProviderProfile` carries whatever a particular CLI does differently. `.grok` is the only
+profile that exists today.
 
 Codex native rendering uses the CLI's **app-server**, not the one-shot `codex exec --json`
 surface. `CodexStreamSession` launches one `codex app-server --listen stdio://` process,
@@ -121,8 +127,49 @@ agreement without inventing reversible archive semantics for Claude, Grok, or Op
 complete provider distinctions, merge, and failure rules live in
 [`sessions.md`](sessions.md#the-provider-archive-boundary).
 
-Grok native rendering uses the public **Agent Client Protocol** exposed by
-`grok agent stdio`, verified against Grok 0.2.118 and ACP protocol version 1. A fresh chat sends
+### ACP, and the one value that names a provider
+
+Grok native rendering uses the public **Agent Client Protocol** exposed by `grok agent stdio`, and
+the transport is split in two: `ACPStreamSession` (`ACPStreamSession.swift`) owns the protocol,
+and `ACPProviderProfile` (`ACPProviderProfile.swift`, plus `ACPProviderProfile+Grok.swift`) owns
+everything one CLI does differently. Grok is the value `.grok`, and the runtime never learns that
+name.
+
+`ACPStreamSession` owns process lifecycle, JSON-RPC framing, the `initialize` handshake, opening
+or loading the session, prompts, cancellation, permission answers, the malformed-line counter and
+the synthesized failure when the child dies mid-turn. `ACPWireAdapter` reads the standard wire
+shapes — content, title, plan entries, tool kinds, tool input and result, the command catalog —
+and `JSONRPCLineEnvelope.swift` holds the newline-delimited framing this shares with Codex's
+app-server.
+
+`ACPProviderProfile` is the only place a provider is named. Its members are the display name used
+in turn-failure prose, the diagnostics label used in logs and `StreamParseDiagnostics`, the
+`StreamEvent.unknown` namespace prefix, an optional `clientCapabilities._meta` extension, a reader
+for a model id reported outside the standard `models.currentModelId`, a reader for a command
+catalog returned from `initialize`, and the host's command-catalog policy (id prefix, refused
+names, refusal reason, which names are session commands rather than turns). Each exists because
+Grok needs it today or because ACP sanctions `_meta` as the extension point; a member added *for
+the next provider* becomes a conditional in the runtime.
+
+Deliberately **not** profile members: the permission option kinds (`allow_once`, `reject_once` and
+their `_always` pair are ACP's own vocabulary), the execution-audit adapter (its body is neutral),
+`clientInfo` / `fs: false` /
+`terminal: false` / `session.configOptions` / the protocol version / the MCP server list (all
+Threading host policy — stating them per provider would let a CLI claim a capability this client
+does not have), `steerAvailability` (a fact about the specification), and `session/new` versus
+`session/load` (which follows from `ResumeState`). It is also deliberately not an `AgentKind`: a
+transport able to ask which runtime it is starts answering per runtime, the comparison
+`scripts/check_architecture_boundaries.sh` refuses.
+
+A second ACP CLI is therefore one profile value plus a launch line in `AgentLauncher`. It adds no
+capability claim, no transport, and no branch. Cursor's CLI was measured against this seam
+(August 2026) and **deferred**: its ACP surface handshakes and advertises `session/load`, but the
+load-bearing lifecycle — replay, permissions, cancellation settling, tool fidelity — sits behind
+authentication this machine does not have, and five `cursor/*` methods are client-side UI
+Threading has not built. The measurements, the capability table, and the go/no-go gates are in
+[`CURSOR_ACP_FINDINGS.md`](../CURSOR_ACP_FINDINGS.md); nothing ships from inference.
+
+The behaviour below was verified against Grok 0.2.118 and ACP protocol version 1. A fresh chat sends
 `session/new`; a resumable one sends `session/load`, whose standard replay notifications rebuild
 the historical user, assistant, reasoning, tool, and plan rows before the composer becomes live.
 The provider-returned session id is persisted just like Codex's assigned thread id. Prompts use
@@ -140,6 +187,17 @@ Threading advertises no filesystem or terminal client capability because it impl
 Grok continues to execute its own tools. Its HTTP MCP capability does let `session/new/load` carry
 the per-session Threading endpoint without changing the project's or user's persistent Grok
 configuration.
+
+`ACPStreamSessionTests` drives the runtime against deterministic `/bin/sh` agents with a *fixture*
+profile rather than `.grok`, so nothing it pins can be true of one vendor only. A fake handed the
+wrong line exits with a distinctive status, which fails a turn instead of hanging the suite, and
+every client line is recorded so an assertion reads the bytes that crossed the pipe. It holds the
+regressions this split could cause: replay gating (history before `initialised`, no deltas during
+it, a late `user_message_chunk` dropped), exactly-once exit, permission option selection over the
+standard kinds, the stop-reason settle, catalog bounds and policy, handshake parity including the
+omitted `_meta`, and framing across partial and malformed lines. `GrokACPProfileTests` keeps what
+is Grok's: the `_meta` readers, the catalog policy, the end-to-end handshake recorded against
+0.2.118, and byte-parity for the three transport sentences a user reads.
 
 ## Composer commands and skills
 

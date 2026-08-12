@@ -238,15 +238,23 @@ public struct PeerControlPlaneClient: Sendable {
     public func issueDeviceCredential(
         hostCredential: PeerControlPlaneBearer,
         hostID: String,
-        deviceID: String
+        deviceID: String,
+        lifetimeSeconds: Int? = nil
     ) async throws -> PeerDeviceServiceCredential {
         try validateIdentifier(hostID)
         try validateIdentifier(deviceID)
+        if let lifetimeSeconds,
+           !(60...(30 * 24 * 60 * 60)).contains(lifetimeSeconds) {
+            throw PeerControlPlaneError.invalidRequest
+        }
         let response: DeviceCredentialResponse = try await request(
             method: "POST",
             url: endpoint.route("v1", "hosts", hostID, "devices"),
             bearer: hostCredential,
-            body: DeviceEnrollmentRequest(deviceID: deviceID)
+            body: DeviceEnrollmentRequest(
+                deviceID: deviceID,
+                lifetimeSeconds: lifetimeSeconds
+            )
         )
         return try response.validated(expectedHostID: hostID, expectedDeviceID: deviceID)
     }
@@ -372,7 +380,10 @@ private struct AppleSignInRequest: Encodable {
 
 private struct RefreshRequest: Encodable { let refreshToken: String }
 private struct HostEnrollmentRequest: Encodable { let hostID: String; let displayName: String }
-private struct DeviceEnrollmentRequest: Encodable { let deviceID: String }
+private struct DeviceEnrollmentRequest: Encodable {
+    let deviceID: String
+    let lifetimeSeconds: Int?
+}
 private struct EmptyRequest: Encodable {}
 
 private struct SessionResponse: Decodable {

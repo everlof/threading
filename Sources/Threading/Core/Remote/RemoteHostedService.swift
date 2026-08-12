@@ -18,6 +18,8 @@ private enum RemoteHostedServiceDefaults {
     static let recordVersion = 1
     static let maximumPendingRevocations = 64
     static let credentialRenewalLeadTime: TimeInterval = 60 * 60
+    static let sessionRenewalLeadTime: TimeInterval = 7 * 24 * 60 * 60
+    static let maintenanceRetryDelay: TimeInterval = 60
     static let maximumReconnectDelay: TimeInterval = 60
 }
 
@@ -141,10 +143,13 @@ final class RemoteHostedServiceController {
     private var listenerEventsTask: Task<Void, Never>?
     private var connectionTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
+    private var maintenanceTask: Task<Void, Never>?
     private var desiredPort: UInt16?
     private var lifecycleGeneration = 0
     private var retryAttempt = 0
-    private var credentialRevokedObserver: NSObjectProtocol?
+    // NotificationCenter's opaque token is created in init and read only in deinit. Marking this
+    // storage nonisolated avoids treating NSObjectProtocol as transferable actor state.
+    nonisolated(unsafe) private var credentialRevokedObserver: NSObjectProtocol?
 
     init(
         store: (any RemoteHostedServicePersisting)? = nil,
@@ -183,6 +188,7 @@ final class RemoteHostedServiceController {
 
     var canIssueDeviceCredentials: Bool {
         guard persistenceError == nil, endpoint != nil, let record else { return false }
+        guard state != .signInRequired else { return false }
         return record.hostCredential.hostID == hostID
             && record.hostCredential.expiresAt > Date()
     }
@@ -310,7 +316,10 @@ final class RemoteHostedServiceController {
         }
     }
 
-    func issueDeviceCredential(deviceID: String) async throws -> PeerDeviceServiceCredential {
+    func issueDeviceCredential(
+        deviceID: String,
+        lifetimeSeconds: Int? = nil
+    ) async throws -> PeerDeviceServiceCredential {
         guard let endpoint else { throw PeerControlPlaneError.invalidEndpoint }
         var current = try await validRecord(client: PeerControlPlaneClient(endpoint: endpoint))
         if current.pendingRevokedDeviceIDs.contains(deviceID) {
@@ -320,7 +329,8 @@ final class RemoteHostedServiceController {
         let credential = try await PeerControlPlaneClient(endpoint: endpoint).issueDeviceCredential(
             hostCredential: current.hostCredential.credential,
             hostID: hostID,
-            deviceID: deviceID
+            deviceID: deviceID,
+            lifetimeSeconds: lifetimeSeconds
         )
         return credential
     }
@@ -329,6 +339,10 @@ final class RemoteHostedServiceController {
         Task { [weak self] in
             await self?.revokeDeviceNow(deviceID: deviceID)
         }
+    }
+
+    func revokeDeviceImmediately(deviceID: String) async {
+        await revokeDeviceNow(deviceID: deviceID)
     }
 
     private func connect(targetPort: UInt16, generation: Int) async {
@@ -359,6 +373,7 @@ final class RemoteHostedServiceController {
                     await self?.handle(event, listener: listener, generation: generation)
                 }
             }
+            scheduleMaintenance(generation: generation, targetPort: targetPort)
         } catch is CancellationError {
             return
         } catch {
@@ -396,6 +411,8 @@ final class RemoteHostedServiceController {
             )
             self.listener = nil
             listenerEventsTask = nil
+            maintenanceTask?.cancel()
+            maintenanceTask = nil
             state = reason == .unauthorized ? .signInRequired : .unavailable("service")
             if reason != .unauthorized { scheduleReconnect(generation: generation) }
         }
@@ -404,6 +421,15 @@ final class RemoteHostedServiceController {
     private func validRecord(client: PeerControlPlaneClient) async throws
         -> RemoteHostedServiceRecord {
         guard var current = record else { throw PeerControlPlaneError.invalidCredential }
+        if current.session.refreshTokenExpiresAt
+            <= Date().addingTimeInterval(RemoteHostedServiceDefaults.sessionRenewalLeadTime) {
+            current.session = try await validSession(
+                current: &current,
+                client: client,
+                forceRefresh: true
+            )
+            try persist(current)
+        }
         let renewalDate = Date().addingTimeInterval(
             RemoteHostedServiceDefaults.credentialRenewalLeadTime
         )
@@ -423,9 +449,11 @@ final class RemoteHostedServiceController {
 
     private func validSession(
         current: inout RemoteHostedServiceRecord,
-        client: PeerControlPlaneClient
+        client: PeerControlPlaneClient,
+        forceRefresh: Bool = false
     ) async throws -> PeerControlPlaneSession {
-        if current.session.accessTokenExpiresAt > Date().addingTimeInterval(60) {
+        if !forceRefresh,
+           current.session.accessTokenExpiresAt > Date().addingTimeInterval(60) {
             return current.session
         }
         guard current.session.refreshTokenExpiresAt > Date().addingTimeInterval(60) else {
@@ -500,6 +528,8 @@ final class RemoteHostedServiceController {
         connectionTask = nil
         retryTask?.cancel()
         retryTask = nil
+        maintenanceTask?.cancel()
+        maintenanceTask = nil
         listenerEventsTask?.cancel()
         listenerEventsTask = nil
         if let listener {
@@ -508,6 +538,59 @@ final class RemoteHostedServiceController {
         listener = nil
         retryAttempt = 0
         if !keepingDesiredPort { desiredPort = nil }
+    }
+
+    private func scheduleMaintenance(
+        generation: Int,
+        targetPort: UInt16,
+        retryAfter: TimeInterval? = nil
+    ) {
+        maintenanceTask?.cancel()
+        guard let record else { return }
+        let nextDate = min(
+            record.session.refreshTokenExpiresAt.addingTimeInterval(
+                -RemoteHostedServiceDefaults.sessionRenewalLeadTime
+            ),
+            record.hostCredential.expiresAt.addingTimeInterval(
+                -RemoteHostedServiceDefaults.credentialRenewalLeadTime
+            )
+        )
+        let delay = retryAfter ?? max(1, nextDate.timeIntervalSinceNow)
+        maintenanceTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self,
+                  generation == self.lifecycleGeneration,
+                  self.desiredPort == targetPort else { return }
+            self.maintenanceTask = nil
+            await self.performMaintenance(generation: generation, targetPort: targetPort)
+        }
+    }
+
+    private func performMaintenance(generation: Int, targetPort: UInt16) async {
+        guard let endpoint, let previous = record else { return }
+        do {
+            let current = try await validRecord(client: PeerControlPlaneClient(endpoint: endpoint))
+            guard generation == lifecycleGeneration, desiredPort == targetPort else { return }
+            if current.hostCredential != previous.hostCredential {
+                start(targetPort: targetPort)
+                return
+            }
+            if listener != nil { state = .ready }
+            scheduleMaintenance(generation: generation, targetPort: targetPort)
+        } catch is CancellationError {
+            return
+        } catch {
+            guard generation == lifecycleGeneration, desiredPort == targetPort else { return }
+            let requiresSignIn = Self.requiresSignIn(error)
+            state = requiresSignIn ? .signInRequired : .unavailable("service")
+            if !requiresSignIn {
+                scheduleMaintenance(
+                    generation: generation,
+                    targetPort: targetPort,
+                    retryAfter: RemoteHostedServiceDefaults.maintenanceRetryDelay
+                )
+            }
+        }
     }
 
     private func scheduleReconnect(generation: Int) {

@@ -37,6 +37,79 @@ final class PeerTransportTests: XCTestCase {
         XCTAssertTrue(foundServerReflexiveCandidate)
     }
 
+    func testConfiguredTURNServerOpensRelayOnlyChannel() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let turnURL = environment["THREADING_TURN_URL"], !turnURL.isEmpty else {
+            throw XCTSkip(
+                "Set THREADING_TURN_URL, THREADING_TURN_USERNAME, and "
+                    + "THREADING_TURN_CREDENTIAL to run the forced-relay probe."
+            )
+        }
+        let username = try XCTUnwrap(
+            environment["THREADING_TURN_USERNAME"],
+            "THREADING_TURN_USERNAME is required when THREADING_TURN_URL is set."
+        )
+        let credential = try XCTUnwrap(
+            environment["THREADING_TURN_CREDENTIAL"],
+            "THREADING_TURN_CREDENTIAL is required when THREADING_TURN_URL is set."
+        )
+        guard !username.isEmpty, !credential.isEmpty else {
+            XCTFail("TURN username and credential must not be empty.")
+            return
+        }
+
+        let server = try PeerIceServer(
+            urls: [turnURL],
+            username: username,
+            credential: credential
+        )
+        let configuration = try PeerTransportConfiguration(
+            iceServers: [server],
+            policy: .relayOnly
+        )
+        let offerer = try WebRTCPeerTransport(role: .offerer, configuration: configuration)
+        let answerer = try WebRTCPeerTransport(role: .answerer, configuration: configuration)
+        defer {
+            Task {
+                await offerer.close()
+                await answerer.close()
+            }
+        }
+
+        let offer = try await offerer.makeTrickleOffer()
+        let answer = try await answerer.makeTrickleAnswer(to: offer)
+        try await offerer.accept(answer: answer)
+
+        async let offerCandidateTransfer = Self.forwardCandidates(from: offerer, to: answerer)
+        async let answerCandidateTransfer = Self.forwardCandidates(from: answerer, to: offerer)
+        async let offererOpen: Void = offerer.waitUntilOpen()
+        async let answererOpen: Void = answerer.waitUntilOpen()
+        _ = try await (
+            offerCandidateTransfer,
+            answerCandidateTransfer,
+            offererOpen,
+            answererOpen
+        )
+
+        let outbound = Data(repeating: 0xA5, count: 32 * 1_024)
+        try await offerer.send(outbound)
+        let receivedOutbound = try await answerer.receive()
+        XCTAssertEqual(receivedOutbound, outbound)
+        let response = Data("relay-confirmed".utf8)
+        try await answerer.send(response)
+        let receivedResponse = try await offerer.receive()
+        XCTAssertEqual(receivedResponse, response)
+
+        let selectedOffererRoute = await offerer.selectedRoute()
+        let selectedAnswererRoute = await answerer.selectedRoute()
+        let offererRoute = try XCTUnwrap(selectedOffererRoute)
+        let answererRoute = try XCTUnwrap(selectedAnswererRoute)
+        XCTAssertTrue(offererRoute.usesRelay, "Offerer selected a non-TURN route under relay-only policy.")
+        XCTAssertTrue(answererRoute.usesRelay, "Answerer selected a non-TURN route under relay-only policy.")
+        XCTAssertEqual(offererRoute.localCandidate, .relay)
+        XCTAssertEqual(answererRoute.localCandidate, .relay)
+    }
+
     func testSessionDescriptionAndMessageLimitsAreEnforcedBeforeWebRTC() async throws {
         XCTAssertThrowsError(try PeerSessionDescription(kind: .offer, sdp: ""))
         XCTAssertThrowsError(

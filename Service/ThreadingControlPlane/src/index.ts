@@ -6,8 +6,9 @@ import {
   handleDeleteAccount,
   handleRefresh,
   handleSignOut,
+  validateDueAppleSessions,
 } from "./auth";
-import { verifyRendezvousSessionToken } from "./crypto";
+import { sha256Hex, verifyRendezvousSessionToken } from "./crypto";
 import {
   authorizeRendezvousCredential,
   enrollHost,
@@ -28,6 +29,7 @@ export default {
       if (request.method === "GET" && url.pathname === "/health") {
         return json({ status: "ok", rendezvousProtocol: BOUNDS.protocolVersion });
       }
+      await enforceRateLimit(request, url.pathname, env);
       if (request.method === "POST" && url.pathname === "/v1/auth/apple") {
         return await handleAppleSignIn(request, env);
       }
@@ -84,27 +86,32 @@ export default {
     }
   },
 
-  async scheduled(_event: ScheduledController, env: Env): Promise<void> {
+  async scheduled(event: ScheduledController, env: Env): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
-    await env.DB.batch([
-      env.DB.prepare(
-        "DELETE FROM apple_assertions WHERE digest IN "
-          + "(SELECT digest FROM apple_assertions WHERE expires_at < ? LIMIT 1000)",
-      ).bind(now),
-      env.DB.prepare(
-        "DELETE FROM apple_notifications WHERE jti_digest IN "
-          + "(SELECT jti_digest FROM apple_notifications WHERE expires_at < ? LIMIT 1000)",
-      ).bind(now),
-      env.DB.prepare(
-        "DELETE FROM refresh_sessions WHERE digest IN "
-          + "(SELECT digest FROM refresh_sessions WHERE expires_at < ? OR revoked_at IS NOT NULL LIMIT 1000)",
-      ).bind(now),
-      env.DB.prepare(
-        "DELETE FROM rendezvous_credentials WHERE digest IN "
-          + "(SELECT digest FROM rendezvous_credentials WHERE expires_at < ? "
-          + "OR (revoked_at IS NOT NULL AND revoked_at < ?) LIMIT 1000)",
-      ).bind(now, now - 7 * 24 * 60 * 60),
-    ]);
+    if (event.cron === "17 3 * * *") {
+      await env.DB.batch([
+        env.DB.prepare(
+          "DELETE FROM apple_assertions WHERE digest IN "
+            + "(SELECT digest FROM apple_assertions WHERE expires_at < ? LIMIT 1000)",
+        ).bind(now),
+        env.DB.prepare(
+          "DELETE FROM apple_notifications WHERE jti_digest IN "
+            + "(SELECT jti_digest FROM apple_notifications WHERE expires_at < ? LIMIT 1000)",
+        ).bind(now),
+        env.DB.prepare(
+          "DELETE FROM rendezvous_credentials WHERE digest IN "
+            + "(SELECT digest FROM rendezvous_credentials WHERE expires_at < ? "
+            + "OR (revoked_at IS NOT NULL AND revoked_at < ?) LIMIT 1000)",
+        ).bind(now, now - 7 * 24 * 60 * 60),
+      ]);
+    } else {
+      await validateDueAppleSessions(env, now);
+    }
+    await env.DB.prepare(
+      "DELETE FROM refresh_sessions WHERE digest IN (SELECT digest FROM refresh_sessions "
+        + "WHERE expires_at <= ? OR revoked_at IS NOT NULL OR (consumed_at IS NOT NULL "
+        + "AND (replacement_expires_at IS NULL OR replacement_expires_at <= ?)) LIMIT 1000)",
+    ).bind(now, now).run();
   },
 } satisfies ExportedHandler<Env>;
 
@@ -161,6 +168,7 @@ async function routeRendezvous(
     headers.set("X-Threading-Device-ID", principal.deviceID);
   } else if (principal.kind === "session") {
     headers.set("X-Threading-Session-ID", principal.sessionID);
+    headers.set("X-Threading-Session-Expires-At", String(principal.sessionExpiresAt));
   }
   const stub = env.HOST_RENDEZVOUS.getByName(principal.hostID);
   return stub.fetch(new Request(request.url, { method: "GET", headers }));
@@ -172,4 +180,37 @@ function decodePath(value: string): string {
   } catch {
     throw new HttpError(400, "invalidPath", "Path contains invalid encoding");
   }
+}
+
+async function enforceRateLimit(request: Request, pathname: string, env: Env): Promise<void> {
+  const authorization = request.headers.get("Authorization");
+  const source = request.headers.get("CF-Connecting-IP") ?? "unattributed";
+  const sourceDigest = await sha256Hex(source);
+  const sourceOutcome = await env.SOURCE_RATE_LIMITER.limit({
+    key: `${sourceDigest}:${rateLimitGroup(pathname)}`,
+  });
+  if (!sourceOutcome.success) {
+    throw new HttpError(429, "rateLimited", "Too many requests; try again shortly");
+  }
+  let actor = `source:${sourceDigest}`;
+  if (authorization?.startsWith("Bearer ")) {
+    const token = authorization.slice(7);
+    if (token.length > 0 && new TextEncoder().encode(token).byteLength <= 4096
+      && !/[\u0000-\u0020\u007f]/u.test(token)) {
+      actor = `credential:${await sha256Hex(token)}`;
+    }
+  }
+  const limiter = pathname === "/v1/auth/apple" ? env.AUTH_RATE_LIMITER : env.API_RATE_LIMITER;
+  const outcome = await limiter.limit({ key: `${actor}:${rateLimitGroup(pathname)}` });
+  if (!outcome.success) {
+    throw new HttpError(429, "rateLimited", "Too many requests; try again shortly");
+  }
+}
+
+function rateLimitGroup(pathname: string): string {
+  if (pathname.startsWith("/v1/rendezvous/")) return "rendezvous";
+  if (pathname.startsWith("/v1/hosts")) return "hosts";
+  if (pathname.startsWith("/v1/auth/")) return "auth";
+  if (pathname === "/v1/account") return "account";
+  return "unknown";
 }

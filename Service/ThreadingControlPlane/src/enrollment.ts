@@ -7,8 +7,10 @@ import { validateIdentifier } from "./protocol";
 
 const hostCredentialLifetimeSeconds = 90 * 24 * 60 * 60;
 const deviceCredentialLifetimeSeconds = 30 * 24 * 60 * 60;
+const minimumDeviceCredentialLifetimeSeconds = 60;
 const maximumDevicesPerHost = 64;
 const maximumHostsPerAccount = 16;
+const maximumStoredHostsPerAccount = 64;
 
 interface CredentialRow {
   kind: "host" | "device";
@@ -26,24 +28,57 @@ export async function enrollHost(request: Request, env: Env): Promise<Response> 
   const displayName = boundedDisplayName(body.displayName);
   const now = Math.floor(Date.now() / 1000);
   const existing = await env.DB.prepare(
-    "SELECT account_id FROM hosts WHERE id = ?",
-  ).bind(hostID).first<{ account_id: string }>();
+    "SELECT account_id, revoked_at FROM hosts WHERE id = ?",
+  ).bind(hostID).first<{ account_id: string; revoked_at: number | null }>();
   if (existing && existing.account_id !== principal.accountID) {
     throw new HttpError(409, "hostAlreadyRegistered", "Host is registered to another account");
   }
-  if (!existing) {
-    const active = await env.DB.prepare(
-      "SELECT COUNT(*) AS count FROM hosts WHERE account_id = ? AND revoked_at IS NULL",
-    ).bind(principal.accountID).first<{ count: number }>();
-    if ((active?.count ?? 0) >= maximumHostsPerAccount) {
+  if (existing) {
+    if (!await updateOwnedHost(hostID, principal.accountID, displayName, now, env)) {
       throw new HttpError(429, "hostLimit", "Account has too many active hosts");
     }
+  } else {
+    let didEnroll = false;
+    try {
+      const result = await env.DB.prepare(
+        "INSERT INTO hosts (id, account_id, display_name, created_at, updated_at) "
+          + "SELECT ?, ?, ?, ?, ? WHERE "
+          + "(SELECT COUNT(*) FROM hosts WHERE account_id = ? AND revoked_at IS NULL) < ? "
+          + "AND (SELECT COUNT(*) FROM hosts WHERE account_id = ?) < ?",
+      ).bind(
+        hostID,
+        principal.accountID,
+        displayName,
+        now,
+        now,
+        principal.accountID,
+        maximumHostsPerAccount,
+        principal.accountID,
+        maximumStoredHostsPerAccount,
+      ).run();
+      didEnroll = result.meta.changes === 1;
+    } catch (error) {
+      // Another request may have enrolled this exact identifier after the initial lookup.
+      const raced = await env.DB.prepare("SELECT account_id FROM hosts WHERE id = ?")
+        .bind(hostID).first<{ account_id: string }>();
+      if (raced?.account_id === principal.accountID) {
+        didEnroll = await updateOwnedHost(
+          hostID,
+          principal.accountID,
+          displayName,
+          now,
+          env,
+        );
+      } else if (raced) {
+        throw new HttpError(409, "hostAlreadyRegistered", "Host is registered to another account");
+      } else {
+        throw error;
+      }
+    }
+    if (!didEnroll) {
+      throw new HttpError(429, "hostLimit", "Account has too many hosts");
+    }
   }
-  await env.DB.prepare(
-    "INSERT INTO hosts (id, account_id, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?) "
-      + "ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, "
-      + "updated_at = excluded.updated_at, revoked_at = NULL",
-  ).bind(hostID, principal.accountID, displayName, now, now).run();
   return rotateHostCredential(hostID, principal.accountID, env, now);
 }
 
@@ -66,8 +101,11 @@ export async function issueDeviceCredential(
   if (!validateIdentifier(hostID)) throw new HttpError(400, "invalidHost", "Host ID is invalid");
   const accountID = await authorizeHostMutation(request, env, hostID);
   const body = await readJSON(request);
-  assertExactKeys(body, ["deviceID"]);
+  assertExactKeys(body, ["deviceID", "lifetimeSeconds"]);
   const deviceID = identifier(body.deviceID, "deviceID");
+  const lifetimeSeconds = body.lifetimeSeconds === undefined
+    ? deviceCredentialLifetimeSeconds
+    : boundedDeviceCredentialLifetime(body.lifetimeSeconds);
   const now = Math.floor(Date.now() / 1000);
   const active = await env.DB.prepare(
     "SELECT COUNT(*) AS count FROM rendezvous_credentials "
@@ -78,18 +116,26 @@ export async function issueDeviceCredential(
     throw new HttpError(429, "deviceLimit", "Host has too many active devices");
   }
   const token = randomToken("th_device_");
-  const expiresAt = now + deviceCredentialLifetimeSeconds;
-  await env.DB.batch([
-    env.DB.prepare(
-      "UPDATE rendezvous_credentials SET revoked_at = ? "
-        + "WHERE host_id = ? AND device_id = ? AND kind = 'device' AND revoked_at IS NULL",
-    ).bind(now, hostID, deviceID),
-    env.DB.prepare(
-      "INSERT INTO rendezvous_credentials "
-        + "(digest, kind, account_id, host_id, device_id, expires_at, created_at) "
-        + "VALUES (?, 'device', ?, ?, ?, ?, ?)",
-    ).bind(await sha256Hex(token), accountID, hostID, deviceID, expiresAt, now),
-  ]);
+  const expiresAt = now + lifetimeSeconds;
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE rendezvous_credentials SET revoked_at = ? "
+          + "WHERE host_id = ? AND device_id = ? AND kind = 'device' AND revoked_at IS NULL",
+      ).bind(now, hostID, deviceID),
+      env.DB.prepare(
+        "INSERT INTO rendezvous_credentials "
+          + "(digest, kind, account_id, host_id, device_id, expires_at, created_at) "
+          + "VALUES (?, 'device', ?, ?, ?, ?, ?)",
+      ).bind(await sha256Hex(token), accountID, hostID, deviceID, expiresAt, now),
+    ]);
+  } catch (error) {
+    if (String(error).includes("threading_device_limit")) {
+      throw new HttpError(429, "deviceLimit", "Host has too many active devices");
+    }
+    throw error;
+  }
+  await disconnectDevice(hostID, deviceID, env);
   return json({ hostID, deviceID, credential: token, expiresAt: expiresAt * 1000 }, 201);
 }
 
@@ -107,7 +153,18 @@ export async function revokeDeviceCredential(
     "UPDATE rendezvous_credentials SET revoked_at = ? "
       + "WHERE host_id = ? AND device_id = ? AND kind = 'device' AND revoked_at IS NULL",
   ).bind(Math.floor(Date.now() / 1000), hostID, deviceID).run();
+  await disconnectDevice(hostID, deviceID, env);
   return new Response(null, { status: 204 });
+}
+
+async function disconnectDevice(hostID: string, deviceID: string, env: Env): Promise<void> {
+  await env.HOST_RENDEZVOUS.getByName(hostID).fetch("https://internal/disconnect-device", {
+    method: "POST",
+    headers: {
+      "X-Threading-Internal-Action": "disconnect-device",
+      "X-Threading-Device-ID": deviceID,
+    },
+  });
 }
 
 export async function revokeHost(
@@ -116,7 +173,7 @@ export async function revokeHost(
   hostID: string,
 ): Promise<Response> {
   if (!validateIdentifier(hostID)) throw new HttpError(400, "invalidHost", "Host ID is invalid");
-  await authorizeHostMutation(request, env, hostID);
+  await authorizeHostRevocation(request, env, hostID);
   const now = Math.floor(Date.now() / 1000);
   await env.DB.batch([
     env.DB.prepare(
@@ -205,6 +262,32 @@ async function authorizeHostMutation(request: Request, env: Env, hostID: string)
   return principal.accountID;
 }
 
+async function authorizeHostRevocation(request: Request, env: Env, hostID: string): Promise<void> {
+  const token = bearerToken(request);
+  if (token.startsWith("th_host_")) {
+    try {
+      const principal = await authorizeRendezvousCredential(token, "host", env);
+      if (principal.kind !== "host" || principal.hostID !== hostID) {
+        throw new HttpError(403, "forbidden", "Host credential does not match");
+      }
+      return;
+    } catch (error) {
+      const revoked = await env.DB.prepare(
+        "SELECT 1 AS found FROM rendezvous_credentials c JOIN hosts h ON h.id = c.host_id "
+          + "WHERE c.digest = ? AND c.kind = 'host' AND c.host_id = ? "
+          + "AND c.revoked_at IS NOT NULL AND h.revoked_at IS NOT NULL",
+      ).bind(await sha256Hex(token), hostID).first<{ found: number }>();
+      if (revoked) return;
+      throw error;
+    }
+  }
+  const principal = await authenticateAccess(request, env);
+  const owned = await env.DB.prepare(
+    "SELECT 1 AS found FROM hosts WHERE id = ? AND account_id = ?",
+  ).bind(hostID, principal.accountID).first<{ found: number }>();
+  if (!owned) throw new HttpError(404, "hostNotFound", "Host was not found");
+}
+
 async function requireHostOwner(hostID: string, accountID: string, env: Env): Promise<void> {
   const row = await env.DB.prepare(
     "SELECT 1 AS found FROM hosts WHERE id = ? AND account_id = ? AND revoked_at IS NULL",
@@ -212,9 +295,33 @@ async function requireHostOwner(hostID: string, accountID: string, env: Env): Pr
   if (!row) throw new HttpError(404, "hostNotFound", "Host was not found");
 }
 
+async function updateOwnedHost(
+  hostID: string,
+  accountID: string,
+  displayName: string,
+  now: number,
+  env: Env,
+): Promise<boolean> {
+  const result = await env.DB.prepare(
+    "UPDATE hosts SET display_name = ?, updated_at = ?, revoked_at = NULL "
+      + "WHERE id = ? AND account_id = ? AND (revoked_at IS NULL OR "
+      + "(SELECT COUNT(*) FROM hosts WHERE account_id = ? AND revoked_at IS NULL) < ?)",
+  ).bind(displayName, now, hostID, accountID, accountID, maximumHostsPerAccount).run();
+  return result.meta.changes === 1;
+}
+
 function identifier(value: unknown, field: string): string {
   if (!validateIdentifier(value)) throw new HttpError(400, "invalidRequest", `${field} is invalid`);
   return value;
+}
+
+function boundedDeviceCredentialLifetime(value: unknown): number {
+  if (!Number.isInteger(value)
+    || (value as number) < minimumDeviceCredentialLifetimeSeconds
+    || (value as number) > deviceCredentialLifetimeSeconds) {
+    throw new HttpError(400, "invalidRequest", "lifetimeSeconds is invalid");
+  }
+  return value as number;
 }
 
 function boundedDisplayName(value: unknown): string {

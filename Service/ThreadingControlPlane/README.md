@@ -7,6 +7,8 @@ TURN configuration, and then leaves ordinary terminal traffic on the encrypted W
 It does not accept terminal output, transcripts, prompts, attachments, file paths, provider
 credentials, or permission evidence. Rendezvous messages are capped at 384 KiB; one Mac has one
 control socket, at most eight pending/device sessions, and at most 64 ICE candidates per peer.
+Worker-native rate-limit bindings protect authentication and API entry points before database or
+Durable Object work; database-side guards keep product quotas intact under concurrent requests.
 
 ## Local verification
 
@@ -19,8 +21,12 @@ npx wrangler d1 migrations apply threading-control-plane --local
 npm run dev
 ```
 
-The checked-in `wrangler.jsonc` intentionally contains a non-deployable D1 database ID. Create the
-production D1 database, replace that value, apply migrations, then set these encrypted secrets:
+The checked-in `wrangler.jsonc` intentionally contains a non-deployable D1 database ID. `npm run
+deploy` runs the production preflight, type-check and full Worker suite before Wrangler and refuses
+a workers.dev-only deployment. The checked-in `secrets.required` contract makes Wrangler refuse
+local startup or deployment when a required encrypted binding is absent; the preflight pins that
+list so a configuration edit cannot silently weaken it. Create the production D1 database, replace
+that value, apply migrations, then set these encrypted secrets:
 
 ```sh
 npx wrangler secret put SESSION_SIGNING_SECRET
@@ -38,12 +44,69 @@ key IDs are separate secrets. The service exchanges Apple's single-use authoriza
 stores only the resulting refresh token, encrypted with AES-GCM, so in-app account deletion can
 revoke Apple authorization before cascading the D1 account rows.
 
+App refresh credentials rotate transactionally and are idempotent for an exact retry, so a lost
+response cannot strand a signed-in client or mint parallel descendants. Revoking a device, host
+or Apple grant disconnects its rendezvous sockets immediately. The Mac renews its host credential
+before expiry and refreshes its app session on a low-frequency unattended schedule.
+
+A bounded scheduler claims at most 250 due Apple grants every 15 minutes and validates each grant
+at most once per 24 hours, four requests at a time. A permanent `invalid_grant` disables local app
+sessions and hosted rendezvous credentials without deleting retained host records; a fresh
+interactive Sign in with Apple authorization re-enables the account. Transient Apple or network
+failures are retried only after the daily interval so the service does not violate Apple's
+validation throttle guidance.
+
 Create a Cloudflare Realtime TURN key;
 the long-lived key and API token stay in Worker secrets. Clients receive only generated TURN
 credentials. If TURN credential provisioning is temporarily unavailable, rendezvous continues
 with Cloudflare STUN so direct paths remain available.
 
 Before deployment, configure the final native Sign in with Apple bundle IDs in
-`APPLE_CLIENT_IDS`, attach the custom service domain, enable account/auth rate limits at the edge,
-register Apple's server-to-server notification endpoint, and set log retention. Do not deploy
-with the example D1 ID or `.dev.vars` values.
+`APPLE_CLIENT_IDS`, attach the custom service domain, verify the checked-in rate-limit namespace
+IDs are unused in the production Cloudflare account, register Apple's server-to-server
+notification endpoint, and set log retention. Do not deploy with the example D1 ID or `.dev.vars`
+values.
+
+## Production deployment checklist
+
+1. Authenticate Wrangler with the production Cloudflare account and create the D1 database:
+
+   ```sh
+   npx wrangler login
+   npx wrangler d1 create threading-control-plane
+   ```
+
+   Put the returned database ID in `wrangler.jsonc`. Never commit account tokens or secret values.
+
+2. Create a Cloudflare Realtime TURN key and record its key ID and API token. TURN is the relay
+   fallback for failed direct ICE paths; it is not an always-on tunnel.
+3. Create the Sign in with Apple key and configure the macOS and iOS App IDs. Register
+   `https://remote.threading.codes/v1/auth/apple/events` as Apple's server-to-server notification
+   endpoint. The `.p8` private key is a Worker secret, never an app resource.
+4. Install every Worker secret listed above, then apply all migrations remotely:
+
+   ```sh
+   npx wrangler d1 migrations apply threading-control-plane --remote
+   npm run deploy
+   ```
+
+5. Ensure the `remote.threading.codes` zone or delegated subdomain is active in the same
+   Cloudflare account. The checked-in Worker route attaches it as a custom domain during deploy;
+   pointing an external CNAME at an arbitrary Worker hostname is not a substitute for that TLS
+   binding.
+6. Verify the Worker-native authentication (30/minute), per-credential API (120/minute), and
+   broad per-source (600/minute) rate-limit bindings in production. They are permissive,
+   per-location abuse protection rather than billing quotas. Do not rate-limit established
+   WebSocket messages as independent HTTP requests. Retain only the metadata-only structured logs
+   emitted by the Worker, with a documented short retention.
+7. Verify `GET /health`, Sign in with Apple, first-install QR pairing, direct ICE, forced TURN,
+   device revoke, host sign-out, scheduled Apple refresh validation, Apple consent revocation and
+   retryable account deletion from a signed release candidate. Run the credentialed relay-only
+   package probe documented in `Packages/ThreadingPeerTransport/README.md` separately for the
+   provisioner's TURN-over-UDP, TURN-over-TCP and TURN-over-TLS URLs; the probe fails if WebRTC
+   silently uses a direct candidate. Confirm D1 contains no transcript, terminal, path or
+   provider-secret fields.
+
+Deployment is intentionally impossible until steps 1–4 replace the placeholder database ID and
+example secrets. A Worker preview or `workers.dev` hostname is useful for staging, but distributed
+app builds are configured for `https://remote.threading.codes`.

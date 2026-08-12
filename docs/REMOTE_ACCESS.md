@@ -4,6 +4,9 @@ Remote access mirrors Threading sessions to a browser or to the native `Threadin
 It is an opt-in beta feature: open the dedicated **Settings → Remote Access** page on the Mac,
 choose a connection, and turn on **Remote Access**:
 
+- **Hosted Direct** becomes the native owner-device default after Sign in with Apple. It uses the
+  Threading service only for identity, ICE signaling and TURN fallback; ordinary traffic goes
+  directly between iPhone and Mac whenever ICE succeeds.
 - **Relay** keeps the existing Cloudflare path and supports ordinary public share links.
 - **Tailscale** publishes Threading only inside the owner's tailnet. It is the private option for
   owner devices and can also share a chat with somebody already in that tailnet.
@@ -11,20 +14,23 @@ choose a connection, and turn on **Remote Access**:
   one-chat link is created. **Owner Relay Fallback** and **Keep Sharing Relay Ready** are separate,
   off-by-default controls for people who prefer availability over the fail-closed private path.
 
-All three terminate at the same loopback server, protocol and authorization checks. A transport
+All transports terminate at the same loopback server, protocol and authorization checks. A transport
 changes who can route packets to Threading; it never expands what a bearer may do.
 
 ## Pair an iPhone
 
 1. Keep Threading running on the Mac.
-2. Choose **Relay**, **Tailscale**, or **Private + Sharing** and wait for the selected pairing
-   connection. The readiness card identifies installation, sign-in/running and HTTPS Serve as
-   separate steps instead of reducing every setup problem to “unavailable.”
+2. For zero-install access, sign in with Apple under **Hosted Direct**. Relay and Tailscale remain
+   optional compatibility/private choices; their readiness cards identify setup problems.
 3. In Threading on the iPhone, choose **Pair a Mac** and scan the QR code shown on the page.
 
-The QR value is a one-time bootstrap. The Mac exchanges it for a unique 256-bit, device-bound
-owner credential, rotates the code immediately, and stores the device record in the login
-Keychain. iOS stores the paired host and its credential in its Keychain. Pairing therefore
+The hosted QR carries two independent scopes in its URL fragment: a temporary rendezvous-only
+credential that can form an encrypted ICE/TURN route to this Mac, and the existing one-time owner
+bootstrap that must still be redeemed by the loopback remote server. The Mac exchanges the
+bootstrap for a unique 256-bit, device-bound owner credential, rotates the code, issues the
+phone's durable hosted credential, and revokes the temporary pairing route. Relay/Tailscale QR
+codes redeem the same owner bootstrap over their selected route. The Mac stores the device record
+in the login Keychain and iOS stores the paired host and its credentials in its Keychain. Pairing therefore
 survives a Threading restart and also survives turning Remote Access off and back on. Settings
 lists each paired owner device with an explicit **Revoke** action; **Reset Everything** also
 deletes the Mac-side owner credentials. A browser owner pairing deliberately remains tab-scoped.
@@ -60,7 +66,9 @@ categories. Focused mode does not attempt to recognize questions drawn by a Clau
 TUI; only structured Native questions/permissions and explicit human requests can create the
 corresponding notifications.
 
-An owner pairing is stored as one logical Mac identity, not as one hostname. Owner responses
+An owner pairing is stored as one logical Mac identity, not as one hostname. iOS attempts its
+durable hosted ICE/TURN credential first, then only the Relay/Tailscale endpoints allowed by the
+owner's selected fallback policy. Owner responses
 advertise the currently usable Tailscale and/or relay endpoints plus an explicit `privateOnly`,
 `relayOnly`, or `preferPrivate` policy. The iPhone orders only HTTPS endpoints allowed by that
 policy, prefers Tailscale when requested, records the successful route, and can move to another
@@ -421,20 +429,18 @@ The environment-selected `.p8` file must be a regular UTF-8 file no larger than 
 read through the opened-file streaming limit before CryptoKit parses it; a metadata preflight is
 not trusted because the configured path can be replaced or grown between inspection and read.
 
-### Hosted Firebase service
+### Hosted service
 
-Firebase is a sensible production transport, but not the chat's source of authority:
+The implemented Cloudflare Worker/D1/Durable Object service owns Sign in with Apple, bounded daily
+Apple grant validation, scoped host/device credentials, bounded ICE signaling and TURN
+provisioning. It never receives the remote HTTP/WebSocket payload carried inside WebRTC. A later
+push slice should keep the APNs key in the service, deduplicate/collapse bounded events, and store
+only sanitized notification or widget projections. Presence should remain connection-derived
+rather than a database heartbeat.
 
-- Firebase Authentication gives invitations a real recipient identity and enables “shared with
-  you” push before the link is opened.
-- Cloud Functions plus FCM hold the APNs provider secret and deliver background notifications.
-- Realtime Database can hold short-lived presence at
-  `/presence/<chat>/<member>` with server timestamps, `onDisconnect` cleanup and strict
-  membership security rules. The current direct WebSocket remains the lower-latency path while
-  both peers are connected.
-- The Mac remains authoritative for session contents, permission evidence and actual tool
-  decisions. Realtime Database must not become a public transcript store or an alternate way
-  around a revoked membership.
+The Mac remains authoritative for session contents, permission evidence and actual tool
+decisions. No hosted store may become a public transcript store or an alternate way around a
+revoked membership.
 
 This also gives a clean product boundary for an open-source app: direct/local and self-hosted
 remote access remains available, while an official paid iOS/hosted service can sell reliable
@@ -517,11 +523,18 @@ much stronger than a guest URL; only show it to devices you control.
 
 ## Beta limitations
 
+Hosted Direct is implemented but not production-deployed by this repository checkout. The
+checked-in Worker configuration contains a deliberately invalid D1 identifier, and the production
+hostname, Cloudflare Realtime key, Sign in with Apple server key, rate-limit namespaces and Apple
+server-notification registration must be provisioned or confirmed before distributed builds can
+use it. A forced TURN-only run and the broader NAT/sleep/handoff matrix remain release gates.
+
 The automatic relay still uses a Cloudflare Quick Tunnel. Quick Tunnels are intended for
 development and testing, have no uptime guarantee, and receive a new public hostname whenever
 Threading starts. The durable device credential survives, but an iPhone paired to that old origin
-needs another reachable advertised route to discover the new Quick Tunnel; a relay-only pairing
-must still scan again. The logical-host model now prefers an advertised stable relay URL, so a
+needs another reachable advertised route to discover the new Quick Tunnel. Hosted Direct supplies
+that route for signed-in owner devices; a legacy relay-only build must still scan again. The
+logical-host model now prefers an advertised stable relay URL, so a
 future named Cloudflare Tunnel can replace the quick endpoint without changing pairing or
 authorization. Provisioning and operating that named tunnel is not part of this phase. Tailscale already has a
 stable tailnet origin, so an owner paired through Tailscale reconnects after a Mac/app restart

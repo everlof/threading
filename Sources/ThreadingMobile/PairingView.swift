@@ -175,6 +175,12 @@ struct PairingView: View {
     }
 
     private func pair(_ text: String) {
+        if let hostedLink = HostedPairingLink(string: text) {
+            beginPairing {
+                try await model.pair(hostedLink, displayName: UIDevice.current.name)
+            }
+            return
+        }
         guard let link = RemoteConnectionLink(string: text),
               link.baseURL.scheme?.lowercased() == "https" else {
             errorMessage = MobileL10n.string(
@@ -182,11 +188,17 @@ struct PairingView: View {
             )
             return
         }
+        beginPairing {
+            try await model.pair(link, displayName: UIDevice.current.name)
+        }
+    }
+
+    private func beginPairing(_ operation: @escaping @MainActor () async throws -> Void) {
         isConnecting = true
         errorMessage = nil
         Task {
             do {
-                try await model.pair(link, displayName: UIDevice.current.name)
+                try await operation()
                 dismiss()
             } catch {
                 errorMessage = error.localizedDescription

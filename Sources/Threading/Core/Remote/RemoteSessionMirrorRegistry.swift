@@ -34,9 +34,9 @@ final class RemoteSessionMirrorRegistry {
         }
         // Archiving is an authorization change, not only a sidebar filter. A live runtime may
         // intentionally survive it, so revoke any attached socket as soon as the store changes.
-        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
+        appEvents.observe(ProjectsDidChange.self) { [weak self] change in
             self?.closeUnavailableSessions()
-            self?.broadcastSessionsChanged()
+            self?.broadcastSessionsChanged(change)
         }
         // The System theme can change without an AppTheme event when macOS itself crosses
         // light/dark mode. Its resolved AppKit colours and reported mode must move remotely too.
@@ -1300,12 +1300,37 @@ final class RemoteSessionMirrorRegistry {
         }
     }
 
-    /// Wakes every dashboard after a store mutation. The payload is only an invalidation:
-    /// each connection re-fetches `/api/me`, where its own scope is applied.
-    private func broadcastSessionsChanged() {
-        let message = encode(RemoteSessionsChangedDTO())
-        for connection in themeEventSubscribers.values {
-            connection.sendText(message)
+    /// Keeps high-frequency row changes proportional to the changed session. Structural edits
+    /// remain an invalidation because they can change ordering, projects, archives and creation
+    /// choices together; every client then re-fetches its own scoped snapshot.
+    private func broadcastSessionsChanged(_ change: ProjectsDidChange) {
+        switch change.sidebarImpact {
+        case .structure:
+            let message = encode(RemoteSessionsChangedDTO())
+            for connection in themeEventSubscribers.values {
+                connection.sendText(message)
+            }
+        case .terminalRow:
+            // Project terminals are not part of the agent-session catalogue.
+            return
+        case .sessionOrder(let sessionID), .sessionRow(let sessionID):
+            let session = ProjectStore.shared.session(withID: sessionID)
+            let project = ProjectStore.shared.project(forSessionID: sessionID)
+            for connection in themeEventSubscribers.values {
+                guard let authorization = connection.authenticatedPeer?.authorization else {
+                    continue
+                }
+                let visible = session.flatMap { candidate -> RemoteSessionSummaryDTO? in
+                    guard RemoteSessionAccess.isVisible(candidate),
+                          authorization.scope.covers(candidate.id),
+                          let project else { return nil }
+                    return summary(for: candidate, projectName: project.name)
+                }
+                connection.sendText(encode(RemoteSessionsChangedDTO(
+                    session: visible,
+                    removedSessionID: visible == nil ? sessionID.uuidString : nil
+                )))
+            }
         }
     }
 
@@ -1344,7 +1369,10 @@ final class RemoteSessionMirrorRegistry {
     }
 
     func sessionSharingChanged() {
-        broadcastSessionsChanged()
+        // Sharing can change both a session's summary and which sessions a scoped peer may see.
+        // There is no single safe row delta, so make every client refresh its own authorised
+        // catalogue through the structural invalidation path.
+        broadcastSessionsChanged(ProjectsDidChange())
         for sessionID in mirrors.keys {
             if var record = inputControls[sessionID],
                record.mode == .focused,

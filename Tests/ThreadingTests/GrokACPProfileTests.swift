@@ -1,7 +1,66 @@
 import XCTest
 @testable import Threading
 
-final class GrokACPStreamSessionTests: XCTestCase {
+/// Covers what stays Grok's after the ACP runtime was made provider-neutral: its profile, the
+/// `_meta` extensions only it answers, and the end-to-end handshake that proved the transport
+/// against Grok 0.2.118 in the first place.
+final class GrokACPProfileTests: XCTestCase {
+
+    // MARK: - Transport Parity
+
+    func testTransportProseKeepsItsWordingUnderTheProviderProfile() {
+        let grok = ACPProviderProfile.grok
+
+        XCTAssertEqual(
+            ACPTransportMessage.noConversationSession(grok.displayName),
+            "Grok opened no conversation session."
+        )
+        XCTAssertEqual(
+            ACPTransportMessage.promptNotSent(grok.displayName),
+            "Threading could not send the Grok turn."
+        )
+        // The status is part of the sentence, so it is spelled out rather than computed.
+        XCTAssertEqual(
+            ACPTransportMessage.exited(grok.diagnosticsLabel, status: 3),
+            "Grok ACP exited with status 3."
+        )
+    }
+
+    @MainActor
+    func testGrokInitializeCarriesNoClientCapabilityMeta() throws {
+        XCTAssertTrue(ACPProviderProfile.grok.clientCapabilitiesMeta.isEmpty)
+
+        let transcript = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GrokACPProfileTests-\(UUID().uuidString).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: transcript) }
+        let script = "read -r line\nprintf '%s' \"$line\" > '\(transcript.path)'\n"
+
+        let session = ACPStreamSession(
+            sessionID: SessionID(),
+            workingDirectory: "/tmp",
+            profile: .grok
+        ) {
+            AgentLaunchPlan(
+                executable: "/bin/sh",
+                arguments: ["-c", script],
+                resumeState: .unavailable
+            )
+        }
+        defer { session.terminate() }
+        let exited = expectation(description: "transport exited")
+        session.onExit = { _ in exited.fulfill() }
+
+        session.start()
+        wait(for: [exited], timeout: 10)
+
+        let data = try Data(contentsOf: transcript)
+        let initialize = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let parameters = try XCTUnwrap(initialize["params"] as? [String: Any])
+        let capabilities = try XCTUnwrap(parameters["clientCapabilities"] as? [String: Any])
+        XCTAssertNil(capabilities["_meta"])
+    }
 
     func testSharedJSONRPCEnvelopeAcceptsACPVersionMember() throws {
         let envelope = try XCTUnwrap(JSONRPCLineEnvelope.parse(

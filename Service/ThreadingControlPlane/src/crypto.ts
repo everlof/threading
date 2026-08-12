@@ -4,6 +4,8 @@ import { HttpError } from "./environment";
 
 const encoder = new TextEncoder();
 const appleKeys = createRemoteJWKSet(new URL("https://appleid.apple.com/auth/keys"));
+const refreshReplacementKeyCache = new WeakMap<object, Promise<CryptoKey>>();
+const maximumRefreshTokenBytes = 4096;
 
 export function randomToken(prefix: string): string {
   const bytes = new Uint8Array(32);
@@ -14,6 +16,50 @@ export function randomToken(prefix: string): string {
 export async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", encoder.encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export async function encryptRefreshReplacement(token: string, env: Env): Promise<string> {
+  if (token.length === 0 || encoder.encode(token).byteLength > maximumRefreshTokenBytes) {
+    throw new HttpError(400, "invalidRequest", "Refresh token is invalid");
+  }
+  const iv = new Uint8Array(12);
+  crypto.getRandomValues(iv);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    await refreshReplacementKey(env),
+    encoder.encode(token),
+  );
+  return `${base64URL(iv)}.${base64URL(new Uint8Array(ciphertext))}`;
+}
+
+export async function decryptRefreshReplacement(value: string, env: Env): Promise<string> {
+  if (value.length === 0 || value.length > maximumRefreshTokenBytes * 2) {
+    throw new HttpError(503, "serviceState", "Stored refresh replacement is invalid");
+  }
+  const parts = value.split(".");
+  if (parts.length !== 2) {
+    throw new HttpError(503, "serviceState", "Stored refresh replacement is invalid");
+  }
+  try {
+    const iv = fromBase64URL(parts[0] ?? "");
+    const ciphertext = fromBase64URL(parts[1] ?? "");
+    if (iv.byteLength !== 12 || ciphertext.byteLength > maximumRefreshTokenBytes + 32) {
+      throw new Error("invalid refresh replacement");
+    }
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv },
+      await refreshReplacementKey(env),
+      ciphertext,
+    );
+    const token = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(plaintext);
+    if (token.length === 0 || encoder.encode(token).byteLength > maximumRefreshTokenBytes) {
+      throw new Error("invalid refresh replacement");
+    }
+    return token;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(503, "serviceState", "Stored refresh replacement could not be decrypted");
+  }
 }
 
 export async function accountIDForAppleSubject(subject: string): Promise<string> {
@@ -65,17 +111,23 @@ export async function signRendezvousSessionToken(
 export async function verifyRendezvousSessionToken(
   token: string,
   env: Env,
-): Promise<{ accountID: string; hostID: string; sessionID: string }> {
+): Promise<{ accountID: string; hostID: string; sessionID: string; sessionExpiresAt: number }> {
   const { payload } = await jwtVerify(token, signingKey(env), {
     issuer: "threading-control-plane",
     audience: "threading-rendezvous",
     algorithms: ["HS256"],
   });
   if (payload.typ !== "rendezvous-session" || typeof payload.sub !== "string"
-    || typeof payload.hostID !== "string" || typeof payload.sessionID !== "string") {
+    || typeof payload.hostID !== "string" || typeof payload.sessionID !== "string"
+    || !Number.isSafeInteger(payload.exp)) {
     throw new HttpError(401, "unauthorized", "Invalid rendezvous session token");
   }
-  return { accountID: payload.sub, hostID: payload.hostID, sessionID: payload.sessionID };
+  return {
+    accountID: payload.sub,
+    hostID: payload.hostID,
+    sessionID: payload.sessionID,
+    sessionExpiresAt: (payload.exp as number) * 1000,
+  };
 }
 
 export async function verifyAppleIdentityToken(
@@ -100,6 +152,28 @@ export async function verifyAppleIdentityToken(
   return payload;
 }
 
+export async function verifyAppleSessionIdentityToken(
+  identityToken: string,
+  clientID: string,
+  env: Env,
+): Promise<JWTPayload> {
+  const audiences = new Set(
+    env.APPLE_CLIENT_IDS.split(",").map((value) => value.trim()).filter(Boolean),
+  );
+  if (!audiences.has(clientID)) {
+    throw new HttpError(503, "serviceConfiguration", "Apple audience is not configured");
+  }
+  const { payload } = await jwtVerify(identityToken, appleKeys, {
+    issuer: "https://appleid.apple.com",
+    audience: clientID,
+    algorithms: ["RS256"],
+  });
+  if (typeof payload.sub !== "string") {
+    throw new HttpError(502, "appleResponse", "Apple identity token is missing its subject");
+  }
+  return payload;
+}
+
 export async function verifyAppleNotification(token: string, env: Env): Promise<JWTPayload> {
   const audiences = env.APPLE_CLIENT_IDS.split(",").map((value) => value.trim()).filter(Boolean);
   if (audiences.length === 0) throw new HttpError(503, "serviceConfiguration", "Apple audience is not configured");
@@ -119,8 +193,43 @@ function signingKey(env: Env): Uint8Array {
   return bytes;
 }
 
+async function refreshReplacementKey(env: Env): Promise<CryptoKey> {
+  const cached = refreshReplacementKeyCache.get(env);
+  if (cached) return cached;
+  const secret = signingKey(env);
+  const imported = crypto.subtle.digest(
+    "SHA-256",
+    concatBytes(encoder.encode("threading-refresh-replacement-v1:"), secret),
+  ).then((material) => crypto.subtle.importKey(
+    "raw",
+    material,
+    "AES-GCM",
+    false,
+    ["encrypt", "decrypt"],
+  )).catch((error) => {
+    refreshReplacementKeyCache.delete(env);
+    throw error;
+  });
+  refreshReplacementKeyCache.set(env, imported);
+  return imported;
+}
+
+function concatBytes(first: Uint8Array, second: Uint8Array): Uint8Array {
+  const joined = new Uint8Array(first.byteLength + second.byteLength);
+  joined.set(first, 0);
+  joined.set(second, first.byteLength);
+  return joined;
+}
+
 function base64URL(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+function fromBase64URL(value: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]+$/u.test(value)) throw new Error("invalid base64url");
+  const padded = value.replaceAll("-", "+").replaceAll("_", "/")
+    + "=".repeat((4 - value.length % 4) % 4);
+  return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
 }

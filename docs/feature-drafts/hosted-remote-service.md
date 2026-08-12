@@ -1,7 +1,8 @@
 # Hosted remote service
 
-> Status: draft, researched 2026-08-11. This is a product and architecture proposal, not an
-> implementation commitment. Re-check vendor limits and prices before procurement.
+> Status: native hosted transport implemented and physically validated 2026-08-12; production
+> deployment and the broader push/widget product remain gated below. Re-check vendor limits and
+> prices before procurement.
 
 ## Decision
 
@@ -14,9 +15,10 @@ This does **not** remove Tailscale. The supported transports remain deliberately
 - **Local** keeps working without an account, subscription or Internet service.
 - **Tailscale** remains the private, peer-to-peer remote path. The user owns their tailnet and
   Threading incurs no tunnel bandwidth charge.
-- **Threading Relay** is the operated public fallback for people who cannot or do not want to use
-  Tailscale. It receives a stable endpoint and is included in the hosted subscription subject to
-  fair-use limits.
+- **Hosted Direct** is the zero-install default: Threading's service introduces the peers, ICE
+  sends ordinary traffic directly when possible, and Cloudflare TURN relays only failed direct
+  paths.
+- **Threading Relay** remains the compatibility path for browser sharing and an optional fallback.
 - **Private + Sharing** may prefer Tailscale for the owner while using Threading Relay for a guest
   or as a fallback.
 
@@ -34,7 +36,7 @@ traversal; after that, a successful direct connection sends application traffic 
 straight to the Mac. DERP or a peer relay carries the traffic only when a direct path cannot be
 established.
 
-The zero-setup hosted mode should therefore select routes in this order:
+The implemented zero-setup hosted mode selects routes in this order:
 
 1. local network when appropriate;
 2. Threading's built-in ICE/STUN direct path;
@@ -47,18 +49,17 @@ The hosted service is still useful on a direct path for identity, endpoint disco
 invitations, entitlements and widget snapshots. Those control-plane messages are tiny; terminal
 bytes do not need to pass through it.
 
-Before committing to a reverse-tunnel vendor, run a transport spike for a Threading-owned
-ICE/STUN direct path with a TURN-style relay fallback. That would give users who do not install
-Tailscale the same "rendezvous, then direct" shape. It is a separate transport implementation,
-not a configuration of Cloudflare Tunnel or ngrok. If it preserves the existing security and
-semantic protocol, survives network changes and produces a strong direct-connection rate in a
-representative network matrix, it should become the default hosted transport; managed reverse
-tunneling then remains a launch fallback rather than the primary data path.
+The transport is a separate native implementation, not a configuration of Cloudflare Tunnel or
+ngrok. Both apps adapt its encrypted data channel back to a loopback TCP origin, so the existing
+remote protocol, capability checks and bounded semantic payloads remain authoritative. A
+one-time hosted QR credential also bootstraps a new phone without Tailscale or `cloudflared`;
+after the Mac-issued owner bootstrap is redeemed, the temporary route is revoked and the phone
+uses its durable device credential.
 
-### Native transport spike: first result
+### Native transport result
 
-The isolated `Packages/ThreadingPeerTransport` spike passed its first gate on 2026-08-11. It is
-not linked into either shipping app yet.
+`Packages/ThreadingPeerTransport` is linked into both application targets behind the existing
+loopback remote interface.
 
 | Check | Result |
 | --- | --- |
@@ -70,7 +71,8 @@ not linked into either shipping app yet.
 | Trickle ICE and live STUN | Complete-SDP gathering hit the 15-second bound; bounded trickle signaling then gathered a Cloudflare server-reflexive candidate in 0.15 seconds |
 | Wi-Fi → cellular physical path | Passed: 32 KiB verified bidirectionally with service-mediated one-use signaling and no TURN configured, proving application bytes used direct ICE rather than the signaling tunnel |
 | Scaling bounds | 64 KiB/message, 2 MiB inbound/outbound bytes, 4,096 unread messages, 64 ICE candidates and 256 KiB SDP |
-| Strict concurrency | Package builds and five deterministic tests pass with complete concurrency checking; the live STUN probe is opt-in |
+| First-install pairing | Passed in code: QR-carried rendezvous-only credential → ICE tunnel → one-time Mac bootstrap → durable device credential; no Tailscale or `cloudflared` dependency |
+| Strict concurrency | Peer transport 16/16 tests (one opt-in live STUN test skipped), shared remote protocol 87/87, Worker 23/23; macOS and physical-iOS targets build with complete concurrency checking |
 | Binary input | Community Google WebRTC M151 XCFramework: about 28.4 MB macOS universal and 12.2 MB iOS device before app slicing/compression |
 
 This is a **provisional direct-path pass**, not a complete NAT matrix. Bonjour advertised on the
@@ -78,10 +80,11 @@ test Mac but did not surface to the iPhone on the test access point, so the succ
 LAN run used an isolated fixed-endpoint fallback; production cannot depend on multicast discovery.
 A second run used a memory-bounded, token-protected rendezvous over a one-use HTTPS tunnel, with
 the Mac on home Wi-Fi and iPhone on cellular. It passed without any configured TURN server. The
-next gate is a TURN configuration forced to relay-only, additional NATs, sleep/wake and
-Wi-Fi/cellular handoff. Record selected-pair statistics before teardown, setup time, reconnect time
-and bytes relayed. The community binary also needs either a reproducible build pipeline or
-replacement before production adoption.
+remaining network gate is a production TURN configuration forced to relay-only, additional NATs,
+sleep/wake and repeated Wi-Fi/cellular handoff. Record selected-pair statistics before teardown,
+setup time, reconnect time and bytes relayed. The community binary is exact-version and checksum
+pinned with its upstream WebRTC source commit recorded in `docs/DEPENDENCY_AUDIT.md`; repeat that
+provenance and advisory review on every update.
 
 ## Product contract
 
@@ -121,14 +124,15 @@ iPhone -- built-in ICE/STUN direct ----------------------------> Mac
 
 The control plane does not proxy ordinary terminal traffic. It consists of:
 
-- **Identity and entitlement:** Firebase Authentication with Sign in with Apple, plus StoreKit 2
-  receipts and App Store Server Notifications.
-- **Host and device registry:** opaque host/device identifiers, public keys, protocol version,
-  enabled transports, last successful registration and revocation state.
+- **Identity:** Sign in with Apple authorization-code exchange, rotating app sessions, encrypted
+  Apple refresh tokens, bounded daily grant validation, server-to-server revocation notifications
+  and in-app account deletion.
+- **Host and device registry:** D1-backed opaque host/device identifiers, independently scoped
+  credentials, bounded active/retained rows, expiry and revocation state.
 - **Rendezvous:** stable endpoint metadata and a short-lived answer to "how can this paired device
   reach this Mac?" It never returns an authority broader than the Mac-issued device capability.
-- **Tunnel provisioner:** one least-privilege tunnel credential per Mac, kept in that Mac's
-  Keychain and revocable without touching any other host.
+- **TURN provisioner:** Cloudflare Realtime credentials are generated on demand from a Worker-only
+  long-lived key. Clients never receive the provisioning secret.
 - **Push broker:** APNs device, ActivityKit and future WidgetKit tokens; deduplication, collapse
   identifiers, expiry and bounded delivery diagnostics. The existing native APNs path should move
   from the Mac to this service. Firebase Cloud Messaging is not required: a direct APNs provider
@@ -141,10 +145,10 @@ The control plane does not proxy ordinary terminal traffic. It consists of:
 - **Operations:** abuse limits, cost budgets, structured metadata-only logs, deletion/export,
   service status and support tooling.
 
-A Firebase/Google Cloud control plane is the smallest first implementation because Authentication,
-App Check, Firestore and serverless execution cover the low-volume metadata path. Keep the service
-API behind one narrow repository interface so the tunnel vendor and even the control-plane vendor
-can be replaced independently.
+The implemented transport control plane is a Cloudflare Worker, D1 database and one hibernating
+Durable Object per Mac. The native clients depend on one narrow service interface so identity,
+TURN or the hosting vendor can still be replaced independently. Push, subscriptions, invitation
+metadata and widget snapshots are later service slices, not hidden dependencies of direct access.
 
 ### Stored data boundary
 
@@ -153,96 +157,83 @@ tokens, invitation membership, tunnel credential references, delivery results an
 widget/Live Activity projection chosen for remote display.
 
 It must not store provider API credentials, raw transcripts, prompts, terminal output, attachments,
-filesystem paths, browser pixels or permission evidence. The public tunnel vendor carries remote
-protocol traffic; under the current tunnel architecture it may terminate TLS. Before a paid launch,
-either document that vendor trust clearly or add application-layer end-to-end encryption between a
-paired device and its Mac.
+filesystem paths, browser pixels or permission evidence. WebRTC encrypts the peer path end to end;
+the service sees signaling metadata and, only when TURN is selected, forwards encrypted packets.
 
 ## Cost model
 
-All figures are USD per month, use public list prices observed on 2026-08-11, exclude tax/VAT and
+All figures are USD per month, use public list prices observed on 2026-08-12, exclude tax/VAT and
 round only in the summary. They are planning estimates, not vendor quotes.
 
-### Cost buckets
+### What is actually billed
 
-| Bucket | What drives it | Expected shape |
-| --- | --- | --- |
-| Identity, metadata and push | active accounts, registrations, safe events | Near free at first; low tens to hundreds of dollars at 10,000 users |
-| Tailscale transport | the user's tailnet | $0 to Threading per GB |
-| Managed public relay | active endpoint-hours, transfer and requests | The principal variable infrastructure cost |
-| Widget snapshots | bounded writes and reads, not tunnel traffic | Small Firestore/serverless usage |
-| Operations | logs, alerts, status/support systems | A budgeted reserve; human support is not included |
-| App Store | subscription proceeds | 15% if eligible for Apple's Small Business Program; not a server bill, but material to margin |
+| Bucket | Public list price and implemented behavior |
+| --- | --- |
+| Worker | $5 monthly minimum includes 10 million requests and 30 million CPU-ms; excess is $0.30/million requests and $0.02/million CPU-ms |
+| Hibernating rendezvous objects | Included 1 million requests and 400,000 GB-s; excess requests are $0.15/million and duration is $12.50/million GB-s |
+| D1 identity/credential rows | Included 25 billion rows read, 50 million written and 5 GB stored on the paid plan; the schema is indexed and every owner collection is capped |
+| STUN/direct traffic | Cloudflare STUN is free; application bytes on a successful direct ICE path do not enter the service |
+| TURN fallback | First 1,000 billable GB each month are free, then $0.05/GB sent from TURN to clients, including TURN overhead |
+| Tailscale/local traffic | $0 to Threading per GB; these paths do not enter the hosted service |
+| Push/widgets | Later slices; APNs itself has no per-message line item, while coalesced Worker/D1 operations use the same included pools above |
+| Operations | Logs, alerts, backup exercises, status/support systems and human support need a separate budget |
 
-Firebase lists Authentication for most providers, App Check, Cloud Messaging and Crashlytics as
-no-cost products. Firestore's current free tier includes 50,000 reads and 20,000 writes per day,
-1 GiB storage and 10 GiB monthly egress. Beyond that, default list prices begin at $0.03 per
-100,000 reads and $0.09 per 100,000 writes. A metadata-only implementation therefore does not
-need a meaningful database budget at pilot scale. Reserve money for serverless compute, logging
-and mistakes rather than designing around an exact $0 estimate.
+The Durable Object uses WebSocket hibernation and automatic ping/pong. An idle signed-in Mac
+therefore does not accrue wall-clock duration merely because its signaling socket remains open.
+Cloudflare bills the initial WebSocket upgrade as a request and applies a 20:1 ratio to incoming
+WebSocket messages for Durable Object request billing. The data channel closes its short-lived
+signaling sockets after negotiation; it does not send terminal frames through the object.
+Scheduled Apple grant validation adds at most one outbound Apple request per stored client grant
+per day, plus bounded D1 claim/result updates. At 10,000 users and the two native client IDs this
+is about 600,000 validations per month, still within the listed Worker/D1 pools; Apple publishes
+no per-validation charge.
 
-### Conservative public-relay ceiling
+### Working budget
 
-This section prices the fallback path when it actually proxies traffic. It is not the expected
-cost for a Tailscale-direct user.
+The table below is intentionally based on **bytes**, not a guessed number of connected hours. It
+assumes 80% of remote bytes go direct and 20% require TURN, then adds 15% to the relayed portion
+for protocol overhead. “Remote GB/user” is total bidirectional application traffic before that
+split. Replace both assumptions with Realtime analytics from each rollout gate.
 
-Cloudflare Named Tunnels are the smallest change from the current `cloudflared` implementation and
-have no separately listed tunnel-transfer fee. However, Cloudflare documents a default limit of
-1,000 tunnels and 1,000 routes per account. That is sufficient for a private beta, not an
-unqualified scale plan. We need a written Enterprise limit increase and price before relying on it
-for launch.
+| Scenario | Hosted users | Remote GB/user | Estimated TURN billable GB | TURN charge | Cloudflare metered subtotal |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Pilot | 100 | 2 | 46 | $0 | **about $5** |
+| Growth | 1,000 | 5 | 1,150 | $7.50 | **about $12.50** |
+| Scale | 10,000 | 10 | 23,000 | $1,100 | **about $1,105** |
 
-Until that quote exists, use ngrok's public pay-as-you-go prices as a conservative, independently
-calculable ceiling. Current public rates are:
+At the scale row, even an intentionally busy signaling estimate—30 negotiations per user per
+month and 30 inbound signaling messages per negotiation—lands around 1.06 million Durable Object
+requests after the 20:1 message ratio. That is only about one cent above the included request
+pool. Worker requests remain below their included 10 million, and bounded D1 metadata remains far
+below its paid-plan inclusions. TURN is therefore the cost driver, as intended.
 
-- $20 monthly with $20 of included usage;
-- $0.02 per active endpoint-hour; an hour becomes active only when traffic reaches the agent;
-- $0.01 per active hour for a custom domain;
-- $0.10 per GB after 5 GB monthly;
-- $1 per 100,000 HTTPS requests after 100,000 monthly.
-
-The estimate conservatively charges the custom-domain hour per active host. An enterprise Device
-Gateway contract may price a wildcard or device fleet differently; ngrok explicitly offers
-per-device/per-customer contracts.
-
-| Scenario | Public-relay Macs | Assumption per Mac | Relay estimate | Control plane + operations reserve | Total infrastructure |
-| --- | ---: | --- | ---: | ---: | ---: |
-| Pilot | 100 | 20 active h, 1 GB, 2,000 requests | $70.50 | $25–75 | **$96–146** |
-| Growth | 1,000 | 20 active h, 2 GB, 3,000 requests | $828.50 | $50–200 | **$879–1,029** |
-| Scale | 10,000 | 25 active h, 3 GB, 5,000 requests | $10,998.50 | $250–750 | **$11,249–11,749** |
-
-The relay formula is:
+Use this formula for the live forecast:
 
 ```text
-max(
-  $20 monthly minimum,
-  active host-hours × ($0.02 endpoint + $0.01 custom domain)
-    + max(0, outbound GB - 5) × $0.10
-    + max(0, HTTPS requests - 100,000) / 100,000 × $1
-)
+turn_billable_GB = total_remote_GB × observed_TURN_byte_share
+turn_cost = max(0, turn_billable_GB - 1,000) × $0.05
+hosted_subtotal = $5 + turn_cost + measured Worker/DO/D1 overages
 ```
 
-These all-relay scenarios are intentionally pessimistic. If 30% of 1,000 hosted users use the
-managed relay and the rest use Tailscale/local access, the same model produces about **$248** of
-relay usage and **$298–448 total infrastructure**, or roughly **$0.30–0.45 per hosted user**.
-At 10,000 hosted users and 30% relay usage, it is about **$3,299** for relay and **$3,549–4,049
-total**, around **$0.35–0.40 per hosted user**.
+An all-TURN stress ceiling under the same traffic assumptions and 15% overhead is $0 for the
+100-user pilot, about $237.50 at 1,000 users, and about $5,700 at 10,000 users, plus the $5 Worker
+minimum. That is a failure/restrictive-network ceiling, not the expected route mix.
 
 ### Sensitivities that can break the model
 
-- **Background polling:** one request in an otherwise idle hour can create a whole active
-  endpoint-hour. Do not health-check every public host or let widgets poll the Mac. Observe tunnel
-  agent sessions, use event-driven state and serve widgets from the bounded snapshot store.
-- **The current three-second iOS dashboard poll:** at 20 visible hours it produces about 24,000
-  requests per user. Before a paid rollout, replace session-catalogue polling with deltas on the
-  existing authenticated event socket. This is a battery and scalability requirement even where
-  request charges remain smaller than endpoint-hour charges.
-- **Heavy transfer:** every additional 10 GB through ngrok's self-serve tier costs about $1. A
-  user moving 20 GB/month adds roughly $2 before request/hour costs. The subscription needs a
-  visible fair-use transfer allowance or a higher tier for sustained heavy use.
-- **Always-hot endpoints:** 720 active hours per host would cost $21.60/month in endpoint and
-  custom-domain hours before a byte of transfer. An idle agent may stay connected, but no service
-  component should manufacture traffic merely to prove it is alive.
+- **Background polling:** it manufactures requests, wakes radios and may keep a rendezvous object
+  active. Do not health-check every host or let widgets poll the Mac. Use event-driven state and
+  serve widgets from a bounded snapshot store.
+- **Mobile catalogue invalidations:** the former three-second iOS poll produced about 24,000
+  requests over 20 visible hours. The implemented path now uses the authenticated event socket,
+  scoped O(changed) session deltas, coalesced structural refreshes and 1–60 second recovery only
+  after a socket failure. Preserve that zero-poll healthy state for widgets and future surfaces.
+- **Heavy transfer:** after the shared 1 TB allowance, every additional 20 TURN GB costs about $1.
+  A transfer-heavy user is cheap while direct and materially different while relayed, so fair-use
+  decisions must use relayed bytes rather than total session time.
+- **Broken hibernation:** accepting a socket with the non-hibernating API would turn idle presence
+  into wall-clock Durable Object duration. Preserve `acceptWebSocket`, auto-response ping/pong and
+  a test/metric that catches objects remaining active without application messages.
 - **Attachments and browser snapshots:** the existing 24 MiB response ceiling bounds one request,
   not monthly transfer. Preserve it and add per-account usage metering without logging content.
 - **Logs:** terminal or payload logging would create both a privacy problem and a potentially
@@ -251,11 +242,12 @@ total**, around **$0.35–0.40 per hosted user**.
 
 ### Unit economics
 
-Under the all-relay ceiling, ordinary infrastructure is roughly $0.90–$1.20 per active relay Mac
-at 1,000–10,000 scale. At a hypothetical $5 monthly subscription and a 15% App Store commission,
-proceeds before tax/refunds are $4.25. That is viable for ordinary use but leaves much less room
-for human support and transfer-heavy users than an $8 plan ($6.80 after the same commission).
-Pricing should be decided from observed beta distributions, not the average alone.
+Under the expected 20% TURN-byte assumption, the 10,000-user infrastructure subtotal is roughly
+$0.11/user before observability and support. The all-TURN ceiling is about $0.57/user. At a
+hypothetical $5 monthly subscription and a 15% App Store commission, proceeds before tax/refunds
+are $4.25. The service margin is therefore driven more by support, refunds and pathological relay
+use than by normal signaling. Pricing still needs observed p50/p90/p99 TURN bytes, not the average
+alone.
 
 The Apple Developer Program fee, tax/VAT, payment refunds, legal/DPA work, security review,
 engineering and human support are outside the infrastructure totals. Apple's current Developer
@@ -265,52 +257,33 @@ Program fee is $99/year. These costs still belong in the business forecast.
 
 | Option | Advantage | Blocking issue | Recommendation |
 | --- | --- | --- | --- |
-| Built-in ICE/STUN with TURN fallback | Most successful sessions send bytes directly; lower latency, relay cost and vendor visibility | Native host-path proof passed; NAT matrix, signaling, recovery, browser compatibility and production dependency remain | **Continue as the priority architecture path**; make it the default only if the network matrix passes |
-| Cloudflare Named Tunnels | Reuses current process and protocol; no listed tunnel egress fee | 1,000-tunnel/route account limit; scaled price unknown | Use for a capped beta only after provisioning/security review; obtain Enterprise quote before 500 hosts |
-| ngrok Device Gateway | Unlimited agents/endpoints on public tier; explicit per-device contracts | Higher public ceiling; binary redistribution, DPA, regional routing and rate limits need written answers | Cost and procurement fallback; request a 1k/10k/100k-device quote |
+| Built-in ICE/STUN with TURN fallback | Most successful sessions send bytes directly; lower latency, relay cost and vendor visibility | Production TURN and broader recovery matrix remain | **Implemented as the native owner-device default** |
+| Cloudflare Named Tunnels | Reuses the legacy relay process and browser-compatible protocol | Every application byte remains proxied and fleet limits/pricing need separate review | Keep only as a compatibility fallback, not the native owner default |
 | Build a Threading relay | Full control; commodity egress can be cheaper | We would own tunnel protocol, routing, abuse, upgrades, availability, backpressure and on-call security | Reject for v1 even though raw VM/egress prices look cheaper |
 
-For comparison, Fly.io currently lists Europe/North America public egress at $0.02/GB, one fifth of
-ngrok's public transfer rate. That does not make a custom relay cheaper as a product: it prices
-only the commodity bytes, not the engineering and operational system ngrok or Cloudflare supplies.
+Before a large rollout, procurement still needs written answers on Realtime and Worker limits, EU
+routing/data processing, abuse handling, support SLA and volume price.
 
-Procurement must get written answers for 10,000 and 100,000 provisioned Mac agents, concurrent
-agents, rate limits, wildcard routing, WebSocket and response limits, EU routing/data processing,
-credential revocation, signed-binary redistribution, abuse handling, support SLA and volume price.
+## Release sequence
 
-## Implementation sequence
-
-1. **Measure before choosing:** add local-only, content-free counters for remote active hours,
-   request count, response bytes and Tailscale-versus-relay selection. Collect an opt-in beta
-   distribution and cost its 50th, 90th and 99th percentiles.
-2. **Direct-transport feasibility gate:** prototype an authenticated WebRTC data channel (or an
-   equivalently mature ICE implementation) between macOS, native iOS and the browser, using the
-   control plane only for candidate signaling. Test STUN-direct and TURN-fallback paths across
-   home NAT, carrier networks, blocked UDP, IPv4/IPv6, VPNs, sleep/wake and Wi-Fi/cellular handoff.
-   Measure connection success, time to first byte, binary size, memory, recovery and relay share.
-   The isolated native host path, signed physical iPhone, bounded trickle signaling and one
-   Wi-Fi-to-cellular STUN-direct sub-gate passed on 2026-08-11; TURN, broader NAT coverage,
-   recovery, browser and production service-signaling work remains.
-3. **Fallback procurement and security:** in parallel with evaluating the spike, prototype stable
-   per-Mac endpoints with Cloudflare and ngrok and decide the tunnel trust/E2E story. Commit to a
-   primary reverse-tunnel vendor only if the direct transport fails its release gate; otherwise
-   retain one as the rollout safety path.
-4. **Control plane:** Sign in with Apple, host/device registry, App Check, deletion, StoreKit
-   entitlement and server notifications. Keep Local and Tailscale available without entitlement.
-5. **Hosted transport:** ship the proven ICE/direct path with TURN fallback, or replace Quick
-   Tunnel provisioning with a scoped stable reverse-tunnel credential if the gate failed.
-   Preserve the loopback-only remote server's capabilities above the transport adapter.
-6. **Push:** move the APNs signer and provider secret from the Mac environment into the service;
-   rotate tokens, deduplicate events and fail closed on revoked hosts/devices.
-7. **Event-driven mobile state:** replace the three-second session-dashboard poll with an initial
-   snapshot plus bounded socket deltas before charging for the relay.
-8. **Widgets and Live Activities:** publish size-capped semantic snapshots and activity events to
-   the service; add clear stale timestamps and deep links back to the authenticated app.
-9. **Account-backed sharing:** store invitation membership metadata while the Mac remains the
-   authority that issues the session capability.
-10. **Rollout:** internal, 100, 500 and 1,000-host gates. Do not cross 500 Cloudflare hosts without
-   a signed scale path. Track cost per active relay Mac, connection success, push latency,
-   bandwidth percentiles and service-induced wakeups at every gate.
+1. **Completed — native transport:** bounded WebRTC data channel, stream multiplexer, loopback
+   adapters, first-install hosted pairing, credential renewal/revocation, reconnect and background
+   teardown in macOS and iOS.
+2. **Completed — control-plane code:** Sign in with Apple, host/device enrollment, hibernating
+   signaling, TURN provisioning, replay protection, race-safe quotas, Worker-native abuse limits,
+   daily Apple grant validation, account deletion and scheduled bounded cleanup.
+3. **Deployment gate:** create production D1/Realtime resources, install independent secrets,
+   attach `remote.threading.codes`, apply migrations, confirm the rate-limit namespaces and Apple
+   server-to-server notifications. The checked-in D1 ID deliberately prevents accidental deploys.
+4. **Network release gate:** force TURN-only, then cover representative home/carrier NATs, blocked
+   UDP, IPv4/IPv6, VPN, sleep/wake and repeated Wi-Fi/cellular handoff.
+5. **App release gate:** complete Apple encryption-export determination, signed archive/device
+   tests, dependency/advisory refresh and account deletion/revocation verification against production.
+6. **Later product slices:** hosted APNs, widgets/Live Activities, subscriptions and
+   account-backed sharing. None may turn the service into a transcript store or reintroduce
+   healthy-state polling; mobile session state is already event-driven.
+7. **Rollout:** internal, 100, 500 and 1,000-host gates. Track direct/TURN share, setup/reconnect
+   time, encrypted bytes relayed, push latency and service-induced wakeups.
 
 ## Performance, failure and test requirements
 
@@ -318,13 +291,13 @@ credential revocation, signed-binary redistribution, abuse handling, support SLA
   pending pushes and widget snapshots. Every query is owner-scoped, paginated and capped.
 - Coalesce high-frequency agent changes before sending safe events. One streaming token must not
   become one server request, database write, push or widget update.
-- Presence is connection-derived; do not write a Firestore heartbeat on a short interval.
+- Presence is connection-derived; do not write a D1 heartbeat on a short interval.
 - Give push events stable IDs, collapse keys and short expiries. Duplicate or reordered delivery
   must be harmless.
 - Revoke a host, device or tunnel credential independently and prove that cached rendezvous cannot
   broaden or revive authority.
 - Bound APNs/activity/widget token counts per account and rotate them transactionally.
-- Load-test at least 10,000 simultaneously connected tunnel agents and slow/hostile clients with
+- Load-test at least 10,000 simultaneously connected host signaling sockets and slow/hostile clients with
   the same frame, connection and high-water limits as production.
 - A control-plane outage leaves local agents and Tailscale sessions working. Managed relay and
   push show a clear degraded/offline state; no fallback opens a listening interface.
@@ -334,16 +307,16 @@ credential revocation, signed-binary redistribution, abuse handling, support SLA
 
 ## Research sources
 
-- [Cloudflare Tunnel overview](https://developers.cloudflare.com/tunnel/)
-- [Cloudflare One account limits](https://developers.cloudflare.com/cloudflare-one/account-limits/)
 - [Cloudflare Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)
-- [ngrok pricing](https://ngrok.com/pricing)
-- [ngrok agent](https://ngrok.com/docs/agent/)
+- [Cloudflare Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)
+- [Cloudflare D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/)
+- [Cloudflare Workers Rate Limiting API](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)
+- [Cloudflare Realtime TURN pricing](https://developers.cloudflare.com/realtime/turn/faq/)
+- [Cloudflare Tunnel overview](https://developers.cloudflare.com/tunnel/)
 - [IETF ICE specification](https://datatracker.ietf.org/doc/html/rfc8445)
 - [IETF TURN specification](https://datatracker.ietf.org/doc/html/rfc8656)
 - [IETF WebRTC data channels](https://datatracker.ietf.org/doc/rfc8831/)
-- [Firebase pricing plans](https://firebase.google.com/docs/projects/billing/firebase-pricing-plans)
-- [Firestore pricing](https://cloud.google.com/firestore/pricing)
-- [Fly.io pricing](https://fly.io/docs/about/pricing/)
 - [Apple Developer Program enrollment and fee](https://developer.apple.com/help/account/membership/program-enrollment/)
 - [Apple Small Business Program](https://developer.apple.com/app-store/small-business-program/)
+- [Apple TN3194: account deletion and token lifecycle](https://developer.apple.com/documentation/technotes/tn3194-handling-account-deletions-and-revoking-tokens-for-sign-in-with-apple)
+- [Apple Sign in with Apple token validation](https://developer.apple.com/documentation/signinwithapplerestapi/generate-and-validate-tokens)

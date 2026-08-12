@@ -325,7 +325,6 @@
 		78F2C76BA78B9DC0CF219C60 /* ExecutionAuditRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D7E43A956E420F02E262626 /* ExecutionAuditRenderTests.swift */; };
 		971E6F21E984CDB63CDF7B33 /* ExecutionAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 358BAF0E005F28972D53F65C /* ExecutionAuditTests.swift */; };
 		961BC1BDA7898BF3AFB594EC /* GitRepositoryFileAccessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46A21D84581038550D1B2FEF /* GitRepositoryFileAccessTests.swift */; };
-		8CC2181BFF2F551374F4F8EA /* GrokACPStreamSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9457F2904DEE4E373FA94155 /* GrokACPStreamSessionTests.swift */; };
 		7E04A2F922EA38D37962922B /* JSONLReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9529F88774DCAAB5568992 /* JSONLReaderTests.swift */; };
 		4A3F79DFC7960043FFCACB63 /* ProjectRowCreateButtonTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FC84F10667C9E259506AC27 /* ProjectRowCreateButtonTests.swift */; };
 		32875F93546A7EDD15CBACB8 /* ResolvedDefaultModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62F102BB5C8A15E742D363B7 /* ResolvedDefaultModelTests.swift */; };
@@ -340,6 +339,8 @@
 		1394755065D3E2A3512FF991 /* SessionSnoozeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3683502D0102546A91853CD /* SessionSnoozeTests.swift */; };
 		F039FF5239DBA27E65F33A23 /* HostBoundaryFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B4D70AAABF41E2CAC179434 /* HostBoundaryFeatureTests.swift */; };
 		5BC2C0260E538FB3F07D09FC /* ProjectScriptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC266C2B6EFA6826922F814 /* ProjectScriptTests.swift */; };
+		1AAD392735CE52158BB7D01A /* ACPStreamSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CA62470F25E432D5812C98 /* ACPStreamSessionTests.swift */; };
+		B3A8CC7DE9D86E0F9002FAF2 /* GrokACPProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8827CC94B5DA00BDF535AAFC /* GrokACPProfileTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -718,7 +719,6 @@
 		0D7E43A956E420F02E262626 /* ExecutionAuditRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExecutionAuditRenderTests.swift; sourceTree = "<group>"; };
 		358BAF0E005F28972D53F65C /* ExecutionAuditTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExecutionAuditTests.swift; sourceTree = "<group>"; };
 		46A21D84581038550D1B2FEF /* GitRepositoryFileAccessTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GitRepositoryFileAccessTests.swift; sourceTree = "<group>"; };
-		9457F2904DEE4E373FA94155 /* GrokACPStreamSessionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GrokACPStreamSessionTests.swift; sourceTree = "<group>"; };
 		CE9529F88774DCAAB5568992 /* JSONLReaderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JSONLReaderTests.swift; sourceTree = "<group>"; };
 		0FC84F10667C9E259506AC27 /* ProjectRowCreateButtonTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectRowCreateButtonTests.swift; sourceTree = "<group>"; };
 		62F102BB5C8A15E742D363B7 /* ResolvedDefaultModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ResolvedDefaultModelTests.swift; sourceTree = "<group>"; };
@@ -734,6 +734,8 @@
 		E3683502D0102546A91853CD /* SessionSnoozeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionSnoozeTests.swift; sourceTree = "<group>"; };
 		8B4D70AAABF41E2CAC179434 /* HostBoundaryFeatureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HostBoundaryFeatureTests.swift; sourceTree = "<group>"; };
 		5CC266C2B6EFA6826922F814 /* ProjectScriptTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectScriptTests.swift; sourceTree = "<group>"; };
+		01CA62470F25E432D5812C98 /* ACPStreamSessionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ACPStreamSessionTests.swift; sourceTree = "<group>"; };
+		8827CC94B5DA00BDF535AAFC /* GrokACPProfileTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GrokACPProfileTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1193,7 +1195,6 @@
 				0D7E43A956E420F02E262626 /* ExecutionAuditRenderTests.swift */,
 				358BAF0E005F28972D53F65C /* ExecutionAuditTests.swift */,
 				46A21D84581038550D1B2FEF /* GitRepositoryFileAccessTests.swift */,
-				9457F2904DEE4E373FA94155 /* GrokACPStreamSessionTests.swift */,
 				CE9529F88774DCAAB5568992 /* JSONLReaderTests.swift */,
 				0FC84F10667C9E259506AC27 /* ProjectRowCreateButtonTests.swift */,
 				62F102BB5C8A15E742D363B7 /* ResolvedDefaultModelTests.swift */,
@@ -1208,6 +1209,8 @@
 				E3683502D0102546A91853CD /* SessionSnoozeTests.swift */,
 				8B4D70AAABF41E2CAC179434 /* HostBoundaryFeatureTests.swift */,
 				5CC266C2B6EFA6826922F814 /* ProjectScriptTests.swift */,
+				01CA62470F25E432D5812C98 /* ACPStreamSessionTests.swift */,
+				8827CC94B5DA00BDF535AAFC /* GrokACPProfileTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -2039,7 +2042,6 @@
 				78F2C76BA78B9DC0CF219C60 /* ExecutionAuditRenderTests.swift in Sources */,
 				971E6F21E984CDB63CDF7B33 /* ExecutionAuditTests.swift in Sources */,
 				961BC1BDA7898BF3AFB594EC /* GitRepositoryFileAccessTests.swift in Sources */,
-				8CC2181BFF2F551374F4F8EA /* GrokACPStreamSessionTests.swift in Sources */,
 				7E04A2F922EA38D37962922B /* JSONLReaderTests.swift in Sources */,
 				4A3F79DFC7960043FFCACB63 /* ProjectRowCreateButtonTests.swift in Sources */,
 				32875F93546A7EDD15CBACB8 /* ResolvedDefaultModelTests.swift in Sources */,
@@ -2054,6 +2056,8 @@
 				1394755065D3E2A3512FF991 /* SessionSnoozeTests.swift in Sources */,
 				F039FF5239DBA27E65F33A23 /* HostBoundaryFeatureTests.swift in Sources */,
 				5BC2C0260E538FB3F07D09FC /* ProjectScriptTests.swift in Sources */,
+				1AAD392735CE52158BB7D01A /* ACPStreamSessionTests.swift in Sources */,
+				B3A8CC7DE9D86E0F9002FAF2 /* GrokACPProfileTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2692,7 +2696,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Threading;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
 				INFOPLIST_KEY_ThreadingControlPlaneURL = "https://remote.threading.codes";
@@ -2755,7 +2759,7 @@
 				DEVELOPMENT_TEAM = SMQ3E8Y57T;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Threading;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
 				INFOPLIST_KEY_ThreadingControlPlaneURL = "https://remote.threading.codes";

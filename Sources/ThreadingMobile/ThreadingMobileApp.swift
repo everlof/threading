@@ -27,6 +27,7 @@ struct ThreadingMobileHostedRoot: View {
                 if phase == .active {
                     MobileDiagnostics.record(.appBecameActive)
                     Task {
+                        await model.refresh()
                         await notifications.refreshAuthorization()
                         await notifications.sync(hosts: model.hosts)
                         await MobileIssueReportOutbox.shared.flush()

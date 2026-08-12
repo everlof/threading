@@ -1,6 +1,9 @@
 export interface Env {
   DB: D1Database;
   HOST_RENDEZVOUS: DurableObjectNamespace;
+  AUTH_RATE_LIMITER: RateLimit;
+  API_RATE_LIMITER: RateLimit;
+  SOURCE_RATE_LIMITER: RateLimit;
   SESSION_SIGNING_SECRET: string;
   APPLE_CLIENT_IDS: string;
   APPLE_TEAM_ID?: string;
@@ -29,7 +32,13 @@ export type RendezvousPrincipal =
     deviceID: string;
     credentialExpiresAt: number;
   }
-  | { kind: "session"; accountID: string; hostID: string; sessionID: string };
+  | {
+    kind: "session";
+    accountID: string;
+    hostID: string;
+    sessionID: string;
+    sessionExpiresAt: number;
+  };
 
 export class HttpError extends Error {
   constructor(

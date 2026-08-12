@@ -4,6 +4,50 @@ import ThreadingExtensionKit
 
 final class RemoteProtocolTests: XCTestCase {
 
+    func testHostedPairingLinkRoundTripsWithoutPuttingSecretsInTheRequestURL() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let link = try XCTUnwrap(HostedPairingLink(
+            serviceURL: URL(string: "https://remote.threading.codes")!,
+            hostID: "host-123",
+            deviceID: "hosted-pairing",
+            rendezvousCredential: "th_device_secret",
+            bootstrapToken: "PAIRINGSECRET",
+            expiresAt: now.addingTimeInterval(300),
+            now: now
+        ))
+
+        XCTAssertTrue(link.scannablePayload.hasPrefix("THREADING://PAIR#"))
+        XCTAssertFalse(link.scannablePayload.contains("th_device_secret"))
+        XCTAssertFalse(link.scannablePayload.contains("PAIRINGSECRET"))
+        XCTAssertEqual(
+            HostedPairingLink(string: link.scannablePayload, now: now),
+            link
+        )
+    }
+
+    func testHostedPairingLinkRejectsExpiredAndInsecurePayloads() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertNil(HostedPairingLink(
+            serviceURL: URL(string: "http://remote.example.com")!,
+            hostID: "host-123",
+            deviceID: "hosted-pairing",
+            rendezvousCredential: "credential",
+            bootstrapToken: "bootstrap",
+            expiresAt: now.addingTimeInterval(300),
+            now: now
+        ))
+        XCTAssertNil(HostedPairingLink(
+            serviceURL: URL(string: "https://remote.threading.codes")!,
+            hostID: "host-123",
+            deviceID: "hosted-pairing",
+            rendezvousCredential: "credential",
+            bootstrapToken: "bootstrap",
+            expiresAt: now,
+            now: now
+        ))
+        XCTAssertNil(HostedPairingLink(string: "THREADING://PAIR#not-base64", now: now))
+    }
+
     func testNotificationPayloadAndRegistrationRoundTrip() throws {
         let event = RemoteNotificationEventDTO(
             id: "event-1",
@@ -502,6 +546,24 @@ final class RemoteProtocolTests: XCTestCase {
                 from: JSONEncoder().encode(changed)
             ),
             changed
+        )
+
+        let delta = RemoteSessionsChangedDTO(
+            session: RemoteSessionSummaryDTO(
+                id: "session-1",
+                title: "Changed",
+                agentKind: "codex",
+                surface: "conversation",
+                state: "working",
+                projectName: "Threading"
+            )
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteSessionsChangedDTO.self,
+                from: JSONEncoder().encode(delta)
+            ),
+            delta
         )
     }
 

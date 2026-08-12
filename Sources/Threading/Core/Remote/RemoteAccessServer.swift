@@ -1083,6 +1083,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     reason: "Created",
                     maximumBytes: 16 * 1024
                 )))
+                RemoteAccessCoordinator.shared.completeHostedPairingBootstrap()
             } catch {
                 ThreadingLogger.remote.error(
                     "Hosted device credential issue failed code=service"

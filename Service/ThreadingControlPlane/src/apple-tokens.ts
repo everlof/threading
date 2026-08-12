@@ -12,12 +12,20 @@ interface AppleTokenResponse {
   id_token?: unknown;
   refresh_token?: unknown;
   token_type?: unknown;
+  error?: unknown;
 }
 
 export interface AppleTokens {
   identityToken: string;
   refreshToken: string;
 }
+
+export type AppleRefreshValidation =
+  | { kind: "valid"; identityToken: string }
+  | { kind: "invalidGrant" };
+
+const appleKeyCache = new WeakMap<object, Promise<CryptoKey>>();
+const appleClientSecretCache = new WeakMap<object, Map<string, { value: string; expiresAt: number }>>();
 
 export async function exchangeAppleAuthorizationCode(
   authorizationCode: string,
@@ -68,6 +76,39 @@ export async function revokeAppleRefreshToken(
   }
 }
 
+export async function validateAppleRefreshToken(
+  refreshToken: string,
+  clientID: string,
+  env: Env,
+): Promise<AppleRefreshValidation> {
+  boundedSecret(refreshToken, "refreshToken", maximumAppleTokenBytes);
+  const response = await fetch("https://appleid.apple.com/auth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientID,
+      client_secret: await appleClientSecret(clientID, env),
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }),
+    signal: AbortSignal.timeout(5_000),
+  });
+  const value = await boundedJSON<AppleTokenResponse>(response);
+  if (!response.ok) {
+    if (response.status === 400 && value.error === "invalid_grant") {
+      return { kind: "invalidGrant" };
+    }
+    throw new HttpError(502, "appleValidation", "Apple session validation failed");
+  }
+  boundedSecret(value.access_token, "access_token", maximumAppleTokenBytes);
+  const identityToken = boundedSecret(value.id_token, "id_token", 16 * 1024);
+  if (value.token_type !== "Bearer" || !Number.isInteger(value.expires_in)
+    || (value.expires_in as number) <= 0) {
+    throw new HttpError(502, "appleResponse", "Apple returned an invalid token response");
+  }
+  return { kind: "valid", identityToken };
+}
+
 export async function encryptAppleToken(token: string, env: Env): Promise<string> {
   boundedSecret(token, "refreshToken", maximumAppleTokenBytes);
   const iv = new Uint8Array(12);
@@ -111,22 +152,36 @@ export async function decryptAppleToken(value: string, env: Env): Promise<string
 async function appleClientSecret(clientID: string, env: Env): Promise<string> {
   const teamID = configured(env.APPLE_TEAM_ID, "Apple team ID");
   const keyID = configured(env.APPLE_KEY_ID, "Apple key ID");
-  const privateKey = configured(env.APPLE_PRIVATE_KEY, "Apple private key").replaceAll("\\n", "\n");
-  let key: CryptoKey;
-  try {
-    key = await importPKCS8(privateKey, "ES256");
-  } catch {
-    throw new HttpError(503, "serviceConfiguration", "Apple private key is invalid");
-  }
   const now = Math.floor(Date.now() / 1000);
-  return new SignJWT({})
+  let secrets = appleClientSecretCache.get(env);
+  if (!secrets) {
+    secrets = new Map();
+    appleClientSecretCache.set(env, secrets);
+  }
+  const cached = secrets.get(clientID);
+  if (cached && cached.expiresAt > now + 30) return cached.value;
+  const value = await new SignJWT({})
     .setProtectedHeader({ alg: "ES256", kid: keyID })
     .setIssuer(teamID)
     .setAudience("https://appleid.apple.com")
     .setSubject(clientID)
     .setIssuedAt(now)
     .setExpirationTime(now + 5 * 60)
-    .sign(key);
+    .sign(await applePrivateKey(env));
+  secrets.set(clientID, { value, expiresAt: now + 5 * 60 });
+  return value;
+}
+
+async function applePrivateKey(env: Env): Promise<CryptoKey> {
+  const cached = appleKeyCache.get(env);
+  if (cached) return cached;
+  const privateKey = configured(env.APPLE_PRIVATE_KEY, "Apple private key").replaceAll("\\n", "\n");
+  const imported = importPKCS8(privateKey, "ES256").catch(() => {
+    appleKeyCache.delete(env);
+    throw new HttpError(503, "serviceConfiguration", "Apple private key is invalid");
+  });
+  appleKeyCache.set(env, imported);
+  return imported;
 }
 
 async function encryptionKey(env: Env): Promise<CryptoKey> {

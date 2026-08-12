@@ -144,6 +144,26 @@ value model, viewport ownership, stable identity, and a stress fixture by defaul
 fixed-schema form remains free to use a retained stack and wholesale rebuild; recycled-cell
 cleanup and one-controller-for-another lifecycle replacement are also not findings by themselves.
 
+### Mobile remote dashboard scaling contract
+
+The dashboard catalogue scales with sessions and its invalidation source can burst when the Mac
+applies several store mutations together. The ordinary expectation is tens of sessions and fewer
+than five catalogue changes per minute; the stress case is 1,000 sessions with 100 row-change
+events arriving in one second.
+
+The initial snapshot and genuinely structural changes may rebuild the scoped catalogue. Ordinary
+row/order changes carry one authorised session summary over the existing event socket, so Mac
+projection and network work are O(changed). iOS coalesces a delta burst for 50 ms, merges and sorts
+the local value catalogue off-main, then publishes once for identity-based visible-row diffing;
+structural invalidations are coalesced for 350 ms. The event socket has one bounded exponential
+recovery task (1–60 seconds), is torn down in the background, and is never accompanied by
+healthy-state REST polling.
+
+Before this boundary, one visible dashboard issued `/api/me` every three seconds: 1,200 requests
+per hour and about 24,000 over 20 visible hours, even with no changes. The healthy steady state is
+now zero repeated REST requests: one activation/foreground snapshot, scoped deltas for row
+changes, and a coalesced snapshot only for structural changes or socket recovery.
+
 ### Scaling audit, 2026-08-08
 
 The Tools page prompted a repository sweep for the patterns above. This is a risk inventory, not a

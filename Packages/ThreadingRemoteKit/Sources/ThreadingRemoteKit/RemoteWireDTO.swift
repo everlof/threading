@@ -1556,14 +1556,21 @@ public struct RemoteAppThemeUpdateDTO: Codable, Equatable, Sendable {
     }
 }
 
-/// A hint that the session catalogue changed. The event deliberately carries no sessions:
-/// every subscriber may have a different share scope, so each client re-fetches its own
-/// authorised `/api/me` snapshot instead of receiving somebody else's catalogue.
+/// A scoped session-catalogue change. Row-only mutations carry one already-authorised summary so
+/// clients can update in O(changed) work. Structural mutations leave both delta fields nil and
+/// ask the client to fetch its own authoritative `/api/me` snapshot.
 public struct RemoteSessionsChangedDTO: Codable, Equatable, Sendable {
     public let type: String
+    public let session: RemoteSessionSummaryDTO?
+    public let removedSessionID: String?
 
-    public init() {
+    public init(
+        session: RemoteSessionSummaryDTO? = nil,
+        removedSessionID: String? = nil
+    ) {
         self.type = "sessionsChanged"
+        self.session = session
+        self.removedSessionID = removedSessionID
     }
 }
 

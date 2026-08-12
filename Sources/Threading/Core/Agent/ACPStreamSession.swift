@@ -101,8 +101,10 @@ final class ACPStreamSession:
                 Task { @MainActor [weak self] in self?.handleTermination(status: status) }
             }
         } catch {
+            let label = profile.diagnosticsLabel
+            let reason = error.localizedDescription
             ThreadingLogger.agent.error(
-                "\(self.profile.diagnosticsLabel, privacy: .public) failed to start: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                "\(label, privacy: .public) failed to start: \(reason, privacy: .private(mask: .hash))"
             )
             // Match every other native transport: start never calls an external lifecycle
             // callback re-entrantly before its caller has finished installing the surface.
@@ -371,8 +373,10 @@ final class ACPStreamSession:
             try input.write(contentsOf: data)
             return true
         } catch {
+            let label = profile.diagnosticsLabel
+            let reason = error.localizedDescription
             ThreadingLogger.agent.error(
-                "\(self.profile.diagnosticsLabel, privacy: .public) write failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                "\(label, privacy: .public) write failed: \(reason, privacy: .private(mask: .hash))"
             )
             return false
         }
@@ -799,8 +803,9 @@ final class ACPStreamSession:
     private func replaceComposerCapabilities(_ capabilities: [ComposerCapability]) {
         let normalization = ComposerCapabilityCatalogPolicy.normalize(capabilities)
         if normalization.wasTruncated {
+            let label = profile.diagnosticsLabel
             ThreadingLogger.agent.warning(
-                "\(self.profile.diagnosticsLabel, privacy: .public) command catalog exceeded local presentation limits; truncated"
+                "\(label, privacy: .public) command catalog exceeded local presentation limits; truncated"
             )
         }
         guard composerCapabilities != normalization.capabilities else { return }
@@ -847,7 +852,8 @@ private enum ACPRequestPurpose {
     case prompt
 }
 
-private enum ACPDefaults {
+/// Internal rather than private so a focused test can pin the real bound it asserts against.
+enum ACPDefaults {
     static let protocolVersion = 1
     static let maximumErrorBytes = 64 * 1024
 

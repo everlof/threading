@@ -102,6 +102,43 @@ describe("host rendezvous durable object", () => {
     device.send(encodeEnvelope({ version: 1, kind: "deviceConnect", hostID, deviceID }));
     expect(await failure).toMatchObject({ kind: "failure", errorCode: "hostOffline" });
   });
+
+  it("rejects delayed use after a credential or session reservation expires", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const deviceID = `device-${crypto.randomUUID()}`;
+    const stub = testEnv.HOST_RENDEZVOUS.getByName(hostID);
+    const expiredDevice = await connect(stub, {
+      kind: "device",
+      accountID: "account-1",
+      hostID,
+      deviceID,
+      expiresAt: Date.now() - 1,
+    });
+    const credentialFailure = nextEnvelope(expiredDevice);
+    expiredDevice.send(encodeEnvelope({ version: 1, kind: "deviceConnect", hostID, deviceID }));
+    expect(await credentialFailure).toMatchObject({
+      kind: "failure",
+      errorCode: "credentialExpired",
+    });
+
+    const expiredPeer = await connect(stub, {
+      kind: "session",
+      accountID: "account-1",
+      hostID,
+      sessionID: `session-${crypto.randomUUID()}`,
+      expiresAt: Date.now() - 1,
+    });
+    const sessionFailure = nextEnvelope(expiredPeer);
+    expiredPeer.send(encodeEnvelope({
+      version: 1,
+      kind: "sessionJoin",
+      sessionID: `different-${crypto.randomUUID()}`,
+    }));
+    expect(await sessionFailure).toMatchObject({
+      kind: "failure",
+      errorCode: "sessionExpired",
+    });
+  });
 });
 
 async function connect(
@@ -112,6 +149,7 @@ async function connect(
     hostID: string;
     deviceID?: string;
     sessionID?: string;
+    expiresAt?: number;
   },
 ): Promise<WebSocket> {
   const headers = new Headers({
@@ -121,10 +159,19 @@ async function connect(
     "X-Threading-Host-ID": principal.hostID,
   });
   if (principal.kind === "host" || principal.kind === "device") {
-    headers.set("X-Threading-Credential-Expires-At", String(Date.now() + 60_000));
+    headers.set(
+      "X-Threading-Credential-Expires-At",
+      String(principal.expiresAt ?? Date.now() + 60_000),
+    );
   }
   if (principal.deviceID) headers.set("X-Threading-Device-ID", principal.deviceID);
   if (principal.sessionID) headers.set("X-Threading-Session-ID", principal.sessionID);
+  if (principal.kind === "session") {
+    headers.set(
+      "X-Threading-Session-Expires-At",
+      String(principal.expiresAt ?? Date.now() + 60_000),
+    );
+  }
   const response = await stub.fetch("https://rendezvous.test/internal", { headers });
   if (!response.webSocket) throw new Error("Expected WebSocket upgrade");
   response.webSocket.accept();

@@ -241,7 +241,7 @@ struct SessionDashboard: View {
         .navigationTitle("Code")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { dashboardToolbar }
-        .task(id: model.activeHostID) { await model.poll() }
+        .task(id: model.activeHostID) { await model.activateDashboard() }
         .onAppear {
 #if DEBUG
             if model.isDemo,

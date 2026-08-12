@@ -20,7 +20,9 @@ final class RemoteAppModel: ObservableObject {
     }
 
     @Published private(set) var hosts: [PairedRemoteHost]
-    @Published private(set) var me: RemoteMeDTO?
+    @Published private(set) var me: RemoteMeDTO? {
+        didSet { catalogueRevision &+= 1 }
+    }
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var activeHostID: String?
     @Published private(set) var storageIssue: String? = nil
@@ -48,14 +50,26 @@ final class RemoteAppModel: ObservableObject {
     private var themeEventsReceiveTask: Task<Void, Never>?
     private var themeEventsHostID: String?
     private var themeEventsGeneration = 0
+    private var themeEventsRecoveryTask: Task<Void, Never>?
+    private var themeEventsRecoveryAttempt = 0
+    private var sessionsChangedRefreshTask: Task<Void, Never>?
+    private var sessionsChangedRefreshGeneration = 0
+    private var pendingSessionDeltas: [String: RemoteSessionsChangedDTO] = [:]
+    private var sessionDeltaApplicationTask: Task<Void, Never>?
+    private var sessionDeltaApplicationGeneration = 0
+    private var catalogueRevision = 0
+    private var catalogueRefreshInFlightGeneration: Int?
     private var refreshGeneration = 0
     private var activeHostedLink: RemoteConnectionLink?
     private var activeHostedHostID: String?
     /// Provisioning is a low-frequency control-plane operation. A service outage must not turn
-    /// the three-second UI poll into a credential-issuance retry loop.
+    /// event-socket recovery into a credential-issuance retry loop.
     private var hostedProvisioningRetryAfter: [String: Date] = [:]
     private static let hostedCredentialRenewalLeadTime: TimeInterval = 24 * 60 * 60
     private static let hostedProvisioningRetryDelay: TimeInterval = 5 * 60
+    private static let sessionsChangedCoalescingDelay = Duration.milliseconds(350)
+    private static let sessionDeltaCoalescingDelay = Duration.milliseconds(50)
+    private static let maximumThemeEventsRecoveryDelay: TimeInterval = 60
 
     init(continuity: MobileSessionContinuityStore = MobileSessionContinuityStore()) {
         self.continuity = continuity
@@ -303,6 +317,42 @@ final class RemoteAppModel: ObservableObject {
         ])
     }
 
+    func pair(_ hostedLink: HostedPairingLink, displayName: String) async throws {
+        guard !hostedLink.isExpired else { throw PeerControlPlaneError.invalidCredential }
+        phase = .connecting
+        MobileDiagnostics.record(.hostPairingStarted, fields: [.transport: "hosted"])
+        let endpoint = try PeerControlPlaneServiceEndpoint(hostedLink.serviceURL)
+        let credential = try PeerRendezvousCredential(hostedLink.rendezvousCredential)
+        let tunnel: PeerHostedDeviceTunnel
+        do {
+            tunnel = try await PeerHostedDeviceConnector.connect(
+                endpoint: endpoint.rendezvousEndpoint,
+                hostID: hostedLink.hostID,
+                deviceID: hostedLink.deviceID,
+                credential: credential
+            )
+        } catch {
+            MobileDiagnostics.record(
+                .hostPairingFailed,
+                level: .error,
+                fields: [.code: MobileDiagnostics.errorCode(error), .transport: "hosted"]
+            )
+            throw error
+        }
+        defer { tunnel.stop() }
+        guard let loopbackLink = RemoteConnectionLink(
+            baseURL: tunnel.origin,
+            token: hostedLink.bootstrapToken
+        ) else {
+            throw RemoteClientError.invalidResponse
+        }
+        try await pair(loopbackLink, displayName: displayName)
+        // `pair` stores the durable hosted credential through this temporary tunnel. Move the
+        // live app socket onto that durable route before the temporary pairing tunnel closes.
+        disconnectThemeEvents()
+        await refresh()
+    }
+
     func selectHost(_ id: String) {
         guard hosts.contains(where: { $0.id == id }), activeHostID != id else { return }
         disconnectThemeEvents()
@@ -340,6 +390,7 @@ final class RemoteAppModel: ObservableObject {
 
     func refresh() async {
         guard !isDemo else { return }
+        discardPendingSessionDeltas()
         refreshGeneration &+= 1
         let generation = refreshGeneration
         guard let host = activeHost else {
@@ -349,6 +400,13 @@ final class RemoteAppModel: ObservableObject {
             return
         }
         let hostID = host.id
+        catalogueRefreshInFlightGeneration = generation
+        defer {
+            if catalogueRefreshInFlightGeneration == generation {
+                catalogueRefreshInFlightGeneration = nil
+                startSessionDeltaApplicationIfNeeded(for: hostID)
+            }
+        }
         let wasOnline = phase == .online && me != nil
         let wasOffline: Bool
         if case .offline = phase {
@@ -388,9 +446,9 @@ final class RemoteAppModel: ObservableObject {
                     || old.endpoints != updated.endpoints
                     || old.connectionPolicy != updated.connectionPolicy
                     || old.activeEndpointKind != updated.activeEndpointKind
-                // Polling is every three seconds. Persist only a real connection transition or
-                // identity change, rather than rewriting the credential-bearing Keychain item
-                // on every healthy poll.
+                // Persist only a real connection transition or identity change, rather than
+                // rewriting the credential-bearing Keychain item after every event-driven
+                // catalogue refresh.
                 if !wasOnline || metadataChanged {
                     hosts[index] = updated
                     _ = persistHosts()
@@ -408,6 +466,7 @@ final class RemoteAppModel: ObservableObject {
         } catch {
             guard activeHostID == hostID, refreshGeneration == generation else { return }
             phase = .offline(error.localizedDescription)
+            scheduleThemeEventsRecovery(for: hostID)
             if !wasOffline {
                 MobileDiagnostics.record(
                     .hostRefreshFailed,
@@ -421,15 +480,15 @@ final class RemoteAppModel: ObservableObject {
         }
     }
 
-    func poll() async {
+    /// Establishes the dashboard's authoritative snapshot. Healthy updates arrive on the event
+    /// socket; only a failed socket starts bounded exponential recovery.
+    func activateDashboard() async {
         guard !isDemo else { return }
-        while !Task.isCancelled {
-            await refresh()
-            try? await Task.sleep(for: .seconds(3))
-        }
+        await refresh()
     }
 
     func suspendHostedConnections() {
+        invalidateRefreshes()
         disconnectThemeEvents()
         discardHostedConnection()
     }
@@ -955,11 +1014,16 @@ final class RemoteAppModel: ObservableObject {
     private func ensureThemeEvents(for host: PairedRemoteHost) {
         guard !isDemo else { return }
         if themeEventsHostID == host.id, themeEventsTask != nil { return }
-        disconnectThemeEvents()
+        clearThemeEventSocket()
 
         let link = activeHostedHostID == host.id ? activeHostedLink ?? host.link : host.link
         let client = RemoteClient(link: link)
-        guard let task = try? client.eventsWebSocketTask() else { return }
+        guard let task = try? client.eventsWebSocketTask() else {
+            scheduleThemeEventsRecovery(for: host.id)
+            return
+        }
+        themeEventsRecoveryTask?.cancel()
+        themeEventsRecoveryTask = nil
         themeEventsGeneration &+= 1
         let generation = themeEventsGeneration
         themeEventsHostID = host.id
@@ -1002,6 +1066,9 @@ final class RemoteAppModel: ObservableObject {
                 guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else {
                     continue
                 }
+                // The server sends an authoritative appTheme frame immediately after auth. Any
+                // well-formed event proves this socket is authenticated and clears backoff.
+                themeEventsRecoveryAttempt = 0
                 switch envelope.type {
                 case "appTheme":
                     if let update = try? JSONDecoder().decode(
@@ -1011,9 +1078,19 @@ final class RemoteAppModel: ObservableObject {
                         me = me?.replacing(theme: update.theme)
                     }
                 case "sessionsChanged":
-                    // The event is intentionally scope-free. Refreshing here makes a surface
-                    // switch, rename, pin or archive made on the Mac visible immediately.
-                    await refresh()
+                    guard let update = try? JSONDecoder().decode(
+                        RemoteSessionsChangedDTO.self,
+                        from: data
+                    ) else { continue }
+                    if me != nil, update.session != nil || update.removedSessionID != nil {
+                        scheduleSessionDelta(update, for: hostID)
+                    } else {
+                        discardPendingSessionDeltas()
+                        // Structural changes still need an authoritative scoped snapshot. A
+                        // bounded coalescing window prevents a mutation burst from fanning out
+                        // into one full catalogue request per event.
+                        scheduleSessionsChangedRefresh(for: hostID)
+                    }
                 case "notification":
                     if let event = try? JSONDecoder().decode(
                         RemoteNotificationEventDTO.self,
@@ -1027,23 +1104,162 @@ final class RemoteAppModel: ObservableObject {
             }
         } catch is CancellationError {
             return
-        } catch {
-            // The three-second REST refresh remains the reconnect and offline fallback.
-        }
+        } catch {}
         if themeEventsGeneration == generation, themeEventsTask === task {
             themeEventsTask = nil
             themeEventsReceiveTask = nil
             themeEventsHostID = nil
+            scheduleThemeEventsRecovery(for: hostID)
         }
     }
 
     private func disconnectThemeEvents() {
+        clearThemeEventSocket()
+        themeEventsRecoveryTask?.cancel()
+        themeEventsRecoveryTask = nil
+        themeEventsRecoveryAttempt = 0
+        sessionsChangedRefreshGeneration &+= 1
+        sessionsChangedRefreshTask?.cancel()
+        sessionsChangedRefreshTask = nil
+        discardPendingSessionDeltas()
+    }
+
+    private func clearThemeEventSocket() {
         themeEventsGeneration &+= 1
         themeEventsReceiveTask?.cancel()
         themeEventsReceiveTask = nil
         themeEventsTask?.cancel(with: .goingAway, reason: nil)
         themeEventsTask = nil
         themeEventsHostID = nil
+    }
+
+    private func scheduleThemeEventsRecovery(for hostID: String) {
+        guard !isDemo, activeHostID == hostID, themeEventsTask == nil,
+              themeEventsRecoveryTask == nil else { return }
+        let exponent = min(themeEventsRecoveryAttempt, 6)
+        let delay = min(
+            pow(2, Double(exponent)),
+            Self.maximumThemeEventsRecoveryDelay
+        )
+        themeEventsRecoveryAttempt &+= 1
+        themeEventsRecoveryTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await self?.recoverThemeEvents(for: hostID)
+        }
+    }
+
+    private func recoverThemeEvents(for hostID: String) async {
+        themeEventsRecoveryTask = nil
+        guard !isDemo, activeHostID == hostID, themeEventsTask == nil else { return }
+        await refresh()
+        if activeHostID == hostID, themeEventsTask == nil {
+            scheduleThemeEventsRecovery(for: hostID)
+        }
+    }
+
+    private func scheduleSessionsChangedRefresh(for hostID: String) {
+        guard activeHostID == hostID, sessionsChangedRefreshTask == nil else { return }
+        sessionsChangedRefreshGeneration &+= 1
+        let generation = sessionsChangedRefreshGeneration
+        sessionsChangedRefreshTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: Self.sessionsChangedCoalescingDelay)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await self?.refreshSessionsChanged(
+                for: hostID,
+                generation: generation
+            )
+        }
+    }
+
+    private func scheduleSessionDelta(
+        _ update: RemoteSessionsChangedDTO,
+        for hostID: String
+    ) {
+        guard activeHostID == hostID,
+              let key = update.removedSessionID ?? update.session?.id else { return }
+        pendingSessionDeltas[key] = update
+        startSessionDeltaApplicationIfNeeded(for: hostID)
+    }
+
+    private func startSessionDeltaApplicationIfNeeded(for hostID: String) {
+        guard catalogueRefreshInFlightGeneration == nil,
+              sessionDeltaApplicationTask == nil,
+              !pendingSessionDeltas.isEmpty else { return }
+        sessionDeltaApplicationGeneration &+= 1
+        let generation = sessionDeltaApplicationGeneration
+        sessionDeltaApplicationTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: Self.sessionDeltaCoalescingDelay)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await self?.applyPendingSessionDeltas(
+                for: hostID,
+                generation: generation
+            )
+        }
+    }
+
+    private func applyPendingSessionDeltas(for hostID: String, generation: Int) async {
+        guard activeHostID == hostID,
+              sessionDeltaApplicationGeneration == generation else { return }
+        let updates = Array(pendingSessionDeltas.values)
+        pendingSessionDeltas.removeAll(keepingCapacity: true)
+        guard let current = me else {
+            sessionDeltaApplicationTask = nil
+            scheduleSessionsChangedRefresh(for: hostID)
+            return
+        }
+        let revision = catalogueRevision
+        // A delta burst can still touch a large local catalogue. Perform the merge and sort off
+        // the main actor, then publish one value for SwiftUI's identity-based visible-row diff.
+        let updated = await Task.detached(priority: .userInitiated) {
+            current.applying(updates)
+        }.value
+        guard activeHostID == hostID,
+              sessionDeltaApplicationGeneration == generation else { return }
+        guard catalogueRevision == revision else {
+            // A mutation response, theme update or authoritative refresh won the race. Keep a
+            // newer queued delta for the same session; otherwise replay this one against the
+            // newly published snapshot instead of overwriting it with stale companion fields.
+            for update in updates {
+                guard let key = update.removedSessionID ?? update.session?.id,
+                      pendingSessionDeltas[key] == nil else { continue }
+                pendingSessionDeltas[key] = update
+            }
+            sessionDeltaApplicationTask = nil
+            startSessionDeltaApplicationIfNeeded(for: hostID)
+            return
+        }
+        me = updated
+        sessionDeltaApplicationTask = nil
+        startSessionDeltaApplicationIfNeeded(for: hostID)
+    }
+
+    private func discardPendingSessionDeltas() {
+        sessionDeltaApplicationGeneration &+= 1
+        sessionDeltaApplicationTask?.cancel()
+        sessionDeltaApplicationTask = nil
+        pendingSessionDeltas.removeAll(keepingCapacity: true)
+    }
+
+    private func refreshSessionsChanged(for hostID: String, generation: Int) async {
+        guard activeHostID == hostID,
+              sessionsChangedRefreshGeneration == generation else { return }
+        await refresh()
+        if sessionsChangedRefreshGeneration == generation {
+            sessionsChangedRefreshTask = nil
+        }
     }
 
     static let demoTheme = RemoteThemeDTO(
@@ -1307,6 +1523,32 @@ final class RemoteAppModel: ObservableObject {
 }
 
 private extension RemoteMeDTO {
+    func applying(_ updates: [RemoteSessionsChangedDTO]) -> RemoteMeDTO {
+        var updatedSessions = sessions
+        let changedIDs = Set(updates.compactMap { $0.removedSessionID ?? $0.session?.id })
+        updatedSessions.removeAll { changedIDs.contains($0.id) }
+        for session in updates.compactMap(\.session) {
+            if !session.isArchived {
+                updatedSessions.append(session)
+            }
+        }
+        updatedSessions.sort {
+            if $0.isPinned != $1.isPinned { return $0.isPinned }
+            return ($0.lastActiveAt ?? 0) > ($1.lastActiveAt ?? 0)
+        }
+        return RemoteMeDTO(
+            serverProtocol: serverProtocol,
+            share: share,
+            sessions: updatedSessions,
+            host: host,
+            theme: theme,
+            themeCatalog: themeCatalog,
+            archivedSessions: archivedSessions,
+            newSessionCatalog: newSessionCatalog,
+            features: features
+        )
+    }
+
     func replacing(theme: RemoteThemeDTO) -> RemoteMeDTO {
         RemoteMeDTO(
             serverProtocol: serverProtocol,

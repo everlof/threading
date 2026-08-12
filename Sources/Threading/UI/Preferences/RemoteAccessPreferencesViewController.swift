@@ -946,9 +946,9 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     @objc private func pairingAction() {
         let coordinator = RemoteAccessCoordinator.shared
 
-        if let url = coordinator.remoteURL {
+        if let payload = coordinator.pairingCodePayload {
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(url.absoluteString, forType: .string)
+            NSPasteboard.general.setString(payload, forType: .string)
             pairingActionButton.title = L10n.string("Copied")
             pairingActionButton.isEnabled = false
 

@@ -4,6 +4,13 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-11",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "remote.threading.codes",
+      "custom_domain": true
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {
@@ -26,11 +33,51 @@
       "migrations_dir": "migrations"
     }
   ],
+  "ratelimits": [
+    {
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "934721001",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "API_RATE_LIMITER",
+      "namespace_id": "934721002",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "SOURCE_RATE_LIMITER",
+      "namespace_id": "934721003",
+      "simple": {
+        "limit": 600,
+        "period": 60
+      }
+    }
+  ],
   "vars": {
     "APPLE_CLIENT_IDS": "codes.threading.app,codes.threading.mobile"
+  },
+  "secrets": {
+    "required": [
+      "SESSION_SIGNING_SECRET",
+      "APPLE_TEAM_ID",
+      "APPLE_KEY_ID",
+      "APPLE_PRIVATE_KEY",
+      "APPLE_TOKEN_ENCRYPTION_SECRET",
+      "TURN_KEY_ID",
+      "TURN_KEY_API_TOKEN"
+    ]
   },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 0.05
+  },
+  "triggers": {
+    "crons": ["7,22,37,52 * * * *", "17 3 * * *"]
   }
 }
