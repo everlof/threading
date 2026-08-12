@@ -27,8 +27,21 @@ enum GitReviewCommands {
     }
 
     /// Tracked plus non-ignored untracked files, NUL-delimited so every legal path survives.
+    /// `ls-files` supplies index order; deduplication makes that a unique lexical catalogue
+    /// rather than work every caller has to repeat in Swift.
     static func repositoryFiles() -> [String] {
-        ["ls-files", "-co", "--exclude-standard", "-z"]
+        ["ls-files", "-co", "--exclude-standard", "--deduplicate", "-z"]
+    }
+
+    /// One exact visible path. `literal` prevents wildcard/pathspec interpretation, while `top`
+    /// anchors the network-supplied spelling at the checkout root. Git may still treat a
+    /// directory pathspec recursively, so the reader verifies the one NUL-delimited result is
+    /// exactly the requested file before touching the filesystem.
+    static func repositoryFile(_ path: String) -> [String] {
+        [
+            "ls-files", "-co", "--exclude-standard", "--deduplicate", "-z", "--",
+            ":(top,literal)\(path)"
+        ]
     }
 
     /// The diff flags for one read, with the whitespace-ignore flag folded in only when asked.
@@ -200,6 +213,9 @@ enum GitReviewDefaults {
     /// The mobile repository browser is an overview, not an unbounded archive transport.
     static let remoteRepositoryFileLimit = 5_000
     static let remoteRepositoryFileByteCap = 512 * 1024
+    /// One literal `ls-files` lookup should return exactly one path. The cap still allows the
+    /// longest inbound repository path plus Git's NUL terminator without admitting a catalogue.
+    static let exactRepositoryPathOutputCap = 16 * 1024 + 1
 
     static let lineNumberWidth: CGFloat = 36
 

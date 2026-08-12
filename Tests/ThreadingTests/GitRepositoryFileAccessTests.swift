@@ -69,6 +69,25 @@ final class GitRepositoryFileAccessTests: XCTestCase {
         XCTAssertEqual(file.content, "brand new")
     }
 
+    /// The exact membership command receives a string across the remote boundary. It must not
+    /// reinterpret legal Git filename bytes as line structure, Unicode quoting, or pathspec
+    /// syntax merely to avoid constructing the repository's complete allowlist.
+    func testExactMembershipPreservesNewlineNonASCIIAndPathspecNames() throws {
+        let fixtures = [
+            "line\nbreak.txt",
+            "r\u{00E4}ksm\u{00F6}rg\u{00E5}s.txt",
+            "literal[1]*?.txt"
+        ]
+
+        for path in fixtures {
+            let contents = "contents of \(path)"
+            try write(contents, to: root.appendingPathComponent(path))
+            let file = try XCTUnwrap(read(path).get())
+            XCTAssertEqual(file.path, path)
+            XCTAssertEqual(file.content, contents)
+        }
+    }
+
     // MARK: - What may not
 
     /// Traversal, absolute paths, and a path that is merely wrong all fail the same way: they
