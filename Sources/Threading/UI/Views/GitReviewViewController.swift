@@ -265,6 +265,10 @@ final class GitReviewViewController: NSViewController {
     var isFileScrollerSeeking = false
     var deferredPhaseDuringLiveScroll: Phase?
 
+    /// The clock that turns a held-still scroller thumb into real content: every knob action
+    /// pushes it back, so it fires only once the thumb has genuinely paused.
+    var scrollerSeekSettleWork: DispatchWorkItem?
+
     private var watcher: GitCheckoutWatcher?
 
     /// The commit message being written, kept here rather than in the composer: the composer

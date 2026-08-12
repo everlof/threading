@@ -207,6 +207,8 @@ extension GitReviewViewController {
     /// height notifications are deliberately ignored during momentum so they cannot retile the
     /// table between wheel events.
     func finishFileLiveScrolling() {
+        scrollerSeekSettleWork?.cancel()
+        scrollerSeekSettleWork = nil
         let wasScrollerSeeking = isFileScrollerSeeking
         isFileLiveScrolling = false
         isFileScrollerSeeking = false
@@ -237,9 +239,37 @@ extension GitReviewViewController {
     /// Enters the scroller-thumb path. Wheel and trackpad scrolling keep fully rendered rows;
     /// their ordinary contiguous workload already fits inside a frame, while a knob can jump
     /// across the whole index on every pointer event.
+    ///
+    /// Every knob action also re-arms the settle clock: people scrub in drag–pause–look
+    /// strokes, and the pause is where they are reading. A viewport that stays a ghost until
+    /// mouse-up answers the pause with nothing.
     func beginFileScrollerSeek() {
         isFileLiveScrolling = true
         isFileScrollerSeeking = true
+
+        scrollerSeekSettleWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.settleFileScrollerSeek() }
+        scrollerSeekSettleWork = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + GitReviewDefaults.scrollerSeekSettleDelay,
+            execute: work
+        )
+    }
+
+    /// The thumb has paused without being released: materialize the visible rows for real, at
+    /// the exact clip origin, while the drag transaction stays open.
+    ///
+    /// This is deliberately less than `finishFileLiveScrolling`. Height discovery and any
+    /// deferred watched phase stay coalesced — mutating geometry under a held thumb would move
+    /// the document beneath it — and `isFileLiveScrolling` stays true so both keep waiting for
+    /// the release. Only `isFileScrollerSeeking` clears, which is what lets the next knob jump
+    /// re-enter the cheap path with `beginFileScrollerSeek` re-arming this clock.
+    func settleFileScrollerSeek() {
+        scrollerSeekSettleWork?.cancel()
+        scrollerSeekSettleWork = nil
+        guard isFileLiveScrolling, isFileScrollerSeeking else { return }
+        isFileScrollerSeeking = false
+        rematerializeVisibleFilesAfterScrollerSeek()
     }
 
     private func rematerializeVisibleFilesAfterScrollerSeek() {
@@ -712,7 +742,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         row: GitReviewFileRow?
     ) {
         guard !isFileLiveScrolling else { return }
-        guard let row else { return }
+        guard let row, !row.hasEstimatedGhostBody else { return }
         let tableRow = fileTableView.row(for: row)
         guard tableRow >= 0,
               tableRow < fileTableView.numberOfRows,
