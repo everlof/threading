@@ -138,6 +138,8 @@ final class ProjectDatabase {
     func load() throws -> ProjectsStateLoad {
         var projects: [Project] = []
         var sessionsByProject: [ProjectID: [AgentSession]] = [:]
+        var pendingSessionRows: [StoredSessionRow] = []
+        pendingSessionRows.reserveCapacity(Self.sessionDecodeWaveSize)
 
         let sessions = try database.prepare(
             """
@@ -168,39 +170,20 @@ final class ProjectDatabase {
                 throw corruptRow("session", id: rawID, reason: "missing JSON payload")
             }
 
-            let session: AgentSession
-            do {
-                session = try Self.decoder.decode(AgentSession.self, from: payload)
-            } catch {
-                throw corruptRow(
-                    "session",
-                    id: rawID,
-                    reason: "invalid JSON payload: \(error.localizedDescription)"
-                )
+            pendingSessionRows.append(StoredSessionRow(
+                rawID: rawID,
+                rowID: rowID,
+                projectID: projectID,
+                storedKind: storedKind,
+                storedLastActiveAt: storedLastActiveAt,
+                payload: payload
+            ))
+            if pendingSessionRows.count == Self.sessionDecodeWaveSize {
+                try appendDecodedSessions(pendingSessionRows, to: &sessionsByProject)
+                pendingSessionRows.removeAll(keepingCapacity: true)
             }
-            guard session.id == rowID else {
-                throw corruptRow(
-                    "session",
-                    id: rawID,
-                    reason: "payload identifier is '\(session.id.uuidString)'"
-                )
-            }
-            guard session.kind.rawValue == storedKind else {
-                throw corruptRow(
-                    "session",
-                    id: rawID,
-                    reason: "indexed provider '\(storedKind)' disagrees with payload '\(session.kind.rawValue)'"
-                )
-            }
-            guard abs(session.lastActiveAt.timeIntervalSince1970 - storedLastActiveAt) < 0.000_001 else {
-                throw corruptRow(
-                    "session",
-                    id: rawID,
-                    reason: "indexed last-active time disagrees with payload"
-                )
-            }
-            sessionsByProject[projectID, default: []].append(session)
         }
+        try appendDecodedSessions(pendingSessionRows, to: &sessionsByProject)
 
         let rows = try database.prepare(
             "SELECT id, name, folder_path, data FROM project ORDER BY position"
@@ -522,6 +505,209 @@ final class ProjectDatabase {
     }
 
     // MARK: - Private Methods — Coding
+
+    /// Indexed columns stay beside the JSON payload while one bounded wave is decoded.
+    ///
+    /// `JSONDecoder.decode` creates a complete top-level parser for every invocation. Calling it
+    /// once per session made startup pay that fixed cost thousands of times even though the rows
+    /// already share one schema and ordering. A bounded array amortizes the parser without
+    /// turning the complete store into one correspondingly large temporary allocation.
+    private struct StoredSessionRow: Sendable {
+        let rawID: String
+        let rowID: SessionID
+        let projectID: ProjectID
+        let storedKind: String
+        let storedLastActiveAt: Double
+        let payload: Data
+    }
+
+    private static let sessionDecodeBatchSize = 256
+    /// Array assembly and dispatch cost more than they save for an ordinary sidebar. Keep the
+    /// original row-at-a-time path until there are enough payloads to amortize that setup.
+    private static let minimumBatchedSessionDecodeCount = sessionDecodeBatchSize * 2
+
+    /// Use a short bounded CPU burst without monopolizing every core. The hard maximum and batch
+    /// size cap one wave at 1,024 rows even on a much larger host.
+    private static let sessionDecodeBatchCount = max(
+        1,
+        min(4, ProcessInfo.processInfo.activeProcessorCount / 2)
+    )
+    private static let sessionDecodeWaveSize = sessionDecodeBatchSize * sessionDecodeBatchCount
+
+    private struct SessionPayloadDecodeFailure: LocalizedError {
+        let rowID: String
+        let reason: String
+
+        var errorDescription: String? { reason }
+    }
+
+    /// `concurrentPerform` joins before `values()` returns. The lock is the only cross-thread
+    /// owner; decoded models leave it only after all batches have completed and are then consumed
+    /// serially in database order.
+    private final class SessionBatchResults: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: [Result<[AgentSession], Error>?]
+
+        init(count: Int) {
+            storage = Array(repeating: nil, count: count)
+        }
+
+        func store(_ result: Result<[AgentSession], Error>, at index: Int) {
+            lock.lock()
+            storage[index] = result
+            lock.unlock()
+        }
+
+        func values() -> [Result<[AgentSession], Error>] {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage.enumerated().map { index, result in
+                result ?? .failure(SQLiteDatabase.Failure.step(
+                    "Session decode batch \(index) did not complete"
+                ))
+            }
+        }
+    }
+
+    private func appendDecodedSessions(
+        _ rows: [StoredSessionRow],
+        to sessionsByProject: inout [ProjectID: [AgentSession]]
+    ) throws {
+        guard !rows.isEmpty else { return }
+        guard rows.count >= Self.minimumBatchedSessionDecodeCount else {
+            try appendIndividuallyDecodedSessions(rows, to: &sessionsByProject)
+            return
+        }
+
+        let batches = stride(from: 0, to: rows.count, by: Self.sessionDecodeBatchSize).map {
+            Array(rows[$0..<min($0 + Self.sessionDecodeBatchSize, rows.count)])
+        }
+        let decodedBatches: [Result<[AgentSession], Error>]
+        if batches.count == 1 {
+            decodedBatches = [Result { try Self.decodeSessionBatch(batches[0]) }]
+        } else {
+            let results = SessionBatchResults(count: batches.count)
+            DispatchQueue.concurrentPerform(iterations: batches.count) { index in
+                results.store(
+                    Result { try Self.decodeSessionBatch(batches[index]) },
+                    at: index
+                )
+            }
+            decodedBatches = results.values()
+        }
+
+        for (batchRows, result) in zip(batches, decodedBatches) {
+            let decoded: [AgentSession]
+            do {
+                decoded = try result.get()
+            } catch let failure as SessionPayloadDecodeFailure {
+                throw corruptRow("session", id: failure.rowID, reason: failure.reason)
+            } catch {
+                throw corruptRow(
+                    "session",
+                    id: batchRows.first?.rawID,
+                    reason: "invalid JSON payload batch: \(error.localizedDescription)"
+                )
+            }
+
+            guard decoded.count == batchRows.count else {
+                throw corruptRow(
+                    "session",
+                    id: batchRows.first?.rawID,
+                    reason: "decoded \(decoded.count) payloads for \(batchRows.count) rows"
+                )
+            }
+            for (row, session) in zip(batchRows, decoded) {
+                try validateAndAppend(session, for: row, to: &sessionsByProject)
+            }
+        }
+    }
+
+    /// Preserve the cheaper historical path for small stores and for the tail below the measured
+    /// batching threshold. A fresh local decoder also keeps it isolated from concurrent waves.
+    private func appendIndividuallyDecodedSessions(
+        _ rows: [StoredSessionRow],
+        to sessionsByProject: inout [ProjectID: [AgentSession]]
+    ) throws {
+        let decoder = JSONDecoder()
+        for row in rows {
+            let session: AgentSession
+            do {
+                session = try decoder.decode(AgentSession.self, from: row.payload)
+            } catch {
+                throw corruptRow(
+                    "session",
+                    id: row.rawID,
+                    reason: "invalid JSON payload: \(error.localizedDescription)"
+                )
+            }
+            try validateAndAppend(session, for: row, to: &sessionsByProject)
+        }
+    }
+
+    private static func decodeSessionBatch(_ rows: [StoredSessionRow]) throws -> [AgentSession] {
+        var payload = Data()
+        payload.reserveCapacity(rows.reduce(2) { $0 + $1.payload.count + 1 })
+        payload.append(0x5B) // [
+        for (index, row) in rows.enumerated() {
+            if index > 0 { payload.append(0x2C) } // ,
+            payload.append(row.payload)
+        }
+        payload.append(0x5D) // ]
+
+        let decoder = JSONDecoder()
+        do {
+            return try decoder.decode([AgentSession].self, from: payload)
+        } catch {
+            // Corruption must still name the exact authoritative row and fail the complete load.
+            // Individual decoding is only the bounded exceptional path for this failed batch.
+            for row in rows {
+                do {
+                    _ = try decoder.decode(AgentSession.self, from: row.payload)
+                } catch {
+                    throw SessionPayloadDecodeFailure(
+                        rowID: row.rawID,
+                        reason: "invalid JSON payload: \(error.localizedDescription)"
+                    )
+                }
+            }
+            throw SessionPayloadDecodeFailure(
+                rowID: rows[0].rawID,
+                reason: "invalid JSON payload batch: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func validateAndAppend(
+        _ session: AgentSession,
+        for row: StoredSessionRow,
+        to sessionsByProject: inout [ProjectID: [AgentSession]]
+    ) throws {
+        guard session.id == row.rowID else {
+            throw corruptRow(
+                "session",
+                id: row.rawID,
+                reason: "payload identifier is '\(session.id.uuidString)'"
+            )
+        }
+        guard session.kind.rawValue == row.storedKind else {
+            throw corruptRow(
+                "session",
+                id: row.rawID,
+                reason: "indexed provider '\(row.storedKind)' disagrees with payload '\(session.kind.rawValue)'"
+            )
+        }
+        guard abs(
+            session.lastActiveAt.timeIntervalSince1970 - row.storedLastActiveAt
+        ) < 0.000_001 else {
+            throw corruptRow(
+                "session",
+                id: row.rawID,
+                reason: "indexed last-active time disagrees with payload"
+            )
+        }
+        sessionsByProject[row.projectID, default: []].append(session)
+    }
 
     /// The payload encoding is the model's own, with dates as the same `timeIntervalSince1970`
     /// doubles `JSONEncoder` has always written here — so a record imported from

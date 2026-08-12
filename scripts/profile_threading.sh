@@ -1659,6 +1659,102 @@ clone_startup_profile_home() {
   /bin/cp -cR "${template_home}" "${run_home}"
 }
 
+# Raises an already-isolated startup snapshot to a deterministic session cardinality. The source
+# Application Support tree is never opened for writing: this runs only after SQLite's backup API
+# has produced the template database under the temporary Cocoa home.
+#
+# Repeating one production payload keeps the fixture schema-valid without teaching a shell script
+# the AgentSession coding contract. Only the row/session identity, title, archive state and order
+# change. The app profile exits before relaunching agents or background services, so provider-side
+# conversation identifiers are deliberately irrelevant to this model/load/viewport workload.
+augment_startup_profile_sessions() {
+  local profile_home="$1"
+  local target_count="$2"
+  local database="${profile_home}/Library/Application Support/Threading/threading.db"
+
+  [[ "${target_count}" =~ ^[1-9][0-9]*$ ]] || {
+    echo "THREADING_STARTUP_PROFILE_SESSIONS must be a positive integer." >&2
+    return 2
+  }
+  ((target_count <= 50000)) || {
+    echo "THREADING_STARTUP_PROFILE_SESSIONS may not exceed 50000." >&2
+    return 2
+  }
+  [[ -f "${database}" ]] || {
+    echo "Cannot add startup sessions: snapshot database not found at ${database}." >&2
+    return 1
+  }
+
+  local existing_count
+  existing_count="$(/usr/bin/sqlite3 "${database}" "SELECT COUNT(*) FROM session")"
+  if ((existing_count >= target_count)); then
+    echo "Startup snapshot already has ${existing_count} sessions; leaving it unchanged."
+    return
+  fi
+
+  /usr/bin/sqlite3 "${database}" <<SQL
+.bail on
+BEGIN IMMEDIATE;
+WITH
+  digits(value) AS (
+    VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)
+  ),
+  numbers(value) AS (
+    SELECT 1 + one.value + 10 * ten.value + 100 * hundred.value
+      + 1000 * thousand.value + 10000 * ten_thousand.value
+    FROM digits AS one
+    CROSS JOIN digits AS ten
+    CROSS JOIN digits AS hundred
+    CROSS JOIN digits AS thousand
+    CROSS JOIN digits AS ten_thousand
+  ),
+  source AS (
+    SELECT
+      project_id,
+      kind,
+      last_active_at,
+      data,
+      (
+        SELECT COALESCE(MAX(position), -1)
+        FROM session AS ordered
+        WHERE ordered.project_id = candidate.project_id
+      ) AS final_position
+    FROM session AS candidate
+    ORDER BY
+      CASE WHEN COALESCE(json_extract(data, '$.archived'), 0) = 0 THEN 0 ELSE 1 END,
+      position
+    LIMIT 1
+  )
+INSERT INTO session (id, project_id, position, kind, last_active_at, data)
+SELECT
+  printf('90000000-0000-4000-8000-%012d', numbers.value),
+  source.project_id,
+  source.final_position + numbers.value,
+  source.kind,
+  source.last_active_at,
+  json_set(
+    source.data,
+    '$.id', printf('90000000-0000-4000-8000-%012d', numbers.value),
+    '$.title', printf('Startup stress session %d', numbers.value),
+    '$.terminalTitle', printf('Startup stress session %d', numbers.value),
+    '$.archived', json('false'),
+    '$.pinned', json('false')
+  )
+FROM numbers
+CROSS JOIN source
+WHERE numbers.value <= ${target_count} - ${existing_count};
+COMMIT;
+SQL
+
+  local actual_count
+  actual_count="$(/usr/bin/sqlite3 "${database}" "SELECT COUNT(*) FROM session")"
+  [[ "${actual_count}" == "${target_count}" ]] || {
+    echo "Expected ${target_count} startup sessions, found ${actual_count}." >&2
+    return 1
+  }
+  echo "Expanded the isolated startup snapshot from ${existing_count} to ${actual_count} sessions."
+}
+
 # `xctrace record --template "App Launch"` can return with the process it launched still
 # suspended. A suspended target ignores TERM until it is continued, so merely waiting for
 # xctrace—or restarting the Dock—leaves one live app per capture. Match the complete executable
@@ -1745,6 +1841,8 @@ run_startup_profile() (
       -quiet \
       ENABLE_CODE_COVERAGE=NO \
       CLANG_COVERAGE_MAPPING=NO \
+      CODE_SIGNING_ALLOWED=NO \
+      CODE_SIGNING_REQUIRED=NO \
       ARCHS="${architecture}" \
       ONLY_ACTIVE_ARCH=YES \
       build
@@ -1780,6 +1878,11 @@ run_startup_profile() (
   local template_home="${snapshot_root}/template"
   echo "Snapshotting startup state without disturbing the running app…"
   prepare_startup_profile_home "${profile_identifier}" "${template_home}"
+  if [[ -n "${THREADING_STARTUP_PROFILE_SESSIONS:-}" ]]; then
+    augment_startup_profile_sessions \
+      "${template_home}" \
+      "${THREADING_STARTUP_PROFILE_SESSIONS}"
+  fi
 
   echo "Running ${runs} direct cold-launch measurements…"
   local run
@@ -1806,7 +1909,6 @@ run_startup_profile() (
     echo "Expected ${runs} settled-frame startup metrics, found ${settled_metric_count:-0}." >&2
     return 1
   }
-
   echo "Recording one isolated App Launch trace…"
   local trace_home="${snapshot_root}/trace"
   clone_startup_profile_home "${template_home}" "${trace_home}"

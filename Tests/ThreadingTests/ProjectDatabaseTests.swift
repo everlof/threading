@@ -308,6 +308,72 @@ final class ProjectDatabaseTests: XCTestCase {
         )
     }
 
+    func testValidJSONSessionDecodeFailureStillNamesTheExactRowAcrossBatches() throws {
+        let database = try makeDatabase()
+        let sessions = (0..<600).map {
+            AgentSession(kind: .claude, title: "Session \($0)")
+        }
+        let malformed = sessions[333]
+        try database.save(ProjectsState(projects: [
+            makeProject("alpha", sessions: sessions)
+        ]))
+
+        let payload = try XCTUnwrap(rawSessionPayload(id: malformed.id))
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any]
+        )
+        object["title"] = 17
+        try updatePayload(
+            table: "session",
+            id: malformed.id.uuidString,
+            payload: String(
+                decoding: try JSONSerialization.data(withJSONObject: object),
+                as: UTF8.self
+            )
+        )
+
+        XCTAssertThrowsError(try database.load().state) { error in
+            guard let loadError = error as? ProjectDatabaseLoadError,
+                  case .corruptRow(let table, let id, _) = loadError else {
+                return XCTFail("Expected a corrupt-row error, got \(error)")
+            }
+            XCTAssertEqual(table, "session")
+            XCTAssertEqual(id, malformed.id.uuidString)
+        }
+    }
+
+    func testSessionOrderSurvivesDecodeBatchAndWaveBoundaries() throws {
+        let database = try makeDatabase()
+        let firstProjectSessions = (0..<1_100).map {
+            AgentSession(kind: .claude, title: "First \($0)")
+        }
+        let secondProjectSessions = (0..<300).map {
+            AgentSession(kind: .codex, title: "Second \($0)")
+        }
+        try database.save(ProjectsState(projects: [
+            makeProject("first", sessions: firstProjectSessions),
+            makeProject("second", sessions: secondProjectSessions)
+        ]))
+
+        let restored = try database.load().state.projects
+        XCTAssertEqual(restored.map(\.name), ["first", "second"])
+        XCTAssertEqual(restored[0].sessions.map(\.id), firstProjectSessions.map(\.id))
+        XCTAssertEqual(restored[1].sessions.map(\.id), secondProjectSessions.map(\.id))
+    }
+
+    func testSessionOrderSurvivesJustBelowTheBatchingThreshold() throws {
+        let database = try makeDatabase()
+        let sessions = (0..<511).map {
+            AgentSession(kind: .claude, title: "Session \($0)")
+        }
+        try database.save(ProjectsState(projects: [
+            makeProject("ordinary", sessions: sessions)
+        ]))
+
+        let restored = try XCTUnwrap(try database.load().state.projects.first)
+        XCTAssertEqual(restored.sessions.map(\.id), sessions.map(\.id))
+    }
+
     func testPayloadIdentityMustMatchItsAuthoritativeRow() throws {
         let database = try makeDatabase()
         let project = makeProject("alpha")
@@ -567,6 +633,14 @@ final class ProjectDatabaseTests: XCTestCase {
     private func rawProjectPayload(id: ProjectID) throws -> String? {
         let database = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
         let statement = try database.prepare("SELECT data FROM project WHERE id = ?")
+        defer { statement.finalize() }
+        statement.bind(1, id.uuidString)
+        return try statement.step() ? statement.text(0) : nil
+    }
+
+    private func rawSessionPayload(id: SessionID) throws -> String? {
+        let database = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        let statement = try database.prepare("SELECT data FROM session WHERE id = ?")
         defer { statement.finalize() }
         statement.bind(1, id.uuidString)
         return try statement.step() ? statement.text(0) : nil

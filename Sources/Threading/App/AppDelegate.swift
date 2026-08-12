@@ -1,4 +1,5 @@
 @preconcurrency import AppKit
+import QuartzCore
 import SwiftTerm
 import ThreadingExtensionKit
 import ThreadingRemoteKit
@@ -21,6 +22,9 @@ private struct StartupProfileMeasurement: Sendable {
 
     func writeResult(
         firstReadyTurnNanoseconds: UInt64,
+        settleLayoutNanoseconds: UInt64,
+        settleDisplayNanoseconds: UInt64,
+        firstFrameNanoseconds: UInt64,
         mode: String,
         projectCount: Int,
         sessionCount: Int,
@@ -45,6 +49,9 @@ private struct StartupProfileMeasurement: Sendable {
             + "first_turn_ms=\(milliseconds(windowOrderedNanoseconds, firstReadyTurnNanoseconds)) "
             + "delegate_to_ready_ms=\(milliseconds(delegateEntryNanoseconds, firstReadyTurnNanoseconds)) "
             + "total_ms=\(milliseconds(processMainEntryNanoseconds, firstReadyTurnNanoseconds)) "
+            + "settle_layout_ms=\(milliseconds(settleLayoutNanoseconds)) "
+            + "settle_display_ms=\(milliseconds(settleDisplayNanoseconds)) "
+            + "total_to_frame_ms=\(milliseconds(processMainEntryNanoseconds, firstFrameNanoseconds)) "
             + "mw_create_ms=\(milliseconds(window.createWindowNanoseconds)) "
             + "mw_base_ms=\(milliseconds(window.baseInitializationNanoseconds)) "
             + "mw_split_ms=\(milliseconds(window.splitTotalNanoseconds)) "
@@ -441,8 +448,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             let sessionCount = projects.reduce(0) { $0 + $1.sessions.count }
             let windowPerformance = mainWindowController.startupPerformance
             DispatchQueue.main.async {
+                let firstReadyTurnNanoseconds = DispatchTime.now().uptimeNanoseconds
+                let layoutStartNanoseconds = DispatchTime.now().uptimeNanoseconds
+                let window = mainWindowController.window
+                window?.contentView?.layoutSubtreeIfNeeded()
+                let layoutReadyNanoseconds = DispatchTime.now().uptimeNanoseconds
+                // `NSView.displayIfNeeded()` does not force a layer-backed window's pending draw;
+                // neither does the window call commit the implicit Core Animation transaction.
+                // Without both, the work slips into `NSApplication.terminate` and the alleged
+                // first-frame number ends before the first frame.
+                window?.displayIfNeeded()
+                CATransaction.flush()
+                let firstFrameNanoseconds = DispatchTime.now().uptimeNanoseconds
                 startupProfile.writeResult(
-                    firstReadyTurnNanoseconds: DispatchTime.now().uptimeNanoseconds,
+                    firstReadyTurnNanoseconds: firstReadyTurnNanoseconds,
+                    settleLayoutNanoseconds: layoutReadyNanoseconds - layoutStartNanoseconds,
+                    settleDisplayNanoseconds: firstFrameNanoseconds - layoutReadyNanoseconds,
+                    firstFrameNanoseconds: firstFrameNanoseconds,
                     mode: plan.isRecovery ? "recovery" : "normal",
                     projectCount: projectCount,
                     sessionCount: sessionCount,
