@@ -7,3 +7,4 @@ APPLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nreplace-me\n-----END PRIVATE KEY-
 APPLE_TOKEN_ENCRYPTION_SECRET=another-independent-32-byte-random-secret
 TURN_KEY_ID=cloudflare-realtime-turn-key-id
 TURN_KEY_API_TOKEN=cloudflare-realtime-turn-api-token
+REPORT_PICKUP_TOKEN=independent-developer-pickup-secret-at-least-32-bytes

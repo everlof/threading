@@ -1,9 +1,13 @@
 export interface Env {
   DB: D1Database;
+  ISSUE_REPORTS: R2Bucket;
   HOST_RENDEZVOUS: DurableObjectNamespace;
   AUTH_RATE_LIMITER: RateLimit;
   API_RATE_LIMITER: RateLimit;
   SOURCE_RATE_LIMITER: RateLimit;
+  REPORT_RATE_LIMITER: RateLimit;
+  REPORT_GLOBAL_RATE_LIMITER: RateLimit;
+  REPORT_PICKUP_TOKEN?: string;
   SESSION_SIGNING_SECRET: string;
   APPLE_CLIENT_IDS: string;
   APPLE_TEAM_ID?: string;

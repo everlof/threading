@@ -9,6 +9,12 @@ credentials, or permission evidence. Rendezvous messages are capped at 384 KiB; 
 control socket, at most eight pending/device sessions, and at most 64 ICE candidates per peer.
 Worker-native rate-limit bindings protect authentication and API entry points before database or
 Durable Object work; database-side guards keep product quotas intact under concurrent requests.
+The one anonymous exception is `POST /v1/reports`: it accepts only the 64-KiB, typed, share-safe
+issue-report contract and writes normalized JSON into a private R2 bucket. The Worker exposes no
+unauthenticated read, list, update, or delete route for those objects. Developer-only list and
+exact-read routes require a separate Worker secret that is never shipped in an app. A D1 row
+containing only the UTC day and an accepted count caps distributed intake at 2,000 new objects per
+day; exact retries do not consume another slot.
 
 ## Local verification
 
@@ -38,6 +44,7 @@ npx wrangler secret put APPLE_PRIVATE_KEY
 npx wrangler secret put APPLE_TOKEN_ENCRYPTION_SECRET
 npx wrangler secret put TURN_KEY_ID
 npx wrangler secret put TURN_KEY_API_TOKEN
+npx wrangler secret put REPORT_PICKUP_TOKEN
 ```
 
 `SESSION_SIGNING_SECRET` and `APPLE_TOKEN_ENCRYPTION_SECRET` must be independent random values of
@@ -71,14 +78,25 @@ ID or `.dev.vars` values.
 
 ## Production deployment checklist
 
-1. Authenticate Wrangler with the production Cloudflare account and create the D1 database:
+The issue-report-specific, checkbox runbook is
+[`docs/operations/issue-reporting-setup.md`](../../docs/operations/issue-reporting-setup.md). The
+steps below remain the complete control-plane deployment sequence.
+
+1. Authenticate Wrangler with the production Cloudflare account, create the D1 database, and
+   create the private report bucket:
 
    ```sh
    npx wrangler login
    npx wrangler d1 create threading-control-plane
+   npx wrangler r2 bucket create threading-private-issue-reports
+   npx wrangler r2 bucket lifecycle add threading-private-issue-reports \
+     delete-reports-after-30-days reports/v1/ --expire-days 30 --force
    ```
 
-   Put the returned database ID in `wrangler.jsonc`. Never commit account tokens or secret values.
+   Put the returned database ID in `wrangler.jsonc`. Leave the R2 bucket private: do not enable
+   its `r2.dev` URL, attach a custom domain, or add public CORS. The 30-day lifecycle is the
+   deletion policy, not an optional cost optimization. Never commit account tokens or secret
+   values.
 
 2. Create a Cloudflare Realtime TURN key and record its key ID and API token. TURN is the relay
    fallback for failed direct ICE paths; it is not an always-on tunnel.
@@ -100,11 +118,15 @@ ID or `.dev.vars` values.
    Cloudflare account. The checked-in Worker route attaches it as a custom domain during deploy;
    pointing an external CNAME at an arbitrary Worker hostname is not a substitute for that TLS
    binding.
-6. Verify the Worker-native authentication (30/minute), per-credential API (120/minute), and
-   broad per-source (600/minute) rate-limit bindings in production. They are permissive,
-   per-location abuse protection rather than billing quotas. Do not rate-limit established
-   WebSocket messages as independent HTTP requests. Retain only the metadata-only structured logs
-   emitted by the Worker, with a documented short retention.
+6. Verify the Worker-native authentication (30/minute), per-credential API (120/minute), broad
+   per-source (600/minute), report-source (6/minute), and report-global (60/minute) rate-limit
+   bindings in production. They are per-location abuse protection rather than accurate billing
+   quotas; put a Cloudflare zone-level request/body rule and spend alert around the report route
+   as an additional abuse backstop. The D1 admission ceiling is the globally consistent storage
+   budget; alert well before it reaches 2,000 so an attack cannot silently deny legitimate
+   reports for the rest of the UTC day. Do not rate-limit established WebSocket messages as
+   independent HTTP requests. Retain only the metadata-only structured logs emitted by the
+   Worker, with a documented short retention.
 7. Verify `GET /health`, `GET /ready`, Sign in with Apple, first-install QR pairing, direct ICE, forced TURN,
    device revoke, host sign-out, scheduled Apple refresh validation, Apple consent revocation and
    retryable account deletion from a signed release candidate. Run the credentialed relay-only
@@ -119,13 +141,39 @@ app builds are configured for `https://remote.threading.codes`.
 
 `/health` is a cheap liveness response. `/ready` additionally proves that the independent signing
 and Apple-token secrets are usable, the Apple private key can sign both shipping client IDs, TURN
-configuration is present, and D1 answers a query. It returns only a generic 503 when unavailable;
-the D1 probe selects the newest required columns so a missing migration also blocks readiness.
-It returns only a generic 503 when unavailable; configuration details remain in metadata-only
-Worker logs.
+configuration is present, D1 answers a query, and the private report bucket binding answers a
+metadata-only probe. It returns only a generic 503 when unavailable; the D1 probe selects the
+newest required columns so a missing migration also blocks readiness.
+Configuration details remain in metadata-only Worker logs.
 
 `npm run test:load` is the repeatable local capacity regression: 100 authenticated host sockets
 across separate Durable Objects, explicitly evicted and probed through WebSocket auto-response.
 Cloudflare's local Vitest runtime currently overflows inside its own Durable Object test helper
 before reaching 1,000 objects. Run the unchanged 10,000-host and slow/hostile-client gate against
 the provisioned staging account rather than treating the smaller emulator pass as equivalent.
+
+## Retrieving a report
+
+The receipt reference is derived from the UUID; it is not a public object address. A developer
+with the protected pickup credential can list metadata or fetch the corresponding object:
+
+```sh
+curl --fail-with-body --silent --show-error \
+  -H "Authorization: Bearer $REPORT_PICKUP_TOKEN" \
+  'https://remote.threading.codes/v1/developer/reports?limit=50'
+
+curl --fail-with-body --silent --show-error \
+  -H "Authorization: Bearer $REPORT_PICKUP_TOKEN" \
+  'https://remote.threading.codes/v1/developer/reports/<lowercase-report-uuid>'
+```
+
+Load `REPORT_PICKUP_TOKEN` from the team secret manager without placing it in shell history; the
+environment variable above is illustrative. Direct Wrangler R2 access remains the break-glass
+fallback, not the ordinary inbox workflow. Configure an R2 metadata-only event notification to
+the owned triage channel so pickup does not depend on already knowing the receipt UUID.
+
+Treat the description and optional screenshot as untrusted customer data. Do not paste either
+into a public issue or interpolate it into an agent instruction. The diagnostic object is the
+content-free event/field vocabulary shared with the apps; raw unified logs, `.ips` payloads,
+terminal output, prompts, paths, credentials, and notification text are not accepted by the
+intake schema.

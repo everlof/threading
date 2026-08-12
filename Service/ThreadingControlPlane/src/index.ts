@@ -19,6 +19,8 @@ import {
   rotateHostCredentialForAccount,
 } from "./enrollment";
 import { bearerToken, json } from "./http";
+import { handleIssueReport } from "./issue-report-intake";
+import { handleIssueReportPickup } from "./issue-report-pickup";
 import { BOUNDS, validateIdentifier } from "./protocol";
 
 export { HostRendezvous } from "./host-rendezvous";
@@ -51,6 +53,16 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/v1/hosts") {
         return await enrollHost(request, env);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/reports") {
+        return await handleIssueReport(request, env);
+      }
+      if (request.method === "GET" && url.pathname === "/v1/developer/reports") {
+        return await handleIssueReportPickup(request, env);
+      }
+      const pickupMatch = /^\/v1\/developer\/reports\/([^/]+)$/u.exec(url.pathname);
+      if (request.method === "GET" && pickupMatch?.[1]) {
+        return await handleIssueReportPickup(request, env, decodePath(pickupMatch[1]));
       }
 
       const rotateMatch = /^\/v1\/hosts\/([^/]+)\/credentials\/rotate$/u.exec(url.pathname);
@@ -93,6 +105,9 @@ export default {
   async scheduled(event: ScheduledController, env: Env): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
     if (event.cron === "17 3 * * *") {
+      const reportQuotaCutoffDay = new Date((now - 7 * 24 * 60 * 60) * 1000)
+        .toISOString()
+        .slice(0, 10);
       await env.DB.batch([
         env.DB.prepare(
           "DELETE FROM apple_assertions WHERE digest IN "
@@ -107,6 +122,8 @@ export default {
             + "(SELECT digest FROM rendezvous_credentials WHERE expires_at < ? "
             + "OR (revoked_at IS NOT NULL AND revoked_at < ?) LIMIT 1000)",
         ).bind(now, now - 7 * 24 * 60 * 60),
+        env.DB.prepare("DELETE FROM issue_report_daily_quota WHERE day < ?")
+          .bind(reportQuotaCutoffDay),
       ]);
     } else {
       await validateDueAppleSessions(env, now);
@@ -141,6 +158,7 @@ async function readinessResponse(env: Env): Promise<Response> {
     }
     requiredConfigurationSecret(env.TURN_KEY_ID, 1, 1024);
     requiredConfigurationSecret(env.TURN_KEY_API_TOKEN, 1, 4096);
+    requiredConfigurationSecret(env.REPORT_PICKUP_TOKEN, 32, 4096);
     await validateAppleConfiguration(clientIDs, env);
     await env.DB.batch([
       env.DB.prepare("SELECT auth_invalidated_at FROM accounts LIMIT 1"),
@@ -154,7 +172,9 @@ async function readinessResponse(env: Env): Promise<Response> {
       ),
       env.DB.prepare("SELECT device_id, revoked_at FROM rendezvous_credentials LIMIT 1"),
       env.DB.prepare("SELECT jti_digest FROM apple_notifications LIMIT 1"),
+      env.DB.prepare("SELECT accepted_count FROM issue_report_daily_quota LIMIT 1"),
     ]);
+    await env.ISSUE_REPORTS.head("health/readiness-probe");
     return json({ status: "ready", rendezvousProtocol: BOUNDS.protocolVersion });
   } catch (error) {
     console.warn("readiness_failed", {
@@ -278,6 +298,8 @@ function rateLimitGroup(pathname: string): string {
   if (pathname.startsWith("/v1/rendezvous/")) return "rendezvous";
   if (pathname.startsWith("/v1/hosts")) return "hosts";
   if (pathname.startsWith("/v1/auth/")) return "auth";
+  if (pathname.startsWith("/v1/developer/reports")) return "developerReports";
+  if (pathname === "/v1/reports") return "reports";
   if (pathname === "/v1/account") return "account";
   return "unknown";
 }

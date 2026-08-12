@@ -6,13 +6,38 @@ export async function readJSON(
   request: Request,
   maximumBytes = 32 * 1024,
 ): Promise<Record<string, unknown>> {
-  const declared = Number(request.headers.get("Content-Length") ?? "0");
-  if (Number.isFinite(declared) && declared > maximumBytes) {
+  const contentLength = request.headers.get("Content-Length");
+  const declared = contentLength === null ? undefined : Number(contentLength);
+  if (declared !== undefined && (!Number.isSafeInteger(declared) || declared < 0)) {
+    throw new HttpError(400, "invalidRequest", "Content-Length is invalid");
+  }
+  if (declared !== undefined && declared > maximumBytes) {
     throw new HttpError(413, "requestTooLarge", "Request body is too large");
   }
-  const data = await request.arrayBuffer();
-  if (data.byteLength === 0 || data.byteLength > maximumBytes) {
-    throw new HttpError(400, "invalidRequest", "Request body is empty or too large");
+  const reader = request.body?.getReader();
+  if (!reader) {
+    throw new HttpError(400, "invalidRequest", "Request body is empty");
+  }
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (received > maximumBytes) {
+      await reader.cancel();
+      throw new HttpError(413, "requestTooLarge", "Request body is too large");
+    }
+    chunks.push(value);
+  }
+  if (received === 0) {
+    throw new HttpError(400, "invalidRequest", "Request body is empty");
+  }
+  const data = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    data.set(chunk, offset);
+    offset += chunk.byteLength;
   }
   let value: unknown;
   try {

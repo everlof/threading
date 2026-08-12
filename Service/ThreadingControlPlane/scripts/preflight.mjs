@@ -19,8 +19,10 @@ const exampleVariables = parseDotVariables(
 );
 const exampleSigningSecret = exampleVariables.get("SESSION_SIGNING_SECRET") ?? "";
 const exampleEncryptionSecret = exampleVariables.get("APPLE_TOKEN_ENCRYPTION_SECRET") ?? "";
+const examplePickupSecret = exampleVariables.get("REPORT_PICKUP_TOKEN") ?? "";
 if (new TextEncoder().encode(exampleSigningSecret).byteLength < 32
   || new TextEncoder().encode(exampleEncryptionSecret).byteLength < 32
+  || new TextEncoder().encode(examplePickupSecret).byteLength < 32
   || exampleSigningSecret === exampleEncryptionSecret) {
   failures.push("local example secrets must satisfy the independent 32-byte runtime contract");
 }
@@ -29,6 +31,11 @@ const databases = Array.isArray(configuration.d1_databases) ? configuration.d1_d
 const database = databases.find((candidate) => candidate?.binding === "DB");
 if (!database || !isCloudflareIdentifier(database.database_id)) {
   failures.push("DB must use the production D1 database ID, not the checked-in placeholder");
+}
+const reportBuckets = Array.isArray(configuration.r2_buckets) ? configuration.r2_buckets : [];
+const reportBucket = reportBuckets.find((candidate) => candidate?.binding === "ISSUE_REPORTS");
+if (reportBucket?.bucket_name !== "threading-private-issue-reports") {
+  failures.push("ISSUE_REPORTS must bind the reviewed private production bucket");
 }
 
 const route = Array.isArray(configuration.routes)
@@ -70,6 +77,8 @@ const expectedRateLimits = new Map([
   ["AUTH_RATE_LIMITER", 30],
   ["API_RATE_LIMITER", 120],
   ["SOURCE_RATE_LIMITER", 600],
+  ["REPORT_RATE_LIMITER", 6],
+  ["REPORT_GLOBAL_RATE_LIMITER", 60],
 ]);
 const rateLimits = Array.isArray(configuration.ratelimits) ? configuration.ratelimits : [];
 const namespaceIDs = new Set();
@@ -98,6 +107,7 @@ const expectedSecrets = [
   "APPLE_TOKEN_ENCRYPTION_SECRET",
   "TURN_KEY_ID",
   "TURN_KEY_API_TOKEN",
+  "REPORT_PICKUP_TOKEN",
 ];
 if (JSON.stringify(configuration.secrets?.required) !== JSON.stringify(expectedSecrets)) {
   failures.push("the required production Worker secret bindings differ from the reviewed list");
@@ -118,6 +128,7 @@ const expectedMigrations = [
   "0004_device_limit.sql",
   "0005_apple_session_validation.sql",
   "0006_refresh_rotation.sql",
+  "0007_issue_report_quota.sql",
 ];
 if (JSON.stringify(migrations) !== JSON.stringify(expectedMigrations)) {
   failures.push("the production migration set differs from the reviewed ordered list");

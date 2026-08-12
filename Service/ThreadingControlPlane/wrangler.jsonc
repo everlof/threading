@@ -33,6 +33,12 @@
       "migrations_dir": "migrations"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "ISSUE_REPORTS",
+      "bucket_name": "threading-private-issue-reports"
+    }
+  ],
   "ratelimits": [
     {
       "name": "AUTH_RATE_LIMITER",
@@ -57,6 +63,22 @@
         "limit": 600,
         "period": 60
       }
+    },
+    {
+      "name": "REPORT_RATE_LIMITER",
+      "namespace_id": "934721004",
+      "simple": {
+        "limit": 6,
+        "period": 60
+      }
+    },
+    {
+      "name": "REPORT_GLOBAL_RATE_LIMITER",
+      "namespace_id": "934721005",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
     }
   ],
   "vars": {
@@ -70,7 +92,8 @@
       "APPLE_PRIVATE_KEY",
       "APPLE_TOKEN_ENCRYPTION_SECRET",
       "TURN_KEY_ID",
-      "TURN_KEY_API_TOKEN"
+      "TURN_KEY_API_TOKEN",
+      "REPORT_PICKUP_TOKEN"
     ]
   },
   "observability": {

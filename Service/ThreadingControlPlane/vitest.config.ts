@@ -15,6 +15,7 @@ Object.assign(process.env, {
   APPLE_TOKEN_ENCRYPTION_SECRET: "test-required-encryption-secret-at-least-32-bytes",
   TURN_KEY_ID: "test-required-turn-key",
   TURN_KEY_API_TOKEN: "test-required-turn-token",
+  REPORT_PICKUP_TOKEN: "test-required-report-pickup-token-at-least-32-bytes",
 });
 
 export default defineConfig({
@@ -34,6 +35,7 @@ export default defineConfig({
             APPLE_TOKEN_ENCRYPTION_SECRET: "test-only-apple-token-secret-at-least-32-bytes",
             TURN_KEY_ID: "",
             TURN_KEY_API_TOKEN: "",
+            REPORT_PICKUP_TOKEN: "test-only-report-pickup-token-at-least-32-bytes",
             TEST_RENDEZVOUS_LOAD: process.env.THREADING_RENDEZVOUS_LOAD ?? "0",
             TEST_RENDEZVOUS_LOAD_HOSTS: process.env.THREADING_RENDEZVOUS_LOAD_HOSTS ?? "100",
             TEST_MIGRATIONS: migrations,

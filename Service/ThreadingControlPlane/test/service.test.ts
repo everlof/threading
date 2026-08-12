@@ -111,6 +111,7 @@ describe("service release surfaces", () => {
     const notification = `notification-${suffix}`;
     const rendezvous = `rendezvous-${suffix}`;
     const refresh = `refresh-${suffix}`;
+    const oldReportQuotaDay = "2000-01-01";
     await testEnv.DB.batch([
       testEnv.DB.prepare(
         "INSERT INTO accounts (id, created_at, updated_at) VALUES (?, ?, ?)",
@@ -135,6 +136,9 @@ describe("service release surfaces", () => {
         "INSERT INTO refresh_sessions (digest, account_id, expires_at, created_at) "
           + "VALUES (?, ?, ?, ?)",
       ).bind(refresh, accountID, now - 1, now - 10),
+      testEnv.DB.prepare(
+        "INSERT INTO issue_report_daily_quota (day, accepted_count) VALUES (?, ?)",
+      ).bind(oldReportQuotaDay, 7),
     ]);
 
     await worker.scheduled({ cron: "17 3 * * *" } as ScheduledController, testEnv);
@@ -143,6 +147,11 @@ describe("service release surfaces", () => {
     await expect(rowExists("apple_notifications", "jti_digest", notification)).resolves.toBe(false);
     await expect(rowExists("rendezvous_credentials", "digest", rendezvous)).resolves.toBe(false);
     await expect(rowExists("refresh_sessions", "digest", refresh)).resolves.toBe(false);
+    await expect(rowExists(
+      "issue_report_daily_quota",
+      "day",
+      oldReportQuotaDay,
+    )).resolves.toBe(false);
   });
 });
 
