@@ -161,6 +161,9 @@ enum SettingsPages {
                 "branch", "compact tree", "indentation", "sidebar density",
                 "project icons", "account avatars", "Codex hooks",
                 "Claude Remote Control", "notifications", "mute", "sound", "alerts",
+                // The bell has its own words: nobody searching for the noise a TUI makes types
+                // "notifications", and "beep" is what they will have called it.
+                "bell", "beep", "terminal bell", "alert sound",
                 "confirmations", "don't ask again", "ask before", "opening message",
                 "first message", "instructions", "conversation speed", "fast mode",
                 "standard mode", "service tier", "credits",

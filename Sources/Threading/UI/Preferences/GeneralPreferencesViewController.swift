@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// General preferences: which agent new sessions use, startup behaviour, and the shell.
 final class GeneralPreferencesViewController: NSViewController {
@@ -47,6 +48,8 @@ final class GeneralPreferencesViewController: NSViewController {
         uniqueKeysWithValues: AttentionAlert.allCases.map { ($0, ThemedToggle()) }
     )
     private let alertSoundToggle = ThemedToggle()
+    private let alertSoundPopUp = ThemedPopUp()
+    private let bellSoundPopUp = ThemedPopUp()
     private let claudeHookToggle = ThemedToggle()
     private let statusLineToggle = ThemedToggle()
     private let codexHookToggle = ThemedToggle()
@@ -69,6 +72,10 @@ final class GeneralPreferencesViewController: NSViewController {
         // The page is cached across visits and messages are hidden from alerts elsewhere, so
         // the count is re-read on the way in rather than showing the last visit's state.
         updateHiddenNoticesControl()
+        // Same reason, one folder further out: the Sounds folder is macOS's, and a sound can
+        // arrive in it from Finder or another app between two visits to this page.
+        rebuildAlertSoundMenu()
+        rebuildBellSoundMenu()
     }
 
     // MARK: - Setup
@@ -154,6 +161,8 @@ final class GeneralPreferencesViewController: NSViewController {
         configure(alertSoundToggle,
                   isOn: AppSettings.shared.playsAttentionAlertSound,
                   action: #selector(alertSoundChanged))
+        configureAlertSoundPopUp()
+        configureBellSoundPopUp()
         updateNotificationRefinements()
         configure(claudeHookToggle,
                   isOn: AppSettings.shared.reportsClaudeLifecycleEvents,
@@ -425,6 +434,7 @@ final class GeneralPreferencesViewController: NSViewController {
                 + "for good, or grants access to a website, a tool, an extension or another person, "
                 + "always asks."),
             SettingsUI.section("Notifications", notifications),
+            SettingsUI.section("Terminal Bell", terminalBellCard()),
             SettingsUI.section("Permission Mode", permissionModeCard()),
             SettingsUI.section("Claude Remote Control", claudeRemoteControlCard()),
             SettingsUI.section("Claude Hooks", claudeHooksCard()),
@@ -657,7 +667,158 @@ final class GeneralPreferencesViewController: NSViewController {
             control: alertSoundToggle
         )
 
-        return [master] + kinds + [sound]
+        let choice = SettingsUI.row(
+            title: "Alert sound",
+            subtitle: "Picking one plays it. Add a Sound copies a sound file into your Sounds "
+                + "folder, where macOS looks for it.",
+            control: alertSoundPopUp
+        )
+
+        return [master] + kinds + [sound, choice]
+    }
+
+    // MARK: - Alert Sound
+
+    private func configureAlertSoundPopUp() {
+        alertSoundPopUp.target = self
+        alertSoundPopUp.action = #selector(alertSoundChoiceChanged)
+        alertSoundPopUp.translatesAutoresizingMaskIntoConstraints = false
+        alertSoundPopUp.widthAnchor
+            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+        alertSoundPopUp.setAccessibilityIdentifier("settings.general.alert-sound")
+        rebuildAlertSoundMenu()
+    }
+
+    /// The menu is rebuilt rather than updated, because what it lists is a folder: a sound
+    /// added, renamed or deleted between two visits to this page must not leave an item behind
+    /// that resolves to nothing at delivery time.
+    ///
+    /// Four groups, in the order the list is read: the system default, the handful worth
+    /// suggesting, the rest of what macOS ships, and the user's own. `NotificationSoundLibrary`
+    /// decides which is which; the page only draws the separators.
+    private func rebuildAlertSoundMenu() {
+        alertSoundPopUp.removeAllItems()
+
+        alertSoundPopUp.addItem(
+            ThemedMenuItem(
+                title: L10n.string("macOS Alert Sound"),
+                representedValue: AttentionAlertSound.systemDefault
+            )
+        )
+
+        let indexOfSound = SoundPickerMenu.addSounds(to: alertSoundPopUp) {
+            AttentionAlertSound.named($0)
+        }
+
+        SoundPickerMenu.addCustomSoundItem(to: alertSoundPopUp) { [weak self] in
+            // Choosing an item moves the selection onto it, and this one is a door rather
+            // than a choice. Put the control back before the panel opens over the page:
+            // nothing has been chosen yet, and the row would otherwise read as if it had.
+            self?.rebuildAlertSoundMenu()
+            self?.addAlertSound()
+        }
+
+        // A stored name whose file has gone shows as the default, because that is what it will
+        // sound like: `AttentionAlertSound.resolvedSound()` falls back the same way, and a
+        // picker naming a sound nobody will hear would be the one lie on the page.
+        switch AppSettings.shared.attentionAlertSound {
+        case .systemDefault:
+            alertSoundPopUp.selectItem(at: 0)
+        case .named(let fileName):
+            alertSoundPopUp.selectItem(at: indexOfSound[fileName] ?? 0)
+        }
+    }
+
+    /// Copies a chosen file into `~/Library/Sounds` and selects it.
+    ///
+    /// Choosing this item moves the pop-up's selection onto it, so every path back through here
+    /// rebuilds the menu: cancelling has to put the previous choice back on the control.
+    private func addAlertSound() {
+        SoundPickerMenu.addCustomSound { [weak self] sound in
+            guard let self else { return }
+            if let sound {
+                AppSettings.shared.attentionAlertSound = .named(sound.fileName)
+            }
+            self.rebuildAlertSoundMenu()
+            if let sound { NotificationSoundPreview.play(sound) }
+        }
+    }
+
+    // MARK: - Terminal Bell
+
+    /// The bell is its own card rather than another row under Notifications, because it obeys
+    /// none of that card's switches.
+    ///
+    /// A notification is Threading noticing something for you: the master switch, the three
+    /// kinds, and a project's mute all get a say in it. A bell is a program writing one byte
+    /// down the PTY, and nothing above it applies — muting a project does not gag its terminal,
+    /// and the bell rings whether or not the session needs you. Filing it under Notifications
+    /// would make that card's copy false for the sake of putting two sounds side by side.
+    private func terminalBellCard() -> SettingsCard {
+        SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Bell sound",
+                subtitle: "What a program's bell does. Picking one plays it. Off still marks "
+                    + "the session in the sidebar, so a silenced bell is seen rather than "
+                    + "missed.",
+                control: bellSoundPopUp
+            )
+        ])
+    }
+
+    private func configureBellSoundPopUp() {
+        bellSoundPopUp.target = self
+        bellSoundPopUp.action = #selector(bellSoundChanged)
+        bellSoundPopUp.translatesAutoresizingMaskIntoConstraints = false
+        bellSoundPopUp.widthAnchor
+            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+        bellSoundPopUp.setAccessibilityIdentifier("settings.general.bell-sound")
+        rebuildBellSoundMenu()
+    }
+
+    /// The same list the alert sound offers, with one item the alert sound cannot have: Off.
+    /// A notification's sound is switched off by the switch above it; a bell has no switch, so
+    /// silence has to be one of the sounds it can be set to.
+    private func rebuildBellSoundMenu() {
+        bellSoundPopUp.removeAllItems()
+
+        for (title, value) in [
+            (L10n.string("Off"), TerminalBellSound.silent),
+            (L10n.string("macOS Alert Sound"), TerminalBellSound.systemAlert)
+        ] {
+            bellSoundPopUp.addItem(ThemedMenuItem(title: title, representedValue: value))
+        }
+
+        let indexOfSound = SoundPickerMenu.addSounds(to: bellSoundPopUp) {
+            TerminalBellSound.named($0)
+        }
+
+        SoundPickerMenu.addCustomSoundItem(to: bellSoundPopUp) { [weak self] in
+            self?.rebuildBellSoundMenu()
+            self?.addBellSound()
+        }
+
+        switch AppSettings.shared.terminalBellSound {
+        case .silent:
+            bellSoundPopUp.selectItem(at: 0)
+        case .systemAlert:
+            bellSoundPopUp.selectItem(at: 1)
+        case .named(let fileName):
+            // Falls back to the system alert for the same reason `TerminalBell` does: a name
+            // whose file has gone still rings, and the picker has to say which sound that is.
+            bellSoundPopUp.selectItem(at: indexOfSound[fileName] ?? 1)
+        }
+    }
+
+    private func addBellSound() {
+        SoundPickerMenu.addCustomSound { [weak self] sound in
+            guard let self else { return }
+            if let sound {
+                AppSettings.shared.terminalBellSound = .named(sound.fileName)
+            }
+            self.rebuildBellSoundMenu()
+            if let sound { TerminalBell.play(.named(sound.fileName)) }
+        }
     }
 
     /// Claude's observational hooks are session-local and independent from Native permission
@@ -757,7 +918,6 @@ final class GeneralPreferencesViewController: NSViewController {
         AppSettings.shared.sessionRestoreLimit = limit
     }
 
-
     @objc private func confirmationChanged(_ sender: ThemedToggle) {
         guard let prompt = confirmationToggles.first(where: { $0.value === sender })?.key else { return }
         AppSettings.shared.setAsks(sender.state == .on, before: prompt)
@@ -789,6 +949,34 @@ final class GeneralPreferencesViewController: NSViewController {
 
     @objc private func alertSoundChanged() {
         AppSettings.shared.playsAttentionAlertSound = alertSoundToggle.state == .on
+        updateNotificationRefinements()
+    }
+
+    /// Choosing a sound also plays it, the way every alert-sound list does: a name is not a
+    /// sound, and switching to one and then waiting for the next blocked turn to find out what
+    /// it does is not choosing.
+    ///
+    /// The default item is the exception and stays silent. macOS's notification tone lives
+    /// inside a private framework rather than in the folders a name resolves in, and the one
+    /// sound that *is* reachable — the system beep — is the alert sound, a different sound
+    /// entirely. Playing that here would be a preview of the wrong thing.
+    @objc private func alertSoundChoiceChanged() {
+        guard let choice = alertSoundPopUp.selectedItem?.representedValue as? AttentionAlertSound
+        else { return }
+        AppSettings.shared.attentionAlertSound = choice
+        guard case .named(let fileName) = choice,
+              let sound = NotificationSoundLibrary.resolve(fileName: fileName) else { return }
+        NotificationSoundPreview.play(sound)
+    }
+
+    /// Same contract as the alert sound's picker, and one difference: the bell *can* preview
+    /// its default, because the system alert sound is a sound this app can ask for. Off
+    /// previews as silence, which is the honest answer.
+    @objc private func bellSoundChanged() {
+        guard let choice = bellSoundPopUp.selectedItem?.representedValue as? TerminalBellSound
+        else { return }
+        AppSettings.shared.terminalBellSound = choice
+        TerminalBell.play(choice)
     }
 
     /// The kind rows refine the master switch and the sound refines the blocked row, so each
@@ -798,7 +986,11 @@ final class GeneralPreferencesViewController: NSViewController {
     private func updateNotificationRefinements() {
         let notifies = attentionNotificationToggle.state == .on
         for toggle in alertToggles.values { toggle.isEnabled = notifies }
-        alertSoundToggle.isEnabled = notifies && alertToggles[.blocked]?.state == .on
+        let sounds = notifies && alertToggles[.blocked]?.state == .on
+        alertSoundToggle.isEnabled = sounds
+        // One step further down the same chain: which sound is a question only a page that is
+        // going to play one can answer.
+        alertSoundPopUp.isEnabled = sounds && alertSoundToggle.state == .on
     }
 
     @objc private func terminalTitleChanged() {

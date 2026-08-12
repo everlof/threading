@@ -695,6 +695,41 @@ The architecture has already extracted this logic, so it is covered without a UI
 
 ---
 
+## Open finding — 12 August 2026
+
+The one item on this page that is not `[x]`. It was found while making the notification sound
+and the terminal bell configurable, and is deliberately left open rather than half-fixed.
+
+- [ ] **A bell from a background session makes two sounds.** Evidence: a program writes `BEL`
+      in a session that is not on screen. `SessionActivityTracker.recordBell` sets `awaitsUser`
+      whenever the session is not visible, which settles to `awaitingUser`, which
+      `AttentionAlertPolicy` turns into a `.blocked` alert; with Threading behind another app
+      that banner presents *with* its own sound, on top of the bell Threading has just played.
+      Two unrelated sounds, ~0 ms apart, for one event. Root cause: the bell and the attention
+      alert are answers to the same edge from two subsystems that do not know about each other,
+      and neither is wrong on its own — the bell is the program asking, the alert is Threading
+      noticing.
+      **Why it is still open:** the obvious fix is "stay quiet if the alert will sound", and
+      that requires predicting whether the alert will actually be *heard*:
+      `notifiesOnAttention`, `notifies(on: .blocked)`, `playsAttentionAlertSound`, the session
+      and project mute scopes, whether the app is active (`willPresent` returns no options for
+      ordinary alerts, so a foreground alert is silent), and macOS's own authorization status,
+      which is answered asynchronously. A prediction that is right most of the time produces a
+      bell that goes missing for reasons the user cannot see, which is worse than one sound too
+      many.
+      **What a real fix looks like:** move the decision to where the answer is already known —
+      have `AttentionAlertCenter` report back that it *did* deliver a sounding alert for this
+      session, and let the bell suppress itself for a short window after that, rather than
+      predicting beforehand. That is a new one-way signal between two subsystems that currently
+      share nothing, so it wants designing rather than bolting on.
+      **Mitigation in the meantime:** both sounds are now configurable and either can be set to
+      Off — Settings ▸ General ▸ Terminal Bell, or the Play a sound switch above it. Files:
+      `TerminalBell.swift`, `SessionActivity.swift` (`recordBell`), `AttentionAlerts.swift`.
+      Described for users in `USER_GUIDE.md` and for maintainers in
+      [`session-activity.md`](docs/architecture/session-activity.md).
+
+---
+
 ## Historical baseline metrics (start of July 2026)
 
 Track these downward as tiers land:

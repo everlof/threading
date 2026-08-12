@@ -361,6 +361,39 @@ final class AppSettings {
         }
     }
 
+    /// What a program's `BEL` sounds like, including not at all.
+    ///
+    /// Deliberately *not* under `playsAttentionAlertSound` or any of the notification switches:
+    /// a bell is the program in front of you asking for attention, not Threading noticing
+    /// something on your behalf, so muting a project's notifications does not gag its terminal.
+    /// Unseeded, and an absent key is the system alert sound — which is what every install
+    /// heard before this setting existed.
+    var terminalBellSound: TerminalBellSound {
+        get { TerminalBellSound(storedValue: defaults.string(forKey: Keys.terminalBellSound)) }
+        set {
+            defaults.set(newValue.storedValue, forKey: Keys.terminalBellSound)
+            notifyChanged()
+        }
+    }
+
+    /// Which sound that is.
+    ///
+    /// Unseeded, because the default is the *absence* of a choice: no key means macOS's own
+    /// notification tone, which is what every install has heard until it says otherwise. A
+    /// stored name is a file name resolved at delivery time, never a path — see
+    /// `AttentionAlertSound`.
+    var attentionAlertSound: AttentionAlertSound {
+        get { AttentionAlertSound(storedValue: defaults.string(forKey: Keys.attentionAlertSound)) }
+        set {
+            if let stored = newValue.storedValue {
+                defaults.set(stored, forKey: Keys.attentionAlertSound)
+            } else {
+                defaults.removeObject(forKey: Keys.attentionAlertSound)
+            }
+            notifyChanged()
+        }
+    }
+
     /// Whether an image dropped on an agent's terminal is rewritten when the agent cannot read
     /// the format it arrived in — a HEIC out of Finder, a scanned TIFF.
     ///
@@ -1240,6 +1273,12 @@ final class AppSettings {
         static let notifiesOnAttention = "notifiesOnAttention"
         static let disabledAttentionAlerts = "disabledAttentionAlerts"
         static let playsAttentionAlertSound = "playsAttentionAlertSound"
+        /// Unseeded on purpose: an absent key is the macOS default tone, which is a real
+        /// answer rather than a missing one.
+        static let attentionAlertSound = "attentionAlertSound"
+        /// Unseeded for the same reason: absent is the system alert sound, which is what the
+        /// bell did before it was a setting.
+        static let terminalBellSound = "terminalBellSound"
         static let disabledAttachmentDetectionAgentKinds = "disabledAttachmentDetectionAgentKinds"
         static let includesAttachmentsOutsideProject = "includesAttachmentsOutsideProject"
         static let capturesPageBeforeAgentActions = "capturesPageBeforeAgentActions"

@@ -639,6 +639,36 @@ row shows the sentence its notification would say:
 | **Finished while you were elsewhere** | A session away from the pane finished or asked something. |
 | **Finished a turn in the background** | A turn ended while Threading was behind another app — the chattiest of the three. |
 | **Play a sound** | Only the blocked alert ever sounds; the other two are silent either way. Off keeps the banner without the ping. |
+| **Alert sound** | Which sound that is. Picking one plays it, so you can audition the list without waiting for a real alert. |
+
+**Choosing the sound.** The **Alert sound** menu starts with **macOS Alert Sound**, the tone
+the system uses for every app. Under it are five suggestions worth trying first — Submarine,
+Glass, Purr, Ping and Tink — then the rest of the sounds macOS ships, then any sounds of your
+own. Selecting a sound plays it immediately; the macOS default is the one item that stays
+silent, because that tone is not a file the app can reach to preview.
+
+**Adding your own sound.** **Add a Sound…** at the bottom of the menu takes an AIFF, WAV or CAF
+file and copies it into your `~/Library/Sounds` folder, which is where macOS looks for
+notification sounds. Because that folder is shared with the system, an added sound also shows
+up in System Settings' alert-sound list, and it is removed the same way any file is: delete it
+in Finder. A sound already in the folder is never overwritten. Anything past 30 seconds is cut
+short by macOS, and a sound whose file is later deleted falls back to the macOS tone rather
+than going silent.
+
+**The terminal bell.** A separate setting, in its own **Terminal Bell** card under the
+notification rows. When a program in the terminal rings the bell, Threading played the macOS
+system alert sound and there was no way to change it; **Bell sound** now offers **Off**, that
+same system alert sound, and every sound in the alert-sound list, including your own. Off
+silences the sound only: the session is still marked in the sidebar, so a bell you cannot hear
+is still a bell you can see.
+
+It sits apart from the notification rows because nothing above it applies to it. The master
+switch, the three alert kinds and **Mute Notifications** are all about Threading noticing
+something on your behalf; the bell is the program itself asking, so muting a project does not
+stop its terminal ringing. One consequence worth knowing: a bell from a session you are not
+looking at also marks it as waiting, which can post a notification, so with Threading in the
+background you may hear the bell and the alert. Setting either one to Off leaves you with a
+single sound.
 
 **Silencing one chat or one project.** **Session Options ▸ Mute Notifications** in a session's `⋯` menu quiets
 that conversation; the same item on a project row quiets the whole checkout, including sessions

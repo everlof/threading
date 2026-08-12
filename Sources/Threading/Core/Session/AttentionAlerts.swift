@@ -283,7 +283,7 @@ final class AttentionAlertCenter: NSObject {
             ?? "Threading session"
         if let project { content.subtitle = project.name }
         content.body = body
-        content.sound = AppSettings.shared.playsAttentionAlertSound ? .default : nil
+        content.sound = Self.chosenSound()
         content.userInfo = AttentionAlertDefaults.userInfo(
             sessionID: sessionID,
             destination: destination
@@ -318,6 +318,16 @@ final class AttentionAlertCenter: NSObject {
     }
 
     // MARK: - Private Methods
+
+    /// The sound every alert that sounds carries, or nil for a silent banner.
+    ///
+    /// One place, because the two posting paths had drifted into asking the same question
+    /// twice: whether a sound plays is the user's switch, and which sound it is is the user's
+    /// choice, and neither call site should be able to honour one without the other.
+    private static func chosenSound() -> UNNotificationSound? {
+        guard AppSettings.shared.playsAttentionAlertSound else { return nil }
+        return AppSettings.shared.attentionAlertSound.resolvedSound()
+    }
 
     private func activityChanged(for sessionID: SessionID) {
         let new = AgentRuntime.shared.activity(sessionID: sessionID)
@@ -365,9 +375,7 @@ final class AttentionAlertCenter: NSObject {
         // The ranking is the alert's (only `blocked` ever sounds); whether it is heard is the
         // user's, and the two are separate questions — a sound switched off should not have to
         // cost the banner that carries it.
-        content.sound = alert.sounds && AppSettings.shared.playsAttentionAlertSound
-            ? .default
-            : nil
+        content.sound = alert.sounds ? Self.chosenSound() : nil
         content.userInfo = [AttentionAlertDefaults.sessionKey: sessionID.uuidString]
         if let project { content.threadIdentifier = project.id.uuidString }
         if let icon = project?.icon,

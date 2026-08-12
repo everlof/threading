@@ -387,6 +387,72 @@ screen described the old state either way. Muting is not a settings change, so t
 call `preferencesChanged()` themselves: `ProjectStore` knows nothing about notifications and
 should not learn.
 
+**Which sound it makes is a file name, and the name is resolved twice** (`AttentionAlertSound.swift`).
+`UNNotificationSound(named:)` does not take a path: it takes a file name that a *system* process
+looks up later, in the app bundle and then `~/Library/Sounds`, `/Library/Sounds`,
+`/System/Library/Sounds`. Three things follow, and all three were measured with a probe app on
+macOS 26.5 rather than assumed:
+
+- **A name that resolves nowhere posts the banner in silence.** There is no fallback of the
+  system's own — the log says `Tone with identifier 'X' is neither in of the collections for
+  system or iTunes tones` and nothing plays. So `AttentionAlertSound.resolvedSound()` checks the
+  search paths itself and hands over `.default` when the file has gone. A stored choice whose
+  file was deleted therefore degrades to the macOS tone rather than to nothing, and the picker
+  shows `macOS Alert Sound` for it, because that is what will actually be heard.
+- **A `/System/Library/Sounds` name works**, so the built-in choices ship no audio: the picker
+  lists what the machine has, and a macOS release that adds or drops one changes the list with
+  no code change. `SuggestedNotificationSounds` names five of them (Submarine, Glass, Purr,
+  Ping, Tink) to put above the rest — short, mid-bright, unstartling — because a list of
+  fourteen is a list nobody reads to the end of and several of the fourteen are novelty stings.
+- **A file copied into `~/Library/Sounds` works too**, which is what Add a Sound does. That is
+  macOS's folder, not Threading's: the copy also appears in System Settings' alert-sound list,
+  an existing file of the same name is never overwritten (identical content is reused,
+  different content takes `name 2`), and removing one is a Finder delete rather than an
+  affordance this app has to own. The extension is checked against what `UNNotificationSound`
+  documents (AIFF, WAV, CAF) *and* the bytes are opened with `NSSound`, because an extension is
+  a claim — a mislabelled file would otherwise become a selectable sound that plays nothing.
+
+**The terminal bell is a different sound with a different owner** (`TerminalBell.swift`), and
+was not ours at all until now. `TerminalViewDelegate` ships a *protocol-extension* default —
+`bell(source:) { NSSound.beep() }` — so a delegate that does not implement the method is not
+choosing the system beep, it simply never had a say. `TerminalSession` now implements it, which
+is the entire switch: the extension's version stops being called and `TerminalBell` answers.
+
+It is deliberately **not** filed under the notification switches, and its card on the General
+page is separate for the same reason: none of them apply. A notification is Threading noticing
+something for you, so the master switch, the three kinds and a project's mute each get a say. A
+bell is a program writing one byte down the PTY — muting a project does not gag its terminal,
+and the bell rings whether or not the session needs anyone. Putting it in the Notifications card
+would have made that card's copy false.
+
+Three consequences worth knowing:
+
+- **`TerminalBellSound` has an Off case and `AttentionAlertSound` does not.** The alert sound is
+  switched off by the toggle above it; the bell has no toggle, so silence has to be one of the
+  sounds it can be set to. Its stored form carries three states in one string, using two
+  reserved words (`silent`, `system`) that cannot collide with a sound: a stored sound is always
+  a file name and every offered file name carries a playable extension.
+- **Silenced is not unnoticed.** The sound and the activity edge are separate paths — the sound
+  is `bell(source:)`, the edge is `onBell` → `recordBell()` — so a bell set to Off still ends
+  the inferred turn and still raises the session's hand in the sidebar.
+- **A bell in a background session can make two sounds**, and this is not fixed. `recordBell`
+  sets `awaitsUser` when the session is not visible, which posts a `.blocked` alert; with
+  Threading behind another app that banner presents *with* its own sound, alongside the bell.
+  Predicting whether the alert will actually be heard means predicting the master switch, the
+  kind, the mute scopes, the sound toggle and macOS's own authorization, and a half-right
+  prediction is worse than two sounds. The honest fix is a choice the user now has: set one of
+  the two to Off.
+
+The stored preference is `attentionAlertSound`, unseeded: an absent key is the macOS tone,
+which is a real answer rather than a missing one, so nothing needs migrating and
+`playsAttentionAlertSound` keeps meaning what it meant. The two questions stay separate —
+whether an alert sounds is the switch, which sound it is is the picker — and
+`AttentionAlertCenter.chosenSound()` is the one place that reads both, since the two posting
+paths had already drifted into asking half the question each. **Choosing in the picker plays
+the sound**, the way every alert-sound list does; the default item is the one that cannot,
+because macOS's notification tone lives in a private framework rather than in a folder a name
+resolves in, and the system beep is a different sound.
+
 **Clicking one opens its session through the sidebar**, on the same path as a local click —
 `SessionNotificationOpened` → `ProjectSidebarViewController.select`. That path fails *silently*
 by construction: a row that is not on screen has no index, `row(forItem:)` answers `-1`, and

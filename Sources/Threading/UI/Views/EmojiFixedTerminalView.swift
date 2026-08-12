@@ -375,8 +375,17 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         onOutputBytes?(slice)
     }
 
+    /// The bell, minus SwiftTerm's beep.
+    ///
+    /// `super.bell` forwards to the view's `terminalDelegate`, which for a
+    /// `LocalProcessTerminalView` is **the view itself** — and it does not implement `bell`, so
+    /// the call lands on `TerminalViewDelegate`'s protocol-extension default, which is a bare
+    /// `NSSound.beep()`. `LocalProcessTerminalViewDelegate` forwards four methods to
+    /// `processDelegate` and the bell is not one of them, so there is no seam further down:
+    /// implementing `bell` on the session would compile, satisfy nothing, and never be called.
+    /// Not calling `super` is therefore the switch, and `onBell` — which Threading already owned
+    /// for the activity edge — becomes the one path a bell takes.
     override func bell(source: Terminal) {
-        super.bell(source: source)
         onBell?()
     }
 

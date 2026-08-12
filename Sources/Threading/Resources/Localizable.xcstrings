@@ -27632,7 +27632,24 @@
     "Restore Name & Icon": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ namn och ikon"}}}},
     "Restore this account's detected name and provider icon": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ kontots upptäckta namn och leverantörsikon"}}}},
     "SplitButtonView": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "SplitButtonView"}}}},
-    "The same weld for a titled press on the pane's ground — a neutral secondary and its menu chevron. A primary cannot weld: its accent against the chevron's neutral would be a permanent seam.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Samma svetsning för ett tryck med titel på panelens egen grund — en neutral sekundär och dess menypil. En primär kan inte svetsas: dess accent mot pilens neutrala yta skulle bli en permanent skarv."}}}}
+    "The same weld for a titled press on the pane's ground — a neutral secondary and its menu chevron. A primary cannot weld: its accent against the chevron's neutral would be a permanent seam.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Samma svetsning för ett tryck med titel på panelens egen grund — en neutral sekundär och dess menypil. En primär kan inte svetsas: dess accent mot pilens neutrala yta skulle bli en permanent skarv."}}}},
+    "Alert sound": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Aviseringsljud"}}}},
+    "Picking one plays it. Add a Sound copies a sound file into your Sounds folder, where macOS looks for it.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Att välja ett spelar upp det. Lägg till ljud kopierar en ljudfil till din Sounds-mapp, där macOS letar efter den."}}}},
+    "macOS Alert Sound": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "macOS aviseringsljud"}}}},
+    "Add a Sound…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lägg till ljud…"}}}},
+    "Choose a sound. Anything past 30 seconds is cut short.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj ett ljud. Allt efter 30 sekunder klipps bort."}}}},
+    "macOS plays AIFF, WAV and CAF notification sounds. This file is %@.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "macOS spelar upp aviseringsljud i AIFF, WAV och CAF. Den här filen är %@."}}}},
+    "in another format": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "i ett annat format"}}}},
+    "This file could not be read as a sound.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Filen kunde inte läsas som ett ljud."}}}},
+    "The sound could not be copied to your Sounds folder. %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ljudet kunde inte kopieras till din Sounds-mapp. %@"}}}},
+    "Too many sounds of that name are already there.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "För många ljud med det namnet finns redan där."}}}},
+    "Bell sound": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ljudsignal"}}}},
+    "Terminal Bell": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Terminalens ljudsignal"}}}},
+    "What a program's bell does. Picking one plays it. Off still marks the session in the sidebar, so a silenced bell is seen rather than missed.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Vad ett programs ljudsignal gör. Att välja en spelar upp den. Av markerar fortfarande sessionen i sidofältet, så en tystad signal syns i stället för att missas."}}}},
+    "bell": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ljudsignal"}}}},
+    "beep": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "pip"}}}},
+    "terminal bell": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "terminalens ljudsignal"}}}},
+    "alert sound": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "aviseringsljud"}}}}
   },
   "version": "1.0"
 }

@@ -105,8 +105,13 @@ final class TerminalSession: NSObject {
             self.delegate?.terminalSession(self, didProduceOutputOf: byteCount)
         }
 
+        // Both halves of a bell, in the order they matter: heard, then noticed. The view no
+        // longer lets SwiftTerm beep for us (see `EmojiFixedTerminalView.bell`), so this is
+        // where the sound is decided — and it is decided separately from the activity edge,
+        // because a bell set to Off must still raise the session's hand in the sidebar.
         terminalView.onBell = { [weak self] in
             guard let self else { return }
+            TerminalBell.ring()
             self.delegate?.terminalSessionDidRingBell(self)
         }
 
