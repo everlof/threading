@@ -2845,6 +2845,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func updatePaneToggleSelection() {
         sidebarToolbarButton?.isSelected = !sidebarItem.isCollapsed
         displayPaneToolbarButton?.isSelected = !displayItem.isCollapsed
+        // **The panel's toggle stands down while the panel draws it.** It is one control, and
+        // the open panel's corner is where it lives — the same glyph the same distance from the
+        // window's trailing edge, so the pane arrives underneath a button that never moved.
+        // Left here as well it would offer the same switch twice, a pane's width apart. Set on
+        // every tick of a divider drag, alongside the fill above, because dragging the panel
+        // shut is one of the ways it comes back. See `DisplayPanelToggle`.
+        displayPaneToolbarButton?.isHidden = !displayItem.isCollapsed
     }
 
     /// Keeps toolbar controls semantic: a filled pane button means the pane is actually visible,

@@ -2,6 +2,34 @@ import AppKit
 import ThreadingExtensionKit
 @preconcurrency import WebKit
 
+// MARK: - Display Panel Toggle
+
+/// The one control that opens and shuts the display panel, wherever it is currently drawn.
+///
+/// **There is exactly one, and it does not move.** It sits at the trailing end of the session
+/// header's group while the panel is shut, and in the panel's own corner while it is open — the
+/// same glyph, the same size, the same distance from the window's trailing edge — so a press
+/// opens the pane *underneath* it rather than handing the corner to a different control. The
+/// corner used to hold an ✕, which said "close" where the toolbar said "toggle" and left the
+/// toggle itself pushed a pane's width to the left of where the eye had just been.
+///
+/// Stating the symbol and the copy once is what keeps the two drawings from drifting into two
+/// different controls; the geometry is `PaneHeaderDefaults.inset` at both ends, and
+/// `DisplayPaneToggleTests` asserts the two land on the same point.
+@MainActor
+enum DisplayPanelToggle {
+
+  /// The panel is the window's trailing pane, and the glyph is that pane filled in.
+  static let symbolName = "sidebar.trailing"
+
+  /// Names what it acts on rather than which way it will act: the button is a switch, and
+  /// `isSelected` — which `ThemedIconButton` publishes as the accessibility value — is what
+  /// says whether the panel is on.
+  static var accessibility: String { L10n.string("Display panel") }
+
+  static var toolTip: String { L10n.string("Show or Hide the Display Panel") }
+}
+
 // MARK: - Display Pane Controller
 
 /// The panel beside the terminal, showing content an agent asked Threading to display.
@@ -20,38 +48,55 @@ final class DisplayPaneController: NSViewController {
   /// Opens a new tab. It sits at the trailing edge of the tab row rather than inside the
   /// scrolling strip, so a pane full of tabs scrolls sideways *under* it instead of carrying
   /// the one control that adds another off the edge with them.
-  private lazy var newTabButton: ThemedButton = {
-    let button = ThemedButton(
-      symbol: "plus",
+  ///
+  /// A `.toolbar` icon button, like the toggle beside it and like the session header's own `+`
+  /// across the split. The two headers are one band — their hairlines land on a single line —
+  /// and this row's controls were six points shorter than that row's, which reads as two rows
+  /// pretending to be one.
+  private lazy var newTabButton: ThemedIconButton = {
+    let button = ThemedIconButton(
+      symbolName: "plus",
       accessibility: L10n.string("New tab"),
-      target: self,
-      action: #selector(newTabButtonClicked(_:))
+      inkSource: .chrome
     )
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.isBordered = false
     button.toolTip = L10n.string("New tab")
+    // It offers a menu rather than doing something, so the menu opens on the press and the
+    // button reads as held for as long as the menu is up — the platform's gesture, and the one
+    // the component guarantees survives a view being rebuilt under a held mouse.
+    button.presentsMenu = true
+    button.onPress = { [weak self, weak button] in
+      guard let self, let button else { return }
+      self.presentNewTabMenu(from: button)
+    }
     return button
   }()
 
-  /// Shuts the panel from its own corner — the same collapse the toolbar's toggle and
-  /// **View ▸ Display Panel** perform, offered where the eye already is when the panel is the
-  /// thing in the way.
+  /// The panel's toggle, in the panel's own corner — see `DisplayPanelToggle`.
   ///
-  /// It only ever *hides*: a control that is gone with its pane cannot bring the pane back, so
-  /// reopening stays the toolbar's and the command's job. The tabs are untouched — they are
-  /// waiting when the panel is next opened, as a dormant session's scrollback is. It sits
-  /// outermost with `+` beside it, in the slot a close occupies in every corner of this app,
-  /// and it is the *pane's*: a tab chip's own ✕ closes that tab and is drawn on the chip.
-  private lazy var closeButton: ThemedButton = {
-    let button = ThemedButton(
-      symbol: "xmark",
-      accessibility: L10n.string("Hide panel"),
-      target: self,
-      action: #selector(closeButtonClicked(_:))
+  /// The same control the session header's group holds while the panel is shut, drawn here
+  /// while it is open, at the same size and the same margin from the window's trailing edge.
+  /// The window hides the group's copy for exactly as long as this one is on screen, so the
+  /// user is never offered the same switch twice and the switch never leaves the corner.
+  ///
+  /// Pressing it hides the panel and nothing else: the tabs are untouched and waiting when the
+  /// panel is next opened, as a dormant session's scrollback is. It is the *pane's* control —
+  /// a tab chip's own ✕ closes that tab and is drawn on the chip.
+  ///
+  /// Its ink is the chrome's, not the backdrop's, because that is the ground it stands on: the
+  /// panel paints itself in the app theme's surface, while the toolbar's copy floats over the
+  /// terminal's palette. Same control, same place, each inked for what is behind it.
+  private lazy var panelToggleButton: ThemedIconButton = {
+    let button = ThemedIconButton(
+      symbolName: DisplayPanelToggle.symbolName,
+      accessibility: DisplayPanelToggle.accessibility,
+      inkSource: .chrome
     )
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.isBordered = false
-    button.toolTip = L10n.string("Hide the Display Panel")
+    button.toolTip = DisplayPanelToggle.toolTip
+    // Filled for as long as it exists, which is exactly as long as the panel is on screen —
+    // the same "this pane is visible" the session header's group states. Pressing an unfilled
+    // toggle and finding a filled one in the same spot is one button answering, not two.
+    button.isSelected = true
+    button.onPress = { [weak self] in self?.hidePanel() }
     return button
   }()
   private lazy var headerCustomizationView = DisplayPaneHeaderCustomizationView(
@@ -298,7 +343,7 @@ final class DisplayPaneController: NSViewController {
 
   // MARK: - Setup
 
-  /// The pane's one top row: its tabs, the control that adds another, and the pane's own close.
+  /// The pane's one top row: its tabs, the control that adds another, and the panel's toggle.
   ///
   /// There was a titled header above the strip, which spent a row of a narrow pane restating
   /// the name of the tab directly beneath it — and the toolbar already names the page. The
@@ -307,7 +352,7 @@ final class DisplayPaneController: NSViewController {
   private func setupHeader() {
     headerView.addSubview(headerCustomizationView)
     headerView.addSubview(newTabButton)
-    headerView.addSubview(closeButton)
+    headerView.addSubview(panelToggleButton)
 
     view.addSubview(headerView)
   }
@@ -315,11 +360,11 @@ final class DisplayPaneController: NSViewController {
   /// Asks the window to collapse the panel. Unset — the pane standing on its own in a fixture
   /// or a detached host — there is no pane to collapse and the press is a no-op, which is the
   /// same answer `onClose` already gives when the last tab is closed.
-  @objc private func closeButtonClicked(_ sender: NSView) {
+  private func hidePanel() {
     onClose?()
   }
 
-  @objc private func newTabButtonClicked(_ sender: NSView) {
+  private func presentNewTabMenu(from sender: NSView) {
     guard let sessionID = currentSessionID else { return }
 
     newTabMenuSession = ThemedMenuPresenter.present(
@@ -515,7 +560,7 @@ final class DisplayPaneController: NSViewController {
     )
     regularTabBarTrailingConstraint = regularTabBarTrailing
     globalTabBarTrailingConstraint = tabBar.trailingAnchor.constraint(
-      equalTo: closeButton.leadingAnchor,
+      equalTo: panelToggleButton.leadingAnchor,
       constant: -gap
     )
 
@@ -525,7 +570,7 @@ final class DisplayPaneController: NSViewController {
     // for a negative width and AppKit would break *something* to grant it. Just below required
     // it yields instead, and the strip — which scrolls, and already refuses to be read as a
     // measurement of its host (see `ThemedTabStripView`) — closes to nothing while `+` and the
-    // close stay whole. Both trailing constraints yield, since either may be the active one.
+    // toggle stay whole. Both trailing constraints yield, since either may be the active one.
     [regularTabBarTrailing, globalTabBarTrailingConstraint].forEach {
       $0?.priority = .init(999)
     }
@@ -539,6 +584,8 @@ final class DisplayPaneController: NSViewController {
       // The strip takes the row and gives up only what the trailing controls need, so a pane
       // full of tabs scrolls sideways rather than pushing the control that adds one, or the
       // one that shuts the pane, off the edge. It never takes a negative width for them.
+      // The two buttons state their own size: a `.toolbar` icon button is the role's
+      // measurement, and a width constraint here would be this pane deciding it again.
       tabBar.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
       tabBar.topAnchor.constraint(equalTo: headerView.topAnchor),
       tabBar.bottomAnchor.constraint(equalTo: headerView.bottomAnchor),
@@ -556,18 +603,19 @@ final class DisplayPaneController: NSViewController {
         lessThanOrEqualTo: headerView.heightAnchor
       ),
       newTabButton.trailingAnchor.constraint(
-        equalTo: closeButton.leadingAnchor, constant: -gap),
+        equalTo: panelToggleButton.leadingAnchor, constant: -gap),
       newTabButton.centerYAnchor.constraint(equalTo: headerView.contentCenterYAnchor),
-      newTabButton.widthAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
-      newTabButton.heightAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
 
-      // The close in the corner, the margin its own — `+` measures from it, and the strip and
+      // The toggle in the corner, the margin its own — `+` measures from it, and the strip and
       // the customization slot from `+`, so the row is one chain from the pane's edge inwards.
-      closeButton.trailingAnchor.constraint(
-        equalTo: headerView.trailingAnchor, constant: -padding),
-      closeButton.centerYAnchor.constraint(equalTo: headerView.contentCenterYAnchor),
-      closeButton.widthAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
-      closeButton.heightAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize),
+      //
+      // **The margin is the session header's, not this pane's `padding`.** The same toggle is
+      // drawn at the trailing end of that header while the panel is shut, pinned there by
+      // `PaneHeaderDefaults.inset`; measuring this one from anything else would make the
+      // button jump as the pane it opens arrives underneath it.
+      panelToggleButton.trailingAnchor.constraint(
+        equalTo: headerView.trailingAnchor, constant: -PaneHeaderDefaults.inset),
+      panelToggleButton.centerYAnchor.constraint(equalTo: headerView.contentCenterYAnchor),
 
       // Content anchors under the one header row.
       imageView.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: padding),
@@ -1768,9 +1816,9 @@ final class DisplayPaneController: NSViewController {
   /// The global document owns the whole row. Session-only extension decoration and `+` both
   /// disappear, and the strip takes their space rather than leaving a blank reservation behind.
   ///
-  /// The close is not theirs to take. The two that go are the ones that act on *this chat's*
-  /// tabs, which the global document is not one of; the close acts on the pane, and the pane is
-  /// on screen either way.
+  /// The toggle is not theirs to take. The two that go are the ones that act on *this chat's*
+  /// tabs, which the global document is not one of; the toggle acts on the pane, and the pane
+  /// is on screen either way.
   private func updateHeaderForCurrentTheme() {
     if isShowingCurrentTheme {
       regularTabBarTrailingConstraint?.isActive = false

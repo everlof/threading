@@ -1915,13 +1915,17 @@ the right that Claude or Codex can put content into while you keep working in th
 Ask for something visual — "show me that screenshot", "chart the bundle sizes", "render that
 as a table" — and the panel opens beside the terminal, taking about a third of the window the
 first time and the width you last dragged it to after that. Drag its divider to resize it; drag
-it all the way to the edge and the panel closes. Close it with the **✕** at the right of its
-header, beside the **+** — that one shuts the panel, while the ✕ on a tab closes only that tab.
-Your tabs are kept either way, and the panel reopens the next time the agent displays something. It can also be opened by hand — the
-panel toggle at the session header's right edge, or **View ▸ Display Panel** — so its tabs (the
-browser, Git Review, Session Info) are reachable without an agent putting content there first.
-Both wait for a session: the panel holds one conversation's tabs, so on a project's start page,
-where no session is selected yet, the toggle and the menu item are unavailable.
+it all the way to the edge and the panel closes. It can also be opened and closed by hand with
+the **panel toggle** at the top-right of the window, or **View ▸ Display Panel** — so its tabs
+(the browser, Git Review, Session Info) are reachable without an agent putting content there
+first. Both wait for a session: the panel holds one conversation's tabs, so on a project's start
+page, where no session is selected yet, the toggle and the menu item are unavailable.
+
+**The toggle stays where you pressed it.** It sits at the right end of the session header while
+the panel is shut; press it and the panel opens *underneath* it, so the same button — now filled,
+beside the panel's **+** — is what shuts it again. There is only ever one of it. The ✕ on a tab
+is a different thing: it closes that tab. Your tabs are kept when the panel closes, and the panel
+reopens the next time the agent displays something.
 
 The tabs are yours to arrange: drag one along the strip to reorder it, middle-click one to
 close it, or use its secondary-click menu — **Close Tab**, **Close Other Tabs**,
