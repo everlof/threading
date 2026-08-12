@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import ThreadingPeerTransport
 import ThreadingRemoteKit
 
 struct PairedRemoteHost: Codable, Hashable, Identifiable {
@@ -17,6 +18,10 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
     var endpoints: [RemoteHostEndpointDTO]? = nil
     var connectionPolicy: RemoteHostConnectionPolicy? = nil
     var activeEndpointKind: String? = nil
+    /// Optional zero-setup direct route. It is protected by the same Keychain item as the
+    /// Mac-issued remote capability and never copied into an ordinary share link.
+    var hostedServiceURL: URL? = nil
+    var hostedCredential: PeerDeviceServiceCredential? = nil
 
     var displayAddress: String {
         link.baseURL.host ?? link.baseURL.absoluteString
@@ -41,6 +46,7 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
         switch activeEndpointKind ?? Self.endpointKind(for: link.baseURL) {
         case "tailscale": return MobileL10n.string("Tailscale")
         case "relay": return MobileL10n.string("Relay")
+        case "hosted": return MobileL10n.string("Direct")
         default: return MobileL10n.string("Direct")
         }
     }
@@ -49,9 +55,13 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
         isOwnerDevice ? name : MobileL10n.string("%@ · Shared chat", name)
     }
 
-    mutating func merge(identity: RemoteHostDTO?, successfulLink: RemoteConnectionLink) {
-        link = successfulLink
-        activeEndpointKind = Self.endpointKind(for: successfulLink.baseURL)
+    mutating func merge(
+        identity: RemoteHostDTO?,
+        successfulLink: RemoteConnectionLink,
+        isHosted: Bool = false
+    ) {
+        if !isHosted { link = successfulLink }
+        activeEndpointKind = isHosted ? "hosted" : Self.endpointKind(for: successfulLink.baseURL)
         lastConnectedAt = Date()
         guard let identity else { return }
         hostID = identity.id

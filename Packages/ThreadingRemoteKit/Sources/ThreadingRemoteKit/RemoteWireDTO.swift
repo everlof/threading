@@ -504,6 +504,37 @@ public struct RemoteHostDTO: Codable, Equatable, Sendable {
 /// older clients ignore the field and newer clients can ignore feature names they do not know.
 public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
     case usageDashboard = "usage-dashboard"
+    case hostedPeerTransport = "hosted-peer-transport"
+}
+
+/// A device-bound hosted rendezvous credential issued by the paired Mac. The ordinary remote
+/// capability remains separate and still authorizes every HTTP/WebSocket operation after the
+/// direct tunnel reaches the Mac's loopback server.
+public struct RemoteHostedDeviceCredentialDTO: Codable, Equatable, Sendable {
+    public let serviceURL: String
+    public let hostID: String
+    public let deviceID: String
+    public let credential: String
+    /// Milliseconds since Unix epoch, matching the hosted service contract.
+    public let expiresAt: Double
+
+    public init(
+        serviceURL: String,
+        hostID: String,
+        deviceID: String,
+        credential: String,
+        expiresAt: Double
+    ) {
+        self.serviceURL = serviceURL
+        self.hostID = hostID
+        self.deviceID = deviceID
+        self.credential = credential
+        self.expiresAt = expiresAt
+    }
+}
+
+public struct RemoteHostedDeviceCredentialRequestDTO: Codable, Equatable, Sendable {
+    public init() {}
 }
 
 // MARK: - Usage dashboard

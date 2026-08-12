@@ -262,7 +262,7 @@ final class ExecutionAuditTests: XCTestCase {
             "rawOutput": ["line": "Compiling", "percent": 42] as [String: Any]
         ]
 
-        let event = try XCTUnwrap(GrokProviderExecutionAdapter.event(
+        let event = try XCTUnwrap(ACPProviderExecutionAdapter.event(
             update: update,
             operation: "Run checks",
             kind: "execute",

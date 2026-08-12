@@ -24,15 +24,26 @@ production D1 database, replace that value, apply migrations, then set these enc
 
 ```sh
 npx wrangler secret put SESSION_SIGNING_SECRET
+npx wrangler secret put APPLE_TEAM_ID
+npx wrangler secret put APPLE_KEY_ID
+npx wrangler secret put APPLE_PRIVATE_KEY
+npx wrangler secret put APPLE_TOKEN_ENCRYPTION_SECRET
 npx wrangler secret put TURN_KEY_ID
 npx wrangler secret put TURN_KEY_API_TOKEN
 ```
 
-`SESSION_SIGNING_SECRET` must be at least 32 random bytes. Create a Cloudflare Realtime TURN key;
+`SESSION_SIGNING_SECRET` and `APPLE_TOKEN_ENCRYPTION_SECRET` must be independent random values of
+at least 32 bytes. `APPLE_PRIVATE_KEY` is the Sign in with Apple `.p8` key; its matching team and
+key IDs are separate secrets. The service exchanges Apple's single-use authorization code and
+stores only the resulting refresh token, encrypted with AES-GCM, so in-app account deletion can
+revoke Apple authorization before cascading the D1 account rows.
+
+Create a Cloudflare Realtime TURN key;
 the long-lived key and API token stay in Worker secrets. Clients receive only generated TURN
 credentials. If TURN credential provisioning is temporarily unavailable, rendezvous continues
 with Cloudflare STUN so direct paths remain available.
 
-Before deployment, configure the final Sign in with Apple Services IDs/bundle IDs in
-`APPLE_CLIENT_IDS`, attach the custom service domain, enable rate limiting/App Attest enforcement
-at the edge, and set log retention. Do not deploy with the example D1 ID or `.dev.vars` values.
+Before deployment, configure the final native Sign in with Apple bundle IDs in
+`APPLE_CLIENT_IDS`, attach the custom service domain, enable account/auth rate limits at the edge,
+register Apple's server-to-server notification endpoint, and set log retention. Do not deploy
+with the example D1 ID or `.dev.vars` values.

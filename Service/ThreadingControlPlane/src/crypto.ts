@@ -100,6 +100,17 @@ export async function verifyAppleIdentityToken(
   return payload;
 }
 
+export async function verifyAppleNotification(token: string, env: Env): Promise<JWTPayload> {
+  const audiences = env.APPLE_CLIENT_IDS.split(",").map((value) => value.trim()).filter(Boolean);
+  if (audiences.length === 0) throw new HttpError(503, "serviceConfiguration", "Apple audience is not configured");
+  const { payload } = await jwtVerify(token, appleKeys, {
+    issuer: "https://appleid.apple.com",
+    audience: audiences,
+    algorithms: ["RS256"],
+  });
+  return payload;
+}
+
 function signingKey(env: Env): Uint8Array {
   const bytes = encoder.encode(env.SESSION_SIGNING_SECRET);
   if (bytes.byteLength < 32) {

@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import ThreadingPeerTransport
 import ThreadingRemoteKit
 
 /// A thread-safe token → authorization map. The server queue reads it on every auth check, and
@@ -99,6 +100,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     private let server = RemoteAccessServer()
     private let tunnel = RemoteTunnel()
     private let tailscale = TailscaleRemoteTransport()
+    private let hostedService: RemoteHostedServiceController
     private let authority = RemoteAuthorityStore()
     private let ownerDevices: RemoteOwnerDeviceRegistry
     private let guestShareStore: RemoteGuestSharePersisting
@@ -117,12 +119,17 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
 
     init(
         ownerDeviceStore: RemoteOwnerDevicePersisting,
-        guestShareStore: RemoteGuestSharePersisting? = nil
+        guestShareStore: RemoteGuestSharePersisting? = nil,
+        hostedService: RemoteHostedServiceController? = nil
     ) {
         ownerDevices = RemoteOwnerDeviceRegistry(store: ownerDeviceStore)
         self.guestShareStore = guestShareStore ?? Self.defaultGuestShareStore()
+        self.hostedService = hostedService ?? RemoteHostedServiceController()
         server.authorizer = authority
         server.invitationRedeemer = self
+        self.hostedService.onStateChange = {
+            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+        }
         restoreGuestShares()
     }
 
@@ -190,6 +197,50 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     }
 
     var tailscaleReadiness: TailscaleReadiness { tailscale.readiness }
+    var hostedServiceState: RemoteHostedServiceState { hostedService.state }
+
+    func signInHostedService(
+        identityToken: String,
+        authorizationCode: String,
+        rawNonce: String
+    ) async throws {
+        try await hostedService.signInWithApple(
+            identityToken: identityToken,
+            authorizationCode: authorizationCode,
+            rawNonce: rawNonce
+        )
+    }
+
+    func signOutHostedService() async throws {
+        try await hostedService.signOut()
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+    }
+
+    func deleteHostedServiceAccount() async throws {
+        try await hostedService.deleteAccount()
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+    }
+
+    var canIssueHostedDeviceCredentials: Bool {
+        hostedService.canIssueDeviceCredentials
+    }
+
+    func issueHostedDeviceCredential(deviceID: String) async throws
+        -> RemoteHostedDeviceCredentialDTO {
+        guard let serviceURL = hostedService.serviceURL else {
+            throw PeerControlPlaneError.invalidEndpoint
+        }
+        let issued = try await hostedService.issueDeviceCredential(deviceID: deviceID)
+        return issued.credential.withValue { credential in
+            RemoteHostedDeviceCredentialDTO(
+                serviceURL: serviceURL.absoluteString,
+                hostID: issued.hostID,
+                deviceID: issued.deviceID,
+                credential: credential,
+                expiresAt: issued.expiresAt.timeIntervalSince1970 * 1_000
+            )
+        }
+    }
 
     /// The stable host plus the routes an owner is allowed to consider. Guest payloads omit the
     /// list so a public one-chat invitation never reveals the owner's private tailnet hostname.
@@ -722,6 +773,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         authority.set(nil, forToken: record.token)
         RemoteNotificationService.shared.revoke(shareID: record.id)
         server.revokeConnections(shareID: record.id)
+        hostedService.revokeDevice(deviceID: record.deviceID)
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
         ThreadingLogger.remote.notice("Remote owner device revoked")
@@ -1101,6 +1153,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         let generation = transportGeneration
         tunnel.stop()
         tailscale.stop()
+        hostedService.start(targetPort: port)
         relayStatus = .stopped
         tailscaleStatus = .stopped
 
@@ -1223,6 +1276,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         transportGeneration += 1
         tunnel.stop()
         tailscale.stop()
+        hostedService.stop()
         relayStatus = .stopped
         tailscaleStatus = .stopped
     }

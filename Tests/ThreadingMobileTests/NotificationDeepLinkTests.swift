@@ -81,6 +81,36 @@ final class NotificationDeepLinkTests: XCTestCase {
         ]))
     }
 
+    func testLegacyPairedHostRecordDecodesWithoutHostedRoute() throws {
+        let link = try XCTUnwrap(RemoteConnectionLink(
+            string: "https://mac.example.test/#capability"
+        ))
+        let legacy = PairedRemoteHost(
+            id: "host-1",
+            hostID: "host-1",
+            shareID: "my-devices",
+            scope: "all",
+            name: "Mac",
+            link: link,
+            lastConnectedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy)) as? [String: Any]
+        )
+        object["hostedServiceURL"] = nil
+        object["hostedCredential"] = nil
+
+        let decoded = try JSONDecoder().decode(
+            PairedRemoteHost.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertEqual(decoded.id, legacy.id)
+        XCTAssertEqual(decoded.link, legacy.link)
+        XCTAssertNil(decoded.hostedServiceURL)
+        XCTAssertNil(decoded.hostedCredential)
+    }
+
     @MainActor
     func testOversizedContinuityDraftCannotReplacePublishedOrDurableState() throws {
         let suite = "MobileContinuityCandidate.\(UUID().uuidString)"

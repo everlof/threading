@@ -16,19 +16,22 @@ final class GrokACPStreamSessionTests: XCTestCase {
     }
 
     func testAdapterReadsStandardSessionModelAndUsage() {
-        XCTAssertEqual(GrokACPAdapter.currentModel(in: [
+        XCTAssertEqual(ACPWireAdapter.currentModel(in: [
             "models": ["currentModelId": "grok-4.5"]
         ]), "grok-4.5")
-        XCTAssertEqual(GrokACPAdapter.integer(42), 42)
-        XCTAssertNil(GrokACPAdapter.integer(true))
-        XCTAssertEqual(GrokACPAdapter.sessionTitle(in: [
+        XCTAssertEqual(GrokACPExtensions.modelStateModelID(in: [
+            "_meta": ["modelState": ["currentModelId": "grok-4.5-fast"]]
+        ]), "grok-4.5-fast")
+        XCTAssertEqual(ACPWireAdapter.integer(42), 42)
+        XCTAssertNil(ACPWireAdapter.integer(true))
+        XCTAssertEqual(ACPWireAdapter.sessionTitle(in: [
             "title": "  Repair the parser  "
         ]), "Repair the parser")
-        XCTAssertNil(GrokACPAdapter.sessionTitle(in: ["title": "  "]))
+        XCTAssertNil(ACPWireAdapter.sessionTitle(in: ["title": "  "]))
     }
 
     func testAdapterMapsACPPlanStatuses() {
-        let steps = GrokACPAdapter.planSteps(in: [
+        let steps = ACPWireAdapter.planSteps(in: [
             "entries": [
                 ["content": "Inspect", "priority": "high", "status": "completed"],
                 ["content": "Implement", "priority": "high", "status": "in_progress"],
@@ -42,18 +45,18 @@ final class GrokACPStreamSessionTests: XCTestCase {
     }
 
     func testAdapterMapsACPToolKindsToPermissionIdentities() {
-        XCTAssertEqual(GrokACPAdapter.toolIdentity(kind: "execute", title: "Run"), .bash)
-        XCTAssertEqual(GrokACPAdapter.toolIdentity(kind: "read", title: "Open"), .read)
-        XCTAssertEqual(GrokACPAdapter.toolIdentity(kind: "edit", title: "Patch"), .edit)
-        XCTAssertEqual(GrokACPAdapter.toolIdentity(kind: "fetch", title: "Fetch"), .webFetch)
+        XCTAssertEqual(ACPWireAdapter.toolIdentity(kind: "execute", title: "Run"), .bash)
+        XCTAssertEqual(ACPWireAdapter.toolIdentity(kind: "read", title: "Open"), .read)
+        XCTAssertEqual(ACPWireAdapter.toolIdentity(kind: "edit", title: "Patch"), .edit)
+        XCTAssertEqual(ACPWireAdapter.toolIdentity(kind: "fetch", title: "Fetch"), .webFetch)
         XCTAssertEqual(
-            GrokACPAdapter.toolIdentity(kind: "future", title: "NovelTool"),
+            ACPWireAdapter.toolIdentity(kind: "future", title: "NovelTool"),
             .unknown("NovelTool")
         )
     }
 
     func testAdapterPreservesRawToolInputAndDiffLocation() {
-        let input = GrokACPAdapter.toolInput(from: [
+        let input = ACPWireAdapter.toolInput(from: [
             "title": "Edit file",
             "kind": "edit",
             "rawInput": ["replacement": "new"],
@@ -72,10 +75,13 @@ final class GrokACPStreamSessionTests: XCTestCase {
     }
 
     func testComposerCatalogKeepsSafeCommandsAndGatesSessionOwnership() throws {
-        let capabilities = GrokACPComposerCatalog.capabilities(from: [
-            ["name": "deep-research", "description": "Research", "input": ["hint": "query"]],
-            ["name": "always-approve", "description": "Skip prompts"]
-        ])
+        let capabilities = ACPWireAdapter.composerCapabilities(
+            from: [
+                ["name": "deep-research", "description": "Research", "input": ["hint": "query"]],
+                ["name": "always-approve", "description": "Skip prompts"]
+            ],
+            policy: ACPProviderProfile.grok.commandCatalog
+        )
 
         let research = try XCTUnwrap(capabilities.first { $0.name == "deep-research" })
         XCTAssertTrue(research.isEnabled)
@@ -149,9 +155,10 @@ final class GrokACPStreamSessionTests: XCTestCase {
         """#
 
         let sessionID = SessionID()
-        let session = GrokACPStreamSession(
+        let session = ACPStreamSession(
             sessionID: sessionID,
-            workingDirectory: "/tmp/project"
+            workingDirectory: "/tmp/project",
+            profile: .grok
         ) {
             AgentLaunchPlan(
                 executable: "/bin/sh",

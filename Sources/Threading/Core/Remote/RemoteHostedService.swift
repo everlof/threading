@@ -1,3 +1,4 @@
+import AuthenticationServices
 import Foundation
 import Security
 import ThreadingPeerTransport
@@ -143,6 +144,7 @@ final class RemoteHostedServiceController {
     private var desiredPort: UInt16?
     private var lifecycleGeneration = 0
     private var retryAttempt = 0
+    private var credentialRevokedObserver: NSObjectProtocol?
 
     init(
         store: (any RemoteHostedServicePersisting)? = nil,
@@ -164,6 +166,19 @@ final class RemoteHostedServiceController {
         } catch {
             persistenceError = error.localizedDescription
         }
+        credentialRevokedObserver = NotificationCenter.default.addObserver(
+            forName: ASAuthorizationAppleIDProvider.credentialRevokedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.forgetRevokedAppleCredential() }
+        }
+    }
+
+    deinit {
+        if let credentialRevokedObserver {
+            NotificationCenter.default.removeObserver(credentialRevokedObserver)
+        }
     }
 
     var canIssueDeviceCredentials: Bool {
@@ -171,6 +186,8 @@ final class RemoteHostedServiceController {
         return record.hostCredential.hostID == hostID
             && record.hostCredential.expiresAt > Date()
     }
+
+    var serviceURL: URL? { endpoint?.baseURL }
 
     func start(targetPort: UInt16) {
         desiredPort = targetPort
@@ -202,28 +219,38 @@ final class RemoteHostedServiceController {
         state = .stopped
     }
 
-    func signInWithApple(identityToken: String, rawNonce: String) async throws {
+    func signInWithApple(
+        identityToken: String,
+        authorizationCode: String,
+        rawNonce: String
+    ) async throws {
         guard let endpoint else { throw PeerControlPlaneError.invalidEndpoint }
         let generation = lifecycleGeneration
         state = .connecting
         let client = PeerControlPlaneClient(endpoint: endpoint)
-        let session = try await client.signInWithApple(
-            identityToken: identityToken,
-            rawNonce: rawNonce
-        )
-        let hostCredential = try await client.enrollHost(
-            accessToken: session.accessToken,
-            hostID: hostID,
-            displayName: hostName
-        )
-        let candidate = RemoteHostedServiceRecord(
-            version: RemoteHostedServiceDefaults.recordVersion,
-            endpoint: endpoint.baseURL,
-            session: session,
-            hostCredential: hostCredential,
-            pendingRevokedDeviceIDs: []
-        )
-        try persist(candidate)
+        do {
+            let session = try await client.signInWithApple(
+                identityToken: identityToken,
+                authorizationCode: authorizationCode,
+                rawNonce: rawNonce
+            )
+            let hostCredential = try await client.enrollHost(
+                accessToken: session.accessToken,
+                hostID: hostID,
+                displayName: hostName
+            )
+            let candidate = RemoteHostedServiceRecord(
+                version: RemoteHostedServiceDefaults.recordVersion,
+                endpoint: endpoint.baseURL,
+                session: session,
+                hostCredential: hostCredential,
+                pendingRevokedDeviceIDs: []
+            )
+            try persist(candidate)
+        } catch {
+            state = persistenceError == nil ? .signInRequired : .unavailable("credentials")
+            throw error
+        }
         guard generation == lifecycleGeneration else { return }
         if let desiredPort {
             start(targetPort: desiredPort)
@@ -232,11 +259,55 @@ final class RemoteHostedServiceController {
         }
     }
 
-    func signOut() throws {
-        stop()
-        try store.delete()
-        record = nil
-        persistenceError = nil
+    func signOut() async throws {
+        lifecycleGeneration &+= 1
+        stopConnection(keepingDesiredPort: true)
+        guard let endpoint else { throw PeerControlPlaneError.invalidEndpoint }
+        guard var current = record else {
+            try store.delete()
+            persistenceError = nil
+            state = desiredPort == nil ? .stopped : .signInRequired
+            return
+        }
+
+        state = .connecting
+        let client = PeerControlPlaneClient(endpoint: endpoint)
+        do {
+            let session = try await validSession(current: &current, client: client)
+            do {
+                try await client.revokeHost(accessToken: session.accessToken, hostID: hostID)
+            } catch PeerControlPlaneError.rejected(let status, _) where status == 404 {
+                // An earlier attempt may have revoked the host before its response was lost.
+            }
+            try await client.signOut(refreshToken: session.refreshToken)
+            try store.delete()
+            record = nil
+            persistenceError = nil
+            state = desiredPort == nil ? .stopped : .signInRequired
+        } catch {
+            state = .unavailable("service")
+            throw error
+        }
+    }
+
+    func deleteAccount() async throws {
+        lifecycleGeneration &+= 1
+        stopConnection(keepingDesiredPort: true)
+        guard let endpoint else { throw PeerControlPlaneError.invalidEndpoint }
+        guard var current = record else { throw PeerControlPlaneError.invalidCredential }
+        state = .connecting
+        let client = PeerControlPlaneClient(endpoint: endpoint)
+        do {
+            let session = try await validSession(current: &current, client: client)
+            try await client.deleteAccount(accessToken: session.accessToken)
+            try store.delete()
+            record = nil
+            persistenceError = nil
+            state = desiredPort == nil ? .stopped : .signInRequired
+        } catch {
+            state = .unavailable("service")
+            throw error
+        }
     }
 
     func issueDeviceCredential(deviceID: String) async throws -> PeerDeviceServiceCredential {
@@ -338,15 +409,7 @@ final class RemoteHostedServiceController {
         )
         if current.hostCredential.expiresAt > renewalDate { return current }
 
-        let session: PeerControlPlaneSession
-        if current.session.accessTokenExpiresAt > Date().addingTimeInterval(60) {
-            session = current.session
-        } else {
-            guard current.session.refreshTokenExpiresAt > Date().addingTimeInterval(60) else {
-                throw PeerControlPlaneError.invalidCredential
-            }
-            session = try await client.refresh(refreshToken: current.session.refreshToken)
-        }
+        let session = try await validSession(current: &current, client: client)
         let hostCredential = try await client.enrollHost(
             accessToken: session.accessToken,
             hostID: hostID,
@@ -356,6 +419,22 @@ final class RemoteHostedServiceController {
         current.hostCredential = hostCredential
         try persist(current)
         return current
+    }
+
+    private func validSession(
+        current: inout RemoteHostedServiceRecord,
+        client: PeerControlPlaneClient
+    ) async throws -> PeerControlPlaneSession {
+        if current.session.accessTokenExpiresAt > Date().addingTimeInterval(60) {
+            return current.session
+        }
+        guard current.session.refreshTokenExpiresAt > Date().addingTimeInterval(60) else {
+            throw PeerControlPlaneError.invalidCredential
+        }
+        let session = try await client.refresh(refreshToken: current.session.refreshToken)
+        current.session = session
+        try persist(current)
+        return session
     }
 
     private func revokeDeviceNow(deviceID: String) async {
@@ -449,6 +528,20 @@ final class RemoteHostedServiceController {
         }
     }
 
+    private func forgetRevokedAppleCredential() {
+        lifecycleGeneration &+= 1
+        stopConnection(keepingDesiredPort: true)
+        do {
+            try store.delete()
+            record = nil
+            persistenceError = nil
+            state = desiredPort == nil ? .stopped : .signInRequired
+        } catch {
+            persistenceError = error.localizedDescription
+            state = .unavailable("credentials")
+        }
+    }
+
     private static func isValid(
         _ record: RemoteHostedServiceRecord,
         endpoint: PeerControlPlaneServiceEndpoint?,
@@ -461,9 +554,20 @@ final class RemoteHostedServiceController {
                 <= RemoteHostedServiceDefaults.maximumPendingRevocations,
               Set(record.pendingRevokedDeviceIDs).count == record.pendingRevokedDeviceIDs.count
         else { return false }
-        return record.pendingRevokedDeviceIDs.allSatisfy { value in
-            !value.isEmpty && value.utf8.count <= PeerRendezvousBounds.maximumIdentifierBytes
-        }
+        return Self.isIdentifier(record.session.accountID)
+            && Self.isIdentifier(record.hostCredential.hostID)
+            && record.pendingRevokedDeviceIDs.allSatisfy(Self.isIdentifier)
+    }
+
+    private static func isIdentifier(_ value: String) -> Bool {
+        !value.isEmpty
+            && value.utf8.count <= PeerRendezvousBounds.maximumIdentifierBytes
+            && value.unicodeScalars.allSatisfy { scalar in
+                switch scalar.value {
+                case 45, 46, 48...57, 58, 65...90, 95, 97...122: true
+                default: false
+                }
+            }
     }
 
     private static func defaultStore() -> RemoteHostedServicePersisting {

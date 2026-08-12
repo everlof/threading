@@ -1,4 +1,5 @@
 import AppKit
+import AuthenticationServices
 
 /// Remote Access gets a page of its own because it is a setup flow, not a behavioural toggle.
 ///
@@ -13,6 +14,11 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private let connectionModeControl = ThemedSegmentedControl()
     private let ownerRelayFallbackToggle = ThemedToggle()
     private let keepRelayReadyToggle = ThemedToggle()
+    private let hostedSignInButton = HostedServiceSignInButton()
+    private let hostedSignOutButton = ThemedButton()
+    private let hostedDeleteAccountButton = ThemedButton()
+    private let hostedStatusLabel = NSTextField(labelWithString: "")
+    private let hostedAccountControls = NSStackView()
     private let inputControlDefault = ThemedSegmentedControl()
     private let openLocallyButton = ThemedButton()
     private let pairingActionButton = ThemedButton()
@@ -33,6 +39,9 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
     private var copiedReset: DispatchWorkItem?
     private var pairedDeviceIDs: [String] = []
+    private let hostedAppleSignIn = RemoteHostedAppleSignIn()
+    private var hostedAccountTask: Task<Void, Never>?
+    private var hostedAccountError: String?
     private let appEvents = AppEventObservations()
 
     // MARK: - Lifecycle
@@ -88,6 +97,28 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         keepRelayReadyToggle.setAccessibilityIdentifier(
             "settings.remote-access.keep-relay-ready"
         )
+
+        hostedSignInButton.configure(target: self, action: #selector(signInHostedService))
+        hostedSignInButton.setAccessibilityIdentifier("settings.remote-access.hosted-sign-in")
+        hostedSignOutButton.title = L10n.string("Sign Out")
+        hostedSignOutButton.target = self
+        hostedSignOutButton.action = #selector(signOutHostedService)
+        hostedSignOutButton.setAccessibilityIdentifier("settings.remote-access.hosted-sign-out")
+        hostedDeleteAccountButton.title = L10n.string("Delete Account")
+        hostedDeleteAccountButton.target = self
+        hostedDeleteAccountButton.action = #selector(deleteHostedServiceAccount)
+        hostedDeleteAccountButton.setAccessibilityIdentifier(
+            "settings.remote-access.hosted-delete-account"
+        )
+        hostedStatusLabel.applyFont(.subheading)
+        hostedStatusLabel.textColor = Design.Text.secondary
+        hostedAccountControls.orientation = .horizontal
+        hostedAccountControls.alignment = .centerY
+        hostedAccountControls.spacing = Design.Spacing.small
+        hostedAccountControls.addArrangedSubview(hostedStatusLabel)
+        hostedAccountControls.addArrangedSubview(hostedSignInButton)
+        hostedAccountControls.addArrangedSubview(hostedSignOutButton)
+        hostedAccountControls.addArrangedSubview(hostedDeleteAccountButton)
 
         inputControlDefault.configure(
             titles: RemoteInputControlDefault.allCases.map(\.title),
@@ -206,6 +237,13 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                     + "your private tailnet. Private + Sharing uses Tailscale for pairing and "
                     + "starts the public relay only when it is needed.",
                 control: connectionModeControl
+            ),
+            SettingsUI.row(
+                title: "Hosted Direct",
+                subtitle: "Uses Threading’s service only to introduce this Mac and iPhone, then "
+                    + "prefers a direct encrypted connection. TURN is used only when direct "
+                    + "network traversal cannot connect.",
+                control: hostedAccountControls
             ),
             SettingsUI.row(
                 title: "Owner Relay Fallback",
@@ -372,6 +410,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         openLocallyButton.isHidden = coordinator.localURL == nil
         openLocallyButton.isEnabled = coordinator.localURL != nil
         rebuildPairedDevices(coordinator.pairedOwnerDevices, error: coordinator.ownerDevicePersistenceError)
+        updateHostedAccount(coordinator)
 
         switch coordinator.status {
         case .disabled:
@@ -427,6 +466,122 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 actionEnabled: true,
                 prominent: true
             )
+        }
+    }
+
+    private func updateHostedAccount(_ coordinator: RemoteAccessCoordinator) {
+        hostedSignInButton.isHidden = true
+        hostedSignOutButton.isHidden = true
+        hostedDeleteAccountButton.isHidden = true
+        hostedSignInButton.isEnabled = hostedAccountTask == nil
+        hostedSignOutButton.isEnabled = hostedAccountTask == nil
+        hostedDeleteAccountButton.isEnabled = hostedAccountTask == nil
+
+        if let hostedAccountError {
+            hostedStatusLabel.stringValue = hostedAccountError
+            if coordinator.canIssueHostedDeviceCredentials {
+                hostedSignOutButton.isHidden = false
+                hostedDeleteAccountButton.isHidden = false
+            } else {
+                hostedSignInButton.isHidden = false
+            }
+            return
+        }
+        switch coordinator.hostedServiceState {
+        case .stopped:
+            if coordinator.canIssueHostedDeviceCredentials {
+                hostedStatusLabel.stringValue = L10n.string("Signed in")
+                hostedSignOutButton.isHidden = false
+                hostedDeleteAccountButton.isHidden = false
+            } else {
+                hostedStatusLabel.stringValue = L10n.string("Not signed in")
+                hostedSignInButton.isHidden = false
+            }
+        case .notConfigured:
+            hostedStatusLabel.stringValue = L10n.string("Not configured in this build")
+        case .signInRequired:
+            hostedStatusLabel.stringValue = L10n.string("Sign in to enable zero-setup access")
+            hostedSignInButton.isHidden = false
+        case .connecting:
+            hostedStatusLabel.stringValue = L10n.string("Connecting…")
+        case .ready:
+            hostedStatusLabel.stringValue = L10n.string("Ready")
+            hostedSignOutButton.isHidden = false
+            hostedDeleteAccountButton.isHidden = false
+        case .unavailable:
+            hostedStatusLabel.stringValue = L10n.string("Temporarily unavailable")
+            if coordinator.canIssueHostedDeviceCredentials {
+                hostedSignOutButton.isHidden = false
+                hostedDeleteAccountButton.isHidden = false
+            } else {
+                hostedSignInButton.isHidden = false
+            }
+        }
+    }
+
+    @objc private func signInHostedService() {
+        guard hostedAccountTask == nil, let window = view.window else { return }
+        hostedAccountError = nil
+        refresh()
+        hostedAccountTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let authorization = try await hostedAppleSignIn.authorize(from: window)
+                try await RemoteAccessCoordinator.shared.signInHostedService(
+                    identityToken: authorization.identityToken,
+                    authorizationCode: authorization.authorizationCode,
+                    rawNonce: authorization.rawNonce
+                )
+            } catch let error as ASAuthorizationError where error.code == .canceled {
+                // Closing Apple's sheet is an ordinary cancellation, not a service failure.
+            } catch {
+                hostedAccountError = L10n.string("Sign in failed. Try again.")
+            }
+            hostedAccountTask = nil
+            refresh()
+        }
+    }
+
+    @objc private func signOutHostedService() {
+        guard hostedAccountTask == nil else { return }
+        hostedAccountError = nil
+        refresh()
+        hostedAccountTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await RemoteAccessCoordinator.shared.signOutHostedService()
+            } catch {
+                hostedAccountError = L10n.string("Sign out failed. Try again.")
+            }
+            hostedAccountTask = nil
+            refresh()
+        }
+    }
+
+    @objc private func deleteHostedServiceAccount() {
+        guard hostedAccountTask == nil else { return }
+        let request = ConfirmationRequest(
+            prompt: .deleteHostedServiceAccount,
+            title: L10n.string("Delete hosted account?"),
+            message: L10n.string(
+                "This permanently removes your Threading service account, revokes direct "
+                    + "access for every paired iPhone, and signs this Mac out. Local chats and "
+                    + "settings stay on this Mac."
+            ),
+            confirmTitle: L10n.string("Delete Account")
+        )
+        guard ConfirmationAlert.ask(request) else { return }
+        hostedAccountError = nil
+        refresh()
+        hostedAccountTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await RemoteAccessCoordinator.shared.deleteHostedServiceAccount()
+            } catch {
+                hostedAccountError = L10n.string("Account deletion failed. Try again.")
+            }
+            hostedAccountTask = nil
+            refresh()
         }
     }
 

@@ -1,12 +1,19 @@
 import type { Env, RendezvousPrincipal } from "./environment";
 import { HttpError } from "./environment";
-import { handleAppleSignIn, handleRefresh } from "./auth";
+import {
+  handleAppleNotification,
+  handleAppleSignIn,
+  handleDeleteAccount,
+  handleRefresh,
+  handleSignOut,
+} from "./auth";
 import { verifyRendezvousSessionToken } from "./crypto";
 import {
   authorizeRendezvousCredential,
   enrollHost,
   issueDeviceCredential,
   revokeDeviceCredential,
+  revokeHost,
   rotateHostCredentialForAccount,
 } from "./enrollment";
 import { bearerToken, json } from "./http";
@@ -24,8 +31,17 @@ export default {
       if (request.method === "POST" && url.pathname === "/v1/auth/apple") {
         return await handleAppleSignIn(request, env);
       }
+      if (request.method === "POST" && url.pathname === "/v1/auth/apple/events") {
+        return await handleAppleNotification(request, env);
+      }
       if (request.method === "POST" && url.pathname === "/v1/auth/refresh") {
         return await handleRefresh(request, env);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/auth/signout") {
+        return await handleSignOut(request, env);
+      }
+      if (request.method === "DELETE" && url.pathname === "/v1/account") {
+        return await handleDeleteAccount(request, env);
       }
       if (request.method === "POST" && url.pathname === "/v1/hosts") {
         return await enrollHost(request, env);
@@ -34,6 +50,10 @@ export default {
       const rotateMatch = /^\/v1\/hosts\/([^/]+)\/credentials\/rotate$/u.exec(url.pathname);
       if (request.method === "POST" && rotateMatch?.[1]) {
         return await rotateHostCredentialForAccount(request, env, decodePath(rotateMatch[1]));
+      }
+      const hostMatch = /^\/v1\/hosts\/([^/]+)$/u.exec(url.pathname);
+      if (request.method === "DELETE" && hostMatch?.[1]) {
+        return await revokeHost(request, env, decodePath(hostMatch[1]));
       }
       const devicesMatch = /^\/v1\/hosts\/([^/]+)\/devices$/u.exec(url.pathname);
       if (request.method === "POST" && devicesMatch?.[1]) {
@@ -70,6 +90,10 @@ export default {
       env.DB.prepare(
         "DELETE FROM apple_assertions WHERE digest IN "
           + "(SELECT digest FROM apple_assertions WHERE expires_at < ? LIMIT 1000)",
+      ).bind(now),
+      env.DB.prepare(
+        "DELETE FROM apple_notifications WHERE jti_digest IN "
+          + "(SELECT jti_digest FROM apple_notifications WHERE expires_at < ? LIMIT 1000)",
       ).bind(now),
       env.DB.prepare(
         "DELETE FROM refresh_sessions WHERE digest IN "

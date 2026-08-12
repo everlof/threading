@@ -77,6 +77,7 @@ struct RemoteRouter {
     static let notificationRegistrationPath = "/api/notifications"
     static let diagnosticUploadPath = "/api/diagnostics"
     static let invitationAcceptancePath = "/api/invitations/accept"
+    static let hostedDeviceCredentialPath = "/api/hosted-device-credential"
     static let appThemePath = "/api/theme"
     static let themeEventsPath = "/ws/events"
     /// Stored in `RemoteConnection.routedSessionID` to avoid a second upgrade-state field.

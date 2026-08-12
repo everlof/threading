@@ -180,6 +180,10 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         baseURL.appendingPathComponent("api/invitations/accept")
     }
 
+    public var hostedDeviceCredentialURL: URL {
+        baseURL.appendingPathComponent("api/hosted-device-credential")
+    }
+
     public func resumeURL(sessionID: String) -> URL {
         baseURL
             .appendingPathComponent("api/session")

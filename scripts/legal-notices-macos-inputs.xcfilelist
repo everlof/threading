@@ -13,6 +13,7 @@ $(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-FONT-EXCEPTION.txt
 $(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-UPSTREAM-README.txt
 $(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-SOURCE.md
 $(BUILD_DIR)/../../SourcePackages/checkouts/NativeDiffKit/LICENSE
+$(BUILD_DIR)/../../SourcePackages/checkouts/WebRTC/LICENSE.md
 $(BUILD_DIR)/../../SourcePackages/checkouts/Sparkle/LICENSE
 $(BUILD_DIR)/../../SourcePackages/checkouts/Sparkle/Vendor/ed25519-sparkle/license.txt
 $(BUILD_DIR)/../../SourcePackages/checkouts/WasmKit/LICENSE

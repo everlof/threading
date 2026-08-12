@@ -31,6 +31,8 @@ struct ThreadingMobileHostedRoot: View {
                         await notifications.sync(hosts: model.hosts)
                         await MobileIssueReportOutbox.shared.flush()
                     }
+                } else if phase == .background {
+                    model.suspendHostedConnections()
                 }
             }
             .onChange(of: notifications.deviceToken) { _, _ in

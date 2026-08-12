@@ -102,6 +102,16 @@ struct RemoteClient {
         )
     }
 
+    func issueHostedDeviceCredential(
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteHostedDeviceCredentialDTO {
+        try await postResponse(
+            RemoteHostedDeviceCredentialRequestDTO(),
+            to: link.hostedDeviceCredentialURL,
+            requestID: requestID
+        )
+    }
+
     func resume(
         sessionID: String,
         requestID: String = UUID().uuidString.lowercased()

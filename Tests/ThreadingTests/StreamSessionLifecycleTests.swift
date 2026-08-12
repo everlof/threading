@@ -20,9 +20,10 @@ final class StreamSessionLifecycleTests: XCTestCase {
         let codex = CodexStreamSession(sessionID: SessionID()) {
             throw PlanningFixtureError.refused
         }
-        let grok = GrokACPStreamSession(
+        let grok = ACPStreamSession(
             sessionID: SessionID(),
-            workingDirectory: "/tmp"
+            workingDirectory: "/tmp",
+            profile: .grok
         ) {
             throw PlanningFixtureError.refused
         }

@@ -109,4 +109,45 @@ final class PeerRendezvousTests: XCTestCase {
             )
         }
     }
+
+    func testControlPlaneEndpointRequiresHTTPSOutsideLoopback() throws {
+        XCTAssertEqual(
+            try PeerControlPlaneServiceEndpoint(
+                XCTUnwrap(URL(string: "https://REMOTE.Threading.Example/"))
+            ).baseURL.absoluteString,
+            "https://remote.threading.example"
+        )
+        XCTAssertNoThrow(try PeerControlPlaneServiceEndpoint(
+            XCTUnwrap(URL(string: "http://127.0.0.1:8787"))
+        ))
+        for rejected in [
+            "http://remote.threading.example",
+            "https://user:password@remote.threading.example",
+            "https://remote.threading.example/api",
+            "https://remote.threading.example/?token=secret",
+        ] {
+            XCTAssertThrowsError(try PeerControlPlaneServiceEndpoint(
+                XCTUnwrap(URL(string: rejected))
+            ))
+        }
+    }
+
+    func testControlPlaneBearerIsValidatedRedactedAndCodable() throws {
+        let bearer = try PeerControlPlaneBearer("th_device_abc-123")
+        XCTAssertEqual(bearer.description, "<redacted>")
+        XCTAssertFalse(String(describing: bearer).contains("abc-123"))
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                PeerControlPlaneBearer.self,
+                from: JSONEncoder().encode(bearer)
+            ),
+            bearer
+        )
+        for rejected in ["", "contains space", "contains\nnewline"] {
+            XCTAssertThrowsError(try PeerControlPlaneBearer(rejected))
+        }
+        XCTAssertThrowsError(try PeerControlPlaneBearer(
+            String(repeating: "x", count: PeerControlPlaneBounds.maximumBearerBytes + 1)
+        ))
+    }
 }

@@ -78,11 +78,13 @@ export class HostRendezvous {
   async fetch(request: Request): Promise<Response> {
     if (request.method === "POST"
       && request.headers.get("X-Threading-Internal-Action") === "disconnect-host") {
-      for (const host of [...this.sockets("host"), ...this.sockets("host-pending")]) {
-        host.close(4001, "Host credential rotated");
-      }
-      for (const waiting of this.sockets("device-waiting")) {
-        this.failSocket(waiting, "hostOffline", "The Mac disconnected");
+      for (const socket of this.ctx.getWebSockets()) {
+        const state = this.attachment(socket);
+        if (state.role === "host" || state.role === "host-pending") {
+          socket.close(4001, "Host credential rotated or revoked");
+        } else {
+          this.failSocket(socket, "hostOffline", "The Mac disconnected");
+        }
       }
       return new Response(null, { status: 204 });
     }

@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingPeerTransport
 import ThreadingRemoteKit
 
 struct RemoteNotificationOpenRequest: Equatable, Identifiable {
@@ -37,6 +38,7 @@ final class RemoteAppModel: ObservableObject {
     }
 
     private let store = RemoteHostStore()
+    private let hostedConnections = HostedRemoteConnectionManager()
     private let continuity: MobileSessionContinuityStore
     /// True while the app is showing the canned Mac — entered from the welcome screen's Try
     /// the Demo, or by the DEBUG screenshot environment. Every mutation path short-circuits on
@@ -47,6 +49,13 @@ final class RemoteAppModel: ObservableObject {
     private var themeEventsHostID: String?
     private var themeEventsGeneration = 0
     private var refreshGeneration = 0
+    private var activeHostedLink: RemoteConnectionLink?
+    private var activeHostedHostID: String?
+    /// Provisioning is a low-frequency control-plane operation. A service outage must not turn
+    /// the three-second UI poll into a credential-issuance retry loop.
+    private var hostedProvisioningRetryAfter: [String: Date] = [:]
+    private static let hostedCredentialRenewalLeadTime: TimeInterval = 24 * 60 * 60
+    private static let hostedProvisioningRetryDelay: TimeInterval = 5 * 60
 
     init(continuity: MobileSessionContinuityStore = MobileSessionContinuityStore()) {
         self.continuity = continuity
@@ -139,9 +148,11 @@ final class RemoteAppModel: ObservableObject {
         // leaving `themeEventsTask` non-nil, and `ensureThemeEvents` would then refuse to
         // reconnect it after the demo ends — live theme and session events silently dead.
         disconnectThemeEvents()
+        discardHostedConnection()
         invalidateRefreshes()
         let host = DemoExperience.pairedHost
         hosts = [host]
+        hostedProvisioningRetryAfter.removeAll(keepingCapacity: false)
         activeHostID = host.id
         continuity.setActiveHostID(host.id)
         me = Self.demoResponse
@@ -154,6 +165,7 @@ final class RemoteAppModel: ObservableObject {
         guard isDemo else { return }
         isDemo = false
         navigationPath = []
+        discardHostedConnection()
         me = nil
         let loaded: [PairedRemoteHost]
         switch store.load() {
@@ -164,6 +176,7 @@ final class RemoteAppModel: ObservableObject {
             storageIssue = error.localizedDescription
         }
         hosts = loaded
+        hostedProvisioningRetryAfter.removeAll(keepingCapacity: false)
         activeHostID = loaded.first?.id
         continuity.setActiveHostID(activeHostID)
         phase = .idle
@@ -179,7 +192,9 @@ final class RemoteAppModel: ObservableObject {
     }
 
     var client: RemoteClient? {
-        activeHost.map { RemoteClient(link: $0.link) }
+        activeHost.map { host in
+            RemoteClient(link: activeHostedHostID == host.id ? activeHostedLink ?? host.link : host.link)
+        }
     }
 
     var canManageThemes: Bool {
@@ -227,6 +242,24 @@ final class RemoteAppModel: ObservableObject {
         let id = me.share.scope == "all"
             ? hostID
             : "\(hostID):share:\(me.share.label)"
+        var hostedServiceURL = hosts.first(where: { $0.id == id })?.hostedServiceURL
+        var hostedCredential = hosts.first(where: { $0.id == id })?.hostedCredential
+        if me.share.scope == "all",
+           me.features?.contains(RemoteRESTFeature.hostedPeerTransport.rawValue) == true {
+            do {
+                let issued = try await RemoteClient(link: link).issueHostedDeviceCredential()
+                (hostedServiceURL, hostedCredential) = try Self.validateHostedCredential(
+                    issued,
+                    expectedHostID: hostID
+                )
+            } catch {
+                // Pairing and the existing relay/Tailscale routes remain valid. The Mac will
+                // advertise the feature again so a later refresh can retry provisioning.
+                hostedProvisioningRetryAfter[id] = Date().addingTimeInterval(
+                    Self.hostedProvisioningRetryDelay
+                )
+            }
+        }
         let host = PairedRemoteHost(
             id: id,
             hostID: hostID,
@@ -237,7 +270,9 @@ final class RemoteAppModel: ObservableObject {
             lastConnectedAt: Date(),
             endpoints: identity?.endpoints,
             connectionPolicy: identity?.connectionPolicy,
-            activeEndpointKind: PairedRemoteHost.endpointKind(for: link.baseURL)
+            activeEndpointKind: PairedRemoteHost.endpointKind(for: link.baseURL),
+            hostedServiceURL: hostedServiceURL,
+            hostedCredential: hostedCredential
         )
 
         let previousHosts = hosts
@@ -271,6 +306,7 @@ final class RemoteAppModel: ObservableObject {
     func selectHost(_ id: String) {
         guard hosts.contains(where: { $0.id == id }), activeHostID != id else { return }
         disconnectThemeEvents()
+        discardHostedConnection()
         invalidateRefreshes()
         activeHostID = id
         continuity.setActiveHostID(id)
@@ -286,6 +322,7 @@ final class RemoteAppModel: ObservableObject {
         ])
         let previousHosts = hosts
         hosts.removeAll { $0.id == host.id }
+        hostedProvisioningRetryAfter[host.id] = nil
         guard persistHosts() else {
             hosts = previousHosts
             return
@@ -293,6 +330,7 @@ final class RemoteAppModel: ObservableObject {
         invalidateRefreshes()
         if activeHostID == host.id {
             disconnectThemeEvents()
+            discardHostedConnection()
             activeHostID = hosts.first?.id
             continuity.setActiveHostID(activeHostID)
             me = nil
@@ -305,6 +343,7 @@ final class RemoteAppModel: ObservableObject {
         refreshGeneration &+= 1
         let generation = refreshGeneration
         guard let host = activeHost else {
+            discardHostedConnection()
             me = nil
             phase = .idle
             return
@@ -319,7 +358,9 @@ final class RemoteAppModel: ObservableObject {
         }
         if !wasOnline { phase = .connecting }
         do {
-            let (response, successfulLink) = try await fetchMe(from: host)
+            let connection = try await fetchMe(from: host)
+            let response = connection.response
+            let successfulLink = connection.link
             guard activeHostID == hostID, refreshGeneration == generation else { return }
             me = response
             phase = .online
@@ -327,7 +368,9 @@ final class RemoteAppModel: ObservableObject {
             if !wasOnline {
                 MobileDiagnostics.record(.hostRefreshSucceeded, fields: [
                     .peer: MobileDiagnostics.pseudonym(hostID, prefix: "peer"),
-                    .transport: PairedRemoteHost.endpointKind(for: successfulLink.baseURL),
+                    .transport: connection.isHosted
+                        ? "hosted"
+                        : PairedRemoteHost.endpointKind(for: successfulLink.baseURL),
                     .protocolVersion: String(response.serverProtocol.version),
                     .minimumProtocolVersion: String(response.serverProtocol.minimumSupported),
                 ])
@@ -335,7 +378,11 @@ final class RemoteAppModel: ObservableObject {
             if let index = hosts.firstIndex(where: { $0.id == hostID }) {
                 let old = hosts[index]
                 var updated = old
-                updated.merge(identity: response.host, successfulLink: successfulLink)
+                updated.merge(
+                    identity: response.host,
+                    successfulLink: successfulLink,
+                    isHosted: connection.isHosted
+                )
                 let metadataChanged = old.name != updated.name
                     || old.link != updated.link
                     || old.endpoints != updated.endpoints
@@ -350,6 +397,12 @@ final class RemoteAppModel: ObservableObject {
                 }
                 ensureThemeEvents(for: updated)
             }
+            await reconcileHostedCredential(
+                hostID: hostID,
+                response: response,
+                successfulLink: successfulLink,
+                generation: generation
+            )
         } catch is CancellationError {
             return
         } catch {
@@ -374,6 +427,11 @@ final class RemoteAppModel: ObservableObject {
             await refresh()
             try? await Task.sleep(for: .seconds(3))
         }
+    }
+
+    func suspendHostedConnections() {
+        disconnectThemeEvents()
+        discardHostedConnection()
     }
 
     func makeSessionReady(_ session: RemoteSessionSummaryDTO) async throws {
@@ -662,21 +720,36 @@ final class RemoteAppModel: ObservableObject {
 
     // MARK: - Live app-theme events
 
-    private func fetchMe(
-        from host: PairedRemoteHost
-    ) async throws -> (RemoteMeDTO, RemoteConnectionLink) {
-        let candidates = host.candidateLinks
-        var lastError: Error = RemoteClientError.invalidResponse
-        for (index, link) in candidates.enumerated() {
+    private struct ConnectionCandidate {
+        let link: RemoteConnectionLink
+        let isHosted: Bool
+    }
+
+    private struct SuccessfulConnection {
+        let response: RemoteMeDTO
+        let link: RemoteConnectionLink
+        let isHosted: Bool
+    }
+
+    private func fetchMe(from host: PairedRemoteHost) async throws -> SuccessfulConnection {
+        let prepared = await connectionCandidates(for: host)
+        var lastError: Error = prepared.error ?? RemoteClientError.invalidResponse
+        for (index, candidate) in prepared.candidates.enumerated() {
             do {
-                let timeout: TimeInterval? = candidates.count > 1 && index < candidates.count - 1
+                let timeout: TimeInterval? = prepared.candidates.count > 1
+                    && index < prepared.candidates.count - 1
                     ? 4 : nil
-                let response = try await RemoteClient(link: link).fetchMe(timeout: timeout)
-                return (response, link)
+                let response = try await RemoteClient(link: candidate.link).fetchMe(timeout: timeout)
+                return SuccessfulConnection(
+                    response: response,
+                    link: candidate.link,
+                    isHosted: candidate.isHosted
+                )
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
                 lastError = error
+                if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
             }
         }
         throw lastError
@@ -693,21 +766,28 @@ final class RemoteAppModel: ObservableObject {
             throw CancellationError()
         }
         let requestID = UUID().uuidString.lowercased()
-        var lastError: Error = RemoteClientError.invalidResponse
-        let candidates = host.candidateLinks
-        for (index, link) in candidates.enumerated() {
+        let prepared = await connectionCandidates(for: host)
+        var lastError: Error = prepared.error ?? RemoteClientError.invalidResponse
+        for (index, candidate) in prepared.candidates.enumerated() {
             do {
-                let timeout: TimeInterval? = candidates.count > 1 && index < candidates.count - 1
+                let timeout: TimeInterval? = prepared.candidates.count > 1
+                    && index < prepared.candidates.count - 1
                     ? 8 : nil
                 let response = try await operation(
-                    RemoteClient(link: link, requestTimeout: timeout),
+                    RemoteClient(link: candidate.link, requestTimeout: timeout),
                     requestID
                 )
                 guard activeHostID == hostID else { throw CancellationError() }
                 invalidateRefreshes()
                 if let index = hosts.firstIndex(where: { $0.id == hostID }),
-                   hosts[index].link != link {
-                    hosts[index].merge(identity: nil, successfulLink: link)
+                   (candidate.isHosted
+                        ? hosts[index].activeEndpointKind != "hosted"
+                        : hosts[index].link != candidate.link) {
+                    hosts[index].merge(
+                        identity: nil,
+                        successfulLink: candidate.link,
+                        isHosted: candidate.isHosted
+                    )
                     _ = persistHosts()
                     disconnectThemeEvents()
                 }
@@ -721,14 +801,108 @@ final class RemoteAppModel: ObservableObject {
                 // id keeps trying the next route safe even if the Mac did receive it.
                 if case .server(let status) = error, [502, 503, 504].contains(status) {
                     lastError = error
+                    if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
                     continue
                 }
+                if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
                 throw error
             } catch {
                 lastError = error
+                if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
             }
         }
         throw lastError
+    }
+
+    private func connectionCandidates(
+        for host: PairedRemoteHost
+    ) async -> (candidates: [ConnectionCandidate], error: Error?) {
+        var candidates: [ConnectionCandidate] = []
+        var preparationError: Error?
+        do {
+            if let hostedLink = try await hostedConnections.link(for: host) {
+                candidates.append(ConnectionCandidate(link: hostedLink, isHosted: true))
+                if activeHostID == host.id {
+                    activeHostedHostID = host.id
+                    activeHostedLink = hostedLink
+                }
+            }
+        } catch is CancellationError {
+            preparationError = CancellationError()
+        } catch {
+            preparationError = error
+            await hostedConnectionFailed(hostID: host.id)
+        }
+        for link in host.candidateLinks where !candidates.contains(where: { $0.link == link }) {
+            candidates.append(ConnectionCandidate(link: link, isHosted: false))
+        }
+        return (candidates, preparationError)
+    }
+
+    private func hostedConnectionFailed(hostID: String) async {
+        await hostedConnections.invalidate(hostID: hostID)
+        if activeHostedHostID == hostID {
+            activeHostedHostID = nil
+            activeHostedLink = nil
+        }
+    }
+
+    private func reconcileHostedCredential(
+        hostID: String,
+        response: RemoteMeDTO,
+        successfulLink: RemoteConnectionLink,
+        generation: Int
+    ) async {
+        guard activeHostID == hostID, refreshGeneration == generation,
+              let index = hosts.firstIndex(where: { $0.id == hostID }),
+              hosts[index].isOwnerDevice else { return }
+
+        let advertised = response.features?.contains(
+            RemoteRESTFeature.hostedPeerTransport.rawValue
+        ) == true
+        if !advertised {
+            hostedProvisioningRetryAfter[hostID] = nil
+            guard hosts[index].hostedCredential != nil || hosts[index].hostedServiceURL != nil else {
+                return
+            }
+            hosts[index].hostedCredential = nil
+            hosts[index].hostedServiceURL = nil
+            _ = persistHosts()
+            await hostedConnectionFailed(hostID: hostID)
+            return
+        }
+
+        let credentialSecondsRemaining = hosts[index].hostedCredential?.expiresAt
+            .timeIntervalSinceNow ?? 0
+        let needsCredential = credentialSecondsRemaining
+            <= Self.hostedCredentialRenewalLeadTime
+        guard needsCredential,
+              hostedProvisioningRetryAfter[hostID, default: .distantPast] <= Date() else { return }
+        do {
+            let issued = try await RemoteClient(link: successfulLink).issueHostedDeviceCredential()
+            let (serviceURL, credential) = try Self.validateHostedCredential(
+                issued,
+                expectedHostID: hosts[index].hostID ?? hostID
+            )
+            guard activeHostID == hostID, refreshGeneration == generation,
+                  let currentIndex = hosts.firstIndex(where: { $0.id == hostID }) else { return }
+            let changed = hosts[currentIndex].hostedServiceURL != serviceURL
+                || hosts[currentIndex].hostedCredential != credential
+            hosts[currentIndex].hostedServiceURL = serviceURL
+            hosts[currentIndex].hostedCredential = credential
+            hostedProvisioningRetryAfter[hostID] = nil
+            if changed {
+                _ = persistHosts()
+                disconnectThemeEvents()
+                await hostedConnectionFailed(hostID: hostID)
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            hostedProvisioningRetryAfter[hostID] = Date().addingTimeInterval(
+                Self.hostedProvisioningRetryDelay
+            )
+        }
     }
 
     @discardableResult
@@ -747,12 +921,44 @@ final class RemoteAppModel: ObservableObject {
         refreshGeneration &+= 1
     }
 
+    private func discardHostedConnection() {
+        activeHostedHostID = nil
+        activeHostedLink = nil
+        Task { await hostedConnections.invalidate() }
+    }
+
+    private static func validateHostedCredential(
+        _ response: RemoteHostedDeviceCredentialDTO,
+        expectedHostID: String
+    ) throws -> (URL, PeerDeviceServiceCredential) {
+        guard response.hostID == expectedHostID,
+              response.deviceID == RemoteDeviceIdentity.current,
+              response.expiresAt.isFinite,
+              let rawURL = URL(string: response.serviceURL) else {
+            throw RemoteClientError.invalidResponse
+        }
+        let endpoint = try PeerControlPlaneServiceEndpoint(rawURL)
+        let expiresAt = Date(timeIntervalSince1970: response.expiresAt / 1_000)
+        guard expiresAt > Date().addingTimeInterval(60),
+              expiresAt < Date().addingTimeInterval(370 * 24 * 60 * 60) else {
+            throw RemoteClientError.invalidResponse
+        }
+        let credential = try PeerDeviceServiceCredential(
+            hostID: response.hostID,
+            deviceID: response.deviceID,
+            credential: PeerControlPlaneBearer(response.credential),
+            expiresAt: expiresAt
+        )
+        return (endpoint.baseURL, credential)
+    }
+
     private func ensureThemeEvents(for host: PairedRemoteHost) {
         guard !isDemo else { return }
         if themeEventsHostID == host.id, themeEventsTask != nil { return }
         disconnectThemeEvents()
 
-        let client = RemoteClient(link: host.link)
+        let link = activeHostedHostID == host.id ? activeHostedLink ?? host.link : host.link
+        let client = RemoteClient(link: link)
         guard let task = try? client.eventsWebSocketTask() else { return }
         themeEventsGeneration &+= 1
         let generation = themeEventsGeneration
@@ -762,7 +968,7 @@ final class RemoteAppModel: ObservableObject {
 
         let auth = RemoteClientMessage(
             type: "auth",
-            token: host.link.token,
+            token: link.token,
             device: RemoteDeviceIdentity.current,
             protocolVersion: RemoteProtocol.current,
             protocolMinimum: RemoteProtocol.minimumSupported

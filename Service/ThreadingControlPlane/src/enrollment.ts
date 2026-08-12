@@ -8,6 +8,7 @@ import { validateIdentifier } from "./protocol";
 const hostCredentialLifetimeSeconds = 90 * 24 * 60 * 60;
 const deviceCredentialLifetimeSeconds = 30 * 24 * 60 * 60;
 const maximumDevicesPerHost = 64;
+const maximumHostsPerAccount = 16;
 
 interface CredentialRow {
   kind: "host" | "device";
@@ -29,6 +30,14 @@ export async function enrollHost(request: Request, env: Env): Promise<Response> 
   ).bind(hostID).first<{ account_id: string }>();
   if (existing && existing.account_id !== principal.accountID) {
     throw new HttpError(409, "hostAlreadyRegistered", "Host is registered to another account");
+  }
+  if (!existing) {
+    const active = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM hosts WHERE account_id = ? AND revoked_at IS NULL",
+    ).bind(principal.accountID).first<{ count: number }>();
+    if ((active?.count ?? 0) >= maximumHostsPerAccount) {
+      throw new HttpError(429, "hostLimit", "Account has too many active hosts");
+    }
   }
   await env.DB.prepare(
     "INSERT INTO hosts (id, account_id, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?) "
@@ -98,6 +107,30 @@ export async function revokeDeviceCredential(
     "UPDATE rendezvous_credentials SET revoked_at = ? "
       + "WHERE host_id = ? AND device_id = ? AND kind = 'device' AND revoked_at IS NULL",
   ).bind(Math.floor(Date.now() / 1000), hostID, deviceID).run();
+  return new Response(null, { status: 204 });
+}
+
+export async function revokeHost(
+  request: Request,
+  env: Env,
+  hostID: string,
+): Promise<Response> {
+  if (!validateIdentifier(hostID)) throw new HttpError(400, "invalidHost", "Host ID is invalid");
+  await authorizeHostMutation(request, env, hostID);
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE hosts SET revoked_at = ?, updated_at = ? WHERE id = ? AND revoked_at IS NULL",
+    ).bind(now, now, hostID),
+    env.DB.prepare(
+      "UPDATE rendezvous_credentials SET revoked_at = ? "
+        + "WHERE host_id = ? AND revoked_at IS NULL",
+    ).bind(now, hostID),
+  ]);
+  await env.HOST_RENDEZVOUS.getByName(hostID).fetch("https://internal/disconnect-host", {
+    method: "POST",
+    headers: { "X-Threading-Internal-Action": "disconnect-host" },
+  });
   return new Response(null, { status: 204 });
 }
 

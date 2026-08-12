@@ -12,6 +12,7 @@ complete license and notice texts shipped with this build are included beside th
 |---|---|---|
 | SwiftTerm (vendored fork) | Imported from `06dbdd410f0684120e2bbb0d0b645eb9285db078`, then modified in-tree | `SwiftTerm-MIT.txt` |
 | NativeDiffKit | 0.1.1 / `363c6197d8e334fa0aaf30550fb0a0bcac540e71` | `NativeDiffKit-MIT.txt` |
+| WebRTC binary distribution | 151.0.0 / `19aa8c1fc7120d50df987b7111f42d5024df3d54` | `WebRTC-BSD-3-Clause.txt` |
 | BorderBeamKit (macOS) | `cbea80755c9d8371b44f158cf340cc84d0c8b93b` | `BorderBeamKit-MIT.txt` |
 | LabelMorph (macOS) | `677d6dad55cd9bf08a6a2fd97f814f4ce072fe11` | `LabelMorph-MIT.txt` |
 | ThinkingOrbs (macOS) | `9287ca9da66cd21851cbe4d7e9019a7cf669d23d` | `ThinkingOrbs-MIT.txt` |
@@ -21,7 +22,8 @@ complete license and notice texts shipped with this build are included beside th
 | swift-argument-parser (resolved build graph) | 1.8.2 / `6a52f3251125d74daf04fcbd5e6f08a75d074382` | `swift-argument-parser-LICENSE.txt` |
 
 The macOS-only files are present in the macOS application bundle. The iOS bundle contains the
-notices applicable to its smaller dependency graph.
+notices applicable to its smaller dependency graph. The WebRTC notice contains both the binary
+distribution's BSD terms and the upstream Google WebRTC terms supplied by the pinned package.
 
 ## Bundled fonts and font-derived artwork
 

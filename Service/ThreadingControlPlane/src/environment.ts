@@ -3,6 +3,10 @@ export interface Env {
   HOST_RENDEZVOUS: DurableObjectNamespace;
   SESSION_SIGNING_SECRET: string;
   APPLE_CLIENT_IDS: string;
+  APPLE_TEAM_ID?: string;
+  APPLE_KEY_ID?: string;
+  APPLE_PRIVATE_KEY?: string;
+  APPLE_TOKEN_ENCRYPTION_SECRET?: string;
   TURN_KEY_ID?: string;
   TURN_KEY_API_TOKEN?: string;
 }

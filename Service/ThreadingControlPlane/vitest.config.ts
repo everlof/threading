@@ -14,6 +14,7 @@ export default defineConfig({
         miniflare: {
           bindings: {
             SESSION_SIGNING_SECRET: "test-only-signing-secret-that-is-at-least-32-bytes",
+            APPLE_TOKEN_ENCRYPTION_SECRET: "test-only-apple-token-secret-at-least-32-bytes",
             TEST_MIGRATIONS: migrations,
           },
         },

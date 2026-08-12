@@ -757,9 +757,10 @@ final class ConversationViewController: NSViewController {
                 plan: plan
             )
         case .grok:
-            self.stream = GrokACPStreamSession(
+            self.stream = ACPStreamSession(
                 sessionID: agentSession.id,
                 workingDirectory: agentSession.workingDirectory(in: project),
+                profile: .grok,
                 plan: plan
             )
         case .openCode:

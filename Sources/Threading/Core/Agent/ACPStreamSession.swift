@@ -1,13 +1,15 @@
 import Foundation
 
-/// Runs Grok's supported Agent Client Protocol transport and adapts it to native Chat.
+/// Runs one Agent Client Protocol CLI and adapts it to native Chat.
 ///
-/// ACP owns the common conversation contract; this type contains only process lifecycle and the
-/// small translation from standard ACP updates into Threading's provider-neutral stream events.
-/// xAI-specific metadata is treated as an optional source of model information, never as a
-/// requirement for opening or resuming a conversation.
+/// ACP owns the common conversation contract, so this type contains only process lifecycle and
+/// the translation from standard ACP updates into Threading's provider-neutral stream events.
+/// Everything one agent does differently — its name in prose, its `_meta` extensions, which of
+/// its commands the host refuses — arrives as an `ACPProviderProfile`, so nothing here asks which
+/// runtime it is running. An agent's own metadata is an optional source of model information,
+/// never a requirement for opening or resuming a conversation.
 @MainActor
-final class GrokACPStreamSession:
+final class ACPStreamSession:
     ConversationStreamSession,
     ProviderExecutionReportingConversation,
     ComposerCapabilityProviding,
@@ -38,6 +40,7 @@ final class GrokACPStreamSession:
     }
 
     private let workingDirectory: String
+    private let profile: ACPProviderProfile
     private let plan: () throws -> AgentLaunchPlan
 
     private var process: AgentChildProcess?
@@ -47,7 +50,7 @@ final class GrokACPStreamSession:
     private var parseDiagnostics = StreamParseDiagnostics()
 
     private var requestSequence: Int64 = 0
-    private var pendingRequests: [JSONRPCRequestID: GrokACPRequestPurpose] = [:]
+    private var pendingRequests: [JSONRPCRequestID: ACPRequestPurpose] = [:]
     private var launchResumeState: ResumeState = .unavailable
     private var activeSessionID: String?
     private var pendingPrompt: String?
@@ -63,18 +66,20 @@ final class GrokACPStreamSession:
     private var userMessageID: String?
     private var pendingUserText = ""
     private var assistantMessageID: String?
-    private var pendingAssistantBlocks: [GrokACPPendingBlock] = []
-    private var toolCalls: [String: GrokACPToolState] = [:]
+    private var pendingAssistantBlocks: [ACPPendingBlock] = []
+    private var toolCalls: [String: ACPToolCallState] = [:]
 
     // MARK: - Initialization
 
     init(
         sessionID: SessionID,
         workingDirectory: String,
+        profile: ACPProviderProfile,
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
         self.workingDirectory = workingDirectory
+        self.profile = profile
         self.plan = plan
     }
 
@@ -97,7 +102,7 @@ final class GrokACPStreamSession:
             }
         } catch {
             ThreadingLogger.agent.error(
-                "Grok ACP failed to start: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                "\(self.profile.diagnosticsLabel, privacy: .public) failed to start: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             // Match every other native transport: start never calls an external lifecycle
             // callback re-entrantly before its caller has finished installing the surface.
@@ -164,7 +169,7 @@ final class GrokACPStreamSession:
 
     /// ACP has no steering primitive: the specification allows one prompt turn per session at a
     /// time, and names nothing for adding to the one in flight. Saying so is the point — the
-    /// composer offers no steer for Grok rather than offering one that quietly queues.
+    /// composer offers no steer for an ACP agent rather than one that quietly queues.
     var steerAvailability: SteerAvailability { .unavailable(.unsupported) }
 
     /// Stops the turn in flight, leaving the session open.
@@ -242,13 +247,17 @@ final class GrokACPStreamSession:
         let version = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
         ) as? String ?? "development"
+        var clientCapabilities: [String: Any] = [
+            "fs": ["readTextFile": false, "writeTextFile": false],
+            "terminal": false,
+            "session": ["configOptions": ["boolean": [:]]]
+        ]
+        if !profile.clientCapabilitiesMeta.isEmpty {
+            clientCapabilities["_meta"] = profile.clientCapabilitiesMeta
+        }
         let parameters: [String: Any] = [
-            "protocolVersion": GrokACPDefaults.protocolVersion,
-            "clientCapabilities": [
-                "fs": ["readTextFile": false, "writeTextFile": false],
-                "terminal": false,
-                "session": ["configOptions": ["boolean": [:]]]
-            ],
+            "protocolVersion": ACPDefaults.protocolVersion,
+            "clientCapabilities": clientCapabilities,
             "clientInfo": [
                 "name": "threading",
                 "title": "Threading",
@@ -298,7 +307,9 @@ final class GrokACPStreamSession:
             ],
             purpose: .prompt
         ) != nil else {
-            finishTurnWithTransportError("Threading could not send the Grok turn.")
+            finishTurnWithTransportError(
+                ACPTransportMessage.promptNotSent(profile.displayName)
+            )
             return
         }
         pendingPrompt = nil
@@ -310,7 +321,7 @@ final class GrokACPStreamSession:
     private func sendRequest(
         method: String,
         parameters: [String: Any],
-        purpose: GrokACPRequestPurpose
+        purpose: ACPRequestPurpose
     ) -> JSONRPCRequestID? {
         requestSequence += 1
         let id = JSONRPCRequestID.integer(requestSequence)
@@ -361,7 +372,7 @@ final class GrokACPStreamSession:
             return true
         } catch {
             ThreadingLogger.agent.error(
-                "Grok ACP write failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                "\(self.profile.diagnosticsLabel, privacy: .public) write failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return false
         }
@@ -377,7 +388,7 @@ final class GrokACPStreamSession:
 
             guard let line = String(data: lineData, encoding: .utf8),
                   let envelope = JSONRPCLineEnvelope.parse(line) else {
-                parseDiagnostics.recordMalformedLine(provider: "Grok ACP")
+                parseDiagnostics.recordMalformedLine(provider: profile.diagnosticsLabel)
                 continue
             }
             route(envelope)
@@ -416,8 +427,8 @@ final class GrokACPStreamSession:
 
         switch purpose {
         case .initialize:
-            if let commands = GrokACPAdapter.availableCommands(in: result) {
-                replaceComposerCapabilities(GrokACPComposerCatalog.capabilities(from: commands))
+            if let commands = profile.initializeCommands(result) {
+                replaceComposerCapabilities(composerCapabilities(from: commands))
             }
             openSession()
 
@@ -427,14 +438,17 @@ final class GrokACPStreamSession:
             let providerID = result?["sessionId"] as? String
                 ?? launchResumeState.transcriptID?.rawValue
             guard let providerID, !providerID.isEmpty else {
-                finishTurnWithTransportError("Grok opened no conversation session.")
+                finishTurnWithTransportError(
+                    ACPTransportMessage.noConversationSession(profile.displayName)
+                )
                 terminate()
                 return
             }
             activeSessionID = providerID
             onEvent?(.initialised(
                 sessionID: TranscriptID(providerID),
-                model: GrokACPAdapter.currentModel(in: result)
+                model: ACPWireAdapter.currentModel(in: result)
+                    ?? profile.extendedModelID(result)
             ))
             sendPendingPromptIfReady()
             onInteractionAvailabilityChange?()
@@ -469,23 +483,23 @@ final class GrokACPStreamSession:
         case "tool_call_update":
             handleToolCallUpdate(update)
         case "plan":
-            onEvent?(.runPlanUpdated(GrokACPAdapter.planSteps(in: update)))
+            onEvent?(.runPlanUpdated(ACPWireAdapter.planSteps(in: update)))
         case "available_commands_update":
             let commands = update["availableCommands"] as? [[String: Any]] ?? []
-            replaceComposerCapabilities(GrokACPComposerCatalog.capabilities(from: commands))
+            replaceComposerCapabilities(composerCapabilities(from: commands))
         case "usage_update":
-            lastContextTokens = GrokACPAdapter.integer(update["used"])
-            lastContextWindow = GrokACPAdapter.integer(update["size"])
+            lastContextTokens = ACPWireAdapter.integer(update["used"])
+            lastContextWindow = ACPWireAdapter.integer(update["size"])
         case "session_info_update":
-            if let title = GrokACPAdapter.sessionTitle(in: update) {
+            if let title = ACPWireAdapter.sessionTitle(in: update) {
                 onSessionTitleChange?(title)
             }
         case "current_mode_update", "config_option_update":
             break
         case .some(let value):
-            onEvent?(.unknown(type: "grok.acp.\(value)"))
+            onEvent?(.unknown(type: "\(profile.unknownEventPrefix)\(value)"))
         case .none:
-            onEvent?(.unknown(type: "grok.acp.session_update"))
+            onEvent?(.unknown(type: "\(profile.unknownEventPrefix)session_update"))
         }
     }
 
@@ -493,7 +507,7 @@ final class GrokACPStreamSession:
 
     private func handleUserChunk(_ update: [String: Any]) {
         guard isLoadingHistory,
-              let text = GrokACPAdapter.textContent(in: update) else { return }
+              let text = ACPWireAdapter.textContent(in: update) else { return }
         flushAssistantMessage()
         let messageID = update["messageId"] as? String
         if userMessageID != nil, messageID != userMessageID { flushUserMessage() }
@@ -502,7 +516,7 @@ final class GrokACPStreamSession:
     }
 
     private func handleAssistantChunk(_ update: [String: Any], thinking: Bool) {
-        guard let text = GrokACPAdapter.textContent(in: update), !text.isEmpty else { return }
+        guard let text = ACPWireAdapter.textContent(in: update), !text.isEmpty else { return }
         flushUserMessage()
         let messageID = update["messageId"] as? String
         if assistantMessageID != nil, messageID != assistantMessageID {
@@ -567,7 +581,7 @@ final class GrokACPStreamSession:
 
     private func handleToolCall(_ update: [String: Any]) {
         guard let id = update["toolCallId"] as? String, !id.isEmpty else { return }
-        var state = GrokACPToolState(update: update)
+        var state = ACPToolCallState(update: update)
         state.didEmitCall = true
         toolCalls[id] = state
         reportProviderExecution(update: update, state: state, phase: .requested, asInput: true)
@@ -582,8 +596,8 @@ final class GrokACPStreamSession:
         onEvent?(.assistantMessage(blocks: [
             .toolUse(
                 id: id,
-                tool: GrokACPAdapter.toolIdentity(kind: state.kind, title: state.title),
-                input: GrokACPAdapter.toolInput(from: update)
+                tool: ACPWireAdapter.toolIdentity(kind: state.kind, title: state.title),
+                input: ACPWireAdapter.toolInput(from: update)
             )
         ]))
         finishToolIfNeeded(id: id)
@@ -591,7 +605,7 @@ final class GrokACPStreamSession:
 
     private func handleToolCallUpdate(_ update: [String: Any]) {
         guard let id = update["toolCallId"] as? String, !id.isEmpty else { return }
-        var state = toolCalls[id] ?? GrokACPToolState(update: update)
+        var state = toolCalls[id] ?? ACPToolCallState(update: update)
         state.merge(update)
         if !state.didEmitCall {
             state.didEmitCall = true
@@ -599,8 +613,8 @@ final class GrokACPStreamSession:
             onEvent?(.assistantMessage(blocks: [
                 .toolUse(
                     id: id,
-                    tool: GrokACPAdapter.toolIdentity(kind: state.kind, title: state.title),
-                    input: GrokACPAdapter.toolInput(from: update)
+                    tool: ACPWireAdapter.toolIdentity(kind: state.kind, title: state.title),
+                    input: ACPWireAdapter.toolInput(from: update)
                 )
             ]))
         }
@@ -619,11 +633,11 @@ final class GrokACPStreamSession:
 
     private func reportProviderExecution(
         update: [String: Any],
-        state: GrokACPToolState,
+        state: ACPToolCallState,
         phase: ExecutionAuditRecord.Phase,
         asInput: Bool
     ) {
-        guard let event = GrokProviderExecutionAdapter.event(
+        guard let event = ACPProviderExecutionAdapter.event(
             update: update,
             operation: state.title,
             kind: state.kind,
@@ -641,7 +655,7 @@ final class GrokACPStreamSession:
         onEvent?(.toolResults([
             ToolResult(
                 toolUseID: id,
-                text: GrokACPAdapter.toolResultText(from: state.payload),
+                text: ACPWireAdapter.toolResultText(from: state.payload),
                 isError: state.status == "failed"
             )
         ]))
@@ -665,16 +679,16 @@ final class GrokACPStreamSession:
         }
 
         let toolCallID = toolCall["toolCallId"] as? String
-        var state = toolCallID.flatMap { toolCalls[$0] } ?? GrokACPToolState(update: toolCall)
+        var state = toolCallID.flatMap { toolCalls[$0] } ?? ACPToolCallState(update: toolCall)
         state.merge(toolCall)
         if let toolCallID { toolCalls[toolCallID] = state }
         let input = JSONValue.object(
-            from: GrokACPAdapter.toolInputFoundation(from: state.payload)
+            from: ACPWireAdapter.toolInputFoundation(from: state.payload)
         ) ?? [:]
 
         let request = PermissionRequest(
             sessionID: sessionID,
-            tool: GrokACPAdapter.toolIdentity(kind: state.kind, title: state.title),
+            tool: ACPWireAdapter.toolIdentity(kind: state.kind, title: state.title),
             input: input
         )
         let options = parameters["options"] as? [[String: Any]] ?? []
@@ -695,8 +709,8 @@ final class GrokACPStreamSession:
         case .deny: allowed = false
         }
         let preferredKinds = allowed
-            ? ["allow_once", "allow_always"]
-            : ["reject_once", "reject_always"]
+            ? ACPDefaults.allowOptionKinds
+            : ACPDefaults.rejectOptionKinds
         let selected = preferredKinds.lazy.compactMap { kind in
             options.first { $0["kind"] as? String == kind }
         }.first
@@ -742,8 +756,8 @@ final class GrokACPStreamSession:
     }
 
     private func receivedError(_ chunk: Data) {
-        guard errorBuffer.count < GrokACPDefaults.maximumErrorBytes else { return }
-        let remaining = GrokACPDefaults.maximumErrorBytes - errorBuffer.count
+        guard errorBuffer.count < ACPDefaults.maximumErrorBytes else { return }
+        let remaining = ACPDefaults.maximumErrorBytes - errorBuffer.count
         errorBuffer.append(chunk.prefix(remaining))
     }
 
@@ -762,7 +776,10 @@ final class GrokACPStreamSession:
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             finishTurnWithTransportError(
                 diagnostics.isEmpty
-                    ? "Grok ACP exited with status \(status)."
+                    ? ACPTransportMessage.exited(
+                        profile.diagnosticsLabel,
+                        status: status
+                    )
                     : diagnostics
             )
         }
@@ -770,11 +787,20 @@ final class GrokACPStreamSession:
         onExit?(status)
     }
 
+    private func composerCapabilities(
+        from commands: [[String: Any]]
+    ) -> [ComposerCapability] {
+        ACPWireAdapter.composerCapabilities(
+            from: commands,
+            policy: profile.commandCatalog
+        )
+    }
+
     private func replaceComposerCapabilities(_ capabilities: [ComposerCapability]) {
         let normalization = ComposerCapabilityCatalogPolicy.normalize(capabilities)
         if normalization.wasTruncated {
             ThreadingLogger.agent.warning(
-                "Grok ACP command catalog exceeded local presentation limits; truncated"
+                "\(self.profile.diagnosticsLabel, privacy: .public) command catalog exceeded local presentation limits; truncated"
             )
         }
         guard composerCapabilities != normalization.capabilities else { return }
@@ -783,176 +809,27 @@ final class GrokACPStreamSession:
     }
 }
 
-// MARK: - Turn Outcome
+// MARK: - Transport Messages
 
-extension TurnOutcome {
-    /// Reads the stop reason ACP answers a `session/prompt` with.
-    ///
-    /// `cancelled` is the protocol's own word for a turn the client ended through
-    /// `session/cancel`, and the spec is explicit that an agent must answer with it rather than
-    /// with an error precisely so the two can be told apart. A refusal is a real failure; an
-    /// unrecognised reason completes rather than inventing one.
-    init(acpStopReason reason: String?) {
-        switch reason {
-        case "cancelled": self = .stopped
-        case "refusal": self = .failed
-        default: self = .completed
-        }
+/// What the user is told when the transport itself fails, rather than the model.
+///
+/// One place, because these strings are the only ones a provider's name reaches, and their
+/// wording is pinned by test.
+enum ACPTransportMessage {
+    static func noConversationSession(_ displayName: String) -> String {
+        "\(displayName) opened no conversation session."
+    }
+
+    static func promptNotSent(_ displayName: String) -> String {
+        "Threading could not send the \(displayName) turn."
+    }
+
+    static func exited(_ diagnosticsLabel: String, status: Int32) -> String {
+        "\(diagnosticsLabel) exited with status \(status)."
     }
 }
 
-// MARK: - ACP Adapter
-
-enum GrokACPAdapter {
-    static func currentModel(in result: [String: Any]?) -> String? {
-        let models = result?["models"] as? [String: Any]
-        if let model = models?["currentModelId"] as? String { return model }
-        let metadata = result?["_meta"] as? [String: Any]
-        let modelState = metadata?["modelState"] as? [String: Any]
-        return modelState?["currentModelId"] as? String
-    }
-
-    static func availableCommands(in result: [String: Any]?) -> [[String: Any]]? {
-        let metadata = result?["_meta"] as? [String: Any]
-        return metadata?["availableCommands"] as? [[String: Any]]
-    }
-
-    static func textContent(in update: [String: Any]) -> String? {
-        guard let content = update["content"] as? [String: Any],
-              content["type"] as? String == "text" else { return nil }
-        return content["text"] as? String
-    }
-
-    static func sessionTitle(in update: [String: Any]) -> String? {
-        guard let title = update["title"] as? String else { return nil }
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    static func integer(_ value: Any?) -> Int? {
-        guard let number = value as? NSNumber,
-              CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
-        return number.intValue
-    }
-
-    static func planSteps(in update: [String: Any]) -> [RunProgress.Step] {
-        let entries = update["entries"] as? [[String: Any]] ?? []
-        return entries.compactMap { entry in
-            guard let title = entry["content"] as? String,
-                  let rawStatus = entry["status"] as? String,
-                  let status = RunProgress.Step.Status(providerValue: rawStatus)
-            else { return nil }
-            return RunProgress.Step(id: nil, title: title, status: status)
-        }
-    }
-
-    static func toolIdentity(kind: String?, title: String) -> ToolIdentity {
-        switch kind {
-        case "read": return .read
-        case "edit", "delete", "move": return .edit
-        case "search": return .grep
-        case "execute": return .bash
-        case "think": return .plan
-        case "fetch": return .webFetch
-        default: return ToolIdentity(title)
-        }
-    }
-
-    static func toolInput(from payload: [String: Any]) -> [String: JSONValue] {
-        JSONValue.object(from: toolInputFoundation(from: payload)) ?? [:]
-    }
-
-    static func toolInputFoundation(from payload: [String: Any]) -> [String: Any] {
-        var input: [String: Any]
-        if let object = payload["rawInput"] as? [String: Any] {
-            input = object
-        } else if let rawInput = payload["rawInput"], !(rawInput is NSNull) {
-            input = ["input": rawInput]
-        } else {
-            input = [:]
-        }
-
-        if input["title"] == nil, let title = payload["title"] as? String {
-            input["title"] = title
-        }
-        if input["kind"] == nil, let kind = payload["kind"] as? String {
-            input["kind"] = kind
-        }
-        if input["file_path"] == nil,
-           let locations = payload["locations"] as? [[String: Any]],
-           let path = locations.first?["path"] as? String {
-            input["file_path"] = path
-        }
-        if let contents = payload["content"] as? [[String: Any]],
-           let diff = contents.first(where: { $0["type"] as? String == "diff" }) {
-            input["file_path"] = input["file_path"] ?? diff["path"]
-            input["old_string"] = input["old_string"] ?? diff["oldText"]
-            input["new_string"] = input["new_string"] ?? diff["newText"]
-        }
-        return input
-    }
-
-    static func toolResultText(from payload: [String: Any]) -> String {
-        if let rawOutput = payload["rawOutput"], !(rawOutput is NSNull) {
-            if let text = rawOutput as? String { return text }
-            return JSONRPCLineEnvelope.encodedText(rawOutput)
-        }
-
-        let contents = payload["content"] as? [[String: Any]] ?? []
-        return contents.compactMap { item -> String? in
-            switch item["type"] as? String {
-            case "content":
-                guard let content = item["content"] as? [String: Any] else { return nil }
-                if content["type"] as? String == "text" {
-                    return content["text"] as? String
-                }
-                return nil
-            case "diff":
-                return item["path"] as? String
-            case "terminal":
-                return item["terminalId"] as? String
-            default:
-                return nil
-            }
-        }.joined(separator: "\n")
-    }
-}
-
-enum GrokACPComposerCatalog {
-    private static let terminalOnlyNames: Set<String> = [
-        "always-approve", "clear", "exit", "feedback", "fork", "login", "logout",
-        "model", "new", "permissions", "quit", "resume"
-    ]
-    private static let sessionCommandNames: Set<String> = [
-        "compact", "context", "session-info"
-    ]
-
-    static func capabilities(from commands: [[String: Any]]) -> [ComposerCapability] {
-        commands.compactMap { command in
-            guard let name = command["name"] as? String, !name.isEmpty,
-                  let description = command["description"] as? String else { return nil }
-            let input = command["input"] as? [String: Any]
-            let availability: ComposerCapability.Availability =
-                terminalOnlyNames.contains(name)
-                    ? .unavailable(reason: L10n.string(
-                        "Available in Grok Terminal; not available in native Chat yet"
-                    ))
-                    : .available
-            return ComposerCapability(
-                id: "grok.command:\(name)",
-                name: name,
-                description: description,
-                argumentHint: input?["hint"] as? String ?? "",
-                kind: .command,
-                trigger: .slash,
-                presentation: sessionCommandNames.contains(name) ? .command : .turn,
-                availability: availability
-            )
-        }
-    }
-}
-
-private enum GrokACPPendingBlock {
+private enum ACPPendingBlock {
     case text(String)
     case thinking(String)
 
@@ -964,36 +841,21 @@ private enum GrokACPPendingBlock {
     }
 }
 
-private struct GrokACPToolState {
-    var payload: [String: Any]
-    var title: String
-    var kind: String?
-    var status: String?
-    var didEmitCall = false
-    var didEmitResult = false
-
-    init(update: [String: Any]) {
-        payload = update
-        title = update["title"] as? String ?? "tool"
-        kind = update["kind"] as? String
-        status = update["status"] as? String
-    }
-
-    mutating func merge(_ update: [String: Any]) {
-        payload.merge(update) { _, new in new }
-        if let value = update["title"] as? String { title = value }
-        if let value = update["kind"] as? String { kind = value }
-        if let value = update["status"] as? String { status = value }
-    }
-}
-
-private enum GrokACPRequestPurpose {
+private enum ACPRequestPurpose {
     case initialize
     case openSession
     case prompt
 }
 
-private enum GrokACPDefaults {
+private enum ACPDefaults {
     static let protocolVersion = 1
     static let maximumErrorBytes = 64 * 1024
+
+    /// The option kinds the protocol itself names, in the order a decision prefers them.
+    ///
+    /// Standard vocabulary rather than provider policy, so it stays out of `ACPProviderProfile`.
+    /// Another ACP client answers hyphenated kinds ("allow-once") as well; a CLI that deviates
+    /// that way earns a profile member then, not before.
+    static let allowOptionKinds = ["allow_once", "allow_always"]
+    static let rejectOptionKinds = ["reject_once", "reject_always"]
 }

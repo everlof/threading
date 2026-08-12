@@ -119,7 +119,12 @@ enum CodexProviderExecutionAdapter {
     }
 }
 
-enum GrokProviderExecutionAdapter {
+/// Serves every Agent Client Protocol CLI, not one vendor's.
+///
+/// A `tool_call` update names its own tool the same way whichever agent sent it, and the audit
+/// category is derived from the neutral `ToolIdentity` rather than from the runtime — so there is
+/// nothing here for a second ACP provider to specialize.
+enum ACPProviderExecutionAdapter {
     static func event(
         update: [String: Any],
         operation: String,
@@ -131,7 +136,7 @@ enum GrokProviderExecutionAdapter {
               let raw = JSONValue(foundationValue: update) else { return nil }
         return ProviderExecutionEvent(
             category: ExecutionAuditStore.category(
-                for: GrokACPAdapter.toolIdentity(kind: kind, title: operation).rawName
+                for: ACPWireAdapter.toolIdentity(kind: kind, title: operation).rawName
             ),
             phase: phase,
             operation: operation,

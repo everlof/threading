@@ -390,6 +390,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        if request.method == "POST", path == RemoteRouter.hostedDeviceCredentialPath {
+            handleHostedDeviceCredential(request, respond: respond)
+            return
+        }
+
         // An interact-capable paired device may resume a dormant conversation before opening
         // its socket. This is a narrow lifecycle door: it cannot create, delete, or change the
         // operational configuration of sessions, and the dedicated server exposes no MCP route.
@@ -1050,6 +1055,40 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 status: 201,
                 reason: "Created"
             )))
+        }
+    }
+
+    private func handleHostedDeviceCredential(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canManageHost else {
+            respond(.respond(RemoteRouter.error(403, "Owner access required")))
+            return
+        }
+        guard let deviceID = RemoteInboundPolicy.normalizedDeviceID(
+            request.header(RemoteRouter.deviceHeader)
+        ) else {
+            respond(.respond(RemoteRouter.error(400, "Invalid device")))
+            return
+        }
+        Task { @MainActor in
+            do {
+                let credential = try await RemoteAccessCoordinator.shared
+                    .issueHostedDeviceCredential(deviceID: deviceID)
+                respond(.respond(RemoteRouter.json(
+                    credential,
+                    status: 201,
+                    reason: "Created",
+                    maximumBytes: 16 * 1024
+                )))
+            } catch {
+                ThreadingLogger.remote.error(
+                    "Hosted device credential issue failed code=service"
+                )
+                respond(.respond(RemoteRouter.error(503, "Hosted service unavailable")))
+            }
         }
     }
 

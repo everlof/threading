@@ -745,6 +745,7 @@
 				ThreadingMobile/ThreadingMobile-InfoPlist.xcstrings,
 				ThreadingMobile/DemoExperience.swift,
 				ThreadingMobile/PairingView.swift,
+				ThreadingMobile/HostedRemoteConnectionManager.swift,
 				ThreadingMobile/MobileIssueReporting.swift,
 				ThreadingMobile/MobileSettingsView.swift,
 				ThreadingMobile/MobileWorkspaceActivity.swift,
@@ -1524,6 +1525,11 @@
 					};
 					F6000001000000000000001 = {
 						CreatedOnToolsVersion = 15.0;
+						SystemCapabilities = {
+							com.apple.SignInWithApple = {
+								enabled = 1;
+							};
+						};
 					};
 				};
 			};

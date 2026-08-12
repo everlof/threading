@@ -30,6 +30,7 @@ common_notices=(
     "Threading-GPL-3.0.txt"
     "SwiftTerm-MIT.txt"
     "NativeDiffKit-MIT.txt"
+    "WebRTC-BSD-3-Clause.txt"
     "W95FA-OFL-1.1.txt"
     "W95FA-SOURCE.md"
     "PlatinumBitmap-OFL-1.1.txt"

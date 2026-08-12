@@ -1606,6 +1606,25 @@ and maximum wall latency so filesystem-cache effects stay visible. This case is 
 external repository and its cache state are not reproducible enough for routine `full`; setting
 `THREADING_GIT_REPOSITORY_STRESS_PATH` includes it in `full+`.
 
+A five-run Debug smoke measurement on 2026-08-12 verified the complete harness before using a
+Linux-scale checkout. The supplied repository had 1,646 visible paths; the revision range produced
+342 files, 54,396 presented diff lines and 2.60 MiB of patch data:
+
+| Real-repository phase | Median | p95 | Max |
+|---|---:|---:|---:|
+| Enumerate repository files | 37.5 ms | 37.9 ms | 40.5 ms |
+| Uncommitted summary | 155.0 ms | 156.0 ms | 158.6 ms |
+| Parsed uncommitted review | 154.5 ms | 155.2 ms | 167.8 ms |
+| First 100 history rows | 572.9 ms | 575.7 ms | 728.6 ms |
+| Revision-range Git command | 111.1 ms | 112.9 ms | 134.8 ms |
+| Revision-range parse | 101.0 ms | 102.2 ms | 102.7 ms |
+
+The one real-model view pass then took 20.5 ms to install, 51.5 ms to lay out, 23.6 ms to draw,
+and 31.6 ms to seek and render the bottom viewport while instantiating three of 342 file rows.
+This is a harness baseline, not a Linux-scale conclusion. It does, however, identify the
+numstat-bearing 100-row history query as the first production phase to inspect when the larger
+checkout is run.
+
 Height discovery is split at that boundary. AppKit automatic row height initially retained roughly
 twice the actual height for a 400-line body, creating blank content after the last glyph; and a
 height query before the table became the scroll document saw width zero, making the offscreen wrap

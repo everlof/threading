@@ -135,10 +135,20 @@ final class RemoteSessionMirrorRegistry {
                 : nil,
             archivedSessions: archived,
             newSessionCatalog: ownsSessionLifecycle ? newSessionCatalog() : nil,
-            features: authorization.canReadHostUsage
-                ? [RemoteRESTFeature.usageDashboard.rawValue]
-                : nil
+            features: restFeatures(for: authorization)
         )
+    }
+
+    private func restFeatures(for authorization: RemoteAuthorization) -> [String]? {
+        var features: [String] = []
+        if authorization.canReadHostUsage {
+            features.append(RemoteRESTFeature.usageDashboard.rawValue)
+        }
+        if authorization.canManageHost,
+           RemoteAccessCoordinator.shared.canIssueHostedDeviceCredentials {
+            features.append(RemoteRESTFeature.hostedPeerTransport.rawValue)
+        }
+        return features.isEmpty ? nil : features
     }
 
     private func summary(for session: AgentSession, projectName: String) -> RemoteSessionSummaryDTO {

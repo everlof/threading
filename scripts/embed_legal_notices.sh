@@ -37,6 +37,7 @@ copy_notice "$repository_root/LICENSE" "Threading-GPL-3.0.txt"
 copy_notice "$repository_root/Legal/THIRD_PARTY_NOTICES.md" "THIRD_PARTY_NOTICES.md"
 copy_notice "$repository_root/Packages/Vendor/SwiftTerm/LICENSE" "SwiftTerm-MIT.txt"
 copy_notice "$package_checkouts/NativeDiffKit/LICENSE" "NativeDiffKit-MIT.txt"
+copy_notice "$package_checkouts/WebRTC/LICENSE.md" "WebRTC-BSD-3-Clause.txt"
 
 font_root="$repository_root/Sources/Threading/Resources/Fonts"
 copy_notice "$font_root/W95FA/W95FA-OFL.txt" "W95FA-OFL-1.1.txt"

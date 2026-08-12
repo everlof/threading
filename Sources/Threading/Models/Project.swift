@@ -84,7 +84,7 @@ struct AgentCapabilities: OptionSet {
   ///
   /// Claude only, and the reason is narrower than it first appears. Codex's app-server takes
   /// submitted text as text. **ACP does not**: `GrokACPComposerCatalog` enumerates Grok's slash
-  /// commands and `GrokACPStreamSession.send(_ invocation:)` forwards a literal `/compact …`
+  /// commands and `ACPStreamSession.send(_ invocation:)` forwards a literal `/compact …`
   /// over `session/prompt`, so Grok plainly interprets the prefix. What has not been measured
   /// is the *uncatalogued* case — a participant's leading-slash message that matches no
   /// advertised command — which is the only text this capability governs. Granting it to Grok

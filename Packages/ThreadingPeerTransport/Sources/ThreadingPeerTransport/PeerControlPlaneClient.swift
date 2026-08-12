@@ -20,7 +20,7 @@ public enum PeerControlPlaneError: Error, Equatable, Sendable {
 }
 
 /// A service bearer whose description can safely appear in diagnostics.
-public struct PeerControlPlaneBearer: Codable, Equatable, Sendable, CustomStringConvertible {
+public struct PeerControlPlaneBearer: Codable, Equatable, Hashable, Sendable, CustomStringConvertible {
     fileprivate let rawValue: String
 
     public init(_ value: String) throws {
@@ -52,25 +52,57 @@ public struct PeerControlPlaneBearer: Codable, Equatable, Sendable, CustomString
     }
 }
 
-public struct PeerControlPlaneSession: Codable, Equatable, Sendable {
+public struct PeerControlPlaneSession: Codable, Equatable, Hashable, Sendable {
     public let accountID: String
     public let accessToken: PeerControlPlaneBearer
     public let accessTokenExpiresAt: Date
     public let refreshToken: PeerControlPlaneBearer
     public let refreshTokenExpiresAt: Date
+
+    public init(
+        accountID: String,
+        accessToken: PeerControlPlaneBearer,
+        accessTokenExpiresAt: Date,
+        refreshToken: PeerControlPlaneBearer,
+        refreshTokenExpiresAt: Date
+    ) {
+        self.accountID = accountID
+        self.accessToken = accessToken
+        self.accessTokenExpiresAt = accessTokenExpiresAt
+        self.refreshToken = refreshToken
+        self.refreshTokenExpiresAt = refreshTokenExpiresAt
+    }
 }
 
-public struct PeerHostServiceCredential: Codable, Equatable, Sendable {
+public struct PeerHostServiceCredential: Codable, Equatable, Hashable, Sendable {
     public let hostID: String
     public let credential: PeerControlPlaneBearer
     public let expiresAt: Date
+
+    public init(hostID: String, credential: PeerControlPlaneBearer, expiresAt: Date) {
+        self.hostID = hostID
+        self.credential = credential
+        self.expiresAt = expiresAt
+    }
 }
 
-public struct PeerDeviceServiceCredential: Codable, Equatable, Sendable {
+public struct PeerDeviceServiceCredential: Codable, Equatable, Hashable, Sendable {
     public let hostID: String
     public let deviceID: String
     public let credential: PeerControlPlaneBearer
     public let expiresAt: Date
+
+    public init(
+        hostID: String,
+        deviceID: String,
+        credential: PeerControlPlaneBearer,
+        expiresAt: Date
+    ) {
+        self.hostID = hostID
+        self.deviceID = deviceID
+        self.credential = credential
+        self.expiresAt = expiresAt
+    }
 }
 
 /// HTTPS endpoint for the account/enrollment API and WebSocket rendezvous API.
@@ -127,10 +159,12 @@ public struct PeerControlPlaneClient: Sendable {
 
     public func signInWithApple(
         identityToken: String,
+        authorizationCode: String,
         rawNonce: String
     ) async throws -> PeerControlPlaneSession {
         guard !identityToken.isEmpty,
               identityToken.utf8.count <= PeerControlPlaneBounds.maximumIdentityTokenBytes,
+              isBoundedNonEmpty(authorizationCode, maximumBytes: 4 * 1024),
               isBoundedNonEmpty(rawNonce, maximumBytes: 512)
         else {
             throw PeerControlPlaneError.invalidRequest
@@ -138,7 +172,11 @@ public struct PeerControlPlaneClient: Sendable {
         let response: SessionResponse = try await request(
             method: "POST",
             url: endpoint.route("v1", "auth", "apple"),
-            body: AppleSignInRequest(identityToken: identityToken, nonce: rawNonce)
+            body: AppleSignInRequest(
+                identityToken: identityToken,
+                authorizationCode: authorizationCode,
+                nonce: rawNonce
+            )
         )
         return try response.validated()
     }
@@ -152,6 +190,14 @@ public struct PeerControlPlaneClient: Sendable {
             body: RefreshRequest(refreshToken: refreshToken.rawValue)
         )
         return try response.validated()
+    }
+
+    public func signOut(refreshToken: PeerControlPlaneBearer) async throws {
+        try await requestWithoutResponse(
+            method: "POST",
+            url: endpoint.route("v1", "auth", "signout"),
+            body: RefreshRequest(refreshToken: refreshToken.rawValue)
+        )
     }
 
     public func enrollHost(
@@ -219,6 +265,26 @@ public struct PeerControlPlaneClient: Sendable {
         )
     }
 
+    public func revokeHost(
+        accessToken: PeerControlPlaneBearer,
+        hostID: String
+    ) async throws {
+        try validateIdentifier(hostID)
+        try await requestWithoutResponse(
+            method: "DELETE",
+            url: endpoint.route("v1", "hosts", hostID),
+            bearer: accessToken
+        )
+    }
+
+    public func deleteAccount(accessToken: PeerControlPlaneBearer) async throws {
+        try await requestWithoutResponse(
+            method: "DELETE",
+            url: endpoint.route("v1", "account"),
+            bearer: accessToken
+        )
+    }
+
     private func request<Body: Encodable, Response: Decodable>(
         method: String,
         url: URL,
@@ -256,6 +322,28 @@ public struct PeerControlPlaneClient: Sendable {
         try validateHTTP(response, data: data, expectedStatuses: 200..<300)
     }
 
+    private func requestWithoutResponse<Body: Encodable>(
+        method: String,
+        url: URL,
+        bearer: PeerControlPlaneBearer? = nil,
+        body: Body
+    ) async throws {
+        var request = try makeRequest(method: method, url: url, bearer: bearer)
+        let encoded: Data
+        do {
+            encoded = try JSONEncoder().encode(body)
+        } catch {
+            throw PeerControlPlaneError.invalidRequest
+        }
+        guard encoded.count <= PeerControlPlaneBounds.maximumRequestBytes else {
+            throw PeerControlPlaneError.invalidRequest
+        }
+        request.httpBody = encoded
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await BoundedHTTP.perform(request)
+        try validateHTTP(response, data: data, expectedStatuses: 200..<300)
+    }
+
     private func makeRequest(
         method: String,
         url: URL,
@@ -278,6 +366,7 @@ public struct PeerControlPlaneClient: Sendable {
 
 private struct AppleSignInRequest: Encodable {
     let identityToken: String
+    let authorizationCode: String
     let nonce: String
 }
 
