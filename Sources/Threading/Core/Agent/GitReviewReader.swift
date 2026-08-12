@@ -109,10 +109,22 @@ enum GitReviewReader {
     /// The checkout's tracked and non-ignored untracked files, sorted for a compact browser.
     static func repositoryFiles(
         in root: URL,
-        completion: @escaping @MainActor @Sendable (Result<[String], Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<GitRepositoryFileList, Failure>) -> Void
     ) {
         perform("git.read.repository-files", completion) {
             try repositoryFilePaths(in: root)
+        }
+    }
+
+    /// The remote repository browser retains natural display order, but that locale-sensitive
+    /// presentation sort stays off-main and out of the lexical catalogue/atlas pipeline.
+    static func repositoryFilesForDisplay(
+        limit: Int,
+        in root: URL,
+        completion: @escaping @MainActor @Sendable (Result<GitRepositoryFilePage, Failure>) -> Void
+    ) {
+        perform("git.read.repository-files-display", completion) {
+            try repositoryFilePaths(in: root).naturalDisplayPage(limit: limit)
         }
     }
 
@@ -125,7 +137,7 @@ enum GitReviewReader {
         completion: @escaping @MainActor @Sendable (Result<GitRepositoryFile, Failure>) -> Void
     ) {
         perform("git.read.repository-file", completion) {
-            guard try repositoryFilePaths(in: root).contains(path) else {
+            guard try repositoryContainsFile(path, in: root) else {
                 throw Failure.gitFailed("File not found.")
             }
 
@@ -699,13 +711,40 @@ enum GitReviewReader {
         return queue
     }
 
-    private static func repositoryFilePaths(in root: URL) throws -> [String] {
-        GitDiffParser.decode(try run(GitReviewCommands.repositoryFiles(), in: root))
+    private static func repositoryFilePaths(in root: URL) throws -> GitRepositoryFileList {
+        // `git ls-files` emits index-order paths, including the untracked merge, and
+        // `--deduplicate` makes the output unique. Preserve that lexical answer: natural-sorting
+        // it here cost hundreds of milliseconds at Linux scale and the atlas sorted it again.
+        GitRepositoryFileList(paths: paths(fromRepositoryList: try run(
+            GitReviewCommands.repositoryFiles(),
+            in: root
+        )))
+    }
+
+    /// Authorises one remote path without manufacturing the complete repository catalogue.
+    /// Literal pathspecs preserve newlines, non-ASCII and wildcard-looking names. Exact result
+    /// comparison remains necessary because Git intentionally expands a directory pathspec.
+    private static func repositoryContainsFile(_ path: String, in root: URL) throws -> Bool {
+        guard !path.isEmpty, !path.utf8.contains(0) else { return false }
+        let data: Data
+        do {
+            data = try run(
+                GitReviewCommands.repositoryFile(path),
+                in: root,
+                maximumOutput: GitReviewDefaults.exactRepositoryPathOutputCap
+            )
+        } catch Failure.outputTooLarge {
+            // A directory-shaped pathspec expands to descendants. It is not one exact file.
+            return false
+        }
+        let matches = paths(fromRepositoryList: data)
+        return matches.count == 1 && matches[0] == path
+    }
+
+    private static func paths(fromRepositoryList data: Data) -> [String] {
+        GitDiffParser.decode(data)
             .split(separator: "\u{00}", omittingEmptySubsequences: true)
             .map(String.init)
-            .sorted {
-                $0.localizedStandardCompare($1) == .orderedAscending
-            }
     }
 
     // MARK: - Untracked Synthesis
@@ -784,13 +823,15 @@ enum GitReviewReader {
         _ arguments: [String],
         in root: URL,
         input: Data? = nil,
-        environment: [String: String] = [:]
+        environment: [String: String] = [:],
+        maximumOutput: Int = GitReviewDefaults.maximumDiffBytes
     ) throws -> Data {
         try GitProcess.run(
             GitReviewCommands.common + arguments,
             in: root,
             input: input,
-            environmentOverrides: environment
+            environmentOverrides: environment,
+            maximumOutput: maximumOutput
         )
     }
 }

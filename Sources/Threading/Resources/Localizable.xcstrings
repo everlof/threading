@@ -27649,7 +27649,8 @@
     "bell": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ljudsignal"}}}},
     "beep": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "pip"}}}},
     "terminal bell": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "terminalens ljudsignal"}}}},
-    "alert sound": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "aviseringsljud"}}}}
+    "alert sound": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "aviseringsljud"}}}},
+    "Show or Hide the Display Panel": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa eller dölj visningspanelen"}}}}
   },
   "version": "1.0"
 }

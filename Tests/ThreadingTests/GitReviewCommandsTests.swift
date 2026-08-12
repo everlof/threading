@@ -61,8 +61,24 @@ final class GitReviewCommandsTests: XCTestCase {
     func testRepositoryFilesAreLiteralAndNULTerminated() {
         XCTAssertEqual(
             GitReviewCommands.repositoryFiles(),
-            ["ls-files", "-co", "--exclude-standard", "-z"]
+            ["ls-files", "-co", "--exclude-standard", "--deduplicate", "-z"]
         )
+        XCTAssertEqual(
+            GitReviewCommands.repositoryFile("literal[1]\n\u{00E4}.swift"),
+            [
+                "ls-files", "-co", "--exclude-standard", "--deduplicate", "-z", "--",
+                ":(top,literal)literal[1]\n\u{00E4}.swift"
+            ]
+        )
+    }
+
+    func testRepositoryFileDisplayPageKeepsNaturalOrderAndItsBound() {
+        let page = GitRepositoryFileList(paths: [
+            "Sources/File10.swift", "Sources/File2.swift", "Sources/File1.swift"
+        ]).naturalDisplayPage(limit: 2)
+
+        XCTAssertEqual(page.paths, ["Sources/File1.swift", "Sources/File2.swift"])
+        XCTAssertTrue(page.isTruncated)
     }
 
     func testLogPagesWithControlCharacterFormat() {

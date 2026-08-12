@@ -1458,20 +1458,24 @@ final class GitReviewViewTests: XCTestCase {
         }
 
         var repositoryFileDurations: [UInt64] = []
+        var rawRepositoryFileDurations: [UInt64] = []
+        var exactRepositoryFileDurations: [UInt64] = []
         var summaryDurations: [UInt64] = []
         var uncommittedDurations: [UInt64] = []
         var historyDurations: [UInt64] = []
         var repositoryFileCount = 0
+        var exactRepositoryPath: String?
         var uncommittedFileCount = 0
         var historyCount = 0
 
         for _ in 0..<runs {
             var started = DispatchTime.now().uptimeNanoseconds
-            let paths = try awaitGitValue {
+            let listing = try awaitGitValue {
                 GitReviewReader.repositoryFiles(in: repository, completion: $0)
             }
             repositoryFileDurations.append(DispatchTime.now().uptimeNanoseconds - started)
-            repositoryFileCount = paths.count
+            repositoryFileCount = listing.paths.count
+            exactRepositoryPath = listing.paths.first
 
             started = DispatchTime.now().uptimeNanoseconds
             _ = try awaitGitValue {
@@ -1494,9 +1498,44 @@ final class GitReviewViewTests: XCTestCase {
             historyCount = history.count
         }
 
+        for _ in 0..<runs {
+            var started = DispatchTime.now().uptimeNanoseconds
+            _ = try GitProcess.run(
+                GitReviewCommands.common + GitReviewCommands.repositoryFiles(),
+                in: repository,
+                maximumOutput: GitReviewDefaults.maximumDiffBytes
+            )
+            rawRepositoryFileDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+
+            if let exactRepositoryPath {
+                started = DispatchTime.now().uptimeNanoseconds
+                let file = try awaitGitValue {
+                    GitReviewReader.repositoryFile(
+                        path: exactRepositoryPath,
+                        in: repository,
+                        completion: $0
+                    )
+                }
+                exactRepositoryFileDurations.append(
+                    DispatchTime.now().uptimeNanoseconds - started
+                )
+                XCTAssertEqual(file.path, exactRepositoryPath)
+            }
+        }
+
         Self.printRealRepositoryMetric(
             "git-repository-files",
             durations: repositoryFileDurations,
+            fields: "paths=\(repositoryFileCount)"
+        )
+        Self.printRealRepositoryMetric(
+            "git-repository-files-raw",
+            durations: rawRepositoryFileDurations,
+            fields: "paths=\(repositoryFileCount)"
+        )
+        Self.printRealRepositoryMetric(
+            "git-repository-file-exact",
+            durations: exactRepositoryFileDurations,
             fields: "paths=\(repositoryFileCount)"
         )
         Self.printRealRepositoryMetric(

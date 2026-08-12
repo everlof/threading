@@ -1677,6 +1677,32 @@ This is a harness baseline, not a Linux-scale conclusion. It does, however, iden
 numstat-bearing 100-row history query as the first production phase to inspect when the larger
 checkout is run.
 
+The subsequent Linux checkout run changed that owner: 94,854 visible paths made the full file
+catalogue and the one-file remote read larger than history. The catalogue was natural-sorted in
+the reader and then sorted again for the Activity atlas; reading one exact file manufactured the
+same complete allowlist before testing membership. A matched five-pass Debug run before and after
+moving uniqueness/lexical order to `git ls-files --deduplicate`, retaining it in a typed catalogue,
+and using one bounded literal pathspec measured:
+
+| Linux-scale production phase | Before median | After median | Change |
+|---|---:|---:|---:|
+| Complete repository-file reader, 94,854 paths | 673.5 ms | 339.2 ms | −49.6% |
+| Raw `ls-files` process floor | 295.8 ms | 225.6 ms | diagnostic |
+| Authorize and read one exact repository file | 950.9 ms | 38.0 ms | −96.0%, 25.0× faster |
+
+The reader result is intentionally lexical, not presentation-sorted. Consumers that need natural
+filename order request a separately bounded display page, still computed off-main, while the
+Activity atlas consumes the catalogue without another whole-repository sort. Exact reads retain
+resolved-root containment and ignored-file semantics and cap Git output to one maximum-length
+remote path; a directory-shaped pathspec that expands to multiple results is refused.
+
+The same post-repair run kept the end-to-end revision-range view bounded: 970 files, 39,488 lines
+and 1.58 MiB parsed in 89.6 ms median, then installed/layout/drew/sought-bottom in
+22.1/29.5/26.7/40.1 ms while instantiating 3 of 970 file rows. The remaining 339 ms catalogue
+median is mostly the 226 ms Git process plus decoding/allocation for all 94,854 paths; do not
+reintroduce a locale sort into that internal path or use a complete catalogue to authorize one
+file.
+
 Height discovery is split at that boundary. AppKit automatic row height initially retained roughly
 twice the actual height for a 400-line body, creating blank content after the last glyph; and a
 height query before the table became the scroll document saw width zero, making the offscreen wrap
@@ -2441,7 +2467,8 @@ and filtering runs at keystroke frequency. Their implementation-time gate is exp
 
 - command catalogs filter off-main, cancel superseded work, check cancellation during the pass,
   and hand the main actor at most 100 value rows for a virtual table;
-- workspace discovery uses `git ls-files -co --exclude-standard -z` once per execution checkout,
+- workspace discovery uses `git ls-files -co --exclude-standard --deduplicate -z` once per
+  execution checkout,
   never recursive enumeration per keystroke; the queue-confined index admits at most 100,000
   contained regular paths and 16 MiB of Git output, cancels superseded queued queries, and returns
   at most 64 relative references;

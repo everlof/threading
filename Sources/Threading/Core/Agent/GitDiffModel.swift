@@ -148,6 +148,31 @@ struct GitStatus: Sendable {
 
 // MARK: - Repository Files
 
+/// Git's complete visible-path answer, already unique and lexically ordered by `ls-files`.
+/// Keeping that provenance in the type prevents a large-repository consumer from sorting the
+/// same 100,000-path catalogue again merely because an ordinary array carries no ordering fact.
+struct GitRepositoryFileList: Sendable {
+    let paths: [String]
+
+    /// Presentation keeps the repository browser's natural filename order without making that
+    /// locale-dependent ordering the topology contract consumed by the shared Activity atlas.
+    func naturalDisplayPage(limit: Int) -> GitRepositoryFilePage {
+        let sorted = paths.sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }
+        let boundedLimit = max(0, limit)
+        return GitRepositoryFilePage(
+            paths: Array(sorted.prefix(boundedLimit)),
+            isTruncated: sorted.count > boundedLimit
+        )
+    }
+}
+
+struct GitRepositoryFilePage: Sendable {
+    let paths: [String]
+    let isTruncated: Bool
+}
+
 /// One bounded source file read for a remote repository browser.
 struct GitRepositoryFile: Sendable {
     let path: String
