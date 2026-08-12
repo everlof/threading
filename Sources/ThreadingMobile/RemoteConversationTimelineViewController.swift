@@ -1,4 +1,5 @@
 import ThreadingRemoteKit
+import QuartzCore
 import SwiftUI
 import UIKit
 
@@ -486,6 +487,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
     private let onViewportChange: (Double, Bool) -> Void
     private var theme: RemoteThemePalette
     private var collectionView: UICollectionView!
+    private let latestButton = UIButton(type: .system)
     private var dataSource: UICollectionViewDiffableDataSource<Int, Item>!
     private var storeObserver: UUID?
     private var parsedDocuments: [String: RemoteMarkdownDocument] = [:]
@@ -512,6 +514,12 @@ final class RemoteConversationTimelineViewController: UIViewController {
         self.theme = theme
         self.initialViewport = initialViewport
         self.onViewportChange = onViewportChange
+#if DEBUG
+        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+            == "conversation-tool-expanded" {
+            expandedRows = ["content-tool-error"]
+        }
+#endif
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -585,6 +593,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
         self.theme = theme
         view.backgroundColor = theme.uiGround
         collectionView.backgroundColor = theme.uiGround
+        applyLatestButtonTheme()
         reconfigureVisibleContent()
     }
 
@@ -622,13 +631,37 @@ final class RemoteConversationTimelineViewController: UIViewController {
             forCellWithReuseIdentifier: RemoteConversationHistoryCell.reuseIdentifier
         )
         view.addSubview(collectionView)
+        latestButton.translatesAutoresizingMaskIntoConstraints = false
+        latestButton.setImage(UIImage(systemName: "arrow.down"), for: .normal)
+        latestButton.accessibilityLabel = MobileL10n.string("Jump to latest message")
+        latestButton.alpha = 0
+        latestButton.isHidden = true
+        latestButton.addAction(UIAction { [weak self] _ in
+            self?.scrollToBottom(animated: true)
+        }, for: .touchUpInside)
+        view.addSubview(latestButton)
         NSLayoutConstraint.activate([
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             collectionView.topAnchor.constraint(equalTo: view.topAnchor),
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            latestButton.trailingAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.trailingAnchor,
+                constant: -MobileDesign.Spacing.inset
+            ),
+            latestButton.bottomAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.bottomAnchor,
+                constant: -MobileDesign.Spacing.inset
+            ),
+            latestButton.widthAnchor.constraint(
+                equalToConstant: MobileDesign.Size.minimumTapTarget
+            ),
+            latestButton.heightAnchor.constraint(
+                equalToConstant: MobileDesign.Size.minimumTapTarget
+            ),
         ])
         view.backgroundColor = theme.uiGround
+        applyLatestButtonTheme()
     }
 
     private func configureDataSource() {
@@ -711,12 +744,28 @@ final class RemoteConversationTimelineViewController: UIViewController {
     private func apply(_ change: RemoteConversationStore.Change) {
         let nearBottom = isNearBottom
         switch change {
-        case .reset:
-            conversationLayout.resetHeightCache()
-            parsedDocuments.removeAll(keepingCapacity: true)
-            markdownSources.removeAll(keepingCapacity: true)
-            expandedRows.removeAll(keepingCapacity: true)
-            applySnapshot(scrollToBottom: !hasAppliedInitialSnapshot || nearBottom)
+        case .unchanged:
+            break
+
+        case .reset(let updated):
+            let state = connection.conversationStore.state
+            let activeIDs = Set(state.rows.map(\.id))
+            let assistantSources = Dictionary(uniqueKeysWithValues: state.rows.compactMap { row in
+                row.kind == "assistant" ? (row.id, row.text ?? "") : nil
+            })
+            for (id, source) in markdownSources
+            where assistantSources[id] != source {
+                markdownSources[id] = nil
+                parsedDocuments[id] = nil
+            }
+            expandedRows.formIntersection(activeIDs)
+            conversationLayout.invalidateHeights(
+                for: updated.map { AnyHashable(Item.row($0)) }
+            )
+            applySnapshot(
+                reconfiguring: Set(updated),
+                scrollToBottom: !hasAppliedInitialSnapshot || nearBottom
+            )
             prefetchMarkdown()
 
         case .delta(
@@ -752,6 +801,9 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 }
                 if permissionChanged, let desiredPermissionID {
                     items.append(.permission(desiredPermissionID))
+                }
+                if historyChanged, hasHistoryItem {
+                    items.append(.history)
                 }
                 reconfigure(items)
             }
@@ -816,6 +868,11 @@ final class RemoteConversationTimelineViewController: UIViewController {
             }
 #endif
             self.hasAppliedInitialSnapshot = true
+#if DEBUG
+            MobileConversationPerformanceProbe.conversationSnapshotApplied(
+                self.collectionView
+            )
+#endif
             if scrollToBottom {
                 if self.needsInitialBottomPosition {
                     self.positionInitialBottomAfterLayout()
@@ -1017,10 +1074,33 @@ final class RemoteConversationTimelineViewController: UIViewController {
         return remaining < MobileDesign.Size.conversationBottomTolerance
     }
 
-    private func scrollToBottom() {
+    private func scrollToBottom(animated: Bool = false) {
         guard let item = dataSource.snapshot().itemIdentifiers.last,
               let indexPath = dataSource.indexPath(for: item) else { return }
-        collectionView.scrollToItem(at: indexPath, at: .bottom, animated: false)
+        collectionView.scrollToItem(at: indexPath, at: .bottom, animated: animated)
+        setLatestButtonVisible(false)
+    }
+
+    private func applyLatestButtonTheme() {
+        latestButton.applyRemoteSurface(
+            fill: theme.uiSurface,
+            radius: MobileDesign.Size.minimumTapTarget / 2,
+            border: theme.uiBorder,
+            borderWidth: max(theme.borderWidth, 1)
+        )
+        latestButton.tintColor = theme.uiAccent
+    }
+
+    private func setLatestButtonVisible(_ visible: Bool) {
+        guard latestButton.isHidden == visible else { return }
+        if visible { latestButton.isHidden = false }
+        UIView.animate(
+            withDuration: UIAccessibility.isReduceMotionEnabled
+                ? 0
+                : MobileDesign.Motion.controlResponse,
+            animations: { self.latestButton.alpha = visible ? 1 : 0 },
+            completion: { _ in self.latestButton.isHidden = !visible }
+        )
     }
 
     private func positionInitialBottomAfterLayout() {
@@ -1055,6 +1135,12 @@ final class RemoteConversationTimelineViewController: UIViewController {
             self.positionFromContinuity()
             self.needsInitialBottomPosition = false
             self.isInitialBottomPositionScheduled = false
+            // A persisted non-following viewport is semantically away from the live edge even
+            // when short final rows happen to fall inside the normal near-bottom tolerance.
+            // Keep the affordance visible until the person explicitly returns to the end.
+            self.setLatestButtonVisible(
+                self.initialViewport?.followsBottom == false || !self.isNearBottom
+            )
 #if DEBUG
             MobileConversationPerformanceProbe.initialBottomSettled()
 #endif
@@ -1123,6 +1209,9 @@ extension RemoteConversationTimelineViewController: UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if hasAppliedInitialSnapshot, !needsInitialBottomPosition {
+            setLatestButtonVisible(!isNearBottom)
+        }
         if scrollView.isDragging || scrollView.isDecelerating || scrollView.isTracking {
             needsInitialBottomPosition = false
             scheduleViewportSave()
@@ -1147,6 +1236,7 @@ enum MobileConversationPerformanceProbe {
         let startedAt: TimeInterval
         let generationMilliseconds: Double
         let storeMilliseconds: Double
+        let reconnect: (() -> Bool)?
     }
 
     private static var fixture: Fixture?
@@ -1159,6 +1249,12 @@ enum MobileConversationPerformanceProbe {
     private static var initialBottomSettledAt: TimeInterval?
     private static var invalidWidthCellConfigurations = 0
     private static var initialBottomSettleTasks = 0
+    private static var restoredDraftAssignments = 0
+    private static var reconnectStartedAt: TimeInterval?
+    private static var reconnectDispatchMilliseconds = 0.0
+    private static var reconnectAwaitsSnapshot = false
+    private static var reconnectSettleScheduled = false
+    private static var reconnectSnapshotReset = false
 
     static func fixtureDidLoad(
         mode: String,
@@ -1166,7 +1262,8 @@ enum MobileConversationPerformanceProbe {
         mountedRows: Int,
         startedAt: TimeInterval,
         generationMilliseconds: Double,
-        storeMilliseconds: Double
+        storeMilliseconds: Double,
+        reconnect: (() -> Bool)?
     ) {
         // `simctl launch --stdout/--stderr` is not reliable for detached UIKit apps on every
         // simulator runtime. Keep the machine-readable copy in the app container as well so the
@@ -1178,7 +1275,8 @@ enum MobileConversationPerformanceProbe {
             mountedRows: mountedRows,
             startedAt: startedAt,
             generationMilliseconds: generationMilliseconds,
-            storeMilliseconds: storeMilliseconds
+            storeMilliseconds: storeMilliseconds,
+            reconnect: reconnect
         )
         didReportFirstPaint = false
         scrollDriver?.stop()
@@ -1190,6 +1288,12 @@ enum MobileConversationPerformanceProbe {
         initialBottomSettledAt = nil
         invalidWidthCellConfigurations = 0
         initialBottomSettleTasks = 0
+        restoredDraftAssignments = 0
+        reconnectStartedAt = nil
+        reconnectDispatchMilliseconds = 0
+        reconnectAwaitsSnapshot = false
+        reconnectSettleScheduled = false
+        reconnectSnapshotReset = false
     }
 
     static func timelineViewLoadStarted() {
@@ -1214,6 +1318,16 @@ enum MobileConversationPerformanceProbe {
 
     static func initialBottomSettled() {
         initialBottomSettledAt = ProcessInfo.processInfo.systemUptime
+    }
+
+    static func restoredDraftWillAssign() {
+        restoredDraftAssignments += 1
+    }
+
+    static func conversationSnapshotApplied(_ collectionView: UICollectionView) {
+        guard reconnectStartedAt != nil, reconnectAwaitsSnapshot else { return }
+        reconnectAwaitsSnapshot = false
+        scheduleReconnectSettle(collectionView)
     }
 
     static func visibleCellWillConfigure(collectionWidth: CGFloat) {
@@ -1269,8 +1383,16 @@ enum MobileConversationPerformanceProbe {
                     + "bottom_settle_ms=\(milliseconds(initialBottomSettleMilliseconds)) "
                     + "invalid_width_cells=\(invalidWidthCellConfigurations) "
                     + "settle_tasks=\(initialBottomSettleTasks) "
+                    + "draft_assignments=\(restoredDraftAssignments) "
                     + "first_paint_ms=\(milliseconds(firstPaintMilliseconds))"
             )
+
+            if fixture.mode == "conversation-reconnect-stress" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
+                    startReconnect(in: collectionView)
+                }
+                return
+            }
 
             guard fixture.mode == "conversation-scroll-stress" else { return }
             let duration = ProcessInfo.processInfo.environment[
@@ -1286,6 +1408,83 @@ enum MobileConversationPerformanceProbe {
                 )
                 scrollDriver = driver
                 driver.start()
+            }
+        }
+    }
+
+    private static func startReconnect(in collectionView: UICollectionView) {
+        guard let fixture, let reconnect = fixture.reconnect,
+              reconnectStartedAt == nil else { return }
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        reconnectStartedAt = startedAt
+        // Set this before dispatching the synchronous store notification. Diffable normally
+        // completes later, but the benchmark should not depend on that implementation detail.
+        reconnectAwaitsSnapshot = true
+        let expectsSnapshot = reconnect()
+        reconnectDispatchMilliseconds = (
+            ProcessInfo.processInfo.systemUptime - startedAt
+        ) * 1_000
+        reconnectSnapshotReset = expectsSnapshot
+        if !expectsSnapshot {
+            reconnectAwaitsSnapshot = false
+            scheduleReconnectSettle(collectionView)
+        }
+    }
+
+    private static func scheduleReconnectSettle(_ collectionView: UICollectionView) {
+        guard let fixture, !reconnectSettleScheduled else { return }
+        reconnectSettleScheduled = true
+        DispatchQueue.main.async { [weak collectionView] in
+            guard let collectionView, let startedAt = reconnectStartedAt else { return }
+            let layoutStartedAt = ProcessInfo.processInfo.systemUptime
+            collectionView.layoutIfNeeded()
+            let layoutEndedAt = ProcessInfo.processInfo.systemUptime
+            CATransaction.flush()
+            let displayEndedAt = ProcessInfo.processInfo.systemUptime
+
+            // The outer conversation controller coalesces phase publications onto a main turn.
+            // Let that render and any diffable completion commit before reading final geometry.
+            DispatchQueue.main.async { [weak collectionView] in
+                guard let collectionView else { return }
+                let finalLayoutStartedAt = ProcessInfo.processInfo.systemUptime
+                collectionView.layoutIfNeeded()
+                let finalLayoutEndedAt = ProcessInfo.processInfo.systemUptime
+                CATransaction.flush()
+                let settledAt = ProcessInfo.processInfo.systemUptime
+                let visibleIndices = collectionView.indexPathsForVisibleItems
+                    .map(\.item)
+                    .sorted()
+                let bottomError = max(
+                    0,
+                    collectionView.contentSize.height
+                        - collectionView.contentOffset.y
+                        - collectionView.bounds.height
+                )
+                let geometryFailures = (
+                    collectionView.collectionViewLayout as? RemoteConversationLayout
+                )?.geometryFailureCount() ?? -1
+                let layoutMilliseconds = (
+                    layoutEndedAt - layoutStartedAt
+                        + finalLayoutEndedAt - finalLayoutStartedAt
+                ) * 1_000
+                let displayMilliseconds = (
+                    displayEndedAt - layoutEndedAt
+                        + settledAt - finalLayoutEndedAt
+                ) * 1_000
+                report([
+                    "THREADING_PERF ios-conversation-reconnect",
+                    "source_rows=\(fixture.sourceRows)",
+                    "snapshot_reset=\(reconnectSnapshotReset ? 1 : 0)",
+                    "dispatch_ms=\(milliseconds(reconnectDispatchMilliseconds))",
+                    "layout_ms=\(milliseconds(layoutMilliseconds))",
+                    "display_ms=\(milliseconds(displayMilliseconds))",
+                    "total_ms=\(milliseconds((settledAt - startedAt) * 1_000))",
+                    "visible_cells=\(collectionView.visibleCells.count)",
+                    "first_visible_index=\(visibleIndices.first ?? -1)",
+                    "last_visible_index=\(visibleIndices.last ?? -1)",
+                    "bottom_error=\(milliseconds(bottomError))",
+                    "geometry_failures=\(geometryFailures)",
+                ].joined(separator: " "))
             }
         }
     }
@@ -1494,6 +1693,22 @@ private final class RemoteConversationRowCell: UICollectionViewCell {
         super.prepareForReuse()
     }
 
+    override func preferredLayoutAttributesFitting(
+        _ layoutAttributes: UICollectionViewLayoutAttributes
+    ) -> UICollectionViewLayoutAttributes {
+        let preferred = layoutAttributes.copy() as! UICollectionViewLayoutAttributes
+        let target = CGSize(
+            width: layoutAttributes.size.width,
+            height: UIView.layoutFittingCompressedSize.height
+        )
+        preferred.size.height = ceil(contentView.systemLayoutSizeFitting(
+            target,
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height)
+        return preferred
+    }
+
     func configure(
         row: RemoteConversationRowDTO,
         markdown: RemoteMarkdownDocument?,
@@ -1580,21 +1795,184 @@ private final class RemoteConversationRowCell: UICollectionViewCell {
 
 // MARK: - Row views
 
+/// The stable one-line contract for a collapsed remote tool call.
+///
+/// A `UIButton.Configuration` with a title and subtitle lays those values out as a two-line card.
+/// That made every completed tool consume the same vertical space as transcript prose even though
+/// its result was still collapsed. This control keeps the 44-point hit target while assigning the
+/// tool, subject, outcome and disclosure to explicit horizontal columns. Only the subject yields.
+final class RemoteToolDisclosureControl: UIControl {
+    private static let toggleActionIdentifier = UIAction.Identifier(
+        "RemoteToolDisclosureControl.toggle"
+    )
+
+    private let toolImageView = UIImageView()
+    private let toolLabel = UILabel()
+    private let summaryLabel = UILabel()
+    private let outcomeImageView = UIImageView()
+    private let disclosureImageView = UIImageView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+
+        toolImageView.translatesAutoresizingMaskIntoConstraints = false
+        toolImageView.contentMode = .scaleAspectFit
+        toolImageView.setContentHuggingPriority(.required, for: .horizontal)
+        toolImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        toolLabel.numberOfLines = 1
+        toolLabel.adjustsFontForContentSizeCategory = true
+        toolLabel.setContentHuggingPriority(.required, for: .horizontal)
+        toolLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        summaryLabel.numberOfLines = 1
+        summaryLabel.lineBreakMode = .byTruncatingMiddle
+        summaryLabel.adjustsFontForContentSizeCategory = true
+        summaryLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        summaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        outcomeImageView.translatesAutoresizingMaskIntoConstraints = false
+        outcomeImageView.contentMode = .scaleAspectFit
+        outcomeImageView.setContentHuggingPriority(.required, for: .horizontal)
+        outcomeImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        disclosureImageView.translatesAutoresizingMaskIntoConstraints = false
+        disclosureImageView.contentMode = .scaleAspectFit
+        disclosureImageView.setContentHuggingPriority(.required, for: .horizontal)
+        disclosureImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let stack = UIStackView(arrangedSubviews: [
+            toolImageView,
+            toolLabel,
+            summaryLabel,
+            outcomeImageView,
+            disclosureImageView,
+        ])
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = MobileDesign.Spacing.small
+        stack.isUserInteractionEnabled = false
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(
+                greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget
+            ),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            toolImageView.widthAnchor.constraint(equalToConstant: 16),
+            toolImageView.heightAnchor.constraint(equalToConstant: 16),
+            outcomeImageView.widthAnchor.constraint(equalToConstant: 16),
+            outcomeImageView.heightAnchor.constraint(equalToConstant: 16),
+            disclosureImageView.widthAnchor.constraint(equalToConstant: 12),
+            disclosureImageView.heightAnchor.constraint(equalToConstant: 12),
+        ])
+
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(
+        row: RemoteConversationRowDTO,
+        isExpanded: Bool,
+        theme: RemoteThemePalette,
+        toggle: @escaping () -> Void
+    ) {
+        let toolName = row.toolName ?? MobileL10n.string("Tool")
+        let summary = row.summary ?? MobileL10n.string("Working…")
+        let hasDetails = row.result?.isEmpty == false
+
+        toolImageView.image = UIImage(systemName: RemoteToolMessageView.symbol(
+            for: row.toolName
+        ))
+        toolImageView.tintColor = theme.uiSecondaryLabel
+
+        toolLabel.font = .preferredFont(forTextStyle: .footnote).withWeight(.semibold)
+        toolLabel.textColor = theme.uiSecondaryLabel
+        toolLabel.text = toolName
+
+        let summaryDescriptor = UIFontDescriptor.preferredFontDescriptor(
+            withTextStyle: .subheadline
+        )
+        summaryLabel.font = UIFont(
+            descriptor: toolName.localizedCaseInsensitiveCompare("bash") == .orderedSame
+                ? (summaryDescriptor.withDesign(.monospaced) ?? summaryDescriptor)
+                : summaryDescriptor,
+            size: 0
+        )
+        summaryLabel.textColor = theme.uiLabel
+        summaryLabel.text = summary
+
+        if row.isError {
+            outcomeImageView.image = UIImage(systemName: "xmark.circle.fill")
+            outcomeImageView.tintColor = theme.uiNegative
+            outcomeImageView.isHidden = false
+        } else if row.result == nil {
+            outcomeImageView.image = UIImage(systemName: "ellipsis")
+            outcomeImageView.tintColor = theme.uiSecondaryLabel
+            outcomeImageView.isHidden = false
+        } else {
+            outcomeImageView.image = nil
+            outcomeImageView.isHidden = true
+        }
+
+        disclosureImageView.image = UIImage(
+            systemName: isExpanded ? "chevron.down" : "chevron.right"
+        )
+        disclosureImageView.tintColor = theme.uiSecondaryLabel
+        disclosureImageView.isHidden = !hasDetails
+        isEnabled = hasDetails
+        accessibilityTraits = hasDetails ? .button : .staticText
+        alpha = hasDetails || row.result == nil ? 1 : 0.7
+
+        accessibilityLabel = "\(toolName), \(summary)"
+        accessibilityValue = hasDetails
+            ? MobileL10n.string(isExpanded ? "Expanded" : "Collapsed")
+            : nil
+        if row.result == nil {
+            accessibilityHint = MobileL10n.string("Tool is running")
+        } else if hasDetails {
+            accessibilityHint = isExpanded
+                ? MobileL10n.string("Hides tool output")
+                : MobileL10n.string("Shows tool output")
+        } else {
+            accessibilityHint = MobileL10n.string("Tool completed without output")
+        }
+
+        removeAction(identifiedBy: Self.toggleActionIdentifier, for: .touchUpInside)
+        if hasDetails {
+            addAction(UIAction(identifier: Self.toggleActionIdentifier) { _ in
+                toggle()
+            }, for: .touchUpInside)
+        }
+    }
+}
+
 private final class RemoteUserMessageView: UIView {
     private let bubble = UIView()
     private var hasConfigured = false
     private let contextStack = UIStackView()
-    private let messageTextView = RemoteUserMessageView.textView(
-        text: "",
-        font: .preferredFont(forTextStyle: .body),
-        color: .label
-    )
+    private let messageTextView: UITextView
 
     init(
         text: String,
         context: [RemoteConversationContextAttachmentDTO] = [],
         theme: RemoteThemePalette
     ) {
+        // Install the first static value while selection is disabled. Assigning text after a
+        // selectable UITextView exists makes UIKit initialize dictation services even though
+        // transcript rows are never editable.
+        messageTextView = Self.textView(
+            text: text,
+            font: .preferredFont(forTextStyle: .body),
+            color: theme.uiLabel
+        )
         super.init(frame: .zero)
         contextStack.axis = .horizontal
         contextStack.alignment = .center
@@ -1726,7 +2104,8 @@ private final class RemoteUserMessageView: UIView {
     fileprivate static func textView(
         text: String,
         font: UIFont,
-        color: UIColor
+        color: UIColor,
+        selectionEnabled: Bool = true
     ) -> UITextView {
         let view = UITextView()
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -1734,12 +2113,18 @@ private final class RemoteUserMessageView: UIView {
         view.textContainerInset = .zero
         view.textContainer.lineFragmentPadding = 0
         view.isEditable = false
-        view.isSelectable = true
+        // Initial static content belongs before selection activation. Selection remains enabled
+        // for the finished transcript surface, but UIKit does not mistake construction for an
+        // editable selection change and cold-load input services.
+        view.isSelectable = false
         view.isScrollEnabled = false
         view.adjustsFontForContentSizeCategory = true
         view.font = font
         view.textColor = color
-        view.text = text
+        if !text.isEmpty {
+            view.text = text
+        }
+        view.isSelectable = selectionEnabled
         return view
     }
 }
@@ -1805,9 +2190,11 @@ private final class RemoteAssistantMessageView: UIStackView {
                 let textView = RemoteUserMessageView.textView(
                     text: "",
                     font: Self.proseFont(),
-                    color: theme.uiLabel
+                    color: theme.uiLabel,
+                    selectionEnabled: false
                 )
                 configure(textView, runs: runs, theme: theme)
+                textView.isSelectable = true
                 addArrangedSubview(textView)
             case .code(let language, let body):
                 addArrangedSubview(RemoteCodeBlockView(
@@ -1826,7 +2213,9 @@ private final class RemoteAssistantMessageView: UIStackView {
     ) {
         textView.textColor = theme.uiLabel
         textView.attributedText = Self.attributed(runs, theme: theme)
-        textView.selectedRange = NSRange(location: 0, length: 0)
+        if textView.isSelectable {
+            textView.selectedRange = NSRange(location: 0, length: 0)
+        }
         textView.accessibilityLabel = runs.map(\.text).joined()
     }
 
@@ -1838,7 +2227,7 @@ private final class RemoteAssistantMessageView: UIStackView {
     }
 
     private static func proseFont() -> UIFont {
-        let descriptor = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .body)
+        let descriptor = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .callout)
         return UIFont(descriptor: descriptor.withDesign(.serif) ?? descriptor, size: 0)
     }
 
@@ -1898,7 +2287,7 @@ private final class RemoteCodeBlockView: UIView {
         languageLabel.textColor = theme.uiSecondaryLabel
         languageLabel.text = language.isEmpty ? MobileL10n.string("code") : language
 
-        let copy = UIButton(type: .system)
+        let copy = RemoteExpandedHitButton(type: .system)
         copy.translatesAutoresizingMaskIntoConstraints = false
         copy.setImage(UIImage(systemName: "doc.on.doc"), for: .normal)
         copy.tintColor = theme.uiSecondaryLabel
@@ -1930,9 +2319,7 @@ private final class RemoteCodeBlockView: UIView {
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
             header.topAnchor.constraint(equalTo: topAnchor),
-            header.heightAnchor.constraint(
-                greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget
-            ),
+            header.heightAnchor.constraint(equalToConstant: 36),
             languageLabel.leadingAnchor.constraint(
                 equalTo: header.leadingAnchor,
                 constant: MobileDesign.Spacing.inset
@@ -1943,12 +2330,8 @@ private final class RemoteCodeBlockView: UIView {
                 constant: -MobileDesign.Spacing.small
             ),
             copy.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            copy.widthAnchor.constraint(
-                greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget
-            ),
-            copy.heightAnchor.constraint(
-                greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget
-            ),
+            copy.widthAnchor.constraint(equalToConstant: 32),
+            copy.heightAnchor.constraint(equalToConstant: 32),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
@@ -1980,6 +2363,16 @@ private final class RemoteCodeBlockView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
+/// Keeps visually compact inline actions reachable without making their containing chrome tall.
+private final class RemoteExpandedHitButton: UIButton {
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        let minimum = MobileDesign.Size.minimumTapTarget
+        let horizontal = max(0, (minimum - bounds.width) / 2)
+        let vertical = max(0, (minimum - bounds.height) / 2)
+        return bounds.insetBy(dx: -horizontal, dy: -vertical).contains(point)
+    }
+}
+
 private final class RemoteExpandableMessageView: UIView {
     init(
         title: String,
@@ -1995,11 +2388,14 @@ private final class RemoteExpandableMessageView: UIView {
         stack.spacing = MobileDesign.Spacing.small
         let button = UIButton(type: .system)
         button.contentHorizontalAlignment = .leading
-        button.setTitle(MobileL10n.string(title), for: .normal)
-        button.setImage(
-            UIImage(systemName: isExpanded ? "chevron.down" : "chevron.right"),
-            for: .normal
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = MobileL10n.string(title)
+        configuration.image = UIImage(
+            systemName: isExpanded ? "chevron.down" : "chevron.right"
         )
+        configuration.imagePadding = MobileDesign.Spacing.small
+        configuration.contentInsets = .zero
+        button.configuration = configuration
         button.tintColor = theme.uiSecondaryLabel
         button.setTitleColor(theme.uiSecondaryLabel, for: .normal)
         button.titleLabel?.font = .preferredFont(forTextStyle: .subheadline)
@@ -2030,12 +2426,9 @@ private final class RemoteExpandableMessageView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
-private final class RemoteToolMessageView: UIView {
-    private static let toggleActionIdentifier = UIAction.Identifier(
-        "RemoteToolMessageView.toggle"
-    )
+final class RemoteToolMessageView: UIView {
     private let stack = UIStackView()
-    private let button = UIButton(type: .system)
+    private let disclosure = RemoteToolDisclosureControl()
     private var resultTextView: UITextView?
 
     init(
@@ -2047,9 +2440,8 @@ private final class RemoteToolMessageView: UIView {
         super.init(frame: .zero)
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.axis = .vertical
-        stack.spacing = MobileDesign.Spacing.small
-        button.contentHorizontalAlignment = .leading
-        stack.addArrangedSubview(button)
+        stack.spacing = 0
+        stack.addArrangedSubview(disclosure)
         addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(
@@ -2060,17 +2452,8 @@ private final class RemoteToolMessageView: UIView {
                 equalTo: trailingAnchor,
                 constant: -MobileDesign.Spacing.inset
             ),
-            stack.topAnchor.constraint(
-                equalTo: topAnchor,
-                constant: MobileDesign.Spacing.medium
-            ),
-            stack.bottomAnchor.constraint(
-                equalTo: bottomAnchor,
-                constant: -MobileDesign.Spacing.medium
-            ),
-            button.heightAnchor.constraint(
-                greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget
-            ),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         configure(row: row, isExpanded: isExpanded, theme: theme, toggle: toggle)
     }
@@ -2091,26 +2474,12 @@ private final class RemoteToolMessageView: UIView {
             borderWidth: theme.borderWidth,
             glow: theme.glow
         )
-        var configuration = UIButton.Configuration.plain()
-        configuration.title = row.summary ?? MobileL10n.string("Working…")
-        configuration.subtitle = row.toolName ?? MobileL10n.string("Tool")
-        configuration.image = UIImage(systemName: Self.symbol(for: row.toolName))
-        configuration.imagePadding = MobileDesign.Spacing.medium
-        configuration.titleAlignment = .leading
-        configuration.baseForegroundColor = theme.uiLabel
-        configuration.contentInsets = .zero
-        button.configuration = configuration
-        button.accessibilityHint = MobileL10n.string(
-            row.result == nil ? "Tool is running" : "Shows tool output"
+        disclosure.configure(
+            row: row,
+            isExpanded: isExpanded,
+            theme: theme,
+            toggle: toggle
         )
-        button.accessibilityValue = MobileL10n.string(isExpanded ? "Expanded" : "Collapsed")
-        button.removeAction(
-            identifiedBy: Self.toggleActionIdentifier,
-            for: .touchUpInside
-        )
-        button.addAction(UIAction(identifier: Self.toggleActionIdentifier) { _ in
-            toggle()
-        }, for: .touchUpInside)
 
         if isExpanded, let result = row.result, !result.isEmpty {
             let textView: UITextView
@@ -2118,9 +2487,15 @@ private final class RemoteToolMessageView: UIView {
                 textView = resultTextView
             } else {
                 textView = RemoteUserMessageView.textView(
-                    text: "",
+                    text: result,
                     font: Self.codeFont(),
                     color: theme.uiSecondaryLabel
+                )
+                textView.textContainerInset = UIEdgeInsets(
+                    top: MobileDesign.Spacing.tight,
+                    left: 0,
+                    bottom: MobileDesign.Spacing.small,
+                    right: 0
                 )
                 resultTextView = textView
             }
@@ -2148,7 +2523,7 @@ private final class RemoteToolMessageView: UIView {
         )
     }
 
-    private static func symbol(for toolName: String?) -> String {
+    static func symbol(for toolName: String?) -> String {
         switch toolName?.lowercased() {
         case "bash": return "terminal"
         case "read": return "doc.text"
@@ -2193,34 +2568,44 @@ private final class RemoteNoticeMessageView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
-private final class RemoteStreamingMessageView: UIView {
-    private let label = UILabel()
+/// Streaming content stays a lightweight multiline label. The reusable collection cell supplies
+/// its actual width when asking Auto Layout for a preferred height, so token growth wraps without
+/// teaching this leaf view anything about collection geometry.
+private final class RemoteStreamingMessageView: UILabel {
 
     init(text: String, theme: RemoteThemePalette) {
         super.init(frame: .zero)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.numberOfLines = 0
-        label.adjustsFontForContentSizeCategory = true
-        addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor),
-            label.topAnchor.constraint(equalTo: topAnchor),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
+        numberOfLines = 0
+        adjustsFontForContentSizeCategory = true
         accessibilityLabel = MobileL10n.string("Agent is responding")
         configure(text: text, theme: theme)
+        startBreathingIfAppropriate()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func configure(text: String, theme: RemoteThemePalette) {
-        label.font = RemoteAssistantMessageView.proseFontForStreaming
-        label.textColor = theme.uiSecondaryLabel
-        if label.text != text {
-            label.text = text
+        font = RemoteAssistantMessageView.proseFontForStreaming
+        textColor = theme.uiSecondaryLabel
+        if self.text != text {
+            self.text = text
+            invalidateIntrinsicContentSize()
         }
+    }
+
+    private func startBreathingIfAppropriate() {
+        guard !UIAccessibility.isReduceMotionEnabled,
+              ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"] == nil
+        else { return }
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = 0.58
+        animation.toValue = 1
+        animation.duration = 0.82
+        animation.autoreverses = true
+        animation.repeatCount = .infinity
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(animation, forKey: "remoteStreamingBreathing")
     }
 }
 
@@ -2568,6 +2953,12 @@ private extension UIView {
         layer.cornerCurve = .continuous
         layer.cornerRadius = radius
         clipsToBounds = true
+        // Reconfiguration and live theme switching both reuse the same row. The helper owns one
+        // outline, so replace its previous instance instead of stacking another border and glow
+        // over it on every result, expansion or palette update.
+        subviews.compactMap { $0 as? RemoteSurfaceBorderView }.forEach {
+            $0.removeFromSuperview()
+        }
         if let border, borderWidth > 0 {
             let outline = RemoteSurfaceBorderView(
                 color: border,
@@ -2586,6 +2977,15 @@ private extension UIView {
                 outline.bottomAnchor.constraint(equalTo: bottomAnchor),
             ])
         }
+    }
+}
+
+private extension UIFont {
+    func withWeight(_ weight: UIFont.Weight) -> UIFont {
+        let traits = [UIFontDescriptor.TraitKey.weight: weight]
+        return UIFont(descriptor: fontDescriptor.addingAttributes([
+            .traits: traits,
+        ]), size: pointSize)
     }
 }
 

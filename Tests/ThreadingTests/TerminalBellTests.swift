@@ -5,40 +5,28 @@ import XCTest
 
 /// What a program's `BEL` sounds like.
 ///
-/// The stored form carries three states in one string, which is the part worth holding: two
-/// reserved words and a file name, in a preference where an absent key has to keep meaning what
-/// the bell did before it was a setting. Playback itself is `NSSound`, which a test cannot hear;
-/// what it can hold is that silence is reachable, that a missing file still rings, and that the
-/// tokens can never be mistaken for a sound.
+/// The choice itself is `SoundChoice`, shared with the notification alert and held to its own
+/// stored form in `SoundChoiceTests`; what belongs here is the bell's half — that an absent key
+/// keeps meaning what the bell did before it was a setting, that silence is reachable, and that
+/// a bell has exactly one way out of the terminal view. Playback itself is `NSSound`, which a
+/// test cannot hear.
 final class TerminalBellTests: XCTestCase {
 
     // MARK: - Stored Choice
 
     /// An install that never chose hears exactly what it heard before: SwiftTerm rang
-    /// `NSSound.beep()` unconditionally, so the absent key has to mean the system alert.
-    func testAnAbsentPreferenceIsTheSoundTheBellAlreadyMade() {
-        XCTAssertEqual(TerminalBellSound(storedValue: nil), .systemAlert)
-        XCTAssertEqual(TerminalBellSound(storedValue: ""), .systemAlert)
-    }
+    /// `NSSound.beep()` unconditionally, so the absent key has to mean the system alert. The
+    /// decode declines to answer for an absent key precisely so this default is the bell's own
+    /// rather than one the alert sound would have to share.
+    @MainActor
+    func testAnAbsentPreferenceIsTheSoundTheBellAlreadyMade() throws {
+        let suite = "TerminalBellSoundAbsent.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
 
-    func testEveryCaseRoundTripsThroughItsStoredValue() {
-        for sound: TerminalBellSound in [.silent, .systemAlert, .named("Tink.aiff")] {
-            XCTAssertEqual(TerminalBellSound(storedValue: sound.storedValue), sound)
-        }
-    }
-
-    /// The reserved words are only safe because a stored sound is always a *file* name, and
-    /// every file name the picker can offer carries a playable extension. If that ever stopped
-    /// being true, a sound called "silent" would switch the bell off instead of playing.
-    func testTheReservedWordsCannotCollideWithASound() {
-        for token in [TerminalBellDefaults.silentToken, TerminalBellDefaults.systemToken] {
-            XCTAssertFalse(
-                NotificationSoundLibrary.supportedExtensions
-                    .contains((token as NSString).pathExtension.lowercased()),
-                "\(token) could be a sound file name"
-            )
-            XCTAssertNotEqual(TerminalBellSound(storedValue: token), .named(token))
-        }
+        XCTAssertEqual(TerminalBellDefaults.sound, .system)
+        XCTAssertNil(SoundChoice(storedValue: nil))
+        XCTAssertEqual(AppSettings(defaults: defaults).terminalBellSound, .system)
     }
 
     @MainActor
@@ -48,7 +36,7 @@ final class TerminalBellTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let settings = AppSettings(defaults: defaults)
-        XCTAssertEqual(settings.terminalBellSound, .systemAlert)
+        XCTAssertEqual(settings.terminalBellSound, .system)
 
         settings.terminalBellSound = .silent
         XCTAssertEqual(AppSettings(defaults: defaults).terminalBellSound, .silent)
@@ -127,5 +115,154 @@ final class TerminalBellTests: XCTestCase {
         let player = SoundPlayer()
         XCTAssertTrue(player.admitsPlaybackNow())
         XCTAssertTrue(player.admitsPlaybackNow())
+    }
+
+    /// The limiter is consulted **before** anything else the bell would do — the global silence
+    /// gate excepted, which comes before even it; see `SilenceGateTests`. A `BEL` arrives as
+    /// fast as a program can write a byte, and a rejected one must cost a date comparison and
+    /// nothing else — no walk through the resolution chain, and none of the `stat`s a chosen
+    /// file name is looked up with. It used to pay for both on every bell of a storm.
+    @MainActor
+    func testABellTheWindowRejectsIsNeverResolved() {
+        var resolutions = 0
+        var plays = 0
+
+        TerminalBell.ring(
+            cause: .bellAgentAsking,
+            silenced: { false },
+            admits: { false },
+            resolve: { _ in
+                resolutions += 1
+                return .system
+            },
+            play: { _ in plays += 1 }
+        )
+
+        XCTAssertEqual(resolutions, 0)
+        XCTAssertEqual(plays, 0)
+    }
+
+    /// And an admitted one resolves its own cause, once.
+    @MainActor
+    func testAnAdmittedBellResolvesItsCauseAndPlaysItOnce() {
+        var seen: [SoundEvent?] = []
+        var played: [SoundChoice] = []
+
+        TerminalBell.ring(
+            cause: .bellLaunch,
+            silenced: { false },
+            admits: { true },
+            resolve: { cause in
+                seen.append(cause)
+                return .named("Tink.aiff")
+            },
+            play: { played.append($0) }
+        )
+
+        XCTAssertEqual(seen, [.bellLaunch])
+        XCTAssertEqual(played, [.named("Tink.aiff")])
+    }
+
+    // MARK: - The Note An Audible Bell Leaves
+
+    /// The note that keeps the attention alert quiet is written **in the play step**, and that
+    /// position is the whole guarantee.
+    ///
+    /// A bell the global gate holds and a bell the limiter rejects never reach the speaker, so
+    /// neither may leave a note: nobody heard anything, and the banner a moment later is the
+    /// only sound there is. Placed any earlier — beside the gate, or beside the limiter — a
+    /// silenced storm or a rejected bell would quietly disarm the next alert's sound instead.
+    ///
+    /// The composition asserted here is the one `ring(cause:owner:)` itself uses; only the
+    /// speaker and the register are handed in, so the test hears nothing and keeps its own map.
+    @MainActor
+    func testTheNoteIsWrittenInThePlayStepAndNowhereEarlier() {
+        let sessionID = SessionID()
+        let owner = SoundOwner.session(sessionID)
+
+        func ring(silenced: Bool, admits: Bool, into register: AudibleBellRegister) -> [SoundChoice] {
+            var spoken: [SoundChoice] = []
+            TerminalBell.ring(
+                cause: .bellAgentAsking,
+                silenced: { silenced },
+                admits: { admits },
+                resolve: { _ in .system },
+                play: {
+                    TerminalBell.playAndRegister(
+                        $0,
+                        owner: owner,
+                        speaker: { spoken.append($0) },
+                        register: register
+                    )
+                }
+            )
+            return spoken
+        }
+
+        let gated = AudibleBellRegister(window: 60)
+        XCTAssertEqual(ring(silenced: true, admits: true, into: gated), [])
+        XCTAssertFalse(gated.heardBell(for: sessionID), "a bell nobody heard disarmed the alert")
+
+        let rejected = AudibleBellRegister(window: 60)
+        XCTAssertEqual(ring(silenced: false, admits: false, into: rejected), [])
+        XCTAssertFalse(
+            rejected.heardBell(for: sessionID),
+            "a bell the limiter swallowed disarmed the alert"
+        )
+
+        let heard = AudibleBellRegister(window: 60)
+        XCTAssertEqual(ring(silenced: false, admits: true, into: heard), [.system])
+        XCTAssertTrue(heard.heardBell(for: sessionID), "a bell that rang left no note")
+    }
+
+    /// Which bells speak for their session, and which have nothing to say.
+    ///
+    /// `silent` is the user's own answer — the finding's mitigation was setting this bell to
+    /// Off — and a sound nobody heard cannot be doubled, so it leaves nothing. A standalone or
+    /// ephemeral terminal leaves nothing either: neither has a conversation, and attention
+    /// alerts are a conversation's. A **named sound whose file has gone still counts**, because
+    /// `deliver` falls back to the alert beep rather than to silence, and a beep is a sound —
+    /// getting that one backwards would make a missing file audible twice.
+    @MainActor
+    func testOnlyAnAudibleBellFromAConversationLeavesANote() {
+        let sessionID = SessionID()
+        let session = SoundOwner.session(sessionID)
+        let terminal = SoundOwner.terminal(TerminalID())
+        let gone = "ThisSoundHasNoFile.\(UUID().uuidString).aiff"
+        XCTAssertNil(NotificationSoundLibrary.resolve(fileName: gone))
+
+        XCTAssertEqual(TerminalBell.registration(for: .system, owner: session), sessionID)
+        XCTAssertEqual(
+            TerminalBell.registration(for: .named("Tink.aiff"), owner: session),
+            sessionID
+        )
+        XCTAssertEqual(
+            TerminalBell.registration(for: .named(gone), owner: session),
+            sessionID,
+            "the fallback beep is a sound the user hears, so the alert must not double it"
+        )
+
+        XCTAssertNil(TerminalBell.registration(for: .silent, owner: session))
+        XCTAssertNil(TerminalBell.registration(for: .system, owner: terminal))
+        XCTAssertNil(TerminalBell.registration(for: .system, owner: nil))
+    }
+
+    /// A surface with no activity tracker says nothing about the cause, and still rings.
+    @MainActor
+    func testABellWithNoCauseStillRings() {
+        var played: [SoundChoice] = []
+
+        TerminalBell.ring(
+            cause: nil,
+            silenced: { false },
+            admits: { true },
+            resolve: { cause in
+                XCTAssertNil(cause)
+                return SoundResolution.resolve(kind: .bell, through: [])
+            },
+            play: { played.append($0) }
+        )
+
+        XCTAssertEqual(played, [.system])
     }
 }

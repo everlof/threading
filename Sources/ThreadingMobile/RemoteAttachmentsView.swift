@@ -15,6 +15,21 @@ struct RemoteAttachmentsView: View {
     @State private var attachments: [RemoteAttachmentDTO]?
     @State private var errorMessage: String?
     @State private var isLoading = false
+    private let loadsRemotely: Bool
+
+    init(
+        session: RemoteSessionSummaryDTO,
+        client: RemoteClient,
+        showsCloseButton: Bool = true,
+        initialAttachments: [RemoteAttachmentDTO]? = nil,
+        loadsRemotely: Bool = true
+    ) {
+        self.session = session
+        self.client = client
+        self.showsCloseButton = showsCloseButton
+        self.loadsRemotely = loadsRemotely
+        _attachments = State(initialValue: initialAttachments)
+    }
 
     var body: some View {
         Group {
@@ -89,6 +104,7 @@ struct RemoteAttachmentsView: View {
 
     @MainActor
     private func load() async {
+        guard loadsRemotely else { return }
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
@@ -238,6 +254,21 @@ struct RemoteAttachmentPreview: View {
     @State private var data: Data?
     @State private var errorMessage: String?
     @State private var isLoading = false
+    private let loadsRemotely: Bool
+
+    init(
+        sessionID: String,
+        attachment: RemoteAttachmentDTO,
+        client: RemoteClient,
+        initialData: Data? = nil,
+        loadsRemotely: Bool = true
+    ) {
+        self.sessionID = sessionID
+        self.attachment = attachment
+        self.client = client
+        self.loadsRemotely = loadsRemotely
+        _data = State(initialValue: initialData)
+    }
 
     var body: some View {
         Group {
@@ -258,14 +289,17 @@ struct RemoteAttachmentPreview: View {
                         data: data,
                         backgroundColor: theme.uiColor("ground", fallback: "#16181D")
                     )
-                } else if let image = UIImage(data: data) {
-                    ScrollView([.horizontal, .vertical]) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: image.size.width, maxHeight: image.size.height)
-                            .padding(12)
+                } else if attachment.kind == "text" {
+                    ScrollView {
+                        Text(String(decoding: data, as: UTF8.self))
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(theme.label)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(MobileDesign.Spacing.large)
                     }
+                } else if let image = UIImage(data: data) {
+                    RemoteZoomableImageView(image: image, backgroundColor: theme.uiGround)
                 } else {
                     unavailable("The image could not be decoded.")
                 }
@@ -311,6 +345,7 @@ struct RemoteAttachmentPreview: View {
         case "pdf": "doc.richtext"
         case "html": "safari"
         case "archive": "archivebox"
+        case "text": "doc.plaintext"
         case "document": "doc.text"
         case "diagram": "point.3.connected.trianglepath.dotted"
         default: "photo"
@@ -321,6 +356,7 @@ struct RemoteAttachmentPreview: View {
     private func load() async {
         // The body never renders these kinds, so their bytes are never asked for.
         guard !Self.previewsOnMacOnly.contains(attachment.kind) else { return }
+        guard loadsRemotely else { return }
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
@@ -338,6 +374,146 @@ struct RemoteAttachmentPreview: View {
     }
 }
 
+#if DEBUG
+/// Deterministic detail fixtures exercise the app's real preview renderers without networking or
+/// exposing a developer-machine path to the simulator. Production attachment detail continues to
+/// load the chosen opaque attachment ID from the paired Mac.
+struct RemoteAttachmentPreviewDemo: View {
+    let kind: String
+
+    var body: some View {
+        RemoteAttachmentPreview(
+            sessionID: "workspace-demo",
+            attachment: attachment,
+            client: RemoteClient(link: RemoteConnectionLink(
+                baseURL: URL(string: "https://workspace.invalid")!,
+                token: "attachment-preview"
+            )!),
+            initialData: previewData,
+            loadsRemotely: false
+        )
+    }
+
+    private var attachment: RemoteAttachmentDTO {
+        switch kind {
+        case "pdf":
+            .init(path: "artifacts/threading-ui-review.pdf", name: "threading-ui-review.pdf", kind: "pdf", byteCount: 842_761, origin: "agent")
+        case "html":
+            .init(path: "reports/ui-evidence.html", name: "ui-evidence.html", kind: "html", byteCount: 32_914, origin: "agent")
+        case "archive":
+            .init(path: "exports/diagnostics.zip", name: "diagnostics.zip", kind: "archive", byteCount: 1_204_981, origin: "user")
+        case "text":
+            .init(path: "artifacts/keyboard-lifecycle.txt", name: "keyboard-lifecycle.txt", kind: "text", byteCount: 1_284, origin: "agent")
+        default:
+            .init(path: "screenshots/keyboard-dismissed.png", name: "keyboard-dismissed.png", kind: "image", byteCount: 184_320, origin: "user")
+        }
+    }
+
+    private var previewData: Data? {
+        switch kind {
+        case "pdf": return Self.pdfData()
+        case "html":
+            return Data("""
+            <!doctype html><meta name=\"viewport\" content=\"width=device-width\">
+            <style>
+            body{background:#090d16;color:#e9fff8;font:16px -apple-system;padding:24px}
+            article{background:#151936;border:1px solid #2f986e;border-radius:18px;padding:22px}
+            h1{font-size:24px} code{color:#00f29d} li{margin:10px 0}
+            </style><article><h1>Keyboard lifecycle review</h1>
+            <p>The generated evidence confirms:</p><ul><li>focus waits for <code>keyboardDidShow</code></li>
+            <li>dismissal waits for <code>keyboardDidHide</code></li><li>the composer returns to its baseline</li></ul></article>
+            """.utf8)
+        case "text":
+            return Data("""
+            Keyboard lifecycle verification
+            ===============================
+
+            ✓ Focus waits for keyboardDidShow.
+            ✓ Dismissal waits for keyboardDidHide.
+            ✓ The composer returns to its original visual anchor.
+
+            Tested on the compact and regular iPhone layouts.
+            """.utf8)
+        case "archive": return nil
+        default: return UIImage(named: "AppIconPreviewDefault")?.pngData()
+        }
+    }
+
+    private static func pdfData() -> Data {
+        let bounds = CGRect(x: 0, y: 0, width: 612, height: 792)
+        return UIGraphicsPDFRenderer(bounds: bounds).pdfData { context in
+            for page in 1...3 {
+                context.beginPage()
+                UIColor(red: 0.04, green: 0.06, blue: 0.10, alpha: 1).setFill()
+                context.cgContext.fill(bounds)
+                "Threading UI review · \(page)/3".draw(
+                    at: CGPoint(x: 48, y: 54),
+                    withAttributes: [
+                        .font: UIFont.systemFont(ofSize: 30, weight: .bold),
+                        .foregroundColor: UIColor.white,
+                    ]
+                )
+                let pageBody = [
+                    "Keyboard lifecycle\n\n✓ Composer restored\n✓ Evidence captured\n✓ Private paths omitted",
+                    "Conversation layout\n\n✓ Tool rows compact\n✓ Dynamic type preserved\n✓ Latest control visible",
+                    "Attachment previews\n\n✓ Images scale to fit\n✓ HTML loads locally\n✓ PDF pages swipe horizontally",
+                ][page - 1]
+                pageBody.draw(
+                    in: CGRect(x: 48, y: 126, width: 516, height: 220),
+                    withAttributes: [
+                        .font: UIFont.systemFont(ofSize: 18),
+                        .foregroundColor: UIColor(red: 0.72, green: 0.92, blue: 0.86, alpha: 1),
+                    ]
+                )
+            }
+        }
+    }
+}
+#endif
+
+private final class RemoteHTMLPreviewView: UIView, WKNavigationDelegate {
+    let webView: WKWebView
+    private let placeholder = UILabel()
+
+    override init(frame: CGRect) {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        webView = WKWebView(frame: .zero, configuration: configuration)
+        super.init(frame: frame)
+        webView.isOpaque = false
+        webView.navigationDelegate = self
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        placeholder.translatesAutoresizingMaskIntoConstraints = false
+        placeholder.text = MobileL10n.string("Rendering preview…")
+        placeholder.font = .preferredFont(forTextStyle: .subheadline)
+        placeholder.textAlignment = .center
+        addSubview(webView)
+        addSubview(placeholder)
+        NSLayoutConstraint.activate([
+            webView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            webView.topAnchor.constraint(equalTo: topAnchor),
+            webView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            placeholder.centerXAnchor.constraint(equalTo: centerXAnchor),
+            placeholder.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        placeholder.isHidden = true
+    }
+
+    func update(backgroundColor: UIColor) {
+        self.backgroundColor = backgroundColor
+        webView.backgroundColor = backgroundColor
+        webView.scrollView.backgroundColor = backgroundColor
+        placeholder.textColor = .secondaryLabel
+    }
+}
+
 private struct RemoteHTMLView: UIViewRepresentable {
     let data: Data
     let backgroundColor: UIColor
@@ -350,20 +526,79 @@ private struct RemoteHTMLView: UIViewRepresentable {
         Coordinator()
     }
 
-    func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        let view = WKWebView(frame: .zero, configuration: configuration)
-        view.isOpaque = false
-        return view
+    func makeUIView(context: Context) -> RemoteHTMLPreviewView {
+        RemoteHTMLPreviewView()
     }
 
-    func updateUIView(_ view: WKWebView, context: Context) {
-        view.backgroundColor = backgroundColor
-        view.scrollView.backgroundColor = backgroundColor
+    func updateUIView(_ view: RemoteHTMLPreviewView, context: Context) {
+        view.update(backgroundColor: backgroundColor)
         guard context.coordinator.data != data else { return }
         context.coordinator.data = data
-        view.loadHTMLString(String(decoding: data, as: UTF8.self), baseURL: nil)
+        view.webView.loadHTMLString(String(decoding: data, as: UTF8.self), baseURL: nil)
+    }
+}
+
+private final class RemoteZoomableImageScrollView: UIScrollView, UIScrollViewDelegate {
+    private let imageView = UIImageView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        delegate = self
+        minimumZoomScale = 1
+        maximumZoomScale = 4
+        showsHorizontalScrollIndicator = false
+        showsVerticalScrollIndicator = false
+        bouncesZoom = true
+        imageView.contentMode = .scaleAspectFit
+        addSubview(imageView)
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(toggleZoom(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        addGestureRecognizer(doubleTap)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if zoomScale == minimumZoomScale { imageView.frame = bounds }
+    }
+
+    func update(image: UIImage, backgroundColor: UIColor) {
+        self.backgroundColor = backgroundColor
+        imageView.image = image
+        setNeedsLayout()
+    }
+
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+
+    @objc private func toggleZoom(_ recognizer: UITapGestureRecognizer) {
+        if zoomScale > minimumZoomScale {
+            setZoomScale(minimumZoomScale, animated: true)
+            return
+        }
+        let targetScale = min(2, maximumZoomScale)
+        let point = recognizer.location(in: imageView)
+        let size = CGSize(width: bounds.width / targetScale, height: bounds.height / targetScale)
+        zoom(to: CGRect(
+            x: point.x - size.width / 2,
+            y: point.y - size.height / 2,
+            width: size.width,
+            height: size.height
+        ), animated: true)
+    }
+}
+
+private struct RemoteZoomableImageView: UIViewRepresentable {
+    let image: UIImage
+    let backgroundColor: UIColor
+
+    func makeUIView(context: Context) -> RemoteZoomableImageScrollView {
+        RemoteZoomableImageScrollView()
+    }
+
+    func updateUIView(_ view: RemoteZoomableImageScrollView, context: Context) {
+        view.update(image: image, backgroundColor: backgroundColor)
     }
 }
 
@@ -382,9 +617,12 @@ private struct RemotePDFView: UIViewRepresentable {
     func makeUIView(context: Context) -> PDFView {
         let view = PDFView()
         view.autoScales = true
-        view.displayMode = .singlePageContinuous
-        view.displayDirection = .vertical
+        view.displayMode = .singlePage
+        view.displayDirection = .horizontal
         view.displaysPageBreaks = true
+        view.usePageViewController(true, withViewOptions: [
+            UIPageViewController.OptionsKey.interPageSpacing: 12,
+        ])
         return view
     }
 

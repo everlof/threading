@@ -364,6 +364,43 @@ final class ImageCompareTests: XCTestCase {
         XCTAssertFalse(CompareInspectorPresenter.isPresenting(in: window))
     }
 
+    /// The same key, delivered the way a **window** delivers it rather than by asking the view
+    /// tree for a key equivalent.
+    ///
+    /// The test above proves the surface answers when it is asked. It does not prove anybody
+    /// asks: a plain Escape with no modifiers is not a key equivalent, so AppKit routes it to
+    /// the first responder as `keyDown`, and from there `interpretKeyEvents` turns it into
+    /// `cancelOperation(_:)` up the responder chain. A surface that implements only
+    /// `performKeyEquivalent` and `keyDown` therefore closes in a fixture that calls
+    /// `performKeyEquivalent` by hand and stays open in the app, which is exactly how this
+    /// shipped. `ThemedAlert` and `ThemedPopover` both answer `cancelOperation`; this is the
+    /// third transient surface and it has to as well.
+    @MainActor
+    func testEscapeClosesTheExpandedComparisonThroughTheResponderChain() throws {
+        // Every mode, because every mode was broken — including the default wipe. Focus was
+        // never the problem: the surface had it, and the key still went nowhere.
+        for mode in [ImageCompareMode.wipeHorizontal, .difference, .sideBySide] {
+            let view = Self.pair()
+            view.mode = mode
+            let window = Self.window(hosting: view)
+            defer { CompareInspectorPresenter.dismiss(in: window) }
+            XCTAssertTrue(view.expand())
+
+            let inspector = try XCTUnwrap(Self.inspector(in: window))
+            let responder = try XCTUnwrap(window.firstResponder as? NSView)
+            XCTAssertTrue(
+                responder === inspector || Self.descendants(of: inspector).contains(responder),
+                "\(mode): the surface never took focus, so no key can reach it at all"
+            )
+
+            responder.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+            XCTAssertFalse(
+                CompareInspectorPresenter.isPresenting(in: window),
+                "\(mode): Escape reached the first responder and the surface stayed open"
+            )
+        }
+    }
+
     @MainActor
     func testTheCloseButtonDismissesAndFocusReturnsToTheSurfaceBehind() throws {
         let view = Self.pair()

@@ -102,10 +102,10 @@ ExtensionComponentPatch(
 )
 ```
 
-Here `.proceed` is Threading's SCC card, or the next extension wrapper. If SCC has no reading, it
-is an empty native body and the extension content still gives the host a reason to present the
-card. A full `replacement` suppresses SCC visually, but not hover timing, placement, popover
-chrome, dismissal, accessibility or extension invalidation.
+Here `.proceed` is Threading's native project-metrics card, or the next extension wrapper. If the
+host has no reading yet, it is an empty native body and the extension content still gives the host
+a reason to present the card. A full `replacement` suppresses the native metrics visually, but
+not hover timing, placement, popover chrome, dismissal, accessibility or extension invalidation.
 
 `sidebar.session-hover-card@1` has the same hook and replacement constraints with
 `sessionPresentation` context. Its `.proceed` is the native session identity, checkout and

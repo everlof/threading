@@ -63,6 +63,14 @@ final class ProjectRowCreateButtonTests: XCTestCase {
         return try XCTUnwrap(walk(root), "the row grew no + button")
     }
 
+    private func descendant(identified identifier: String, in root: NSView) -> NSView? {
+        if root.accessibilityIdentifier() == identifier { return root }
+        for child in root.subviews {
+            if let found = descendant(identified: identifier, in: child) { return found }
+        }
+        return nil
+    }
+
     private func event(_ type: NSEvent.EventType, on view: NSView) throws -> NSEvent {
         let centre = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
         return try XCTUnwrap(
@@ -81,6 +89,24 @@ final class ProjectRowCreateButtonTests: XCTestCase {
     }
 
     // MARK: - Tests
+
+    func testCollapsedCountMaterializesOnlyWhenItHasDigitsToShow() throws {
+        let project = Project(name: "Threading", folderURL: URL(fileURLWithPath: "/tmp/Threading"))
+        let row = ProjectRowView(customizationLookup: { _ in .empty })
+
+        row.configure(with: project)
+        XCTAssertFalse(row.countLabelIsMaterialized)
+
+        row.configure(with: project, collapsedSessionCount: 3)
+        XCTAssertTrue(row.countLabelIsMaterialized)
+        let label = try XCTUnwrap(
+            descendant(identified: "sidebar.project.count", in: row) as? NSTextField
+        )
+        XCTAssertEqual(label.stringValue, "3")
+
+        row.configure(with: project)
+        XCTAssertTrue(label.isHidden, "a reused count label should stay warm but leave no pixels")
+    }
 
     func testTheCreateButtonMakesAChatOnItsPressWithoutAskingFirst() throws {
         let project = Project(name: "Threading", folderURL: URL(fileURLWithPath: "/tmp/Threading"))

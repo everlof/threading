@@ -148,6 +148,7 @@ final class GitStatusParserTests: XCTestCase {
         XCTAssertEqual(commits[0].date, Date(timeIntervalSince1970: 1_750_000_000))
         XCTAssertEqual(commits[0].added, 10)
         XCTAssertEqual(commits[0].removed, 2)
+        XCTAssertTrue(commits[0].hasStats)
 
         XCTAssertEqual(commits[1].added, 3)
         XCTAssertEqual(commits[1].removed, 0)
@@ -159,7 +160,22 @@ final class GitStatusParserTests: XCTestCase {
         )
 
         XCTAssertEqual(commits.count, 1)
+        XCTAssertEqual(commits[0].shortHash, "cccc")
         XCTAssertEqual(commits[0].added, 0)
         XCTAssertEqual(commits[0].removed, 0)
+    }
+
+    func testMetadataOnlyLogMarksTemporaryZeroCountsUnknown() {
+        let record = "\u{01}cccc3333\u{00}cccc\u{00}Fast history\u{00}David\u{00}1750002000\u{02}"
+        let commits = GitDiffParser.commits(
+            fromLog: Data(record.utf8),
+            includesStats: false
+        )
+
+        XCTAssertEqual(commits.count, 1)
+        XCTAssertEqual(commits[0].shortHash, "cccc333")
+        XCTAssertEqual(commits[0].added, 0)
+        XCTAssertEqual(commits[0].removed, 0)
+        XCTAssertFalse(commits[0].hasStats)
     }
 }

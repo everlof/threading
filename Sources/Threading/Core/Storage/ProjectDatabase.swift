@@ -179,7 +179,10 @@ final class ProjectDatabase {
                 payload: payload
             ))
             if pendingSessionRows.count == Self.sessionDecodeWaveSize {
-                try appendDecodedSessions(pendingSessionRows, to: &sessionsByProject)
+                try appendDecodedSessions(
+                    pendingSessionRows,
+                    to: &sessionsByProject
+                )
                 pendingSessionRows.removeAll(keepingCapacity: true)
             }
         }
@@ -318,29 +321,28 @@ final class ProjectDatabase {
 
     /// Deletes one session without re-encoding every other row in the project graph.
     ///
-    /// The expected project is part of the delete predicate rather than trusted as an update
-    /// hint. Positions are order keys, not a contiguity promise: leaving a gap makes deletion one
-    /// indexed row instead of rewriting every later sibling. Any later full graph save compacts
-    /// the keys, while a reload sorts sparse keys exactly as it sorted contiguous ones.
-    /// Selection and the row disappear in the same transaction or not at all.
+    /// The row order and selected id are part of the same transaction as the deletion. A
+    /// selected session therefore cannot reappear after relaunch because its scalar selection
+    /// cleared while its graph row did not (or the reverse), and later siblings retain the
+    /// contiguous positions produced by a complete `save(_:)`.
     func removeSession(
         id sessionID: SessionID,
         from projectID: ProjectID,
+        at position: Int,
         selectedSessionID: SessionID?
     ) throws {
         try database.transaction {
-            let deletion = try database.prepare(
-                "DELETE FROM session WHERE id = ? AND project_id = ?"
-            )
-            defer { deletion.finalize() }
-            try deletion.bind(1, sessionID.uuidString)
+            try database.prepare("DELETE FROM session WHERE id = ? AND project_id = ?")
+                .bind(1, sessionID.uuidString)
                 .bind(2, projectID.uuidString)
                 .run()
-            guard try database.scalar("SELECT changes()") == 1 else {
-                throw SQLiteDatabase.Failure.step(
-                    "Session removal did not match its durable project"
-                )
-            }
+            try database.prepare(
+                "UPDATE session SET position = position - 1 "
+                    + "WHERE project_id = ? AND position > ?"
+            )
+                .bind(1, projectID.uuidString)
+                .bind(2, position)
+                .run()
             try setSelectedSessionID(selectedSessionID)
         }
     }
@@ -397,16 +399,6 @@ final class ProjectDatabase {
 
     func deletePanel(for sessionID: SessionID) throws {
         let statement = try database.prepare("DELETE FROM \(ProjectDatabaseSchema.panelTable) WHERE session_id = ?")
-        defer { statement.finalize() }
-        statement.bind(1, sessionID.uuidString)
-        try statement.run()
-    }
-
-    func deleteAttachments(for sessionID: SessionID) throws {
-        let statement = try database.prepare(
-            "DELETE FROM \(ProjectDatabaseSchema.attachmentsTable) WHERE session_id = ?"
-        )
-        defer { statement.finalize() }
         statement.bind(1, sessionID.uuidString)
         try statement.run()
     }
@@ -438,6 +430,14 @@ final class ProjectDatabase {
             .bind(1, sessionID.uuidString)
             .bind(2, payload)
             .run()
+    }
+
+    func deleteAttachments(for sessionID: SessionID) throws {
+        let statement = try database.prepare(
+            "DELETE FROM \(ProjectDatabaseSchema.attachmentsTable) WHERE session_id = ?"
+        )
+        statement.bind(1, sessionID.uuidString)
+        try statement.run()
     }
 
     func retainAttachments(sessionIDs: Set<SessionID>) throws {
@@ -532,28 +532,26 @@ final class ProjectDatabase {
     private func setSelectedSessionID(_ id: SessionID?) throws {
         guard let id else {
             let statement = try database.prepare("DELETE FROM app_state WHERE key = ?")
-            defer { statement.finalize() }
             statement.bind(1, ProjectDatabaseSchema.selectedSessionKey)
             try statement.run()
             return
         }
 
-        let statement = try database.prepare(ProjectDatabaseSchema.upsertAppState)
-        defer { statement.finalize() }
-        try statement.bind(1, ProjectDatabaseSchema.selectedSessionKey)
+        try database.prepare(ProjectDatabaseSchema.upsertAppState)
+            .bind(1, ProjectDatabaseSchema.selectedSessionKey)
             .bind(2, id.uuidString)
             .run()
     }
 
     // MARK: - Private Methods — Coding
 
-    /// Indexed columns stay beside the JSON payload while one bounded wave is decoded.
+    /// Indexed columns stay beside the JSON payload while a bounded group is decoded.
     ///
     /// `JSONDecoder.decode` creates a complete top-level parser for every invocation. Calling it
-    /// once per session made startup pay that fixed cost thousands of times even though the rows
-    /// already share one schema and ordering. A bounded array amortizes the parser without
-    /// turning the complete store into one correspondingly large temporary allocation.
-    private struct StoredSessionRow: Sendable {
+    /// once per session made startup pay that fixed cost 5,000 times even though the rows were
+    /// already ordered and all had the same schema. A bounded array amortizes the parser without
+    /// turning the complete store into one large temporary allocation.
+    private struct StoredSessionRow {
         let rawID: String
         let rowID: SessionID
         let projectID: ProjectID
@@ -563,12 +561,11 @@ final class ProjectDatabase {
     }
 
     private static let sessionDecodeBatchSize = 256
-    /// Array assembly and dispatch cost more than they save for an ordinary sidebar. Keep the
-    /// original row-at-a-time path until there are enough payloads to amortize that setup.
-    private static let minimumBatchedSessionDecodeCount = sessionDecodeBatchSize * 2
 
-    /// Use a short bounded CPU burst without monopolizing every core. The hard maximum and batch
-    /// size cap one wave at 1,024 rows even on a much larger host.
+    /// A short startup CPU burst is cheaper than serially decoding thousands of independent
+    /// records, but it must not monopolize every core or retain the complete database as one
+    /// temporary document. Four batches gives the measured Apple Silicon hosts useful parallelism
+    /// while the 1,024-row wave keeps memory and corruption fallback bounded.
     private static let sessionDecodeBatchCount = max(
         1,
         min(4, ProcessInfo.processInfo.activeProcessorCount / 2)
@@ -582,9 +579,9 @@ final class ProjectDatabase {
         var errorDescription: String? { reason }
     }
 
-    /// `concurrentPerform` joins before `values()` returns. The lock is the only cross-thread
-    /// owner; decoded models leave it only after all batches have completed and are then consumed
-    /// serially in database order.
+    /// `DispatchQueue.concurrentPerform` requires one Sendable synchronization owner. The decoded
+    /// values themselves remain ordinary launch-local model values and cross the worker boundary
+    /// only while this lock holds; callers receive them after every worker has joined.
     private final class SessionBatchResults: @unchecked Sendable {
         private let lock = NSLock()
         private var storage: [Result<[AgentSession], Error>?]
@@ -615,10 +612,6 @@ final class ProjectDatabase {
         to sessionsByProject: inout [ProjectID: [AgentSession]]
     ) throws {
         guard !rows.isEmpty else { return }
-        guard rows.count >= Self.minimumBatchedSessionDecodeCount else {
-            try appendIndividuallyDecodedSessions(rows, to: &sessionsByProject)
-            return
-        }
 
         let batches = stride(from: 0, to: rows.count, by: Self.sessionDecodeBatchSize).map {
             Array(rows[$0..<min($0 + Self.sessionDecodeBatchSize, rows.count)])
@@ -642,7 +635,11 @@ final class ProjectDatabase {
             do {
                 decoded = try result.get()
             } catch let failure as SessionPayloadDecodeFailure {
-                throw corruptRow("session", id: failure.rowID, reason: failure.reason)
+                throw corruptRow(
+                    "session",
+                    id: failure.rowID,
+                    reason: failure.reason
+                )
             } catch {
                 throw corruptRow(
                     "session",
@@ -658,35 +655,20 @@ final class ProjectDatabase {
                     reason: "decoded \(decoded.count) payloads for \(batchRows.count) rows"
                 )
             }
-            for (row, session) in zip(batchRows, decoded) {
-                try validateAndAppend(session, for: row, to: &sessionsByProject)
-            }
-        }
-    }
 
-    /// Preserve the cheaper historical path for small stores and for the tail below the measured
-    /// batching threshold. A fresh local decoder also keeps it isolated from concurrent waves.
-    private func appendIndividuallyDecodedSessions(
-        _ rows: [StoredSessionRow],
-        to sessionsByProject: inout [ProjectID: [AgentSession]]
-    ) throws {
-        let decoder = JSONDecoder()
-        for row in rows {
-            let session: AgentSession
-            do {
-                session = try decoder.decode(AgentSession.self, from: row.payload)
-            } catch {
-                throw corruptRow(
-                    "session",
-                    id: row.rawID,
-                    reason: "invalid JSON payload: \(error.localizedDescription)"
+            for (row, session) in zip(batchRows, decoded) {
+                try validateAndAppend(
+                    session,
+                    for: row,
+                    to: &sessionsByProject
                 )
             }
-            try validateAndAppend(session, for: row, to: &sessionsByProject)
         }
     }
 
-    private static func decodeSessionBatch(_ rows: [StoredSessionRow]) throws -> [AgentSession] {
+    private static func decodeSessionBatch(
+        _ rows: [StoredSessionRow]
+    ) throws -> [AgentSession] {
         var payload = Data()
         payload.reserveCapacity(rows.reduce(2) { $0 + $1.payload.count + 1 })
         payload.append(0x5B) // [
@@ -700,8 +682,9 @@ final class ProjectDatabase {
         do {
             return try decoder.decode([AgentSession].self, from: payload)
         } catch {
-            // Corruption must still name the exact authoritative row and fail the complete load.
-            // Individual decoding is only the bounded exceptional path for this failed batch.
+            // A corrupt authoritative row must still name the exact record and fail the whole
+            // load. Individual decoding is deliberately the exceptional recovery path: healthy
+            // startup stays batched, while corruption reporting preserves its existing contract.
             for row in rows {
                 do {
                     _ = try decoder.decode(AgentSession.self, from: row.payload)

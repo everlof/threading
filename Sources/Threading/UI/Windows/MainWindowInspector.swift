@@ -25,17 +25,24 @@ extension MainWindowController {
         elementInspector.toggle(over: window)
     }
 
-    /// Help ▸ Report a Problem. Lives beside the inspector's own sheet because both file the
-    /// same kind of ticket through the same chain; only the evidence differs.
+    /// Help ▸ Report a Problem. Lives beside the inspector's own sheet because both send the
+    /// same private DTO through the same durable outbox; only the reviewed evidence differs.
     func presentReportProblem() {
+        MacRemoteDiagnostics.record(.issueReportOpened, fields: [
+            .reason: "manual",
+            .surface: "helpMenu",
+        ])
         let sheet = ReportProblemViewController()
         sheet.onDone = { [weak self, weak sheet] in
             guard let self, let sheet else { return }
             self.contentViewController?.dismiss(sheet)
         }
 
-        let submitter = GitHubIssueSubmitter.live()
-        sheet.onSubmitIssue = { draft in await submitter.submit(draft) }
+        if let submitter = issueReportSubmitter {
+            sheet.onSubmitReport = { draft in
+                await submitter.submit(trigger: "manual", draft: draft)
+            }
+        }
 
         contentViewController?.presentAsSheet(sheet)
     }
@@ -135,6 +142,10 @@ extension MainWindowController {
         screenshot: NSImage?,
         screenshotURL: URL?
     ) {
+        MacRemoteDiagnostics.record(.issueReportOpened, fields: [
+            .reason: "manual",
+            .surface: "inspector",
+        ])
         let environment = InspectorEnvironment.capture(
             window: window,
             sessionID: currentSessionID
@@ -153,10 +164,15 @@ extension MainWindowController {
             self.contentViewController?.dismiss(sheet)
         }
 
-        // Resolved here rather than held by the sheet: the credential chain is the window's
-        // business, and a sheet that reached for it could not be built in a test.
-        let submitter = GitHubIssueSubmitter.live()
-        sheet.onSubmitIssue = { draft in await submitter.submit(draft) }
+        if let submitter = issueReportSubmitter {
+            sheet.onSubmitReport = { draft, screenshot in
+                await submitter.submit(
+                    trigger: "manual",
+                    draft: draft,
+                    screenshot: screenshot
+                )
+            }
+        }
 
         contentViewController?.presentAsSheet(sheet)
     }

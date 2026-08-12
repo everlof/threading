@@ -1,16 +1,14 @@
 import AppKit
 
-/// Help ▸ Report a Problem: a ticket raised from anywhere in the app, without a capture.
+/// Help ▸ Report a Problem: a private report raised from anywhere in the app, without a capture.
 ///
 /// The inspector's sheet files what the app *measured*; this one files what the user *noticed* —
 /// including the half of reports that are not defects at all, which is why the first control is
-/// the kind. A tracker where every ticket arrives labelled `bug` is a tracker whose labels mean
+/// the kind. An inbox where every report arrives labelled `bug` is an inbox whose labels mean
 /// nothing, and asking once at the top costs a click that triage would otherwise pay for later.
 ///
-/// Nothing is attached beyond three facts about this Mac, named on screen before the button is
-/// pressed. A ticket outlives the conversation that produced it, so what rides along has to be
-/// safe by construction rather than by review — the rule `MacRemoteDiagnostics` already states
-/// for the support report, applied to the smaller thing.
+/// The user-authored description and the content-free diagnostic journal go to Threading's
+/// private support inbox. Nothing is published to GitHub, and no raw local log is attached.
 final class ReportProblemViewController: NSViewController {
 
     // MARK: - Properties
@@ -21,17 +19,15 @@ final class ReportProblemViewController: NSViewController {
     private let statusView = SubmissionStatusView()
     private let submitButton = ThemedButton()
 
-    private var kind: GitHubIssueKind = .problem
+    private var kind: DeveloperIssueReportKind = .problem
     private var isSubmitting = false
 
     /// Called when the sheet is done, however it was closed.
     var onDone: (() -> Void)?
 
-    /// Files the issue. Injected for the same reason the inspector's sheet injects it: a sheet
-    /// that reached for the credential chain could not be built in a test.
-    var onSubmitIssue: ((GitHubIssueDraft) async -> GitHubIssueSubmission)?
-
-    var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    /// Sends the reviewed report. Injected so a render/behavior test needs no network or app
+    /// composition root.
+    var onSubmitReport: ((DeveloperIssueReportDraft) async -> DeveloperIssueReportSubmission)?
 
     // MARK: - Lifecycle
 
@@ -167,7 +163,7 @@ final class ReportProblemViewController: NSViewController {
     }
 
     /// Shown rather than promised: the line names the exact three values that will be in the
-    /// ticket, in the form they will appear there.
+    /// report, in the form they will appear there.
     ///
     /// It wraps and yields rather than holding its width. Under a theme whose type is a wide
     /// monospace this one sentence is ~690 points long, and a label that will not compress
@@ -176,7 +172,7 @@ final class ReportProblemViewController: NSViewController {
     private func makeEnvironmentNote() -> NSView {
         let label = NSTextField(labelWithString: L10n.format(
             "Included with the report: %@",
-            GitHubIssueEnvironment.markdown()
+            DeveloperIssueReportComposer.environment()
         ))
         label.applyFont(.caption)
         label.textColor = Design.Text.tertiary
@@ -228,23 +224,23 @@ final class ReportProblemViewController: NSViewController {
     // MARK: - Actions
 
     @objc func submitIssue() {
-        guard !isSubmitting, let onSubmitIssue else { return }
+        guard !isSubmitting, let onSubmitReport else { return }
 
-        // A ticket with no words in it wastes the reader's time, and the reader is a person.
+        // A report with no words in it wastes the reader's time, and the reader is a person.
         guard !draftIsEmpty else {
             statusView.show(ReportProblemStrings.emptyWarning, tone: .failed)
             view.window?.makeFirstResponder(titleField)
             return
         }
 
-        let draft = issueDraft()
+        let draft = reportDraft()
         isSubmitting = true
         submitButton.isEnabled = false
         submitButton.title = ReportProblemStrings.submittingTitle
         statusView.show(ReportProblemStrings.submittingStatus, tone: .working)
 
         Task { @MainActor [weak self] in
-            let outcome = await onSubmitIssue(draft)
+            let outcome = await onSubmitReport(draft)
             self?.finishSubmitting(outcome)
         }
     }
@@ -262,25 +258,21 @@ final class ReportProblemViewController: NSViewController {
 
     /// What gets filed. The typed title wins when there is one; otherwise the first line of the
     /// description becomes it, which is how people write when a form does not insist.
-    func issueDraft() -> GitHubIssueDraft {
+    func reportDraft() -> DeveloperIssueReportDraft {
         let typed = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let fallback = kind == .problem
             ? ReportProblemStrings.untitledProblem
             : ReportProblemStrings.untitledImprovement
 
-        return GitHubIssueDraft(
+        return DeveloperIssueReportDraft(
+            kind: kind,
             title: typed.isEmpty
-                ? GitHubIssueComposer.title(
+                ? DeveloperIssueReportComposer.title(
                     fromNote: detailField.stringValue,
                     fallback: fallback
                 )
-                : String(typed.prefix(GitHubIssueDefaults.titleLimit)),
-            body: GitHubIssueComposer.body(
-                note: detailField.stringValue,
-                report: "",
-                environment: GitHubIssueEnvironment.markdown()
-            ),
-            labels: [kind.label]
+                : String(typed.prefix(DeveloperIssueReportComposer.maximumTitleCharacters)),
+            details: detailField.stringValue
         )
     }
 
@@ -289,20 +281,16 @@ final class ReportProblemViewController: NSViewController {
 
     // MARK: - Private Methods
 
-    private func finishSubmitting(_ outcome: GitHubIssueSubmission) {
+    private func finishSubmitting(_ outcome: DeveloperIssueReportSubmission) {
         isSubmitting = false
         submitButton.isEnabled = true
         submitButton.title = ReportProblemStrings.submitTitle
 
         switch outcome {
-        case .created(let url, let number, _):
-            statusView.show(ReportProblemStrings.created(issue: number), tone: .done)
-            openURL(url)
-
-        case .webForm(let url, let message):
-            statusView.show(message, tone: .working)
-            openURL(url)
-
+        case .delivered(let reference):
+            statusView.show(ReportProblemStrings.received(reference: reference), tone: .done)
+        case .queued:
+            statusView.show(ReportProblemStrings.queued, tone: .working)
         case .failed(let message):
             statusView.show(message, tone: .failed)
         }
@@ -331,7 +319,7 @@ enum ReportProblemIdentifiers {
 enum ReportProblemStrings {
     static var heading: String { L10n.string("Report a Problem") }
     static var subheading: String {
-        L10n.string("Files an issue on Threading's GitHub. Nothing is sent until you press Submit.")
+        L10n.string("Sends a private report to Threading. Nothing is sent until you press Send.")
     }
     static var kindCaption: String { L10n.string("Kind") }
     static var problemTitle: String { L10n.string("Problem") }
@@ -343,18 +331,20 @@ enum ReportProblemStrings {
         L10n.string("What happened, what you expected, and how to see it again")
     }
     static var detailHint: String {
-        L10n.string("⌘Return submits the issue · Return adds a line")
+        L10n.string("⌘Return sends the report · Return adds a line")
     }
-    static var submitTitle: String { L10n.string("Submit") }
-    static var submittingTitle: String { L10n.string("Submitting…") }
-    static var submittingStatus: String { L10n.string("Filing the issue on GitHub…") }
+    static var submitTitle: String { L10n.string("Send to Developer") }
+    static var submittingTitle: String { L10n.string("Sending…") }
+    static var submittingStatus: String { L10n.string("Sending to Threading’s private inbox…") }
     static var cancelTitle: String { L10n.string("Cancel") }
     static var emptyWarning: String { L10n.string("Write a title or some details first.") }
     static var untitledProblem: String { L10n.string("Problem reported from Threading") }
     static var untitledImprovement: String { L10n.string("Improvement suggested from Threading") }
 
-    static func created(issue number: Int) -> String {
-        guard number > 0 else { return L10n.string("Filed on GitHub.") }
-        return L10n.format("Filed as issue #%lld.", number)
+    static func received(reference: String) -> String {
+        L10n.format("Report received. Reference: %@", reference)
+    }
+    static var queued: String {
+        L10n.string("Report saved securely and queued for retry when Threading is active.")
     }
 }

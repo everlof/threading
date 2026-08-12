@@ -32,6 +32,7 @@ final class SettingsDisclosureRenderTests: XCTestCase {
             [
                 ("system-light", .system, .aqua),
                 ("system-dark", .system, .darkAqua),
+                ("threading", AppThemeStyles.threading, .darkAqua),
                 ("cyberpunk", AppThemeStyles.cyberpunk, .darkAqua),
                 ("neo-brutalism", AppThemeStyles.neoBrutalism, .aqua),
                 ("swiss", AppThemeStyles.swissMinimalist, .aqua)
@@ -429,7 +430,9 @@ final class SettingsDisclosureRenderTests: XCTestCase {
             appearance.performAsCurrentDrawingAppearance {
                 data = self.png(of: host)
             }
-            let url = directory.appendingPathComponent("sidebar-\(fixture.name).png")
+            let url = directory.appendingPathComponent(
+                "settings-sidebar-\(fixture.name).png"
+            )
             try XCTUnwrap(data, "no sidebar render for \(fixture.name)").write(to: url)
         }
     }

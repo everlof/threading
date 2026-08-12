@@ -27,17 +27,6 @@ never blocks the writer, and `busy_timeout` turns "another process has it" into 
 makes multiple writers *possible*, not permitted — `SingleInstanceLock` still stands, and is a
 chosen concurrency model rather than a workaround.
 
-Permanent removal is an exact transaction, not an invitation to save that graph again. The delete
-predicate includes both session and project identifiers; `SELECT changes()` must report exactly one
-row, and the selected-session scalar changes in that same transaction. Session `position` values
-are order keys rather than a contiguity promise, so deletion leaves a sparse key instead of
-rewriting every later sibling; the next ordinary full graph save may compact them. `ProjectStore`
-uses this path only after flushing or ruling out unrelated coalesced mutations. If other unsaved
-model work exists it falls back to the full graph transaction, and if either transaction fails the
-in-memory graph and indexes are restored before a broad recovery notification. Session-owned panel
-and attachment rows have exact deletes of their own and run only after the graph removal is durable,
-so teardown cannot resurrect the deleted session and a failure cannot expose a half-removed graph.
-
 **SQLite handles have one deterministic lifetime.** `SQLiteDatabase.Statement` finalizes in
 `deinit` as well as after `run`: fluent binding can throw while the statement expression is still
 being built, before `run` has installed its own `defer`, and that must not leave a native statement
@@ -125,14 +114,14 @@ by id later, so startup records `containsUnkeyedRows` and only skipping the tabl
 it. The project and session rows stay all-or-nothing and eagerly decoded because those are the copy
 of record.
 
-Eager does not mean unbounded. A large store retains indexed session columns beside at most one
-1,024-row wave, decodes 256-row JSON arrays on up to half the active processors (with a hard cap of
-four), then validates and appends the completed batches serially in database order. Stores and
-wave tails below 512 rows keep the cheaper row-at-a-time decoder; the array and dispatch setup was
-measurably slower at ordinary cardinality. If an array decode fails, only that bounded 256-row
-batch is retried individually so the all-or-nothing failure still identifies the exact corrupt
-authoritative row. Payload id, provider kind and last-active-time checks remain row-level after
-decode, and no later wave begins until the current wave has joined.
+Authoritative session rows remain eager, but their healthy decode is **bounded and batched**.
+`ProjectDatabase` joins at most 256 stored JSON objects into one temporary array and invokes the
+top-level `JSONDecoder` once for that group instead of constructing a parser for every row. Indexed
+id, project, provider and activity metadata stays beside each payload and is checked after decode,
+in database order. If a batch fails, the loader decodes only that bounded group individually to
+name the exact corrupt row and then refuses the complete load as before. This is an amortization of
+the same all-or-nothing validation contract, not lazy or partial project-state loading; the bound
+also prevents a 50,000-session store from becoming one correspondingly large temporary document.
 
 Agent execution evidence has different write and trust needs from mutable application state, so it
 does not live in SQLite. [Execution Audit](execution-audit.md) keeps a bounded append-only,
@@ -526,8 +515,12 @@ outlive a renderer: Native → Terminal destroys one controller and starts anoth
 app-server offers no durable child index to query afterwards. `SubagentStateStore` writes one
 versioned JSON snapshot per session under `Subagents/<session-id>.json`. It contains descriptors,
 states, progress and bounded recent activity only; conversation rows are replayed lazily from
-the stored provider transcript path. Progress updates are coalesced before atomic writes, so a
-busy child does not turn telemetry into synchronous disk churn.
+the stored provider transcript path. Progress updates are coalesced before atomic writes. Snapshot
+projection uses authoritative id/alias and transcript-path indexes, so a missing parent id does not
+scan every child once per row. Routine encode/write work is serialized on a utility queue; an
+explicit flush or app quit drains earlier writes and synchronously commits the newest snapshot.
+Renderer teardown only queues its final state, so switching surfaces does not wait on a multi-MB
+atomic write.
 
 The same `SubagentSessionState` object is retained by `AgentRuntime` across an in-app renderer
 switch, preserving live details without a disk round-trip. A full app relaunch loads the compact
@@ -538,7 +531,8 @@ an `.unreadable-<uuid>` suffix before new state may be written; if quarantine it
 writes for that session remain blocked rather than overwriting the only recoverable bytes.
 Removing a session also invalidates its in-memory state before deleting the file. This matters
 because token accounting finishes off-main: a late completion must not recreate a snapshot for
-a session that no longer exists.
+a session that no longer exists. The deletion itself shares the writer queue, after any already
+accepted saves, so a stale write completes first and deletion wins rather than recreating the file.
 
 ## 2026-07-30 — Where it all is, and starting over
 

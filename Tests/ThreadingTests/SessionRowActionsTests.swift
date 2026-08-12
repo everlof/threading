@@ -170,6 +170,11 @@ final class SessionRowActionsTests: XCTestCase {
 
         row.configure(with: session, activity: .idle)
         XCTAssertFalse(row.customizationHostsAreMaterialized)
+        XCTAssertFalse(row.customizationScaffoldingIsMaterialized)
+        XCTAssertNil(optionalView(named: "sidebar.session.identity.content", in: row))
+        XCTAssertNil(optionalView(named: "sidebar.session.content", in: row))
+        XCTAssertNil(optionalView(named: "sidebar.session.slot.after-title", in: row))
+        XCTAssertNil(optionalView(named: "sidebar.session.attention-overlay", in: row))
 
         let target = ExtensionComponentTarget(
             component: HostComponentContracts.sidebarSessionRow.id,
@@ -188,6 +193,9 @@ final class SessionRowActionsTests: XCTestCase {
         row.refreshCustomizations(changedTargets: [target])
 
         XCTAssertTrue(row.customizationHostsAreMaterialized)
+        XCTAssertTrue(row.customizationScaffoldingIsMaterialized)
+        XCTAssertNotNil(optionalView(named: "sidebar.session.content", in: row))
+        XCTAssertNotNil(optionalView(named: "sidebar.session.slot.after-title", in: row))
         let title = try XCTUnwrap(
             optionalView(named: "sidebar.session.title", in: row) as? MorphingTitleLabel
         )
@@ -972,5 +980,33 @@ final class SessionRowActionsTests: XCTestCase {
             archive.accessibilityTitle(),
             SidebarRowDefaults.archiveAccessibilityLabel
         )
+    }
+
+    // MARK: - Hover Card Sound Line
+
+    /// The session row keeps no tooltip of its own, so the hover card is where an overridden
+    /// chat has to say so. A chat that inherits adds no line: configuration is not status.
+    @MainActor
+    func testTheHoverCardNamesASoundTheChatDoesNotInherit() {
+        var overridden = AgentSession(kind: .claude, title: "Ping")
+        overridden.soundOverrides = [
+            SoundOverrideKeys.all: SoundChoice.named("Submarine").storedValue
+        ]
+
+        let info = SessionInfoPopoverViewController.Info(session: overridden, activity: .idle)
+        XCTAssertNotNil(
+            info.soundLine,
+            "an overridden chat said nothing on its one hover surface"
+        )
+        XCTAssertEqual(
+            info.soundLine?.contains("Submarine"), true,
+            "the line does not name the sound it exists to name"
+        )
+
+        let inheriting = SessionInfoPopoverViewController.Info(
+            session: AgentSession(kind: .claude, title: "Quiet"),
+            activity: .idle
+        )
+        XCTAssertNil(inheriting.soundLine, "a chat that inherits grew a line for it")
     }
 }

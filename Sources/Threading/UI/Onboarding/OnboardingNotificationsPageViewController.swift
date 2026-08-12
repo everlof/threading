@@ -187,7 +187,7 @@ final class OnboardingNotificationsPageViewController: NSViewController, Onboard
         }
         soundToggle.isEnabled = granted
         soundToggle.state = granted
-            ? (AppSettings.shared.playsAttentionAlertSound ? .on : .off)
+            ? (AppSettings.shared.attentionAlertSound == .silent ? .off : .on)
             : .off
 
         switch status {
@@ -231,7 +231,13 @@ final class OnboardingNotificationsPageViewController: NSViewController, Onboard
         AppSettings.shared.setNotifies(toggle.state == .on, on: alert)
     }
 
+    /// The walkthrough asks whether alerts sound, not which sound they make — Settings owns
+    /// that, and a picker here would be a choice before there is anything to hear it against.
+    /// So this writes the two answers a switch can express, and switching back on restores the
+    /// system tone rather than a name, because on this page there has not been one yet.
     @objc private func soundToggleChanged() {
-        AppSettings.shared.playsAttentionAlertSound = soundToggle.state == .on
+        let sounds = soundToggle.state == .on
+        guard sounds != (AppSettings.shared.attentionAlertSound != .silent) else { return }
+        AppSettings.shared.attentionAlertSound = sounds ? AttentionAlertDefaults.sound : .silent
     }
 }

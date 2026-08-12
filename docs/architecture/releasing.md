@@ -238,11 +238,13 @@ pinning exactly, so security patches arrive without a project edit.
 entitlement work. SPM embeds `Sparkle.framework` automatically from the link; no Embed Frameworks
 phase was needed.
 
-**It brings five nested executables**, all of which notarization inspects:
+**Sparkle brings five nested executables**, all of which notarization inspects:
 `Autoupdate`, `Sparkle`, `Updater.app/Contents/MacOS/Updater`, and the `Downloader.xpc` and
 `Installer.xpc` services. `scripts/release.sh` verifies them without modification, because its
-check is a `find` over the bundle rather than a list of known binaries — the export signs all
-nine (four app-side, five Sparkle) as Developer ID, hardened and timestamped.
+check is a `find` over the bundle rather than a list of known binaries. With the bundled `scc`
+helper, the export signs all ten executables (five app-side, five Sparkle) as Developer ID,
+hardened and timestamped. The release gate separately verifies that `Contents/Helpers/scc` is
+the expected universal version after signing.
 
 ### The UI is ours, with one documented exception
 

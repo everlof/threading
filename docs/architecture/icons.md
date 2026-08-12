@@ -264,8 +264,11 @@ made.
 
 **The phone cannot generate an icon at runtime.** iOS has no API that accepts an image:
 `setAlternateIconName` selects from icons compiled into the bundle. The primary icon therefore
-remains the canonical full-bleed `Brand/ThreadingMark-Navy-1024.png`, copied by
-`scripts/generate_mobile_app_icon.swift`; `AppIconRenderTests` pins that copy byte-for-byte.
+starts from the canonical full-bleed `Brand/ThreadingMark-Navy-1024.png`.
+`scripts/generate_mobile_app_icon.swift` fits that exact mark and plate into the iOS safe zone
+before writing both the app-icon and Settings-preview assets; `AppIconRenderTests` pins the
+opaque canonical ground at the safe-zone edges and the canonical ink at the centre. The runtime
+mark and web export remain the unmodified brand assets.
 
 The built-in Mac styles are also compiled as **manually selected alternate icons**. Run
 `scripts/generate_mobile_theme_icons.sh`: the existing `GeneratedAppIcon` render test draws every

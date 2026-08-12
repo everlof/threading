@@ -102,28 +102,29 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     private let titleLabel = MorphingTitleLabel()
     /// Durable visibility state in words: the row remains findable while snoozed, and an early
     /// wake remains obvious until the session is visited.
-    private let attentionOverlayLabel = NSTextField(labelWithString: "")
+    private var attentionOverlayLabel: NSTextField?
     /// Pinning is stronger than every sidebar sort, so it remains visible beside the title
     /// rather than being communicated only by the row's position.
     /// Inserted into the arranged content only for a pinned session. Most rows are unpinned, so
     /// resolving this SF Symbol (and carrying an empty arranged slot) belongs behind that state.
     private var pinnedIndicator: NSImageView?
     private let nativeIdentityContent = NSView()
-    private let nativeContent = NSView()
-    private let afterTitleSlot = NSStackView()
+    private lazy var afterTitleSlot = NSStackView()
     private lazy var identityContentContainer = ComponentContentContainer(
         defaultContent: nativeIdentityContent
     )
-    private lazy var contentContainer = ComponentContentContainer(defaultContent: nativeContent)
-    private lazy var rowContentStack = NSStackView(
-        views: [contentContainer, attentionOverlayLabel, afterTitleSlot]
-    )
+    private lazy var nativeStack = NSStackView(views: [nativeIdentityContent, titleLabel])
+    private lazy var contentContainer = ComponentContentContainer(defaultContent: nativeStack)
+    private lazy var rowContentStack = NSStackView(views: [nativeStack])
+    private var identityContentContainerIsMaterialized = false
+    private var contentContainerIsMaterialized = false
+    private var afterTitleSlotIsMaterialized = false
     private var identityCustomizationHostIsMaterialized = false
     private lazy var identityCustomizationHost: ComponentCustomizationHost = {
         identityCustomizationHostIsMaterialized = true
         return ComponentCustomizationHost(
             target: .sessionIdentity(),
-            contentContainer: identityContentContainer,
+            contentContainer: materializeIdentityContentContainer(),
             lookup: customizationLookup,
             imageResolver: { [weak self] reference, extensionIdentifier in
                 self?.resolveCustomizationImage(
@@ -142,8 +143,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
                 component: HostComponentContracts.sidebarSessionRow.id,
                 contractVersion: HostComponentContracts.sidebarSessionRow.version
             ),
-            contentContainer: contentContainer,
-            slots: ["after-title": afterTitleSlot],
+            contentContainer: materializeContentContainer(),
+            slots: ["after-title": materializeAfterTitleSlot()],
             lookup: customizationLookup,
             imageResolver: { [weak self] reference, extensionIdentifier in
                 self?.resolveCustomizationImage(
@@ -283,12 +284,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             for: .horizontal
         )
 
-        attentionOverlayLabel.applyFont(.caption)
-        attentionOverlayLabel.setAccessibilityIdentifier("sidebar.session.attention-overlay")
-        attentionOverlayLabel.setContentHuggingPriority(.required, for: .horizontal)
-        attentionOverlayLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        attentionOverlayLabel.isHidden = true
-
         setupTrailingSlot()
         setupCustomizableContent()
 
@@ -345,42 +340,16 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             iconView.trailingAnchor.constraint(equalTo: nativeIdentityContent.trailingAnchor)
         ])
 
-        identityContentContainer.setAccessibilityIdentifier(
-            "sidebar.session.identity.content"
-        )
-        identityContentContainer.onReplacementChanged = { [weak self] replacement in
-            self?.applyIdentityReplacementState(replacement)
-        }
-
-        let nativeStack = NSStackView(views: [identityContentContainer, titleLabel])
         nativeStack.orientation = .horizontal
         nativeStack.alignment = .centerY
         nativeStack.spacing = SidebarRowDefaults.horizontalSpacing
         nativeStack.translatesAutoresizingMaskIntoConstraints = false
-
-        nativeContent.translatesAutoresizingMaskIntoConstraints = false
-        nativeContent.addSubview(nativeStack)
-
-        NSLayoutConstraint.activate([
-            nativeStack.topAnchor.constraint(equalTo: nativeContent.topAnchor),
-            nativeStack.bottomAnchor.constraint(equalTo: nativeContent.bottomAnchor),
-            nativeStack.leadingAnchor.constraint(equalTo: nativeContent.leadingAnchor),
-            nativeStack.trailingAnchor.constraint(equalTo: nativeContent.trailingAnchor)
-        ])
-
-        nativeContent.setAccessibilityIdentifier("sidebar.session.default-content")
-        contentContainer.setAccessibilityIdentifier("sidebar.session.content")
-        contentContainer.setContentHuggingPriority(
+        nativeStack.setAccessibilityIdentifier("sidebar.session.default-content")
+        nativeStack.setContentHuggingPriority(
             SidebarRowDefaults.stretchableHugging,
             for: .horizontal
         )
-        contentContainer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        afterTitleSlot.orientation = .horizontal
-        afterTitleSlot.alignment = .centerY
-        afterTitleSlot.spacing = Design.Spacing.tight
-        afterTitleSlot.isHidden = true
-        afterTitleSlot.setAccessibilityIdentifier("sidebar.session.slot.after-title")
+        nativeStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // The trailing slot is **not** in the stack.
         //
@@ -402,6 +371,80 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             _ = identityCustomizationHost
             _ = customizationHost
         }
+    }
+
+    /// The native row is the launch path. Extension containers are compatibility scaffolding,
+    /// not visible content, so an empty registry must not add their views and constraints to
+    /// every mounted row. A published identity patch crosses this boundary and reparents the
+    /// already configured native identity into the same container the eager path used.
+    private func materializeIdentityContentContainer() -> ComponentContentContainer {
+        if identityContentContainerIsMaterialized { return identityContentContainer }
+
+        let index = nativeStack.arrangedSubviews.firstIndex(of: nativeIdentityContent) ?? 0
+        nativeStack.removeArrangedSubview(nativeIdentityContent)
+        nativeIdentityContent.removeFromSuperview()
+        let container = identityContentContainer
+        container.setAccessibilityIdentifier("sidebar.session.identity.content")
+        container.onReplacementChanged = { [weak self] replacement in
+            self?.applyIdentityReplacementState(replacement)
+        }
+        nativeStack.insertArrangedSubview(container, at: index)
+        identityContentContainerIsMaterialized = true
+        return container
+    }
+
+    /// Materializes the replaceable row surface only when a row-level extension actually has
+    /// content. The native icon/title stack itself is retained and reparented; a one-child
+    /// wrapper and its four edge constraints would add no semantics here. Disabling the
+    /// extension therefore restores the exact same views without rebuilding title/icon state.
+    private func materializeContentContainer() -> ComponentContentContainer {
+        if contentContainerIsMaterialized { return contentContainer }
+
+        let index = rowContentStack.arrangedSubviews.firstIndex(of: nativeStack) ?? 0
+        rowContentStack.removeArrangedSubview(nativeStack)
+        nativeStack.removeFromSuperview()
+        let container = contentContainer
+        container.setAccessibilityIdentifier("sidebar.session.content")
+        container.setContentHuggingPriority(
+            SidebarRowDefaults.stretchableHugging,
+            for: .horizontal
+        )
+        container.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        rowContentStack.insertArrangedSubview(container, at: index)
+        contentContainerIsMaterialized = true
+        return container
+    }
+
+    /// Slot geometry is absent until a published customization can put pixels in the slot.
+    private func materializeAfterTitleSlot() -> NSStackView {
+        guard !afterTitleSlotIsMaterialized else { return afterTitleSlot }
+        afterTitleSlot.orientation = .horizontal
+        afterTitleSlot.alignment = .centerY
+        afterTitleSlot.spacing = Design.Spacing.tight
+        afterTitleSlot.isHidden = true
+        afterTitleSlot.setAccessibilityIdentifier("sidebar.session.slot.after-title")
+        rowContentStack.addArrangedSubview(afterTitleSlot)
+        afterTitleSlotIsMaterialized = true
+        return afterTitleSlot
+    }
+
+    /// Woken/snoozed text is uncommon durable state. Ordinary rows do not carry an empty label
+    /// and its intrinsic-size constraints merely because another row might need one.
+    private func attentionLabelForPresentation() -> NSTextField {
+        if let attentionOverlayLabel { return attentionOverlayLabel }
+
+        let label = NSTextField(labelWithString: "")
+        label.applyFont(.caption)
+        label.setAccessibilityIdentifier("sidebar.session.attention-overlay")
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        label.isHidden = true
+        let insertionIndex = afterTitleSlotIsMaterialized
+            ? max(0, rowContentStack.arrangedSubviews.count - 1)
+            : rowContentStack.arrangedSubviews.count
+        rowContentStack.insertArrangedSubview(label, at: insertionIndex)
+        attentionOverlayLabel = label
+        return label
     }
 
     /// Materializes the alternate-account overlay when it first has pixels to contribute.
@@ -808,14 +851,16 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         nativeToolTip = nil
         setPinned(session.isPinned)
         if session.wake != nil {
-            attentionOverlayLabel.stringValue = L10n.string("Woke")
-            attentionOverlayLabel.setAccessibilityLabel(L10n.string("Session woke from snooze"))
-            attentionOverlayLabel.isHidden = false
+            let label = attentionLabelForPresentation()
+            label.stringValue = L10n.string("Woke")
+            label.setAccessibilityLabel(L10n.string("Session woke from snooze"))
+            label.isHidden = false
         } else if session.isSnoozed(at: Date()) {
-            attentionOverlayLabel.stringValue = L10n.string("Snoozed")
-            attentionOverlayLabel.setAccessibilityLabel(L10n.string("Session is snoozed"))
-            attentionOverlayLabel.isHidden = false
-        } else {
+            let label = attentionLabelForPresentation()
+            label.stringValue = L10n.string("Snoozed")
+            label.setAccessibilityLabel(L10n.string("Session is snoozed"))
+            label.isHidden = false
+        } else if let attentionOverlayLabel {
             attentionOverlayLabel.stringValue = ""
             attentionOverlayLabel.isHidden = true
         }
@@ -917,6 +962,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
     var customizationHostsAreMaterialized: Bool {
         identityCustomizationHostIsMaterialized || customizationHostIsMaterialized
+    }
+
+    var customizationScaffoldingIsMaterialized: Bool {
+        identityContentContainerIsMaterialized
+            || contentContainerIsMaterialized
+            || afterTitleSlotIsMaterialized
     }
 
     /// The icon slot carries the *agent* — Claude's starburst, OpenAI's knot, a shell's
@@ -1197,7 +1248,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         pinnedIndicator?.contentTintColor = backgroundStyle == .emphasized
             ? Design.Ink.selection.label
             : Design.Surface.accent
-        attentionOverlayLabel.textColor = backgroundStyle == .emphasized
+        attentionOverlayLabel?.textColor = backgroundStyle == .emphasized
             ? Design.Ink.selection.secondary
             : Design.Text.tertiary
         statusIndicator?.hostGround = ground
@@ -1217,6 +1268,7 @@ extension AgentKind {
         case .codex: return "chevron.left.forwardslash.chevron.right"
         case .grok: return "bolt.circle"
         case .openCode: return "curlybraces.square"
+        case .cursor: return "cursorarrow"
         }
     }
 }

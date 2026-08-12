@@ -3,6 +3,39 @@ import XCTest
 
 final class GitDiffParserTests: XCTestCase {
 
+    func testRawDiffIndexPreservesChangesAndConsumesRenamePaths() {
+        let raw = ":100644 100644 aaaaaaa bbbbbbb M\u{00}Sources/Edit.swift\u{00}"
+            + ":000000 100644 0000000 ccccccc A\u{00}Sources/New.swift\u{00}"
+            + ":100644 000000 ddddddd 0000000 D\u{00}Sources/Old.swift\u{00}"
+            + ":100644 100644 eeeeeee fffffff R098\u{00}Old Name.swift\u{00}New Name.swift\u{00}"
+
+        let files = GitDiffParser.files(fromRawDiff: Data(raw.utf8))
+
+        XCTAssertEqual(files.map(\.path), [
+            "Sources/Edit.swift", "Sources/New.swift", "Sources/Old.swift", "New Name.swift",
+        ])
+        XCTAssertEqual(files[0].change, .modified)
+        XCTAssertEqual(files[1].change, .added)
+        XCTAssertEqual(files[2].change, .deleted)
+        XCTAssertEqual(files[3].change, .renamed(from: "Old Name.swift"))
+        XCTAssertTrue(files.allSatisfy { $0.hunks.isEmpty && $0.added == 0 && $0.removed == 0 })
+    }
+
+    func testNULTerminatedNumstatKeepsLiteralAndRenameDestinationPaths() {
+        let raw = "12\t3\tSources/[literal].swift\u{00}"
+            + "4\t1\t\u{00}Old Name.swift\u{00}New Name.swift\u{00}"
+            + "-\t-\timage.png\u{00}"
+
+        XCTAssertEqual(
+            GitDiffParser.fileStats(fromNumstat: Data(raw.utf8)),
+            [
+                GitFileLineStats(path: "Sources/[literal].swift", added: 12, removed: 3),
+                GitFileLineStats(path: "New Name.swift", added: 4, removed: 1),
+                GitFileLineStats(path: "image.png", added: 0, removed: 0),
+            ]
+        )
+    }
+
     // MARK: - Unified Diff
 
     func testModifiedFileNumbersLinesAcrossHunks() {

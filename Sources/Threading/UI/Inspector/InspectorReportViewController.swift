@@ -1,13 +1,13 @@
 import AppKit
 
 /// The report sheet: the window screenshot with the capture marked, the text that names it, a
-/// description, and the two things worth doing with it — copying it into a session, or filing
-/// it as a GitHub issue.
+/// description, and the two things worth doing with it — copying the complete local evidence into
+/// a session, or sending a bounded copy to Threading's private developer inbox.
 ///
 /// The markdown carries the screenshot's *path* rather than embedding the image — a path is
 /// the one form of an image the agent CLIs can act on, so the copied report pastes straight
 /// into a session composer. The description leads the copied text for the same reason: a chat
-/// reads the instruction before the evidence, and so does a person reading a ticket.
+/// reads the instruction before the evidence, and so does a person reading a report.
 ///
 /// **The description comes before the evidence on screen, too.** It was under a 170-point block
 /// of read-only markdown in a box one line tall, which is the layout of a form whose last field
@@ -16,9 +16,8 @@ import AppKit
 ///
 /// **The environment is held apart from the report rather than baked into it**, because it is
 /// said in three places and must not be said twice in any of them: the details box shows it under
-/// the capture, Copy Report carries it into the chat, and the ticket closes with it under the
-/// rule `GitHubIssueComposer` draws. A report string that already contained it would have
-/// arrived on GitHub with the environment printed once in the evidence and again under the rule.
+/// the capture, Copy Report carries it into the chat, and the private report closes with it under
+/// report composer. A report string that already contained it would arrive twice.
 final class InspectorReportViewController: NSViewController {
 
     // MARK: - Properties
@@ -46,20 +45,11 @@ final class InspectorReportViewController: NSViewController {
     /// Called when the sheet is done, however it was closed.
     var onDone: (() -> Void)?
 
-    /// Files the issue. Injected rather than reached for, so the sheet can be driven in a test
-    /// without a network, a token, or a repository.
-    var onSubmitIssue: ((GitHubIssueDraft) async -> GitHubIssueSubmission)?
-
-    /// Where a created issue — or the prefilled form standing in for one — is opened.
-    var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
-
-    /// Puts the capture where ⌘V can reach it. The GitHub API takes markdown and nothing else:
-    /// image upload is a web-UI endpoint that refuses token auth, so the shortest honest path
-    /// from this sheet to a picture in the issue is the clipboard and one keystroke.
-    var copyImageToPasteboard: (NSImage) -> Void = { image in
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.writeObjects([image])
-    }
+    /// Sends the reviewed report. Injected rather than reached for, so the sheet can be driven in
+    /// a test without a network or application composition root.
+    var onSubmitReport: (
+        (DeveloperIssueReportDraft, NSImage?) async -> DeveloperIssueReportSubmission
+    )?
 
     // MARK: - Initialization
 
@@ -249,10 +239,10 @@ final class InspectorReportViewController: NSViewController {
     /// is in it and already answers Return and Shift-Return the way every composer here does, so
     /// the sheet inherits the behaviour rather than restating it.
     ///
-    /// It opens at several lines rather than one because the sheet now files tickets, and a
-    /// ticket is a paragraph. `submitPlacement` moves to `.outside` for the same reason the
+    /// It opens at several lines rather than one because the sheet now files reports, and a
+    /// report is a paragraph. `submitPlacement` moves to `.outside` for the same reason the
     /// session composer uses it: Return-sends turns every line break in a description into an
-    /// accidental submission, and here the thing submitted is public and permanent.
+    /// accidental submission, and here the thing submitted is private and retained.
     private func makeNoteField() -> NSView {
         noteField.placeholder = InspectorStrings.notePlaceholder
         noteField.submitPlacement = .outside
@@ -354,37 +344,46 @@ final class InspectorReportViewController: NSViewController {
     }
 
     @objc func submitIssue() {
-        guard !isSubmitting, let onSubmitIssue else { return }
+        guard !isSubmitting, let onSubmitReport else { return }
 
-        let draft = issueDraft()
+        let draft = reportDraft()
         beginSubmitting()
 
         Task { @MainActor [weak self] in
-            let outcome = await onSubmitIssue(draft)
+            let outcome = await onSubmitReport(draft, self?.screenshot)
             self?.finishSubmitting(outcome)
         }
     }
 
-    /// What gets filed: the description leads, the capture follows, the environment closes.
+    /// What reaches the private inbox: the description leads, bounded structural evidence and
+    /// the environment follow. The temporary screenshot path is deliberately removed; the small
+    /// reviewed JPEG preview is a separate field and the full PNG remains local.
     ///
     /// The captured environment is the one the sheet was given, which already opens with the
-    /// three facts `GitHubIssueEnvironment` states and adds what the capture itself needed. A
+    /// three facts the shared environment summary states and adds what the capture itself needed. A
     /// sheet built without one still files the plain line rather than an empty rule.
-    func issueDraft() -> GitHubIssueDraft {
-        GitHubIssueDraft(
-            title: GitHubIssueComposer.title(
+    func reportDraft() -> DeveloperIssueReportDraft {
+        DeveloperIssueReportDraft(
+            kind: .problem,
+            title: DeveloperIssueReportComposer.title(
                 fromNote: noteField.stringValue,
                 fallback: L10n.format("%@ — %@", heading, subheading)
             ),
-            body: GitHubIssueComposer.body(
+            details: InspectorReportComposer.compose(
                 note: noteField.stringValue,
-                report: markdown,
-                environment: environment.isEmpty
-                    ? GitHubIssueEnvironment.markdown()
-                    : environment
-            ),
-            labels: [GitHubIssueKind.problem.label]
+                markdown: publicDetails
+            )
         )
+    }
+
+    private var publicDetails: String {
+        let safeCapture = markdown.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.contains("Window screenshot,") }
+            .joined(separator: "\n")
+        let capturedEnvironment = environment.isEmpty
+            ? DeveloperIssueReportComposer.environment()
+            : environment
+        return safeCapture + "\n\n" + capturedEnvironment
     }
 
     /// The capture and what it was captured under, in the order they are read. One blank line
@@ -408,32 +407,19 @@ final class InspectorReportViewController: NSViewController {
         statusView.show(InspectorStrings.submittingStatus, tone: .working)
     }
 
-    private func finishSubmitting(_ outcome: GitHubIssueSubmission) {
+    private func finishSubmitting(_ outcome: DeveloperIssueReportSubmission) {
         isSubmitting = false
         submitButton.isEnabled = true
         submitButton.title = InspectorStrings.submitTitle
 
         switch outcome {
-        case .created(let url, let number, _):
-            handOffScreenshot()
-            statusView.show(InspectorStrings.created(issue: number), tone: .done)
-            openURL(url)
-
-        case .webForm(let url, let message):
-            handOffScreenshot()
-            statusView.show(message + " " + InspectorStrings.pasteHint, tone: .working)
-            openURL(url)
-
+        case .delivered(let reference):
+            statusView.show(InspectorStrings.received(reference: reference), tone: .done)
+        case .queued:
+            statusView.show(InspectorStrings.queued, tone: .working)
         case .failed(let message):
             statusView.show(message, tone: .failed)
         }
-    }
-
-    /// The capture leaves with the user: on the clipboard, one ⌘V from being in the issue that
-    /// just opened. Done for the web form too — that page has the same comment box.
-    private func handOffScreenshot() {
-        guard let screenshot else { return }
-        copyImageToPasteboard(screenshot)
     }
 
     /// What the sheet is showing, for the tests that drive a submission without a network.
@@ -461,7 +447,7 @@ enum InspectorReportLayout {
     static let previewHeight: CGFloat = 280
     static let textHeight: CGFloat = 150
     /// Several lines, opened rather than grown into: the box's size is what says how much is
-    /// expected of it, and a ticket is a paragraph.
+    /// expected of it, and a report is a paragraph.
     static let noteHeight: CGFloat = 120
     static let reportFontSize: CGFloat = 11
     static let copiedResetDelay: TimeInterval = 1.5
@@ -484,32 +470,22 @@ enum InspectorStrings {
         L10n.string("Describe what's wrong, or what should change")
     }
     static var noteHint: String {
-        L10n.string("⌘Return submits the issue · Return adds a line")
+        L10n.string("⌘Return sends the report · Return adds a line")
     }
     static var descriptionCaption: String { L10n.string("Description") }
     static var detailsCaption: String { L10n.string("Captured details") }
     static var copyTitle: String { L10n.string("Copy Report") }
     static var copiedTitle: String { L10n.string("Copied") }
     static var closeTitle: String { L10n.string("Close") }
-    static var submitTitle: String { L10n.string("Submit Issue") }
-    static var submittingTitle: String { L10n.string("Submitting…") }
-    static var submittingStatus: String { L10n.string("Filing the issue on GitHub…") }
+    static var submitTitle: String { L10n.string("Send to Developer") }
+    static var submittingTitle: String { L10n.string("Sending…") }
+    static var submittingStatus: String { L10n.string("Sending to Threading’s private inbox…") }
 
-    /// GitHub answers with the number; a reading that could not find one still means the issue
-    /// exists, so the receipt says so without inventing a number for it.
-    static func created(issue number: Int) -> String {
-        guard number > 0 else {
-            return L10n.string(
-                "Filed on GitHub. The screenshot is on the clipboard — ⌘V adds it in the browser."
-            )
-        }
-        return L10n.format(
-            "Filed as issue #%lld. The screenshot is on the clipboard — ⌘V adds it in the browser.",
-            number
-        )
+    static func received(reference: String) -> String {
+        L10n.format("Report received. Reference: %@", reference)
     }
-    static var pasteHint: String {
-        L10n.string("The screenshot is on the clipboard — ⌘V adds it.")
+    static var queued: String {
+        L10n.string("Report saved securely and queued for retry when Threading is active.")
     }
 
     /// The overlay's control line, one token each. Drawn whether anything is held or not, in

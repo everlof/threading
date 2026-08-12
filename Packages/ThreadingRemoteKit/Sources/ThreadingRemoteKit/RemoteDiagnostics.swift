@@ -40,6 +40,12 @@ public enum RemoteDiagnosticEvent: String, Codable, Sendable {
     case pushProviderRefused
     case issueReportOpened
     case issueReportExported
+    case issueReportSubmissionStarted
+    case issueReportSubmissionSucceeded
+    case issueReportSubmissionDeferred
+    case issueReportSubmissionFailed
+    case uncleanExitDetected
+    case recoveryModeEntered
     case diagnosticSharingStarted
     case diagnosticSharingStopped
     case diagnosticUploadReceived
@@ -85,7 +91,7 @@ public enum RemoteDiagnosticField: String, CaseIterable, Sendable {
 ///
 /// This is a second allowlist rather than a free-form dictionary so the opt-in cannot quietly
 /// grow into device names, stable identifiers, request URLs, or conversation state.
-public enum RemoteDiagnosticExtraField: String, Sendable {
+public enum RemoteDiagnosticExtraField: String, CaseIterable, Sendable {
     case deviceModel
     case interfaceIdiom
     case locale
@@ -531,7 +537,42 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         additionalDetails: [RemoteDiagnosticExtraField: String] = [:],
         to outputDirectory: URL = FileManager.default.temporaryDirectory
     ) throws -> URL {
-        let report = RemoteDiagnosticReport(
+        let report = supportReport(
+            appVersion: appVersion,
+            appBuild: appBuild,
+            operatingSystem: operatingSystem,
+            protocolVersion: protocolVersion,
+            minimumProtocolVersion: minimumProtocolVersion,
+            additionalDetails: additionalDetails
+        )
+        let data = try JSONEncoder.pretty.encode(report)
+        guard data.count <= Self.maximumSupportReportBytes else {
+            throw RemoteDiagnosticJournalError.reportTooLarge
+        }
+        try FileManager.default.createDirectory(
+            at: outputDirectory,
+            withIntermediateDirectories: true
+        )
+        let url = outputDirectory.appendingPathComponent(
+            "threading-support-\(source.rawValue)-\(UUID().uuidString.lowercased()).json"
+        )
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
+    /// Builds the same share-safe report in memory for a private intake submission.
+    ///
+    /// Keeping this beside `writeSupportReport` prevents the upload path from reconstructing the
+    /// contract or writing a temporary full-size support file merely to read it back.
+    public func supportReport(
+        appVersion: String,
+        appBuild: String,
+        operatingSystem: String,
+        protocolVersion: Int,
+        minimumProtocolVersion: Int,
+        additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
+    ) -> RemoteDiagnosticReport {
+        RemoteDiagnosticReport(
             schemaVersion: RemoteDiagnosticReport.currentSchemaVersion,
             generatedAt: ISO8601DateFormatter().string(from: Date()),
             source: source,
@@ -547,19 +588,6 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
                 }),
             records: records()
         )
-        let data = try JSONEncoder.pretty.encode(report)
-        guard data.count <= Self.maximumSupportReportBytes else {
-            throw RemoteDiagnosticJournalError.reportTooLarge
-        }
-        try FileManager.default.createDirectory(
-            at: outputDirectory,
-            withIntermediateDirectories: true
-        )
-        let url = outputDirectory.appendingPathComponent(
-            "threading-support-\(source.rawValue)-\(UUID().uuidString.lowercased()).json"
-        )
-        try data.write(to: url, options: .atomic)
-        return url
     }
 
     public static func readSupportReport(at url: URL) throws -> RemoteDiagnosticReport {

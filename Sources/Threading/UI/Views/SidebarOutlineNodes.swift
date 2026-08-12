@@ -44,6 +44,12 @@ protocol SidebarOutlineNode: NSObject {
     /// What the outline shows under this node, in display order.
     var sidebarChildren: [NSObject] { get }
 
+    /// Objective-C storage used by `NSOutlineView`'s one-callback-per-logical-row expansion.
+    /// Swift array bridging in every `child:ofItem:` callback was measurable at 5,000 expanded
+    /// rows; nodes invalidate this retained projection only when their child collection changes.
+    var sidebarOutlineChildCount: Int { get }
+    func sidebarOutlineChild(at index: Int) -> NSObject
+
     /// Takes everything the rebuild produced — its children, and any content the row draws from
     /// the node rather than from the store — mapping every node it references through
     /// `substituting`, so the tree ends up made of the objects the outline already knows.
@@ -69,7 +75,10 @@ final class ProjectNode: NSObject {
 
     /// What the outline actually shows under the project: a `BranchGroupNode` where a
     /// branch gathered several sessions, a bare `SessionNode` everywhere else.
-    var childNodes: [NSObject] = []
+    var childNodes: [NSObject] = [] {
+        didSet { outlineChildren = nil }
+    }
+    private var outlineChildren: NSArray?
 
     init(projectID: ProjectID) {
         self.projectID = projectID
@@ -79,6 +88,17 @@ final class ProjectNode: NSObject {
 extension ProjectNode: SidebarOutlineNode {
     var sidebarKey: SidebarNodeKey { .project(projectID) }
     var sidebarChildren: [NSObject] { childNodes }
+    var sidebarOutlineChildCount: Int { materializedOutlineChildren.count }
+    func sidebarOutlineChild(at index: Int) -> NSObject {
+        materializedOutlineChildren.object(at: index) as! NSObject
+    }
+
+    private var materializedOutlineChildren: NSArray {
+        if let outlineChildren { return outlineChildren }
+        let projected = NSArray(array: childNodes)
+        outlineChildren = projected
+        return projected
+    }
 
     func adoptContent(
         of rebuilt: any SidebarOutlineNode,
@@ -98,7 +118,10 @@ final class SessionNode: NSObject {
     /// Side chats forked from this session. Empty for almost every row, and a row with none
     /// is not expandable — the same "earns its level" rule the repository and branch groups
     /// follow, applied one level further down.
-    var childNodes: [SessionNode] = []
+    var childNodes: [SessionNode] = [] {
+        didSet { outlineChildren = nil }
+    }
+    private var outlineChildren: NSArray?
 
     init(sessionID: SessionID) {
         self.sessionID = sessionID
@@ -108,6 +131,17 @@ final class SessionNode: NSObject {
 extension SessionNode: SidebarOutlineNode {
     var sidebarKey: SidebarNodeKey { .session(sessionID) }
     var sidebarChildren: [NSObject] { childNodes }
+    var sidebarOutlineChildCount: Int { materializedOutlineChildren.count }
+    func sidebarOutlineChild(at index: Int) -> NSObject {
+        materializedOutlineChildren.object(at: index) as! NSObject
+    }
+
+    private var materializedOutlineChildren: NSArray {
+        if let outlineChildren { return outlineChildren }
+        let projected = NSArray(array: childNodes)
+        outlineChildren = projected
+        return projected
+    }
 
     func adoptContent(
         of rebuilt: any SidebarOutlineNode,
@@ -140,6 +174,10 @@ final class TerminalNode: NSObject {
 extension TerminalNode: SidebarOutlineNode {
     var sidebarKey: SidebarNodeKey { .terminal(terminalID) }
     var sidebarChildren: [NSObject] { [] }
+    var sidebarOutlineChildCount: Int { 0 }
+    func sidebarOutlineChild(at index: Int) -> NSObject {
+        preconditionFailure("A terminal node has no outline children")
+    }
 
     func adoptContent(
         of rebuilt: any SidebarOutlineNode,
@@ -159,7 +197,10 @@ final class RepoGroupNode: NSObject {
     /// heading the same heading across rebuilds. The `name` below is only what it is *called*.
     let identity: String
     private(set) var name: String
-    var projectNodes: [ProjectNode] = []
+    var projectNodes: [ProjectNode] = [] {
+        didSet { outlineChildren = nil }
+    }
+    private var outlineChildren: NSArray?
 
     init(identity: String, name: String) {
         self.identity = identity
@@ -170,6 +211,17 @@ final class RepoGroupNode: NSObject {
 extension RepoGroupNode: SidebarOutlineNode {
     var sidebarKey: SidebarNodeKey { .repository(identity) }
     var sidebarChildren: [NSObject] { projectNodes }
+    var sidebarOutlineChildCount: Int { materializedOutlineChildren.count }
+    func sidebarOutlineChild(at index: Int) -> NSObject {
+        materializedOutlineChildren.object(at: index) as! NSObject
+    }
+
+    private var materializedOutlineChildren: NSArray {
+        if let outlineChildren { return outlineChildren }
+        let projected = NSArray(array: projectNodes)
+        outlineChildren = projected
+        return projected
+    }
 
     func adoptContent(
         of rebuilt: any SidebarOutlineNode,
@@ -189,26 +241,16 @@ extension RepoGroupNode: SidebarOutlineNode {
 final class BranchGroupNode: NSObject {
     let branch: String
     let projectID: ProjectID
-    var sessionNodes: [SessionNode] = []
-    var terminalNodes: [TerminalNode] = []
+    var sessionNodes: [SessionNode] = [] {
+        didSet { outlineChildren = nil }
+    }
+    var terminalNodes: [TerminalNode] = [] {
+        didSet { outlineChildren = nil }
+    }
+    private var outlineChildren: NSArray?
 
     var childNodes: [NSObject] {
         sessionNodes.map { $0 as NSObject } + terminalNodes.map { $0 as NSObject }
-    }
-
-    /// The outline asks for a count once, then for every child by index. Keep that indexed path
-    /// allocation-free: materializing `childNodes` for each request turns one large branch into
-    /// a quadratic launch walk even though the outline ultimately retains only logical indexes.
-    var outlineChildCount: Int {
-        sessionNodes.count + terminalNodes.count
-    }
-
-    func outlineChild(at index: Int) -> NSObject {
-        precondition(index >= 0 && index < outlineChildCount)
-        if index < sessionNodes.count {
-            return sessionNodes[index]
-        }
-        return terminalNodes[index - sessionNodes.count]
     }
 
     init(branch: String, projectID: ProjectID) {
@@ -220,6 +262,19 @@ final class BranchGroupNode: NSObject {
 extension BranchGroupNode: SidebarOutlineNode {
     var sidebarKey: SidebarNodeKey { .branch(projectID, branch) }
     var sidebarChildren: [NSObject] { childNodes }
+    var sidebarOutlineChildCount: Int { materializedOutlineChildren.count }
+    func sidebarOutlineChild(at index: Int) -> NSObject {
+        materializedOutlineChildren.object(at: index) as! NSObject
+    }
+
+    private var materializedOutlineChildren: NSArray {
+        if let outlineChildren { return outlineChildren }
+        let projected = NSArray(
+            array: sessionNodes.map { $0 as NSObject } + terminalNodes.map { $0 as NSObject }
+        )
+        outlineChildren = projected
+        return projected
+    }
 
     func adoptContent(
         of rebuilt: any SidebarOutlineNode,

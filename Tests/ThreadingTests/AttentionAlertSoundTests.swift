@@ -2,15 +2,14 @@ import UserNotifications
 import XCTest
 @testable import Threading
 
-/// Which sound a notification carries: the folder search, the stored choice, and what adding
-/// a file to the Sounds folder does.
+/// Which sounds a notification can carry: the folder search, the listing the pickers are built
+/// from, and what adding a file to the Sounds folder does.
 ///
 /// Nothing here delivers a notification. `UNNotificationSound(named:)` takes a file *name* and
 /// a system process resolves it later, so everything worth asserting is on this side of that
-/// hand-off: whether the name will resolve, which folder answered, and what a name that
-/// resolves nowhere falls back to. Measured on macOS 26.5 with a probe app: an unresolvable
-/// name posts the banner in silence, with no fallback of its own, which is the whole reason
-/// `resolvedSound` checks first.
+/// hand-off: whether the name will resolve, and which folder answered. What the *choice* does
+/// with that answer — including the fallback for a name that resolves nowhere, measured on
+/// macOS 26.5 with a probe app — is `SoundChoiceTests`.
 @MainActor
 final class AttentionAlertSoundTests: XCTestCase {
 
@@ -29,51 +28,7 @@ final class AttentionAlertSoundTests: XCTestCase {
         try super.tearDownWithError()
     }
 
-    // MARK: - Stored Choice
-
-    /// The default is the *absence* of a choice, so an install that has never chosen and one
-    /// that chose the system sound read the same — and neither writes a key.
-    func testAnAbsentPreferenceIsTheSystemDefault() {
-        XCTAssertEqual(AttentionAlertSound(storedValue: nil), .systemDefault)
-        XCTAssertEqual(AttentionAlertSound(storedValue: ""), .systemDefault)
-        XCTAssertNil(AttentionAlertSound.systemDefault.storedValue)
-    }
-
-    func testANameRoundTripsThroughTheStoredValue() {
-        let choice = AttentionAlertSound(storedValue: "Submarine.aiff")
-        XCTAssertEqual(choice, .named("Submarine.aiff"))
-        XCTAssertEqual(choice.storedValue, "Submarine.aiff")
-    }
-
-    func testTheChoiceDefaultsOnAndPersists() throws {
-        let suite = "AttentionAlertSoundChoice.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let settings = AppSettings(defaults: defaults)
-        XCTAssertEqual(settings.attentionAlertSound, .systemDefault)
-
-        settings.attentionAlertSound = .named("Glass.aiff")
-        XCTAssertEqual(AppSettings(defaults: defaults).attentionAlertSound, .named("Glass.aiff"))
-
-        // Back to the default removes the key rather than storing an empty name, so the
-        // preference stays readable as "never chose".
-        settings.attentionAlertSound = .systemDefault
-        XCTAssertNil(defaults.string(forKey: "attentionAlertSound"))
-    }
-
     // MARK: - Resolution
-
-    func testANameThatResolvesNowhereFallsBackToTheSystemSound() {
-        let sound = AttentionAlertSound.named("NoSuchSound.aiff").resolvedSound(in: [root])
-        XCTAssertEqual(sound, .default)
-    }
-
-    func testAResolvableNameIsHandedOverAsItsOwnSound() throws {
-        try write("Chime.aiff", to: root)
-        let sound = AttentionAlertSound.named("Chime.aiff").resolvedSound(in: [root])
-        XCTAssertNotEqual(sound, .default)
-    }
 
     /// The sound the picker previews has to be the file the notification will play, which is
     /// only true if both search the folders in the same order.

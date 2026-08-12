@@ -16,6 +16,7 @@ import AppKit
 enum AppThemeStyles {
 
     static let all: [AppTheme] = [
+        threading,
         editorial,
         cyberpunk,
         swissMinimalist,
@@ -81,6 +82,103 @@ enum AppThemeStyles {
         shadow: .none,
         density: .compact,
         glyphStyle: .classic
+    )
+
+    /// Threading's own navy and orange frame. Marketing captures use this theme unless they
+    /// are demonstrating the theme picker itself.
+    static let threading = AppTheme(
+        id: AppThemeID("threading"),
+        name: "Threading",
+        mode: .dark,
+        summary: "A navy frame, warm text, and Threading orange.",
+        variants: [.dark: AppTheme.Variant(
+            roles: [
+                .ground: hex("#040A12"),
+                .surface: hex("#071626"),
+                .panel: hex("#0A1C2F"),
+                .elevated: hex("#102A43"),
+                .border: hex("#2B4B65"),
+                .divider: hex("#183A52"),
+                .label: hex("#F7EFE6"),
+                .accent: hex("#FF9A3D"),
+                .accentMuted: hex("#FF9A3D").withAlphaComponent(0.13),
+                .controlResting: hex("#0E253A"),
+                .controlHover: hex("#173B55"),
+                // Selection is a deeper navy rather than diluted orange. Orange remains the
+                // action and focus ink, while selected rows stay crisp instead of turning
+                // muddy brown over the app's blue surfaces.
+                .selection: hex("#17405C"),
+                .statusPositive: hex("#74C49A"),
+                .statusWarning: hex("#E6A35D"),
+                .statusNegative: hex("#E06E65"),
+                .syntaxKeyword: hex("#FF9A3D"),
+                .syntaxType: hex("#7DC9D2"),
+                .syntaxString: hex("#B8C58A"),
+                .syntaxNumber: hex("#E6B98C")
+            ],
+            terminalPalette: TerminalTheme(
+                id: TerminalThemeID("app-threading-terminal"),
+                name: "Threading",
+                foreground: hex("#F7EFE6"),
+                background: hex("#040A12"),
+                cursor: hex("#FF9A3D"),
+                selection: hex("#173A50"),
+                black: hex("#071626"),
+                red: hex("#E06E65"),
+                green: hex("#74C49A"),
+                yellow: hex("#E6A35D"),
+                blue: hex("#6EA8D8"),
+                magenta: hex("#C486B9"),
+                cyan: hex("#7DC9D2"),
+                white: hex("#D9D1C8"),
+                brightBlack: hex("#4F697E"),
+                brightRed: hex("#F08A81"),
+                brightGreen: hex("#91D6AD"),
+                brightYellow: hex("#F2BC78"),
+                brightBlue: hex("#8DBEE3"),
+                brightMagenta: hex("#D9A0CC"),
+                brightCyan: hex("#9CDAE0"),
+                brightWhite: hex("#F7EFE6")
+            ),
+            material: AppTheme.Material(
+                panelRadius: 10,
+                controlRadius: 7,
+                borderWidth: 1,
+                buttonStyle: AppTheme.Material.ButtonStyle(fontWeight: .semibold),
+                headingStyle: AppTheme.Material.HeadingStyle(fontWeight: .semibold)
+            ),
+            sidebar: SidebarStyle(
+                background: .init(gradient: .init(stops: [
+                    .init(color: hex("#0B2237"), position: 0),
+                    .init(color: hex("#071626"), position: 1)
+                ], angleDegrees: 180)),
+                navigatorWell: .init(fill: hex("#061321"), bevel: .none)
+            ),
+            chrome: WindowChromeStyle(
+                titleBar: .init(
+                    activeGradient: .init(stops: [
+                        .init(color: hex("#0D253B"), position: 0),
+                        .init(color: hex("#091B2E"), position: 1)
+                    ], angleDegrees: 180),
+                    inactiveGradient: .init(stops: [
+                        .init(color: hex("#081524"), position: 0),
+                        .init(color: hex("#06101C"), position: 1)
+                    ], angleDegrees: 180),
+                    ink: hex("#F7EFE6"),
+                    inactiveInk: hex("#8693A0"),
+                    titleAlignment: .leading,
+                    titleFontStyle: .upright,
+                    titleFontSize: 12,
+                    height: 32,
+                    buttonGlyphStyle: .plain,
+                    buttonPlacement: .trailing,
+                    showsAppIcon: false,
+                    activeTexture: .init(kind: .rule, color: hex("#FF9A3D")),
+                    inactiveTexture: .init(kind: .rule, color: hex("#2B4B65"))
+                ),
+                frame: .init(width: 1, cornerRadius: 12)
+            )
+        )]
     )
 
     /// High-contrast terminal chrome on the live reference's near-black violet stack.

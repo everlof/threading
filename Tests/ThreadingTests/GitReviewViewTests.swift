@@ -220,6 +220,149 @@ final class GitReviewViewTests: XCTestCase {
         )
     }
 
+    /// The header's Copy Path / external-open pair answers the pointer on the whole line, and
+    /// is hidden rather than merely transparent at rest — `hitTest` reads no alpha, so an
+    /// invisible button would swallow the header's own toggle and copy paths nobody asked for.
+    func testHeaderHoverRevealsTheFileActionsAndAStaleHoverConcealsThem() throws {
+        let files = GitDiffParser.files(fromUnifiedDiff: fixture)
+        let row = GitReviewFileRow(
+            file: files[0],
+            expanded: true,
+            fileURL: URL(fileURLWithPath: "/tmp/Sources/Foo.swift")
+        )
+
+        // Built, never shown — see the fixture-window rule in CLAUDE.md.
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 600),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        let host = try XCTUnwrap(window.contentView)
+        host.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            row.topAnchor.constraint(equalTo: host.topAnchor),
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        let buttons = row.subviews.compactMap { $0 as? ThemedIconButton }
+        XCTAssertEqual(buttons.count, 2, "copy path and external open ride the header")
+        XCTAssertTrue(buttons.allSatisfy(\.isHidden), "at rest the actions take no clicks")
+
+        let headerPoint = NSPoint(x: row.bounds.midX, y: row.bounds.maxY - 4)
+        let enter = try XCTUnwrap(NSEvent.enterExitEvent(
+            with: .mouseEntered,
+            location: row.convert(headerPoint, to: nil),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            trackingNumber: 0,
+            userData: nil
+        ))
+        row.mouseEntered(with: enter)
+
+        let copy = try XCTUnwrap(buttons.first {
+            $0.accessibilityIdentifier() == "git-review.file.copy-path"
+        })
+        XCTAssertFalse(copy.isHidden, "hovering the header line reveals the actions")
+
+        // A fixture window is never key, so the pointer cannot be on this header: the
+        // tracking rebuild must sweep a stale reveal away without waiting for an exit event
+        // nothing will deliver — the row scrolled or reloaded out from under the pointer.
+        row.updateTrackingAreas()
+        XCTAssertTrue(buttons.allSatisfy(\.isHidden))
+    }
+
+    /// A click that lands on a revealed hover action belongs to that control; the row folding
+    /// at the same moment would collapse the card out from under the press.
+    func testClickOnARevealedHoverActionDoesNotToggleTheFileCard() throws {
+        let files = GitDiffParser.files(fromUnifiedDiff: fixture)
+        let row = GitReviewFileRow(
+            file: files[0],
+            expanded: false,
+            fileURL: URL(fileURLWithPath: "/tmp/Sources/Foo.swift")
+        )
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        let host = try XCTUnwrap(window.contentView)
+        host.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            row.topAnchor.constraint(equalTo: host.topAnchor),
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        let enter = try XCTUnwrap(NSEvent.enterExitEvent(
+            with: .mouseEntered,
+            location: row.convert(NSPoint(x: row.bounds.midX, y: row.bounds.midY), to: nil),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            trackingNumber: 0,
+            userData: nil
+        ))
+        row.mouseEntered(with: enter)
+        host.layoutSubtreeIfNeeded()
+
+        let copy = try XCTUnwrap(row.subviews.compactMap { $0 as? ThemedIconButton }.first {
+            $0.accessibilityIdentifier() == "git-review.file.copy-path"
+        })
+        XCTAssertFalse(copy.isHidden)
+        XCTAssertGreaterThan(copy.frame.width, 1)
+
+        let recognizer = try XCTUnwrap(row.gestureRecognizers.first)
+        let click = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: row.convert(NSPoint(x: copy.frame.midX, y: copy.frame.midY), to: nil),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ))
+        XCTAssertFalse(
+            row.gestureRecognizer(recognizer, shouldAttemptToRecognizeWith: click),
+            "the revealed action owns its click"
+        )
+    }
+
+    /// Nothing on disk, nothing offered: a row without a URL and a file this comparison
+    /// deletes both build headers with no hover actions. The gate is the model — never a
+    /// `FileManager` check, which a virtual table row must not pay mid-scroll.
+    func testFileRowsWithoutAWorkingCopyOfferNoHoverActions() {
+        let files = GitDiffParser.files(fromUnifiedDiff: fixture)
+        let bare = GitReviewFileRow(file: files[0], expanded: false)
+        XCTAssertTrue(bare.subviews.compactMap { $0 as? ThemedIconButton }.isEmpty)
+
+        let deleted = GitFileDiff(
+            path: "Sources/Gone.swift",
+            change: .deleted,
+            hunks: [],
+            added: 0,
+            removed: 12
+        )
+        let deletedRow = GitReviewFileRow(
+            file: deleted,
+            expanded: false,
+            fileURL: URL(fileURLWithPath: "/tmp/Sources/Gone.swift")
+        )
+        XCTAssertTrue(deletedRow.subviews.compactMap { $0 as? ThemedIconButton }.isEmpty)
+    }
+
     func testEditToolDiffViewKeepsTwoLabelRows() {
         let view = DiffView(lines: [
             DiffLine(kind: .removed, text: "a"),
@@ -332,6 +475,134 @@ final class GitReviewViewTests: XCTestCase {
         controller.view.layoutSubtreeIfNeeded()
         XCTAssertEqual(controller.fileTableView.numberOfRows, files.count)
         XCTAssertLessThan(controller.instantiatedFileRowCount, files.count)
+    }
+
+    func testProgressiveFileIndexReconcilesIntoFullRowsInPlace() {
+        let files = Self.stressFiles(count: 200)
+        let index = files.map {
+            GitFileDiff(
+                path: $0.path,
+                change: $0.change,
+                hunks: [],
+                added: 0,
+                removed: 0
+            )
+        }
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .lastTurn
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+
+        controller.show(.fileIndex(index))
+        controller.view.layoutSubtreeIfNeeded()
+        let table = controller.fileTableView
+        XCTAssertTrue(controller.scrollView.documentView === table)
+        XCTAssertEqual(table.numberOfRows, files.count)
+        XCTAssertEqual(controller.pendingDiffIndexPaths.count, files.count)
+        XCTAssertTrue(controller.counterLabel.stringValue.contains(L10n.string("Loading…")))
+
+        controller.show(.files(files))
+        controller.view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(controller.scrollView.documentView === table)
+        XCTAssertTrue(controller.pendingDiffIndexPaths.isEmpty)
+        XCTAssertEqual(controller.renderedFiles, files)
+        XCTAssertLessThan(controller.instantiatedFileRowCount, files.count)
+    }
+
+    /// History pages are only a transport bound, not a UI bound: every press of Show more keeps
+    /// another page. The production surface therefore has to retain models while mounting only
+    /// the graph rows that intersect the viewport.
+    func testLargeHistoryUsesVirtualCommitRows() {
+        let commits = (0..<1_000).map { index in
+            let hash = String(format: "%040x", index + 1)
+            return GitCommitSummary(
+                hash: hash,
+                shortHash: String(hash.prefix(7)),
+                subject: "Commit \(index)",
+                author: "Performance Fixture",
+                date: Date(timeIntervalSince1970: TimeInterval(index)),
+                added: index % 20,
+                removed: index % 7,
+                parents: index + 1 < 1_000
+                    ? [String(format: "%040x", index + 2)]
+                    : [],
+                refs: index == 0 ? ["HEAD", "main"] : []
+            )
+        }
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .commit
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+        controller.commits = commits
+        controller.show(.commits(canLoadMore: true))
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(controller.scrollView.documentView === controller.historyTableView)
+        XCTAssertEqual(controller.historyTableView.numberOfRows, commits.count + 1)
+        XCTAssertLessThan(
+            controller.instantiatedCommitRowCount,
+            commits.count / 10,
+            "opening history eagerly constructed offscreen commit rows"
+        )
+
+        controller.scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: controller.maximumScrollOffsetY()
+        ))
+        controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertLessThan(
+            controller.instantiatedCommitRowCount,
+            commits.count / 5,
+            "seeking through history constructed rows between the two viewports"
+        )
+        XCTAssertGreaterThan(controller.historyTableView.visibleRect.minY, 0)
+    }
+
+    func testHistoryStatsEnrichRowsWithoutRebuildingGraph() {
+        func commit(added: Int, removed: Int, hasStats: Bool) -> GitCommitSummary {
+            GitCommitSummary(
+                hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                shortHash: "aaaaaaa",
+                subject: "Progressively measured",
+                author: "Performance Fixture",
+                date: Date(timeIntervalSince1970: 1_750_000_000),
+                added: added,
+                removed: removed,
+                hasStats: hasStats,
+                parents: [],
+                refs: ["HEAD", "main"]
+            )
+        }
+
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .commit
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+        controller.commits = [commit(added: 0, removed: 0, hasStats: false)]
+        controller.show(.commits(canLoadMore: false))
+        controller.view.layoutSubtreeIfNeeded()
+        let graph = controller.renderedCommitGraph
+
+        XCTAssertEqual(
+            controller.applyCommitStats([commit(added: 12, removed: 4, hasStats: true)]),
+            1
+        )
+        XCTAssertEqual(controller.commits.first?.added, 12)
+        XCTAssertEqual(controller.commits.first?.removed, 4)
+        XCTAssertTrue(controller.commits.first?.hasStats == true)
+        XCTAssertEqual(controller.renderedCommitGraph, graph)
+        XCTAssertTrue(controller.scrollView.documentView === controller.historyTableView)
     }
 
     /// The pane is one column: the mode chip, every file card and the overflow start and end on
@@ -617,7 +888,7 @@ final class GitReviewViewTests: XCTestCase {
         controller.view.layoutSubtreeIfNeeded()
         controller.updateScrollControls()
 
-        XCTAssertFalse(controller.jumpToEndButton.isHidden)
+        XCTAssertTrue(controller.jumpToEndButton.isFloatingPresent)
 
         controller.scrollToDiffEnd()
         XCTAssertEqual(
@@ -626,8 +897,8 @@ final class GitReviewViewTests: XCTestCase {
             accuracy: 0.5,
             "jump-to-end should reach AppKit's inset-aware terminal scroll position"
         )
-        XCTAssertTrue(
-            controller.jumpToEndButton.isHidden,
+        XCTAssertFalse(
+            controller.jumpToEndButton.isFloatingPresent,
             "document=\(controller.scrollView.documentView?.frame.height ?? -1), "
                 + "viewport=\(controller.scrollView.contentView.bounds.height), "
                 + "offset=\(controller.scrollView.contentView.bounds.origin.y)"
@@ -985,6 +1256,26 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertGreaterThan(controller.measuredFileRowHeights.count, measurementsBeforeScroll)
     }
 
+    func testPendingNumstatWeightEstablishesExpandedDocumentGeometry() {
+        let pending = GitFileDiff(
+            path: "Sources/Pending.swift",
+            change: .modified,
+            hunks: [],
+            added: 120,
+            removed: 30
+        )
+
+        XCTAssertEqual(
+            GitReviewFileRow.estimatedPendingTableHeight(for: pending, expanded: false),
+            48
+        )
+        XCTAssertGreaterThan(
+            GitReviewFileRow.estimatedPendingTableHeight(for: pending, expanded: true),
+            2_000,
+            "a pending large file must contribute its line weight before its hunks hydrate"
+        )
+    }
+
     /// A scrollbar-thumb drag may replace the viewport on every pointer event. Those transient
     /// rows preserve expanded geometry without building TextKit; release installs the complete
     /// diff at the exact same scroll origin.
@@ -1141,6 +1432,54 @@ final class GitReviewViewTests: XCTestCase {
                 of: GitReviewDiffTextView.self,
                 in: controller.scrollView.contentView
             )
+        )
+    }
+
+    /// A pending file with known numstat weight presents as an expanded ghost, and its height
+    /// stays the model's estimate: the skeleton stretches to whatever it is given, so measuring
+    /// it would collapse the honest document extent to the header's own fitting height.
+    func testAPendingRowWithKnownWeightWearsTheSkeletonAtItsEstimatedHeight() throws {
+        let pending = GitFileDiff(
+            path: "Sources/Pending.swift",
+            change: .modified,
+            hunks: [],
+            added: 120,
+            removed: 30
+        )
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .lastTurn
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+        controller.show(.fileIndex([pending]))
+        controller.view.layoutSubtreeIfNeeded()
+
+        let expected = GitReviewFileRow.estimatedPendingTableHeight(for: pending, expanded: true)
+        XCTAssertEqual(
+            controller.fileTableView.rect(ofRow: 0).height,
+            expected,
+            accuracy: 1
+        )
+        XCTAssertNotNil(
+            Self.firstDescendant(
+                of: DiffSkeletonView.self,
+                in: controller.scrollView.contentView
+            ),
+            "the numstat height the row already owns must show as a ghost, not an empty card"
+        )
+
+        // The exact-height pass a real row takes must skip the ghost. Run it synchronously by
+        // closing a live-scroll transaction over this same viewport.
+        controller.isFileLiveScrolling = true
+        controller.finishFileLiveScrolling()
+        controller.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            controller.fileTableView.rect(ofRow: 0).height,
+            expected,
+            accuracy: 1,
+            "the ghost's fitting height must not replace the numstat estimate"
         )
     }
 
@@ -1570,24 +1909,33 @@ final class GitReviewViewTests: XCTestCase {
         }
 
         var repositoryFileDurations: [UInt64] = []
-        var rawRepositoryFileDurations: [UInt64] = []
-        var exactRepositoryFileDurations: [UInt64] = []
+        var repositorySingleFileDurations: [UInt64] = []
         var summaryDurations: [UInt64] = []
         var uncommittedDurations: [UInt64] = []
         var historyDurations: [UInt64] = []
+        var historyStatsDurations: [UInt64] = []
         var repositoryFileCount = 0
-        var exactRepositoryPath: String?
         var uncommittedFileCount = 0
         var historyCount = 0
+        var historyCommits: [GitCommitSummary] = []
 
         for _ in 0..<runs {
             var started = DispatchTime.now().uptimeNanoseconds
-            let listing = try awaitGitValue {
+            let paths = try awaitGitValue {
                 GitReviewReader.repositoryFiles(in: repository, completion: $0)
             }
             repositoryFileDurations.append(DispatchTime.now().uptimeNanoseconds - started)
-            repositoryFileCount = listing.paths.count
-            exactRepositoryPath = listing.paths.first
+            repositoryFileCount = paths.count
+
+            if let path = paths.first {
+                started = DispatchTime.now().uptimeNanoseconds
+                _ = try awaitGitValue {
+                    GitReviewReader.repositoryFile(path: path, in: repository, completion: $0)
+                }
+                repositorySingleFileDurations.append(
+                    DispatchTime.now().uptimeNanoseconds - started
+                )
+            }
 
             started = DispatchTime.now().uptimeNanoseconds
             _ = try awaitGitValue {
@@ -1608,31 +1956,14 @@ final class GitReviewViewTests: XCTestCase {
             }
             historyDurations.append(DispatchTime.now().uptimeNanoseconds - started)
             historyCount = history.count
-        }
+            historyCommits = history
 
-        for _ in 0..<runs {
-            var started = DispatchTime.now().uptimeNanoseconds
-            _ = try GitProcess.run(
-                GitReviewCommands.common + GitReviewCommands.repositoryFiles(),
-                in: repository,
-                maximumOutput: GitReviewDefaults.maximumDiffBytes
-            )
-            rawRepositoryFileDurations.append(DispatchTime.now().uptimeNanoseconds - started)
-
-            if let exactRepositoryPath {
-                started = DispatchTime.now().uptimeNanoseconds
-                let file = try awaitGitValue {
-                    GitReviewReader.repositoryFile(
-                        path: exactRepositoryPath,
-                        in: repository,
-                        completion: $0
-                    )
-                }
-                exactRepositoryFileDurations.append(
-                    DispatchTime.now().uptimeNanoseconds - started
-                )
-                XCTAssertEqual(file.path, exactRepositoryPath)
+            started = DispatchTime.now().uptimeNanoseconds
+            let historyStats = try awaitGitValue {
+                GitReviewReader.logStats(skip: 0, in: repository, completion: $0)
             }
+            historyStatsDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+            historyCommits = historyStats
         }
 
         Self.printRealRepositoryMetric(
@@ -1640,16 +1971,13 @@ final class GitReviewViewTests: XCTestCase {
             durations: repositoryFileDurations,
             fields: "paths=\(repositoryFileCount)"
         )
-        Self.printRealRepositoryMetric(
-            "git-repository-files-raw",
-            durations: rawRepositoryFileDurations,
-            fields: "paths=\(repositoryFileCount)"
-        )
-        Self.printRealRepositoryMetric(
-            "git-repository-file-exact",
-            durations: exactRepositoryFileDurations,
-            fields: "paths=\(repositoryFileCount)"
-        )
+        if !repositorySingleFileDurations.isEmpty {
+            Self.printRealRepositoryMetric(
+                "git-repository-single-file",
+                durations: repositorySingleFileDurations,
+                fields: "paths=\(repositoryFileCount)"
+            )
+        }
         Self.printRealRepositoryMetric(
             "git-repository-summary",
             durations: summaryDurations,
@@ -1663,15 +1991,113 @@ final class GitReviewViewTests: XCTestCase {
         Self.printRealRepositoryMetric(
             "git-repository-history",
             durations: historyDurations,
+            fields: "paths=\(repositoryFileCount) commits=\(historyCount) statistics=deferred"
+        )
+        Self.printRealRepositoryMetric(
+            "git-repository-history-stats",
+            durations: historyStatsDurations,
             fields: "paths=\(repositoryFileCount) commits=\(historyCount)"
         )
 
+        let historyController = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: repository.path,
+            mode: .commit
+        )
+        _ = historyController.view
+        historyController.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+        historyController.commits = historyCommits
+
+        let historyRenderStarted = DispatchTime.now().uptimeNanoseconds
+        historyController.show(.commits(canLoadMore: historyCount == GitReviewDefaults.logPageSize))
+        let historyRenderEnded = DispatchTime.now().uptimeNanoseconds
+        historyController.view.layoutSubtreeIfNeeded()
+        let historyLayoutEnded = DispatchTime.now().uptimeNanoseconds
+
+        let historyViewport = historyController.scrollView.bounds
+        if let bitmap = historyController.scrollView.bitmapImageRepForCachingDisplay(in: historyViewport) {
+            historyController.scrollView.cacheDisplay(in: historyViewport, to: bitmap)
+        }
+        let historyDrawEnded = DispatchTime.now().uptimeNanoseconds
+
+        let historySeekStarted = DispatchTime.now().uptimeNanoseconds
+        let historyDocumentHeight = historyController.historyTableView.frame.height
+        historyController.scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: max(historyDocumentHeight - historyViewport.height, 0)
+        ))
+        historyController.scrollView.reflectScrolledClipView(historyController.scrollView.contentView)
+        historyController.view.layoutSubtreeIfNeeded()
+        if let bitmap = historyController.scrollView.bitmapImageRepForCachingDisplay(in: historyViewport) {
+            historyController.scrollView.cacheDisplay(in: historyViewport, to: bitmap)
+        }
+        let historySeekEnded = DispatchTime.now().uptimeNanoseconds
+
+        print(
+            "THREADING_PERF git-repository-history-view "
+                + "commits=\(historyCount) rows=\(historyController.historyTableView.numberOfRows) "
+                + "instantiated=\(historyController.instantiatedCommitRowCount) "
+                + "render_ms=\(Self.milliseconds(historyRenderEnded - historyRenderStarted)) "
+                + "layout_ms=\(Self.milliseconds(historyLayoutEnded - historyRenderEnded)) "
+                + "draw_ms=\(Self.milliseconds(historyDrawEnded - historyLayoutEnded)) "
+                + "bottom_seek_ms=\(Self.milliseconds(historySeekEnded - historySeekStarted))"
+        )
+
+        var indexDurations: [UInt64] = []
+        var statsDurations: [UInt64] = []
+        var visibleHydrationDurations: [UInt64] = []
         var commandDurations: [UInt64] = []
         var parseDurations: [UInt64] = []
+        var rangeIndexFiles: [GitFileDiff] = []
         var rangeFiles: [GitFileDiff] = []
         var diffBytes = 0
         for _ in 0..<runs {
-            let commandStarted = DispatchTime.now().uptimeNanoseconds
+            var commandStarted = DispatchTime.now().uptimeNanoseconds
+            let indexData = try GitProcess.run(
+                GitReviewCommands.common + GitReviewCommands.diffIndex(
+                    from: base,
+                    to: target
+                ),
+                in: repository,
+                maximumOutput: GitReviewDefaults.maximumDiffBytes
+            )
+            rangeIndexFiles = GitDiffParser.files(fromRawDiff: indexData)
+            indexDurations.append(DispatchTime.now().uptimeNanoseconds - commandStarted)
+
+            commandStarted = DispatchTime.now().uptimeNanoseconds
+            _ = GitDiffParser.fileStats(fromNumstat: try GitProcess.run(
+                GitReviewCommands.common + GitReviewCommands.diffNumstat(
+                    from: base,
+                    to: target
+                ),
+                in: repository,
+                maximumOutput: GitReviewDefaults.maximumDiffBytes
+            ))
+            statsDurations.append(DispatchTime.now().uptimeNanoseconds - commandStarted)
+
+            let visiblePaths = Array(Set(rangeIndexFiles
+                .prefix(GitReviewDefaults.progressiveDiffHydrationBatch)
+                .flatMap { file -> [String] in
+                    if case .renamed(let from) = file.change { return [from, file.path] }
+                    return [file.path]
+                })).sorted()
+            if !visiblePaths.isEmpty {
+                commandStarted = DispatchTime.now().uptimeNanoseconds
+                _ = try GitProcess.run(
+                    GitReviewCommands.common + GitReviewCommands.diff(
+                        from: base,
+                        to: target,
+                        paths: visiblePaths
+                    ),
+                    in: repository,
+                    maximumOutput: GitReviewDefaults.maximumDiffBytes
+                )
+                visibleHydrationDurations.append(
+                    DispatchTime.now().uptimeNanoseconds - commandStarted
+                )
+            }
+
+            commandStarted = DispatchTime.now().uptimeNanoseconds
             let data: Data
             do {
                 data = try GitProcess.run(
@@ -1706,6 +2132,24 @@ final class GitReviewViewTests: XCTestCase {
         }
         let rangeFields = "paths=\(repositoryFileCount) files=\(rangeFiles.count) "
             + "lines=\(changedLines) bytes=\(diffBytes)"
+        Self.printRealRepositoryMetric(
+            "git-repository-range-index",
+            durations: indexDurations,
+            fields: "paths=\(repositoryFileCount) files=\(rangeIndexFiles.count)"
+        )
+        Self.printRealRepositoryMetric(
+            "git-repository-range-stats",
+            durations: statsDurations,
+            fields: "paths=\(repositoryFileCount) files=\(rangeIndexFiles.count)"
+        )
+        if !visibleHydrationDurations.isEmpty {
+            Self.printRealRepositoryMetric(
+                "git-repository-range-visible-hydration",
+                durations: visibleHydrationDurations,
+                fields: "paths=\(repositoryFileCount) batch="
+                    + "\(GitReviewDefaults.progressiveDiffHydrationBatch)"
+            )
+        }
         Self.printRealRepositoryMetric(
             "git-repository-range-command",
             durations: commandDurations,

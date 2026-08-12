@@ -1,13 +1,19 @@
 import AppKit
+import ThreadingRemoteKit
 import XCTest
 @testable import Threading
 
-/// The two sheets that file a ticket, drawn and driven.
+private actor IssueReportRequestCapture {
+    private(set) var request: URLRequest?
+    func record(_ request: URLRequest) { self.request = request }
+}
+
+/// The two sheets that send a private developer report, drawn and driven.
 ///
 /// Rendered because the complaint that produced them was about *size and clarity* — a note box
 /// one line tall under a wall of read-only markdown — and no constraint assertion catches that.
-/// Driven because both sheets have an outcome path that touches a network, a clipboard and a
-/// browser, and all three are injected precisely so a test can watch them without any of it.
+/// Driven because both sheets have an outcome path that touches the private intake, and that
+/// handoff is injected precisely so a test can watch it without using the network.
 final class IssueReportingRenderTests: XCTestCase {
 
     private enum Render {
@@ -18,6 +24,112 @@ final class IssueReportingRenderTests: XCTestCase {
             return URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("ThreadingRenders", isDirectory: true)
         }
+    }
+
+    // MARK: - Durable private delivery
+
+    func testMacOutboxPostsWithoutAnAppCredentialAndUsesTheUUIDForIdempotency() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mac-report-outbox-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if FileManager.default.fileExists(atPath: directory.path) {
+                try? FileManager.default.removeItem(at: directory)
+            }
+        }
+        let submission = makeSubmission()
+        let pendingURL = directory.appendingPathComponent("\(submission.id).json")
+        let capture = IssueReportRequestCapture()
+        let outbox = MacIssueReportOutbox(
+            directory: directory,
+            endpoint: URL(string: "https://reports.example/v1/reports")!,
+            transport: { request in
+                await capture.record(request)
+                let receipt = PublicIssueReportReceiptDTO(
+                    reportID: submission.id,
+                    reference: "RPT-TEST",
+                    wasAlreadyReceived: false
+                )
+                return (
+                    try JSONEncoder().encode(receipt),
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 201,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!
+                )
+            }
+        )
+
+        guard case .delivered(let receipt) = try await outbox.enqueueAndDeliver(submission) else {
+            return XCTFail("the private intake did not return its receipt")
+        }
+        XCTAssertEqual(receipt.reference, "RPT-TEST")
+        let request = await capture.request
+        XCTAssertEqual(request?.httpMethod, "POST")
+        XCTAssertEqual(request?.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertEqual(request?.value(forHTTPHeaderField: "Idempotency-Key"), submission.id)
+        XCTAssertNil(request?.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                PublicIssueReportSubmissionDTO.self,
+                from: XCTUnwrap(request?.httpBody)
+            ),
+            submission
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pendingURL.path))
+    }
+
+    func testMacOutboxRetainsAnOfflineReportAndFlushesTheSameUUIDLater() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mac-report-retry-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if FileManager.default.fileExists(atPath: directory.path) {
+                try? FileManager.default.removeItem(at: directory)
+            }
+        }
+        let submission = makeSubmission()
+        let pendingURL = directory.appendingPathComponent("\(submission.id).json")
+        let offline = MacIssueReportOutbox(
+            directory: directory,
+            endpoint: URL(string: "https://reports.example/v1/reports")!,
+            transport: { _ in throw URLError(.notConnectedToInternet) }
+        )
+
+        guard case .queued = try await offline.enqueueAndDeliver(submission) else {
+            return XCTFail("an offline report was not retained")
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pendingURL.path))
+
+        let capture = IssueReportRequestCapture()
+        let online = MacIssueReportOutbox(
+            directory: directory,
+            endpoint: URL(string: "https://reports.example/v1/reports")!,
+            transport: { request in
+                await capture.record(request)
+                return (
+                    try JSONEncoder().encode(PublicIssueReportReceiptDTO(
+                        reportID: submission.id,
+                        reference: "RPT-RETRY",
+                        wasAlreadyReceived: true
+                    )),
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!
+                )
+            }
+        )
+        await online.flush()
+
+        let retriedRequest = await capture.request
+        XCTAssertEqual(
+            retriedRequest?.value(forHTTPHeaderField: "Idempotency-Key"),
+            submission.id
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pendingURL.path))
     }
 
     // MARK: - The inspector's sheet
@@ -52,25 +164,31 @@ final class IssueReportingRenderTests: XCTestCase {
     }
 
     @MainActor
-    func testAFiledIssueCopiesTheScreenshotAndOpensTheIssue() {
+    func testAReportSendsTheReviewedScreenshotAndShowsItsPrivateReceipt() {
         let sheet = makeInspectorSheet()
         _ = laidOut(sheet)
 
-        let issue = URL(string: "https://github.com/everlof/threading/issues/42")!
-        var opened: [URL] = []
-        var copied: [NSImage] = []
-        sheet.openURL = { opened.append($0) }
-        sheet.copyImageToPasteboard = { copied.append($0) }
-        sheet.onSubmitIssue = { _ in .created(url: issue, number: 42, tier: .ghCLI) }
-
         let done = expectation(description: "submitted")
-        sheet.submitIssue()
-        DispatchQueue.main.async { done.fulfill() }
-        wait(for: [done], timeout: 2)
+        var capturedDraft: DeveloperIssueReportDraft?
+        var capturedScreenshot: NSImage?
+        sheet.onSubmitReport = { draft, screenshot in
+            capturedDraft = draft
+            capturedScreenshot = screenshot
+            done.fulfill()
+            return .delivered(reference: "RPT-20260812-0042")
+        }
 
-        XCTAssertEqual(opened, [issue])
-        XCTAssertEqual(copied.count, 1, "the capture never reached the clipboard")
-        XCTAssertTrue(sheet.statusMessage.contains("42"), sheet.statusMessage)
+        sheet.submitIssue()
+        wait(for: [done], timeout: 2)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+
+        XCTAssertEqual(capturedDraft?.kind, .problem)
+        XCTAssertNotNil(capturedScreenshot, "the reviewed capture never reached the intake")
+        XCTAssertFalse(
+            capturedDraft?.description.contains("/tmp/threading-inspect") == true,
+            "a temporary local path escaped into the private report"
+        )
+        XCTAssertTrue(sheet.statusMessage.contains("RPT-20260812-0042"), sheet.statusMessage)
     }
 
     @MainActor
@@ -111,23 +229,23 @@ final class IssueReportingRenderTests: XCTestCase {
     }
 
     @MainActor
-    func testARefusedIssueSaysSoAndKeepsTheSheetOpen() {
+    func testARefusedReportSaysSoAndKeepsTheSheetOpen() {
         let sheet = makeInspectorSheet()
         _ = laidOut(sheet)
 
-        var opened: [URL] = []
         var dismissed = false
-        sheet.openURL = { opened.append($0) }
         sheet.onDone = { dismissed = true }
-        sheet.onSubmitIssue = { _ in .failed(message: "GitHub refused the report (500).") }
-
         let done = expectation(description: "submitted")
-        sheet.submitIssue()
-        DispatchQueue.main.async { done.fulfill() }
-        wait(for: [done], timeout: 2)
+        sheet.onSubmitReport = { _, _ in
+            done.fulfill()
+            return .failed(message: "The private inbox refused the report (500).")
+        }
 
-        XCTAssertEqual(sheet.statusMessage, "GitHub refused the report (500).")
-        XCTAssertTrue(opened.isEmpty, "nothing was created, so nothing should open")
+        sheet.submitIssue()
+        wait(for: [done], timeout: 2)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+
+        XCTAssertEqual(sheet.statusMessage, "The private inbox refused the report (500).")
         XCTAssertFalse(dismissed, "a failed submission must not throw the report away")
     }
 
@@ -138,29 +256,30 @@ final class IssueReportingRenderTests: XCTestCase {
         (view(withIdentifier: InspectorReportIdentifiers.note, under: host) as? PromptView)?
             .stringValue = "Archive button is unclickable"
 
-        let draft = sheet.issueDraft()
+        let draft = sheet.reportDraft()
 
         XCTAssertEqual(draft.title, "Archive button is unclickable")
-        XCTAssertTrue(draft.body.hasPrefix("Archive button is unclickable"))
-        XCTAssertTrue(draft.body.contains("- Element: SidebarRowView"))
-        XCTAssertTrue(draft.body.contains("Threading"))
-        XCTAssertTrue(draft.body.contains("- App theme: System, adaptive, drawing dark"))
-        XCTAssertEqual(draft.labels, ["bug"])
+        XCTAssertTrue(draft.description.contains("Archive button is unclickable"))
+        XCTAssertTrue(draft.description.contains("- Element: SidebarRowView"))
+        XCTAssertTrue(draft.description.contains("Threading"))
+        XCTAssertTrue(draft.description.contains("- App theme: System, adaptive, drawing dark"))
+        XCTAssertFalse(draft.description.contains("/tmp/threading-inspect"))
+        XCTAssertEqual(draft.kind, .problem)
     }
 
-    /// The environment is one block in three places, and the ticket is the one that could hold
+    /// The environment is one block in three places, and the private report is the one that could hold
     /// two: the composer closes every body with an environment under a rule, so a report string
     /// that already carried its own would print the build line twice.
     @MainActor
-    func testTheEnvironmentIsStatedOnceInTheTicketAndOnceInTheDetails() {
+    func testTheEnvironmentIsStatedOnceInTheReportAndOnceInTheDetails() {
         let sheet = makeInspectorSheet()
         _ = laidOut(sheet)
 
-        let body = sheet.issueDraft().body
+        let body = sheet.reportDraft().description
         XCTAssertEqual(
             body.components(separatedBy: "Threading 1.0 (1)").count - 1,
             1,
-            "the environment landed in the ticket twice"
+            "the environment landed in the report twice"
         )
 
         XCTAssertTrue(
@@ -176,7 +295,7 @@ final class IssueReportingRenderTests: XCTestCase {
     // MARK: - Help ▸ Report a Problem
 
     @MainActor
-    func testTheKindPicksTheLabelAndTheTitleWinsOverTheFirstLine() {
+    func testTheKindAndTypedTitleReachThePrivateDraft() {
         let sheet = ReportProblemViewController()
         let host = laidOut(sheet)
 
@@ -185,32 +304,32 @@ final class IssueReportingRenderTests: XCTestCase {
         let detail = view(withIdentifier: ReportProblemIdentifiers.detail, under: host)
         (detail as? PromptView)?.stringValue = "It loses the rounding at the top right."
 
-        XCTAssertEqual(sheet.issueDraft().title, "Toolbar corner is cut off")
-        XCTAssertEqual(sheet.issueDraft().labels, ["bug"])
+        XCTAssertEqual(sheet.reportDraft().title, "Toolbar corner is cut off")
+        XCTAssertEqual(sheet.reportDraft().kind, .problem)
 
         let kind = view(withIdentifier: ReportProblemIdentifiers.kind, under: host)
         (kind as? ThemedSegmentedControl)?.onSelect?(1)
         XCTAssertEqual(
-            sheet.issueDraft().labels,
-            ["enhancement"],
-            "an improvement filed as a bug is how a label stops meaning anything"
+            sheet.reportDraft().kind,
+            .improvement,
+            "the report lost the kind the user chose"
         )
     }
 
     @MainActor
-    func testAnEmptyReportIsRefusedBeforeItReachesGitHub() {
+    func testAnEmptyReportIsRefusedBeforeItReachesTheDeveloperInbox() {
         let sheet = ReportProblemViewController()
         _ = laidOut(sheet)
 
         var submissions = 0
-        sheet.onSubmitIssue = { _ in
+        sheet.onSubmitReport = { _ in
             submissions += 1
             return .failed(message: "never")
         }
 
         sheet.submitIssue()
 
-        XCTAssertEqual(submissions, 0, "an empty ticket was sent to a person")
+        XCTAssertEqual(submissions, 0, "an empty report was sent to a person")
         XCTAssertFalse(sheet.statusMessage.isEmpty, "and nothing said why")
     }
 
@@ -223,7 +342,7 @@ final class IssueReportingRenderTests: XCTestCase {
         let shown = (note as? NSTextField)?.stringValue ?? ""
 
         XCTAssertTrue(shown.contains("Threading"), shown)
-        XCTAssertFalse(shown.isEmpty, "what travels with the ticket is not stated")
+        XCTAssertFalse(shown.isEmpty, "what travels with the report is not stated")
     }
 
     /// A theme states a typeface, and one of them is a wide monospace in which a single caption
@@ -270,8 +389,8 @@ final class IssueReportingRenderTests: XCTestCase {
             for name: NSAppearance.Name in [.aqua, .darkAqua] {
                 let mode = name == .aqua ? "light" : "dark"
                 for (label, image) in [
-                    ("inspector-report", sheetImage(appearance: name) { self.makeInspectorSheet() }),
-                    ("report-problem", sheetImage(appearance: name) { ReportProblemViewController() })
+                    ("issue-report-inspector", sheetImage(appearance: name) { self.makeInspectorSheet() }),
+                    ("issue-report-problem", sheetImage(appearance: name) { ReportProblemViewController() })
                 ] {
                     guard let image else {
                         XCTFail("no image for \(label) \(suffix) \(mode)")
@@ -289,6 +408,30 @@ final class IssueReportingRenderTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    private func makeSubmission() -> PublicIssueReportSubmissionDTO {
+        let journal = RemoteDiagnosticJournal(
+            directory: FileManager.default.temporaryDirectory.appendingPathComponent(
+                "mac-report-fixture-\(UUID().uuidString)",
+                isDirectory: true
+            ),
+            source: .macOSHost
+        )
+        let report = journal.supportReport(
+            appVersion: "1.0",
+            appBuild: "1",
+            operatingSystem: "macOS 26.5",
+            protocolVersion: RemoteProtocol.current,
+            minimumProtocolVersion: RemoteProtocol.minimumSupported
+        )
+        return PublicIssueReportSubmissionDTO(
+            id: UUID().uuidString.lowercased(),
+            createdAt: ISO8601DateFormatter().string(from: Date()),
+            trigger: "manual",
+            description: "The composer stopped responding.",
+            diagnostics: PublicIssueReportDiagnosticsDTO(bounding: report)
+        )
+    }
 
     /// Fixed text rather than a live `InspectorEnvironment.capture`: the renders are compared
     /// between runs, and a block carrying this machine's window size and theme would differ in

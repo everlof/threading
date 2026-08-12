@@ -695,12 +695,13 @@ The architecture has already extracted this logic, so it is covered without a UI
 
 ---
 
-## Open finding — 12 August 2026
+## Finding — 12 August 2026 (fixed the same day)
 
-The one item on this page that is not `[x]`. It was found while making the notification sound
-and the terminal bell configurable, and is deliberately left open rather than half-fixed.
+Found while making the notification sound and the terminal bell configurable, and deliberately
+left open rather than half-fixed. (Two later findings from the scoped-sound implementation are
+recorded in their own section below.)
 
-- [ ] **A bell from a background session makes two sounds.** Evidence: a program writes `BEL`
+- [x] **A bell from a background session makes two sounds.** Evidence: a program writes `BEL`
       in a session that is not on screen. `SessionActivityTracker.recordBell` sets `awaitsUser`
       whenever the session is not visible, which settles to `awaitingUser`, which
       `AttentionAlertPolicy` turns into a `.blocked` alert; with Threading behind another app
@@ -711,7 +712,8 @@ and the terminal bell configurable, and is deliberately left open rather than ha
       noticing.
       **Why it is still open:** the obvious fix is "stay quiet if the alert will sound", and
       that requires predicting whether the alert will actually be *heard*:
-      `notifiesOnAttention`, `notifies(on: .blocked)`, `playsAttentionAlertSound`, the session
+      `notifiesOnAttention`, `notifies(on: .blocked)`, `attentionAlertSound` (which can be
+      `silent`), the session
       and project mute scopes, whether the app is active (`willPresent` returns no options for
       ordinary alerts, so a foreground alert is silent), and macOS's own authorization status,
       which is answered asynchronously. A prediction that is right most of the time produces a
@@ -722,11 +724,70 @@ and the terminal bell configurable, and is deliberately left open rather than ha
       session, and let the bell suppress itself for a short window after that, rather than
       predicting beforehand. That is a new one-way signal between two subsystems that currently
       share nothing, so it wants designing rather than bolting on.
-      **Mitigation in the meantime:** both sounds are now configurable and either can be set to
-      Off — Settings ▸ General ▸ Terminal Bell, or the Play a sound switch above it. Files:
+      **Mitigation in the meantime** (updated with the scoped-sound work, August 2026): the
+      exact colliding pair is now one *event* — set `bell.agentAsking` to Off in any scope's
+      Customize sheet and the background-ask bell goes quiet while every other bell keeps
+      ringing, which is a proportionate answer where the old one was global. The seam for the
+      real fix now exists: `TerminalSession`'s single ring site knows the session and the cause
+      and fires after the edge is recorded, so "an alert just sounded for this session, hold
+      the bell" is one guard once `AttentionAlertCenter` reports delivery. Files:
       `TerminalBell.swift`, `SessionActivity.swift` (`recordBell`), `AttentionAlerts.swift`.
       Described for users in `USER_GUIDE.md` and for maintainers in
       [`session-activity.md`](docs/architecture/session-activity.md).
+      **Fixed, 12 August 2026 — and the prescription above is wrong.** "Have the alert center
+      report a sounding delivery and let the bell hold itself" cannot be built here: the
+      decision it wants to move *ahead* of the ring runs a main-actor turn *after* it, by
+      design. `AttentionAlertCenter` observes the activity edge through a `Task`, and it has to —
+      `post` reads the project icon off disk and writes an attachment temp file, while the whole
+      chain from `recordBell` to that observer is synchronous inside `terminalView.onBell`, so
+      de-deferring it would put filesystem work on the PTY's byte path, against the Scaling
+      Gate. A guard at the ring would never see its own edge's registration and would only
+      swallow the *next* bell — the missing-bell failure this item was held open to avoid.
+      Measured with a standalone probe reproducing the observer and `Task` shapes: the ring runs
+      third, the alert decision fourth. So the report flows the other way. A bell that is
+      actually **heard** leaves a note (`AudibleBellRegister`: one `SessionID → Date` map, O(1)
+      read and write, pruned on every touch, no timer and no I/O), written inside `TerminalBell`'s
+      play step — so a bell the gate held, one the limiter rejected, one resolved to `silent`,
+      and one from a standalone terminal all leave nothing.
+      `AttentionAlertCenter.stateAlertSound` reads it and drops **only** `content.sound` within
+      `TerminalBellDefaults.audibleBellWindow` (0.5 s, 2.5× the bell's own limiter); the banner,
+      its icon, its thread, the sidebar's hand and the Notification Center entry are untouched.
+      `postRequestedUpdate` does not ask — an update the user told an agent to send is not a bell
+      echo. The error direction stays one-way and now points the safe way: every uncertainty
+      leaves the *alert* sounding, and nothing in the seam can quiet a bell, so a bell going
+      missing for reasons the user cannot see is structurally impossible. Tests:
+      `BellAlertSuppressionTests` (register semantics, the guard, the different-session and
+      expiry cases, requested updates) and two additions to `TerminalBellTests` (the note is
+      written inside the play step; only an audible bell from a conversation writes one).
+
+## Open findings — 12 August 2026, scoped-sound implementation
+
+Two more found while shipping the scoped sound overrides; neither belongs to that feature's
+code, so they are recorded here rather than half-fixed in passing.
+
+- [x] **The Enforce Repository Boundaries build phase swallows lint failures.** Evidence: with
+      peer-introduced localization findings present under `Sources/ThreadingMobile`, an
+      ordinary `xcodebuild … build` still succeeds; the phase's shell has no `set -e`, so only
+      its *last* command's exit status counts and a theme or localization failure earlier in
+      the phase is printed and discarded. CLAUDE.md's claim that "all three therefore fail an
+      ordinary `xcodebuild`" was false — only the last-run check gated.
+      **Fixed, 12 August 2026:** `set -euo pipefail` at the top of the phase script, with a
+      comment saying why the line is load-bearing. Landed at a moment all three lints were
+      clean tree-wide, and proved itself within the hour: the very next build failed on two
+      genuinely missing localization keys from another session's in-flight work — printed and
+      swallowed the day before, a build failure now. The in-flight sessions were notified
+      directly rather than left to find out.
+- [x] **A session row cannot yet say it carries a sound override.** Project and standalone
+      terminal rows name a non-inherited sound in their tooltip; the session row keeps no
+      tooltip by design (its hover card carries the full title and account), so the affordance
+      belongs in the hover card.
+      **Fixed, 12 August 2026:** `SessionInfoPopoverViewController.Info` gains a `soundLine`
+      built from the same `SoundOverrideAudit.toolTipLine` the other two rows use, rendered
+      beside the branch line (configuration, like the checkout — not a condition). Absent
+      overrides add no line. The wiring is pinned by
+      `SessionRowActionsTests.testTheHoverCardNamesASoundTheChatDoesNotInherit`; the line's
+      wording was already tested with the audit. `SessionInfoPopover.swift` — the peer refactor
+      in `SessionRowView.swift` needed no touching after all, since the card builds from `Info`.
 
 ---
 

@@ -48,6 +48,20 @@ enum MacRemoteDiagnostics {
         )
     }
 
+    static func report(
+        additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
+    ) -> RemoteDiagnosticReport {
+        let info = Bundle.main.infoDictionary
+        return journal.supportReport(
+            appVersion: info?["CFBundleShortVersionString"] as? String ?? "?",
+            appBuild: info?["CFBundleVersion"] as? String ?? "?",
+            operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
+            protocolVersion: RemoteProtocol.current,
+            minimumProtocolVersion: RemoteProtocol.minimumSupported,
+            additionalDetails: additionalDetails
+        )
+    }
+
     /// Imports one explicitly shared client batch into the Mac's already share-safe journal.
     ///
     /// The authenticated device id replaces any client-supplied peer value. That both prevents

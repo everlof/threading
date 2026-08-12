@@ -144,6 +144,42 @@ value model, viewport ownership, stable identity, and a stress fixture by defaul
 fixed-schema form remains free to use a retained stack and wholesale rebuild; recycled-cell
 cleanup and one-controller-for-another lifecycle replacement are also not findings by themselves.
 
+### Project-stats scaling contract
+
+Project count and repository history both scale, while pointer entry can repeat quickly. The
+hover card therefore reads persisted aggregate values only; it never walks files, reads history,
+or waits for a process on the main actor. Code composition and Git activity have independent
+utility queues, in-flight suppression, and freshness clocks, so a slow repository cannot turn
+crossing sidebar rows into a process queue or delay another metric. A working project is skipped.
+
+The bundled scc process has a 30-second/32-MiB output bound. Git activity is exactly two bounded
+queries: one latest commit and at most 20,001 timestamps covering twelve seven-day buckets, each
+with a 15-second/512-KiB bound. The 20,001st timestamp proves truncation; the UI reports
+`20,000+` and withholds the biased chart. No view cardinality is proportional to files or commits:
+the card retains at most the fixed language legend plus twelve bars.
+
+Completion persistence follows the same scaling rule. The main actor publishes one changed
+reading and enqueues that exact identity in O(1); a dedicated utility writer owns its own cache
+dictionary and folds a burst into at most one verified whole-file rewrite per two-second window.
+It deliberately does not retain a main-actor dictionary snapshot, because that would move JSON
+off-main while forcing the next mutation to copy every project through copy-on-write.
+
+The 250-project CLI fixture (`scripts/profile_threading.sh project-stats-stress`) writes the same
+109,293-byte activity cache through both paths. Across three fresh processes, the old 250
+main-actor rewrites took 1,710.727 ms median; the exact worker enqueued all 250 readings in
+0.198 ms median and completed one background rewrite in 86.075 ms median, a 95.0% reduction in
+total persistence work and removal of the disk/encode/read-back pause from UI publication.
+`project-stats.cache-write` records cache kind, final entry count, folded update count, and result
+in built-in traces. The independently built CLI artifact at
+`/tmp/threading-profiles/20260812T124238Z-project-stats-stress` passed the one-write gate and
+measured 528.508 versus 4.202 ms total, with 0.395 ms spent enqueueing from the caller.
+
+Deeper Project Insights must remain outside hover. Its proposed host broker caps time window,
+commit count, file count, top-N rows, and graph edges; fast summary facets may refresh passively,
+but hotspot, coupling, and ownership facets load only after explicit panel navigation. A display
+panel must virtualize repeated rows, while a semantic scene stays under its existing 500-mark
+contract.
+
 ### Mobile remote dashboard scaling contract
 
 The dashboard catalogue scales with sessions and its invalidation source can burst when the Mac
@@ -541,7 +577,7 @@ scripts/profile_threading.sh ios-simulator-sample 15
 # Host-side projection/encoding plus mobile decode, pagination, reconnect, delta and resync.
 scripts/profile_threading.sh remote-conversation-stress 5000
 
-# Deterministic iOS cold open of the newest 160 rows, then deep scroll with 5,000 loaded rows.
+# Deterministic iOS cold open, mounted 5,000-row reconnect, then deep scrolling.
 scripts/profile_threading.sh ios-conversation-stress 12 5000
 
 # Cross-device sweep: remote transport state, Mac replay, iOS cold open and deep scrolling.
@@ -586,13 +622,18 @@ fallback. This ownership is part of the harness contract—a completed or interr
 leave neither a process nor a Dock tile behind.
 `THREADING_STARTUP_PROFILE_RUNS` controls the repetition count (three by default);
 `THREADING_STARTUP_PROFILE_CONFIGURATION` selects the build configuration (Debug by default).
-`THREADING_STARTUP_PROFILE_SESSIONS` raises the isolated database snapshot to the requested session
-cardinality (up to 50,000) by cloning a schema-valid production row with unique identity and
-position fields; an already-larger snapshot is reported and left intact, and the live database is
-never edited.
+`THREADING_STARTUP_PROFILE_SESSIONS` raises the isolated snapshot to that many deterministic,
+schema-valid sessions (up to 50,000) before any measured copy is made. It never edits or invents
+files in the real support directory: the rows are added only to SQLite's temporary backup, and
+every repetition receives the same pristine clone. Use 5,000 for the routine large-restoration
+check; omit it to measure the real store exactly as it is.
 Set `THREADING_STARTUP_PROFILE_DERIVED_DATA` to a trusted existing DerivedData directory for fast
 incremental tuning runs; omitting it keeps each retained artifact self-contained.
 The startup build explicitly disables code coverage and builds only the measured host architecture.
+It also disables Xcode signing for the build product: the harness changes the copied app's bundle
+identity and ad-hoc signs that copy immediately afterwards, so requiring the shipping identity's
+development profile would add no integrity and made Release profiling fail on an otherwise valid
+developer machine.
 The scheme's test plan otherwise leaks `-profile-generate` into a standalone launch build, while a
 universal Release binary spends build time on a slice the selected destination cannot execute.
 Coverage-instrumented launch totals are not comparable to the uninstrumented baselines below.
@@ -612,8 +653,9 @@ never reach the time limit or finalize. The stack sample is reliable for locatin
 it measures the Mac-backed simulator rather than an iPhone's CPU, GPU, memory pressure, power, or
 thermal behavior.
 
-The conversation-specific iOS command uses a DEBUG-only fixture and an automated display-link
-scroll driver, so it needs no manual interaction. Its Debug app is explicitly compiled with `-O`:
+The conversation-specific iOS command uses DEBUG-only fixtures, a mounted reconnect action, and an
+automated display-link scroll driver, so it needs no manual interaction. Its Debug app is explicitly
+compiled with `-O`:
 the probes remain available, but Swift code does not run under the intentionally slow `-Onone`
 setting. Cold open intentionally mounts only the newest 160 rows: that is the production remote
 snapshot bound, even when the Mac owns a much longer conversation. The deep-scroll pass represents
@@ -624,9 +666,19 @@ the script then relaunches the identical fixture for `/usr/bin/sample`. A 1 ms s
 invasive enough to turn a 5 ms scroll-work p95 into more than 20 ms, so a metric emitted while that
 sampler is attached is diagnostic evidence, not a regression baseline. `remote-conversation-stress`
 separately measures the Mac snapshot-to-wire projection, client decode/apply, every 64-row history
-page, repeated reconnect hydration, a live delta, and revision-gap resync. These deterministic
-numbers exclude real network round-trip time; use a device trace and a real paired connection when
-latency, radio, thermal, or GPU behavior is the question.
+page, repeated reconnect hydration, a live delta, a 250-frame streaming burst, and revision-gap
+resync. The command requires both the cold-open and bounded-streaming metrics, so a renamed or
+skipped XCTest cannot silently produce a green zero-test run. These deterministic numbers exclude
+real network round-trip time; use a device trace and a real paired connection when latency, radio,
+thermal, or GPU behavior is the question.
+
+The reconnect pass mounts all requested rows, waits for the first settled viewport, then drives the
+same published connection phases and authoritative store replacement as the production UI. It
+reports synchronous dispatch, layout, display and end-to-end settled time plus whether the
+replacement forced a diffable reset. The CLI rejects a reset of an identical snapshot, invalid
+geometry, an estimated-only bottom, duplicate cold settling, or a fixture draft mutation. Socket
+round-trip and decode remain intentionally outside this phase because the host-side workload
+measures them separately.
 
 The scroll result also reports `jump_top_index`, `final_top_index`, and `geometry_failures`.
 Those are correctness gates for the optimized height index: both exact jumps must resolve item 0,
@@ -650,6 +702,7 @@ regressions, not as an iPhone launch-time promise.
 | Reconnect hydration, 20 repetitions | 1.46 ms p50 / 1.65 ms p95 |
 | All 76 history pages | 138.86 ms total / 2.40 ms page p95 |
 | Live update against 5,000 rows | 7.18 ms |
+| 250 metadata-only streaming updates against 5,000 rows | 0.625 ms total |
 | Revision-gap resync, newest 160 rows | 1.82 ms |
 | iOS remote cold open, newest 160 rows | 507.24 ms first paint |
 | iOS fully loaded 5,000-row stress view | 2,081.56–2,341.54 ms first paint |
@@ -658,6 +711,20 @@ regressions, not as an iPhone launch-time promise.
 | iOS deep-scroll frame gap | 100.04–149.93 ms p95; every observed frame over 33.3 ms |
 | Mac reopen, 1,000 turns / 6,000 rows | 154.60 ms |
 | Mac exact deep jump | 19.25 ms |
+
+The original remote broadcaster rebuilt the provider-neutral row DTO array and compared the whole
+snapshot every 50 ms while tokens streamed. A settled 5,000-row history therefore remained in the
+hot path even though only `streamingText` had changed. Three warm Debug runs of 250 updates measured
+the old whole-row comparison at 1,308.596–1,317.713 ms total (1,309.904 ms median).
+
+The native controller now mirrors the exact append/result changes already emitted by
+`ConversationTimeline` into a cached row projection. A controller generation plus monotonically
+advancing row revision proves when that array is unchanged; metadata comparison and delta creation
+then touch no settled rows. The same three runs measured 0.568–0.664 ms total (0.625 ms median),
+about 2,095 times less work. A real row append still uses the general diff and measured about 8 ms
+end to end at 5,000 rows; that lower-frequency structural path remains the boundary to optimize if
+future traces show it dominating. Focused tests pin exact append and tool-result projection plus the
+empty-row invariant for metadata-only deltas.
 
 The immediate problem was the fully loaded iOS timeline, not wire projection or reconnect-state
 hydration. The original scroll sample spent 3,498 of 3,984 driver-layout samples inside
@@ -782,9 +849,53 @@ viewport.
 
 The same cold sample found a separate 16-sample framework load below `restoreDraft()`: assigning
 the empty saved draft to an already-empty composer made `UITextView` coordinate a selection change,
-initialize dictation, and dynamically load AssistantServices. Draft restoration now compares first.
-A real saved draft is still installed synchronously; the overwhelmingly common empty state does no
-text mutation and leaves dictation cold until the composer genuinely needs it.
+initialize dictation, and dynamically load AssistantServices. A first comparison fixed the ordinary
+empty-string case, but a reused simulator container could still make a performance fixture inherit a
+real draft and silently measure a different workload. Restoration compares normalized visible
+values, while deterministic cold/scroll fixtures explicitly use an empty draft. Their metric reports
+`draft_assignments`; the CLI rejects any value other than zero. A real production draft is still
+installed synchronously.
+
+The next isolated trace found the same 17 ms input-services load below initial selectable transcript
+text. Static `UITextView` content is now installed while selection is disabled and selection is
+enabled on the finished view; rows remain selectable but construction is not reported to UIKit as an
+editable selection change. The post-change cold trace had zero AssistantServices or dictation
+samples. Five matched same-simulator cold launches moved median bottom settle from **103.503 to
+98.249 ms** and median first paint from **199.097 to 197.190 ms**. Those aggregates are deliberately
+reported as modest because framework warmth and process scheduling vary; the firm result is removal
+of the owned call tree. Three matched deep-scroll runs stayed neutral at **15.781 versus 15.735 ms
+p95** (13.337 versus 13.697 ms median) with zero geometry failures, so selection preservation did
+not trade cold work for a scrolling regression.
+
+The mounted reconnect fixture then found a different total-history failure. Even when all 5,000
+rows and their content were identical, `RemoteConversationStore.replace` always emitted `reset`.
+That cleared the stable height and Markdown caches and animated a new 5,000-item diffable snapshot.
+In the baseline sample, 34 of the reconnect action's 39 synchronous samples were under store
+replacement and 28 were inside diffable application. The nominally unchanged update consequently
+took **39.843 ms** to dispatch and **496.406 ms** to settle.
+
+Snapshot replacement is now identity-aware. Equal ordered row identities produce only exact
+changed-row and metadata deltas; a snapshot whose only difference is its revision is a timeline
+no-op, while state and send availability still advance. Inserts, removals and reordering retain a
+structural reset, but preserve height and Markdown caches by stable id, invalidate changed retained
+rows, and discard only cache entries whose row/source disappeared. Five direct launches of the
+same before and after binaries measured:
+
+| Mounted 5,000-row reconnect | Before | After |
+|---|---:|---:|
+| Full snapshot resets | 5 / 5 | **0 / 5** |
+| Synchronous dispatch, median | 46.986 ms | **8.036 ms** |
+| End-to-end settled, median | 505.460 ms | **11.237 ms** |
+
+That is an 82.9% dispatch reduction and a 97.8% settled-time reduction. Every run retained the
+last five visible rows at the expected 20-point adjusted bottom inset and reported zero geometry
+failures. The matched full suite kept the controls neutral or better: production-window cold paint
+was 228.940 versus 222.052 ms, scrolling work p95 was 15.018 versus 13.869 ms, exact top navigation
+still reached item 0, and geometry failures remained zero. The CLI keeps the unchanged-reset check
+as a regression gate, while focused store tests cover identical, content-changed, reordered,
+inserted and in-flight history-loading replacements. Baseline and after artifacts are
+`/tmp/threading-profiles/20260812T115239Z-ios-conversation-stress` and
+`/tmp/threading-profiles/20260812T115713Z-ios-conversation-stress`.
 
 The device commands intentionally attach rather than build or install: first install a Release
 build, connect and unlock the trusted Developer Mode device, and leave Threading open in the
@@ -1487,72 +1598,95 @@ real 32 px Claude asset and a 23-row viewport with two style passes measured **7
 an owned primitive comparison, not an attributed end-to-end launch delta; the existing
 `sidebar-stress` fixture carries the production viewport path.
 
-### Large-store session decoding
+The first settled-frame Release baseline against the same two-project / 114-session snapshot
+measured **445.412 ms** median process entry to settled frame, including **51.550 ms** of explicit
+layout and **41.000 ms** of display after the first ready turn. The isolated trace measured
+482.763 / 55.467 / 49.204 ms respectively. The profiler build is unsigned and host-architecture
+only; the measured copy receives a throwaway bundle identity and ad-hoc signature afterwards, so
+Release profiling does not depend on a development certificate or redirect through LaunchServices
+to the installed app.
 
-The retained startup cardinality control made the persistence scaling boundary reproducible. A
-Release launch against the isolated 5,000-session snapshot initially measured `state_ms` at
-**163.539 / 141.317 / 120.729 ms** (median **141.317 ms**), while the matched App Launch trace
-reported **120.501 ms**. Time Profiler attributed **54.641 ms** of sampled weight beneath
-`ProjectDatabase.load` to `JSONDecoder.decode`; **39.641 ms** was the `AgentSession` decoder and
-**10.439 ms** was SQLite stepping. The database was paying the top-level JSON parser's fixed cost
-once for every row.
+Although row customization hosts were already deferred, each ordinary row still eagerly built the
+extension surfaces they would have hosted: two replaceable-content wrappers, an empty after-title
+stack, and an empty wake/snooze label. A native row now starts as its direct native subtree. The
+identity wrapper, row wrapper and slot materialize only when the registry publishes corresponding
+content; the attention label materializes only when that row first has durable attention state.
+Rows reused after those boundaries keep the materialized subtree warm, and injected gallery/test
+rows retain their self-observing eager route.
 
-Large loads now retain no more than a 1,024-row wave and decode 256-row JSON arrays on bounded
-parallel workers: half the active processor count, capped at four. Results join and are consumed
-serially in database order. Array decode failure retries only its 256-row batch one row at a time,
-preserving the exact corrupt-row diagnosis rather than turning a speedup into a quarantine mystery.
-The 512-row entry threshold is load-bearing: an initial implementation batched the 127-session
-ordinary fixture and regressed its median `state_ms` to **48.926 ms**. Keeping smaller stores on
-the original decoder restored **33.385 / 24.702 / 27.499 ms** (median **27.499 ms**), versus the
-nearby 122-session reference median of **27.349 ms**.
+Three fresh Release launches reduced median settled layout from **51.550 to 45.822 ms (−11.1%)**;
+the after trace measured **49.117 ms**, down from 55.467 ms. Its inclusive sampled table-row work
+fell from 55.796 to 46.448 ms, Auto Layout engine work from 52.493 to 45.000 ms, row initialization
+from 29.515 to 26.448 ms, and key-loop work from 15.000 to 11.448 ms. This is an owned layout and
+scaling result, not an end-to-end launch claim: median delegate-to-settled-frame time was effectively
+flat at 328.780 versus 328.383 ms, while process-entry variance moved total-to-frame from 445.412 to
+475.409 ms. A direct attempt to batch key-loop recalculation was also rejected: the same mounted
+window measured 2.371 ms on AppKit's automatic path versus 2.533 ms when batching and explicitly
+recalculating it.
 
-With that gate, the final 5,000-session direct lines were **103.996 / 87.823 / 696.891 ms**. The
-last line was discarded as an environmental outlier only because every startup phase inflated
-during the disk-full, multi-build interval; the raw triplet remains recorded here. The retained
-direct median is therefore **103.996 ms**, **26.4% / 37.321 ms** below baseline, and the matched
-trace measured **92.191 ms** versus **120.501 ms**. Total settled-frame time is intentionally not
-claimed as improved: native-window and machine-load variance dominated it. Boundary tests cover
-the row-at-a-time path at 511 rows, ordering across batch and wave boundaries, and exact failure
-identity inside a valid-JSON batch.
+The next trace attributed one complete 5 ms sample in `ProjectRowView.setupViews` to the trailing
+collapsed-session count: the count was empty, but constructing its label still initialized the
+monospaced-digit font and OpenType feature table and installed three constraints. The label now
+materializes with the first nonzero count; a reused row keeps it warm and hides it when the count
+returns to zero. Hover controls retain their original overlay/crossfade geometry.
 
-### Large-store first outline mount
+The follow-up live snapshot had gained two sessions (116 instead of 114), so its aggregate launch
+numbers are not treated as a controlled pair. Median settled layout nevertheless moved from
+45.822 to 44.459 ms and the trace boundary from 49.117 to 47.516 ms. The firm result is in the
+owned call tree: `ProjectRowView.setupViews → numericDetail → CTFontCreateWithFontDescriptor →
+CreateOTFeatureTable` moved from 5 ms to **zero samples**. Fourteen focused count, reuse, hover,
+extension-replacement, selection-theme and render tests cover the boundary.
 
-Removing the persistence decoder exposed the next cardinality owner one phase later. A matched
-Release App Launch trace against the same isolated two-project / 5,000-session snapshot put
-**180.316 ms** under `mountInitialTreeIfNeeded`, **153.892 ms** under `reload`, and **143.892 ms**
-under recursive standing expansion. Of that, **138.892 ms** was the outline data source serving
-children. Final layout and display were almost identical to the 131-session control; the scaling
-penalty lived in the first main-queue turn that installed logical outline rows.
+The ordinary session row still put its native icon/title stack inside a one-child `NSView`
+wrapper, even after the extension container around that wrapper had become lazy. The wrapper added
+no ownership or replacement semantics; it existed only to pin the stack to four edges. The native
+stack is now the row's direct arranged child and becomes the extension container's default content
+only if a row-level customization is published. This removes one view and four constraints from
+every mounted ordinary session row while preserving the exact reparenting boundary extensions use.
 
-The branch data source had an allocation multiplier hidden behind a harmless-looking property.
-`BranchGroupNode.childNodes` maps all sessions and terminals into a fresh combined array. AppKit
-asks for the branch count once and then asks for each child by index, so the old implementation
-rebuilt an *n*-element array for each of *n* rows: quadratic work before row-view virtualization
-could help. Whole-tree traversals may still use `childNodes`; the outline's hot path now reads a
-constant-time count and indexes the two stored arrays directly, preserving sessions-then-terminals
-order and exact object identity.
+The 5,000-session Debug fixture moved final layout from **47.185 to 46.781 ms** and resize p95 from
+**5.895 to 5.631 ms**. Those small direct changes are close enough to run noise that they are not
+claimed as exact savings. A follow-up isolated Release trace was directionally consistent: sampled
+table layout moved 48.639 → 36.341 ms, row initialization 36.397 → 25.605 ms, key-loop work
+19.151 → 5.000 ms, Auto Layout engine work 39.436 → 21.494 ms, and stack-view work
+15.000 → 1.720 ms. Direct settled layout was 48.938 ms and the trace measured 44.507 ms, within
+the existing launch variance. Fifty-nine focused row, extension, title-morph, rendering and project
+count tests cover the simplified hierarchy; the scaling result is the deleted per-cell structure,
+not a promised end-to-end launch delta.
 
-Five matched direct Release launches measured:
+The next scaling audit made the Release launch harness capable of raising its isolated SQLite
+snapshot to an exact session count. `THREADING_STARTUP_PROFILE_SESSIONS=5000` repeats a real,
+schema-valid session payload only inside the temporary backup; every direct run and trace still
+receives the same pristine copy, and the user's live store is never opened for writing. That
+fixture showed that the complete logical tree was virtualized at the cell layer but still expensive
+at the AppKit data-source bridge. `NSOutlineView` repeatedly asked Swift arrays for Objective-C
+children while recursively expanding the standing tree. Caching each immutable node's `NSArray`
+projection, invalidated whenever its Swift children change, reduced the sampled initial sidebar
+mount from about **140 ms to 42.9 ms**. Direct first-turn work fell from a **164.9 ms** median to
+**84.5 ms**. Whole-launch dyld and native-window variance moved in the opposite direction during
+that comparison, so the owned outline phase—not the aggregate—is the result to preserve.
 
-| Two projects / 5,000 sessions | Rebuilt child array per row | Direct indexed child | Change |
+With outline enumeration bounded, the same trace exposed authoritative session decoding as the
+remaining cardinality-dependent startup owner. The database previously invoked a top-level
+`JSONDecoder.decode` once per session. It now decodes bounded 256-row JSON arrays while retaining
+each row's indexed metadata; a failed batch falls back to individual decoding only to identify the
+exact corrupt row before refusing the whole load. The paired Release results were:
+
+| Startup state workload | Per-row decode | Bounded batch decode | Change |
 |---|---:|---:|---:|
-| First ready turn | 187.991 ms | **59.335 ms** | **−128.656 ms (−68.4%)** |
-| Process entry → first ready turn | 542.055 ms | **372.091 ms** | −169.964 ms (−31.4%) |
-| Settled first frame | 645.222 ms | **475.491 ms** | **−169.731 ms (−26.3%)** |
+| Ordinary store (119/120 sessions), median | 17.35 ms | 17.83 ms | flat (+0.48 ms) |
+| 5,000 sessions, median | 120.88 ms | **100.06 ms** | **−20.82 ms (−17.2%)** |
+| 5,000-session premium over ordinary | 103.52 ms | **82.23 ms** | **−21.29 ms (−20.6%)** |
 
-The retained coarse clocks report the deferred divider geometry and first tree mount separately.
-The after median was **3.022 ms** of geometry and **30.495 ms** to mount 4,902 logical rows. In the
-matched after trace, mount/reload/standing-expansion fell to **30.648 / 10.648 / 5.648 ms**, and the
-outline child callback had no 5 ms sample. The ordinary 131-session control did not regress:
-first-turn median moved **47.681 → 37.094 ms**, settled-frame median **621.174 → 490.826 ms**, and
-its measured mount was **2.973 ms**. Those ordinary aggregate deltas include native-window and
-machine-load variance; they are a no-regression control, not an additional attributed speedup.
-
-The indexed-order regression lives in the registered sidebar tree suite. Its opt-in one-project /
-5,000-session stress shape also closes and fully reopens the project, proves all 5,000 logical
-session rows returned, then exactly reveals and materializes a selected row that began beyond the
-launch viewport. Persisted-closed projects remain closed on first mount while their default-open
-branch and side-chat descendants are ready when the project is later expanded.
+Time Profiler independently moved `ProjectDatabase.load` from **62.86 to 50.78 ms** and the
+inclusive state-load stack from **81.93 to 61.07 ms**. The optimized three-run settled-frame
+median was 594.62 ms versus 717.47 ms in the immediately preceding run, but that larger aggregate
+also includes measured system-wide launch variance and is not attributed to the decoder. Database
+tests cover syntactically invalid payloads, valid JSON with a schema/type failure, exact corrupt-row
+identity, and ordering across the 256-row boundary. Retained artifacts are
+`/tmp/threading-profiles/20260812T142156Z-startup`,
+`/tmp/threading-profiles/20260812T143632Z-startup`, and
+`/tmp/threading-profiles/20260812T144409Z-startup`.
 
 ## Display-pane transition beside a live TUI
 
@@ -1591,33 +1725,6 @@ comparison measured:
 The final natural-grid fixture accepts at most one grid per completed action; a remotely frozen
 grid accepts none. There are no synthetic transition ticks or secretly deferred grids. Run the
 fixture through `scripts/profile_threading.sh display-pane-stress`; routine `full` includes it.
-
-The first fixture drove that split route directly with an empty panel. The toolbar gesture has
-one more stage: it points the panel at the selected session before revealing it. `showSession`
-used to render even when that session and its retained active tab were already selected, so an
-open rebuilt the tab strip and the active native surface merely to expose the view that was
-already standing in the split item. A 256-mark semantic-scene fixture made that hidden work
-deterministic. Five fresh-process, five-cycle Debug runs measured:
-
-| Production toolbar gesture | Before | After |
-|---|---:|---:|
-| Retained render passes across five opens | 5 | 0 |
-| Open p50, median of five processes | 36.343 ms | 10.843 ms |
-| Open/close cycle, median of five processes | 44.082 ms | 20.688 ms |
-
-`showSession` and `showSessionTabs` now no-op only when their requested visible state is already
-the controller's state; switching session or leaving the global theme document still renders.
-The toolbar route also no longer repeats the full toolbar state walk that
-`setDisplayPaneVisible` already performs after the collapse state changes.
-
-A 50-cycle command-line Time Profiler trace of the after case attributed 957 ms of inclusive CPU
-to the pane controller, of which 927 ms was under Auto Layout and 915 ms under the split collapse;
-terminal resize was 48 ms, while display-pane render was 14 ms including fixture setup and zero
-gesture-time render passes. These inclusive stacks overlap by design, but identify the remaining
-owner clearly: AppKit committing a real split-item collapse and the one exact terminal grid, not
-retained pane reconstruction or an animation tick storm. The user-route line also reports actions
-over 16.7 and 33.3 ms, so a later AppKit-layout regression is visible even though TUI geometry is
-intentionally immediate rather than animated.
 
 ## Git Review as the first stress target
 
@@ -1769,31 +1876,146 @@ This is a harness baseline, not a Linux-scale conclusion. It does, however, iden
 numstat-bearing 100-row history query as the first production phase to inspect when the larger
 checkout is run.
 
-The subsequent Linux checkout run changed that owner: 94,854 visible paths made the full file
-catalogue and the one-file remote read larger than history. The catalogue was natural-sorted in
-the reader and then sorted again for the Activity atlas; reading one exact file manufactured the
-same complete allowlist before testing membership. A matched five-pass Debug run before and after
-moving uniqueness/lexical order to `git ls-files --deduplicate`, retaining it in a typed catalogue,
-and using one bounded literal pathspec measured:
+### Linux-scale result and repairs
 
-| Linux-scale production phase | Before median | After median | Change |
+The follow-up used a full clone of `torvalds/linux`: 94,854 visible paths, roughly 1.46 million
+commits, an 8.2 GiB checkout and a 6.5 GiB object database. A macOS case-insensitive checkout
+cannot represent 13 case-colliding Linux paths independently, so the working tree deliberately
+reported those 13 files as modified; the benchmark did not clean or rewrite the external clone.
+The real range `HEAD~100..HEAD` produced 970 files, 39,488 presented lines and 1.58 MiB of patch
+data. Five-run Debug medians exposed three independent defects:
+
+1. untracked synthesis used full porcelain status merely to obtain untracked names, making Git
+   walk the tracked index twice for a working-tree review;
+2. the history page mounted all 100 graph rows in an `NSStackView`; and
+3. repository enumeration applied `localizedStandardCompare` to every path, while opening one
+   mobile repository file repeated that complete catalogue solely as an allowlist check.
+
+The reader now uses `git ls-files --others --exclude-standard -z` for untracked synthesis. It
+preserves ignored-file filtering and literal NUL-delimited names, including newlines and non-ASCII
+characters. The immediately matched run reduced summary from 589 to 341 ms and parsed
+uncommitted review from 593 to 349 ms, both about 42%; later warmed final medians were 300 and
+304 ms. The remaining time is Git/process and bounded untracked-file synthesis, not main-thread
+view construction.
+
+History retains the whole `GitCommitGraph` as small value geometry but hands rich rows to a fixed-
+height `NSTableView`. `Show more` can therefore retain additional model pages without making
+construction, layout or drawing proportional to total history. A 1,000-commit regression mounts
+only the two visited viewports. The real 100-row page changed as follows:
+
+| History UI phase | Eager stack | Virtual table | Change |
 |---|---:|---:|---:|
-| Complete repository-file reader, 94,854 paths | 673.5 ms | 339.2 ms | −49.6% |
-| Raw `ls-files` process floor | 295.8 ms | 225.6 ms | diagnostic |
-| Authorize and read one exact repository file | 950.9 ms | 38.0 ms | −96.0%, 25.0× faster |
+| Render | 48.8 ms | 11.3 ms | −77% |
+| Layout | 155.3 ms | 23.1 ms | −85% |
+| Draw first viewport | 180.7 ms | 28.4 ms | −84% |
+| Seek + draw bottom | 296.8 ms | 43.8 ms | −85% |
+| Rich rows constructed | 101 | 33 across both viewports | O(visible) |
 
-The reader result is intentionally lexical, not presentation-sorted. Consumers that need natural
-filename order request a separately bounded display page, still computed off-main, while the
-Activity atlas consumes the catalogue without another whole-repository sort. Exact reads retain
-resolved-root containment and ignored-file semantics and cap Git output to one maximum-length
-remote path; a directory-shaped pathspec that expands to multiple results is refused.
+The table must be identified inside its data-source callbacks by its already-installed column
+identifier, not by reading the controller's lazy `historyTableView` property. Doing the latter
+re-enters initialization while `dataSource` is being assigned and recursively constructs tables.
+The 1,000-commit and existing large-file regressions pin that lifecycle boundary.
 
-The same post-repair run kept the end-to-end revision-range view bounded: 970 files, 39,488 lines
-and 1.58 MiB parsed in 89.6 ms median, then installed/layout/drew/sought-bottom in
-22.1/29.5/26.7/40.1 ms while instantiating 3 of 970 file rows. The remaining 339 ms catalogue
-median is mostly the 226 ms Git process plus decoding/allocation for all 94,854 paths; do not
-reintroduce a locale sort into that internal path or use a complete catalogue to authorize one
-file.
+For the 94,854-path catalogue, direct isolation measured Git at 160–180 ms, UTF-8 decode and value
+creation around 98 ms, localized natural sorting at 256–262 ms, and deterministic lexical sorting
+at about 13 ms. Repository tools conventionally expose locale-independent Git path order, so the
+reader now explicitly merges tracked/untracked output with lexical sorting. The production median
+fell from 548 to 305 ms (−44%). Opening a single remote file no longer builds that array: after
+containment and regular-file checks it asks Git for one `:(literal)` path, preserving the tracked
+or non-ignored allowlist without accepting wildcard or exclude pathspecs. A Linux file open now
+takes 29.6 ms median; previously it necessarily paid the roughly 548 ms catalogue first.
+
+The final representative run was:
+
+| Linux workload | Median | p95 | Cold/maximum |
+|---|---:|---:|---:|
+| Enumerate 94,854 repository paths | 304.6 ms | 309.0 ms | 769.5 ms |
+| Validate and read one repository file | 29.6 ms | 29.8 ms | 30.4 ms |
+| Uncommitted summary, 13 files | 299.9 ms | 302.9 ms | 307.0 ms |
+| Parsed uncommitted review, 13 files | 304.0 ms | 304.8 ms | 306.3 ms |
+| First 100 history models | 92.9 ms | 97.9 ms | 569.5 ms |
+| Range Git command, 970 files | 439.4 ms | 448.5 ms | 790.0 ms |
+| Range parse, 39,488 lines | 80.2 ms | 81.5 ms | 83.6 ms |
+
+Cold history and range reads remain visibly cache-sensitive: their first iterations are roughly
+six and two times their warm medians. No reader change in this pass targeted those commands, so
+their warmed median movement across runs must not be credited to the UI repair. The next work on
+those phases belongs below `git.process` (arguments, object/index cache behavior, or progressive
+presentation), while the range parser and both virtual tables are already bounded enough that
+moving the same work around the main actor would not address the measured owner.
+
+### Progressive Git-process follow-up
+
+Command isolation against the same Linux checkout showed that the remaining history cost was not
+commit traversal. Metadata for 100 commits takes about 10–20 ms in `/usr/bin/git`, while
+`--numstat` opens enough trees and blobs to take roughly 50 ms warm and several hundred
+milliseconds cold. Git's unique `%h` abbreviation and `%D` decoration expansion also double the
+otherwise-minimal metadata command on this object/ref population. The pane therefore now presents
+the whole graph, full subjects, authors and dates from a metadata-only page; it derives a temporary
+seven-character label from `%H`, shows an ellipsis in the count column, and asynchronously enriches
+the same fixed-height rows with exact abbreviations, refs and `+/−` statistics. Enrichment reloads
+only matching rows by hash and never rebuilds graph geometry. A failed statistics read leaves the
+usable history in place rather than replacing it with an error.
+
+The matched five-run result changed history's presentation-critical read from 92.9 ms median and
+569.5 ms first run to 40.2 ms median and 95.8 ms first run. Exact statistics then arrived in a
+separate 92.4 ms median read; its 555.0 ms cold outlier no longer blocks first paint. The table
+remained bounded at 33 constructed rows and about 48 ms for a bottom seek.
+
+For a full range, changing rename detection, indentation heuristics or Git's Myers/minimal diff
+algorithm did not materially move the roughly 340–450 ms Git command. A raw NUL-delimited file
+index, however, asks only for stable paths and change kinds: the initial Linux run measured the
+970-file `HEAD~100..HEAD` roster at 44.7 ms median versus 436.7 ms for the unified patch plus
+80.1 ms to parse it. Large staged and checkpoint comparisons therefore start that compact read
+only after the full patch has missed a 100 ms responsiveness budget; ordinary diffs spawn no
+second process.
+
+The first version stopped at progressive presentation: it drew non-interactive `loading…` rows,
+but still let the complete patch finish and replaced every value model afterward. That moved first
+paint without removing the measured work. The production path now freezes both endpoints as tree
+hashes (including copying the staged index to a private index before `write-tree`), cancels the
+full-patch process group as soon as a roster of at least 100 paths wins, and requests exact hunks
+only for up to 16 pending files intersecting the resting viewport. Literal pathspecs include both
+sides of a rename. One serial hydration queue prevents process fan-out, bounds notifications
+coalesce during wheel motion, and no returned model or height mutates the table until live scrolling
+ends. Statistics and image endpoints use the same immutable tree pair, so two viewport batches can
+never show two index versions.
+
+The matched three-run Debug sweep on the same Linux checkout (94,854 visible paths, 970 range
+files, 39,488 changed lines) measured the new production pieces separately:
+
+| Linux range phase | Median | Cold/maximum | Presentation role |
+|---|---:|---:|---|
+| Raw path/change roster | 67.7 ms | 304.4 ms | first complete file index |
+| First 16 exact file patches | 42.7 ms | 42.7 ms | first rich viewport |
+| Exact all-file numstat | 399.1 ms | 782.6 ms | background totals and height weights |
+| Complete unified patch command | 504.8 ms | 574.2 ms | old rich-body path |
+| Complete unified patch parse | 104.4 ms | 121.1 ms | old all-file model cost |
+
+Warm first exact viewport is therefore about **210 ms** including the 100 ms gate, rather than
+about **609 ms** for complete patch plus parse (roughly 65% earlier). The processes still race on
+a genuinely cold object cache: whichever result reaches main first wins, so the 304 ms cold raw
+read does not delay a full patch that finishes sooner. Exact numstat starts only after the resting
+viewport is rich and has stayed still for another 600 ms, uses its own lower-priority queue, and
+cannot block viewing, hydration, scrolling or navigation summaries. The original broad
+`--find-renames` made a direct matched probe take 2.61 s despite this range containing no renames,
+versus 0.56 s with `--no-renames`. Production now uses the no-rename pass, then re-enables
+similarity analysis only for rename endpoint paths already proven by the raw roster. The final
+three-run app benchmark reduced the exact stats median from 712.5 ms to **399.1 ms** (44%) while a
+real edited-rename integration test pins identical per-file counts. Unlike the discarded complete
+path, the pass retains no hunk text and does no all-file Swift parse, but its remaining line walk is
+still work proportional to total changed content.
+
+Pending rows first use cheap header geometry, then the numstat roster establishes an expanded
+offscreen line-weight estimate. Hydrating a row invalidates only that identity. Both transitions
+preserve the first visible path and its within-row offset, or the actual maximum offset when the
+reader is at bottom, and defer height notifications during momentum. Unknown counts remain
+`loading…`; they are never represented as zero and staging is disabled until exact content exists.
+
+The scaling rule this pins is broader than Git Review: when a trustworthy cheap index and an
+expensive rich body have different cost curves, present the index after a short latency gate and
+enrich retained identities in place. Do not make every small request pay the progressive path, and
+do not represent unknown statistics as zero or enable actions against placeholder content.
 
 Height discovery is split at that boundary. AppKit automatic row height initially retained roughly
 twice the actual height for a 400-line body, creating blank content after the last glyph; and a
@@ -1842,7 +2064,9 @@ cold viewport before it asks for every logical row one at a time; reversing that
 the Markdown cache and understate first-paint work. Its `elapsed_ms` includes the later exhaustive
 diagnostic and is therefore not production first paint. The fixture also asserts that one model
 update rebuilds the child navigator once, styles no Markdown during presentation construction,
-and grows the bounded cache by no more blocks than the viewport requested.
+and grows the bounded cache by no more blocks than the viewport requested. The same command also
+builds a 1,000-child, 12-activity-entry-per-child navigator and reports snapshot projection,
+main-actor enqueue, utility-writer drain and reload separately as `subagent-persistence`.
 
 The regression fixture was a 457 KB Claude child transcript with 91 replay events, 47 timeline
 rows, 44 tool calls/results and one 13 KB final Markdown answer. The old retained stack eagerly
@@ -1863,6 +2087,29 @@ styles a block only when its virtual row materializes, and keeps at most 64 styl
 identity-and-source-checked LRU that is cleared on selection or theme changes. The navigator takes
 content and selection in one update. Fresh generated runs reduced synchronous render from
 19.8–22.3 ms to 5.9–8.3 ms, with one navigator rebuild and zero styled blocks during render.
+
+The persistence fixture found a separate quadratic pause outside the pane. Snapshot projection
+canonicalized every child's parent id through `canonicalID(for:)`; a parent session is not itself
+a child, so the fallback scanned the complete child array and missed once per row. Unique
+transcript-path reconciliation repeated the same array materialization while children arrived.
+Main-actor medians made the curve visible: 100 children projected in 10.116 ms, 250 in 63.717 ms,
+and 1,000 in 760.721 ms. The 1,000-child atomic JSON write then added another 39.332 ms on the
+main actor for a 10.8 MB bounded snapshot.
+
+`SubagentTimeline` now maintains authoritative id/alias and transcript-path indexes. A negative
+parent lookup and a path reconciliation are O(1), while ordered presentation remains the one
+linear pass. Routine coalesced saves hand the immutable, `Sendable` snapshot to one utility writer;
+renderer teardown queues its final state, explicit flush/quit drains earlier writes and persists
+the newest state durably, and deletion is ordered after queued writes so stale work cannot recreate
+a removed session. The writer retains atomic replacement, size rejection, quarantine blocking and
+per-session files.
+
+Three registered stress runs reduced the 1,000-child snapshot median to **1.386 ms**. Main-thread
+enqueue was **0.346 ms** median; the remaining 45.638 ms encode/write ran on the utility queue.
+The measured main pause therefore fell from about **800.053 to 1.732 ms** (99.8%, roughly 462×).
+The fixture also reloads the finished file; all 18 focused state regressions pass, covering
+alias/path reconciliation, ordered latest-write wins, durable flush, quarantine, and
+delete-after-save.
 
 The exact provider fixture exposed one more, independent cost. Its final settings inventory is a
 large two-column Markdown table; the general renderer represented every row as a horizontal stack,
@@ -2065,51 +2312,6 @@ footprint rose by roughly 12 MB. The remaining 26–38 ms is the intended constr
 Layout of about 21 visible collapsed headers, not work proportional to transcript depth. Reducing
 that further would require a materially different drawn/reconfigurable header, not another height
 cache or an off-screen view tree.
-
-That drawn-header step was taken in the 2026-08-12 scale sweep, together with a fixture that names
-the cases hidden by a generic middle jump: one exact file row, an edit row before and after opening
-its native diff, 24 bounded context attachments on one exact user row, and 240 production table
-offsets with a cubic momentum-shaped tail. All samples used the 1,000 settled-turn + 500 live-tool
-production controller path in fresh test processes. Five matched pre-change samples identified
-destination layout as the owner: exact file-row landing was 74–93 ms (86 ms median), of which
-67–83 ms was layout; scroll was 12.6–15.2 ms p50 and 25.7–39.4 ms p95 while only 20 rows lived.
-
-The fixed collapsed header now draws its one-line glyph/title/subject/meta/chevron as one semantic
-view. It keeps the lazy selectable output and `DiffView`, expansion state, hover, theme roles and
-accessibility press/expanded contract. Five final fresh-process runs measured:
-
-| Workload | Before | After |
-|---|---:|---:|
-| Exact file-row jump, median | 86 ms | 25.7 ms |
-| File destination layout, median | 72 ms | 17.5 ms |
-| Collapsed edit-row jump, median | 86 ms | 22.7 ms |
-| First edit-diff open, median | 14.0 ms | 8.4 ms |
-| 240-frame traversal p50, median run | 14.3 ms | 5.9 ms |
-| 240-frame traversal p95, median run | 27.4 ms | 8.1 ms |
-
-The final exact attachment-bearing row was 26–43 ms, the expanded diff re-landing was 8.9–10.7 ms,
-and the working set remained 21 rows. Geometry, correction and visible-turn bookkeeping remain
-sub-millisecond to roughly one millisecond; scroll physics and exact identities were not replaced.
-
-The same sweep caught a newer cold-open regression that the older fixture's row count hid. Each
-settled edit turn eagerly retained a `ChangedFilesCardView` and its nested `NSTableView`, even though
-the outer conversation table showed only a viewport. A one-second CLI sample placed 17 of 21 replay
-samples under changed-card construction, and replay also linearly searched for an anchor already
-known to be the presentation tail. Historical cards now retain typed bounded data and construct the
-card at viewport materialization; stable presentation identity owns directory disclosure and the
-exact checkpoint action. Five fresh 1,000-turn tool-heavy processes measured:
-
-| Metric | Before | After |
-|---|---:|---:|
-| Cold elapsed, median | 1,899 ms | 337 ms |
-| Presentation, median | 1,854 ms | 299 ms |
-| Renderer delta | 61–65 MB | 9–12 MB |
-| Exact deepest-turn jump | 40–55 ms typical | 38–46 ms |
-
-The post-change 1,000-turn controls stayed viewport-sized and measured 226–260 ms for mixed and
-246–270 ms for prose across five fresh processes. The registered tests also force a historical card
-through construction, disclosure, recycling and reconstruction, and assert that its bounded preview
-and exact immutable-checkpoint View diff action survive.
 
 The command writes `THREADING_PERF conversation-active-*` lines to
 `conversation-active-turn-stress.log`. Override either dimension for a one-point investigation
@@ -2373,41 +2575,54 @@ a project opened later did not regain their default-open state. A flattened visi
 remains an option only if a future product target demands substantially less than the now-bounded
 AppKit mount and resize phases.
 
-### Permanent session removal
+### Permanent session removal is an exact edit
 
-The same opt-in fixture removes one dormant session and then the selected session after all earlier
-title work has been flushed. It times the synchronous mutation and the following layout separately,
-keeps a direct full reload as a comparison, and asserts that both rows, selection, and outline count
-are exact. Seed, close, reopen, and then measure: seeding and measuring through one live SQLite/WAL
-owner makes checkpoint state dominate the result and is not a launch-realistic process boundary.
+Deleting one chat used to take every broad maintenance path at once: `ProjectStore` rewrote the
+complete project graph, the sidebar rebuilt and reloaded every project, its caller immediately
+reloaded the same outline a second time, and the main window recomputed the live-session set before
+sweeping every session-owned cache. A live native conversation also synchronously serialized the
+entire viewport-continuity document even though the deleted session could never restore it.
 
-The 2026-08-12 comparison used committed `master` at
-`dff0173185bb495c4ec69c0522d86fe7f731eb2b` as the before binary. Its detached worktree changed only
-`SidebarTreeBuilderTests.swift` (52 insertions, 5 deletions): it added the production removal sample
-and the identical seed-close-reopen/flush protocol; no production behavior changed. Both binaries
-were Debug builds, used 10 projects × 500 manually ordered sessions, and ran each sample in a fresh
-`xctest` process with the same environment. The raw synchronous mutation samples in milliseconds
-were:
+The 5,000-session Debug fixture measured a dormant deletion at 302 ms before layout and a selected
+deletion at 280 ms. The targeted transaction and project-subtree outline edit reduced those phases
+to about 44 ms and 19 ms respectively; the project-local outline share was about 31 ms / 11 ms. The
+removed duplicate full reload alone cost another 60 ms. A 1,000-turn native transcript split the
+live teardown pause and attributed 27.8 ms of 27.9 ms to the obsolete viewport save rather than to
+releasing its row hierarchy. Skipping that write at the permanent-delete boundary reduced a fresh
+1,000-turn teardown to **0.048 ms**; releasing the virtualized hierarchy itself was 0.001 ms.
 
-| Path | Before, five fresh processes | Exact path, five fresh processes | Median |
-|---|---|---|---:|
-| Dormant session | 407.071, 320.003, 336.498, 299.018, 290.606 | 13.431, 12.432, 11.435, 12.094, 11.330 | **320.003 → 12.094 ms** |
-| Selected session | 420.418, 304.876, 354.137, 321.370, 276.078 | 4.115, 3.759, 3.460, 6.297, 3.256 | **321.370 → 3.759 ms** |
+The implementation rule is therefore stronger than “delete the row efficiently”: a permanent
+single-session action stays exact through every owner. It uses one SQLite delete plus the affected
+project's positional shift, replaces only that project's rendered tree and indexes, skips viewport
+continuity persistence, invalidates the exact runtime/panel/drawer/attachment/MCP/capture/subagent
+records, and removes owned cache directories on a utility task. `sidebar.session-remove.persist`,
+`sidebar.project-structure.apply`, and `sidebar.session-remove.cleanup` keep those boundaries visible
+in a CLI trace. Whole-set `retainOnly` sweeps remain appropriate for project deletion and startup
+reconciliation, never for an ordinary one-chat click.
 
-Pairing each mutation with its immediately following layout gives median totals of 330.203 →
-22.140 ms for dormant removal and 328.220 → 8.788 ms for selected removal. The new owner timings
-make the remaining limit explicit: dormant removal spends a median 8.099 ms applying one outline
-leaf deletion and 0.143 ms in exact SQLite persistence; selected removal spends 1.412 ms and
-0.236 ms respectively. A future improvement therefore belongs in the AppKit outline application,
-not in persistence.
+A follow-up audit found two broad passes still hiding inside that exact-looking route. Compact-tree
+rule refresh asked the outline for every logical row merely to discover which row views AppKit had
+mounted, and `ProjectStore` rebuilt the lookup dictionaries for every project, session and terminal
+after removing one session. The outline now maintains a weak registry from its add/remove delegate
+callbacks and the store removes one identity plus shifts only later sessions in the affected
+project. The 5,000-session regression reports and gates **47 rule candidates for 5,118 logical
+rows**. Three reused-binary runs put selected deletion at 11.198–14.444 ms (12.330 ms median),
+versus 17.572 ms in the earlier artifact, but those runs were not a controlled same-load pair; the
+load-bearing result is the deleted whole-tree/whole-store work and the mounted-row candidate gate,
+not an aggregate timing claim. Artifacts are
+`/tmp/threading-profiles/20260812T120530Z-sidebar-stress` and
+`/tmp/threading-profiles/20260812T121710Z-sidebar-stress`.
 
-The load-bearing rule is that one session removal stays proportional to that session. The store
-updates only its affected project index, persistence deletes one graph row and updates the selected
-scalar transactionally, and the sidebar applies one leaf edit or rebuilds only the affected project
-when grouping boundaries make a leaf edit ambiguous. Cleanup addresses only that session's runtime,
-attachments, panels, drawers, detached windows, MCP endpoint, history pages, and remote scopes.
-Pending unrelated coalesced model work deliberately falls back to the full graph transaction so an
-optimization cannot make an earlier mutation disappear.
+The final exact persistence pass removed the remaining whole-state write from this route. One-chat
+deletion now executes one SQLite `DELETE`, shifts only later positions in that project, updates the
+selected-session scalar in the same transaction, and mutates only the affected in-memory location
+indexes. Three one-project / 5,000-session runs measured the complete dormant mutation plus layout
+at **32.40–35.69 ms (35.08 ms median)** and selected deletion at **12.65–15.12 ms (13.22 ms
+median)**. Their exact outline work was only 1.26–1.61 ms dormant and 0.83–0.90 ms selected; the
+same fixture's deliberate full-reload comparison remained about 121–133 ms. Against the prior
+exact-row-but-whole-store baseline of 160.03 ms dormant and 112.53 ms selected, the medians are
+roughly **78% and 88% lower**. The remaining ~30 ms cold dormant sample is the first durable SQLite
+write/model shift, not a logical-row walk; the warmed selected mutation itself is 4–6 ms.
 
 ## File pane stress target
 
@@ -2640,8 +2855,7 @@ and filtering runs at keystroke frequency. Their implementation-time gate is exp
 
 - command catalogs filter off-main, cancel superseded work, check cancellation during the pass,
   and hand the main actor at most 100 value rows for a virtual table;
-- workspace discovery uses `git ls-files -co --exclude-standard --deduplicate -z` once per
-  execution checkout,
+- workspace discovery uses `git ls-files -co --exclude-standard -z` once per execution checkout,
   never recursive enumeration per keystroke; the queue-confined index admits at most 100,000
   contained regular paths and 16 MiB of Git output, cancels superseded queued queries, and returns
   at most 64 relative references;

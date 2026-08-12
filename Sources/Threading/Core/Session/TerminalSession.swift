@@ -105,14 +105,29 @@ final class TerminalSession: NSObject {
             self.delegate?.terminalSession(self, didProduceOutputOf: byteCount)
         }
 
-        // Both halves of a bell, in the order they matter: heard, then noticed. The view no
+        // Both halves of a bell, in the order they matter: noticed, then heard. The view no
         // longer lets SwiftTerm beep for us (see `EmojiFixedTerminalView.bell`), so this is
-        // where the sound is decided — and it is decided separately from the activity edge,
-        // because a bell set to Off must still raise the session's hand in the sidebar.
+        // where the sound is decided — and it is decided *after* the edge, because the cause
+        // the delegate works out while recording it is what the sound is chosen by.
+        //
+        // The ring is this session's rather than the delegate's, so a conformer that says
+        // nothing still rings: nothing goes silent because somebody forgot to implement a
+        // method. It happens exactly once, in one place that knows both the session and the
+        // cause — which is also what lets a bell that was actually heard leave a note for the
+        // attention alert about to describe this same edge, so the pair does not sound twice.
+        // The note is left inside `TerminalBell`'s play step and read by
+        // `AttentionAlertCenter.stateAlertSound`; it flows this way, and not the other, because
+        // the ring below is synchronous while the alert's decision is a main-actor turn later.
+        // See `AudibleBellRegister`.
+        //
+        // The owner is this terminal's own identity rather than only its session, so a
+        // standalone terminal's bell resolves through *its* record and its project — a chat's
+        // and a shell drawer's still resolve through the conversation, and an ephemeral
+        // terminal through the app alone. See `SoundOwner`.
         terminalView.onBell = { [weak self] in
             guard let self else { return }
-            TerminalBell.ring()
-            self.delegate?.terminalSessionDidRingBell(self)
+            let cause = self.delegate?.terminalSessionDidReceiveBell(self)
+            TerminalBell.ring(cause: cause, owner: SoundOwner(self.identity))
         }
 
         terminalView.onMouseReportForwarded = { [weak self] in
@@ -503,6 +518,22 @@ final class TerminalSession: NSObject {
         }
     }
 
+    /// Whether a program other than this session's own command holds the terminal **right now**.
+    ///
+    /// The same judgement the title makes — a foreground process group that is not the session's
+    /// shell is a command running *in* the terminal rather than the thing the terminal is — and
+    /// deliberately not the same reading. `refreshForegroundProcess()` caches its answer for a
+    /// row that repaints once a second; this is asked at the byte, because a second-old answer
+    /// is not an answer about the bell that just arrived. Two syscalls, and only ever behind the
+    /// gate that says someone asked to hear the distinction.
+    func foregroundIsAnotherProgram() -> Bool {
+        guard isRunning, shellPid > 0 else { return false }
+        return ProcessUtility.foregroundProcessGroup(
+            ofPTY: ptyDescriptor,
+            shellPid: shellPid
+        ) != nil
+    }
+
     /// Re-reads which command owns the terminal, and retires a title whose owner has gone.
     ///
     /// Returns whether either answer moved, so a caller can repaint on the tick that changed
@@ -615,7 +646,12 @@ protocol TerminalSessionDelegate: AnyObject {
     )
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?)
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int)
-    func terminalSessionDidRingBell(_ session: TerminalSession)
+
+    /// A `BEL` arrived: record whatever activity edge it means, and answer why it rang.
+    ///
+    /// `nil` — the default, and the answer from every surface with no activity tracker — means
+    /// the delegate cannot say. The session rings either way.
+    func terminalSessionDidReceiveBell(_ session: TerminalSession) -> SoundEvent?
     func terminalSessionDidForwardMouseReport(_ session: TerminalSession)
 }
 
@@ -632,6 +668,6 @@ extension TerminalSessionDelegate {
     ) {}
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {}
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int) {}
-    func terminalSessionDidRingBell(_ session: TerminalSession) {}
+    func terminalSessionDidReceiveBell(_ session: TerminalSession) -> SoundEvent? { nil }
     func terminalSessionDidForwardMouseReport(_ session: TerminalSession) {}
 }

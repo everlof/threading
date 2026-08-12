@@ -99,7 +99,7 @@ extension GitReviewViewController {
 
     private var showsDiff: Bool {
         switch phase {
-        case .files, .commitDetail: return true
+        case .fileIndex, .files, .commitDetail: return true
         case .message, .commits: return false
         }
     }

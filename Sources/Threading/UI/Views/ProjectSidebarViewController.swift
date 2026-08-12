@@ -115,12 +115,32 @@ final class ProjectSidebarViewController: NSViewController {
         button.action = #selector(settingsClicked)
         return button
     }()
+    /// The global silence gate, at the band's trailing edge.
+    ///
+    /// One glyph, worn while it holds: the button's own selected state is the whole indication,
+    /// because a control that stops every sound the app can make and then looks exactly like it
+    /// did is the mystery-noise problem inverted. Pressing it writes one Boolean and no
+    /// override anywhere, so releasing it gives every scope back the answer it already had.
+    private lazy var silenceButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: SidebarDefaults.silenceSymbol,
+            accessibility: SidebarStrings.silenceSounds,
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.onPress = { [weak self] in self?.silenceClicked() }
+        return button
+    }()
     /// Settings is the sidebar's one standing destination. Surfaces that live in the *trailing*
     /// panel are opened from that panel — see `DisplayPaneController.newTabEntries(for:)` — so
     /// this column never carries a permanent door to something it does not show.
+    /// The trailing silence gate is not a counterexample: it opens nothing and goes nowhere,
+    /// it reports and changes one piece of the app's own live state, and the rule is about
+    /// destinations rather than about controls.
     // A non-release build carries its channel mark beside Settings — see `BuildChannelBadge`.
     private lazy var footer = PaneFooterView(
         leading: [settingsButton, BuildChannelBadge.make()].compactMap { $0 },
+        trailing: [silenceButton],
         margin: .paneEdge
     )
 
@@ -183,6 +203,10 @@ final class ProjectSidebarViewController: NSViewController {
     /// Builds the Theme submenu for the row menus; retained because the items target it.
     let themeMenuBuilder = ThemeMenuBuilder()
 
+    /// The same for the Sounds submenu, retained for the same reason: its rows carry a closure
+    /// back to it, and a builder made per menu would be gone before the first click.
+    let soundMenuBuilder = SoundMenuBuilder()
+
     /// The sidebar's ground, under every theme — see `applySidebarSurface`.
     private var themeBackdrop: SidebarBackdropView?
     private(set) var isSettingsMode = false
@@ -219,6 +243,12 @@ final class ProjectSidebarViewController: NSViewController {
     /// reached from a dozen call sites, including a notification posted from anywhere in the app.
     private var isReloading = false
     private var needsReloadAfterCurrent = false
+
+    /// The outline reports programmatic expansion through the same delegate methods as a user's
+    /// disclosure click. During a structural apply, `expandStandingRows` already owns the whole
+    /// descendant walk and persistence is already authoritative; letting the callback enter that
+    /// route again recursively enumerated the same large project a second time at cold launch.
+    private var isApplyingStandingExpansion = false
 
     /// Stable indexes over the rendered node objects. Row refresh and navigation are frequent;
     /// neither should allocate a flattened tree or recursively search thousands of unrelated
@@ -441,6 +471,7 @@ private extension ProjectSidebarViewController {
             footer.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
 
+        applySilenceState()
         _ = toasts
     }
 
@@ -475,6 +506,27 @@ private extension ProjectSidebarViewController {
         delegate?.projectSidebarDidToggleSettings(self)
     }
 
+    /// Toggles the gate and nothing else. The button is not set here: the setting's own change
+    /// event is what moves it, so this window, a second window, the Settings row and the menu
+    /// item all follow the same one signal rather than each other.
+    @objc private func silenceClicked() {
+        AppSettings.shared.silencesAllSounds.toggle()
+    }
+
+    /// Wears the gate's current state — filled and bordered while it holds, quiet otherwise —
+    /// and says which state that is in words the pointer and VoiceOver can both reach.
+    ///
+    /// Called on every settings change rather than only on the press, because the same Boolean
+    /// is written from three surfaces and a control that only followed its own presses would be
+    /// wrong the first time one of the other two was used.
+    private func applySilenceState() {
+        let silenced = AppSettings.shared.silencesAllSounds
+        silenceButton.isSelected = silenced
+        silenceButton.toolTip = silenced
+            ? SidebarStrings.silencedHint
+            : SidebarStrings.silenceSoundsHint
+    }
+
     private func observeStoreChanges() {
         appEvents.observe(ProjectsDidChange.self) { [weak self] change in
             self?.projectsDidChange(change)
@@ -501,6 +553,10 @@ private extension ProjectSidebarViewController {
         // so it takes its own route to a wholesale re-layout.
         appEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
             self?.applyTreeDensity()
+            // The footer's silence gate is written from three surfaces, so it follows the
+            // setting rather than its own press. It repaints only on a real change —
+            // `ThemedIconButton.isSelected` guards that for it.
+            self?.applySilenceState()
         }
     }
 
@@ -891,7 +947,7 @@ extension ProjectSidebarViewController {
         // branch keeps lone headings enabled. Rebuild that uncommon boundary rather than copy
         // the tree builder's grouping policy into the mutation path.
         if let branch = parent as? BranchGroupNode,
-           branch.sidebarChildren.count <= 2 {
+           branch.sidebarOutlineChildCount <= 2 {
             applyProjectStructureChange(projectID)
             return
         }
@@ -925,6 +981,9 @@ extension ProjectSidebarViewController {
             return
         }
 
+        // Begin the exact-path measurement only after every invariant that can choose the
+        // project-local fallback. Starting sooner made the cheap abandoned attempt overwrite
+        // the fallback's real tree/shape/adoption timings in the stress ledger.
         #if DEBUG
         let updateStarted = DispatchTime.now().uptimeNanoseconds
         var measuredUpdate = ProjectSidebarReloadPerformance()
@@ -1130,6 +1189,10 @@ extension ProjectSidebarViewController {
     /// already open does nothing — so this runs after every structural change and only the rows
     /// that just arrived actually move.
     private func expandStandingRows(animated: Bool, recursively: Bool = false) {
+        let wasApplyingStandingExpansion = isApplyingStandingExpansion
+        isApplyingStandingExpansion = true
+        defer { isApplyingStandingExpansion = wasApplyingStandingExpansion }
+
         let outline = animated ? outlineView.animator() : outlineView
 
         // Repository headings have no persisted disclosure state. A project can also be a root
@@ -2065,7 +2128,7 @@ private extension ProjectSidebarViewController {
         // As with a surface switch, process teardown follows the durable graph mutation. A store
         // refusal leaves every running chat and terminal untouched and still reachable.
         for session in project.sessions {
-            AgentRuntime.shared.discard(sessionID: session.id)
+            AgentRuntime.shared.discardDeletedSession(session.id)
         }
         ProjectTerminalRuntime.shared.discard(terminalsIn: project)
         reload()
@@ -2375,22 +2438,13 @@ extension ProjectSidebarViewController: NSOutlineViewDataSource {
 
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
         guard let item else { return rootNodes.count }
-
-        if let group = item as? RepoGroupNode { return group.projectNodes.count }
-        if let project = item as? ProjectNode { return project.childNodes.count }
-        if let branch = item as? BranchGroupNode { return branch.outlineChildCount }
-        if let session = item as? SessionNode { return session.childNodes.count }
-        return 0
+        return (item as? any SidebarOutlineNode)?.sidebarOutlineChildCount ?? 0
     }
 
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
         guard let item else { return rootNodes[index] }
-
-        if let group = item as? RepoGroupNode { return group.projectNodes[index] }
-        if let project = item as? ProjectNode { return project.childNodes[index] }
-        if let branch = item as? BranchGroupNode { return branch.outlineChild(at: index) }
-        if let session = item as? SessionNode { return session.childNodes[index] }
-        return rootNodes[index]
+        guard let node = item as? any SidebarOutlineNode else { return rootNodes[index] }
+        return node.sidebarOutlineChild(at: index)
     }
 
     /// A session is expandable only once something was forked from it, so the disclosure
@@ -2501,7 +2555,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         if let branchNode = item as? BranchGroupNode, let cell = view as? ProjectRowView {
             let hiddenItems = outlineView.isItemExpanded(branchNode)
                 ? 0
-                : branchNode.outlineChildCount
+                : branchNode.childNodes.count
 
             cell.configureAsBranch(
                 named: branchNode.branch,
@@ -2646,6 +2700,11 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     }
 
     func outlineViewItemDidExpand(_ notification: Notification) {
+        // `expandStandingRows` is the authoritative programmatic pass. AppKit synchronously
+        // reflects it here, but this callback is the *user* disclosure route: entering it would
+        // repeat descendant expansion and issue persistence work for state that already matches.
+        guard !isApplyingStandingExpansion else { return }
+
         if let branchNode = notification.userInfo?["NSObject"] as? BranchGroupNode {
             collapsedBranchKeys.remove(Self.branchKey(branchNode))
             reloadRow(for: branchNode)
@@ -2664,6 +2723,8 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     }
 
     func outlineViewItemDidCollapse(_ notification: Notification) {
+        guard !isApplyingStandingExpansion else { return }
+
         if let branchNode = notification.userInfo?["NSObject"] as? BranchGroupNode {
             collapsedBranchKeys.insert(Self.branchKey(branchNode))
             reloadRow(for: branchNode)
@@ -2756,6 +2817,7 @@ extension ProjectSidebarViewController {
                 ))
             ])),
             terminalThemeEntry(for: terminalID),
+            terminalSoundEntry(for: terminalID),
             .separator,
             .item(ThemedMenuItem(
                 title: L10n.string("Close Terminal"),
@@ -2793,6 +2855,8 @@ extension ProjectSidebarViewController {
         entries.append(projectIconEntry(row: row))
         if let projectID {
             entries.append(projectThemeEntry(for: projectID))
+            // Beside Theme, not beside Mute below it: presentation, not delivery.
+            entries.append(projectSoundEntry(for: projectID))
             entries.append(projectChangeRequestEntry(for: projectID))
             entries.append(projectMuteEntry(for: projectID, row: row))
         }

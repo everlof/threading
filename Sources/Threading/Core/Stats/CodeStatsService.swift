@@ -1,53 +1,154 @@
 import Foundation
-import os
 
-// MARK: - Code Stats Service
+// MARK: - Cache Persistence
 
-/// Keeps each project's code composition ready before anyone hovers.
+/// Applies exact reading updates on a utility queue and rewrites the rebuildable cache at most
+/// once per coalescing window.
 ///
-/// The shape is `ArtifactScanService`'s — cached findings drawn immediately, refreshed
-/// passively — but the economics are inverted: scc answers a whole repository in tens of
-/// milliseconds, so the cache exists for the *first* glance after launch and for machines
-/// with no scc at all, not to amortise an expensive walk.
+/// The main actor deliberately hands over only one small reading. Handing over its complete
+/// dictionary on every completion would keep the JSON work off-main, but retain each dictionary
+/// snapshot long enough to turn the next main-actor mutation into an O(projects) copy. The writer
+/// instead loads its own dictionary lazily on its queue, merges exact identities, and owns every
+/// later encode, atomic write, and read-back verification.
+final class ProjectStatsCacheWriter<Key, Value>: @unchecked Sendable
+where Key: Hashable & Codable & Sendable, Value: Codable & Sendable {
+
+    private let store: RecoverableFileStore<[Key: Value]>
+    private let cacheKind: String
+    private let coalescingInterval: TimeInterval
+    private let queue: DispatchQueue
+
+    /// Queue-confined state. The dictionary starts nil so the service's main-actor cache and this
+    /// writer never share copy-on-write storage after launch.
+    private var persistedValues: [Key: Value]?
+    private var pendingValues: [Key: Value] = [:]
+    private var pendingUpdateCount = 0
+    private var flushIsScheduled = false
+    private var completedWriteCount = 0
+    private var lastBatchSize = 0
+
+    init(
+        store: RecoverableFileStore<[Key: Value]>,
+        cacheKind: String,
+        coalescingInterval: TimeInterval,
+        queue: DispatchQueue? = nil
+    ) {
+        self.store = store
+        self.cacheKind = cacheKind
+        self.coalescingInterval = max(coalescingInterval, 0)
+        self.queue = queue ?? DispatchQueue(
+            label: "codes.threading.project-stats.cache.\(cacheKind)",
+            qos: .utility
+        )
+    }
+
+    /// O(1) at the caller: only the changed identity and its compact value cross the queue.
+    func schedule(_ value: Value, for key: Key) {
+        queue.async { [self] in
+            pendingValues[key] = value
+            pendingUpdateCount += 1
+            scheduleFlushIfNeeded()
+        }
+    }
+
+    private func scheduleFlushIfNeeded() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard !flushIsScheduled else { return }
+        flushIsScheduled = true
+        queue.asyncAfter(deadline: .now() + coalescingInterval) { [self] in
+            flushPendingValues()
+        }
+    }
+
+    private func flushPendingValues() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        flushIsScheduled = false
+        guard !pendingValues.isEmpty else { return }
+
+        var values = persistedValues ?? store.load(defaultValue: [:]).value
+        let updates = pendingValues
+        let updateCount = pendingUpdateCount
+        pendingValues.removeAll(keepingCapacity: true)
+        pendingUpdateCount = 0
+        for (key, value) in updates { values[key] = value }
+
+        let span = PerformanceRecorder.shared.begin(
+            "project-stats.cache-write",
+            category: "persistence",
+            metadata: [
+                "cache": cacheKind,
+                "entries": String(values.count),
+                "updates": String(updateCount)
+            ]
+        )
+        let saved = store.save(values)
+        persistedValues = values
+        completedWriteCount += 1
+        lastBatchSize = updateCount
+        span.end(metadata: ["result": saved ? "saved" : "failed"])
+    }
+
+    /// Deterministic seam for correctness and opt-in stress tests. Production relies on the
+    /// ordinary delayed flush because these files are fully rebuildable caches.
+    func flushForTesting(timeout: TimeInterval = 10) -> Bool {
+        let completed = DispatchSemaphore(value: 0)
+        queue.async { [self] in
+            flushPendingValues()
+            completed.signal()
+        }
+        return completed.wait(timeout: .now() + timeout) == .success
+    }
+
+    var completedWriteCountForTesting: Int { queue.sync { completedWriteCount } }
+    var lastBatchSizeForTesting: Int { queue.sync { lastBatchSize } }
+}
+
+// MARK: - Project Stats Service
+
+/// Keeps the cheap, glanceable facts for every project ready before anyone hovers.
 ///
-/// The freshest trigger is the same moment the branch is re-read: a session that just
-/// stopped working is a project whose code most likely just changed.
+/// Code composition and Git activity have separate caches, queues, and freshness clocks. A slow
+/// history read therefore cannot delay scc, and adding another bounded metric does not require a
+/// monolithic cache migration. Both refresh passively, on hover when aged, and when a session
+/// stops working — the point at which project facts most likely changed.
 @MainActor
-final class CodeStatsService {
+final class ProjectStatsService {
 
     // MARK: - Singleton
 
-    static let shared = CodeStatsService()
+    static let shared = ProjectStatsService()
 
     // MARK: - Types
 
-    /// One project's count, and when it was true.
-    struct ProjectReading: Codable {
+    struct CodeReading: Codable, Sendable {
         var measuredAt: Date
         var stats: CodeStats
     }
 
-    /// Whether scc exists on this machine.
-    ///
-    /// A miss carries when it was measured, because it is the one answer that goes stale by
-    /// the user's own hand: the popover names the install command, and a `brew install scc`
-    /// should start counting without a relaunch. `resolveTool` re-probes a stale miss.
-    private enum Tool {
-        case unresolved
-        case missing(lastChecked: Date)
-        case found(path: String)
+    /// `activity == nil` is a cached, successful "not a Git repository" result. A process
+    /// failure is not persisted, so a transient error can heal on the next refresh.
+    struct ActivityReading: Codable, Sendable {
+        var measuredAt: Date
+        var activity: ProjectActivity?
     }
 
     // MARK: - Properties
 
-    private var readings: [ProjectID: ProjectReading] = [:]
-    private var inFlight: Set<ProjectID> = []
+    private var codeReadings: [ProjectID: CodeReading]
+    private var activityReadings: [ProjectID: ActivityReading]
+    private var codeInFlight: Set<ProjectID> = []
+    private var activityInFlight: Set<ProjectID> = []
 
-    private let persistence: RecoverableFileStore<[ProjectID: ProjectReading]>
+    private let codePersistence: ProjectStatsCacheWriter<ProjectID, CodeReading>
+    private let activityPersistence: ProjectStatsCacheWriter<ProjectID, ActivityReading>
 
-    /// `.utility`, not `.background`: a count finishes in the time a hover dwell takes, so
-    /// it is allowed to be prompt — it is just never allowed to be waited on.
-    private let queue = DispatchQueue(label: "codes.threading.code-stats", qos: .utility)
+    /// Independent utility queues preserve prompt code counts without serializing them behind a
+    /// large repository's bounded Git history query. Neither is ever waited on by the main actor.
+    private let codeQueue = DispatchQueue(label: "codes.threading.project-stats.code", qos: .utility)
+    private let activityQueue = DispatchQueue(
+        label: "codes.threading.project-stats.activity",
+        qos: .utility
+    )
 
     private var passiveTimer: Timer?
 
@@ -58,7 +159,7 @@ final class CodeStatsService {
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(ProjectIconDefaults.applicationDirectoryName)
 
-        self.persistence = RecoverableFileStore(
+        let codeStore = RecoverableFileStore<[ProjectID: CodeReading]>(
             url: root.appendingPathComponent(CodeStatsDefaults.fileName),
             fileManager: fileManager,
             criticality: .rebuildableCache,
@@ -66,31 +167,48 @@ final class CodeStatsService {
             dateEncodingStrategy: .iso8601,
             dateDecodingStrategy: .iso8601
         )
-        self.readings = persistence.load(defaultValue: [:]).value
+        let activityStore = RecoverableFileStore<[ProjectID: ActivityReading]>(
+            url: root.appendingPathComponent(ProjectActivityDefaults.fileName),
+            fileManager: fileManager,
+            criticality: .rebuildableCache,
+            sizePolicy: .derivedCache,
+            dateEncodingStrategy: .iso8601,
+            dateDecodingStrategy: .iso8601
+        )
+        codeReadings = codeStore.load(defaultValue: [:]).value
+        activityReadings = activityStore.load(defaultValue: [:]).value
+        codePersistence = ProjectStatsCacheWriter(
+            store: codeStore,
+            cacheKind: "code",
+            coalescingInterval: CodeStatsDefaults.persistenceCoalescingInterval
+        )
+        activityPersistence = ProjectStatsCacheWriter(
+            store: activityStore,
+            cacheKind: "activity",
+            coalescingInterval: CodeStatsDefaults.persistenceCoalescingInterval
+        )
     }
 
     // MARK: - Reading
 
-    /// A project's last count, or nil if it never had one (or scc is not installed).
     func stats(for projectID: ProjectID) -> CodeStats? {
-        readings[projectID]?.stats
+        codeReadings[projectID]?.stats
     }
 
-    /// Whether the machine is known to have no scc — what turns the popover into the
-    /// install hint rather than silence. False while unresolved: "not looked yet" must not
-    /// read as "not installed".
-    var toolIsMissing: Bool {
-        toolCache.withLock { if case .missing = $0 { return true }; return false }
+    func codeMeasuredAt(for projectID: ProjectID) -> Date? {
+        codeReadings[projectID]?.measuredAt
     }
 
-    /// When a project was last counted — the reading's age is part of the reading.
-    func measuredAt(for projectID: ProjectID) -> Date? {
-        readings[projectID]?.measuredAt
+    func activity(for projectID: ProjectID) -> ProjectActivity? {
+        activityReadings[projectID]?.activity
+    }
+
+    func activityMeasuredAt(for projectID: ProjectID) -> Date? {
+        activityReadings[projectID]?.measuredAt
     }
 
     // MARK: - Refreshing
 
-    /// Starts the passive refresh, once, at launch.
     func startPassiveScanning() {
         guard passiveTimer == nil else { return }
 
@@ -109,63 +227,112 @@ final class CodeStatsService {
         }
     }
 
-    /// Recounts every project whose reading has aged past `staleAfter` and which is not busy.
     func refreshStaleProjects() {
         let now = Date()
         for project in ProjectStore.shared.projects {
-            let age = readings[project.id].map { now.timeIntervalSince($0.measuredAt) }
-            guard age.map({ $0 > CodeStatsDefaults.staleAfter }) ?? true else { continue }
-            refresh(project)
+            let codeIsStale = isAged(
+                codeReadings[project.id]?.measuredAt,
+                past: CodeStatsDefaults.staleAfter,
+                now: now
+            )
+            let activityIsStale = isAged(
+                activityReadings[project.id]?.measuredAt,
+                past: CodeStatsDefaults.staleAfter,
+                now: now
+            )
+            refresh(project, code: codeIsStale, activity: activityIsStale)
         }
     }
 
-    /// Recounts when the reading is missing or has aged past `hoverRefreshAfter` — the hover
-    /// entry point, which must not launch a process per pointer crossing.
+    /// Refreshes only readings missing or older than the hover threshold. Repeated pointer
+    /// crossings therefore never become repeated process launches.
     func refreshIfAged(_ project: Project) {
-        let age = readings[project.id].map { Date().timeIntervalSince($0.measuredAt) }
-        guard age.map({ $0 > CodeStatsDefaults.hoverRefreshAfter }) ?? true else { return }
-        refresh(project)
+        let now = Date()
+        refresh(
+            project,
+            code: isAged(
+                codeReadings[project.id]?.measuredAt,
+                past: CodeStatsDefaults.hoverRefreshAfter,
+                now: now
+            ),
+            activity: isAged(
+                activityReadings[project.id]?.measuredAt,
+                past: CodeStatsDefaults.hoverRefreshAfter,
+                now: now
+            )
+        )
     }
 
-    /// Recounts the project a session belongs to — called on the stopped-working edge,
-    /// which is when the code most recently changed.
     func refreshProject(forSessionID sessionID: SessionID) {
         guard let project = ProjectStore.shared.project(forSessionID: sessionID) else { return }
         refresh(project)
     }
 
-    /// Recounts one project.
-    ///
-    /// Declines while a session in it is working: not for the disk's sake — a count is
-    /// cheap — but because a tree mid-edit measures as neither the before nor the after.
     func refresh(_ project: Project, force: Bool = false) {
-        guard !inFlight.contains(project.id) else { return }
-        guard force || !isWorking(project) else { return }
+        refresh(project, code: true, activity: true, force: force)
+    }
 
-        inFlight.insert(project.id)
+    private func refresh(
+        _ project: Project,
+        code: Bool,
+        activity: Bool,
+        force: Bool = false
+    ) {
+        guard code || activity else { return }
+        guard force || !isWorking(project) else { return }
+        if code { refreshCode(project) }
+        if activity { refreshActivity(project) }
+    }
+
+    private func refreshCode(_ project: Project) {
+        guard !codeInFlight.contains(project.id) else { return }
+        codeInFlight.insert(project.id)
 
         let projectID = project.id
         let folderPath = project.folderPath
-        let shell = AgentLauncher.loginShellPath
-
-        queue.async { [weak self] in
-            let executable = self?.resolveTool(shell: shell)
-
-            guard let executable else {
-                Task { @MainActor in self?.inFlight.remove(projectID) }
-                return
-            }
-
-            let stats = CodeStatsRunner.measure(folder: folderPath, executable: executable)
+        codeQueue.async { [weak self] in
+            let stats = CodeStatsRunner.measure(folder: folderPath)
             let measuredAt = Date()
 
             Task { @MainActor in
                 guard let self else { return }
-                self.inFlight.remove(projectID)
+                self.codeInFlight.remove(projectID)
                 guard let stats else { return }
-                self.readings[projectID] = ProjectReading(measuredAt: measuredAt, stats: stats)
-                self.save()
-                NotificationCenter.default.post(CodeStatsDidChange(projectID: projectID))
+                let reading = CodeReading(measuredAt: measuredAt, stats: stats)
+                self.codeReadings[projectID] = reading
+                self.codePersistence.schedule(reading, for: projectID)
+                NotificationCenter.default.post(ProjectStatsDidChange(projectID: projectID))
+            }
+        }
+    }
+
+    private func refreshActivity(_ project: Project) {
+        guard !activityInFlight.contains(project.id) else { return }
+        activityInFlight.insert(project.id)
+
+        let projectID = project.id
+        let folderPath = project.folderPath
+        activityQueue.async { [weak self] in
+            let measurement = ProjectActivityRunner.measure(folder: folderPath)
+            let measuredAt = Date()
+
+            Task { @MainActor in
+                guard let self else { return }
+                self.activityInFlight.remove(projectID)
+                guard let measurement else { return }
+
+                let value: ProjectActivity?
+                switch measurement {
+                case .notRepository: value = nil
+                case .activity(let activity): value = activity
+                }
+                let reading = ActivityReading(
+                    measuredAt: measuredAt,
+                    activity: value
+                )
+                self.activityReadings[projectID] = reading
+                self.activityPersistence.schedule(reading, for: projectID)
+                NotificationCenter.default.post(ProjectStatsDidChange(projectID: projectID))
             }
         }
     }
@@ -176,40 +343,7 @@ final class CodeStatsService {
         project.sessions.contains { AgentRuntime.shared.activity(sessionID: $0.id) == .working }
     }
 
-    /// Resolves the binary on the scan queue — the login-shell probe is a subprocess, which
-    /// is nothing the main actor should sit behind. Serialised by the queue itself. A find
-    /// is kept for the app's run; a miss is re-probed once it ages past `missingReprobeAfter`,
-    /// which is how installing scc heals the feature without a relaunch.
-    private nonisolated func resolveTool(shell: String) -> String? {
-        let cached = toolCache.withLock { $0 }
-        switch cached {
-        case .found(let path):
-            return path
-        case .missing(let lastChecked)
-            where Date().timeIntervalSince(lastChecked) < CodeStatsDefaults.missingReprobeAfter:
-            return nil
-        case .missing, .unresolved:
-            let wasUnresolved = { if case .unresolved = cached { return true }; return false }()
-            let path = CodeStatsRunner.locate(shell: shell)
-            toolCache.withLock {
-                $0 = path.map { .found(path: $0) } ?? .missing(lastChecked: Date())
-            }
-
-            // The first miss is worth a line; the periodic re-probes repeating it are not.
-            if path == nil, wasUnresolved {
-                ThreadingLogger.agent.info("scc not found; code stats offer the install hint")
-            }
-            return path
-        }
-    }
-
-    /// The resolved location, readable off the main actor. Only the scan queue writes it.
-    private let toolCache = OSAllocatedUnfairLock(initialState: Tool.unresolved)
-
-    // MARK: - Persistence
-
-    /// Written whole, on every change — one summary line per language per project.
-    private func save() {
-        _ = persistence.save(readings)
+    private func isAged(_ date: Date?, past threshold: TimeInterval, now: Date) -> Bool {
+        date.map { now.timeIntervalSince($0) > threshold } ?? true
     }
 }

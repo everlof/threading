@@ -102,7 +102,7 @@ or a store.
 | `AgentWorkloadMonitor`, `LimitRecoveryCoordinator` | They watch live sessions; there are none |
 | `cleanupOrphanedHistoryFiles`, `clearLegacySessionState` | Both delete |
 | `ProjectIconDiscovery`, `CheckoutBranchFollower`, `SessionNaming.backfillLegacyNames` | All three write into the store or the support directory |
-| `AccountUsageMenu.prefetch`, `AccountEmailProbe`, `CodeStatsService` | Subprocesses and network for information nothing here shows |
+| `AccountUsageMenu.prefetch`, `AccountEmailProbe`, `ProjectStatsService` | Subprocesses and network for information nothing here shows |
 | `UsageWindowPoker` | It starts a real agent turn on a schedule, which is the clearest "automatic work" in the launch |
 | `RemoteAccessCoordinator`, `RemoteWorkspaceBridge` | A tunnel child and a socket, plus the seam a phone drives the window through |
 | `ArtifactScanService` | A disk survey |

@@ -534,6 +534,12 @@ final class GitTurnBaselineStore {
     /// until its refs are successfully removed, making a failed cleanup retryable rather than
     /// stranding untracked app-owned refs with no record of their repository.
     func remove(sessionID: SessionID) {
+        let span = PerformanceRecorder.shared.begin(
+            "sidebar.session-remove.git-checkpoints",
+            category: "sidebar"
+        )
+        defer { span.end() }
+
         archive.nextOrdinalBySession.removeValue(forKey: sessionID.uuidString)
         activeCheckpointIDs.removeValue(forKey: sessionID)
         generations[sessionID] = (generations[sessionID] ?? 0) + 1
@@ -640,8 +646,15 @@ final class GitTurnBaselineStore {
 
     @discardableResult
     private func saveAndNotify(_ sessionID: SessionID) -> Bool {
+        saveAndNotify([sessionID])
+    }
+
+    @discardableResult
+    private func saveAndNotify(_ sessionIDs: Set<SessionID>) -> Bool {
         let saved = persistence.save(archive)
-        NotificationCenter.default.post(GitTurnCheckpointsDidChange(sessionID: sessionID))
+        for sessionID in sessionIDs {
+            NotificationCenter.default.post(GitTurnCheckpointsDidChange(sessionID: sessionID))
+        }
         return saved
     }
 
@@ -827,12 +840,21 @@ final class GitTurnBaselineStore {
     }
 
     private func discard(checkpointIDs: [GitTurnCheckpointID]) {
+        struct RefBatch {
+            let root: URL
+            var records: [GitTurnCheckpoint] = []
+            var refs: [String] = []
+        }
+
+        var metadataOnly: [GitTurnCheckpoint] = []
+        var batchesByRepository: [String: RefBatch] = [:]
+
         for checkpointID in checkpointIDs where !garbageCollectionsInFlight.contains(checkpointID) {
             guard let record = checkpoint(id: checkpointID),
                   activeCheckpointIDs[record.sessionID] != checkpointID else { continue }
             let refs = [record.beforeRef, record.afterRef].compactMap { $0 }
             guard !refs.isEmpty else {
-                removeMetadata(checkpointID, sessionID: record.sessionID)
+                metadataOnly.append(record)
                 continue
             }
             guard let repositoryIdentity = record.repositoryIdentity,
@@ -843,29 +865,45 @@ final class GitTurnBaselineStore {
                 continue
             }
 
-            garbageCollectionsInFlight.insert(checkpointID)
+            var batch = batchesByRepository[repositoryIdentity] ?? RefBatch(root: root)
+            batch.records.append(record)
+            batch.refs.append(contentsOf: refs)
+            batchesByRepository[repositoryIdentity] = batch
+        }
+
+        // Checkpoints that never admitted refs are a metadata edit, not one document rewrite per
+        // checkpoint. This path is common when a session is removed while captures are pending.
+        if !metadataOnly.isEmpty {
+            let ids = Set(metadataOnly.map(\.id))
+            archive.checkpoints.removeAll { ids.contains($0.id) }
+            _ = saveAndNotify(Set(metadataOnly.map(\.sessionID)))
+        }
+
+        // `git update-ref --stdin` already accepts a batch. Grouping by repository turns a
+        // 50-turn session deletion from 50 child processes and 50 archive rewrites into one of
+        // each, while metadata still remains durable until every owned ref in the batch is gone.
+        for (repositoryIdentity, batch) in batchesByRepository {
+            let ids = Set(batch.records.map(\.id))
+            let sessionIDs = Set(batch.records.map(\.sessionID))
+            garbageCollectionsInFlight.formUnion(ids)
             GitReviewReader.deleteCheckpointRefs(
-                refs,
+                batch.refs,
                 expectedRepositoryIdentity: repositoryIdentity,
-                in: root
+                in: batch.root
             ) { [weak self] result in
                 guard let self else { return }
-                self.garbageCollectionsInFlight.remove(checkpointID)
+                self.garbageCollectionsInFlight.subtract(ids)
                 switch result {
                 case .success:
-                    self.removeMetadata(checkpointID, sessionID: record.sessionID)
+                    self.archive.checkpoints.removeAll { ids.contains($0.id) }
+                    _ = self.saveAndNotify(sessionIDs)
                 case .failure(let failure):
                     ThreadingLogger.git.error(
-                        "Checkpoint garbage collection failed for \(checkpointID.uuidString, privacy: .public): \(failure.localizedDescription, privacy: .private(mask: .hash))"
+                        "Checkpoint garbage collection failed for \(ids.count, privacy: .public) records: \(failure.localizedDescription, privacy: .private(mask: .hash))"
                     )
                 }
             }
         }
-    }
-
-    private func removeMetadata(_ checkpointID: GitTurnCheckpointID, sessionID: SessionID) {
-        archive.checkpoints.removeAll { $0.id == checkpointID }
-        _ = saveAndNotify(sessionID)
     }
 
     private func discardRefOnly(

@@ -100,6 +100,13 @@ final class ScheduledMessageNotifier {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
+        // Silent by default, which is what this banner has always been — but silent as an
+        // *answer* now rather than as an omission, so the event can be given a sound in the
+        // one place every other sound is chosen. The global silence gate answers in that same
+        // place, so a gated banner arrives with no sound and is otherwise unchanged.
+        content.sound = SoundResolution
+            .sound(for: .alertScheduledMessage, sessionID: sessionID)
+            .notificationSound()
         if let sessionID {
             content.userInfo = [ScheduledNotifierDefaults.sessionKey: sessionID.uuidString]
         }

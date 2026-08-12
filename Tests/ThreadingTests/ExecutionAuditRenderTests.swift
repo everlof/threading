@@ -26,8 +26,12 @@ final class ExecutionAuditRenderTests: XCTestCase {
 
         static let themes: [(String, AppTheme)] = [
             ("system", .system),
+            ("threading", AppThemeStyles.threading),
             ("cyberpunk", AppThemeStyles.cyberpunk),
-            ("swiss", AppThemeStyles.swissMinimalist)
+            ("swiss", AppThemeStyles.swissMinimalist),
+            ("neo-brutalism", AppThemeStyles.neoBrutalism),
+            ("claymorphism", AppThemeStyles.claymorphism),
+            ("vaporwave", AppThemeStyles.vaporwave)
         ]
     }
 
@@ -56,7 +60,17 @@ final class ExecutionAuditRenderTests: XCTestCase {
                     browser: browser,
                     store: fixture.store
                 )
-                let window = makeWindow(controller: controller, appearance: appearance)
+                let chromeHost: WindowChromeHostViewController?
+                let windowController: NSViewController
+                if theme.id == AppThemeStyles.threading.id, appearanceName == "dark" {
+                    let host = WindowChromeHostViewController(workspace: controller)
+                    chromeHost = host
+                    windowController = host
+                } else {
+                    chromeHost = nil
+                    windowController = controller
+                }
+                let window = makeWindow(controller: windowController, appearance: appearance)
                 defer { window.close() }
 
                 let categoryFilter = try XCTUnwrap(view(
@@ -79,6 +93,22 @@ final class ExecutionAuditRenderTests: XCTestCase {
                     named: "execution-audit-\(themeName)-\(appearanceName).png"
                 )
                 written += 1
+
+                if let chromeHost {
+                    chromeHost.setTitle("Threading")
+                    chromeHost.setTakeoverActive(true)
+                    chromeHost.bandView.fixtureIsKey = true
+                    chromeHost.commandBandView.setLeadingControls(makeWindowControls())
+                    chromeHost.view.layoutSubtreeIfNeeded()
+                    window.displayIfNeeded()
+                    try write(
+                        snapshot(window: window, appearance: appearance),
+                        named: "execution-audit-threading-chrome-dark.png"
+                    )
+                    written += 1
+                    chromeHost.setTakeoverActive(false)
+                    chromeHost.view.layoutSubtreeIfNeeded()
+                }
 
                 controller.setMode(.browserSplit)
                 let loaded = expectation(description: "fixture page loaded")
@@ -104,8 +134,32 @@ final class ExecutionAuditRenderTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(written, 12)
+        XCTAssertEqual(written, Render.themes.count * Render.appearances.count * 2 + 1)
         print("Rendered execution audit storybook to \(Render.directory.path)")
+    }
+
+    /// The product capture uses the same command controls as MainWindowController. They remain
+    /// inert here because this fixture verifies the real chrome and audit composition, not window
+    /// navigation behavior, which has its own controller tests.
+    private func makeWindowControls() -> [NSView] {
+        let sidebar = ThemedIconButton(
+            symbolName: "sidebar.leading",
+            accessibility: L10n.string("Show or hide sidebar"),
+            inkSource: .chrome
+        )
+        let back = ThemedIconButton(
+            symbolName: "chevron.left",
+            accessibility: L10n.string("Go back"),
+            inkSource: .chrome
+        )
+        back.isEnabled = false
+        let forward = ThemedIconButton(
+            symbolName: "chevron.right",
+            accessibility: L10n.string("Go forward"),
+            inkSource: .chrome
+        )
+        forward.isEnabled = false
+        return [sidebar, back, forward]
     }
 
     private func makeFixture() throws -> (
@@ -175,7 +229,7 @@ final class ExecutionAuditRenderTests: XCTestCase {
             provider: nil,
             operation: "browser_navigate",
             callID: "browser-1",
-            input: .object(["url": .string("https://example.test/checkout")]),
+            input: .object(["url": .string("https://threading.codes/")]),
             fidelity: .exact
         )
         store.recordToolResult(
@@ -184,7 +238,7 @@ final class ExecutionAuditRenderTests: XCTestCase {
             provider: nil,
             operation: "browser_navigate",
             callID: "browser-1",
-            output: .object(["ok": .bool(true), "title": .string("Review order")]),
+            output: .object(["ok": .bool(true), "title": .string("Threading")]),
             isError: false,
             fidelity: .exact
         )
@@ -205,7 +259,8 @@ final class ExecutionAuditRenderTests: XCTestCase {
             callID: "browser-2",
             output: .object([
                 "elements": .array([
-                    .object(["ref": .string("e12"), "role": .string("button"), "name": .string("Continue")])
+                    .object(["ref": .string("e12"), "role": .string("link"), "name": .string("Themes")]),
+                    .object(["ref": .string("e19"), "role": .string("link"), "name": .string("GitHub")])
                 ])
             ]),
             isError: false,
@@ -218,7 +273,7 @@ final class ExecutionAuditRenderTests: XCTestCase {
             category: .permission,
             phase: .requested,
             operation: "permission.request",
-            input: .object(["tool": .string("browser_click"), "target": .string("button Continue")]),
+            input: .object(["tool": .string("browser_click"), "target": .string("link Themes")]),
             fidelity: .exact
         )
         store.append(
@@ -246,7 +301,7 @@ final class ExecutionAuditRenderTests: XCTestCase {
             provider: nil,
             operation: "browser_click",
             callID: "browser-3",
-            output: .object(["ok": .bool(true), "url": .string("https://example.test/payment")]),
+            output: .object(["ok": .bool(true), "url": .string("https://threading.codes/themes")]),
             isError: false,
             fidelity: .exact
         )
@@ -254,9 +309,31 @@ final class ExecutionAuditRenderTests: XCTestCase {
             sessionID: sessionID,
             source: .threadingMCP,
             provider: nil,
-            operation: "browser_type",
+            operation: "browser_snapshot",
             callID: "browser-4",
-            input: .object(["ref": .string("e19"), "text": .string("private@example.com")]),
+            input: .object(["interactive": .bool(true), "compact": .bool(true)]),
+            fidelity: .exact
+        )
+        store.recordToolResult(
+            sessionID: sessionID,
+            source: .threadingMCP,
+            provider: nil,
+            operation: "browser_snapshot",
+            callID: "browser-4",
+            output: .object([
+                "page": .object([
+                    "title": .string("Threading themes"),
+                    "url": .string("https://threading.codes/themes"),
+                    "heading": .string("One view. A completely different feel.")
+                ]),
+                "elements": .array([
+                    .object(["ref": .string("e31"), "role": .string("link"), "name": .string("Product")]),
+                    .object(["ref": .string("e32"), "role": .string("link"), "name": .string("Extensions")]),
+                    .object(["ref": .string("e33"), "role": .string("link"), "name": .string("Themes")]),
+                    .object(["ref": .string("e34"), "role": .string("link"), "name": .string("Compare")])
+                ])
+            ]),
+            isError: false,
             fidelity: .exact
         )
 

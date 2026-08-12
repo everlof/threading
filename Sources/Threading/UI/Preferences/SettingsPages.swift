@@ -164,6 +164,12 @@ enum SettingsPages {
                 // The bell has its own words: nobody searching for the noise a TUI makes types
                 // "notifications", and "beep" is what they will have called it.
                 "bell", "beep", "terminal bell", "alert sound",
+                // The gate covers both kinds, so it answers to neither one's words.
+                "silence", "silence sounds",
+                // The per-event tier and the list of what has already been given a sound.
+                // Somebody hunting a mystery noise types the noise's words, not the page's.
+                "custom sounds", "per-event sounds", "customize events", "override",
+
                 "confirmations", "don't ask again", "ask before", "opening message",
                 "first message", "instructions", "conversation speed", "fast mode",
                 "standard mode", "service tier", "credits",

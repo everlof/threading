@@ -37,6 +37,7 @@ struct MobileIssueReportView: View {
     @State private var sharePayload: DiagnosticsSharePayload?
     @State private var exportError: String?
     @State private var notice: Notice?
+    @FocusState private var reporterNoteIsFocused: Bool
 
     private enum ActiveAction: Equatable {
         case publicReport
@@ -61,6 +62,8 @@ struct MobileIssueReportView: View {
             Form {
                 Section {
                     TextEditor(text: $reporterNote)
+                        .focused($reporterNoteIsFocused)
+                        .mobileUIEvidenceKeyboardFocus($reporterNoteIsFocused)
                         .frame(minHeight: 110)
                         .overlay(alignment: .topLeading) {
                             if reporterNote.isEmpty {
@@ -159,11 +162,7 @@ struct MobileIssueReportView: View {
                             Spacer()
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.roundedRectangle(radius: 14))
-                    .controlSize(.large)
-                    .tint(theme.accent)
-                    .foregroundStyle(theme.ground)
+                    .buttonStyle(MobileReportActionButtonStyle(kind: .primary, theme: theme))
                     .disabled(!canSend || activeAction != nil)
 
                     HStack(spacing: 10) {
@@ -185,9 +184,7 @@ struct MobileIssueReportView: View {
                                 .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity)
                             }
-                            .buttonStyle(.bordered)
-                            .buttonBorderShape(.roundedRectangle(radius: 12))
-                            .controlSize(.large)
+                            .buttonStyle(MobileReportActionButtonStyle(kind: .secondary, theme: theme))
                             .frame(maxWidth: .infinity)
                             .disabled(!canSend || activeAction != nil)
                         }
@@ -209,9 +206,7 @@ struct MobileIssueReportView: View {
                             .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
-                        .buttonBorderShape(.roundedRectangle(radius: 12))
-                        .controlSize(.large)
+                        .buttonStyle(MobileReportActionButtonStyle(kind: .secondary, theme: theme))
                         .frame(maxWidth: .infinity)
                         .disabled(activeAction != nil)
                     }
@@ -298,11 +293,20 @@ struct MobileIssueReportView: View {
         activeAction = .publicReport
         Task { @MainActor in
             defer { activeAction = nil }
+            MobileDiagnostics.record(.issueReportSubmissionStarted, fields: [
+                .reason: request.trigger.rawValue,
+                .surface: "developerInbox",
+            ])
             do {
-                let submission = try makeSubmission(destination: "public")
+                let submission = try makeSubmission(destination: "developerInbox")
                 let result = try await MobileIssueReportOutbox.shared.enqueueAndDeliver(submission)
                 switch result {
                 case .delivered(let receipt):
+                    MobileDiagnostics.record(.issueReportSubmissionSucceeded, fields: [
+                        .reason: request.trigger.rawValue,
+                        .result: "delivered",
+                        .surface: "developerInbox",
+                    ])
                     notice = Notice(
                         title: MobileL10n.string("Report received"),
                         message: MobileL10n.string(
@@ -312,6 +316,15 @@ struct MobileIssueReportView: View {
                         dismissReport: true
                     )
                 case .queued:
+                    MobileDiagnostics.record(
+                        .issueReportSubmissionDeferred,
+                        level: .warning,
+                        fields: [
+                            .reason: request.trigger.rawValue,
+                            .result: "queued",
+                            .surface: "developerInbox",
+                        ]
+                    )
                     notice = Notice(
                         title: MobileL10n.string("Report saved"),
                         message: MobileL10n.string(
@@ -322,6 +335,15 @@ struct MobileIssueReportView: View {
                     )
                 }
             } catch {
+                MobileDiagnostics.record(
+                    .issueReportSubmissionFailed,
+                    level: .error,
+                    fields: [
+                        .reason: request.trigger.rawValue,
+                        .result: "failed",
+                        .surface: "developerInbox",
+                    ]
+                )
                 MobileDiagnostics.logFailure(.issueReportDelivery, error: error)
                 notice = Notice(
                     title: MobileL10n.string("Couldn’t send report"),
@@ -346,6 +368,8 @@ struct MobileIssueReportView: View {
                     accountHandle: destination.accountHandle,
                     model: nil,
                     reasoningEffort: nil,
+                    fastMode: nil,
+                    permissionMode: nil,
                     surface: "terminal",
                     prompt: prompt
                 )
@@ -529,8 +553,8 @@ private extension String {
 }
 
 private extension UIImage {
-    /// Produces a layout-readable preview small enough to live in a private issue's machine
-    /// payload. The system Share action remains the route for the original lossless PNG.
+    /// Produces a layout-readable preview small enough for the private intake. The system Share
+    /// action remains the route for the original lossless PNG.
     func publicReportPreview(maximumBytes: Int) -> Data? {
         let longestSide = max(size.width, size.height)
         guard longestSide > 0 else { return nil }
@@ -564,8 +588,8 @@ fileprivate enum MobileIssueReportDeliveryResult {
 
 /// A disk-backed handoff between the consent screen and the public intake.
 ///
-/// Files are written before the request starts. A response lost after GitHub accepted the report
-/// is safe to retry because the server keys the operation by `submission.id`.
+/// Files are written before the request starts. A response lost after the private intake accepted
+/// the report is safe to retry because the server keys the operation by `submission.id`.
 actor MobileIssueReportOutbox {
     static let shared = MobileIssueReportOutbox()
 
@@ -573,7 +597,6 @@ actor MobileIssueReportOutbox {
     private static let maximumDirectoryEntries = maximumPendingReports * 4
     private let directory: URL
     private let endpoint: URL
-    private let intakeToken: String?
     private var activeReportIDs: Set<String> = []
 
     init(
@@ -590,11 +613,7 @@ actor MobileIssueReportOutbox {
         ) as? String
         self.endpoint = endpoint
             ?? configuredEndpoint.flatMap { $0.isEmpty ? nil : URL(string: $0) }
-            ?? URL(string: "https://threading.codes/api/reports")!
-        let configuredToken = Bundle.main.object(
-            forInfoDictionaryKey: "ThreadingReportIntakeToken"
-        ) as? String
-        intakeToken = configuredToken.flatMap { $0.isEmpty ? nil : $0 }
+            ?? URL(string: "https://remote.threading.codes/v1/reports")!
     }
 
     fileprivate func enqueueAndDeliver(
@@ -666,6 +685,14 @@ actor MobileIssueReportOutbox {
                 } catch {
                     MobileDiagnostics.logFailure(.issueReportDelivery, error: error)
                 }
+            } catch let error as MobileIssueReportError where !error.shouldRemainQueued {
+                MobileDiagnostics.logFailure(.issueReportDelivery, error: error)
+                do {
+                    try FileManager.default.removeItem(at: url)
+                } catch {
+                    MobileDiagnostics.logFailure(.issueReportDelivery, error: error)
+                }
+                continue
             } catch {
                 MobileDiagnostics.logDegraded(.issueReportDelivery, error: error)
                 return
@@ -692,9 +719,6 @@ actor MobileIssueReportOutbox {
         request.httpBody = try JSONEncoder().encode(submission)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(submission.id, forHTTPHeaderField: "Idempotency-Key")
-        if let intakeToken {
-            request.setValue("Bearer \(intakeToken)", forHTTPHeaderField: "Authorization")
-        }
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -1043,5 +1067,30 @@ enum MobileScreenCapture {
         return renderer.image { _ in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
+    }
+}
+private struct MobileReportActionButtonStyle: ButtonStyle {
+    enum Kind { case primary, secondary }
+
+    let kind: Kind
+    let theme: RemoteThemePalette
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity, minHeight: MobileDesign.Size.dialogActionHeight)
+            .foregroundStyle(kind == .primary ? theme.ground : theme.label)
+            .background(
+                kind == .primary ? theme.accent : theme.controlResting,
+                in: RoundedRectangle(cornerRadius: theme.controlRadius)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: theme.controlRadius)
+                    .stroke(
+                        kind == .primary ? Color.clear : theme.border,
+                        lineWidth: theme.borderWidth
+                    )
+            }
+            .opacity(isEnabled ? (configuration.isPressed ? 0.78 : 1) : 0.42)
     }
 }

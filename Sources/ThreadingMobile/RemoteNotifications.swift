@@ -261,6 +261,15 @@ final class ThreadingMobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
 }
 
 #if DEBUG
+extension Notification.Name {
+    static let mobileUIEvidenceFocusRequested = Notification.Name(
+        "ThreadingMobileUIEvidenceFocusRequested"
+    )
+    static let mobileUIEvidenceDismissRequested = Notification.Name(
+        "ThreadingMobileUIEvidenceDismissRequested"
+    )
+}
+
 /// Captures deterministic, app-only simulator evidence for the browsable iOS catalogue.
 ///
 /// The host script never guesses that a launch is ready. This coordinator renders the real key
@@ -273,6 +282,9 @@ private enum MobileUIEvidenceCapture {
         static let run = "THREADING_MOBILE_UI_EVIDENCE_RUN"
         static let identifier = "THREADING_MOBILE_UI_EVIDENCE_ID"
         static let demo = "THREADING_MOBILE_DEMO"
+        static let keyboardState = "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_STATE"
+        static let captureMode = "THREADING_MOBILE_UI_EVIDENCE_CAPTURE_MODE"
+        static let keyboardLayout = "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_LAYOUT"
     }
 
     private enum Contract {
@@ -297,6 +309,9 @@ private enum MobileUIEvidenceCapture {
         let run: String
         let identifier: String
         let demo: String
+        let keyboardState: KeyboardState?
+        let captureMode: CaptureMode
+        let keyboardLayout: KeyboardLayoutContract
 
         static func current() -> Request? {
             let environment = ProcessInfo.processInfo.environment
@@ -307,7 +322,13 @@ private enum MobileUIEvidenceCapture {
             return Request(
                 run: run,
                 identifier: identifier,
-                demo: environment[Environment.demo] ?? "standard"
+                demo: environment[Environment.demo] ?? "standard",
+                keyboardState: environment[Environment.keyboardState]
+                    .flatMap(KeyboardState.init(rawValue:)),
+                captureMode: environment[Environment.captureMode]
+                    .flatMap(CaptureMode.init(rawValue:)) ?? .app,
+                keyboardLayout: environment[Environment.keyboardLayout]
+                    .flatMap(KeyboardLayoutContract.init(rawValue:)) ?? .frame
             )
         }
 
@@ -331,6 +352,32 @@ private enum MobileUIEvidenceCapture {
         let pixelHeight: Int
         let sampleCount: Int
         let stabilized: Bool
+        let keyboardState: String?
+        let checks: [String: Bool]
+    }
+
+    /// A semantic keyboard state from the evidence manifest. The capture coordinator drives the
+    /// real first editable control instead of asking each fixture to grow its own timer and focus
+    /// implementation.
+    private enum KeyboardState: String {
+        case closed
+        case open
+        case dismissedAfterOpen = "dismissed-after-open"
+    }
+
+    /// App captures prove static pixel stability. Display captures are reserved for OS-owned
+    /// pixels such as the software keyboard, whose caret and suggestion views are intentionally
+    /// animated and cannot satisfy an app-window pixel comparison.
+    private enum CaptureMode: String {
+        case app
+        case display
+    }
+
+    /// Fixed composers recover their whole frame. A platform Form editor can retain a different
+    /// private text-container width after focus while its visible row remains correctly anchored.
+    private enum KeyboardLayoutContract: String {
+        case frame
+        case origin
     }
 
     static var isRequested: Bool { Request.current() != nil }
@@ -359,33 +406,56 @@ private enum MobileUIEvidenceCapture {
                 return
             }
 
-            var previous: Data?
-            var last: Data?
-            var stableCount = 0
-            var sampleCount = 0
-            var stabilized = false
+            let keyboardChecks = try await prepareKeyboard(
+                request.keyboardState,
+                layoutContract: request.keyboardLayout,
+                in: window
+            )
 
-            while sampleCount < Contract.maximumSamples, !Task.isCancelled {
-                try await Task.sleep(for: Contract.sampleInterval)
+            let last: Data
+            let sampleCount: Int
+            let stabilized: Bool
+            if request.captureMode == .display {
+                // The host captures the complete Simulator display after this marker appears.
+                // By this point the keyboard contract above has proved readiness, so waiting for
+                // the blinking UIKit caret to become pixel-identical would only add fragility.
+                try await Task.sleep(for: .milliseconds(200))
                 window.layoutIfNeeded()
-                let data = try png(of: window)
-                sampleCount += 1
-                last = data
+                last = try png(of: window)
+                sampleCount = 1
+                stabilized = true
+            } else {
+                var previous: Data?
+                var latest: Data?
+                var stableCount = 0
+                var samples = 0
+                var reachedStability = false
 
-                if data == previous {
-                    stableCount += 1
-                } else {
-                    stableCount = 1
-                    previous = data
+                while samples < Contract.maximumSamples, !Task.isCancelled {
+                    try await Task.sleep(for: Contract.sampleInterval)
+                    window.layoutIfNeeded()
+                    let data = try png(of: window)
+                    samples += 1
+                    latest = data
+
+                    if data == previous {
+                        stableCount += 1
+                    } else {
+                        stableCount = 1
+                        previous = data
+                    }
+                    if samples >= Contract.minimumSamples,
+                       stableCount >= Contract.stableSamplesRequired {
+                        reachedStability = true
+                        break
+                    }
                 }
-                if sampleCount >= Contract.minimumSamples,
-                   stableCount >= Contract.stableSamplesRequired {
-                    stabilized = true
-                    break
-                }
+                guard let latest else { return }
+                last = latest
+                sampleCount = samples
+                stabilized = reachedStability
             }
 
-            guard let last else { return }
             try last.write(to: imageURL, options: .atomic)
             let scale = window.screen.scale
             let marker = Marker(
@@ -399,7 +469,9 @@ private enum MobileUIEvidenceCapture {
                 pixelWidth: Int((window.bounds.width * scale).rounded()),
                 pixelHeight: Int((window.bounds.height * scale).rounded()),
                 sampleCount: sampleCount,
-                stabilized: stabilized
+                stabilized: stabilized,
+                keyboardState: request.keyboardState?.rawValue,
+                checks: keyboardChecks
             )
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -407,8 +479,321 @@ private enum MobileUIEvidenceCapture {
         } catch {
             // Absence of the marker is the failure contract. The host retains stdout/stderr and
             // reports the exact fixture whose app-owned capture did not complete.
+            let failureURL = directory.appendingPathComponent(
+                "\(request.identifier).failure.txt"
+            )
+            try? "UI evidence failed: \(String(reflecting: error))\n".write(
+                to: failureURL,
+                atomically: true,
+                encoding: .utf8
+            )
             return
         }
+    }
+
+    private static func prepareKeyboard(
+        _ state: KeyboardState?,
+        layoutContract: KeyboardLayoutContract,
+        in window: UIWindow
+    ) async throws -> [String: Bool] {
+        guard let state else { return [:] }
+        let keyboard = KeyboardVisibilityObserver(window: window)
+
+        // SwiftUI may still be mounting its platform text control when the scene becomes key.
+        // Poll the shipping hierarchy rather than sleeping for a device-dependent magic delay.
+        guard let editor = await waitForEditableControl(in: window) else {
+            throw EvidenceError.editableControlMissing(editableHierarchy(in: window))
+        }
+
+        if let responder = firstResponder(in: window) {
+            _ = responder.resignFirstResponder()
+            window.endEditing(true)
+            _ = await waitUntil { firstResponder(in: window) == nil }
+        }
+        let baselineFrame = await stableFrame(of: editor, in: window)
+        let baselineSafeArea = window.safeAreaInsets
+
+        if state == .closed {
+            return [
+                "keyboardHidden": firstResponder(in: window) == nil,
+                "noFirstResponder": firstResponder(in: window) == nil,
+            ]
+        }
+
+        var didFocusThroughView = false
+        for _ in 0..<10 where !didFocusThroughView {
+            NotificationCenter.default.post(
+                name: .mobileUIEvidenceFocusRequested,
+                object: window
+            )
+            didFocusThroughView = await waitUntil({ editor.isFirstResponder }, attempts: 2)
+        }
+        if !didFocusThroughView {
+            // UIKit-owned editors (the native conversation and SwiftTerm) do not need a SwiftUI
+            // focus binding. Focus them directly after giving a SwiftUI host one bounded chance
+            // to handle the semantic request.
+            if let field = editor as? UITextField {
+                field.isEnabled = true
+                field.isUserInteractionEnabled = true
+            }
+            guard editor.becomeFirstResponder() else {
+                throw EvidenceError.editorRejectedFocus
+            }
+            editor.reloadInputViews()
+        }
+        guard await waitUntil({ keyboard.isVisible }) else {
+            throw EvidenceError.keyboardDidNotShow
+        }
+        window.layoutIfNeeded()
+
+        var checks = [
+            "editorFocused": editor.isFirstResponder,
+            "keyboardShown": keyboard.isVisible,
+            "keyboardShownOnce": keyboard.didShow,
+        ]
+        if state == .open {
+            return checks
+        }
+
+        NotificationCenter.default.post(
+            name: .mobileUIEvidenceDismissRequested,
+            object: window
+        )
+        // Let SwiftUI commit FocusState=false before touching UIKit. Resigning the platform
+        // editor in the same synchronous turn leaves SwiftUI's previous `true` transaction as
+        // the winner on complex containers such as Form, which immediately reopens the keyboard.
+        // `endEditing` remains a bounded fallback for UIKit-owned editors with no FocusState.
+        if !(await waitUntil({ firstResponder(in: window) == nil }, attempts: 20)) {
+            window.endEditing(true)
+        }
+        guard await waitUntil({ !keyboard.isVisible }) else {
+            throw EvidenceError.keyboardDidNotHide
+        }
+        guard await waitUntil({ firstResponder(in: window) == nil }) else {
+            throw EvidenceError.editorKeptFocus
+        }
+        // Keyboard animations and a SwiftUI Form's scroll transaction do not necessarily finish
+        // in the same frame. Poll the actual pre-keyboard geometry instead of baking an animation
+        // duration into the evidence contract.
+        let editorLayoutRestored = await waitUntil({
+            window.layoutIfNeeded()
+            let frame = editor.convert(editor.bounds, to: window)
+            switch layoutContract {
+            case .frame:
+                return approximatelyEqual(frame, baselineFrame)
+            case .origin:
+                return approximatelyEqual(frame.origin, baselineFrame.origin)
+            }
+        }, attempts: 40)
+        let safeAreaRestored = await waitUntil({
+            window.layoutIfNeeded()
+            return approximatelyEqual(window.safeAreaInsets, baselineSafeArea)
+        }, attempts: 40)
+        checks["keyboardHidden"] = !keyboard.isVisible
+        checks["noFirstResponder"] = firstResponder(in: window) == nil
+        checks["safeAreaRestored"] = safeAreaRestored
+        switch layoutContract {
+        case .frame:
+            checks["editorFrameRestored"] = editorLayoutRestored
+        case .origin:
+            checks["editorOriginRestored"] = editorLayoutRestored
+        }
+        return checks
+    }
+
+    private static func waitForEditableControl(in window: UIWindow) async -> UIView? {
+        for _ in 0..<100 {
+            window.layoutIfNeeded()
+            if let editor = editableControl(in: window, window: window) {
+                return editor
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return nil
+    }
+
+    /// SwiftUI may expose the backing editor before a Form has completed its first sizing pass.
+    /// Taking that transient frame as the baseline makes ordinary initial layout look like failed
+    /// keyboard restoration. Require several unchanged layout cycles before focus changes state.
+    private static func stableFrame(of view: UIView, in window: UIWindow) async -> CGRect {
+        var previous: CGRect?
+        var latest = view.convert(view.bounds, to: window)
+        var stableCount = 0
+        for sample in 0..<40 {
+            try? await Task.sleep(for: .milliseconds(50))
+            window.layoutIfNeeded()
+            latest = view.convert(view.bounds, to: window)
+            if let previous, approximatelyEqual(latest, previous) {
+                stableCount += 1
+            } else {
+                stableCount = 1
+            }
+            previous = latest
+            if sample >= 3, stableCount >= 3 { break }
+        }
+        return latest
+    }
+
+    private static func editableControl(in view: UIView, window: UIWindow) -> UIView? {
+        // A SwiftUI platform host may have zero bounds while a hosted UIKit control has a real,
+        // visible frame. Test visibility on the candidate and its ancestors, but never prune a
+        // subtree from an intermediate host's empty geometry.
+        let visibleFrame = view.convert(view.bounds, to: window)
+        let isVisibleCandidate = view.window != nil
+            && !visibleFrame.isEmpty
+            && visibleFrame.intersects(window.bounds)
+            && ancestorsAreVisible(from: view, through: window)
+        // SwiftUI owns focus outside this backing field. The coordinator asks the shipping view's
+        // FocusState to activate it before falling back to direct UIKit focus.
+        if isVisibleCandidate, let field = view as? UITextField {
+            return field
+        }
+        if isVisibleCandidate, let textView = view as? UITextView,
+           textView.isEditable, textView.isUserInteractionEnabled {
+            return textView
+        }
+        if isVisibleCandidate,
+           view.accessibilityLabel == MobileL10n.string("Remote terminal"),
+           view.canBecomeFirstResponder {
+            return view
+        }
+        for subview in view.subviews.reversed() {
+            if let match = editableControl(in: subview, window: window) { return match }
+        }
+        return nil
+    }
+
+    private static func ancestorsAreVisible(from view: UIView, through window: UIWindow) -> Bool {
+        var candidate: UIView? = view
+        while let current = candidate {
+            if current.isHidden || current.alpha <= 0.01 { return false }
+            if current === window { return true }
+            candidate = current.superview
+        }
+        return false
+    }
+
+    private static func firstResponder(in view: UIView) -> UIView? {
+        if view.isFirstResponder { return view }
+        for subview in view.subviews {
+            if let responder = firstResponder(in: subview) { return responder }
+        }
+        return nil
+    }
+
+    private static func editableHierarchy(in root: UIView) -> String {
+        var matches: [String] = []
+        func visit(_ view: UIView) {
+            let name = NSStringFromClass(type(of: view))
+            if name.localizedCaseInsensitiveContains("text")
+                || name.localizedCaseInsensitiveContains("field")
+                || name.localizedCaseInsensitiveContains("input") {
+                let frame = view.convert(view.bounds, to: root)
+                matches.append(
+                    "\(name) frame=\(frame.debugDescription) hidden=\(view.isHidden) "
+                        + "alpha=\(view.alpha) window=\(view.window != nil)"
+                )
+            }
+            view.subviews.forEach(visit)
+        }
+        visit(root)
+        return matches.prefix(30).joined(separator: " | ")
+    }
+
+    private static func waitUntil(
+        _ condition: @MainActor () -> Bool,
+        attempts: Int = 100
+    ) async -> Bool {
+        for _ in 0..<attempts {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return condition()
+    }
+
+    /// UIKit owns the keyboard in a separate window, so an app window's keyboard layout guide is
+    /// not a reliable visibility oracle under every SwiftUI hosting arrangement. The lifecycle
+    /// notifications are the platform contract: frame changes cover floating/undocked keyboards,
+    /// while explicit show/hide events keep the semantic state unambiguous.
+    @MainActor
+    private final class KeyboardVisibilityObserver: NSObject {
+        private(set) var isVisible = false
+        private(set) var didShow = false
+        private weak var window: UIWindow?
+
+        init(window: UIWindow) {
+            self.window = window
+            super.init()
+            let center = NotificationCenter.default
+            center.addObserver(
+                self,
+                selector: #selector(willShow(_:)),
+                name: UIResponder.keyboardWillShowNotification,
+                object: nil
+            )
+            center.addObserver(
+                self,
+                selector: #selector(willHide(_:)),
+                name: UIResponder.keyboardWillHideNotification,
+                object: nil
+            )
+            center.addObserver(
+                self,
+                selector: #selector(willChangeFrame(_:)),
+                name: UIResponder.keyboardWillChangeFrameNotification,
+                object: nil
+            )
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        @objc private func willShow(_ notification: Notification) {
+            isVisible = true
+            didShow = true
+        }
+
+        @objc private func willHide(_ notification: Notification) {
+            isVisible = false
+        }
+
+        @objc private func willChangeFrame(_ notification: Notification) {
+            guard let window,
+                  let value = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey]
+                    as? NSValue else { return }
+            let frame = window.convert(value.cgRectValue, from: window.screen.coordinateSpace)
+            let visible = !window.bounds.intersection(frame).isNull
+                && window.bounds.intersection(frame).height > 1
+            isVisible = visible
+            didShow = didShow || visible
+        }
+    }
+
+    private static func approximatelyEqual(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+        abs(lhs.minX - rhs.minX) <= 2
+            && abs(lhs.minY - rhs.minY) <= 2
+            && abs(lhs.width - rhs.width) <= 2
+            && abs(lhs.height - rhs.height) <= 2
+    }
+
+    private static func approximatelyEqual(_ lhs: CGPoint, _ rhs: CGPoint) -> Bool {
+        abs(lhs.x - rhs.x) <= 2 && abs(lhs.y - rhs.y) <= 2
+    }
+
+    private static func approximatelyEqual(_ lhs: UIEdgeInsets, _ rhs: UIEdgeInsets) -> Bool {
+        abs(lhs.top - rhs.top) <= 1
+            && abs(lhs.left - rhs.left) <= 1
+            && abs(lhs.bottom - rhs.bottom) <= 1
+            && abs(lhs.right - rhs.right) <= 1
+    }
+
+    private enum EvidenceError: Error {
+        case editableControlMissing(String)
+        case editorRejectedFocus
+        case keyboardDidNotShow
+        case keyboardDidNotHide
+        case editorKeptFocus
     }
 
     private static func png(of window: UIWindow) throws -> Data {
@@ -426,6 +811,28 @@ private enum MobileUIEvidenceCapture {
     }
 }
 #endif
+
+extension View {
+    /// DEBUG evidence asks a shipping editor to traverse its normal SwiftUI focus boundary.
+    /// Production builds erase the observers entirely.
+    @ViewBuilder
+    func mobileUIEvidenceKeyboardFocus(_ focus: FocusState<Bool>.Binding) -> some View {
+#if DEBUG
+        onReceive(NotificationCenter.default.publisher(
+            for: .mobileUIEvidenceFocusRequested
+        )) { _ in
+            focus.wrappedValue = true
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .mobileUIEvidenceDismissRequested
+        )) { _ in
+            focus.wrappedValue = false
+        }
+#else
+        self
+#endif
+    }
+}
 
 @MainActor
 final class RemoteNotificationManager: ObservableObject {

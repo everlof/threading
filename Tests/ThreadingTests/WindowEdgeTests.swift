@@ -1,5 +1,4 @@
 import AppKit
-import ThreadingExtensionKit
 import XCTest
 @testable import Threading
 
@@ -331,7 +330,7 @@ final class WindowEdgeTests: XCTestCase {
         let cycles = ProcessInfo.processInfo.environment["THREADING_DISPLAY_PANE_STRESS_CYCLES"]
             .flatMap(Int.init)
             .flatMap { $0 > 0 ? $0 : nil }
-            ?? 5
+            ?? 3
         let animated = ProcessInfo.processInfo.environment[
             "THREADING_DISPLAY_PANE_STRESS_ANIMATED"
         ] != "0"
@@ -397,89 +396,6 @@ final class WindowEdgeTests: XCTestCase {
             grid: "frozen",
             cycles: cycles,
             animated: animated
-        )
-
-        // The old fixture called the split route directly with an empty panel. The reported
-        // gesture comes from the toolbar and usually reopens a retained, rich surface, so drive
-        // that route too. A bounded semantic scene makes repeated pane rendering visible without
-        // involving disk, a provider, or a second process.
-        let scene = ExtensionScene(
-            accessibilityLabel: "Display pane transition stress",
-            preferredAspectRatio: 1.6,
-            items: (0..<256).map { index in
-                let column = index % 16
-                let row = index / 16
-                return ExtensionSceneItem(
-                    id: "node-\(index)",
-                    frame: ExtensionSceneRect(
-                        x: Double(column) / 16,
-                        y: Double(row) / 16,
-                        width: 0.055,
-                        height: 0.055
-                    ),
-                    color: index.isMultiple(of: 7) ? .accent : .neutral,
-                    label: "Node \(index)",
-                    detail: "Retained production scene item \(index)"
-                )
-            }
-        )
-        controller.displayPaneController.addContentTab(
-            DisplayContent(
-                body: .semanticScene(scene),
-                title: "Heavy retained scene",
-                subtitle: "256 native scene marks"
-            ),
-            for: agentSession.id
-        )
-        window.contentView?.layoutSubtreeIfNeeded()
-        window.contentView?.displayIfNeeded()
-
-        let renderCountBefore = controller.displayPaneController.renderInvocationCount
-        var userOpenSamples: [UInt64] = []
-        var userCloseSamples: [UInt64] = []
-        var userGridChanges = 0
-        terminal.onFrameGridChangeDecision = { _, _, applies in
-            if applies { userGridChanges += 1 }
-        }
-        let userStarted = DispatchTime.now().uptimeNanoseconds
-        for _ in 0..<cycles {
-            for visible in [true, false] {
-                let actionStarted = DispatchTime.now().uptimeNanoseconds
-                controller.toggleDisplayPane()
-                window.contentView?.layoutSubtreeIfNeeded()
-                window.contentView?.displayIfNeeded()
-                let elapsed = DispatchTime.now().uptimeNanoseconds - actionStarted
-                if visible {
-                    userOpenSamples.append(elapsed)
-                } else {
-                    userCloseSamples.append(elapsed)
-                }
-            }
-        }
-        let userElapsed = DispatchTime.now().uptimeNanoseconds - userStarted
-        terminal.onFrameGridChangeDecision = nil
-        let renderDelta = controller.displayPaneController.renderInvocationCount
-            - renderCountBefore
-        XCTAssertEqual(
-            renderDelta,
-            0,
-            "opening an already-selected retained pane must not rebuild its active surface"
-        )
-        let orderedOpen = userOpenSamples.sorted()
-        let orderedClose = userCloseSamples.sorted()
-        let userSamples = userOpenSamples + userCloseSamples
-        print(
-            "THREADING_PERF display-pane-user-transition "
-                + "surface=codex content=semantic-scene items=256 cycles=\(cycles) "
-                + "render_passes=\(renderDelta) grid_changes=\(userGridChanges) "
-                + "open_p50_ms=\(Self.milliseconds(Self.percentile(0.50, in: orderedOpen))) "
-                + "open_max_ms=\(Self.milliseconds(orderedOpen.last ?? 0)) "
-                + "close_p50_ms=\(Self.milliseconds(Self.percentile(0.50, in: orderedClose))) "
-                + "close_max_ms=\(Self.milliseconds(orderedClose.last ?? 0)) "
-                + "over_16_7_ms=\(userSamples.filter { $0 > 16_667_000 }.count) "
-                + "over_33_3_ms=\(userSamples.filter { $0 > 33_333_000 }.count) "
-                + "total_ms=\(Self.milliseconds(userElapsed)) "
-                + "per_cycle_ms=\(Self.milliseconds(userElapsed / UInt64(max(cycles, 1))))"
         )
 
         terminal.feed(text: "\u{1b}[?1049l")

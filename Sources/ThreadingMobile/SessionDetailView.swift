@@ -486,40 +486,27 @@ private struct WorkspaceToolbarIcon: View {
 
 private struct RemoteNavigationTitle: View {
     @ObservedObject var connection: RemoteSessionConnection
+    @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
-        VStack(spacing: MobileDesign.Spacing.hairline) {
-            Text(connection.title)
-                .font(.headline)
-                .lineLimit(1)
-
-            if case .failed = connection.phase {
-                Button(action: connection.connect) {
-                    status
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("Reconnect")
-            } else {
-                status
+        if case .failed = connection.phase {
+            Button(action: connection.connect) {
+                title
             }
+            .buttonStyle(.plain)
+            .accessibilityHint("Reconnect")
+        } else {
+            title
         }
-        .accessibilityElement(children: .combine)
     }
 
-    private var status: some View {
-        HStack(spacing: MobileDesign.Spacing.tight) {
-            Circle()
-                .fill(color)
-                .frame(
-                    width: MobileDesign.Size.navigationStatusIndicator,
-                    height: MobileDesign.Size.navigationStatusIndicator
-                )
-            Text(label)
-                .lineLimit(1)
-        }
-        .font(.caption2)
-        .foregroundStyle(theme.secondaryLabel)
+    private var title: some View {
+        MobileConnectionNavigationTitle(
+            title: connection.title,
+            status: label,
+            statusColor: color
+        )
     }
 
     private var color: Color {
@@ -534,12 +521,7 @@ private struct RemoteNavigationTitle: View {
         switch connection.phase {
         case .connecting: return MobileL10n.string("Connecting to Mac…")
         case .connected:
-            if connection.capability != .interact { return MobileL10n.string("View only") }
-            if let control = connection.inputControl,
-               control.mode == .focused, !control.canWrite {
-                return MobileL10n.string("Watching")
-            }
-            return MobileL10n.string("Remote control")
+            return model.activeHost?.name ?? MobileL10n.string("Connected")
         case .ended(let reason): return reason
         case .failed(let reason): return reason
         }
@@ -586,6 +568,10 @@ struct TerminalRemoteView: View {
                 onScrollProgress: saveTerminalViewport
             )
             .background(terminalBackground)
+            // The terminal owns the padding colour so the inset reads as breathing room rather
+            // than a second application panel under every authored chrome.
+            .padding(MobileDesign.Spacing.small)
+            .background(terminalBackground)
             TerminalCollaborationBar(
                 connection: connection,
                 askForInput: { showsAttentionRequest = true }
@@ -602,6 +588,8 @@ struct TerminalRemoteView: View {
                 customize: { showsKeyboardEditor = true }
             )
         }
+        .toolbarBackground(theme.surface, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 RemoteNavigationTitle(connection: connection)
@@ -652,6 +640,10 @@ private struct TerminalCollaborationBar: View {
         if label != nil || canAskForInput {
             HStack(spacing: MobileDesign.Spacing.small) {
                 if let label {
+                    Image(systemName: "person.2")
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .frame(width: MobileDesign.Size.terminalStatusIconColumn)
                     Text(label)
                         .font(.caption)
                         .foregroundStyle(theme.secondaryLabel)
@@ -661,12 +653,15 @@ private struct TerminalCollaborationBar: View {
                     Spacer(minLength: 0)
                 }
                 if canAskForInput {
-                    AttentionTriggerButton(action: askForInput)
+                    AttentionTriggerButton(presentation: .utility, action: askForInput)
                 }
             }
-            .padding(.horizontal, MobileDesign.Spacing.large)
-            .padding(.vertical, MobileDesign.Spacing.small)
+            .frame(minHeight: MobileDesign.Size.minimumTapTarget)
+            .padding(.horizontal, MobileDesign.Spacing.inset)
             .background(theme.surface)
+            .overlay(alignment: .top) {
+                Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
+            }
         }
     }
 
@@ -707,6 +702,7 @@ private struct TerminalLineComposer: View {
     @State private var draft = ""
     @State private var pendingSubmissionID: String?
     @State private var submissionNotice: String?
+    @FocusState private var draftIsFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -716,8 +712,10 @@ private struct TerminalLineComposer: View {
                 statusLabel(submissionNotice, isWarning: true)
             }
 
-            HStack(alignment: .bottom, spacing: MobileDesign.Spacing.small) {
+            HStack(alignment: .center, spacing: MobileDesign.Spacing.small) {
                 TextField("Compose on this device…", text: $draft, axis: .vertical)
+                    .focused($draftIsFocused)
+                    .mobileUIEvidenceKeyboardFocus($draftIsFocused)
                     .lineLimit(1...5)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -733,7 +731,7 @@ private struct TerminalLineComposer: View {
                         )
                         .background(
                             canSubmit ? theme.accent : theme.controlResting,
-                            in: Circle()
+                            in: RoundedRectangle(cornerRadius: theme.controlRadius)
                         )
                         .foregroundStyle(canSubmit ? theme.ground : theme.secondaryLabel)
                 }
@@ -1247,14 +1245,17 @@ private struct ConversationComposer: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: MobileDesign.Spacing.small) {
+        HStack(alignment: .top, spacing: MobileDesign.Spacing.small) {
             Button(action: toggleCapabilities) {
                 Image(systemName: "plus")
                     .frame(
                         width: MobileDesign.Size.minimumTapTarget,
                         height: MobileDesign.Size.minimumTapTarget
                     )
-                    .background(theme.controlResting, in: Circle())
+                    .background(
+                        theme.controlResting,
+                        in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                    )
             }
             .disabled(!hasCapabilities)
             .accessibilityLabel(MobileL10n.string("Browse commands and skills"))
@@ -1278,7 +1279,7 @@ private struct ConversationComposer: View {
                     )
                     .background(
                         isEnabled && !text.isEmpty ? theme.accent : theme.controlResting,
-                        in: Circle()
+                        in: RoundedRectangle(cornerRadius: theme.controlRadius)
                     )
                     .foregroundStyle(
                         isEnabled && !text.isEmpty ? theme.ground : theme.secondaryLabel
@@ -1286,7 +1287,8 @@ private struct ConversationComposer: View {
             }
             .disabled(!isEnabled || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .padding(MobileDesign.Spacing.medium)
+        .padding(.horizontal, MobileDesign.Spacing.composerHorizontal)
+        .padding(.vertical, MobileDesign.Spacing.composerVertical)
         .background(
             theme.panel,
             in: RoundedRectangle(cornerRadius: theme.panelRadius)
@@ -1307,6 +1309,12 @@ private struct ConversationComposer: View {
 }
 
 private struct AttentionTriggerButton: View {
+    enum Presentation: Equatable {
+        case contained
+        case utility
+    }
+
+    var presentation: Presentation = .contained
     let action: () -> Void
     @Environment(\.remoteTheme) private var theme
 
@@ -1319,7 +1327,12 @@ private struct AttentionTriggerButton: View {
                     width: MobileDesign.Size.minimumTapTarget,
                     height: MobileDesign.Size.minimumTapTarget
                 )
-                .background(theme.controlResting, in: Circle())
+                .background {
+                    if presentation == .contained {
+                        RoundedRectangle(cornerRadius: theme.controlRadius)
+                            .fill(theme.controlResting)
+                    }
+                }
         }
         .accessibilityLabel(MobileL10n.string("Ask a person for input"))
         .accessibilityHint(MobileL10n.string("Sends a human-only notification"))
@@ -1336,69 +1349,72 @@ private struct InputControlBar: View {
         if connection.supportsFocusedInputControl, let state = connection.inputControl {
             VStack(spacing: 0) {
                 HStack(spacing: MobileDesign.Spacing.small) {
-                Image(systemName: state.mode == .collaborative ? "person.2" : "hand.raised")
-                    .foregroundStyle(state.canWrite ? theme.positive : theme.warning)
-                Text(status(state))
-                    .font(.caption)
-                    .foregroundStyle(theme.secondaryLabel)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Image(systemName: state.mode == .collaborative ? "person.2" : "hand.raised")
+                        .foregroundStyle(state.canWrite ? theme.positive : theme.warning)
+                        .frame(width: MobileDesign.Size.terminalStatusIconColumn)
+                    Text(status(state))
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                if state.mode == .focused, !state.canWrite, !state.canManage {
-                    Button(MobileL10n.string("Request control")) {
-                        send(action: "request")
+                    if state.mode == .focused, !state.canWrite, !state.canManage {
+                        Button(MobileL10n.string("Request control")) {
+                            send(action: "request")
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption.weight(.semibold))
+                        .padding(.trailing, MobileDesign.Spacing.inset)
                     }
-                    .buttonStyle(.borderless)
-                    .font(.caption.weight(.semibold))
-                }
 
-                if state.canManage || state.canHandOff {
-                    Menu {
-                        if state.canManage, state.mode != .collaborative {
-                            Button(MobileL10n.string("Collaborative")) {
-                                send(action: "collaborative")
-                            }
-                        }
-                        if state.canManage, !state.canWrite {
-                            Button(MobileL10n.string("Reclaim control")) {
-                                send(action: "reclaim")
-                            }
-                        }
-                        if state.mode == .collaborative, state.canManage {
-                            Button(MobileL10n.string("Focus on me")) {
-                                send(
-                                    action: "focused",
-                                    targetID: state.currentParticipantID
-                                )
-                            }
-                        }
-                        if state.mode == .focused {
-                            ForEach(
-                                state.participants.filter {
-                                    $0.id != state.controllerID && $0.isOnline
+                    if state.canManage || state.canHandOff {
+                        Menu {
+                            if state.canManage, state.mode != .collaborative {
+                                Button(MobileL10n.string("Collaborative")) {
+                                    send(action: "collaborative")
                                 }
-                            ) { participant in
-                                Button(
-                                    MobileL10n.string("Hand off to %@", participant.displayName)
-                                ) {
+                            }
+                            if state.canManage, !state.canWrite {
+                                Button(MobileL10n.string("Reclaim control")) {
+                                    send(action: "reclaim")
+                                }
+                            }
+                            if state.mode == .collaborative, state.canManage {
+                                Button(MobileL10n.string("Focus on me")) {
                                     send(
-                                        action: "handoff",
-                                        targetID: participant.id
+                                        action: "focused",
+                                        targetID: state.currentParticipantID
                                     )
                                 }
                             }
+                            if state.mode == .focused {
+                                ForEach(
+                                    state.participants.filter {
+                                        $0.id != state.controllerID && $0.isOnline
+                                    }
+                                ) { participant in
+                                    Button(
+                                        MobileL10n.string("Hand off to %@", participant.displayName)
+                                    ) {
+                                        send(
+                                            action: "handoff",
+                                            targetID: participant.id
+                                        )
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .frame(
+                                    width: MobileDesign.Size.minimumTapTarget,
+                                    height: MobileDesign.Size.minimumTapTarget
+                                )
                         }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .frame(
-                                width: MobileDesign.Size.minimumTapTarget,
-                                height: MobileDesign.Size.minimumTapTarget
-                            )
+                        .accessibilityLabel(MobileL10n.string("Input control options"))
                     }
-                    .accessibilityLabel(MobileL10n.string("Input control options"))
-                }
                 }
                 .disabled(pendingRequestID != nil)
+                .frame(minHeight: MobileDesign.Size.minimumTapTarget)
                 if pendingRequestID != nil {
                     Text(MobileL10n.string("Sending control request…"))
                         .font(.caption)
@@ -1415,9 +1431,7 @@ private struct InputControlBar: View {
                         .padding(.bottom, MobileDesign.Spacing.tight)
                 }
             }
-            .padding(.leading, MobileDesign.Spacing.large)
-            .padding(.trailing, MobileDesign.Spacing.small)
-            .padding(.vertical, MobileDesign.Spacing.tight)
+            .padding(.horizontal, MobileDesign.Spacing.inset)
             .background(theme.surface)
             .overlay(alignment: .top) {
                 Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
@@ -1470,6 +1484,7 @@ private struct AttentionActivityBanner: View {
             HStack(alignment: .top, spacing: MobileDesign.Spacing.small) {
                 Image(systemName: "person.wave.2")
                     .foregroundStyle(theme.accent)
+                    .frame(width: MobileDesign.Size.terminalStatusIconColumn)
                 VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
                     Text(MobileL10n.string(
                         "%@ asked %@ for input",
@@ -1487,7 +1502,7 @@ private struct AttentionActivityBanner: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, MobileDesign.Spacing.large)
+            .padding(.horizontal, MobileDesign.Spacing.inset)
             .padding(.vertical, MobileDesign.Spacing.small)
             .background(theme.accentMuted)
             .fixedSize(horizontal: false, vertical: true)
@@ -1504,6 +1519,7 @@ struct AttentionRequestSheet: View {
     @State private var note = ""
     @State private var requestID: String?
     @State private var notice: String?
+    @FocusState private var noteIsFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -1538,6 +1554,8 @@ struct AttentionRequestSheet: View {
 
                 Section {
                     TextField("Optional note…", text: $note, axis: .vertical)
+                        .focused($noteIsFocused)
+                        .mobileUIEvidenceKeyboardFocus($noteIsFocused)
                         .lineLimit(2...4)
                         .onChange(of: note) { _, value in
                             note = Self.truncatedNote(value)

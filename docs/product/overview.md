@@ -5,7 +5,7 @@ group: Start
 order: 10
 ---
 
-# A supervision layer for local agent work
+# Keep local coding sessions together
 
 The app is not another coding agent and it does not resell model access. It is
 a native workspace for supervising agent processes you already use, including
@@ -43,7 +43,7 @@ delegation, and review.
 ## Local-first by design
 
 The desktop app runs on your Mac and starts local provider processes. It does
-not require a hosted project mirror or a new AI subscription. Remote access is
+not require a hosted project mirror or a new provider subscription. Remote access is
 an optional, explicitly paired feature; it is not required for normal use.
 
 Extensions follow the same principle. They declare capabilities and

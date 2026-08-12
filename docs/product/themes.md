@@ -20,6 +20,7 @@ A theme can provide:
 - light or dark appearance;
 - panel and control geometry;
 - border treatment and restrained glow or shadow;
+- an optional app-drawn window frame and command band;
 - a supported typeface category;
 - a complete terminal palette;
 - optional app and Dock artwork where supported.
@@ -38,9 +39,18 @@ new features, and the iOS companion.
 ## System and stock themes
 
 System follows the platform appearance and remains the safe application
-default. Stock themes provide more directed identities, including Editorial,
-Cyberpunk, Swiss Minimalist, Bauhaus, Art Deco, Neo Brutalism, Claymorphism,
-Vaporwave, Newsprint, Botanical, Industrial, and Christmas.
+default. Stock themes provide more directed identities, including Threading,
+Editorial, Cyberpunk, Swiss Minimalist, Bauhaus, Art Deco, Neo Brutalism,
+Claymorphism, Vaporwave, Newsprint, Botanical, Industrial, and Christmas.
+
+## Threading
+
+Threading is a dark stock theme with navy surfaces, warm text, and orange
+accents. It also draws the Mac window frame, title band, window controls, and
+command band with the same palette. Selected rows use a deeper navy so orange
+can stay reserved for actions, focus, and the active window seam. Its terminal
+palette and iPhone projection use the same colors, so native controls and a
+provider TUI sit in one consistent frame.
 
 ## Editorial
 

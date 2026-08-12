@@ -143,6 +143,7 @@ struct RemoteUsageDashboardView: View {
     @Environment(\.remoteTheme) private var theme
     @StateObject private var model: RemoteUsageDashboardModel
     private let isDemo: Bool
+    private let demoShowsStaleSnapshot: Bool
     @State private var tab = MobileUsageTab.overview
     @State private var overviewDays = 30
     @State private var limitDays = 30
@@ -151,6 +152,13 @@ struct RemoteUsageDashboardView: View {
 
     init(link: RemoteConnectionLink, isDemo: Bool) {
         self.isDemo = isDemo
+#if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        demoShowsStaleSnapshot = environment["THREADING_MOBILE_DEMO"] == "usage-stale"
+            || environment["THREADING_MOBILE_UI_EVIDENCE_ID"]?.contains("usage-stale") == true
+#else
+        demoShowsStaleSnapshot = false
+#endif
         _model = StateObject(
             wrappedValue: RemoteUsageDashboardModel(link: link, isDemo: isDemo)
         )
@@ -173,8 +181,6 @@ struct RemoteUsageDashboardView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    snapshotStatus
-
                     if tab == .overview {
                         overviewContent
                     } else {
@@ -183,6 +189,7 @@ struct RemoteUsageDashboardView: View {
                 }
                 .frame(maxWidth: 720)
                 .padding(.horizontal, MobileDesign.Spacing.inset)
+                .padding(.top, MobileDesign.Spacing.medium)
                 .padding(.bottom, MobileDesign.Spacing.pane)
             }
             .refreshable { await model.refresh(selectedDays: limitDays) }
@@ -263,11 +270,15 @@ struct RemoteUsageDashboardView: View {
         return UsageCard {
             VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
                 VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
-                    Text(MobileL10n.string(
-                        metric == .cost ? "Measured token cost" : "Processed tokens"
-                    ))
-                        .font(.subheadline)
-                        .foregroundStyle(theme.secondaryLabel)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(MobileL10n.string(
+                            metric == .cost ? "Measured token cost" : "Processed tokens"
+                        ))
+                            .font(.subheadline)
+                            .foregroundStyle(theme.secondaryLabel)
+                        Spacer()
+                        snapshotFreshnessBadge
+                    }
                     Text(metricValue(metric == .cost ? range.cost.totalUSD : Double(range.tokens.processed)))
                         .font(.system(.largeTitle, design: .rounded, weight: .bold))
                         .minimumScaleFactor(0.7)
@@ -454,15 +465,28 @@ struct RemoteUsageDashboardView: View {
         } else {
             UsageCard {
                 VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
-                    Text("Account and window")
-                        .font(.caption)
-                        .foregroundStyle(theme.secondaryLabel)
-                    Picker("Account and window", selection: $model.selectedLimitID) {
+                    Menu {
                         ForEach(model.limitSeries) { series in
-                            Text(series.title).tag(Optional(series.id))
+                            Button {
+                                model.selectedLimitID = series.id
+                            } label: {
+                                if series.id == model.selectedLimitID {
+                                    Label(series.title, systemImage: "checkmark")
+                                } else {
+                                    Text(series.title)
+                                }
+                            }
+                        }
+                    } label: {
+                        if let selected = model.limitSeries.first(where: {
+                            $0.id == model.selectedLimitID
+                        }) {
+                            UsageSeriesSelectionLabel(series: selected)
+                        } else {
+                            Label("Choose account", systemImage: "person.crop.circle")
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    .pickerStyle(.menu)
                     .tint(theme.accent)
                     rangePicker(selection: $limitDays)
                 }
@@ -503,28 +527,52 @@ struct RemoteUsageDashboardView: View {
     }
 
     @ViewBuilder
-    private var snapshotStatus: some View {
+    private var snapshotFreshnessBadge: some View {
         if let dashboard = model.dashboard {
-            HStack(spacing: MobileDesign.Spacing.small) {
+            let isFresh = snapshotIsFresh(dashboard) && model.errorMessage == nil
+                && !dashboard.isBuilding && !model.isRefreshing
+            if isFresh {
+                Circle()
+                    .fill(theme.positive)
+                    .frame(width: 7, height: 7)
+                    .accessibilityLabel(snapshotStatusText(dashboard))
+            } else {
+                HStack(spacing: MobileDesign.Spacing.tight) {
                 if model.isRefreshing || dashboard.isBuilding {
                     ProgressView().controlSize(.small).tint(theme.accent)
                 } else {
-                    Image(systemName: model.errorMessage == nil ? "clock" : "wifi.exclamationmark")
-                        .foregroundStyle(model.errorMessage == nil ? theme.secondaryLabel : theme.warning)
+                    Circle()
+                        .fill(snapshotIsFresh(dashboard) && model.errorMessage == nil
+                            ? theme.positive
+                            : theme.tertiaryLabel)
+                        .frame(width: 7, height: 7)
                 }
-                Text(snapshotStatusText(dashboard))
-                    .font(.caption)
-                    .foregroundStyle(theme.secondaryLabel)
-                Spacer(minLength: 0)
+                    Text(snapshotStatusText(dashboard))
+                        .font(.caption2)
+                        .foregroundStyle(theme.secondaryLabel)
+                }
+                .padding(.horizontal, MobileDesign.Spacing.small)
+                .padding(.vertical, MobileDesign.Spacing.tight)
+                .background(theme.surface.opacity(0.92), in: Capsule())
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(snapshotStatusText(dashboard))
             }
-            .padding(.horizontal, MobileDesign.Spacing.small)
-            .accessibilityElement(children: .combine)
         }
     }
 
+    private func snapshotIsFresh(_ dashboard: RemoteUsageDashboardDTO) -> Bool {
+        if demoShowsStaleSnapshot {
+            return false
+        }
+        return isDemo || Date().timeIntervalSince1970 - dashboard.preparedAt < 5 * 60
+    }
+
     private func snapshotStatusText(_ dashboard: RemoteUsageDashboardDTO) -> String {
-        if isDemo {
+        if isDemo, !demoShowsStaleSnapshot {
             return MobileL10n.string("Updated now")
+        }
+        if demoShowsStaleSnapshot {
+            return MobileL10n.string("Updated 3h ago")
         }
         let observed = wallRelativeDate(dashboard.preparedAt)
         if model.errorMessage != nil {
@@ -544,7 +592,10 @@ struct RemoteUsageDashboardView: View {
                 .font(.headline)
                 .padding(.horizontal, MobileDesign.Spacing.small)
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 142), spacing: MobileDesign.Spacing.small)],
+                columns: [
+                    GridItem(.flexible(), spacing: MobileDesign.Spacing.small),
+                    GridItem(.flexible(), spacing: MobileDesign.Spacing.small),
+                ],
                 spacing: MobileDesign.Spacing.small
             ) {
                 UsageMetricCard(
@@ -682,9 +733,9 @@ struct RemoteUsageDashboardView: View {
 
     private func rangePicker(selection: Binding<Int>) -> some View {
         Picker("Range", selection: selection) {
-            Text("7 days").tag(7)
-            Text("30 days").tag(30)
-            Text("90 days").tag(90)
+            Text("7d").tag(7)
+            Text("30d").tag(30)
+            Text("90d").tag(90)
         }
         .pickerStyle(.segmented)
     }
@@ -835,12 +886,7 @@ struct RemoteUsageDashboardView: View {
 
     private func seriesColor(_ index: Int, isOther: Bool) -> Color {
         if isOther { return theme.tertiaryLabel }
-        switch index % 4 {
-        case 0: return theme.accent
-        case 1: return theme.warning
-        case 2: return theme.positive
-        default: return theme.negative
-        }
+        return theme.categorical(index)
     }
 
     private func coverageSymbol(_ state: String) -> String {
@@ -945,12 +991,37 @@ private struct UsageMetricCard: View {
             }
         }
         .padding(MobileDesign.Spacing.medium)
-        .frame(maxWidth: .infinity, minHeight: 94, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
         .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.controlRadius))
         .overlay {
             RoundedRectangle(cornerRadius: theme.controlRadius)
                 .stroke(theme.border, lineWidth: theme.borderWidth)
         }
+    }
+}
+
+private struct UsageSeriesSelectionLabel: View {
+    let series: RemoteUsageLimitSeriesSummaryDTO
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: MobileDesign.Spacing.small) {
+            Label(series.runtimeName, systemImage: "sparkles")
+                .font(.subheadline.weight(.semibold))
+            Spacer(minLength: MobileDesign.Spacing.small)
+            Text(series.accountName)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, MobileDesign.Spacing.small)
+                .padding(.vertical, MobileDesign.Spacing.tight)
+                .background(theme.controlResting, in: Capsule())
+            Text(series.windowLabel)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, MobileDesign.Spacing.small)
+                .padding(.vertical, MobileDesign.Spacing.tight)
+                .background(theme.controlResting, in: Capsule())
+        }
+        .foregroundStyle(theme.label)
+        .accessibilityElement(children: .combine)
     }
 }
 

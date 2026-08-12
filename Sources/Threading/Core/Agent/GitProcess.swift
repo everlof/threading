@@ -10,6 +10,10 @@ enum GitFailure: LocalizedError, Equatable, Sendable {
     case gitFailed(String)
     case timedOut
     case outputTooLarge
+    /// An internal supersession signal. Review generations consume this rather than presenting
+    /// it: the useful compact comparison has won the race, so continuing to generate a complete
+    /// patch would spend CPU and I/O on bytes no surface will retain.
+    case cancelled
     case noCommits
     case noDefaultBranch
     case baselineExpired
@@ -29,6 +33,7 @@ enum GitFailure: LocalizedError, Equatable, Sendable {
         case .gitFailed(let message): return message
         case .timedOut: return L10n.string("git took too long to answer.")
         case .outputTooLarge: return L10n.string("This diff is too large to display.")
+        case .cancelled: return L10n.string("The git operation was cancelled.")
         case .noCommits: return L10n.string("No commits yet.")
         case .noDefaultBranch: return L10n.string("No default branch found.")
         case .baselineExpired: return L10n.string("The turn baseline has expired.")
@@ -73,7 +78,8 @@ enum GitProcess {
         environmentOverrides: [String: String] = [:],
         maximumOutput: Int = GitReviewDefaults.maximumDiffBytes,
         acceptedExitCodes: Set<Int32> = [0],
-        reportsRejectedExit: Bool = true
+        reportsRejectedExit: Bool = true,
+        cancellation: GitProcessCancellation? = nil
     ) throws -> Data {
         let command = arguments.first(where: { !$0.hasPrefix("-") }) ?? "unknown"
         let performanceSpan = PerformanceRecorder.shared.begin(
@@ -122,6 +128,7 @@ enum GitProcess {
             stdin?.closeBothEnds()
             throw GitFailure.launchFailed(error.localizedDescription)
         }
+        cancellation?.attach(child)
 
         stdout.closeWriteEnd()
         stderr.closeWriteEnd()
@@ -189,6 +196,7 @@ enum GitProcess {
         child.waitUntilExit()
         let timedOut = deadline.complete()
         outputEscalation?.complete()
+        cancellation?.complete()
         inputWritten.wait()
         stderrDrained.wait()
 
@@ -199,6 +207,7 @@ enum GitProcess {
         )
 
         if timedOut { throw GitFailure.timedOut }
+        if cancellation?.isCancelled == true { throw GitFailure.cancelled }
         if outputWasOversized { throw GitFailure.outputTooLarge }
         if let outputReadError { throw GitFailure.gitFailed(outputReadError.localizedDescription) }
 
@@ -227,6 +236,54 @@ enum GitProcess {
         return .gitFailed(message)
     }
 
+}
+
+/// One caller-owned cancellation for one bounded Git process. Cancellation terminates the whole
+/// spawned process group and escalates to KILL after the ordinary bounded-child grace period, so a
+/// filter or descendant keeping stdout open cannot strand the synchronous reader. The token is
+/// deliberately narrower than Swift task cancellation: `GitProcess.run` blocks a queue thread.
+final class GitProcessCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var child: SpawnedChildProcess?
+    private var escalation: ChildProcessEscalation?
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        guard !cancelled else {
+            lock.unlock()
+            return
+        }
+        cancelled = true
+        if let child {
+            escalation = ChildProcessEscalation(child: child)
+        }
+        lock.unlock()
+    }
+
+    fileprivate func attach(_ child: SpawnedChildProcess) {
+        lock.lock()
+        self.child = child
+        if cancelled {
+            escalation = ChildProcessEscalation(child: child)
+        }
+        lock.unlock()
+    }
+
+    fileprivate func complete() {
+        lock.lock()
+        child = nil
+        let escalation = self.escalation
+        self.escalation = nil
+        lock.unlock()
+        escalation?.complete()
+    }
 }
 
 private enum GitProcessDefaults {

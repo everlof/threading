@@ -815,6 +815,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               creation.accountHandle.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
               creation.model.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
               creation.reasoningEffort.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
+              creation.permissionMode.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
               creation.surface == "terminal" || creation.surface == "conversation" else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
@@ -855,6 +856,22 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     return
                 }
             }
+            let permissionMode = creation.permissionMode.flatMap(AgentPermissionMode.init(rawValue:))
+            guard creation.permissionMode == nil
+                    || (permissionMode != nil && kind.supportsPermissionModes) else {
+                respond(.respond(RemoteRouter.error(422, "Unknown Permission Mode")))
+                return
+            }
+            if creation.fastMode != nil {
+                guard AgentModels.supportsFastMode(
+                    kind: kind,
+                    model: creation.model,
+                    account: account
+                ) else {
+                    respond(.respond(RemoteRouter.error(422, "Unsupported Speed")))
+                    return
+                }
+            }
             let usesNativeUI = creation.surface == "conversation"
             guard !usesNativeUI || kind.supportsNativeUI else {
                 respond(.respond(RemoteRouter.error(422, "Unsupported Surface")))
@@ -867,6 +884,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 accountHandle: accountHandle,
                 model: creation.model,
                 reasoningEffort: creation.reasoningEffort,
+                fastMode: creation.fastMode,
+                permissionMode: permissionMode,
                 usesNativeUI: usesNativeUI,
                 prompt: prompt
             ) else {

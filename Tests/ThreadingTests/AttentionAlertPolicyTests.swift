@@ -135,10 +135,16 @@ final class AttentionAlertPolicyTests: XCTestCase {
         )
     }
 
-    /// Only the alert that is holding a turn up sounds. The settings row that switches the
-    /// sound off exists because the *banner* is still wanted; the two are separate questions.
-    func testOnlyTheBlockedAlertSounds() {
-        XCTAssertEqual(AttentionAlert.allCases.filter(\.sounds), [.blocked])
+    /// Of the three states, only the one holding a turn up sounds — but that is no longer a
+    /// property of the alert. It is the bottom of the resolution chain, where the two that
+    /// stay silent can be given a sound by name and the loud one can be quieted without
+    /// costing the banner that carries it.
+    func testOnlyTheBlockedStateAlertSoundsByDefault() {
+        let sounding = AttentionAlert.allCases.filter {
+            SoundResolution.resolve(SoundEvent($0), through: []) != .silent
+        }
+
+        XCTAssertEqual(sounding, [.blocked])
     }
 
     /// Every kind reads differently in both places it is named, so a settings row can be
@@ -169,16 +175,19 @@ final class AttentionAlertPolicyTests: XCTestCase {
         XCTAssertTrue(reread.notifies(on: .unread))
     }
 
+    /// Alerts sound until someone says otherwise, and the answer for "not at all" is a value of
+    /// the sound itself rather than a switch beside it — the checkbox that used to say so is
+    /// retired, and `silent` is what it became.
     func testTheSoundDefaultsOnAndPersistsAnOptOut() throws {
         let suite = "AttentionAlertSound.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let settings = AppSettings(defaults: defaults)
-        XCTAssertTrue(settings.playsAttentionAlertSound)
+        XCTAssertEqual(settings.attentionAlertSound, .system)
 
-        settings.playsAttentionAlertSound = false
-        XCTAssertFalse(AppSettings(defaults: defaults).playsAttentionAlertSound)
+        settings.attentionAlertSound = .silent
+        XCTAssertEqual(AppSettings(defaults: defaults).attentionAlertSound, .silent)
     }
 
     // MARK: - Muting Scopes

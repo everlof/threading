@@ -96,6 +96,85 @@ final class GitStagingTests: XCTestCase {
         XCTAssertTrue(staged.contains("let ten = 1000"), "the second should still be staged")
     }
 
+    func testProgressiveStagedDiffFreezesOneIndexVersionAcrossViewportReads() throws {
+        try write(Self.edited, to: "app.swift")
+        try git("add", "app.swift")
+
+        let comparison: GitReviewReader.ProgressiveDiff = try performValue {
+            GitReviewReader.diffIndex(.staged, in: self.root, completion: $0)
+        }
+        XCTAssertEqual(comparison.files.map(\.path), ["app.swift"])
+
+        let later = Self.edited.replacingOccurrences(of: "let one = 100", with: "let one = 999")
+        try write(later, to: "app.swift")
+        try git("add", "app.swift")
+
+        let hydrated: [GitFileDiff] = try performValue {
+            GitReviewReader.diffFiles(
+                comparison.files,
+                using: comparison,
+                in: self.root,
+                completion: $0
+            )
+        }
+        let text = hydrated.flatMap(\.hunks).flatMap(\.lines).map(\.text).joined(separator: "\n")
+        XCTAssertTrue(text.contains("let one = 100"))
+        XCTAssertFalse(text.contains("let one = 999"))
+
+        let stats: [GitFileLineStats] = try performValue {
+            GitReviewReader.diffStats(comparison, in: self.root, completion: $0)
+        }
+        XCTAssertEqual(stats.first?.path, "app.swift")
+        XCTAssertEqual(stats.first?.added, hydrated.first?.added)
+        XCTAssertEqual(stats.first?.removed, hydrated.first?.removed)
+    }
+
+    func testPreCancelledGitReadReportsCancellation() throws {
+        let cancellation = GitProcessCancellation()
+        cancellation.cancel()
+
+        XCTAssertThrowsError(try GitProcess.run(
+            ["status", "--short"],
+            in: root,
+            cancellation: cancellation
+        )) { error in
+            XCTAssertEqual(error as? GitFailure, .cancelled)
+        }
+    }
+
+    func testProgressiveStatsRestrictRenameDetectionWithoutLosingRenameCounts() throws {
+        try git("mv", "app.swift", "renamed.swift")
+        try write(
+            Self.original.replacingOccurrences(of: "let one = 1", with: "let one = 100"),
+            to: "renamed.swift"
+        )
+        try git("add", "--all")
+
+        let comparison: GitReviewReader.ProgressiveDiff = try performValue {
+            GitReviewReader.diffIndex(.staged, in: self.root, completion: $0)
+        }
+        let indexed = try XCTUnwrap(comparison.files.first)
+        XCTAssertEqual(indexed.path, "renamed.swift")
+        XCTAssertEqual(indexed.change, .renamed(from: "app.swift"))
+
+        let hydrated: [GitFileDiff] = try performValue {
+            GitReviewReader.diffFiles(
+                comparison.files,
+                using: comparison,
+                in: self.root,
+                completion: $0
+            )
+        }
+        let stats: [GitFileLineStats] = try performValue {
+            GitReviewReader.diffStats(comparison, in: self.root, completion: $0)
+        }
+
+        XCTAssertEqual(stats.count, 1)
+        XCTAssertEqual(stats.first?.path, "renamed.swift")
+        XCTAssertEqual(stats.first?.added, hydrated.first?.added)
+        XCTAssertEqual(stats.first?.removed, hydrated.first?.removed)
+    }
+
     func testStagingAFileWithNoTrailingNewline() throws {
         // The `\\ No newline at end of file` note is a comment about the line before it, and a
         // patch that drops it silently re-adds a newline the file never had.
@@ -122,6 +201,26 @@ final class GitStagingTests: XCTestCase {
 
         try perform { GitIndexWriter.stage(paths: [file.path], in: self.root, completion: $0) }
         XCTAssertTrue(try output("diff", "--cached", "--name-only").contains("added.txt"))
+    }
+
+    func testUntrackedDiscoveryKeepsLiteralPathsAndExcludesIgnoredFiles() throws {
+        try write("*.cache\n", to: ".gitignore")
+        try git("add", ".gitignore")
+        try git("commit", "--quiet", "--message", "ignore cache files")
+
+        let literalPath = "literal ü\nname.txt"
+        try write("visible\n", to: literalPath)
+        try write("ignored\n", to: "generated.cache")
+
+        let files = try unstagedDiff()
+        XCTAssertEqual(files.first { $0.path == literalPath }?.change, .untracked)
+        XCTAssertFalse(files.contains { $0.path == "generated.cache" })
+
+        let summary = try performValue {
+            GitReviewReader.uncommittedSummary(in: self.root, completion: $0)
+        }
+        XCTAssertEqual(summary.files, 1)
+        XCTAssertEqual(summary.added, 1)
     }
 
     func testUntrackedSymlinkDoesNotExposeBytesOutsideTheCheckout() throws {

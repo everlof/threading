@@ -56,29 +56,24 @@ final class GitReviewCommandsTests: XCTestCase {
             GitReviewCommands.status(),
             ["status", "--porcelain=v2", "-z", "--untracked-files=all"]
         )
+        XCTAssertEqual(
+            GitReviewCommands.untrackedFiles(),
+            ["ls-files", "--others", "--exclude-standard", "-z"]
+        )
     }
 
     func testRepositoryFilesAreLiteralAndNULTerminated() {
         XCTAssertEqual(
             GitReviewCommands.repositoryFiles(),
-            ["ls-files", "-co", "--exclude-standard", "--deduplicate", "-z"]
+            ["ls-files", "-co", "--exclude-standard", "-z"]
         )
         XCTAssertEqual(
-            GitReviewCommands.repositoryFile("literal[1]\n\u{00E4}.swift"),
+            GitReviewCommands.repositoryFile(":(exclude)*.swift\n"),
             [
-                "ls-files", "-co", "--exclude-standard", "--deduplicate", "-z", "--",
-                ":(top,literal)literal[1]\n\u{00E4}.swift"
+                "ls-files", "-co", "--exclude-standard", "-z", "--",
+                ":(literal):(exclude)*.swift\n",
             ]
         )
-    }
-
-    func testRepositoryFileDisplayPageKeepsNaturalOrderAndItsBound() {
-        let page = GitRepositoryFileList(paths: [
-            "Sources/File10.swift", "Sources/File2.swift", "Sources/File1.swift"
-        ]).naturalDisplayPage(limit: 2)
-
-        XCTAssertEqual(page.paths, ["Sources/File1.swift", "Sources/File2.swift"])
-        XCTAssertTrue(page.isTruncated)
     }
 
     func testLogPagesWithControlCharacterFormat() {
@@ -88,6 +83,13 @@ final class GitReviewCommandsTests: XCTestCase {
         XCTAssertTrue(arguments.contains("--numstat"))
         // Parents and decorations trail the original fields, which is what the graph reads.
         XCTAssertTrue(arguments.contains("--pretty=format:%x01%H%x00%h%x00%s%x00%an%x00%at%x00%P%x00%D%x02"))
+
+        let metadata = GitReviewCommands.logMetadata(skip: 200)
+        XCTAssertTrue(metadata.contains("--skip=200"))
+        XCTAssertTrue(metadata.contains("--max-count=\(GitReviewDefaults.logPageSize)"))
+        XCTAssertFalse(metadata.contains("--numstat"))
+        XCTAssertTrue(metadata.contains("--pretty=format:%x01%H%x00%H%x00%s%x00%an%x00%at%x00%P%x00%x02"))
+        XCTAssertFalse(metadata.joined().contains("%D"))
     }
 
     func testVerifyCommitPinsObjectType() {
@@ -123,6 +125,50 @@ final class GitReviewCommandsTests: XCTestCase {
         XCTAssertEqual(
             GitReviewCommands.diff(from: "old", to: "new", ignoringWhitespace: true),
             ["diff"] + GitReviewCommands.diffFlags + ["-w", "old", "new"]
+        )
+    }
+
+    func testProgressiveIndexesUseRawNULTerminatedDiffs() {
+        XCTAssertEqual(
+            GitReviewCommands.diffIndex(from: "old", to: "new"),
+            [
+                "diff", "--raw", "-z", "--no-color", "--no-ext-diff", "--no-textconv",
+                "--find-renames", "old", "new",
+            ]
+        )
+        XCTAssertEqual(
+            GitReviewCommands.diff(
+                from: "old",
+                to: "new",
+                paths: ["Sources/*.swift", ":(exclude)secret"],
+                ignoringWhitespace: true
+            ),
+            [
+                "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--find-renames",
+                "-U3", "-w", "old", "new", "--", ":(literal)Sources/*.swift",
+                ":(literal):(exclude)secret",
+            ]
+        )
+        XCTAssertEqual(
+            GitReviewCommands.diffNumstat(from: "old", to: "new"),
+            [
+                "diff", "--numstat", "-z", "--no-color", "--no-ext-diff", "--no-textconv",
+                "--no-renames", "old", "new",
+            ]
+        )
+        XCTAssertEqual(
+            GitReviewCommands.diffNumstat(
+                from: "old",
+                to: "new",
+                paths: ["Old/*.swift", ":(exclude)New.swift"],
+                detectingRenames: true,
+                ignoringWhitespace: true
+            ),
+            [
+                "diff", "--numstat", "-z", "--no-color", "--no-ext-diff", "--no-textconv",
+                "--find-renames", "-w", "old", "new", "--", ":(literal)Old/*.swift",
+                ":(literal):(exclude)New.swift",
+            ]
         )
     }
 

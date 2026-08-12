@@ -159,6 +159,52 @@ distinction is free: it is the pair of facts `settle()` already holds. It also d
 report that used to be unreadable — Claude raises `Notification` both for a permission prompt and
 once its prompt has sat idle a while, and the turn is what tells those apart.
 
+### The trail a state change leaves
+
+**A row can say a session wants you, and nothing anywhere could say why.** `needsAttention` has
+three ways in — a turn that ended off screen, the runtime's own idle-prompt notice, a bell — set
+in three different places, and from outside they are the same dot. Asked in August 2026 why a mark
+had appeared on a session the user was looking straight at, the honest answer was a list of
+candidates: the hooks are silent by design, `HookLifecycleRelay.deliver` records arrivals at
+`debug` (not retained unless somebody turned the level on *first*), and a terminal session keeps
+no execution-audit ledger. The state was derivable; the cause was gone.
+
+So `settle()` takes a `SessionActivityCause` — named for the **input**, never the outcome — and
+writes one `ThreadingLogger.session` line per change under `codes.threading:session`:
+
+```
+Activity idle -> needsAttention cause=turnFinished session=<uuid> visible=false turn=false
+awaits=true asks=0 park=none paused=false reports=true unattended=false
+```
+
+Which is read back with, for a mark that appeared within the last half hour:
+
+```bash
+log show --predicate 'subsystem == "codes.threading" AND category == "session"' \
+  --last 30m --info --style compact | grep Activity
+```
+
+Four decisions inside that, each of which was the alternative first:
+
+- **`info`, not `debug`.** The question is always asked in the past tense. A level that has to be
+  enabled before the thing it would have explained is a level that explains nothing, which is
+  exactly what the existing per-hook `debug` line does today. Per-hook detail is still there for
+  anyone streaming: `log stream --level debug --predicate 'subsystem == "codes.threading"'`.
+- **Every fact the branch reads, not the two that moved.** `turnFinished` with `visible=false` is
+  an unread mark; the identical cause with `visible=true` is a session going quietly idle. One
+  input, two outcomes, and only the facts beside it tell them apart.
+- **A reported cause that changes nothing is still a line** (`Activity held at …`). "The mark was
+  already up when the second notice arrived" is what a row stuck flagged looks like from in here.
+  Inferred causes are excluded: a session with no hooks settles on every burst of output, and the
+  turn boundaries would drown in it.
+- **The session id is on every line**, because a window holds dozens of trackers reporting the
+  same six states. `unowned` marks a fixture, which legitimately has no session.
+
+The cause is also kept as a value (`lastCause`), so `SessionActivityTrailTests` asserts the rule
+rather than scraping `log show` — including the pair that motivated all of it: the same
+`turnFinished` landing on `needsAttention` off screen and `idle` on screen, and
+`awaitingUserReported` as the one cause that flags a session the user is watching.
+
 Three consequences worth knowing before changing any of it:
 
 - **The marks are ranked by what they cost, not by novelty.** Blocked is a filled dot in the
@@ -387,7 +433,7 @@ screen described the old state either way. Muting is not a settings change, so t
 call `preferencesChanged()` themselves: `ProjectStore` knows nothing about notifications and
 should not learn.
 
-**Which sound it makes is a file name, and the name is resolved twice** (`AttentionAlertSound.swift`).
+**Which sound it makes is a file name, and the name is resolved twice** (`SoundChoice.swift`).
 `UNNotificationSound(named:)` does not take a path: it takes a file name that a *system* process
 looks up later, in the app bundle and then `~/Library/Sounds`, `/Library/Sounds`,
 `/System/Library/Sounds`. Three things follow, and all three were measured with a probe app on
@@ -395,7 +441,7 @@ macOS 26.5 rather than assumed:
 
 - **A name that resolves nowhere posts the banner in silence.** There is no fallback of the
   system's own — the log says `Tone with identifier 'X' is neither in of the collections for
-  system or iTunes tones` and nothing plays. So `AttentionAlertSound.resolvedSound()` checks the
+  system or iTunes tones` and nothing plays. So `SoundChoice.notificationSound()` checks the
   search paths itself and hands over `.default` when the file has gone. A stored choice whose
   file was deleted therefore degrades to the macOS tone rather than to nothing, and the picker
   shows `macOS Alert Sound` for it, because that is what will actually be heard.
@@ -425,33 +471,151 @@ bell is a program writing one byte down the PTY — muting a project does not ga
 and the bell rings whether or not the session needs anyone. Putting it in the Notifications card
 would have made that card's copy false.
 
-Three consequences worth knowing:
+Four consequences worth knowing:
 
-- **`TerminalBellSound` has an Off case and `AttentionAlertSound` does not.** The alert sound is
-  switched off by the toggle above it; the bell has no toggle, so silence has to be one of the
-  sounds it can be set to. Its stored form carries three states in one string, using two
-  reserved words (`silent`, `system`) that cannot collide with a sound: a stored sound is always
-  a file name and every offered file name carries a playable extension.
-- **Silenced is not unnoticed.** The sound and the activity edge are separate paths — the sound
-  is `bell(source:)`, the edge is `onBell` → `recordBell()` — so a bell set to Off still ends
-  the inferred turn and still raises the session's hand in the sidebar.
-- **A bell in a background session can make two sounds**, and this is not fixed. `recordBell`
-  sets `awaitsUser` when the session is not visible, which posts a `.blocked` alert; with
-  Threading behind another app that banner presents *with* its own sound, alongside the bell.
-  Predicting whether the alert will actually be heard means predicting the master switch, the
-  kind, the mute scopes, the sound toggle and macOS's own authorization, and a half-right
-  prediction is worse than two sounds. The honest fix is a choice the user now has: set one of
-  the two to Off.
+- **Both sounds are one `SoundChoice`, and Off is one of its values.** They were two enums:
+  the bell had an Off case and the alert did not, because a "Play a sound" checkbox already
+  said that for the alert. Once silence became a value the picker offers, the checkbox had
+  nothing left to say and two types carried one idea, so the alert's picker gained Off and the
+  checkbox retired (`SoundChoice.swift`). What still differs is what `system` *means* — the
+  macOS notification tone for an alert, the system alert beep for a bell — which is the kind's
+  business rather than the choice's. The stored form is `silent`, `system`, or `file:` and the
+  name; the prefix keeps the two reserved words out of the file-name namespace for good, and
+  the decode still reads both older dialects (the bell's bare name beside the same two words,
+  the alert's bare name or nothing at all).
+- **The cause comes first, then one ring.** Both halves of a bell leave the view through the same
+  hook — `EmojiFixedTerminalView.bell` → `onBell` — and the order inside it is now *noticed, then
+  heard*: `TerminalSession` asks its delegate (`terminalSessionDidReceiveBell`), which records the
+  activity edge and answers with the `SoundEvent` that names **why** it rang, and then rings once
+  with that cause. It used to ring first and tell the delegate afterwards, with `ring()` knowing
+  neither the session nor the reason.
+  Three properties are deliberate. The ring belongs to the session rather than to the delegate,
+  so a conformer that implements nothing — `ProjectTerminalViewController`, `ShellDrawerViewController`,
+  anything else holding a `TerminalSession` — still rings, at the bell kind's own level, exactly
+  as loudly as before; nothing goes silent because somebody forgot a method. It rings **once**,
+  in one place. And that place knows both the session and the cause, which is the seam the
+  double-sound fix below is built on.
+- **Silenced is not unnoticed.** The sound and the activity edge are still separate answers to
+  one bell: `recordBell()` moves the state whatever the sound resolves to, so a bell set to Off
+  still ends the inferred turn and still raises the session's hand in the sidebar.
+- **A bell in a background session used to make two sounds**, and the suppress seam is now real
+  — pointing the opposite way from how it was drafted. A bell that is actually *heard* leaves a
+  note (`AudibleBellRegister`, one `SessionID → Date` map, pruned on touch), written inside
+  `TerminalBell`'s play step; `AttentionAlertCenter.stateAlertSound` reads it and posts the
+  banner with **no sound** when a bell spoke for that session inside the window
+  (`TerminalBellDefaults.audibleBellWindow`, 0.5 s — 2.5× the bell's own limiter, so it covers
+  a stalled main-actor turn without reaching a genuinely later alert). The banner, the icon,
+  the sidebar's hand and the Notification Center entry are untouched.
+  It reports this way round because of *when* each half decides. The draft assumed the alert
+  center could report a sounding delivery for the bell to hold against, and it cannot: the ring
+  is synchronous inside `onBell`, while the alert's decision is a main-actor turn later — the
+  center observes the activity edge through a `Task`, and its `post` reads the project icon off
+  disk, which must not land on the PTY's byte path. A guard at the ring would therefore never
+  see its own edge's registration and would only swallow the *next* bell.
+  The error direction is also better this way. Every uncertainty leaves the **alert** sounding —
+  no note, an expired one, a bell the gate held, one the limiter rejected, one resolved to
+  `silent`, one from a standalone terminal, which has no alert to collide with anyway. Nothing
+  in the seam can quiet a bell, so the failure the finding feared — a bell going missing for
+  reasons the user cannot see — is structurally impossible; the worst case is the pair itself.
+  `postRequestedUpdate` deliberately does not ask: an update the user told an agent to send is
+  not an echo of a bell.
 
-The stored preference is `attentionAlertSound`, unseeded: an absent key is the macOS tone,
-which is a real answer rather than a missing one, so nothing needs migrating and
-`playsAttentionAlertSound` keeps meaning what it meant. The two questions stay separate —
-whether an alert sounds is the switch, which sound it is is the picker — and
-`AttentionAlertCenter.chosenSound()` is the one place that reads both, since the two posting
-paths had already drifted into asking half the question each. **Choosing in the picker plays
-the sound**, the way every alert-sound list does; the default item is the one that cannot,
-because macOS's notification tone lives in a private framework rather than in a folder a name
-resolves in, and the system beep is a different sound.
+**Why a bell rang is a reading of state that already existed.** `recordBell` returns one of four
+`SoundEvent` cases, classified in fixed precedence — `launch → agentVisible → otherProgram →
+agentAsking` — from the same three facts its one assignment was already made of. The causes
+overlap (another program can ring in a visible session, or during a boot), so the order is the
+contract: visibility outranks attribution because the sound's job is telling you what you cannot
+see. `bell.otherProgram` is the only heuristic, and it costs a *fresh*
+`ProcessUtility.foregroundProcessGroup(ofPTY:shellPid:)` — never the once-a-second reading that
+names a terminal, which can be a full second stale — so it is asked only when the resolution
+chain holds an entry for that event specifically (`SoundResolution.attributesOtherPrograms`).
+Without one it would resolve to the same sound as `bell.agentAsking` and buy a distinction nobody
+could hear.
+
+**Which sound any of it makes is `SoundResolution`,** a pure chain shared by the bell and the
+alerts, three scopes narrowest first and three levels inside each:
+`scope[event] → scope[kind] → scope[all] → next scope out → a per-event built-in table`. The
+scopes are the chat's record, then its project's, then the app — a standalone terminal reads
+`terminal → project → app` instead — with `AgentSession`, `Project` and `ProjectTerminal` each
+carrying one optional `soundOverrides: [String: String]?` (keys: `SoundEvent` raw values plus
+the reserved `all`/`bell`/`alert`; values: `SoundChoice` stored strings). The map stays raw at
+the storage boundary and every writer read-modify-writes it whole, so a key written by a later
+build survives being read and written here; absent — the common case — a record contributes no
+scope at all. The app scope is the two existing pickers at the kind level and an unseeded
+`soundEventChoices` map beneath them; it deliberately has **no `all`**, because the pickers are
+its outermost say. The table at the bottom **is** the pre-scoping behaviour written down: every
+bell is the system alert beep, `alert.blocked` and `alert.requestedUpdate` are the macOS tone,
+and `alert.unread`, `alert.finished` and `alert.scheduledMessage` are silent. Those three are
+*opt-in*: an entry broader than the event applies to them only when it is `silent`, so a broad
+stroke can quiet an event that has never sounded but can never voice one. Only an entry naming
+the event does that. The limiter is consulted **before** any of it — a rejected bell walks no
+chain and `stat`s no file, which a storm used to pay for per byte.
+
+**Which record a bell belongs to is `SoundOwner`,** read off `TerminalInstanceIdentity` at the
+one ring site: agent sessions and their shells resolve as the session, a standalone terminal as
+its terminal record, an ephemeral surface as nothing — and nothing goes silent for lacking a
+record, it just resolves at the app scope the way every bell once did. A terminal resolves
+through its **`homeProject`**, not the cwd-derived project the theme menus use: `displayProject`
+runs `GitInfo.worktreeIdentity`, a child process, and a bell arrives as fast as a program can
+write a byte. The submenu reads the same scope, so what it says is what rings.
+
+**The writers store nil where the value matches what would have been inherited** — the mute
+item's rule, applied at every scope — so a chat keeps *following* its project, and a later
+change there still reaches it. The one-click *Sounds* submenu (beside Theme on all three row
+kinds, `ProjectSidebarSoundMenu.swift`) writes only `scope[all]`; its *Inherit* item names the
+inherited answer through `SoundResolution.uniformAnswer` **only when every voiced event agrees**
+(opt-in events abstain), goes plain when they differ — the ordinary state right after migration,
+since the app's bell and alert tones differ — and label and writer read the same function, so
+they cannot disagree. Its *Customize… / Customize (N Events)…* item is a door to the sheet and
+never clears anything: a menu item that silently discards configured choices is a trap, so
+clearing lives on the sheet's *Reset All*, a surface that shows what is being reset.
+
+**The Customize sheet is one sheet at every scope** (`SoundCustomizeViewController`), because
+the difference between scopes is answered by `SoundScope` — the storage seam that knows a
+record keeps its whole say in one map while the app's is spread across two preferences and the
+event map. Each row's *Inherit* parenthetical is `SoundResolution.inherited(_:at:beyond:)`:
+resolution with only that row's own entry removed, everything else standing, which is also the
+exact expression its writer compares against. At the app scope the word is **Default**, the
+theme scope's word for the same position, and the two kind rows are literally the page pickers'
+storage. *Reset All* drops a record's **whole map, unknown keys included** — a scope with
+nothing left to say must be indistinguishable from one that never said anything, and a later
+build's key left behind would keep answering in the chain something the sheet did not show.
+Settings' **Custom sounds** section is the audit: a live scan of the store (no cache, capped
+before any view is built), one row per scope carrying an override, each a *Reset* and a door to
+its sheet. Project and standalone-terminal rows also name a non-inherited sound in their
+tooltip; **the session row deliberately does not yet** — it keeps no tooltip by design, its
+hover card is the right home, and that file was mid-refactor in another session when this
+landed. The affordance is owed; see IMPROVEMENTS.md.
+
+**The global silence gate is a gate, not a scope** (`AppSettings.silencesAllSounds`): it writes
+to no override map, so releasing it gives every scope back the answer it already had. The bell
+checks it **ahead of the limiter** — a silenced storm costs one Boolean per `BEL` and must not
+consume the window, or the first bell after the gate opens would be the one swallowed — while
+the alert paths inherit it from one seam, the `@MainActor` conveniences over the pure chain
+(the chain itself stays gate-free). Banners still post, the sidebar still raises its hand.
+Auditions bypass it deliberately: a sound picked in a list is an explicit ask to hear it, and a
+picker that played nothing would read as broken. Three surfaces write the one Boolean — the
+speaker at the sidebar footer's trailing edge (worn while silenced: a control that stops nine
+kinds of sound and then hides is the mystery-noise problem inverted), the mirrored Settings row,
+and Threading ▸ Silence Sounds (⇧⌘S, `AppCommand.Group.system`, which Recovery Mode allows
+wholesale) — and all three follow `AppSettingsDidChange` rather than each other. macOS Focus
+cannot do this job: it silences notification sounds but not the bell, which the app plays
+itself through `NSSound`.
+
+The stored preference is `attentionAlertSound`, unseeded: an absent key is the macOS tone, which
+is a real answer rather than a missing one. `AttentionAlertCenter.chosenSound(for:sessionID:)` is
+the one place that reads it, since the two posting paths had already drifted into asking half the
+question each — and it is now one question rather than two, because `silent` is a value of the
+answer. All three alert paths ask it with their own event: the state alerts, the requested update,
+and `ScheduledMessageNotifier`, whose banner is silent as an *answer* now rather than as an
+omission. `AttentionAlert.sounds` is gone with them — whether a kind sounds was a property of the
+alert, and it is a row of the terminus table.
+The retired checkbox carries over once, in `AppSettings.migrateAttentionAlertSoundSwitch`: an
+unchecked box becomes `silent`, a checked one writes nothing, and the old key is removed, which
+is what makes the migration its own marker. **Choosing in the picker plays the sound**, the way
+every alert-sound list does; Off and the default item are the two that cannot, because macOS's
+notification tone lives in a private framework rather than in a folder a name resolves in, and
+the system beep is a different sound.
 
 **Clicking one opens its session through the sidebar**, on the same path as a local click —
 `SessionNotificationOpened` → `ProjectSidebarViewController.select`. That path fails *silently*

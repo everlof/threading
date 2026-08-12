@@ -120,7 +120,7 @@ final class AppThemeRenderTests: XCTestCase {
             ("plain", plain, NSSize(width: 420, height: 300)),
             // Tall enough for every row, wide enough that `ThemedMenuLayout.maximumWidth` is
             // what cuts the deliberately long Codex line — the ellipsis is part of the render.
-            ("detailed", identityMenuEntries(), NSSize(width: 540, height: 470))
+            ("detailed", identityMenuEntries(), NSSize(width: 540, height: 540))
         ]
         for (name, entries, canvas) in fixtures {
             let variants: [(String, NSAppearance.Name, AppTheme)] = [
@@ -144,11 +144,13 @@ final class AppThemeRenderTests: XCTestCase {
         XCTAssertEqual(written, 6)
     }
 
-    /// The composer's identity menu as the composer builds it: one flat list spanning every
-    /// runtime, rows assembled through `AccountUsageMenu.identitySegments` rather than a
-    /// hand-copied approximation that drifts the first time the grammar changes. The data is
+    /// The composer's identity menu as the composer builds it: logins filed under a section head
+    /// per runtime, rows assembled through `AccountUsageMenu.decorate`'s own helpers rather than
+    /// a hand-copied approximation that drifts the first time the grammar changes. The data is
     /// chosen to hit every tone — calm values, a warning, a critical 99%, an expired `—`, a
-    /// scoped model window, bare runtime rows — and one line long enough to earn its ellipsis.
+    /// scoped model window, bare runtime rows — plus the two shapes the column layout exists to
+    /// get right: a plan metering one window beside plans metering two (Codex under Claude), and
+    /// a name long enough that it, rather than a number, is what gives way.
     private func identityMenuEntries() -> [ThemedMenuEntry] {
         let now = Date()
 
@@ -180,19 +182,17 @@ final class AppThemeRenderTests: XCTestCase {
         ) -> ThemedMenuEntry {
             var item = ThemedMenuItem(
                 title: title,
-                image: usage.map { AccountMarkImage.make(for: kind, usage: $0, at: now) }
-                    ?? AccountMarkImage.make(for: kind),
+                image: AccountMarkImage.make(for: kind),
                 isSelected: selected
             )
             if let usage {
-                item.setSubtitle(AccountUsageMenu.identitySegments(
-                    runtime: kind, for: usage, metering: nil, at: now
-                ))
+                AccountUsageMenu.apply(usage, to: &item, at: now)
             }
             return .item(item)
         }
 
         return [
+            .header(AgentKind.claude.displayName),
             row("Everlof", .claude, usage(
                 [window("5h", 0.22, resetsIn: 16_440), window("7d", 0.15, resetsIn: 345_600)],
                 scoped: [scoped("Fable", 0.4, resetsIn: -60)]
@@ -205,6 +205,7 @@ final class AppThemeRenderTests: XCTestCase {
                 [window("5h", nil, resetsIn: 3_600), window("7d", 0.79, resetsIn: 62_640)],
                 scoped: [scoped("Fable", 0, resetsIn: 62_640)]
             )),
+            .header(AgentKind.codex.displayName),
             row("Everlof", .codex, usage(
                 [window("7d", 0.99, resetsIn: 442_800)],
                 scoped: [scoped("GPT-5.3-Codex-Spark", 0, resetsIn: 442_800)],
@@ -214,6 +215,10 @@ final class AppThemeRenderTests: XCTestCase {
                 [window("7d", 0.55, resetsIn: 442_800)],
                 plan: "Team"
             )),
+            // The runtimes with no login to name go last, behind a rule: left in runtime order
+            // they sat under the Codex head with the same indent, which reads as Codex having
+            // four logins, two of them called Grok and OpenCode.
+            .separator,
             row("Grok", .grok),
             row("OpenCode", .openCode)
         ]

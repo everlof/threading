@@ -270,7 +270,7 @@ struct SubagentTimeline {
     /// Full child conversations stay in the providers' own transcript files. Persisting them
     /// again would duplicate an unbounded JSONL in Application Support and create two sources
     /// of truth. This snapshot keeps the navigator facts needed before a transcript is opened.
-    struct Snapshot: Codable, Equatable {
+    struct Snapshot: Codable, Equatable, Sendable {
         let version: Int
         var agents: [AgentSnapshot]
 
@@ -280,7 +280,7 @@ struct SubagentTimeline {
         }
     }
 
-    struct AgentSnapshot: Codable, Equatable {
+    struct AgentSnapshot: Codable, Equatable, Sendable {
         var descriptor: SubagentDescriptor
         var status: SubagentStatus
         var message: String?
@@ -317,6 +317,7 @@ struct SubagentTimeline {
     private var agentsByID: [String: Agent] = [:]
     private var orderedIDs: [String] = []
     private var canonicalIDByAlias: [String: String] = [:]
+    private var canonicalIDByPath: [String: String] = [:]
 
     init(sessionID: SessionID) {
         self.sessionID = sessionID
@@ -472,9 +473,7 @@ struct SubagentTimeline {
         let identities = [descriptor.threadID] + (descriptor.alternateThreadIDs ?? [])
         let existing = identities.compactMap(canonicalID(for:)).first
             ?? descriptor.path.flatMap { path in
-                agents.first {
-                    $0.descriptor.path == path
-                }?.descriptor.threadID
+                canonicalIDByPath[path]
             }
 
         let canonical = existing ?? ensureAgent(descriptor.threadID)
@@ -498,10 +497,7 @@ struct SubagentTimeline {
 
     private func canonicalID(for threadID: String) -> String? {
         if agentsByID[threadID] != nil { return threadID }
-        if let canonical = canonicalIDByAlias[threadID] { return canonical }
-        return agents.first {
-            $0.descriptor.alternateThreadIDs?.contains(threadID) == true
-        }?.descriptor.threadID
+        return canonicalIDByAlias[threadID]
     }
 
     private mutating func registerAliases(
@@ -511,6 +507,9 @@ struct SubagentTimeline {
         canonicalIDByAlias[descriptor.threadID] = canonicalID
         for alias in descriptor.alternateThreadIDs ?? [] {
             canonicalIDByAlias[alias] = canonicalID
+        }
+        if let path = descriptor.path, !path.isEmpty {
+            canonicalIDByPath[path] = canonicalID
         }
     }
 
@@ -703,7 +702,7 @@ final class SubagentSessionState {
             ))
         }
         persistenceDirty = true
-        flushPersistence()
+        persist(waitUntilDurable: false)
         onChange?()
     }
 
@@ -755,11 +754,26 @@ final class SubagentSessionState {
 
     /// Commits any coalesced navigator update before app shutdown or renderer disposal.
     func flushPersistence() {
+        persist(waitUntilDurable: true)
+        store?.waitForPendingSaves()
+    }
+
+    private func persist(waitUntilDurable: Bool) {
         persistenceTimer?.invalidate()
         persistenceTimer = nil
         guard persistenceDirty, !isInvalidated else { return }
         persistenceDirty = false
-        store?.save(timeline.snapshot, sessionID: sessionID)
+        let span = PerformanceRecorder.shared.begin(
+            "subagent.persistence.snapshot",
+            category: "storage"
+        )
+        let snapshot = timeline.snapshot
+        span.end(metadata: ["agents": "\(snapshot.agents.count)"])
+        if waitUntilDurable {
+            store?.save(snapshot, sessionID: sessionID)
+        } else {
+            store?.saveEventually(snapshot, sessionID: sessionID)
+        }
     }
 
     /// Makes late provider callbacks harmless after the owning session has been deleted.
@@ -781,8 +795,82 @@ final class SubagentSessionState {
             repeats: false
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.flushPersistence()
+                self?.persist(waitUntilDurable: false)
             }
+        }
+    }
+}
+
+private final class SubagentSnapshotWriter: @unchecked Sendable {
+
+    private let queue = DispatchQueue(
+        label: "codes.threading.subagent-snapshots",
+        qos: .utility
+    )
+    private let fileManager: FileManager
+    private let directory: URL
+
+    init(fileManager: FileManager, directory: URL) {
+        self.fileManager = fileManager
+        self.directory = directory
+    }
+
+    func enqueue(_ snapshot: SubagentTimeline.Snapshot, file: URL, sessionID: SessionID) {
+        queue.async { [self] in
+            save(snapshot, file: file, sessionID: sessionID)
+        }
+    }
+
+    func saveAndWait(
+        _ snapshot: SubagentTimeline.Snapshot,
+        file: URL,
+        sessionID: SessionID
+    ) {
+        queue.sync { [self] in
+            save(snapshot, file: file, sessionID: sessionID)
+        }
+    }
+
+    func remove(_ file: URL) {
+        queue.async { [self] in
+            try? fileManager.removeItem(at: file)
+        }
+    }
+
+    func waitForPendingSaves() {
+        queue.sync {}
+    }
+
+    private func save(
+        _ snapshot: SubagentTimeline.Snapshot,
+        file: URL,
+        sessionID: SessionID
+    ) {
+        let span = PerformanceRecorder.shared.begin(
+            "subagent.persistence.write",
+            category: "storage",
+            metadata: ["agents": "\(snapshot.agents.count)"]
+        )
+        defer { span.end() }
+
+        do {
+            try fileManager.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(snapshot)
+            guard data.count <= SubagentDefaults.maximumSnapshotBytes else {
+                throw BoundedFileReadError.exceedsLimit(
+                    maximumBytes: SubagentDefaults.maximumSnapshotBytes
+                )
+            }
+            try data.write(to: file, options: .atomic)
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to save subagents for \(sessionID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
         }
     }
 }
@@ -798,6 +886,7 @@ final class SubagentStateStore {
 
     private let fileManager: FileManager
     private let directory: URL
+    private let writer: SubagentSnapshotWriter
     private var writesBlocked: Set<SessionID> = []
 
     init(directory: URL? = nil, fileManager: FileManager = .default) {
@@ -812,9 +901,14 @@ final class SubagentStateStore {
             SubagentDefaults.snapshotDirectoryName,
             isDirectory: true
         )
+        self.writer = SubagentSnapshotWriter(
+            fileManager: fileManager,
+            directory: self.directory
+        )
     }
 
     func load(sessionID: SessionID) -> SubagentTimeline.Snapshot? {
+        writer.waitForPendingSaves()
         let file = url(for: sessionID)
         guard fileManager.fileExists(atPath: file.path) else { return nil }
 
@@ -867,29 +961,20 @@ final class SubagentStateStore {
 
     func save(_ snapshot: SubagentTimeline.Snapshot, sessionID: SessionID) {
         guard !writesBlocked.contains(sessionID) else { return }
+        writer.saveAndWait(snapshot, file: url(for: sessionID), sessionID: sessionID)
+    }
 
-        do {
-            try fileManager.createDirectory(
-                at: directory,
-                withIntermediateDirectories: true
-            )
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(snapshot)
-            guard data.count <= SubagentDefaults.maximumSnapshotBytes else {
-                throw BoundedFileReadError.exceedsLimit(
-                    maximumBytes: SubagentDefaults.maximumSnapshotBytes
-                )
-            }
-            try data.write(to: url(for: sessionID), options: .atomic)
-        } catch {
-            ThreadingLogger.agent.error(
-                "Failed to save subagents for \(sessionID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
-            )
-        }
+    func saveEventually(_ snapshot: SubagentTimeline.Snapshot, sessionID: SessionID) {
+        guard !writesBlocked.contains(sessionID) else { return }
+        writer.enqueue(snapshot, file: url(for: sessionID), sessionID: sessionID)
+    }
+
+    func waitForPendingSaves() {
+        writer.waitForPendingSaves()
     }
 
     func retainOnly(sessionIDs: Set<SessionID>) {
+        writer.waitForPendingSaves()
         guard let files = try? fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil,
@@ -911,10 +996,7 @@ final class SubagentStateStore {
 
     func remove(sessionID: SessionID) {
         writesBlocked.remove(sessionID)
-        let file = url(for: sessionID)
-        Task.detached(priority: .utility) {
-            try? FileManager().removeItem(at: file)
-        }
+        writer.remove(url(for: sessionID))
     }
 
     private func url(for sessionID: SessionID) -> URL {

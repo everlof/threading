@@ -57,7 +57,6 @@ final class GeneralSettingsRenderTests: XCTestCase {
             )
         }
 
-        XCTAssertTrue(labels.contains(L10n.string("Play a sound")))
         XCTAssertTrue(labels.contains(L10n.string("Alert sound")))
         XCTAssertTrue(labels.contains(L10n.string("Notify when a session needs you")))
     }
@@ -66,9 +65,12 @@ final class GeneralSettingsRenderTests: XCTestCase {
     ///
     /// Read-only on purpose: the bundle is hosted in the app, so writing a choice here would
     /// change the sound the developer's own copy plays. What is worth holding is the shape —
-    /// the default first, every sound the search paths answer for, and the way in for one of
-    /// the user's own last — plus the fact that a name is only ever offered if it resolves,
-    /// since a name that resolves nowhere posts the banner in silence.
+    /// Off and the default first, every sound the search paths answer for, and the way in for
+    /// one of the user's own last — plus the fact that a name is only ever offered if it
+    /// resolves, since a name that resolves nowhere posts the banner in silence.
+    ///
+    /// Off is here because the checkbox that used to express it is gone: if silence is not in
+    /// this list, an install that had alerts switched off has no way to say so again.
     @MainActor
     func testTheAlertSoundPickerOffersTheDefaultEveryInstalledSoundAndAWayToAddOne() throws {
         let controller = GeneralPreferencesViewController()
@@ -81,15 +83,16 @@ final class GeneralSettingsRenderTests: XCTestCase {
         )
         let items = (0..<popUp.numberOfItems).compactMap { popUp.item(at: $0) }
 
-        XCTAssertEqual(items.first?.title, L10n.string("macOS Alert Sound"))
-        XCTAssertEqual(
-            items.first?.representedValue as? AttentionAlertSound,
-            AttentionAlertSound.systemDefault
-        )
+        XCTAssertEqual(items.first?.title, L10n.string("Off"))
+        XCTAssertEqual(items.first?.representedValue as? SoundChoice, .silent)
+        XCTAssertEqual(items.dropFirst().first?.title, L10n.string("macOS Alert Sound"))
+        XCTAssertEqual(items.dropFirst().first?.representedValue as? SoundChoice, .system)
         XCTAssertEqual(items.last?.title, L10n.string("Add a Sound…"))
 
-        let offered = Set(items.dropFirst().dropLast().compactMap {
-            ($0.representedValue as? AttentionAlertSound)?.storedValue
+        let offered = Set(items.dropFirst(2).dropLast().compactMap {
+            ($0.representedValue as? SoundChoice).flatMap {
+                if case .named(let fileName) = $0 { return fileName } else { return nil }
+            }
         })
         XCTAssertEqual(offered, Set(NotificationSoundLibrary.available().map(\.fileName)))
         XCTAssertFalse(offered.isEmpty, "macOS ships alert sounds; none were listed")
@@ -101,18 +104,17 @@ final class GeneralSettingsRenderTests: XCTestCase {
         }
 
         XCTAssertEqual(
-            popUp.selectedItem?.representedValue as? AttentionAlertSound,
+            popUp.selectedItem?.representedValue as? SoundChoice,
             AppSettings.shared.attentionAlertSound
         )
     }
 
-    /// The bell picker offers the same sounds and one more answer.
+    /// The bell picker offers the same sounds in the same order.
     ///
-    /// A notification's sound is switched off by the toggle above it. The bell has no toggle —
-    /// nothing in the Notifications card applies to it — so if Off is not in this list there is
-    /// no way to stop a program beeping, which is the thing people actually want from a bell
-    /// setting. It is also deliberately *first*: reaching for a bell setting usually means
-    /// reaching for silence.
+    /// Nothing in the Notifications card applies to the bell, so if Off is not in this list
+    /// there is no way to stop a program beeping, which is the thing people actually want from
+    /// a bell setting. It is also deliberately *first*: reaching for a bell setting usually
+    /// means reaching for silence.
     @MainActor
     func testTheBellPickerLeadsWithOffAndOffersTheSameSounds() throws {
         let controller = GeneralPreferencesViewController()
@@ -125,20 +127,20 @@ final class GeneralSettingsRenderTests: XCTestCase {
         )
         let items = (0..<popUp.numberOfItems).compactMap { popUp.item(at: $0) }
 
-        XCTAssertEqual(items.first?.representedValue as? TerminalBellSound, .silent)
-        XCTAssertEqual(items.dropFirst().first?.representedValue as? TerminalBellSound, .systemAlert)
+        XCTAssertEqual(items.first?.representedValue as? SoundChoice, .silent)
+        XCTAssertEqual(items.dropFirst().first?.representedValue as? SoundChoice, .system)
         XCTAssertEqual(items.last?.title, L10n.string("Add a Sound…"))
 
         // The same vocabulary as the alert sound, which is the point of sharing the builder.
         let offered = Set(items.dropFirst(2).dropLast().compactMap {
-            ($0.representedValue as? TerminalBellSound).flatMap {
+            ($0.representedValue as? SoundChoice).flatMap {
                 if case .named(let fileName) = $0 { return fileName } else { return nil }
             }
         })
         XCTAssertEqual(offered, Set(NotificationSoundLibrary.available().map(\.fileName)))
 
         XCTAssertEqual(
-            popUp.selectedItem?.representedValue as? TerminalBellSound,
+            popUp.selectedItem?.representedValue as? SoundChoice,
             AppSettings.shared.terminalBellSound
         )
         XCTAssertTrue(Self.labels(in: controller.view).contains(L10n.string("Bell sound")))

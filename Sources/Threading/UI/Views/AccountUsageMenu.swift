@@ -30,16 +30,26 @@ enum AccountUsageMenu {
     /// the session that would start now, and a model this session is not running must not tint it.
     ///
     /// `agent` is the runtime this login belongs to, on a surface where that is *not* already
-    /// established — the composer's identity menu offers every runtime's logins in one list, so
-    /// each row has to name its own. Naming it costs the ring: a menu row has one image slot, and
-    /// `AccountMarkImage` spends it on the brand mark with the same reading underneath. Left nil
-    /// where the runtime is a foregone conclusion, and the ring stays.
+    /// established — the composer's identity menu offers every runtime's logins in one list. It
+    /// spends the row's one image slot on the brand mark rather than on `UsageRingImage`, so two
+    /// logins the same person named the same thing on two runtimes are told apart at a glance.
+    /// Left nil where the runtime is a foregone conclusion, and the ring stays.
     ///
-    /// The runtime is written **as well as** drawn, leading the subtitle. The mark answers the
-    /// glance, but one person's logins are often named the same thing on two runtimes, and two
-    /// rows reading `Everlof` told apart only by a 14pt silhouette is a coin toss. It leads
-    /// rather than trails because the eye finds the start of a line, and it is the only segment
-    /// there that survives an account with no reading at all.
+    /// **The reading is columns now, not a sentence.** It used to be one toned line —
+    /// `Claude Code · Max · 5h 27% · 7d 81% · 7d resets in 19h 36m` — and for one row that reads
+    /// fine. The menu's job is comparing several, and in a sentence a value's position is set by
+    /// the length of the name in front of it: three logins put their three 5-hour numbers at
+    /// three different x positions, so the comparison the menu exists for became a search. Worse,
+    /// the line overran the panel's width cap and the segment that lost its characters was the
+    /// countdown — `7d resets in 5d 1…`.
+    ///
+    /// So each window becomes a `ThemedMenuMetric`: a named column, a bar, and the number, with
+    /// every row's `7d` stacked under every other row's. The plan moves onto the title's line,
+    /// the countdown gets a column of its own that can never be the thing that truncates, and
+    /// the subtitle is left for the one thing that does not fit a shared column — a scoped model
+    /// window, which most logins do not have. The runtime is no longer written at all: the
+    /// composer files these rows under a section head per runtime, which says it once for the
+    /// group instead of on every row, and that is what freed the width the columns needed.
     static func decorate(
         _ item: inout ThemedMenuItem,
         for account: AgentAccount,
@@ -50,99 +60,105 @@ enum AccountUsageMenu {
 
         let usage = AccountUsageService.shared.usage(for: account)
 
-        // The gauge first, because it is what makes three accounts comparable without reading
-        // twelve numbers. The text stays: it is the precise answer, and the gauge is the glance.
         if let agent {
-            // Drawn whatever usage says: on this surface the mark is identity, and a row that
-            // lost its runtime because a reading had not landed would be worse than one with no
-            // meter under it.
-            item.image = AccountMarkImage.make(for: agent, usage: usage, metering: model)
+            // The plain mark, not the metered one. `AccountMarkImage`'s 2pt underline existed
+            // because a 14pt image slot was the only room a reading had; at that size it could
+            // carry a hue and never a length, which the value's own tint already said. The
+            // columns carry the length now, so the mark goes back to being identity alone.
+            item.image = AccountMarkImage.make(for: agent)
         } else if let usage, let ring = UsageRingImage.make(for: usage, metering: model) {
             item.image = ring
         }
 
-        let segments = identitySegments(runtime: agent, for: usage, metering: model)
-        guard !segments.isEmpty else { return }
-
-        // `ThemedMenuPresenter` draws subtitles consistently on every supported macOS version.
-        // This helper describes the content without reaching into menu presentation.
-        item.setSubtitle(segments)
+        guard let usage else { return }
+        apply(usage, to: &item, metering: model)
     }
 
-    /// An identity row's whole subtitle: the runtime leading — the one segment that survives a
-    /// login with no reading — then the reading's toned runs. Not private so the render fixture
-    /// can draw the same rows the composer assembles, rather than a hand-copied approximation
-    /// that drifts the first time this grammar changes.
-    static func identitySegments(
-        runtime agent: AgentKind?,
-        for usage: AccountUsage?,
-        metering model: String?,
+    /// The reading half of `decorate`, with the account lookup taken out.
+    ///
+    /// Split so the row a menu will show can be built from a `AccountUsage` value — by a test
+    /// asserting the grammar, and by the render fixture drawing it — rather than each of them
+    /// re-deriving what the composer assembles and drifting the first time this changes.
+    static func apply(
+        _ usage: AccountUsage,
+        to item: inout ThemedMenuItem,
+        metering model: String? = nil,
         at now: Date = Date()
-    ) -> [ThemedMenuSubtitleSegment] {
-        var segments: [ThemedMenuSubtitleSegment] = []
-        if let agent {
-            segments.append(ThemedMenuSubtitleSegment(agent.displayName))
-        }
-        if let usage {
-            let reading = summarySegments(for: usage, metering: model, at: now)
-            if !reading.isEmpty {
-                if !segments.isEmpty { segments.append(separator) }
-                segments += reading
-            }
-        }
-        return segments
+    ) {
+        item.titleDetail = usage.planLabel?.isEmpty == false ? usage.planLabel : nil
+        item.metrics = identityMetrics(for: usage, at: now)
+        item.trailingDetail = resetColumn(for: usage, metering: model, at: now)
+
+        let scoped = scopedSegments(for: usage, at: now)
+        if !scoped.isEmpty { item.setSubtitle(scoped) }
     }
 
-    /// `Max · 5h 7% · 7d 56% · Fable 89% · Fable resets in 15h`.
+    /// The account's own windows as columns — `5h`, `7d` — in the order the provider reports
+    /// them, which is the order every row's columns are then aligned in.
     ///
-    /// The line answers, in order, the three questions asked while picking a login: what plan is
-    /// this, how much of it is left, and when does the tight one come back. The reset names its
-    /// window rather than trailing the list bare — the binding window is not always the last one
-    /// written, and an unattributed countdown is read as belonging to whichever is.
+    /// Account windows only. A scoped model window's name is its length *and* its model
+    /// (`7d Fable`), so giving each one a column would add a wide, permanently empty column to
+    /// every login that does not meter that model — and most do not. Those go on the row's own
+    /// second line instead, where they cost nothing to the rows without them.
+    static func identityMetrics(
+        for usage: AccountUsage,
+        at now: Date = Date()
+    ) -> [ThemedMenuMetric] {
+        usage.readings(of: usage.windows, at: now).map { reading in
+            ThemedMenuMetric(
+                label: reading.name,
+                value: reading.value,
+                fraction: reading.fraction,
+                tone: tone(for: reading.severity)
+            )
+        }
+    }
+
+    /// `7d · 19h 36m` — when the window that binds a session on `model` comes back.
     ///
-    /// Every scoped window is listed, not only the ones metering `model`: this is the menu where
-    /// the login is chosen and the model is not, so a Fable window at 89% is exactly the thing to
-    /// say out loud, whatever the account's configured default happens to be. `model` still
-    /// decides which window *binds* — the countdown, and the ring `decorate` draws.
-    ///
-    /// Not private, and takes its own `now`, so the line a menu will show can be asserted
-    /// without building a menu.
-    static func summary(
+    /// Still attributed to its window, for the reason the written line attributed it: the
+    /// binding window is not always the last column, and a bare countdown at the end of a row is
+    /// read as belonging to whichever is. `resets in` is dropped — a column of countdowns states
+    /// what it is by being one, and the phrase was repeated on every row of the menu.
+    static func resetColumn(
         for usage: AccountUsage,
         metering model: String?,
         at now: Date = Date()
     ) -> String? {
-        let segments = summarySegments(for: usage, metering: model, at: now)
-        guard !segments.isEmpty else { return nil }
-        return segments.map(\.text).joined()
+        guard let binding = usage.bindingWindow(at: now, metering: model),
+              let resetsAt = binding.resetsAt
+        else { return nil }
+
+        return binding.compactName
+            + UsageDefaults.segmentSeparator
+            + UsageFormat.remaining(until: resetsAt, from: now)
     }
 
-    /// The same line as toned runs, which is what the menu row actually draws.
+    /// The windows a shared column cannot hold: the ones scoped to a single model.
     ///
-    /// The grammar is the toolbar pill's, transplanted: window names and separators recede to
-    /// the muted tier, values hold the subtitle's own ink until their window is under pressure
-    /// and then take its severity colour, and the reset clause stays muted — it is the
-    /// footnote, not the finding. What that buys is rhythm: the twelve numbers a three-login
-    /// comparison reads stop being twelve equally grey tokens, and the one worth seeing is the
-    /// one inked differently. The plain `summary` is this list's own text joined, so the two
-    /// cannot say different things.
-    static func summarySegments(
+    /// Empty for most logins, which is the point — a row only grows a second line when it has
+    /// something the columns could not say.
+    static func scopedSegments(
+        for usage: AccountUsage,
+        at now: Date = Date()
+    ) -> [ThemedMenuSubtitleSegment] {
+        readingSegments(usage.readings(of: usage.modelWindows, at: now), joining: false)
+    }
+
+    /// The whole identity row as one plain line — what a tooltip and VoiceOver get, and what a
+    /// test asserts the grammar against.
+    ///
+    /// This is `ThemedMenuItem.spokenSummary` over a row `apply` has filled in, rather than a
+    /// second assembly of the same facts: a summary derived independently of the row is exactly
+    /// how a tooltip ends up saying something the pixels do not.
+    static func summary(
         for usage: AccountUsage,
         metering model: String?,
         at now: Date = Date()
-    ) -> [ThemedMenuSubtitleSegment] {
-        var segments: [ThemedMenuSubtitleSegment] = []
-
-        if let plan = usage.planLabel, !plan.isEmpty {
-            segments.append(ThemedMenuSubtitleSegment(plan))
-        }
-        segments += readingSegments(usage.readings(at: now, scoped: .all), joining: !segments.isEmpty)
-        if let reset = resetLine(for: usage, metering: model, at: now) {
-            if !segments.isEmpty { segments.append(separator) }
-            segments.append(ThemedMenuSubtitleSegment(reset, .muted))
-        }
-
-        return segments
+    ) -> String {
+        var item = ThemedMenuItem(title: "")
+        apply(usage, to: &item, metering: model, at: now)
+        return item.spokenSummary
     }
 
     /// `7d Fable resets in 15h` — when the window that binds a session on `model` comes back.
@@ -164,23 +180,25 @@ enum AccountUsageMenu {
 
     // MARK: - Model Rows
 
-    /// Puts what a session on `model` would be measured against on a *model* row, in the menu
-    /// where the model is chosen.
+    /// Puts on a *model* row only what meters that model beyond the account, in the menu where
+    /// the model is chosen.
     ///
     /// The other half of the same decision. The account menu says which logins have a
     /// separately metered model under pressure; this says which model that is, at the moment
     /// that choice is made — and it is the only surface where the answer is actionable, since
     /// switching model is the cheap way out of a spent scoped window.
     ///
-    /// Every row carries its reading, including the models the plan meters no differently.
-    /// Stating only the scoped ones was defensible — the account windows are identical on every
-    /// row and distinguish nothing — but it read as *missing*: three models listed and one with
-    /// a number beside it looks like two failed lookups, not like two models with nothing of
-    /// their own to say. Repetition is cheaper than a row that appears to have no data.
+    /// The account's own windows are *not* repeated here: they are identical on every row by
+    /// construction — same login, same two windows — and they belong to the menu's header
+    /// (`modelMenuHeader`), stated once. Repeating them per row was tried first, on the theory
+    /// that a bare row beside a decorated one reads as a failed lookup; what it actually
+    /// produced, on the common account with no scoped window at all, was five copies of one
+    /// sentence — which reads as a rendering bug, not as five models. The header is what lets a
+    /// bare row mean what it says: nothing beyond the line above.
     ///
-    /// `model` is nil for the row that leaves the choice to the CLI on an account that names no
-    /// default: nothing is known about which model will run, so the account's own windows are
-    /// the whole honest answer.
+    /// Every row keeps its **ring**, whatever its text: it gauges the binding window per model,
+    /// so the one row whose scoped window is nearly spent sits visibly fuller than its
+    /// neighbours — the glance that makes the rows comparable without reading any of them.
     ///
     /// No refresh from here, unlike the account rows. The composer prefetches when it appears
     /// and the account menu asks again on every open, so this list is already warm — and a
@@ -192,26 +210,73 @@ enum AccountUsageMenu {
     ) {
         let now = Date()
         guard let usage = AccountUsageService.shared.usage(for: account) else { return }
-        let segments = modelSummarySegments(for: usage, running: model, at: now)
-        guard !segments.isEmpty else { return }
 
         // The same ring the account rows draw, gauging the same thing: the window a session
         // started here runs out of first. Rings that meant different things on two menus a click
         // apart would be worse than no ring at all. One `now` for both, so a row cannot state a
         // window the ring has already decided is expired.
         item.image = UsageRingImage.make(for: usage, at: now, metering: model)
+
+        let segments = modelSummarySegments(for: usage, running: model, at: now)
+        guard !segments.isEmpty else { return }
         item.setSubtitle(segments)
     }
 
-    /// `5h 10% · 7d 22% · 7d Fable 89% · 7d Fable resets in 15h` — every window a session on
-    /// `model` is measured against, and when the binding one comes back.
+    /// The line a model menu states once, above the rows: whose numbers these are, and the
+    /// windows every row shares. Title is the login's own name — the account was chosen on
+    /// another surface, and a menu of five readings had better say whose they are — and the
+    /// subtitle is the account's windows with the binding reset, the denominators the scoped
+    /// row lines are read against.
     ///
-    /// Nil only when the account has no windows at all, which is the same silence every other
-    /// usage surface keeps when there is nothing to report.
+    /// Disabled rather than choosable, the same idiom as every other informational menu row:
+    /// it states context, and a press on it should do nothing.
     ///
-    /// Narrow where the account menu is broad: this row *is* a model, so the scoped windows of
-    /// other models are not its business — that is `ScopedWindows.metering`, and the reason the
-    /// two menus do not share one line.
+    /// Nil when the account has no reading, which is the same silence the rows keep — a header
+    /// with nothing to say would demote the menu's first row to furniture for no reason.
+    static func modelMenuHeader(
+        for account: AgentAccount,
+        at now: Date = Date()
+    ) -> ThemedMenuItem? {
+        guard let usage = AccountUsageService.shared.usage(for: account) else { return nil }
+        let segments = modelMenuHeaderSegments(for: usage, at: now)
+        guard !segments.isEmpty else { return nil }
+
+        var item = ThemedMenuItem(title: account.displayName, isEnabled: false)
+        item.setSubtitle(segments)
+        return item
+    }
+
+    /// `Max · 5h 41% · 7d 77% · 7d resets in 22h 10m` — the plan and the account's own windows,
+    /// deliberately without the scoped ones: those belong to the rows that answer for their
+    /// models, and a header restating them would put the same number on screen twice in one
+    /// menu.
+    static func modelMenuHeaderSegments(
+        for usage: AccountUsage,
+        at now: Date = Date()
+    ) -> [ThemedMenuSubtitleSegment] {
+        var segments: [ThemedMenuSubtitleSegment] = []
+
+        if let plan = usage.planLabel, !plan.isEmpty {
+            segments.append(ThemedMenuSubtitleSegment(plan))
+        }
+        segments += readingSegments(
+            usage.readings(at: now, metering: nil),
+            joining: !segments.isEmpty
+        )
+        if let reset = resetLine(for: usage, metering: nil, at: now) {
+            if !segments.isEmpty { segments.append(separator) }
+            segments.append(ThemedMenuSubtitleSegment(reset, .muted))
+        }
+
+        return segments
+    }
+
+    /// `7d Fable 89% · resets in 15h` — the windows scoped to `model`, and when the binding one
+    /// comes back. Empty for a model the plan meters no differently, which is most rows: the
+    /// account's windows live in the header, so an empty line here *means* "nothing beyond the
+    /// line above" rather than standing in for missing data.
+    ///
+    /// Nil only when there is nothing scoped to say, mirroring the segments.
     static func modelSummary(
         for usage: AccountUsage,
         running model: String?,
@@ -222,20 +287,34 @@ enum AccountUsageMenu {
         return segments.map(\.text).joined()
     }
 
-    /// The model line as toned runs — `summarySegments`' grammar, minus the plan the account
-    /// row already stated, scoped to the windows that meter `model`.
+    /// The model line as toned runs — the shared reading grammar over only the scoped windows
+    /// metering `model` (`ScopedWindows.metering` narrowed further: another model's window is
+    /// not this row's business, and the account's are the header's).
+    ///
+    /// The countdown appears only when a window *of this row's own* is what binds a session on
+    /// `model` — the account windows' reset already trails the header. It names its window when
+    /// the row states more than one, and stays bare beside a single reading: `7d Fable 89% ·
+    /// 7d Fable resets in 15h` repeats a name three inches from itself, and the rule that a
+    /// countdown must say which window it belongs to is about lists where that is ambiguous.
     static func modelSummarySegments(
         for usage: AccountUsage,
         running model: String?,
         at now: Date = Date()
     ) -> [ThemedMenuSubtitleSegment] {
-        let readings = usage.readings(at: now, metering: model)
-        guard !readings.isEmpty else { return [] }
+        let scoped = usage.scopedWindows(metering: model)
+        guard !scoped.isEmpty else { return [] }
 
-        var segments = readingSegments(readings, joining: false)
-        if let reset = resetLine(for: usage, metering: model, at: now) {
+        var segments = readingSegments(usage.readings(of: scoped, at: now), joining: false)
+
+        if let binding = usage.bindingWindow(at: now, metering: model),
+           binding.scopeName != nil,
+           let resetsAt = binding.resetsAt {
+            let countdown = UsageFormat.resets(until: resetsAt, from: now)
             segments.append(separator)
-            segments.append(ThemedMenuSubtitleSegment(reset, .muted))
+            segments.append(ThemedMenuSubtitleSegment(
+                scoped.count > 1 ? "\(binding.compactName) \(countdown)" : countdown,
+                .muted
+            ))
         }
         return segments
     }

@@ -2,24 +2,12 @@ import AppKit
 
 // MARK: - Project Stats Popover
 
-/// The hover popover for a project row: what the code is made of.
+/// The hover popover for a project row: what the code is made of and how recently it moves.
 ///
 /// The session popover answers "what is this conversation"; this one answers "what is this
-/// codebase" — its composition bar, languages and size.
-///
-/// With scc known to be absent it answers with the install hint instead: a feature whose
-/// only trace is a popover that never appears cannot be discovered, so the one moment the
-/// user is already asking the question is where the answer "install scc" belongs. A project
-/// merely not counted *yet* still shows nothing — "not looked" is not "not installed".
+/// codebase" — composition, size, and a bounded twelve-week Git activity glance. The source
+/// counter is bundled with Threading; no package-manager state leaks into this presentation.
 final class ProjectStatsPopoverViewController: NSViewController {
-
-    // MARK: - Content
-
-    /// What the popover has to say: a reading, or how to get one.
-    private enum Content {
-        case stats(Info)
-        case missingTool(projectName: String)
-    }
 
     // MARK: - Info
 
@@ -28,31 +16,49 @@ final class ProjectStatsPopoverViewController: NSViewController {
         let projectName: String
         let stats: CodeStats
         let bar: CodeStatsBar
+        let activity: ProjectActivity?
         let measuredAt: Date
 
         /// Built from the service's cache; nil when there is nothing to show, which is the
         /// row's cue not to present at all.
         init?(project: Project) {
-            guard let stats = CodeStatsService.shared.stats(for: project.id),
+            let service = ProjectStatsService.shared
+            guard let stats = service.stats(for: project.id),
                   !stats.isEmpty,
-                  let measuredAt = CodeStatsService.shared.measuredAt(for: project.id)
+                  let codeMeasuredAt = service.codeMeasuredAt(for: project.id)
             else { return nil }
 
-            self.init(projectName: project.name, stats: stats, measuredAt: measuredAt)
+            let activity = service.activity(for: project.id)
+            let measuredAt = activity
+                .flatMap { _ in service.activityMeasuredAt(for: project.id) }
+                .map { min(codeMeasuredAt, $0) }
+                ?? codeMeasuredAt
+            self.init(
+                projectName: project.name,
+                stats: stats,
+                activity: activity,
+                measuredAt: measuredAt
+            )
         }
 
         /// The direct form, which is what lets the render tests feed a synthetic reading.
-        init(projectName: String, stats: CodeStats, measuredAt: Date) {
+        init(
+            projectName: String,
+            stats: CodeStats,
+            activity: ProjectActivity? = nil,
+            measuredAt: Date
+        ) {
             self.projectName = projectName
             self.stats = stats
             self.bar = CodeStatsBar.make(from: stats)
+            self.activity = activity
             self.measuredAt = measuredAt
         }
     }
 
     // MARK: - Properties
 
-    private let content: Content
+    private let info: Info
     /// The ordinary controller owns its popover width and insets. When it becomes the native
     /// `.proceed` content of a customizable presentation, the outer host owns that chrome.
     private let isEmbedded: Bool
@@ -72,13 +78,7 @@ final class ProjectStatsPopoverViewController: NSViewController {
     // MARK: - Initialization
 
     init(info: Info, isEmbedded: Bool = false) {
-        self.content = .stats(info)
-        self.isEmbedded = isEmbedded
-        super.init(nibName: nil, bundle: nil)
-    }
-
-    init(missingToolFor projectName: String, isEmbedded: Bool = false) {
-        self.content = .missingTool(projectName: projectName)
+        self.info = info
         self.isEmbedded = isEmbedded
         super.init(nibName: nil, bundle: nil)
     }
@@ -91,7 +91,7 @@ final class ProjectStatsPopoverViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        let rows = NSStackView(views: makeRows())
+        let rows = NSStackView(views: makeStatsRows(info))
         rows.orientation = .vertical
         rows.alignment = .leading
         rows.spacing = Design.Spacing.small
@@ -124,13 +124,6 @@ final class ProjectStatsPopoverViewController: NSViewController {
 
     // MARK: - Private Methods
 
-    private func makeRows() -> [NSView] {
-        switch content {
-        case .stats(let info): return makeStatsRows(info)
-        case .missingTool(let projectName): return makeMissingToolRows(projectName)
-        }
-    }
-
     private func makeStatsRows(_ info: Info) -> [NSView] {
         let summary = NSTextField(labelWithString: summaryLine(for: info))
         summary.applyFont(.subheading)
@@ -145,6 +138,9 @@ final class ProjectStatsPopoverViewController: NSViewController {
 
         var rows: [NSView] = [nameLabel(info.projectName), summary, bar]
         rows.append(contentsOf: info.bar.segments.map(legendRow(for:)))
+        if let activity = info.activity {
+            rows.append(contentsOf: activityRows(activity))
+        }
 
         let age = NSTextField(labelWithString: agedLine(for: info))
         age.applyFont(.subheading)
@@ -152,26 +148,6 @@ final class ProjectStatsPopoverViewController: NSViewController {
         rows.append(age)
 
         return rows
-    }
-
-    /// The install hint: what would be here, the one command that gets it, and that nothing
-    /// more is needed afterwards — the service re-probes on its own, so there is no button.
-    private func makeMissingToolRows(_ projectName: String) -> [NSView] {
-        let explains = NSTextField(wrappingLabelWithString: ProjectPopoverDefaults.missingToolExplanation)
-        explains.applyFont(.subheading)
-        explains.textColor = Design.Text.secondary
-        explains.preferredMaxLayoutWidth = ProjectPopoverDefaults.width - 2 * Design.Spacing.inset
-        explains.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let command = NSTextField(labelWithString: ProjectPopoverDefaults.installCommand)
-        command.applyFont(.code())
-        command.textColor = Design.Text.label
-
-        let heals = NSTextField(labelWithString: ProjectPopoverDefaults.missingToolPromise)
-        heals.applyFont(.subheading)
-        heals.textColor = Design.Text.tertiary
-
-        return [nameLabel(projectName), explains, command, heals]
     }
 
     private func nameLabel(_ projectName: String) -> NSTextField {
@@ -214,6 +190,48 @@ final class ProjectStatsPopoverViewController: NSViewController {
         return stack
     }
 
+    /// A semantic label and exact count flank the compact trend. The chart stays supplemental:
+    /// VoiceOver receives a complete sentence, and a capped history omits bars rather than
+    /// drawing the newest 20,000 commits as if they represented the whole window.
+    private func activityRows(_ activity: ProjectActivity) -> [NSView] {
+        let title = NSTextField(labelWithString: L10n.string("Recent activity"))
+        title.applyFont(.subheading)
+        title.textColor = Design.Text.secondary
+        title.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+
+        let count = NSTextField(labelWithString: activityCount(activity))
+        count.applyFont(.numericDetail())
+        count.textColor = Design.Text.tertiary
+        count.setContentHuggingPriority(.required, for: .horizontal)
+        count.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let heading = NSStackView(views: [title, count])
+        heading.orientation = .horizontal
+        heading.alignment = .centerY
+        heading.distribution = .fill
+        heading.spacing = Design.Spacing.small
+        heading.translatesAutoresizingMaskIntoConstraints = false
+        heading.widthAnchor.constraint(equalToConstant: ProjectPopoverDefaults.contentWidth).isActive = true
+
+        var rows: [NSView] = [heading]
+        if !activity.isTruncated, activity.latestCommitAt != nil {
+            let sparkline = ThemedBarSparklineView(
+                values: activity.weeklyCommits.map(Double.init),
+                accessibilityLabel: activityAccessibilityLabel(activity)
+            )
+            sparkline.widthAnchor.constraint(
+                equalToConstant: ProjectPopoverDefaults.contentWidth
+            ).isActive = true
+            rows.append(sparkline)
+        }
+
+        let latest = NSTextField(labelWithString: latestCommitLine(activity))
+        latest.applyFont(.subheading)
+        latest.textColor = Design.Text.tertiary
+        rows.append(latest)
+        return rows
+    }
+
     // MARK: - Text
 
     private func summaryLine(for info: Info) -> String {
@@ -234,7 +252,45 @@ final class ProjectStatsPopoverViewController: NSViewController {
     }
 
     private func agedLine(for info: Info) -> String {
-        "Counted \(Self.relativeDate.localizedString(for: info.measuredAt, relativeTo: Date()))"
+        L10n.format(
+            "Updated %@",
+            Self.relativeDate.localizedString(for: info.measuredAt, relativeTo: Date())
+        )
+    }
+
+    private func activityCount(_ activity: ProjectActivity) -> String {
+        let formatted = Self.count.string(
+            from: NSNumber(value: ProjectActivity.maximumCommitCount)
+        ) ?? "20,000"
+        if activity.isTruncated {
+            return L10n.format("Past 12 weeks · %@+ commits", formatted)
+        }
+
+        let count = Self.count.string(from: NSNumber(value: activity.commitCount)) ?? ""
+        let key = activity.commitCount == 1
+            ? "Past 12 weeks · %@ commit"
+            : "Past 12 weeks · %@ commits"
+        return L10n.format(key, count)
+    }
+
+    private func latestCommitLine(_ activity: ProjectActivity) -> String {
+        guard let latest = activity.latestCommitAt else {
+            return L10n.string("No commits yet")
+        }
+        return L10n.format(
+            "Latest commit %@",
+            Self.relativeDate.localizedString(for: latest, relativeTo: Date())
+        )
+    }
+
+    private func activityAccessibilityLabel(_ activity: ProjectActivity) -> String {
+        let values = activity.weeklyCommits
+            .map { Self.count.string(from: NSNumber(value: $0)) ?? "0" }
+            .joined(separator: ", ")
+        return L10n.format(
+            "Commits in each of the past 12 weeks, oldest to newest: %@",
+            values
+        )
     }
 }
 
@@ -282,15 +338,4 @@ enum ProjectPopoverDefaults {
     static let contentWidth = width - 2 * Design.Spacing.inset
 
     static let dotSize: CGFloat = 7
-
-    /// The install hint, in three lines: what is absent, the command, the promise. The
-    /// command is Homebrew's because that is the one package manager a macOS user can be
-    /// assumed a single line away from.
-    static var missingToolExplanation: String {
-        L10n.string("Code statistics are counted by scc, which is not installed.")
-    }
-    static let installCommand = "brew install scc"
-    static var missingToolPromise: String {
-        L10n.string("Counts appear on their own once it is.")
-    }
 }

@@ -269,7 +269,15 @@ final class ArchivedPreferencesViewController: NSViewController {
             ), in: view.window)
             return
         }
-        AgentRuntime.shared.discard(sessionID: entry.session.id)
+        // This route bypasses the sidebar delegate, so it owns the same exact permanent-delete
+        // cleanup. Archived sessions have no installed panel or drawer surfaces to release first.
+        let sessionID = entry.session.id
+        AgentRuntime.shared.discardDeletedSession(sessionID)
+        SessionAttachmentStore.shared.removeSession(sessionID)
+        DisplayPaneStore.shared.removeSession(sessionID)
+        MCPSessionRegistry.remove(sessionID: sessionID)
+        GitTurnBaselineStore.shared.remove(sessionID: sessionID)
+        BrowserAutoCaptureRing.shared.clear(for: sessionID)
         reload()
     }
 

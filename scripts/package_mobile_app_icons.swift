@@ -8,6 +8,7 @@ private struct ThemeIcon {
 }
 
 private let themes: [ThemeIcon] = [
+    .init(id: "threading", suffix: "Threading"),
     .init(id: "editorial", suffix: "Editorial"),
     .init(id: "cyberpunk", suffix: "Cyberpunk"),
     .init(id: "swiss-minimalist", suffix: "SwissMinimalist"),

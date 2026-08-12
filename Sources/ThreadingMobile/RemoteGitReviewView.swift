@@ -41,6 +41,8 @@ struct RemoteGitReviewView: View {
     @State private var errorMessage: String?
     @State private var selectedFile: RemoteRepositoryFileDTO?
     @State private var isAllFilesAtBottom = true
+    @State private var hasAllFilesOverflow = false
+    @FocusState private var searchIsFocused: Bool
 
     private let allFilesScrollEndID = "git-review-all-files-end"
 
@@ -65,7 +67,7 @@ struct RemoteGitReviewView: View {
         VStack(spacing: 0) {
             Picker("Contents", selection: $section) {
                 ForEach(RemoteGitReviewSection.allCases, id: \.self) { section in
-                    Text(section.title).tag(section)
+                    Text(sectionTitle(section)).tag(section)
                 }
             }
             .pickerStyle(.segmented)
@@ -120,15 +122,15 @@ struct RemoteGitReviewView: View {
                             Image(systemName: "chevron.down")
                                 .font(.caption2.weight(.bold))
                         }
-                        if let snapshot {
-                            HStack(spacing: 6) {
-                                Text("+\(snapshot.added)")
+                        HStack(spacing: 6) {
+                                Text("+\(compactChangeCount(snapshot?.added ?? 0))")
                                     .foregroundStyle(theme.positive)
-                                Text("−\(snapshot.removed)")
+                                Text("−\(compactChangeCount(snapshot?.removed ?? 0))")
                                     .foregroundStyle(theme.negative)
-                            }
-                            .font(.caption2.monospacedDigit())
                         }
+                        .font(.caption2.monospacedDigit())
+                        .opacity(snapshot == nil ? 0 : 1)
+                        .accessibilityHidden(snapshot == nil)
                     }
                     .foregroundStyle(theme.label)
                 }
@@ -196,6 +198,8 @@ struct RemoteGitReviewView: View {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(theme.tertiaryLabel)
                     TextField("Find a file", text: $searchText)
+                        .focused($searchIsFocused)
+                        .mobileUIEvidenceKeyboardFocus($searchIsFocused)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
@@ -245,18 +249,20 @@ struct RemoteGitReviewView: View {
                                 ReviewScrollBottomReader(
                                     coordinateSpace: "git-review-all-files"
                                 )
+                                ReviewScrollContentHeightReader()
                             }
                         }
                         .coordinateSpace(name: "git-review-all-files")
                         .onPreferenceChange(ReviewScrollBottomPreferenceKey.self) { bottom in
                             isAllFilesAtBottom = bottom <= viewport.size.height + 2
                         }
+                        .onPreferenceChange(ReviewScrollContentHeightPreferenceKey.self) { height in
+                            hasAllFilesOverflow = height > viewport.size.height + 2
+                        }
                         .refreshable { await loadRepositoryFiles() }
                         .overlay(alignment: .bottom) {
-                            if let snapshot, !snapshot.files.isEmpty {
+                            if hasAllFilesOverflow && !isAllFilesAtBottom {
                                 reviewBottomControls(
-                                    snapshot: snapshot,
-                                    showsJumpButton: !isAllFilesAtBottom
                                 ) {
                                     withAnimation(.easeOut(duration: 0.22)) {
                                         proxy.scrollTo(allFilesScrollEndID, anchor: .bottom)
@@ -281,6 +287,18 @@ struct RemoteGitReviewView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return paths }
         return paths.filter { $0.localizedCaseInsensitiveContains(query) }
+    }
+
+    private func sectionTitle(_ section: RemoteGitReviewSection) -> String {
+        switch section {
+        case .changed:
+            guard let count = snapshot?.files.count else { return section.title }
+            return "\(section.title) (\(compactChangeCount(count)))"
+        case .allFiles:
+            // The repository total does not describe an action or review state, and large
+            // worktrees made this segment compete with the change totals already in the title.
+            return section.title
+        }
     }
 
     private func loadingView(_ label: String) -> some View {
@@ -319,32 +337,23 @@ struct RemoteGitReviewView: View {
     }
 
     private func reviewBottomControls(
-        snapshot: RemoteGitReviewSnapshotDTO,
-        showsJumpButton: Bool,
         scrollToBottom: @escaping () -> Void
     ) -> some View {
-        VStack(spacing: 8) {
-            if showsJumpButton {
-                Button(action: scrollToBottom) {
-                    Image(systemName: "arrow.down")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: 40, height: 40)
-                        .foregroundStyle(theme.label)
-                        .background(theme.surface, in: Circle())
-                        .overlay(
-                            Circle()
-                                .stroke(theme.border, lineWidth: theme.borderWidth)
-                        )
-                        .shadow(color: theme.ground.opacity(0.35), radius: 10, y: 4)
-                }
-                .buttonStyle(.plain)
-                .transition(.scale(scale: 0.82).combined(with: .opacity))
-                .accessibilityLabel("Scroll to the end of the diff")
-            }
-
-            RemoteGitReviewSummaryPill(snapshot: snapshot)
+        Button(action: scrollToBottom) {
+            Image(systemName: "arrow.down")
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 40, height: 40)
+                .foregroundStyle(theme.label)
+                .background(theme.surface, in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(theme.border, lineWidth: theme.borderWidth)
+                )
+                .shadow(color: theme.ground.opacity(0.35), radius: 10, y: 4)
         }
-        .animation(.easeInOut(duration: 0.16), value: showsJumpButton)
+        .buttonStyle(.plain)
+        .transition(.scale(scale: 0.82).combined(with: .opacity))
+        .accessibilityLabel("Scroll to the end of the repository")
         .padding(.horizontal, 16)
         .padding(.bottom, 10)
     }
@@ -393,13 +402,21 @@ struct RemoteGitReviewView: View {
         isLoadingFiles = true
 #if DEBUG
         if isReviewDemo {
-            repositoryFiles = RemoteRepositoryFilesDTO(paths: [
-                "AGENTS.md",
-                "README.md",
-                "Packages/ThreadingRemoteKit/Sources/ThreadingRemoteKit/RemoteWireDTO.swift",
-                "Sources/ThreadingMobile/RemoteGitReviewView.swift",
-                "Sources/ThreadingMobile/SessionDetailView.swift",
-            ])
+            let isMassive = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                == "review-files-massive"
+            repositoryFiles = RemoteRepositoryFilesDTO(
+                paths: isMassive
+                    ? (0..<20_000).map { index in
+                        "Sources/Generated/Feature\(index / 100)/GeneratedFile\(index).swift"
+                    }
+                    : [
+                        "AGENTS.md",
+                        "README.md",
+                        "Packages/ThreadingRemoteKit/Sources/ThreadingRemoteKit/RemoteWireDTO.swift",
+                        "Sources/ThreadingMobile/RemoteGitReviewView.swift",
+                        "Sources/ThreadingMobile/SessionDetailView.swift",
+                    ]
+            )
             isLoadingFiles = false
             return
         }
@@ -458,12 +475,15 @@ struct RemoteGitReviewView: View {
 
 #if DEBUG
     private var isReviewDemo: Bool {
-        ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "review"
+        ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
+            .hasPrefix("review") == true
     }
 
     private static func demoSnapshot(
         mode: RemoteGitReviewMode
     ) -> RemoteGitReviewSnapshotDTO {
+        let isMassive = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
+            .contains("massive") == true
         let first = RemoteGitFileDiffDTO(
             path: "Sources/ThreadingMobile/RemoteGitReviewView.swift",
             change: "modified",
@@ -504,8 +524,8 @@ struct RemoteGitReviewView: View {
                     ]
                 )
             ],
-            added: 73,
-            removed: 12
+            added: isMassive ? 24_691 : 73,
+            removed: isMassive ? 8_032 : 12
         )
         let second = RemoteGitFileDiffDTO(
             path: "Packages/ThreadingRemoteKit/Sources/ThreadingRemoteKit/RemoteWireDTO.swift",
@@ -700,48 +720,27 @@ private struct ReviewScrollBottomReader: View {
     }
 }
 
-private struct RemoteGitReviewSummaryPill: View {
-    let snapshot: RemoteGitReviewSnapshotDTO
+private struct ReviewScrollContentHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
 
-    @Environment(\.remoteTheme) private var theme
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
 
+private struct ReviewScrollContentHeightReader: View {
     var body: some View {
-        HStack(spacing: 9) {
-            Text(MobileL10n.string(
-                "%lld %@",
-                snapshot.files.count,
-                MobileL10n.string(snapshot.files.count == 1 ? "file" : "files")
-            ))
-                .foregroundStyle(theme.secondaryLabel)
-            Text("+\(compact(snapshot.added))")
-                .foregroundStyle(theme.positive)
-            Text("−\(compact(snapshot.removed))")
-                .foregroundStyle(theme.negative)
-        }
-        .font(.caption.monospacedDigit())
-        .lineLimit(1)
-        .padding(.horizontal, 14)
-        .frame(height: 36)
-        .background(theme.surface, in: Capsule())
-        .overlay(
-            Capsule()
-                .stroke(theme.border, lineWidth: theme.borderWidth)
-        )
-        .shadow(color: theme.ground.opacity(0.38), radius: 12, y: 5)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            MobileL10n.string(
-                "%lld changed files, %lld additions, %lld deletions",
-                snapshot.files.count,
-                snapshot.added,
-                snapshot.removed
+        GeometryReader { geometry in
+            Color.clear.preference(
+                key: ReviewScrollContentHeightPreferenceKey.self,
+                value: geometry.size.height
             )
-        )
+        }
     }
+}
 
-    private func compact(_ value: Int) -> String {
-        value.formatted(.number.notation(.compactName))
-    }
+private func compactChangeCount(_ value: Int) -> String {
+    value.formatted(.number.notation(.compactName))
 }
 
 private struct RemoteRepositoryFileRow: View {

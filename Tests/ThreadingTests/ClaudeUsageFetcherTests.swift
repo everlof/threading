@@ -147,6 +147,70 @@ final class ClaudeUsageFetcherTests: XCTestCase {
         }
     }
 
+    // MARK: - The Endpoint Document
+
+    /// The usage endpoint serves the same utilization document the CLI caches, scoped limits
+    /// included — and the live fetch must decode all of it. It used to read only the fixed
+    /// `five_hour`/`seven_day` pair, so every account whose reading came from the API showed
+    /// its Fable window nowhere: the response named it and the fetcher threw it away, then
+    /// hoped to recover it from a `.claude.json` cache that often does not exist.
+    ///
+    /// The fixture is the endpoint's real shape, quirks included: a scoped limit can carry
+    /// `resets_at: null` and a zero percent, and its model is named by `display_name` with a
+    /// null `id`.
+    func testEndpointDocumentCarriesItsOwnScopedWindows() throws {
+        let payload = Data("""
+        {
+          "five_hour": {"utilization": 41, "resets_at": "2026-07-27T16:29:59.872906+00:00"},
+          "seven_day": {"utilization": 77, "resets_at": "2026-07-28T09:59:59.872925+00:00"},
+          "seven_day_opus": null,
+          "limits": [
+            {"kind": "session", "group": "session", "percent": 41, "scope": null,
+             "resets_at": "2026-07-27T16:29:59.872906+00:00", "is_active": true},
+            {"kind": "weekly_all", "group": "weekly", "percent": 77, "scope": null,
+             "resets_at": "2026-07-28T09:59:59.872925+00:00", "is_active": false},
+            {"kind": "weekly_scoped", "group": "weekly", "percent": 0, "resets_at": null,
+             "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null},
+             "is_active": false}
+          ]
+        }
+        """.utf8)
+
+        let document = try UsageHTTP.snakeCaseDecoder()
+            .decode(ClaudeUtilization.self, from: payload)
+
+        XCTAssertEqual(document.accountWindows().map(\.id), ["5h", "7d"])
+        XCTAssertEqual(
+            try XCTUnwrap(document.accountWindows().first?.fraction),
+            0.41,
+            accuracy: 0.0001
+        )
+
+        let scoped = try XCTUnwrap(document.modelWindows().first)
+        XCTAssertEqual(document.modelWindows().count, 1)
+        XCTAssertEqual(scoped.scopeName, "Fable")
+        XCTAssertEqual(scoped.compactName, "7d Fable")
+        XCTAssertEqual(scoped.fraction, 0)
+        XCTAssertNil(scoped.resetsAt)
+    }
+
+    /// An account slot that is present with its value missing keeps its identity — the reading
+    /// renders `—` for it — rather than vanishing from the list.
+    func testWindowWithUnknownValueKeepsItsIdentity() throws {
+        let payload = Data("""
+        {
+          "five_hour": {"utilization": null, "resets_at": "2026-07-27T16:29:59.872906+00:00"},
+          "seven_day": {"utilization": 77, "resets_at": "2026-07-28T09:59:59.872925+00:00"}
+        }
+        """.utf8)
+
+        let document = try UsageHTTP.snakeCaseDecoder()
+            .decode(ClaudeUtilization.self, from: payload)
+
+        XCTAssertEqual(document.accountWindows().map(\.id), ["5h", "7d"])
+        XCTAssertNil(try XCTUnwrap(document.accountWindows().first).fraction)
+    }
+
     // MARK: - Helpers
 
     /// An alternate login, so the default account's `~/.claude.json` is never consulted and the

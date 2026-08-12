@@ -28,6 +28,16 @@ enum GitReviewReader {
         case commit(hash: String)
     }
 
+    /// One immutable large-comparison snapshot. Every later visible-file read uses these exact
+    /// tree hashes, so an index write between two viewport batches cannot mix versions on screen.
+    struct ProgressiveDiff: Sendable {
+        let files: [GitFileDiff]
+        fileprivate let oldTree: String
+        fileprivate let newTree: String
+        fileprivate let oldTitle: String
+        fileprivate let newTitle: String
+    }
+
     // MARK: - Properties
 
     private static let queue = DispatchQueue(label: "codes.threading.git-review", qos: .userInitiated)
@@ -50,6 +60,28 @@ enum GitReviewReader {
         qos: .userInitiated
     )
 
+    /// A compact index must race the full patch rather than wait behind it on `queue`; both
+    /// commands are read-only and `--no-optional-locks` keeps them from owning the real index.
+    private static let diffIndexQueue = DispatchQueue(
+        label: "codes.threading.git-diff-index",
+        qos: .userInitiated
+    )
+
+    /// Visible-file hydration is serial and independent of the full-patch race. One obsolete
+    /// viewport may finish, but it cannot fan out into one process per row or sit behind the
+    /// complete patch it is replacing.
+    private static let diffHydrationQueue = DispatchQueue(
+        label: "codes.threading.git-diff-hydration",
+        qos: .userInitiated
+    )
+
+    /// Whole-range totals are useful only after the visible body. They must neither delay that
+    /// body nor occupy `summaryQueue`, whose small reads feed navigation chrome in every session.
+    private static let diffStatsQueue = DispatchQueue(
+        label: "codes.threading.git-diff-stats",
+        qos: .utility
+    )
+
     /// Ref transactions are serialized within one repository, while unrelated repositories can
     /// still capture concurrently. Git already locks its ref backend; this narrower app-level
     /// ordering additionally keeps retention deletion from racing a final publication we own.
@@ -59,18 +91,209 @@ enum GitReviewReader {
     // MARK: - Public Methods
 
     /// The diff for a request, parsed into per-file models. Completion arrives on main.
+    @discardableResult
     static func diff(
         _ request: DiffRequest,
         in root: URL,
         ignoringWhitespace: Bool = false,
         completion: @escaping @MainActor @Sendable (Result<[GitFileDiff], Failure>) -> Void
-    ) {
+    ) -> GitProcessCancellation {
+        let cancellation = GitProcessCancellation()
         perform(
             "git.read.diff",
             metadata: ["comparison": metricName(for: request)],
             completion
         ) {
-            try performDiff(request, in: root, ignoringWhitespace: ignoringWhitespace)
+            try performDiff(
+                request,
+                in: root,
+                ignoringWhitespace: ignoringWhitespace,
+                cancellation: cancellation
+            )
+        }
+        return cancellation
+    }
+
+    /// Whether this request can be frozen as two immutable trees. Working-tree and legacy turn
+    /// shapes need synthesis that cannot be repeated lazily without mixing versions; staged and
+    /// checkpoint comparisons can serve every later viewport from one exact tree pair.
+    static func supportsProgressiveIndex(_ request: DiffRequest) -> Bool {
+        switch request {
+        case .staged, .turnCheckpoint: true
+        case .uncommitted, .unstaged, .branch, .lastTurn, .commit: false
+        }
+    }
+
+    /// The path/change roster for a progressively presentable comparison. It runs independently
+    /// of the full patch and is useful only above the controller's large-comparison threshold.
+    static func diffIndex(
+        _ request: DiffRequest,
+        in root: URL,
+        ignoringWhitespace: Bool = false,
+        completion: @escaping @MainActor @Sendable (Result<ProgressiveDiff, Failure>) -> Void
+    ) {
+        perform(
+            "git.read.diff-index",
+            on: diffIndexQueue,
+            metadata: ["comparison": metricName(for: request)],
+            completion
+        ) {
+            let trees: (old: String, new: String, oldTitle: String, newTitle: String)
+            switch request {
+            case .staged:
+                trees = (
+                    old: hasCommits(in: root)
+                        ? (resolvedTree(GitReviewCommands.head, in: root) ?? GitReviewCommands.head)
+                        : try emptyTree(in: root),
+                    new: try indexSnapshot(in: root),
+                    oldTitle: "HEAD",
+                    newTitle: L10n.string("Index")
+                )
+            case .turnCheckpoint(let checkpoint):
+                let checkpointTrees = try checkpointTrees(checkpoint, in: root)
+                trees = (
+                    old: checkpointTrees.before,
+                    new: checkpointTrees.after,
+                    oldTitle: L10n.string("Turn Start"),
+                    newTitle: checkpoint.status == .complete
+                        ? L10n.string("Turn End")
+                        : L10n.string("Working Tree")
+                )
+            case .uncommitted, .unstaged, .branch, .lastTurn, .commit:
+                throw Failure.gitFailed("This comparison cannot be indexed progressively.")
+            }
+            let files = GitDiffParser.files(fromRawDiff: try run(
+                GitReviewCommands.diffIndex(
+                    from: trees.old,
+                    to: trees.new,
+                    ignoringWhitespace: ignoringWhitespace
+                ),
+                in: root
+            ))
+            return ProgressiveDiff(
+                files: files,
+                oldTree: trees.old,
+                newTree: trees.new,
+                oldTitle: trees.oldTitle,
+                newTitle: trees.newTitle
+            )
+        }
+    }
+
+    /// Exact hunks for a bounded group of rows already named by `diffIndex`. The controller owns
+    /// viewport coalescing; this seam owns literal pathspecs, rename-source inclusion and the
+    /// immutable checkpoint endpoints. Only comparison shapes admitted by `supportsProgressiveIndex`
+    /// can reach it.
+    static func diffFiles(
+        _ indexedFiles: [GitFileDiff],
+        using comparison: ProgressiveDiff,
+        in root: URL,
+        ignoringWhitespace: Bool = false,
+        completion: @escaping @MainActor @Sendable (Result<[GitFileDiff], Failure>) -> Void
+    ) {
+        perform(
+            "git.read.diff-files",
+            on: diffHydrationQueue,
+            metadata: [
+                "files": String(indexedFiles.count)
+            ],
+            completion
+        ) {
+            let paths = Array(Set(indexedFiles.flatMap { file -> [String] in
+                if case .renamed(let from) = file.change {
+                    return [from, file.path]
+                }
+                return [file.path]
+            })).sorted()
+            guard !paths.isEmpty else { return [] }
+
+            return GitDiffParser.files(fromUnifiedDiff: GitDiffParser.decode(
+                try run(
+                    GitReviewCommands.diff(
+                        from: comparison.oldTree,
+                        to: comparison.newTree,
+                        paths: paths,
+                        ignoringWhitespace: ignoringWhitespace
+                    ),
+                    in: root
+                )
+            ))
+        }
+    }
+
+    /// Exact aggregate counts without generating hunks. The ordinary pass disables rename
+    /// discovery, then only the rename paths already proven by the raw roster pay diffcore's
+    /// similarity scan. This preserves one semantic row and its exact counts while avoiding a
+    /// repository-wide rename search on the overwhelmingly common no-rename comparison.
+    @discardableResult
+    static func diffStats(
+        _ comparison: ProgressiveDiff,
+        in root: URL,
+        ignoringWhitespace: Bool = false,
+        completion: @escaping @MainActor @Sendable (Result<[GitFileLineStats], Failure>) -> Void
+    ) -> GitProcessCancellation {
+        let cancellation = GitProcessCancellation()
+        perform(
+            "git.read.diff-stats",
+            on: diffStatsQueue,
+            completion
+        ) {
+            let ordinary = GitDiffParser.fileStats(fromNumstat: try run(
+                GitReviewCommands.diffNumstat(
+                    from: comparison.oldTree,
+                    to: comparison.newTree,
+                    ignoringWhitespace: ignoringWhitespace
+                ),
+                in: root,
+                cancellation: cancellation
+            ))
+
+            let renamePaths = Set(comparison.files.flatMap { file -> [String] in
+                guard case .renamed(let source) = file.change else { return [] }
+                return [source, file.path]
+            })
+            guard !renamePaths.isEmpty else { return ordinary }
+
+            // Remove the delete/add interpretation produced by `--no-renames`, then replace it
+            // with the exact path-limited rename record. Including both endpoints also keeps the
+            // result correct for the rare delete/rename/add shape that reintroduces a source path.
+            let exactRenames = GitDiffParser.fileStats(fromNumstat: try run(
+                GitReviewCommands.diffNumstat(
+                    from: comparison.oldTree,
+                    to: comparison.newTree,
+                    paths: renamePaths.sorted(),
+                    detectingRenames: true,
+                    ignoringWhitespace: ignoringWhitespace
+                ),
+                in: root,
+                cancellation: cancellation
+            ))
+            return ordinary.filter { !renamePaths.contains($0.path) } + exactRenames
+        }
+        return cancellation
+    }
+
+    static func endpointFilePair(
+        path: String,
+        comparison: ProgressiveDiff,
+        in root: URL,
+        completion: @escaping @MainActor @Sendable (Result<GitEndpointFilePair, Failure>) -> Void
+    ) {
+        perform("git.read.progressive-endpoint-file-pair", completion) {
+            GitEndpointFilePair(
+                old: bytes(
+                    at: .revision(comparison.oldTree, title: comparison.oldTitle),
+                    path: path,
+                    in: root
+                ),
+                new: bytes(
+                    at: .revision(comparison.newTree, title: comparison.newTitle),
+                    path: path,
+                    in: root
+                ),
+                oldTitle: comparison.oldTitle,
+                newTitle: comparison.newTitle
+            )
         }
     }
 
@@ -94,7 +317,9 @@ enum GitReviewReader {
         }
     }
 
-    /// One page of history, newest first. Completion arrives on main.
+    /// One metadata-only page of history, newest first. This is enough to draw the complete
+    /// graph and text immediately; exact line statistics deliberately follow on a second read
+    /// so cold tree/blob access cannot hold the first presentation. Completion arrives on main.
     static func log(
         skip: Int,
         in root: URL,
@@ -102,29 +327,36 @@ enum GitReviewReader {
     ) {
         perform("git.read.log", metadata: ["skip": String(skip)], completion) {
             guard hasCommits(in: root) else { throw Failure.noCommits }
-            return GitDiffParser.commits(fromLog: try run(GitReviewCommands.log(skip: skip), in: root))
+            return GitDiffParser.commits(
+                fromLog: try run(GitReviewCommands.logMetadata(skip: skip), in: root),
+                includesStats: false
+            )
+        }
+    }
+
+    /// Exact `+/−` totals for a history page. Kept separate from `log` because computing them
+    /// opens the commits' trees and blobs; callers can enrich an already-visible fixed-height
+    /// table without making first presentation pay that cold cost.
+    static func logStats(
+        skip: Int,
+        in root: URL,
+        completion: @escaping @MainActor @Sendable (Result<[GitCommitSummary], Failure>) -> Void
+    ) {
+        perform("git.read.log-stats", metadata: ["skip": String(skip)], completion) {
+            guard hasCommits(in: root) else { throw Failure.noCommits }
+            return GitDiffParser.commits(
+                fromLog: try run(GitReviewCommands.log(skip: skip), in: root)
+            )
         }
     }
 
     /// The checkout's tracked and non-ignored untracked files, sorted for a compact browser.
     static func repositoryFiles(
         in root: URL,
-        completion: @escaping @MainActor @Sendable (Result<GitRepositoryFileList, Failure>) -> Void
+        completion: @escaping @MainActor @Sendable (Result<[String], Failure>) -> Void
     ) {
         perform("git.read.repository-files", completion) {
             try repositoryFilePaths(in: root)
-        }
-    }
-
-    /// The remote repository browser retains natural display order, but that locale-sensitive
-    /// presentation sort stays off-main and out of the lexical catalogue/atlas pipeline.
-    static func repositoryFilesForDisplay(
-        limit: Int,
-        in root: URL,
-        completion: @escaping @MainActor @Sendable (Result<GitRepositoryFilePage, Failure>) -> Void
-    ) {
-        perform("git.read.repository-files-display", completion) {
-            try repositoryFilePaths(in: root).naturalDisplayPage(limit: limit)
         }
     }
 
@@ -137,10 +369,6 @@ enum GitReviewReader {
         completion: @escaping @MainActor @Sendable (Result<GitRepositoryFile, Failure>) -> Void
     ) {
         perform("git.read.repository-file", completion) {
-            guard try repositoryContainsFile(path, in: root) else {
-                throw Failure.gitFailed("File not found.")
-            }
-
             let resolvedRoot = root.standardizedFileURL.resolvingSymlinksInPath()
             let candidate = resolvedRoot
                 .appendingPathComponent(path)
@@ -155,6 +383,16 @@ enum GitReviewReader {
                     .fileSizeKey,
                   ]),
                   values.isRegularFile == true else {
+                throw Failure.gitFailed("File not found.")
+            }
+
+            // Containment runs before spawning Git, so directory-shaped or escaping requests
+            // cannot turn even a literal pathspec into a broad index walk. Git then supplies the
+            // independent tracked/non-ignored allowlist decision for the one regular file.
+            let visibleMatch = try nulDelimitedPaths(
+                run(GitReviewCommands.repositoryFile(path), in: root)
+            )
+            guard visibleMatch.contains(path) else {
                 throw Failure.gitFailed("File not found.")
             }
 
@@ -389,10 +627,16 @@ enum GitReviewReader {
     private static func performDiff(
         _ request: DiffRequest,
         in root: URL,
-        ignoringWhitespace: Bool
+        ignoringWhitespace: Bool,
+        cancellation: GitProcessCancellation? = nil
     ) throws -> [GitFileDiff] {
         let tracked = GitDiffParser.files(fromUnifiedDiff: GitDiffParser.decode(
-            try trackedDiffData(request, in: root, ignoringWhitespace: ignoringWhitespace)
+            try trackedDiffData(
+                request,
+                in: root,
+                ignoringWhitespace: ignoringWhitespace,
+                cancellation: cancellation
+            )
         ))
 
         // The working-tree modes append untracked files, which `git diff` never mentions; a
@@ -421,15 +665,24 @@ enum GitReviewReader {
     private static func trackedDiffData(
         _ request: DiffRequest,
         in root: URL,
-        ignoringWhitespace: Bool
+        ignoringWhitespace: Bool,
+        cancellation: GitProcessCancellation? = nil
     ) throws -> Data {
         let ws = ignoringWhitespace
         switch request {
         case .staged:
-            return try run(GitReviewCommands.diffStaged(ignoringWhitespace: ws), in: root)
+            return try run(
+                GitReviewCommands.diffStaged(ignoringWhitespace: ws),
+                in: root,
+                cancellation: cancellation
+            )
 
         case .unstaged:
-            return try run(GitReviewCommands.diff(against: nil, ignoringWhitespace: ws), in: root)
+            return try run(
+                GitReviewCommands.diff(against: nil, ignoringWhitespace: ws),
+                in: root,
+                cancellation: cancellation
+            )
 
         case .uncommitted:
             // On an unborn HEAD, a real empty tree preserves the normal ref→worktree semantics.
@@ -439,14 +692,19 @@ enum GitReviewReader {
                 : try emptyTree(in: root)
             return try run(
                 GitReviewCommands.diff(against: baseline, ignoringWhitespace: ws),
-                in: root
+                in: root,
+                cancellation: cancellation
             )
 
         case .branch:
             guard hasCommits(in: root) else { throw Failure.noCommits }
             let base = try defaultBranch(in: root)
             let mergeBase = decodeTrimmed(try run(GitReviewCommands.mergeBase(base), in: root))
-            return try run(GitReviewCommands.diff(against: mergeBase, ignoringWhitespace: ws), in: root)
+            return try run(
+                GitReviewCommands.diff(against: mergeBase, ignoringWhitespace: ws),
+                in: root,
+                cancellation: cancellation
+            )
 
         case .lastTurn(let baseline):
             guard treeExists(baseline.treeHash, in: root) else { throw Failure.baselineExpired }
@@ -457,7 +715,8 @@ enum GitReviewReader {
                     to: currentTree,
                     ignoringWhitespace: ws
                 ),
-                in: root
+                in: root,
+                cancellation: cancellation
             )
 
         case .turnCheckpoint(let checkpoint):
@@ -468,11 +727,16 @@ enum GitReviewReader {
                     to: trees.after,
                     ignoringWhitespace: ws
                 ),
-                in: root
+                in: root,
+                cancellation: cancellation
             )
 
         case .commit(let hash):
-            return try run(GitReviewCommands.show(hash, ignoringWhitespace: ws), in: root)
+            return try run(
+                GitReviewCommands.show(hash, ignoringWhitespace: ws),
+                in: root,
+                cancellation: cancellation
+            )
         }
     }
 
@@ -695,6 +959,32 @@ enum GitReviewReader {
         return decodeTrimmed(try run(GitReviewCommands.writeTree(), in: root, environment: environment))
     }
 
+    /// Freezes the current real index without asking Git to lock or refresh it. Git replaces the
+    /// index atomically, so copying its current file gives one coherent version; `write-tree`
+    /// runs only against the private copy and returns an immutable object hash for later batches.
+    private static func indexSnapshot(in root: URL) throws -> String {
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory
+            .appendingPathComponent("threading-git-index-" + UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+
+        let alternateIndex = directory.appendingPathComponent("index")
+        let realIndexPath = decodeTrimmed(try run(GitReviewCommands.indexPath(), in: root))
+        if !realIndexPath.isEmpty, fileManager.fileExists(atPath: realIndexPath) {
+            try fileManager.copyItem(at: URL(fileURLWithPath: realIndexPath), to: alternateIndex)
+        }
+        let environment = ["GIT_INDEX_FILE": alternateIndex.path]
+        if !fileManager.fileExists(atPath: alternateIndex.path) {
+            _ = try run(GitReviewCommands.readEmptyTree(), in: root, environment: environment)
+        }
+        return decodeTrimmed(try run(
+            GitReviewCommands.writeTree(),
+            in: root,
+            environment: environment
+        ))
+    }
+
     private static func decodeTrimmed(_ data: Data) -> String {
         GitDiffParser.decode(data).trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -711,37 +1001,23 @@ enum GitReviewReader {
         return queue
     }
 
-    private static func repositoryFilePaths(in root: URL) throws -> GitRepositoryFileList {
-        // `git ls-files` emits index-order paths, including the untracked merge, and
-        // `--deduplicate` makes the output unique. Preserve that lexical answer: natural-sorting
-        // it here cost hundreds of milliseconds at Linux scale and the atlas sorted it again.
-        GitRepositoryFileList(paths: paths(fromRepositoryList: try run(
-            GitReviewCommands.repositoryFiles(),
-            in: root
-        )))
+    private static func repositoryFilePaths(in root: URL) throws -> [String] {
+        nulDelimitedPaths(try run(GitReviewCommands.repositoryFiles(), in: root))
+            // Git path order is deterministic, locale-independent, and what repository tools
+            // conventionally expose. Sorting explicitly also merges tracked and untracked output.
+            // `localizedStandardCompare` cost ~260 ms by itself for Linux's 95k paths; lexical
+            // sorting is ~13 ms and keeps this background read dominated by Git and decoding.
+            .sorted()
     }
 
-    /// Authorises one remote path without manufacturing the complete repository catalogue.
-    /// Literal pathspecs preserve newlines, non-ASCII and wildcard-looking names. Exact result
-    /// comparison remains necessary because Git intentionally expands a directory pathspec.
-    private static func repositoryContainsFile(_ path: String, in root: URL) throws -> Bool {
-        guard !path.isEmpty, !path.utf8.contains(0) else { return false }
-        let data: Data
-        do {
-            data = try run(
-                GitReviewCommands.repositoryFile(path),
-                in: root,
-                maximumOutput: GitReviewDefaults.exactRepositoryPathOutputCap
-            )
-        } catch Failure.outputTooLarge {
-            // A directory-shaped pathspec expands to descendants. It is not one exact file.
-            return false
-        }
-        let matches = paths(fromRepositoryList: data)
-        return matches.count == 1 && matches[0] == path
+    /// The path-only query is materially cheaper than porcelain status on large clean trees and
+    /// has the same contract needed by synthesis: non-ignored untracked paths, NUL-delimited so
+    /// spaces, quotes, newlines, and non-ASCII names survive without a second quoting grammar.
+    private static func untrackedPaths(in root: URL) throws -> [String] {
+        nulDelimitedPaths(try run(GitReviewCommands.untrackedFiles(), in: root))
     }
 
-    private static func paths(fromRepositoryList data: Data) -> [String] {
+    private static func nulDelimitedPaths(_ data: Data) -> [String] {
         GitDiffParser.decode(data)
             .split(separator: "\u{00}", omittingEmptySubsequences: true)
             .map(String.init)
@@ -752,8 +1028,7 @@ enum GitReviewReader {
     /// `git diff` never mentions untracked files, so the working-tree modes append them as
     /// all-added diffs built from the files themselves.
     private static func untrackedDiffs(in root: URL, excluding: Set<String>) throws -> [GitFileDiff] {
-        let status = GitDiffParser.status(fromPorcelainV2: try run(GitReviewCommands.status(), in: root))
-        return status.untracked
+        try untrackedPaths(in: root)
             .filter { !excluding.contains($0) }
             .map { synthesizedDiff(path: $0, root: root) }
     }
@@ -762,10 +1037,10 @@ enum GitReviewReader {
     /// The synthesis caps apply here too — an over-cap or binary file counts as a file
     /// carrying no lines rather than being read whole.
     private static func untrackedSummary(in root: URL) throws -> GitChangeSummary {
-        let status = GitDiffParser.status(fromPorcelainV2: try run(GitReviewCommands.status(), in: root))
+        let paths = try untrackedPaths(in: root)
 
         var added = 0
-        for path in status.untracked {
+        for path in paths {
             guard let data = boundedWorktreeBytes(
                 path: path,
                 in: root,
@@ -775,7 +1050,7 @@ enum GitReviewReader {
             added += lineCount(of: data)
         }
 
-        return GitChangeSummary(files: status.untracked.count, added: added, removed: 0)
+        return GitChangeSummary(files: paths.count, added: added, removed: 0)
     }
 
     /// Newline count, with an unterminated final line counting as a line — the same total the
@@ -824,14 +1099,14 @@ enum GitReviewReader {
         in root: URL,
         input: Data? = nil,
         environment: [String: String] = [:],
-        maximumOutput: Int = GitReviewDefaults.maximumDiffBytes
+        cancellation: GitProcessCancellation? = nil
     ) throws -> Data {
         try GitProcess.run(
             GitReviewCommands.common + arguments,
             in: root,
             input: input,
             environmentOverrides: environment,
-            maximumOutput: maximumOutput
+            cancellation: cancellation
         )
     }
 }

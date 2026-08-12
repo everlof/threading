@@ -57,6 +57,7 @@ final class RemoteSessionMirrorRegistry {
         /// Complete provider-neutral state and its live wire revision. The complete rows stay
         /// on the Mac; clients receive only a recent window plus requested older pages.
         var conversationSnapshot: RemoteConversationSnapshotDTO? = nil
+        var conversationRowsRevision: RemoteConversationRowsRevision? = nil
         var conversationRevision = 0
         /// Devices that have already sent input, so the "first remote input" audit line is
         /// written once per device+session rather than per keystroke.
@@ -210,7 +211,12 @@ final class RemoteSessionMirrorRegistry {
                         reasoning: option.reasoningLevels.map {
                             RemoteReasoningChoiceDTO(id: $0.effort, name: $0.displayName)
                         },
-                        defaultReasoningID: option.defaultReasoningLevel
+                        defaultReasoningID: option.defaultReasoningLevel,
+                        supportsFastMode: AgentModels.supportsFastMode(
+                            kind: kind,
+                            model: option.identifier,
+                            account: account
+                        )
                     )
                 }
             }
@@ -255,7 +261,18 @@ final class RemoteSessionMirrorRegistry {
                 accounts: accounts,
                 models: models(for: defaultAccount),
                 defaultModelID: AgentModels.defaultModel(for: kind, account: defaultAccount),
-                supportsConversation: kind.supportsNativeUI
+                supportsConversation: kind.supportsNativeUI,
+                permissionModes: kind.supportsPermissionModes
+                    ? AgentPermissionMode.allCases.map { mode in
+                        RemotePermissionModeChoiceDTO(
+                            id: mode.rawValue,
+                            name: mode.displayName,
+                            detail: [mode.menuDescription, mode.caveat(for: kind)]
+                                .compactMap { $0 }
+                                .joined(separator: " ")
+                        )
+                    }
+                    : []
             )
         }
 
@@ -393,8 +410,13 @@ final class RemoteSessionMirrorRegistry {
             )
         }
 
-        let current = conversation.remoteSnapshot
-        if mirrors[sessionID]?.conversationSnapshot != current {
+        let projection = conversation.remoteProjection
+        let current = projection.snapshot
+        let rowsChanged = mirrors[sessionID]?.conversationRowsRevision != projection.rowsRevision
+        let metadataChanged = mirrors[sessionID]?.conversationSnapshot.map {
+            !Self.sameConversationMetadata($0, current)
+        } ?? true
+        if rowsChanged || metadataChanged {
             if mirrors[sessionID]?.subscribers.isEmpty == false {
                 // Bring every already-attached viewer forward before the newcomer is inserted.
                 // Mutating the shared baseline for only the newcomer would otherwise make a
@@ -403,6 +425,7 @@ final class RemoteSessionMirrorRegistry {
                 broadcastConversation(sessionID)
             } else if var mirror = mirrors[sessionID] {
                 mirror.conversationSnapshot = current
+                mirror.conversationRowsRevision = projection.rowsRevision
                 mirror.conversationRevision &+= 1
                 mirrors[sessionID] = mirror
             }
@@ -461,8 +484,12 @@ final class RemoteSessionMirrorRegistry {
               let conversation = AgentRuntime.shared.conversation(for: sessionID) else {
             return
         }
-        let current = conversation.remoteSnapshot
-        if mirrors[sessionID]?.conversationSnapshot != current {
+        let projection = conversation.remoteProjection
+        let current = projection.snapshot
+        if mirrors[sessionID]?.conversationRowsRevision != projection.rowsRevision
+            || mirrors[sessionID]?.conversationSnapshot.map({
+                !Self.sameConversationMetadata($0, current)
+            }) ?? true {
             broadcastConversation(sessionID)
         }
         let revision = mirrors[sessionID]?.conversationRevision ?? 0
@@ -1230,21 +1257,34 @@ final class RemoteSessionMirrorRegistry {
     private func broadcastConversation(_ sessionID: SessionID) {
         guard var mirror = mirrors[sessionID], mirror.surface == "conversation",
               let conversation = AgentRuntime.shared.conversation(for: sessionID) else { return }
-        let current = conversation.remoteSnapshot
+        let projection = conversation.remoteProjection
+        let current = projection.snapshot
         let previous = mirror.conversationSnapshot
-        guard previous != current else { return }
+        let rowsUnchanged = mirror.conversationRowsRevision == projection.rowsRevision
+        let metadataUnchanged = previous.map {
+            Self.sameConversationMetadata($0, current)
+        } ?? false
+        guard !rowsUnchanged || !metadataUnchanged else { return }
 
         let baseRevision = mirror.conversationRevision
         let revision = baseRevision &+ 1
         let delta = previous.flatMap {
-            RemoteConversationWirePolicy.delta(
-                from: $0,
-                to: current,
-                baseRevision: baseRevision,
-                revision: revision
-            )
+            rowsUnchanged
+                ? RemoteConversationWirePolicy.deltaWithUnchangedRows(
+                    from: $0,
+                    to: current,
+                    baseRevision: baseRevision,
+                    revision: revision
+                )
+                : RemoteConversationWirePolicy.delta(
+                    from: $0,
+                    to: current,
+                    baseRevision: baseRevision,
+                    revision: revision
+                )
         }
         mirror.conversationSnapshot = current
+        mirror.conversationRowsRevision = projection.rowsRevision
         mirror.conversationRevision = revision
         mirrors[sessionID] = mirror
 
@@ -1264,6 +1304,19 @@ final class RemoteSessionMirrorRegistry {
                 )))
             }
         }
+    }
+
+    /// Compares only state that can change without a timeline-row mutation. Row equality is
+    /// answered by `RemoteConversationRowsRevision`, so a token does not walk the transcript.
+    private static func sameConversationMetadata(
+        _ lhs: RemoteConversationSnapshotDTO,
+        _ rhs: RemoteConversationSnapshotDTO
+    ) -> Bool {
+        lhs.streamingText == rhs.streamingText
+            && lhs.canSend == rhs.canSend
+            && lhs.composerCapabilities == rhs.composerCapabilities
+            && lhs.permission == rhs.permission
+            && lhs.hasEarlier == rhs.hasEarlier
     }
 
     /// Keeps a remote renderer on the local terminal's authoritative grid. The remote never

@@ -155,16 +155,17 @@ final class MCPSessionRegistryTests: XCTestCase {
   }
 
   @MainActor
-  func testRemovingOneSessionRevokesOnlyItsEndpoint() {
-    let removedSessionID = SessionID()
+  func testRemovingOneSessionDoesNotFilterTheRegistry() {
     let retainedSessionID = SessionID()
-    let removedToken = MCPSessionRegistry.token(for: removedSessionID)
+    let removedSessionID = SessionID()
     let retainedToken = MCPSessionRegistry.token(for: retainedSessionID)
+    let removedToken = MCPSessionRegistry.token(for: removedSessionID)
+    defer { MCPSessionRegistry.remove(sessionID: retainedSessionID) }
 
     MCPSessionRegistry.remove(sessionID: removedSessionID)
 
-    XCTAssertNil(MCPSessionRegistry.session(forToken: removedToken))
     XCTAssertEqual(MCPSessionRegistry.session(forToken: retainedToken), retainedSessionID)
+    XCTAssertNil(MCPSessionRegistry.session(forToken: removedToken))
     XCTAssertEqual(MCPSessionRegistry.token(for: retainedSessionID), retainedToken)
   }
 

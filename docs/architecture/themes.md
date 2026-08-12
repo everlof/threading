@@ -188,6 +188,24 @@ context. Applying a profile invalidates the old finding before SwiftTerm clears 
 if the new palette is still bad the next visible draw reports it again; if it fixed the pair, no
 stale explanation survives.
 
+**The notice also says what went missing, and shows the pair.** Two hex values are a true
+statement about a screen the reader has already looked at and found nothing wrong with, because
+the evidence is the part they cannot see: `#505050` on `#464646` reads as two colours in a
+sentence and as one flat field on the terminal. So the conflict carries a **sample of the run
+itself** — the words the band then quotes, which is what turns the notice into a place to look —
+and the band carries a `ColorPairSpecimenView` showing the two colours touching under an "As
+drawn" caption, where a pair four steps apart is visibly one block. The sample is program output and is treated as such:
+SwiftTerm strips control characters, collapses whitespace, and caps it at
+`TerminalContrastSample.characterLimit` with the cut declared by an ellipsis. Only the *character*
+bound claims a cut — a row is padded to its width, so a short label inside a long run reaches the
+scan bound having kept everything there was to keep, and `hello…` would say the opposite. An
+empty sample falls the copy back to the colours alone.
+
+Deduplication stays keyed on the **colour pair**, not on the reported conflict, so a program
+printing a second unreadable word is still one collision rather than a second notice. The sample
+stays out of `signature` for the same reason from the other end: a quote must never turn a
+dismissed finding back into a new one.
+
 A live app-theme switch is a terminal-theme switch for any chat or standalone terminal
 following it, which is why `AgentSessionViewController` and `ProjectTerminalViewController`
 observe `AppThemeDidChange` alongside the assignment events.
@@ -1196,3 +1214,23 @@ on a small scalable font—the latter malformed letters rather than creating bit
 stock alphabet is clean-room and ships no Winamp pixels. A title containing any unsupported
 localized character falls back as a whole to the ordinary antialiased font, preserving the copy
 instead of mixing alphabets or drawing a missing glyph.
+
+## 2026-08-12: the product has its own stock theme
+
+**Threading** (`threading`) is the stock dark theme used for ordinary product captures. It uses
+navy ground and panel roles, warm text, and orange accents. Its terminal palette uses the same
+family of colors, so a provider TUI does not look like a separate skin placed inside the app.
+
+The theme uses the normal Threading layout and control vocabulary. Selected rows use a deep navy
+fill rather than diluted orange, leaving orange for actions, focus, the app mark, and the active
+window seam. The sidebar has a restrained navy depth shift and a flat navigator well. On macOS it
+takes over the window frame through `WindowChromeStyle`: a quiet two-stop navy title band, warm
+plain caption glyphs, a one-point orange active seam, the shared command band, and a one-point
+navy outer frame with a twelve-point corner. The title band does not repeat the application icon.
+It does not move application controls. The chrome is
+authored rather than copied from a historical system, so
+`docs/references/chrome/threading/reference.json` records every component as not applicable and
+the shared chrome sweeps plus whole-window render hold the implementation.
+
+System and other stock themes remain available, but ordinary product evidence uses Threading.
+Other themes appear only when a page is explicitly comparing themes.

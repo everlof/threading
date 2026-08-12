@@ -159,6 +159,8 @@ enum AppCommands {
         static let inspectElement = "inspect.element"
 
         static let checkForUpdates = "app.checkForUpdates"
+
+        static let silenceSounds = "app.silenceSounds"
     }
 
     // MARK: Editable
@@ -290,7 +292,19 @@ enum AppCommands {
         // updates is a Help-menu visit, not a reflex — but a command, so it can earn one.
         AppCommand(id: ID.checkForUpdates, group: .system, title: "Check for Updates…",
                    detail: "Asks the release feed whether a newer Threading exists.",
-                   defaultShortcut: nil, isEditable: true)
+                   defaultShortcut: nil, isEditable: true),
+
+        // Beside Check for Updates for the same reason: this is the app itself rather than a
+        // view of anything, it works with no window on screen, and it is the one quiet switch
+        // macOS cannot supply — a Focus silences the notification sounds that ride a posted
+        // `UNNotificationSound`, but not the bell, which this app plays itself through
+        // `NSSound`. ⇧⌘S is free: ⌃⌘S is Toggle Sidebar, and this app has no documents for the
+        // platform's Save As to have claimed the chord.
+        AppCommand(id: ID.silenceSounds, group: .system, title: "Silence Sounds",
+                   detail: "Holds every sound Threading makes — notification alerts and the "
+                       + "terminal bell alike — without changing what either is set to.",
+                   defaultShortcut: KeyboardShortcut(key: "s", modifiers: [.command, .shift]),
+                   isEditable: true)
     ]
 
     // MARK: Fixed

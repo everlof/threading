@@ -68,10 +68,7 @@ private struct StartupProfileMeasurement: Sendable {
             + "mw_finalize_ms=\(milliseconds(window.splitFinalizeNanoseconds)) "
             + "mw_chrome_ms=\(milliseconds(window.chromeCoordinatorNanoseconds)) "
             + "mw_frame_ms=\(milliseconds(window.initialFrameNanoseconds)) "
-            + "mw_title_ms=\(milliseconds(window.initialTitleNanoseconds)) "
-            + "mw_initial_sidebar_geometry_ms=\(milliseconds(window.initialSidebarGeometryNanoseconds)) "
-            + "mw_initial_sidebar_mount_ms=\(milliseconds(window.initialSidebarMountNanoseconds)) "
-            + "mw_initial_sidebar_rows=\(window.initialSidebarLogicalRowCount)\n"
+            + "mw_title_ms=\(milliseconds(window.initialTitleNanoseconds))\n"
         try? FileHandle.standardOutput.write(contentsOf: Data(line.utf8))
     }
 
@@ -110,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     // MARK: - Properties
 
     private var mainWindowController: MainWindowController?
+    private let issueReportEvents = AppEventObservations()
     private var onboardingWindowController: OnboardingWindowController?
     /// True while first-launch onboarding is deferring the main window. Gates session restore
     /// and routes Dock-click reopens to the onboarding window instead of the hidden main one.
@@ -410,7 +408,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
 
         let mainWindowController = MainWindowController()
+        mainWindowController.issueReportSubmitter = MacIssueReportSubmitter(
+            diagnosticsProvider: { [weak self] in
+                guard let self else { throw MacIssueReportError.invalidPackage }
+                return try await self.publicIssueReportDiagnostics()
+            }
+        )
         self.mainWindowController = mainWindowController
+        if plan.startsBackgroundServices {
+            Task { await MacIssueReportOutbox.shared.flush() }
+            issueReportEvents.observe(NSApplication.didBecomeActiveNotification) {
+                Task { await MacIssueReportOutbox.shared.flush() }
+            }
+        }
         LaunchLedger.shared.record(.mainWindowConstructed)
         startupProfile?.windowConstructedNanoseconds = DispatchTime.now().uptimeNanoseconds
         // The bridge's only client is the remote server, which recovery never starts, and it is
@@ -449,6 +459,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             let projects = ProjectStore.shared.projects
             let projectCount = projects.count
             let sessionCount = projects.reduce(0) { $0 + $1.sessions.count }
+            let windowPerformance = mainWindowController.startupPerformance
             DispatchQueue.main.async {
                 let firstReadyTurnNanoseconds = DispatchTime.now().uptimeNanoseconds
                 let layoutStartNanoseconds = DispatchTime.now().uptimeNanoseconds
@@ -470,7 +481,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                     mode: plan.isRecovery ? "recovery" : "normal",
                     projectCount: projectCount,
                     sessionCount: sessionCount,
-                    window: mainWindowController.startupPerformance
+                    window: windowPerformance
                 )
                 NSApp.terminate(nil)
             }
@@ -607,9 +618,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // reading what it has already found.
         ArtifactScanService.shared.startPassiveScanning()
 
-        // The code count too, on a much shorter leash: scc answers a repository in tens of
-        // milliseconds, so its first pass does not need to wait out the launch.
-        CodeStatsService.shared.startPassiveScanning()
+        // Project composition and bounded Git activity run on independent utility queues. They
+        // are cheap enough to prepare shortly after launch and never hold the main actor.
+        ProjectStatsService.shared.startPassiveScanning()
 
         // Replaces names the old agent-name scheme left behind ("Claude Code 2") with what
         // transcripts still hold, then reconciles Codex rows with its canonical session index.
@@ -952,6 +963,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         accountHandle: AccountHandle,
         model: String?,
         reasoningEffort: String?,
+        fastMode: Bool?,
+        permissionMode: AgentPermissionMode?,
         usesNativeUI: Bool,
         prompt: String
     ) -> AgentSession? {
@@ -962,6 +975,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             accountHandle: accountHandle,
             model: model,
             reasoningEffort: reasoningEffort,
+            fastMode: fastMode,
+            permissionMode: permissionMode,
             usesNativeUI: usesNativeUI,
             prompt: prompt
         )
@@ -1025,6 +1040,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// checkpoint exists to make visible.
     @MainActor
     private func presentRecoveryMode(on windowController: MainWindowController) {
+        MacRemoteDiagnostics.record(.recoveryModeEntered, level: .warning, fields: [
+            .reason: launchPlan.reason.rawValue,
+            .surface: "recoveryMode",
+        ])
         windowController.presentRecoveryMode(
             reason: launchPlan.reason,
             checkpoint: launchDecision.lastReachedCheckpoint,
@@ -1566,6 +1585,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             "system.preferences",
             action: #selector(performHostMenuCommand(_:))
         ))
+        // Beside Settings rather than under View: the gate is the app's own voice, not a view
+        // of anything, and the app menu is the one place it can be found with no window open.
+        // Its check is stamped in `validateMenuItem`, which AppKit asks on every open.
+        menu.addItem(commandItem(
+            AppCommands.ID.silenceSounds,
+            action: #selector(toggleSilenceSounds)
+        ))
         menu.addItem(.separator())
         menu.addItem(commandItem(
             "system.hide",
@@ -1963,6 +1989,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             menuItem.state = AppSettings.shared.compactsSidebarTree ? .on : .off
             return true
         }
+        // The silence gate carries state too, and it is always available: it needs no window,
+        // no session and no checkout, which is most of the point of having it in the menu bar.
+        if menuItem.action == #selector(toggleSilenceSounds) {
+            menuItem.state = AppSettings.shared.silencesAllSounds ? .on : .off
+            return true
+        }
         // Settings and an empty window carry no checkout, so the item reads as unavailable
         // rather than beeping at a chord the menu said would work.
         if menuItem.action == #selector(openInExternalApp) {
@@ -2157,6 +2189,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             AppSettings.shared.groupsLoneBranches.toggle()
             NotificationCenter.default.post(ProjectsDidChange())
         case AppCommands.ID.compactTree: AppSettings.shared.compactsSidebarTree.toggle()
+        // No extra post: the setter's own settings event is what the sidebar's footer control
+        // and the Settings row both follow, which is what keeps the three surfaces one state.
+        case AppCommands.ID.silenceSounds: AppSettings.shared.silencesAllSounds.toggle()
         case AppCommands.ID.newTerminalTab: mainWindowController?.showTerminalTab()
         case AppCommands.ID.browser: mainWindowController?.showBrowser()
         case AppCommands.ID.files: mainWindowController?.showFilesTab()
@@ -2337,13 +2372,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func writeSupportReport(
         privacyStatuses: [SystemPrivacyPermission: SystemPrivacyStatus]
     ) {
+        let details = supportReportDetails(privacyStatuses: privacyStatuses)
+
+        do {
+            let report = try MacRemoteDiagnostics.supportReport(
+                additionalDetails: details.fields
+            )
+            NSWorkspace.shared.activateFileViewerSelecting([report])
+        } catch {
+            ThreadingLogger.remote.error(
+                "Support report creation failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            let alert = ThemedAlert()
+            alert.alertStyle = .warning
+            alert.messageText = L10n.string("Couldn’t create support report")
+            alert.informativeText = L10n.string(
+                "Threading could not prepare the remote diagnostics file."
+            )
+            alert.addButton(withTitle: L10n.string("OK"))
+            alert.runModal()
+        }
+    }
+
+    private func publicIssueReportDiagnostics() async throws -> PublicIssueReportDiagnosticsDTO {
+        let statuses = await withCheckedContinuation { continuation in
+            SystemPrivacyStatusReader().load { statuses in
+                continuation.resume(returning: statuses)
+            }
+        }
+        let details = supportReportDetails(privacyStatuses: statuses)
+        return PublicIssueReportDiagnosticsDTO(
+            bounding: MacRemoteDiagnostics.report(additionalDetails: details.fields)
+        )
+    }
+
+    private func supportReportDetails(
+        privacyStatuses: [SystemPrivacyPermission: SystemPrivacyStatus]
+    ) -> MacSupportReportDetails {
         let projects = ProjectStore.shared.projects
         let extensions = ExtensionManager.shared.installedExtensions
         let accounts = AgentKind.allCases.reduce(into: [String: Int]()) { counts, kind in
             counts[kind.rawValue] = AgentAccountDiscovery.allAccounts(for: kind).count
         }
 
-        let details = MacSupportReportDetails(
+        return MacSupportReportDetails(
             privacyStatuses: privacyStatuses,
             remoteAccessEnabled: AppSettings.shared.remoteAccessEnabled,
             automaticUpdateChecksEnabled: AppUpdater.shared.automaticChecksEnabled,
@@ -2365,25 +2437,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             // menu command that is already writing a file.
             metricKitDiagnostics: MetricKitDiagnosticReader().read()
         )
-
-        do {
-            let report = try MacRemoteDiagnostics.supportReport(
-                additionalDetails: details.fields
-            )
-            NSWorkspace.shared.activateFileViewerSelecting([report])
-        } catch {
-            ThreadingLogger.remote.error(
-                "Support report creation failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
-            )
-            let alert = ThemedAlert()
-            alert.alertStyle = .warning
-            alert.messageText = L10n.string("Couldn’t create support report")
-            alert.informativeText = L10n.string(
-                "Threading could not prepare the remote diagnostics file."
-            )
-            alert.addButton(withTitle: L10n.string("OK"))
-            alert.runModal()
-        }
     }
 
     @objc private func openBrowser() {
@@ -2468,6 +2521,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     // what the sidebar re-lays out on. See `ProjectSidebarViewController.applyTreeDensity`.
     @MainActor @objc private func toggleCompactTree() {
         _ = hostCommandPlane.invoke(commandID: AppCommands.ID.compactTree)
+    }
+
+    @MainActor @objc private func toggleSilenceSounds() {
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.silenceSounds)
     }
 
     @objc private func showFind() {

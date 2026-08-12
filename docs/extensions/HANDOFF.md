@@ -547,7 +547,7 @@ v1-blocking item here is complete.
 - [ ] Apply the customizable-presentation pattern across stable product surfaces. Each adoption
   must keep trigger, lifecycle, placement, focus, accessibility and destructive behavior in a
   host-owned shell; extensions receive only semantic add/wrap/replace contracts:
-  - [x] `sidebar.project-hover-card@1`: compose around native SCC content, replace it, or create
+  - [x] `sidebar.project-hover-card@1`: compose around native project-metrics content, replace it, or create
     an extension-only card. Multiple hooks retain provenance and the Hello Status reference
     extension contributes real project detail through the public contract.
   - [x] `sidebar.session-hover-card@1`: compose around the existing session identity/status

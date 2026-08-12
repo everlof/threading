@@ -2083,6 +2083,66 @@ final class RemoteServerIntegrationTests: XCTestCase {
         XCTAssertTrue(delta.canSend)
     }
 
+    func testConversationMetadataDeltaRequiresStableRowCountAndCarriesNoRows() throws {
+        let rows = [RemoteConversationRowDTO(id: "0", kind: "assistant", text: "Settled")]
+        let previous = RemoteConversationSnapshotDTO(
+            rows: rows,
+            streamingText: "A",
+            canSend: false
+        )
+        let current = RemoteConversationSnapshotDTO(
+            rows: rows,
+            streamingText: "AB",
+            canSend: false
+        )
+        let delta = try XCTUnwrap(RemoteConversationWirePolicy.deltaWithUnchangedRows(
+            from: previous,
+            to: current,
+            baseRevision: 8,
+            revision: 9
+        ))
+
+        XCTAssertTrue(delta.appendedRows.isEmpty)
+        XCTAssertTrue(delta.updatedRows.isEmpty)
+        XCTAssertEqual(delta.streamingText, "AB")
+        XCTAssertNil(RemoteConversationWirePolicy.deltaWithUnchangedRows(
+            from: previous,
+            to: RemoteConversationSnapshotDTO(rows: rows + rows, canSend: false),
+            baseRevision: 9,
+            revision: 10
+        ))
+    }
+
+    func testConversationRowProjectionTracksExactTimelineChanges() {
+        var timeline = ConversationTimeline(sessionID: SessionID())
+        var projection = RemoteConversationRowProjection()
+
+        func apply(_ event: StreamEvent) {
+            for change in timeline.apply(event) {
+                projection.apply(change, timelineRows: timeline.rows)
+            }
+        }
+
+        apply(.userMessage("Run the tests"))
+        apply(.assistantMessage(blocks: [
+            .toolUse(id: "call-1", tool: .bash, input: ["command": "swift test"])
+        ]))
+        let beforeResult = projection.rowsRevision
+        apply(.toolResults([
+            ToolResult(toolUseID: "call-1", text: "Passed", isError: false)
+        ]))
+
+        XCTAssertEqual(projection.rows.map(\.id), ["0", "1"])
+        XCTAssertEqual(projection.rows[0].text, "Run the tests")
+        XCTAssertEqual(projection.rows[1].result, "Passed")
+        XCTAssertNotEqual(projection.rowsRevision, beforeResult)
+
+        let beforeStreaming = projection.rowsRevision
+        apply(.textDelta("Still working"))
+        XCTAssertEqual(projection.rowsRevision, beforeStreaming)
+        XCTAssertEqual(projection.rows.count, timeline.rows.count)
+    }
+
     func testConversationCatalogIsDeltaEncodedAndBoundedWithoutPrivateSkillPaths() throws {
         let previous = RemoteConversationSnapshotDTO(rows: [], canSend: true)
         let capabilities = (0..<400).map { index in
@@ -2284,6 +2344,44 @@ final class RemoteServerIntegrationTests: XCTestCase {
                 + "delta_ms=\(Self.milliseconds(deltaEnded - deltaStarted)) "
                 + "encode_decode_apply_ms=\(Self.milliseconds(deltaApplied - deltaEnded)) "
                 + "elapsed_ms=\(Self.milliseconds(deltaApplied - deltaStarted))"
+        )
+
+        let streamingUpdates = 250
+        var legacyStreamingNanoseconds: UInt64 = 0
+        var exactStreamingNanoseconds: UInt64 = 0
+        var priorStreaming = complete
+        for update in 0..<streamingUpdates {
+            let next = RemoteConversationSnapshotDTO(
+                rows: rows,
+                streamingText: "Streaming token \(update)",
+                canSend: false
+            )
+            let legacyStarted = DispatchTime.now().uptimeNanoseconds
+            _ = RemoteConversationWirePolicy.delta(
+                from: priorStreaming,
+                to: next,
+                baseRevision: update,
+                revision: update + 1
+            )
+            legacyStreamingNanoseconds += DispatchTime.now().uptimeNanoseconds - legacyStarted
+
+            let exactStarted = DispatchTime.now().uptimeNanoseconds
+            let exact = try XCTUnwrap(RemoteConversationWirePolicy.deltaWithUnchangedRows(
+                from: priorStreaming,
+                to: next,
+                baseRevision: update,
+                revision: update + 1
+            ))
+            exactStreamingNanoseconds += DispatchTime.now().uptimeNanoseconds - exactStarted
+            XCTAssertTrue(exact.appendedRows.isEmpty)
+            XCTAssertTrue(exact.updatedRows.isEmpty)
+            priorStreaming = next
+        }
+        print(
+            "THREADING_PERF remote-conversation-streaming-burst "
+                + "source_rows=\(rowCount) updates=\(streamingUpdates) "
+                + "whole_row_compare_ms=\(Self.milliseconds(legacyStreamingNanoseconds)) "
+                + "stable_row_generation_ms=\(Self.milliseconds(exactStreamingNanoseconds))"
         )
 
         let gap = RemoteConversationDeltaDTO(

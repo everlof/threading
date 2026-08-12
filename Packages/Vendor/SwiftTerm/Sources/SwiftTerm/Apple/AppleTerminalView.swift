@@ -595,17 +595,63 @@ extension TerminalView {
         let ratio = contrastRatio(flattenedForeground, backgroundRGB)
         guard ratio < 1.25 else { return }
 
-        let conflict = TerminalTextColorConflict(
+        guard !reportedTextContrast.contains(pair) else { return }
+        insertBounded(pair, into: &reportedTextContrast, limit: 64)
+
+        onLowContrastText(TerminalTextColorConflict(
             foregroundSource: foregroundSource,
             backgroundSource: backgroundSource,
             foreground: renderedForeground,
             background: renderedBackground,
-            contrastRatio: ratio
-        )
+            contrastRatio: ratio,
+            sample: contrastSample(from: string)
+        ))
+    }
 
-        guard !reportedTextContrast.contains(conflict) else { return }
-        insertBounded(conflict, into: &reportedTextContrast, limit: 64)
-        onLowContrastText(conflict)
+    /// The run's own text, reduced to something the app may quote back at the reader.
+    ///
+    /// A diagnostic that only names two hex values leaves the person guessing which part of the
+    /// screen went missing, and the answer is right here in the run being measured. It is still
+    /// program output, so it is treated as such: control characters are dropped rather than
+    /// rendered as chrome, whitespace runs collapse, and both the scan and the result are
+    /// bounded — the scan because a run is as long as the terminal is wide, the result because a
+    /// notice band has one sentence to spend.
+    private func contrastSample(from string: String) -> String {
+        var kept: [Unicode.Scalar] = []
+        var scanned = 0
+        var pendingSpace = false
+        var truncated = false
+
+        for scalar in string.unicodeScalars {
+            scanned += 1
+            // The scan bound ends the sample without claiming anything was cut. A row is padded
+            // to its width, so a short label inside a long run reaches this having kept
+            // everything there was to keep — and "hello…" would say the opposite. The character
+            // bound is the one that means text was dropped, and being the smaller of the two it
+            // is what any run with more words than the band can hold reaches first.
+            if scanned > TerminalContrastSample.scanLimit { break }
+            if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                // Leading whitespace is dropped; interior whitespace becomes one space, and
+                // only if something follows it.
+                pendingSpace = !kept.isEmpty
+                continue
+            }
+            guard !CharacterSet.controlCharacters.contains(scalar) else { continue }
+            guard kept.count + (pendingSpace ? 1 : 0) < TerminalContrastSample.characterLimit else {
+                truncated = true
+                break
+            }
+            if pendingSpace {
+                kept.append(" ")
+                pendingSpace = false
+            }
+            kept.append(scalar)
+        }
+
+        guard !kept.isEmpty else { return "" }
+        var sample = String(String.UnicodeScalarView(kept))
+        if truncated { sample.append(TerminalContrastSample.ellipsis) }
+        return sample
     }
 
     private func containsMeaningfulText(_ string: String) -> Bool {

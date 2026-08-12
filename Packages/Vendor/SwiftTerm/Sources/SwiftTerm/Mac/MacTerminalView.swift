@@ -49,19 +49,42 @@ public struct TerminalTextColorConflict: Hashable, Sendable {
     public let background: TerminalRenderedColor
     public let contrastRatio: Double
 
+    /// What the run actually said, so a diagnostic can quote the text the reader could not see.
+    /// Program output is external content: this is already stripped of control characters,
+    /// collapsed to single spaces and capped at a few words, and it is empty when nothing
+    /// quotable survived that.
+    public let sample: String
+
     public init(
         foregroundSource: TerminalRenderedColorSource,
         backgroundSource: TerminalRenderedColorSource,
         foreground: TerminalRenderedColor,
         background: TerminalRenderedColor,
-        contrastRatio: Double
+        contrastRatio: Double,
+        sample: String = ""
     ) {
         self.foregroundSource = foregroundSource
         self.backgroundSource = backgroundSource
         self.foreground = foreground
         self.background = background
         self.contrastRatio = contrastRatio
+        self.sample = sample
     }
+}
+
+/// Bounds on the text a colour conflict is allowed to carry out of the renderer.
+public enum TerminalContrastSample {
+    /// Scanned scalars, which is what stops a full-width run from being walked twice.
+    public static let scanLimit = 64
+
+    /// Kept characters. A few words is enough to point at the place on screen; a whole line
+    /// would not fit the band that shows it, and would be truncated there instead — by a
+    /// component that cannot say *why* it truncated.
+    public static let characterLimit = 24
+
+    /// Appended when either bound cut the run short, so a quoted fragment never claims to be
+    /// the whole of what the program printed.
+    public static let ellipsis: Character = "…"
 }
 
 struct TerminalTextContrastPair: Hashable {
@@ -209,7 +232,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     /// programs can emit arbitrary truecolour values, and a diagnostic cache must not turn that
     /// external cardinality into permanent renderer memory.
     var evaluatedTextContrast: Set<TerminalTextContrastPair> = []
-    var reportedTextContrast: Set<TerminalTextColorConflict> = []
+    /// Keyed by the colour pair rather than by the reported conflict: the conflict now carries a
+    /// sample of the text that produced it, and a program printing a second unreadable word must
+    /// not read as a second collision.
+    var reportedTextContrast: Set<TerminalTextContrastPair> = []
     var transparent = TTColor.transparent ()
     var isBigSur = true
     

@@ -42,7 +42,16 @@ final class ProjectTerminalRowView: NSTableCellView {
             title,
             animated: sameTerminal && titleLabel.stringValue != title
         )
-        toolTip = terminal.currentDirectory
+        // A sound this terminal does not inherit is named on the line under its folder, so an
+        // overridden row is identifiable without opening a menu — and only then, since an
+        // override is configuration rather than status.
+        toolTip = [
+            terminal.currentDirectory,
+            SoundOverrideAudit.toolTipLine(
+                for: .terminal(terminal.id),
+                overrides: terminal.soundOverrides
+            )
+        ].compactMap { $0 }.joined(separator: "\n")
         applyColors()
     }
 

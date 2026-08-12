@@ -14,17 +14,6 @@ private struct ClaudeCredentialsFile: Decodable {
     }
 }
 
-private struct ClaudeUsageResponse: Decodable {
-    let fiveHour: Window?
-    let sevenDay: Window?
-
-    struct Window: Decodable {
-        /// Percent 0–100.
-        let utilization: Double?
-        let resetsAt: String?
-    }
-}
-
 // MARK: - Claude Usage Fetcher
 
 /// Reads Claude usage, preferring a live API read and falling back to the local status-line
@@ -33,8 +22,10 @@ private struct ClaudeUsageResponse: Decodable {
 ///
 /// Four sources, ordered by freshness: the API against a token on disk, the API against the
 /// Keychain token, the status-line cache Claude Code pushes on every turn, then the CLI's own
-/// `cachedUsageUtilization`. The last one is also *merged into* whichever won, because it is
-/// the only one that names a model-scoped window — see `ClaudeUsageProfileCache`.
+/// `cachedUsageUtilization`. A live read carries its model-scoped windows itself — the
+/// endpoint's document names them in `limits[]` (`ClaudeUtilization`) — and the last source is
+/// *merged into* a winner that arrived without any, which is the status-line feed's case; see
+/// `ClaudeUsageProfileCache`.
 ///
 /// **A source that cannot serve hands the question down; it does not answer for the chain.**
 /// That rule was learnt from the opposite: a stale `<config>/.credentials.json` threw from
@@ -138,13 +129,17 @@ enum ClaudeUsageFetcher {
 
     // MARK: - Private Methods
 
-    /// Carries the profile cache's model-scoped windows onto a reading taken from a fresher
-    /// source, which has the account's own windows but never the scoped ones.
+    /// Carries the profile cache's model-scoped windows onto a reading that arrived without
+    /// any — the status-line feed's case, which has the account's own windows and nothing
+    /// scoped. A reading that brought its own scoped windows keeps them: it is fresher than
+    /// the cache by construction.
     private static func withModelWindows(
         from profile: AccountUsage?,
         on usage: AccountUsage
     ) -> AccountUsage {
-        guard let profile, !profile.modelWindows.isEmpty else { return usage }
+        guard usage.modelWindows.isEmpty,
+              let profile, !profile.modelWindows.isEmpty
+        else { return usage }
 
         var merged = usage
         merged.modelWindows = profile.modelWindows
@@ -163,51 +158,26 @@ enum ClaudeUsageFetcher {
         request.setValue(ClaudeUsageDefaults.oauthBeta, forHTTPHeaderField: "anthropic-beta")
         request.setValue(ClaudeUsageDefaults.userAgent, forHTTPHeaderField: "User-Agent")
 
+        // The endpoint serves the same utilization document the CLI caches in `.claude.json`,
+        // scoped limits included — decoding less than all of it is how the Fable window went
+        // missing on every account whose CLI had no cache to recover it from.
         let response = try await UsageHTTP.getJSON(
             request,
-            as: ClaudeUsageResponse.self,
+            as: ClaudeUtilization.self,
             decoder: UsageHTTP.snakeCaseDecoder()
         )
 
-        var windows: [AccountUsage.Window] = []
-        if let window = normalize(
-            response.fiveHour,
-            id: UsageDefaults.fiveHourWindowID,
-            label: UsageDefaults.fiveHourLabel
-        ) {
-            windows.append(window)
-        }
-        if let window = normalize(
-            response.sevenDay,
-            id: UsageDefaults.weeklyWindowID,
-            label: UsageDefaults.weeklyLabel
-        ) {
-            windows.append(window)
-        }
-
+        let windows = response.accountWindows()
         guard !windows.isEmpty else { throw UsageFetchError.decoding }
 
-        return AccountUsage(
+        var usage = AccountUsage(
             windows: windows,
             planLabel: credentials.plan,
             observedAt: Date(),
             source: .api
         )
-    }
-
-    private static func normalize(
-        _ window: ClaudeUsageResponse.Window?,
-        id: String,
-        label: String
-    ) -> AccountUsage.Window? {
-        guard let window else { return nil }
-        return AccountUsage.Window(
-            id: id,
-            label: label,
-            fraction: window.utilization.map { min(max($0 / 100, 0), 1) },
-            resetsAt: window.resetsAt.flatMap(UsageHTTP.parseISO8601),
-            windowDuration: UsageDefaults.duration(forWindowID: id)
-        )
+        usage.modelWindows = response.modelWindows()
+        return usage
     }
 
     /// The keychain token as the API branch consumes one, or nil when the setting is off or

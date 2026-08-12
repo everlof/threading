@@ -811,6 +811,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         accountHandle: AccountHandle,
         model: String?,
         reasoningEffort: String?,
+        fastMode: Bool?,
+        permissionMode: AgentPermissionMode?,
         usesNativeUI: Bool,
         prompt: String
     ) -> AgentSession? {
@@ -826,7 +828,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 accountHandle: accountHandle,
                 model: model,
                 reasoningEffort: reasoningEffort,
+                fastMode: fastMode,
                 usesNativeUI: usesNativeUI,
+                permissionMode: permissionMode,
                 title: SessionNaming.promptTitle(from: task)
               ) else { return nil }
 
@@ -834,6 +838,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             "session": session.id.uuidString,
             "project": projectID.uuidString,
             "agent": kind.rawValue,
+            "speed": fastMode.map { $0 ? "fast" : "standard" } ?? "inherit",
+            "permissionMode": permissionMode?.rawValue ?? "inherit",
             "prompt": opening ?? "",
         ])
 

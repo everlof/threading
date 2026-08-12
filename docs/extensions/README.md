@@ -534,12 +534,12 @@ component when that contract exposes an around-hook seam: `.proceed` stands for 
 host-owned view, while stacks, overlays, and capability-gated custom surfaces remain
 host-instantiated.
 
-`sidebar.project-hover-card@1` applies the same composition to the card currently populated by
-SCC. Threading retains hover timing, popover placement, dismissal, width, insets, theme and
+`sidebar.project-hover-card@1` applies the same composition to the native project-metrics card.
+Threading retains hover timing, popover placement, dismissal, width, insets, theme and
 accessibility. A hook can place extension content before or after `.proceed`; a replacement can
-own the entire visual body. The card opens when either native SCC content or an accepted
+own the entire visual body. The card opens when either native metrics or an accepted
 extension contribution exists, so an extension may introduce project hover information before
-SCC has produced a reading.
+the host has produced a reading.
 
 `sidebar.session-hover-card@1` applies that identical presentation mechanism to a session's
 identity, checkout and activity card. Its context and entity key are session-specific, but its

@@ -20,8 +20,9 @@ struct RootView: View {
     var body: some View {
         Group {
 #if DEBUG
-            if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                == "terminal-collaboration" {
+            if Self.terminalDemoModes.contains(
+                ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] ?? ""
+            ) {
                 NavigationStack {
                     TerminalRemoteView(connection: demoTerminal)
                         .navigationTitle(demoTerminal.title)
@@ -40,7 +41,8 @@ struct RootView: View {
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "pairing" {
                 PairingView()
                     .environmentObject(model)
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "welcome" {
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
+                        .hasPrefix("welcome") == true {
                 NavigationStack {
                     WelcomeView(openSettings: { showsSettings = true })
                 }
@@ -56,13 +58,40 @@ struct RootView: View {
                 NavigationStack {
                     CollaborationSettingsView()
                 }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "permission" {
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "notification-settings" {
+                NotificationSettingsView()
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "terminal-key-settings" {
+                NavigationStack {
+                    TerminalKeyboardAgentList()
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "terminal-key-editor" {
+                NavigationStack {
+                    TerminalKeyboardEditorContent(agentKind: "claude")
+                        .navigationTitle("Claude Code")
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "mac-appearance-settings" {
+                NavigationStack {
+                    MacAppearanceSettingsView()
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "diagnostics" {
+                RemoteDiagnosticsView()
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "shared-link" {
+                SharedSessionLinkView(link: Self.sharedLinkDemo)
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
+                        .hasPrefix("permission") == true {
                 NavigationStack {
                     ConversationRemoteView(connection: demoPermission)
                         .navigationTitle(demoPermission.title)
                         .navigationBarTitleDisplayMode(.inline)
                 }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "new-session" {
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
+                        .hasPrefix("new-session") == true {
                 NewRemoteSessionView()
                     .environmentObject(model)
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
@@ -71,11 +100,47 @@ struct RootView: View {
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "themed-dialog-confirmation" {
                 ThemedDialogDemoView(kind: .confirmation)
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "review",
-                      let session = model.me?.sessions.first,
-                      let client = model.client {
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
+                        .hasPrefix("review") == true {
                 NavigationStack {
-                    RemoteGitReviewView(session: session, client: client)
+                    RemoteGitReviewView(
+                        session: model.me?.sessions.first ?? Self.workspaceDemoSession,
+                        client: model.client ?? Self.workspaceDemoClient,
+                        initialSection:
+                            ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
+                                .contains("files") == true ? .allFiles : .changed
+                    )
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "browser-private" {
+                NavigationStack {
+                    RemoteBrowserFollowView(
+                        session: Self.workspaceDemoSession,
+                        client: Self.workspaceDemoClient,
+                        activity: workspaceDemoActivity,
+                        initialTabID: "browser-private",
+                        initialWorkspace: Self.browserDemoSnapshot,
+                        loadsRemotely: false
+                    )
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "attachments" {
+                NavigationStack {
+                    RemoteAttachmentsView(
+                        session: Self.workspaceDemoSession,
+                        client: Self.workspaceDemoClient,
+                        initialAttachments: Self.attachmentDemoItems,
+                        loadsRemotely: false
+                    )
+                }
+            } else if let attachmentDemo = ProcessInfo.processInfo.environment[
+                "THREADING_MOBILE_DEMO"
+            ], attachmentDemo.hasPrefix("attachment-detail-") {
+                let attachmentKind = String(
+                    attachmentDemo.dropFirst("attachment-detail-".count)
+                )
+                NavigationStack {
+                    RemoteAttachmentPreviewDemo(kind: attachmentKind)
                 }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "workspace" {
                 SessionWorkspaceView(
@@ -179,13 +244,23 @@ struct RootView: View {
         if requestedTheme == "light" {
             return RemoteThemePalette(RemoteAppModel.demoLightTheme)
         }
+        if requestedTheme == "threading" {
+            return RemoteThemePalette(RemoteAppModel.demoThreadingTheme)
+        }
+        if let requestedTheme,
+           let catalogTheme = RemoteAppModel.demoCatalogThemes.first(where: {
+               $0.id == requestedTheme
+           }) {
+            return RemoteThemePalette(catalogTheme)
+        }
         if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
             .hasPrefix("conversation") == true
             || ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                 == "attention-request"
             || ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "permission"
-            || ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                == "terminal-collaboration" {
+            || Self.terminalDemoModes.contains(
+                ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] ?? ""
+            ) {
             return RemoteThemePalette(demoConversation.theme ?? model.me?.theme)
         }
 #endif
@@ -205,6 +280,14 @@ struct RootView: View {
     }
 
 #if DEBUG
+    private static let terminalDemoModes: Set<String> = [
+        "terminal-collaboration",
+        "terminal-ansi",
+        "terminal-scrollback",
+        "terminal-codex-tui",
+        "terminal-claude-tui",
+    ]
+
     private static let workspaceDemoSession = RemoteSessionSummaryDTO(
         id: "workspace-demo",
         title: "Remote access review",
@@ -222,7 +305,7 @@ struct RootView: View {
     private static let workspaceDemoSnapshot = RemoteWorkspaceDTO(
         browserTabs: [
             RemoteBrowserTabDTO(
-                id: UUID().uuidString,
+                id: "browser-release",
                 title: "Release checklist",
                 displayURL: "developer.apple.com/…/distributing-your-app",
                 isActive: true,
@@ -230,7 +313,7 @@ struct RootView: View {
                 canPreview: true
             ),
             RemoteBrowserTabDTO(
-                id: UUID().uuidString,
+                id: "browser-private",
                 title: "",
                 displayURL: nil,
                 isActive: false,
@@ -239,6 +322,71 @@ struct RootView: View {
             ),
         ],
         latestActivityID: "workspace-demo-browser"
+    )
+
+    private static let browserDemoSnapshot = RemoteWorkspaceDTO(
+        browserTabs: [
+            RemoteBrowserTabDTO(
+                id: "browser-private",
+                title: "",
+                displayURL: nil,
+                isActive: true,
+                isPrivate: true,
+                canPreview: false
+            ),
+            RemoteBrowserTabDTO(
+                id: "browser-release",
+                title: "Release checklist",
+                displayURL: "developer.apple.com/…/distributing-your-app",
+                isActive: false,
+                isPrivate: false,
+                canPreview: true
+            ),
+        ],
+        latestActivityID: "browser-private-demo"
+    )
+
+    private static let attachmentDemoItems = [
+        RemoteAttachmentDTO(
+            path: "artifacts/threading-ui-review.pdf",
+            name: "threading-ui-review.pdf",
+            kind: "pdf",
+            byteCount: 842_761,
+            origin: "agent",
+            id: "attachment-review"
+        ),
+        RemoteAttachmentDTO(
+            path: "screenshots/keyboard-dismissed.png",
+            name: "keyboard-dismissed.png",
+            kind: "image",
+            byteCount: 184_320,
+            origin: "user",
+            id: "attachment-keyboard"
+        ),
+        RemoteAttachmentDTO(
+            path: "reports/ui-evidence.html",
+            name: "ui-evidence.html",
+            kind: "html",
+            byteCount: 32_914,
+            origin: "agent",
+            id: "attachment-report"
+        ),
+        RemoteAttachmentDTO(
+            path: "exports/diagnostics.zip",
+            name: "diagnostics.zip",
+            kind: "archive",
+            byteCount: 1_204_981,
+            origin: "user",
+            id: "attachment-diagnostics"
+        ),
+    ]
+
+    private static let sharedLinkDemo = SharedSessionLink(
+        sessionTitle: "Remote access review",
+        url: URL(string: "https://threading.example/share/demo")!,
+        capability: "interact",
+        canApprovePermissions: true,
+        expiresAt: Date().addingTimeInterval(86_400)
     )
 
     @MainActor
@@ -306,7 +454,25 @@ struct RootView: View {
 private struct WelcomeView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
+    @State private var selectedFeatureID: String?
     let openSettings: () -> Void
+
+    init(openSettings: @escaping () -> Void) {
+        self.openSettings = openSettings
+#if DEBUG
+        let demo = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+        let requestedID = demo?.hasPrefix("welcome-") == true
+            ? String(demo!.dropFirst("welcome-".count))
+            : nil
+        _selectedFeatureID = State(
+            initialValue: WelcomeFeature.items.contains(where: { $0.id == requestedID })
+                ? requestedID
+                : WelcomeFeature.items.first?.id
+        )
+#else
+        _selectedFeatureID = State(initialValue: WelcomeFeature.items.first?.id)
+#endif
+    }
 
     var body: some View {
         ZStack {
@@ -314,40 +480,53 @@ private struct WelcomeView: View {
 
             ScrollView {
                 VStack(spacing: MobileDesign.Spacing.pane) {
-                    Image("ThreadingMark")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 88, height: 88)
-                        .padding(MobileDesign.Spacing.inset)
-                        .background(
-                            theme.panel,
-                            in: RoundedRectangle(cornerRadius: theme.panelRadius)
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: theme.panelRadius)
-                                .stroke(theme.border, lineWidth: theme.borderWidth)
-                        }
-                        .remoteThemeGlow(theme)
+                    VStack(spacing: MobileDesign.Spacing.medium) {
+                        WelcomeBrandMark()
+
+                        Text("Threading")
+                            .font(.system(size: 30, weight: .bold, design: .rounded))
+                    }
 
                     VStack(spacing: MobileDesign.Spacing.small) {
-                        Text("Your code, within reach")
-                            .font(.system(size: 34, weight: .bold, design: .rounded))
-                            .multilineTextAlignment(.center)
                         Text("Pair your own Mac, or open a chat someone shared with you.")
                             .font(.body)
                             .foregroundStyle(theme.secondaryLabel)
                             .multilineTextAlignment(.center)
                     }
 
-                    HStack(spacing: MobileDesign.Spacing.small) {
-                        WelcomeCapability(symbol: "bubble.left.and.bubble.right", title: "Chats")
-                        WelcomeCapability(symbol: "terminal", title: "Terminal")
-                        WelcomeCapability(symbol: "person.2", title: "Shared")
+                    GeometryReader { geometry in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: MobileDesign.Spacing.medium) {
+                                ForEach(WelcomeFeature.items) { feature in
+                                    WelcomeFeatureCard(
+                                        feature: feature,
+                                        isFocused: feature.id == selectedFeatureID
+                                    )
+                                    .frame(width: geometry.size.width)
+                                    .id(feature.id)
+                                }
+                            }
+                            .scrollTargetLayout()
+                        }
+                        .scrollTargetBehavior(.viewAligned)
+                        .scrollPosition(id: $selectedFeatureID)
                     }
+                    .frame(height: 132)
+
+                    HStack(spacing: MobileDesign.Spacing.small) {
+                        ForEach(WelcomeFeature.items) { feature in
+                            Circle()
+                                .fill(feature.id == selectedFeatureID
+                                    ? theme.accent
+                                    : theme.tertiaryLabel.opacity(0.55))
+                                .frame(width: 6, height: 6)
+                        }
+                    }
+                    .accessibilityHidden(true)
                 }
                 .frame(maxWidth: 460)
                 .padding(.horizontal, MobileDesign.Spacing.pane)
-                .padding(.top, 54)
+                .padding(.top, MobileDesign.Spacing.pane)
                 .padding(.bottom, MobileDesign.Spacing.large)
             }
             .safeAreaInset(edge: .bottom) {
@@ -393,33 +572,148 @@ private struct WelcomeView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("Threading")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(theme.surface, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar(.hidden, for: .navigationBar)
     }
 }
 
-private struct WelcomeCapability: View {
+private struct WelcomeBrandMark: View {
     @Environment(\.remoteTheme) private var theme
-    let symbol: String
-    let title: LocalizedStringKey
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulseIsBright = false
 
     var body: some View {
-        VStack(spacing: MobileDesign.Spacing.small) {
-            Image(systemName: symbol)
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(theme.accent)
-            Text(title)
-                .font(.caption.weight(.medium))
-                .lineLimit(1)
+        ZStack {
+            Image("ThreadingMark")
+                .resizable()
+                .scaledToFit()
+
+            // The mark's centre is part of the raster asset, so pulse a masked radial light
+            // rather than fading the whole logo. Evidence capture freezes the bright phase;
+            // production breathes gently and honours Reduce Motion.
+            RadialGradient(
+                colors: [Color.white.opacity(0.95), Color.white.opacity(0)],
+                center: .center,
+                startRadius: 0,
+                endRadius: 30
+            )
+            .opacity(pulseIsBright ? 0.58 : 0.16)
+            .blendMode(.screen)
+            .mask {
+                Image("ThreadingMark")
+                    .resizable()
+                    .scaledToFit()
+            }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 74)
+        .frame(width: 88, height: 88)
+        .padding(MobileDesign.Spacing.inset)
+        .background(
+            theme.panel,
+            in: RoundedRectangle(cornerRadius: theme.panelRadius)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.panelRadius)
+                .strokeBorder(theme.border, lineWidth: theme.borderWidth)
+        }
+        .remoteThemeGlow(theme)
+        .onAppear {
+            guard !reduceMotion, !isCapturingEvidence else {
+                pulseIsBright = true
+                return
+            }
+            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                pulseIsBright = true
+            }
+        }
+    }
+
+    private var isCapturingEvidence: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"] != nil
+#else
+        false
+#endif
+    }
+}
+
+@MainActor
+private struct WelcomeFeature: Identifiable {
+    let id: String
+    let symbol: String
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey
+
+    static let items = [
+        WelcomeFeature(
+            id: "collaborate",
+            symbol: "person.2.wave.2",
+            title: "Work together",
+            detail: "Follow the same session, request input, and keep each device’s draft separate."
+        ),
+        WelcomeFeature(
+            id: "browser",
+            symbol: "safari",
+            title: "Follow the browser",
+            detail: "See the active Mac tab when it is shareable, without moving private tabs off the Mac."
+        ),
+        WelcomeFeature(
+            id: "usage",
+            symbol: "chart.bar.xaxis",
+            title: "Track usage",
+            detail: "Review provider cost, tokens, limits, and reset history while work is running."
+        ),
+        WelcomeFeature(
+            id: "terminal",
+            symbol: "terminal",
+            title: "Use the real terminal",
+            detail: "Resume the agent’s own TUI with colors, scrollback, and mobile terminal keys intact."
+        ),
+        WelcomeFeature(
+            id: "shared",
+            symbol: "bubble.left.and.bubble.right",
+            title: "Open shared chats",
+            detail: "Join one invited conversation without granting access to the rest of the Mac."
+        ),
+    ]
+}
+
+private struct WelcomeFeatureCard: View {
+    @Environment(\.remoteTheme) private var theme
+    let feature: WelcomeFeature
+    let isFocused: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: MobileDesign.Spacing.medium) {
+            Image(systemName: feature.symbol)
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(theme.accent)
+                .frame(width: 42, height: 42)
+                .background(theme.accentMuted, in: RoundedRectangle(cornerRadius: theme.controlRadius))
+
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
+                Text(feature.title)
+                    .font(.headline)
+                    .foregroundStyle(theme.label)
+                Text(feature.detail)
+                    .font(.footnote)
+                    .foregroundStyle(theme.secondaryLabel)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(MobileDesign.Spacing.inset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.controlRadius))
         .overlay {
             RoundedRectangle(cornerRadius: theme.controlRadius)
-                .stroke(theme.border, lineWidth: theme.borderWidth)
+                .strokeBorder(
+                    isFocused ? theme.accent.opacity(0.72) : theme.border,
+                    lineWidth: max(theme.borderWidth, isFocused ? 1 : 0)
+                )
         }
+        .scaleEffect(isFocused ? 1 : 0.96)
+        .opacity(isFocused ? 1 : 0.72)
+        .animation(.easeInOut(duration: MobileDesign.Motion.controlResponse), value: isFocused)
+        .accessibilityElement(children: .combine)
     }
 }

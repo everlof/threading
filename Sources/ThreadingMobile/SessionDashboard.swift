@@ -71,7 +71,7 @@ private struct SurfaceChangeRequest {
     let surface: String
 }
 
-private struct SharedSessionLink: Identifiable {
+struct SharedSessionLink: Identifiable {
     let id = UUID()
     let sessionTitle: String
     let url: URL
@@ -93,6 +93,8 @@ struct SessionDashboard: View {
     @State private var showsArchived = false
     @State private var showsSnoozed = false
     @State private var showsNewSession = false
+    @State private var newSessionProjectName: String?
+    @State private var showsMacPicker = false
     @State private var renamingSession: RemoteSessionSummaryDTO?
     @State private var renameText = ""
     @State private var actionError: String?
@@ -154,20 +156,10 @@ struct SessionDashboard: View {
                     Spacer()
                     Text("\(sessions.count)")
                         .font(.subheadline)
+                        .monospacedDigit()
                         .foregroundStyle(theme.secondaryLabel)
-                    if model.canManageSessions, !showsArchived {
-                        Button {
-                            showsNewSession = true
-                        } label: {
-                            Label("New session", systemImage: "plus")
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 12)
-                                .frame(height: 36)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(theme.ground)
-                        .background(theme.accent, in: Capsule())
-                        .accessibilityHint("Starts an agent on the selected Mac")
+                    if model.canManageSessions, !showsArchived, organization == .recent {
+                        projectNewSessionButton(project: nil)
                     }
                 }
 
@@ -183,7 +175,11 @@ struct SessionDashboard: View {
                             isArchived: showsArchived,
                             showsActions: model.canManageSessions,
                             pendingActionSessionID: pendingActionSessionID,
-                            action: perform
+                            action: perform,
+                            startNewSession: {
+                                newSessionProjectName = project
+                                showsNewSession = true
+                            }
                         )
                     }
                 } else {
@@ -256,7 +252,12 @@ struct SessionDashboard: View {
     private var dashboardSheets: some View {
         dashboardNavigation
         .sheet(isPresented: $showsNewSession) {
-            NewRemoteSessionView()
+            NewRemoteSessionView(initialProjectName: newSessionProjectName)
+                .environmentObject(model)
+                .environment(\.remoteTheme, theme)
+        }
+        .sheet(isPresented: $showsMacPicker) {
+            DashboardMacPickerView()
                 .environmentObject(model)
                 .environment(\.remoteTheme, theme)
         }
@@ -425,7 +426,17 @@ struct SessionDashboard: View {
         ToolbarItem(placement: .principal) {
             Text("Code").font(.headline)
         }
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button {
+                newSessionProjectName = nil
+                showsNewSession = true
+            } label: {
+                Image(systemName: "plus")
+                    .frame(width: 34, height: 34)
+                    .background(theme.controlResting, in: Circle())
+            }
+            .accessibilityLabel("New session")
+
             Menu {
                 Section("Organize") {
                     ForEach(SessionOrganization.allCases, id: \.rawValue) { option in
@@ -648,71 +659,69 @@ struct SessionDashboard: View {
                     .foregroundStyle(theme.secondaryLabel)
             }
 
-            HStack(spacing: 16) {
-                Image(systemName: "laptopcomputer")
-                    .font(.system(size: 28, weight: .light))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(model.activeHost?.name ?? MobileL10n.string("Threading Mac"))
-                        .font(.headline)
-                    if model.me?.share.scope == "session" {
-                        let role = model.me?.share.capability == "interact"
-                            ? (model.me?.share.canApprovePermissions == true
-                                ? MobileL10n.string("Collaborator + approvals")
-                                : MobileL10n.string("Collaborator"))
-                            : MobileL10n.string("View only")
-                        Text(MobileL10n.string("Shared chat · %@", role))
-                            .font(.caption)
-                            .foregroundStyle(theme.accent)
+            Button {
+                showsMacPicker = true
+            } label: {
+                HStack(spacing: 16) {
+                    Image(systemName: "laptopcomputer")
+                        .font(.system(size: 28, weight: .light))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(model.activeHost?.name ?? MobileL10n.string("Threading Mac"))
+                            .font(.headline)
+                        if model.me?.share.scope == "session" {
+                            let role = model.me?.share.capability == "interact"
+                                ? (model.me?.share.canApprovePermissions == true
+                                    ? MobileL10n.string("Collaborator + approvals")
+                                    : MobileL10n.string("Collaborator"))
+                                : MobileL10n.string("View only")
+                            Text(MobileL10n.string("Shared chat · %@", role))
+                                .font(.caption)
+                                .foregroundStyle(theme.accent)
+                        }
+                        HStack(spacing: 6) {
+                            Circle().fill(statusColor).frame(width: 7, height: 7)
+                            Text(statusText)
+                                .font(.subheadline)
+                                .foregroundStyle(theme.secondaryLabel)
+                                .lineLimit(1)
+                        }
                     }
-                    HStack(spacing: 6) {
-                        Circle().fill(statusColor).frame(width: 7, height: 7)
-                        Text(statusText)
-                            .font(.subheadline)
-                            .foregroundStyle(theme.secondaryLabel)
-                            .lineLimit(1)
-                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(theme.tertiaryLabel)
                 }
-                Spacer()
-                Image(systemName: "iphone")
-                    .font(.system(size: 24, weight: .light))
-                    .foregroundStyle(theme.secondaryLabel)
+                .padding(20)
+                .contentShape(Rectangle())
             }
-            .padding(20)
+            .buttonStyle(.plain)
             .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
             .overlay(
                 RoundedRectangle(cornerRadius: theme.panelRadius)
                     .stroke(theme.border, lineWidth: theme.borderWidth)
             )
             .remoteThemeGlow(theme)
-
-            if !alternateHosts.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(alternateHosts) { host in
-                            Button {
-                                model.selectHost(host.id)
-                            } label: {
-                                Label(host.menuTitle, systemImage: "laptopcomputer")
-                                    .font(.subheadline)
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 12)
-                                    .frame(height: 38)
-                                    .background(theme.panel, in: Capsule())
-                                    .overlay(
-                                        Capsule().stroke(theme.border, lineWidth: theme.borderWidth)
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityHint(MobileL10n.string("Choose Mac"))
-                        }
-                    }
-                }
-            }
         }
     }
 
-    private var alternateHosts: [PairedRemoteHost] {
-        model.hosts.filter { $0.id != model.activeHostID }
+    private func projectNewSessionButton(project: String?) -> some View {
+        Button {
+            newSessionProjectName = project
+            showsNewSession = true
+        } label: {
+            Label("New", systemImage: "plus")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, MobileDesign.Spacing.small)
+                .frame(minHeight: 34)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(theme.accent)
+        .background(theme.controlResting, in: RoundedRectangle(cornerRadius: theme.controlRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.controlRadius)
+                .strokeBorder(theme.border, lineWidth: theme.borderWidth)
+        }
+        .accessibilityLabel("New session")
     }
 
     private var statusColor: Color {
@@ -765,6 +774,60 @@ struct SessionDashboard: View {
     }
 }
 
+private struct DashboardMacPickerView: View {
+    @EnvironmentObject private var model: RemoteAppModel
+    @Environment(\.remoteTheme) private var theme
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(model.hosts) { host in
+                Button {
+                    model.selectHost(host.id)
+                    dismiss()
+                } label: {
+                    HStack(spacing: MobileDesign.Spacing.medium) {
+                        Image(systemName: "laptopcomputer")
+                            .foregroundStyle(theme.secondaryLabel)
+                            .frame(width: 28)
+                        VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
+                            Text(host.menuTitle)
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(theme.label)
+                            if host.id == model.activeHostID {
+                                Text("Current Mac")
+                                    .font(.caption)
+                                    .foregroundStyle(theme.positive)
+                            }
+                        }
+                        Spacer()
+                        if host.id == model.activeHostID {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(theme.accent)
+                        }
+                    }
+                    .frame(minHeight: MobileDesign.Size.minimumTapTarget)
+                }
+                .buttonStyle(.plain)
+                .listRowBackground(theme.surface)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(theme.ground)
+            .navigationTitle("Choose Mac")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(theme.surface, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
 private struct ProjectSessionGroup: View {
     let project: String
     let sessions: [RemoteSessionSummaryDTO]
@@ -772,13 +835,36 @@ private struct ProjectSessionGroup: View {
     let showsActions: Bool
     let pendingActionSessionID: String?
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
+    let startNewSession: () -> Void
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(project, systemImage: "folder")
-                .font(.headline)
-                .foregroundStyle(theme.label)
+            HStack {
+                Label(project, systemImage: "folder")
+                    .font(.headline)
+                    .foregroundStyle(theme.label)
+                Spacer()
+                if showsActions, !isArchived {
+                    Button(action: startNewSession) {
+                        Label("New", systemImage: "plus")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, MobileDesign.Spacing.small)
+                            .frame(minHeight: 34)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(theme.accent)
+                    .background(
+                        theme.controlResting,
+                        in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: theme.controlRadius)
+                            .strokeBorder(theme.border, lineWidth: theme.borderWidth)
+                    }
+                    .accessibilityLabel("New session in \(project)")
+                }
+            }
             VStack(spacing: 10) {
                 ForEach(sessions) { session in
                     SessionListItem(
@@ -802,115 +888,115 @@ private struct SessionListItem: View {
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
     @Environment(\.remoteTheme) private var theme
 
+    @ViewBuilder
     var body: some View {
-        HStack(spacing: 6) {
-            if isArchived {
-                SessionRow(session: session, showsChevron: false)
-            } else {
-                NavigationLink(value: session.id) {
-                    SessionRow(session: session, showsChevron: false)
-                }
-                .buttonStyle(.plain)
-            }
+        if showsActions {
+            sessionRow
+                .contextMenu { sessionActions }
+                .accessibilityHint("Long press for session actions")
+        } else {
+            sessionRow
+        }
+    }
 
-            if showsActions {
-                Menu {
-                if isArchived {
-                    Button {
-                        action(.restore, session)
-                    } label: {
-                        Label("Restore", systemImage: "arrow.uturn.backward")
-                    }
-                } else {
-                    Button {
-                        action(.pin, session)
-                    } label: {
-                        Label(
-                            MobileL10n.string(session.isPinned ? "Unpin" : "Pin"),
-                            systemImage: session.isPinned ? "pin.slash" : "pin"
-                        )
-                    }
-                    Button {
-                        action(.rename, session)
-                    } label: {
-                        Label("Rename", systemImage: "pencil")
-                    }
-                    if session.isSnoozed() {
-                        Button {
-                            action(.snooze(nil), session)
-                        } label: {
-                            Label("Unsnooze", systemImage: "sun.max")
-                        }
-                    } else {
-                        Menu {
-                            ForEach(MobileSnoozePresets.choices()) { choice in
-                                Button(choice.title) {
-                                    action(.snooze(choice.deadline), session)
-                                }
-                            }
-                        } label: {
-                            Label("Snooze", systemImage: "moon.zzz")
-                        }
-                    }
-                    Button {
-                        action(.share, session)
-                    } label: {
-                        Label("Share chat", systemImage: "square.and.arrow.up")
-                    }
-                    if session.isShared {
-                        Button(role: .destructive) {
-                            action(.stopSharing, session)
-                        } label: {
-                            Label("Stop sharing", systemImage: "person.crop.circle.badge.xmark")
-                        }
-                    }
-                    Section("Interface") {
-                        Button {
-                            action(.surface("conversation"), session)
-                        } label: {
-                            Label(
-                                "Native",
-                                systemImage: session.surface == "conversation"
-                                    ? "checkmark"
-                                    : "bubble.left.and.bubble.right"
-                            )
-                        }
-                        .accessibilityLabel("Native, experimental")
-                        Button {
-                            action(.surface("terminal"), session)
-                        } label: {
-                            Label(
-                                MobileL10n.string(session.agentKind == "claude"
-                                    ? "Claude Code UI"
-                                    : "Codex UI"),
-                                systemImage: session.surface == "terminal"
-                                    ? "checkmark"
-                                    : "terminal"
-                            )
-                        }
-                    }
-                    Button(role: .destructive) {
-                        action(.archive, session)
-                    } label: {
-                        Label("Archive", systemImage: "archivebox")
-                    }
-                }
+    @ViewBuilder
+    private var sessionRow: some View {
+        if isArchived {
+            SessionRow(session: session, showsChevron: false)
+        } else {
+            NavigationLink(value: session.id) {
+                SessionRow(session: session, showsChevron: false)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private var sessionActions: some View {
+        if isArchived {
+            Button {
+                action(.restore, session)
+            } label: {
+                Label("Restore", systemImage: "arrow.uturn.backward")
+            }
+        } else {
+            Button {
+                action(.pin, session)
+            } label: {
+                Label(
+                    MobileL10n.string(session.isPinned ? "Unpin" : "Pin"),
+                    systemImage: session.isPinned ? "pin.slash" : "pin"
+                )
+            }
+            Button {
+                action(.rename, session)
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            if session.isSnoozed() {
+                Button {
+                    action(.snooze(nil), session)
                 } label: {
-                    Image(systemName: pendingActionSessionID == session.id
-                        ? "ellipsis.circle.fill"
-                        : "ellipsis")
-                        .frame(width: 38, height: 48)
-                        .contentShape(Rectangle())
+                    Label("Unsnooze", systemImage: "sun.max")
                 }
-                .disabled(pendingActionSessionID != nil)
-                .foregroundStyle(theme.secondaryLabel)
-                .accessibilityLabel("Actions for \(session.title)")
+            } else {
+                Menu {
+                    ForEach(MobileSnoozePresets.choices()) { choice in
+                        Button(choice.title) {
+                            action(.snooze(choice.deadline), session)
+                        }
+                    }
+                } label: {
+                    Label("Snooze", systemImage: "moon.zzz")
+                }
+            }
+            Button {
+                action(.share, session)
+            } label: {
+                Label("Share chat", systemImage: "square.and.arrow.up")
+            }
+            if session.isShared {
+                Button(role: .destructive) {
+                    action(.stopSharing, session)
+                } label: {
+                    Label("Stop sharing", systemImage: "person.crop.circle.badge.xmark")
+                }
+            }
+            Section("Interface") {
+                Button {
+                    action(.surface("conversation"), session)
+                } label: {
+                    Label(
+                        "Native",
+                        systemImage: session.surface == "conversation"
+                            ? "checkmark"
+                            : "bubble.left.and.bubble.right"
+                    )
+                }
+                .accessibilityLabel("Native, experimental")
+                Button {
+                    action(.surface("terminal"), session)
+                } label: {
+                    Label(
+                        MobileL10n.string(session.agentKind == "claude"
+                            ? "Claude Code UI"
+                            : "Codex UI"),
+                        systemImage: session.surface == "terminal"
+                            ? "checkmark"
+                            : "terminal"
+                    )
+                }
+            }
+            Button(role: .destructive) {
+                action(.archive, session)
+            } label: {
+                Label("Archive", systemImage: "archivebox")
             }
         }
     }
 }
 
-private struct SharedSessionLinkView: View {
+struct SharedSessionLinkView: View {
     let link: SharedSessionLink
     @Environment(\.remoteTheme) private var theme
     @Environment(\.dismiss) private var dismiss
@@ -947,11 +1033,15 @@ private struct SharedSessionLinkView: View {
                     Label("Share link", systemImage: "square.and.arrow.up")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
+                        .frame(minHeight: 56)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(theme.accent)
-                .foregroundStyle(theme.ground)
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.accentForeground)
+                .background(
+                    theme.accent,
+                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                )
 
                 Button {
                     UIPasteboard.general.string = link.url.absoluteString
@@ -961,7 +1051,18 @@ private struct SharedSessionLinkView: View {
                         ? "checkmark"
                         : "doc.on.doc")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.label)
+                .padding(.horizontal, MobileDesign.Spacing.large)
+                .frame(minHeight: MobileDesign.Size.minimumTapTarget)
+                .background(
+                    theme.controlResting,
+                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: theme.controlRadius)
+                        .stroke(theme.border, lineWidth: theme.borderWidth)
+                }
 
                 Text(
                     "The invite works once. After acceptance, access lasts until you stop "
@@ -1002,19 +1103,12 @@ private struct SessionRow: View {
             .frame(width: 46, height: 46)
 
             VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text(session.title)
-                        .font(.body.weight(.medium))
-                        .lineLimit(3)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .layoutPriority(1)
-                    if session.isPinned {
-                        Image(systemName: "pin.fill")
-                            .font(.caption2)
-                            .foregroundStyle(theme.accent)
-                    }
-                }
+                Text(session.title)
+                    .font(.body.weight(.medium))
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
                 HStack(spacing: 5) {
                     Image(systemName: session.isAvailable
                         ? "laptopcomputer"
@@ -1030,11 +1124,20 @@ private struct SessionRow: View {
                 .lineLimit(1)
             }
             Spacer()
-            if let lastActiveAt = session.lastActiveAt {
-                Text(compactAge(since: Date(timeIntervalSince1970: lastActiveAt)))
-                    .font(.caption2)
-                    .foregroundStyle(theme.tertiaryLabel)
-                    .fixedSize()
+            VStack(alignment: .trailing, spacing: MobileDesign.Spacing.small) {
+                if session.isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.caption2)
+                        .foregroundStyle(theme.accent)
+                        .accessibilityLabel("Pinned")
+                }
+                Spacer(minLength: 0)
+                if let lastActiveAt = session.lastActiveAt {
+                    Text(compactAge(since: Date(timeIntervalSince1970: lastActiveAt)))
+                        .font(.caption2)
+                        .foregroundStyle(theme.tertiaryLabel)
+                        .fixedSize()
+                }
             }
             if showsChevron {
                 Image(systemName: "chevron.right")
@@ -1103,12 +1206,40 @@ struct NewRemoteSessionView: View {
     @State private var accountID = ""
     @State private var modelID = ""
     @State private var reasoningID = ""
+    @State private var speedID = ""
+    @State private var permissionID = ""
     /// The agent's supported UI is the safe default; Native stays an explicit experimental opt-in.
     @State private var surface = "terminal"
     @State private var prompt = ""
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @FocusState private var promptIsFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var launchIconAnimated = false
+    @State private var promptSuggestion: String
+    private let initialProjectName: String?
+
+    private static let promptSuggestions = [
+        MobileL10n.string("Hunt down the flaky test…"),
+        MobileL10n.string("Make the impossible state impossible…"),
+        MobileL10n.string("Polish the rough edges…"),
+        MobileL10n.string("Teach this screen a new trick…"),
+        MobileL10n.string("Find the bug hiding in plain sight…"),
+    ]
+
+    init(initialProjectName: String? = nil) {
+        self.initialProjectName = initialProjectName
+        let evidenceID = ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]
+        let suggestion: String
+        if let evidenceID {
+            let index = evidenceID.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+                % Self.promptSuggestions.count
+            suggestion = Self.promptSuggestions[index]
+        } else {
+            suggestion = Self.promptSuggestions.randomElement() ?? Self.promptSuggestions[0]
+        }
+        _promptSuggestion = State(initialValue: suggestion)
+    }
 
     private var catalog: RemoteNewSessionCatalogDTO? {
         appModel.me?.newSessionCatalog
@@ -1138,30 +1269,79 @@ struct NewRemoteSessionView: View {
         models.first { $0.id == modelID }
     }
 
+    private var hostStatusColor: Color {
+        switch appModel.phase {
+        case .online: return theme.positive
+        case .connecting: return theme.warning
+        case .idle, .offline: return theme.tertiaryLabel
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                configurationStrip
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: MobileDesign.Spacing.large) {
+                        configurationStrip
 
-                Spacer(minLength: 24)
+                        if !promptIsFocused {
+                            launchOverview
+                                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                        }
 
-                composer
-                hostLabel
+                        launchOptions
+
+                        composer
+                            .id("new-session-composer")
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: promptIsFocused) { _, isFocused in
+                    guard isFocused else { return }
+                    Task { @MainActor in
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) {
+                            proxy.scrollTo("new-session-composer", anchor: .bottom)
+                        }
+                    }
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
             .background(theme.ground)
-            .navigationTitle("New session")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(theme.surface, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                         .disabled(isSubmitting)
                 }
+                ToolbarItem(placement: .principal) {
+                    MobileCompactConnectionNavigationTitle(
+                        title: MobileL10n.string("New session"),
+                        status: appModel.activeHost?.name ?? MobileL10n.string("Connected"),
+                        statusColor: hostStatusColor
+                    )
+                }
             }
             .onAppear {
                 applyCatalogDefaults()
+                launchIconAnimated = true
+#if DEBUG
+                if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                    == "new-session-multiline" {
+                    prompt = "Review the keyboard lifecycle, compare the open and dismissed layouts, and summarize any remaining spacing regressions before you make changes."
+                }
+#endif
+#if DEBUG
+                if ProcessInfo.processInfo.environment[
+                    "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_STATE"
+                ] == nil {
+                    promptIsFocused = true
+                }
+#else
                 promptIsFocused = true
+#endif
             }
             .onChange(of: agentID) { _, _ in
                 applyAgentDefaults()
@@ -1188,13 +1368,9 @@ struct NewRemoteSessionView: View {
     }
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        HStack(alignment: .bottom, spacing: MobileDesign.Spacing.small) {
             promptEditor
-            HStack(spacing: 10) {
-                modelMenu
-                Spacer(minLength: 8)
-                sendButton
-            }
+            sendButton
         }
         .padding(12)
         .background(
@@ -1209,11 +1385,12 @@ struct NewRemoteSessionView: View {
     }
 
     private var promptEditor: some View {
-        TextField("Message the coding agent…", text: $prompt, axis: .vertical)
+        TextField(promptSuggestion, text: $prompt, axis: .vertical)
             .focused($promptIsFocused)
+            .mobileUIEvidenceKeyboardFocus($promptIsFocused)
             .textFieldStyle(.plain)
             .font(.body)
-            .lineLimit(3...8)
+            .lineLimit(2...6)
             .padding(.horizontal, 4)
             .padding(.vertical, 6)
     }
@@ -1233,20 +1410,63 @@ struct NewRemoteSessionView: View {
             .frame(width: 38, height: 38)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(canSubmit ? theme.ground : theme.tertiaryLabel)
+        .foregroundStyle(canSubmit ? theme.accentForeground : theme.tertiaryLabel)
         .background(canSubmit ? theme.accent : theme.controlHover, in: Circle())
         .disabled(!canSubmit)
         .accessibilityLabel("Start session")
     }
 
-    private var hostLabel: some View {
-        Label(
-            "Runs on \(appModel.activeHost?.name ?? "your Mac")",
-            systemImage: "laptopcomputer"
-        )
-        .font(.caption)
-        .foregroundStyle(theme.secondaryLabel)
-        .padding(.top, 10)
+    private var launchOverview: some View {
+        VStack(spacing: MobileDesign.Spacing.medium) {
+            Image(systemName: surface == "conversation"
+                ? "bubble.left.and.bubble.right.fill"
+                : "terminal.fill")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(theme.accent)
+                .frame(width: 72, height: 72)
+                .background(
+                    theme.accentMuted,
+                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                )
+                .symbolEffect(
+                    .bounce,
+                    options: .nonRepeating,
+                    value: reduceMotion ? false : launchIconAnimated
+                )
+
+            Text("Ready for a new task")
+                .font(.title3.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, MobileDesign.Spacing.large)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var launchOptions: some View {
+        VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+            Text("Run settings")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(theme.secondaryLabel)
+                .padding(.horizontal, MobileDesign.Spacing.tight)
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: MobileDesign.Spacing.small),
+                    GridItem(.flexible(), spacing: MobileDesign.Spacing.small),
+                ],
+                spacing: MobileDesign.Spacing.small
+            ) {
+                modelMenu
+                reasoningMenu
+                if selectedModel?.supportsFastMode == true {
+                    speedMenu
+                }
+                if !(selectedAgent?.permissionModes ?? []).isEmpty {
+                    permissionMenu
+                }
+            }
+        }
+        .padding(.bottom, MobileDesign.Spacing.medium)
     }
 
     private var configurationStrip: some View {
@@ -1395,54 +1615,105 @@ struct NewRemoteSessionView: View {
                 }
             }
 
-            if let selectedModel, !selectedModel.reasoning.isEmpty {
-                Section("Reasoning") {
-                    Button {
-                        reasoningID = ""
-                    } label: {
-                        Label(
-                            "Default",
-                            systemImage: reasoningID.isEmpty ? "checkmark" : "circle"
-                        )
-                    }
-                    ForEach(selectedModel.reasoning) { effort in
-                        Button {
-                            reasoningID = effort.id
-                        } label: {
-                            Label(
-                                effort.name,
-                                systemImage: effort.id == reasoningID
-                                    ? "checkmark"
-                                    : "brain.head.profile"
-                            )
-                        }
-                    }
-                }
-            }
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "bolt")
-                Text(modelConfigurationTitle)
-                    .lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption2)
-                    .foregroundStyle(theme.tertiaryLabel)
-            }
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(theme.label)
-            .padding(.horizontal, 12)
-            .frame(height: 38)
-            .background(theme.controlResting, in: Capsule())
+            LaunchChoiceLabel(
+                symbol: "cpu",
+                caption: "Model",
+                value: selectedModel?.name ?? MobileL10n.string("Default")
+            )
         }
         .disabled(models.isEmpty)
     }
 
-    private var modelConfigurationTitle: String {
-        let modelName = selectedModel?.name ?? MobileL10n.string("Default model")
-        guard let selectedModel,
-              let reasoning = selectedModel.reasoning.first(where: { $0.id == reasoningID })
-        else { return modelName }
-        return "\(modelName) · \(reasoning.name)"
+    private var reasoningMenu: some View {
+        Menu {
+            Button {
+                reasoningID = ""
+            } label: {
+                Label("Default", systemImage: reasoningID.isEmpty ? "checkmark" : "circle")
+            }
+            ForEach(selectedModel?.reasoning ?? []) { effort in
+                Button {
+                    reasoningID = effort.id
+                } label: {
+                    Label(
+                        effort.name,
+                        systemImage: effort.id == reasoningID
+                            ? "checkmark"
+                            : "brain.head.profile"
+                    )
+                }
+            }
+        } label: {
+            LaunchChoiceLabel(
+                symbol: "brain.head.profile",
+                caption: "Effort",
+                value: selectedReasoningName
+            )
+        }
+        .disabled(selectedModel?.reasoning.isEmpty != false)
+    }
+
+    private var selectedReasoningName: String {
+        selectedModel?.reasoning.first(where: { $0.id == reasoningID })?.name
+            ?? MobileL10n.string("Default")
+    }
+
+    private var speedMenu: some View {
+        Menu {
+            Button {
+                speedID = ""
+            } label: {
+                Label("Inherit", systemImage: speedID.isEmpty ? "checkmark" : "circle")
+            }
+            Button {
+                speedID = "standard"
+            } label: {
+                Label("Standard", systemImage: speedID == "standard" ? "checkmark" : "gauge")
+            }
+            Button {
+                speedID = "fast"
+            } label: {
+                Label("Fast", systemImage: speedID == "fast" ? "checkmark" : "bolt.fill")
+            }
+        } label: {
+            LaunchChoiceLabel(
+                symbol: "bolt.fill",
+                caption: "Speed",
+                value: speedID.isEmpty ? MobileL10n.string("Inherit") : speedID.capitalized
+            )
+        }
+    }
+
+    private var permissionMenu: some View {
+        Menu {
+            Button {
+                permissionID = ""
+            } label: {
+                Label("Inherit", systemImage: permissionID.isEmpty ? "checkmark" : "circle")
+            }
+            ForEach(selectedAgent?.permissionModes ?? []) { mode in
+                Button {
+                    permissionID = mode.id
+                } label: {
+                    Label(
+                        mode.name,
+                        systemImage: mode.id == permissionID ? "checkmark" : "hand.raised"
+                    )
+                }
+            }
+        } label: {
+            LaunchChoiceLabel(
+                symbol: "hand.raised",
+                caption: "Permissions",
+                value: selectedPermissionName
+            )
+        }
+    }
+
+    private var selectedPermissionName: String {
+        selectedAgent?.permissionModes?.first(where: { $0.id == permissionID })?.name
+            ?? MobileL10n.string("Inherit")
     }
 
     private var selectedIdentityLabel: String {
@@ -1480,7 +1751,13 @@ struct NewRemoteSessionView: View {
     }
 
     private func applyCatalogDefaults() {
-        if projectID.isEmpty { projectID = catalog?.projects.first?.id ?? "" }
+        if projectID.isEmpty {
+            projectID = initialProjectName.flatMap { name in
+                catalog?.projects.first {
+                    $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+                }?.id
+            } ?? catalog?.projects.first?.id ?? ""
+        }
         if agentID.isEmpty {
             agentID = catalog?.agents.first(where: { $0.id == "codex" })?.id
                 ?? catalog?.agents.first?.id
@@ -1497,6 +1774,9 @@ struct NewRemoteSessionView: View {
                 ?? ""
         }
         if !selectedAgent.supportsConversation { surface = "terminal" }
+        if !(selectedAgent.permissionModes ?? []).contains(where: { $0.id == permissionID }) {
+            permissionID = ""
+        }
         applyAccountDefaults()
     }
 
@@ -1513,6 +1793,7 @@ struct NewRemoteSessionView: View {
     private func applyModelDefaults() {
         guard let selectedModel else {
             reasoningID = ""
+            speedID = ""
             return
         }
         if !selectedModel.reasoning.contains(where: { $0.id == reasoningID }) {
@@ -1520,6 +1801,7 @@ struct NewRemoteSessionView: View {
                 selectedModel.reasoning.contains(where: { $0.id == id }) ? id : nil
             } ?? ""
         }
+        if selectedModel.supportsFastMode != true { speedID = "" }
     }
 
     private func submit() {
@@ -1534,6 +1816,8 @@ struct NewRemoteSessionView: View {
                     accountHandle: accountID.isEmpty ? nil : accountID,
                     model: modelID.isEmpty ? nil : modelID,
                     reasoningEffort: reasoningID.isEmpty ? nil : reasoningID,
+                    fastMode: speedID == "fast" ? true : (speedID == "standard" ? false : nil),
+                    permissionMode: permissionID.isEmpty ? nil : permissionID,
                     surface: surface,
                     prompt: prompt
                 )
@@ -1544,6 +1828,46 @@ struct NewRemoteSessionView: View {
                 MobileDiagnostics.logDegraded(.sessionAction, error: error)
                 errorMessage = error.localizedDescription
             }
+        }
+    }
+}
+
+private struct LaunchChoiceLabel: View {
+    @Environment(\.remoteTheme) private var theme
+    let symbol: String
+    let caption: LocalizedStringKey
+    let value: String
+
+    var body: some View {
+        HStack(spacing: MobileDesign.Spacing.small) {
+            Image(systemName: symbol)
+                .font(.subheadline)
+                .foregroundStyle(theme.accent)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
+                Text(caption)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(theme.secondaryLabel)
+                Text(value)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.label)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            Spacer(minLength: MobileDesign.Spacing.tight)
+            Image(systemName: "chevron.down")
+                .font(.caption2)
+                .foregroundStyle(theme.tertiaryLabel)
+        }
+        .padding(.horizontal, MobileDesign.Spacing.medium)
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .background(
+            theme.controlResting,
+            in: RoundedRectangle(cornerRadius: theme.controlRadius)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.controlRadius)
+                .stroke(theme.border, lineWidth: theme.borderWidth)
         }
     }
 }

@@ -373,12 +373,15 @@ final class SessionComposerRenderTests: XCTestCase {
         let chip = try XCTUnwrap(chip(named: "composer.session-start.identity", in: composer.view))
         let presentation = try XCTUnwrap(chip.preparedPresentation())
 
-        XCTAssertFalse(
-            presentation.entries.contains { if case .separator = $0 { return true } else { return false } },
-            "a separator would restore the sections this menu exists to collapse"
-        )
-
         let items = presentation.entries.compactMap(\.item)
+
+        // One press deep, which is the property collapsing the two sections bought: what it
+        // removed was a runtime chooser standing between the pointer and a login, and no row
+        // here reopens one.
+        XCTAssertTrue(
+            items.allSatisfy { $0.submenu == nil },
+            "a submenu would restore the two trips this menu exists to collapse"
+        )
         XCTAssertGreaterThanOrEqual(
             items.count,
             AgentKind.allCases.count,
@@ -388,18 +391,31 @@ final class SessionComposerRenderTests: XCTestCase {
             items.allSatisfy { $0.image != nil },
             "a row in a cross-runtime list with no mark is a login with no provider"
         )
-        XCTAssertTrue(
-            items.allSatisfy { item in
-                AgentKind.allCases.contains { kind in
-                    item.title == kind.displayName
-                        || item.subtitle?.hasPrefix(kind.displayName) == true
-                }
-            },
-            """
-            every row names its runtime in words as well as drawing it — the same person's \
-            logins on two runtimes are often named the same thing, and a 14pt silhouette is \
-            the only other thing telling them apart
-            """
+        // The runtime is still named in words as well as drawn — the same person's logins on
+        // two runtimes are frequently named the same thing, and a 14pt silhouette is a coin
+        // toss. It is said once, by the head over the group, rather than written into every
+        // row's own line: that segment was the longest on the line and the reason the reading
+        // overran the panel's width cap.
+        let heads = presentation.entries.compactMap { entry -> String? in
+            if case .header(let title) = entry { return title } else { return nil }
+        }
+        for kind in AgentKind.allCases {
+            let accounts = kind.supportsAccounts ? AgentAccountDiscovery.accounts(for: kind) : []
+            if accounts.isEmpty {
+                XCTAssertFalse(
+                    heads.contains(kind.displayName),
+                    "a head over one row repeating its own name is furniture"
+                )
+            } else {
+                XCTAssertTrue(
+                    heads.contains(kind.displayName),
+                    "\(kind.displayName)'s logins are filed under nothing that names them"
+                )
+            }
+        }
+        XCTAssertFalse(
+            items.contains { $0.subtitle?.hasPrefix(AgentKind.claude.displayName) == true },
+            "the head names the runtime, so a row must not spend its line saying it again"
         )
         XCTAssertEqual(
             items.filter(\.isSelected).count,

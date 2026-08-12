@@ -14,8 +14,11 @@ screenshots.
   recaptures do not drift.
 - Keep uncompressed PNG masters in the repository. The website may generate
   AVIF or WebP derivatives.
-- Capture both System and Editorial where the visual story benefits, but use
-  one theme consistently inside a single sequence.
+- Use the Threading theme for ordinary product workflows on both macOS and
+  iOS. Use other themes only when the page is explicitly comparing themes.
+- Keep the app-drawn Threading title bar, window controls, command band, and
+  frame in ordinary macOS captures. A loose controller render is theme
+  comparison evidence, not a full product window.
 - Keep fixture copy independent of the working product name.
 
 ## Required scenes
@@ -26,9 +29,11 @@ screenshots.
 | `mac-conversation` | macOS | Native conversation with tool activity and an inline permission | Decisions stay attached to their cause |
 | `mac-subagents` | macOS | Parent session with a visible child tree and results | Delegation does not disappear into a flat log |
 | `mac-git-review` | macOS | File list, text diff, and staging boundary | Conversation connects to reviewable changes |
+| `mac-theme-showcase` | macOS | The same populated native conversation and Git Review pane under each compared theme | Theme masks change the app dress without changing the underlying story |
 | `ios-sessions` | iOS | Paired session list with attention states | Important work follows away from the desk |
 | `ios-permission` | iOS | Shared conversation and scoped approval | Remote decisions remain explicit |
 | `ios-review` | iOS | Compact Git review | The companion supports review without pretending to be the Mac |
+| `ios-tui` | iOS | Provider TUI with the remote composer | Native and terminal sessions can both follow you from the Mac |
 
 ## Master sizes
 
@@ -80,3 +85,28 @@ The website should reference stable semantic names such as
 `/product/mac-attention.webp`, never simulator-generated filenames. A manifest
 records the source PNG digest, crop, output dimensions, and generated formats.
 This lets CI detect stale derivatives after a new capture.
+
+The first version of this contract now lives in:
+
+- `web/product-screenshot-references.json`, which names each journey checkpoint
+  or evidence scene by a stable identifier;
+- `web/scripts/sync-product-screenshots.mjs`, which resolves those identifiers
+  from selected test reports;
+- `web/public/product/manifest.json`, which records the resolved source, pixel
+  size, and SHA-256 digest for each public copy.
+
+`GitReviewRenderTests.testRendersThreadingConversationWithGitReviewPane` owns the
+named macOS theme-showcase captures. It renders the shipping conversation, Git
+Review pane, split view, and Threading chrome rather than a website mockup.
+
+All images under `web/public/product/` are generated copies. Do not edit them by
+hand. After capturing new macOS journey evidence, macOS surface evidence, and
+iOS surface evidence, run the website's `screenshots:check` command against the
+three selected reports. A changed referenced capture makes the check fail.
+Review the new source image, then run `screenshots:sync` with the same paths to
+update the website copies and their hashes.
+
+The website test also rejects a product image that has no named reference, a
+missing referenced image, an unexpected size, or bytes that differ from the
+generated manifest. This keeps test output as the source of truth while leaving
+the final update as an explicit review decision.

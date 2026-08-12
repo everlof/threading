@@ -231,15 +231,23 @@ Sources, per provider:
   "expired" is said only when a token really was refused *and* nothing below could serve. An
   account with no token anywhere reports `.noCredential`, not an expired login.
 
-  The third source is also **merged into** whichever won, because it is the only one that names
-  a **model-scoped** window. A plan can meter some models separately (a weekly window for Fable
-  beside the weekly window for everything), and on a session running that model the scoped
-  window is routinely the binding one — 89% against a 56% account weekly is the number that
-  stops the work, and neither the status-line feed nor the fixed `five_hour`/`seven_day` pair
-  carries it. It is findable only in `utilization.limits[]`, as an entry whose `scope.model`
+  A **model-scoped** window lives in `utilization.limits[]`, as an entry whose `scope.model`
   names a model; entries with no model are the account's own windows under another name and are
-  skipped rather than drawn twice. `parsedScopedLimits` in Claudex's bridge anticipates the same
-  data arriving through the status line one day; until it does, `.claude.json` is where it is.
+  skipped rather than drawn twice. A plan can meter some models separately (a weekly window for
+  Fable beside the weekly window for everything), and on a session running that model the scoped
+  window is routinely the binding one — 89% against a 56% account weekly is the number that
+  stops the work. The endpoint and the CLI's cache carry the same document, decoded by one type
+  (`ClaudeUtilization`), so a live API read brings its scoped windows with it. It did not
+  always: the fetch used to decode only the fixed `five_hour`/`seven_day` pair, which dropped
+  the scoped limits the response already named and left them recoverable only from a
+  `.claude.json` cache that plenty of accounts simply do not have — the symptom was a login
+  showing fresh 5-hour and weekly bars with its Fable window nowhere.
+
+  The third source is still **merged into** a winner that arrived without scoped windows,
+  which is the status-line feed's case — that feed does not carry them. `parsedScopedLimits`
+  in Claudex's bridge anticipates the same data arriving through the status line one day;
+  until it does, `.claude.json` is what backfills it. A reading that brought its own scoped
+  windows keeps them: it is fresher than the cache by construction.
 
   Scoped windows land in `modelWindows`, kept out of `windows` so the *account's* peak stays the
   account's — the rule Codex's per-model limits already follow.
@@ -378,19 +386,32 @@ Everywhere else the reading stays narrow (`.metering`, the default): a session a
 model, and the mobile mirror of one, are subject to that model's windows and to no others.
 
 The **model** menu carries the other half, since it is the only surface where a scoped limit is
-actionable — a spent Fable window is escaped by picking something else. Each row states every
-window a session on it would be measured against (`AccountUsageMenu.modelSummary`, `.metering`):
-`5h 10% · 7d 22% · 7d Fable 89% · 7d Fable resets in 15h`. Both menus draw the same ring, gauging
-the same binding window, because two rings a click apart that meant different things would be
-worse than no ring.
+actionable — a spent Fable window is escaped by picking something else. It states the shared
+numbers **once, in a header**, and each row only what meters *it*:
 
-**Rows the plan meters no differently repeat the account's windows rather than staying bare.**
-Printing only the scoped ones was the first design and it was defensible — the account windows
-are identical on every such row and distinguish nothing — but three models listed with a number
-beside exactly one of them does not read as "two models with nothing of their own to say", it
-reads as two failed lookups. Repetition is the cheaper mistake. The row that leaves the choice
-to the CLI decorates too, metered by the account's configured default, or by nothing at all when
-the account names none — in which case the account's own windows are the whole honest answer.
+- The header (`AccountUsageMenu.modelMenuHeader`) is a disabled row — the same informational
+  idiom as "No apps found" — titled with the login's name, since the account was chosen on
+  another surface and a menu of readings had better say whose they are. Its line is the plan
+  and the account's own windows with the binding reset: `Max · 5h 41% · 7d 77% · 7d resets in
+  22h 10m`. Deliberately not the scoped windows, which belong to the rows.
+- A row's line (`AccountUsageMenu.modelSummary`) is the windows scoped to that model, plus a
+  countdown only when a window of the row's own is what binds: `7d Fable 89% · resets in 15h`.
+  The countdown stays bare beside a single reading — attributing it there repeats a name three
+  inches from itself — and names its window only when the row states more than one. Rows the
+  plan meters no differently carry no line at all.
+- Every row keeps its **ring**, gauging the binding window per model, so the row whose scoped
+  window is nearly spent sits visibly fuller than its neighbours. Both menus draw the same
+  ring, gauging the same binding window, because two rings a click apart that meant different
+  things would be worse than no ring.
+
+**This is the third design, and the header is what makes the first one work.** Scoped-only rows
+were tried, and three models listed with a number beside exactly one of them read as two failed
+lookups. Repeating the account's windows on every row fixed that and was the second design —
+but on the common account with no scoped window at all it printed one sentence five times,
+which reads as a rendering bug, not as five models. The header resolves both: a bare row under
+a stated header means "nothing beyond the line above", and nothing repeats. The row that leaves
+the choice to the CLI is metered by the account's configured default, or by nothing at all when
+the account names none — in which case the header already said everything there was to say.
 
 The model menu reads the cache without asking for a refresh per row; the conversation header's
 copy of it asks once for the whole menu, since unlike the composer it has no prefetch on appear.
@@ -418,42 +439,77 @@ resolutions:
   menu opens, which is already too late for that open. Warming **every** runtime's logins, not
   the selected one's, is what a list spanning all four needs.
 
-  It also carries a **gauge**, because the text alone did not scale to the decision it exists
-  for: `5h 0% · 7d 90%` is four numbers and two window names per account, so comparing three
-  logins means reading twelve of them and holding the comparison in your head. It compares
-  without arithmetic — the fuller one is the busier account — and its tint says whether that
-  matters. It shows the **peak** window rather than the first, since an account at
-  `5h 0% · 7d 90%` is nearly out and a gauge drawn from the 5-hour window would say the
-  opposite. Drawn rather than composed from views, because a menu row takes an image and no
-  view at all — the same constraint that produced `ThemeSwatchImage`. The numbers stay: the
-  gauge is the glance, the text is the precise answer.
+  **The reading is a table, not a sentence — this is the fourth design and the first one that
+  scales to the comparison the menu exists for.** The line it replaced was
+  `Claude Code · Max · 5h 27% · 7d 81% · 7d resets in 19h 36m`, toned per run, with a 14pt
+  meter under the brand mark. Read one row at a time it was fine. Read as a menu it had five
+  faults, and every one of them comes from the same root — *in a sentence, a value's position is
+  set by the length of the name in front of it*:
 
-  **Which gauge depends on whether the row has to name its runtime.** A menu row has exactly
-  one image slot. Where the runtime is a foregone conclusion the slot holds `UsageRingImage`,
-  as it always did. In the composer's identity menu it holds `AccountMarkImage` instead — the
-  runtime's brand mark with the same reading as a meter underneath it — because a flat list of
-  Claude, Codex, Grok and OpenCode logins is unreadable if a row cannot say which of them it
-  belongs to. Composing the two (the mark drawn *inside* the ring) was tried first and rejected
-  on the render: at 14pt the enclosed mark is a coloured smudge that identifies nothing, which
-  is the one job it was added for. Underlining keeps both legible.
+  1. **No columns.** Three logins put their three 5-hour numbers at three different x positions,
+     so comparing them is a search rather than a glance.
+  2. **One separator for seven kinds of thing.** `·` joined runtime, plan, window, value, scoped
+     window and countdown alike, so it gave the eye nothing to skip by.
+  3. **`7d` written three times in one line** (`7d 37% · 7d Fable 0% · 7d resets in 2d 6h`) —
+     and that repetition is what pushed the line past `ThemedMenuLayout.maximumWidth`.
+  4. **So it truncated, and the countdown is what lost its digits**: `7d resets in 5d 1…`, a
+     sentence claiming to be complete.
+  5. **The meter could only ever be a hue.** 14×2pt under the mark: 27% and 37% draw the same
+     length, so it repeated the tint the value already carried and added no second reading.
 
-  The runtime is also **written**, leading that row's subtitle — `Claude Code · Max · 5h 7% · …`.
-  The mark answers the glance, but one person's logins are frequently named the same thing on
-  two runtimes, and two rows reading `Everlof` separated only by a silhouette is a coin toss. It
-  leads rather than trails because the eye finds the start of a line, and because it is the one
-  segment that survives a login with no reading at all.
+  Each window is now a `ThemedMenuMetric` — a named column, a bar, and the number — and the menu
+  measures one column plan across every row (`ThemedMenuMetrics.metricColumns`), so every row's
+  `7d` is stacked under every other row's. A plan metering one window leaves the `5h` cell
+  **empty rather than closed up**: closing it would slide the remaining readings under a
+  different heading, which is the one thing a column must never do, and the gap itself says that
+  plan has one window. The bar is 32pt, wide enough that ten points of difference is visible —
+  which is what makes the ranking pre-attentive and retires the argument for the meter under the
+  mark. The numbers stay beside it: the bar is the glance, the number is the precise answer.
 
-  The line itself is **toned rather than printed in one grey**. The row draws it as
-  `ThemedMenuSubtitleSegment` runs — window names, separators and the reset clause at the muted
-  tier, values in the subtitle's own ink until their window passes the warning threshold and in
-  its severity colour after — which is the pill's grammar transplanted to the menus (both of
-  them: the model rows tint the same way). It exists for the same reason the gauge does:
-  comparing three logins is twelve numbers, and printed in one ink the twelve hide the one the
-  decision turns on. The tint is a second signal, never the only one — the numbers say the same
-  thing in any ink. `AccountUsage.readings` is the shared structured source (name, value,
-  severity per window, the stale-value rule decided once for the pill, the menus and the plain
-  joins), and `AccountUsageMenu.summarySegments`/`identitySegments` are asserted directly, plus
-  drawn by the dropdown render sweep with data chosen to hit every tone.
+  **What paid for the columns was the section head.** The rows are filed under one head per
+  runtime, so `Claude Code · ` — the longest segment on the line — comes off every row and is
+  said once. This costs no navigation: a header is not a submenu, so reaching another runtime's
+  login is still the one press it became when this stopped being two sections. A runtime with no
+  login to offer keeps its bare row and gets *no* head, because a heading over a single row
+  repeating its own name is furniture.
+
+  The rest of the line redistributes by what it is. The **plan** joins the title's line
+  (`titleDetail`), quieter than the name — demoting it to a second line would give a
+  subtitle-height row to every login whose provider happens to report one. The **countdown** gets
+  a right-aligned column of its own (`7d · 19h 36m`), which is what makes fault 4 structurally
+  impossible: the columns are fixed and the *name* is elastic, so a menu at its width cap
+  truncates the name — the one thing still recognisable from its first half — and never a number.
+  `resets in` is dropped, since a column of countdowns states what it is by being one, but the
+  countdown still **names its window**: it is not always the last column, and a bare one at the
+  end of a row is read as belonging to whichever is. The **scoped model windows** are the one
+  thing a shared column cannot hold — a scoped window's name is its length *and* its model
+  (`7d Fable`), so a column per model would be a column almost every row leaves empty — and they
+  take the row's second line, present on the few logins that have one.
+
+  **Which image the row carries still depends on whether it has to name its runtime.** A menu row
+  has exactly one image slot. Where the runtime is a foregone conclusion it holds
+  `UsageRingImage`, as it always did. In the composer's identity menu it holds `AccountMarkImage`
+  — but the **plain** mark now, not the metered one. Its 2pt underline existed only because a
+  14pt slot was the only room a reading had; the columns carry the length now, so the mark goes
+  back to being identity alone. (Composing mark and ring — the mark drawn *inside* the ring — was
+  tried in the metered era and rejected on the render: at 14pt the enclosed mark is a coloured
+  smudge that identifies nothing, which was the one job it was added for.)
+
+  Tones are unchanged and still semantic: window names, separators and the countdown at the muted
+  tier, values in the row's own ink until their window passes the warning threshold and in its
+  severity colour after — the pill's grammar, which the model rows also keep. The tint remains a
+  second signal, never the only one; the numbers say the same thing in any ink, and a classic
+  selection band flattens every tone — text *and* bar — to its own authored pair.
+  `AccountUsage.readings` is the shared structured source, and it now carries `fraction` beside
+  `value` so a bar and the number next to it cannot disagree about whether there is anything to
+  report: an expired window prints `—` and draws an **empty** track, never the full one a
+  fraction carried over from the previous window would have drawn.
+
+  `AccountUsageMenu.apply` is the seam: the reading half of `decorate` with the account lookup
+  taken out, so a test and the dropdown render sweep both build the row the composer assembles
+  rather than re-deriving it. `ThemedMenuItem.spokenSummary` is that row joined into one line —
+  what the tooltip and VoiceOver get, since neither of them can see a column or a bar, and a row
+  announced by its name alone would be a login with no reading at all.
 - The composer's own reading is **one line inside the prompt box**, on the row that carries
   what the session will run with. It is `AccountUsage.compactSummary` metered by the model the
   session would launch on, which is the same string the toolbar pill draws once the session

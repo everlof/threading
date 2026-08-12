@@ -267,6 +267,20 @@ final class DrawerHostViewController: NSViewController {
         if currentSessionID == sessionID { render() }
     }
 
+    /// Permanent deletion uses the same live teardown as closing; persistence is removed once
+    /// both panel hosts have released their surfaces.
+    func removeSession(_ sessionID: SessionID) {
+        openSessions.remove(sessionID)
+        if let state = statesBySession.removeValue(forKey: sessionID) {
+            state.tabs.forEach { teardownHosted($0) }
+        }
+        restoredSessions.remove(sessionID)
+        if currentSessionID == sessionID {
+            currentSessionID = nil
+            render()
+        }
+    }
+
     /// Drops every session not in the given set — deletion, not closing, so nothing of theirs
     /// may stay alive. The persisted payloads are swept by `DisplayPaneStore.retainOnly`.
     func retainOnly(sessionIDs: Set<SessionID>) {
@@ -278,20 +292,6 @@ final class DrawerHostViewController: NSViewController {
         }
         if let currentSessionID, !sessionIDs.contains(currentSessionID) {
             self.currentSessionID = nil
-            render()
-        }
-    }
-
-    /// Permanent deletion uses the same live teardown as closing; persistence is removed once
-    /// both panel hosts have released their surfaces.
-    func removeSession(_ sessionID: SessionID) {
-        openSessions.remove(sessionID)
-        if let state = statesBySession.removeValue(forKey: sessionID) {
-            state.tabs.forEach { teardownHosted($0) }
-        }
-        restoredSessions.remove(sessionID)
-        if currentSessionID == sessionID {
-            currentSessionID = nil
             render()
         }
     }

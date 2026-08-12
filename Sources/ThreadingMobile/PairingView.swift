@@ -10,11 +10,13 @@ struct PairingView: View {
     @State private var linkText = ""
     @State private var errorMessage: String?
     @State private var isConnecting = false
+    @State private var showsLinkHelp = false
+    @FocusState private var linkIsFocused: Bool
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: MobileDesign.Spacing.large) {
+                VStack(spacing: MobileDesign.Spacing.inset) {
                     scannerCard
 
                     linkCard
@@ -26,7 +28,16 @@ struct PairingView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    pairingHelp
+                    DisclosureGroup(isExpanded: $showsLinkHelp) {
+                        pairingHelp
+                            .padding(.top, MobileDesign.Spacing.medium)
+                    } label: {
+                        Label("About private links", systemImage: "lock.shield")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(theme.secondaryLabel)
+                    }
+                    .tint(theme.accent)
+                    .padding(.horizontal, MobileDesign.Spacing.tight)
 
                     Button {
                         dismiss()
@@ -39,7 +50,7 @@ struct PairingView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(theme.secondaryLabel)
                 }
-                .padding(MobileDesign.Spacing.large)
+                .padding(MobileDesign.Spacing.inset)
             }
             .navigationTitle("Add Connection")
             .navigationBarTitleDisplayMode(.inline)
@@ -63,7 +74,7 @@ struct PairingView: View {
                 linkText = value
                 pair(value)
             }
-            .frame(height: 286)
+            .frame(height: 236)
             .clipShape(RoundedRectangle(cornerRadius: theme.panelRadius))
             .overlay(alignment: .bottom) {
                 Label("Scan the code on your Mac", systemImage: "qrcode")
@@ -74,34 +85,40 @@ struct PairingView: View {
                     .padding(14)
             }
         } else {
-            VStack(spacing: 14) {
+            VStack(spacing: MobileDesign.Spacing.small) {
                 Image(systemName: "qrcode.viewfinder")
-                    .font(.system(size: 44, weight: .light))
-                Text("QR scanning isn’t available on this device.")
-                    .font(.headline)
-                    Text("Paste an owner pairing link or a shared-chat link below.")
-                    .font(.subheadline)
+                    .font(.system(size: 30, weight: .light))
+                Text("Scan a QR code")
+                    .font(.subheadline.weight(.semibold))
+                Text("Camera scanning isn’t available here. Paste a secure link below.")
+                    .font(.footnote)
                     .foregroundStyle(theme.secondaryLabel)
                     .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 230)
+            .frame(height: 132)
             .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
-            .remoteThemeGlow(theme)
+            .overlay {
+                RoundedRectangle(cornerRadius: theme.panelRadius)
+                    .stroke(theme.border, lineWidth: theme.borderWidth)
+            }
         }
     }
 
     private var linkCard: some View {
-        VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
-            Label("Use a link", systemImage: "link")
+        let connectIsDisabled = isConnecting || linkText.isEmpty
+        return VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
+            Label("Paste a link", systemImage: "link")
                 .font(.headline)
 
-            Text("Paste a pairing link, or a chat link someone shared with you.")
-                .font(.subheadline)
+            Text("Use the private link from your Mac or an invited chat.")
+                .font(.footnote)
                 .foregroundStyle(theme.secondaryLabel)
 
             HStack(spacing: MobileDesign.Spacing.small) {
                 TextField("https://…", text: $linkText)
+                    .focused($linkIsFocused)
+                    .mobileUIEvidenceKeyboardFocus($linkIsFocused)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
@@ -142,12 +159,16 @@ struct PairingView: View {
                 .font(.headline)
                 .frame(maxWidth: .infinity)
                 .frame(height: 50)
-                .background(theme.accent, in: Capsule())
-                .foregroundStyle(theme.ground)
+                .background(
+                    connectIsDisabled ? theme.controlHover : theme.accent,
+                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                )
+                .foregroundStyle(
+                    connectIsDisabled ? theme.secondaryLabel : theme.ground
+                )
             }
             .buttonStyle(.plain)
-            .disabled(isConnecting || linkText.isEmpty)
-            .opacity(isConnecting || linkText.isEmpty ? 0.45 : 1)
+            .disabled(connectIsDisabled)
         }
         .padding(MobileDesign.Spacing.inset)
         .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
@@ -155,7 +176,6 @@ struct PairingView: View {
             RoundedRectangle(cornerRadius: theme.panelRadius)
                 .stroke(theme.border, lineWidth: theme.borderWidth)
         }
-        .remoteThemeGlow(theme)
     }
 
     private var pairingHelp: some View {

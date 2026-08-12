@@ -43,10 +43,6 @@ enum AttentionAlert: String, Equatable, CaseIterable {
         }
     }
 
-    /// Only the blocked state sounds: it is the one holding a turn up right now, which is the
-    /// same ranking the sidebar's filled-versus-hollow marks already draw. Whether that sound
-    /// actually plays is `AppSettings.playsAttentionAlertSound`.
-    var sounds: Bool { self == .blocked }
 }
 
 // MARK: - Attention Alert Policy
@@ -283,7 +279,7 @@ final class AttentionAlertCenter: NSObject {
             ?? "Threading session"
         if let project { content.subtitle = project.name }
         content.body = body
-        content.sound = Self.chosenSound()
+        content.sound = Self.requestedUpdateSound(for: sessionID)
         content.userInfo = AttentionAlertDefaults.userInfo(
             sessionID: sessionID,
             destination: destination
@@ -317,17 +313,77 @@ final class AttentionAlertCenter: NSObject {
         return true
     }
 
-    // MARK: - Private Methods
+    // MARK: - Which Sound An Alert Carries
 
-    /// The sound every alert that sounds carries, or nil for a silent banner.
+    /// The sound one event carries on one session, or nil for a silent banner.
     ///
     /// One place, because the two posting paths had drifted into asking the same question
-    /// twice: whether a sound plays is the user's switch, and which sound it is is the user's
-    /// choice, and neither call site should be able to honour one without the other.
-    private static func chosenSound() -> UNNotificationSound? {
-        guard AppSettings.shared.playsAttentionAlertSound else { return nil }
-        return AppSettings.shared.attentionAlertSound.resolvedSound()
+    /// twice. It used to be two questions — a switch for whether a sound played and a picker
+    /// for which one — and it is one now: `silent` is a value the picker offers, so the switch
+    /// that used to express it has nothing left to say.
+    ///
+    /// Which alerts sound is no longer a property of the alert. It is the bottom of the
+    /// resolution chain — a per-event table holding today's answers — so an event that has
+    /// never sounded can be given a sound without a second switch, and the two that sound can
+    /// be quieted without losing their banners.
+    ///
+    /// The global silence gate answers here too, inside `SoundResolution`'s app-facing seam: a
+    /// gated alert posts with no sound at all and is otherwise untouched. Both posting paths go
+    /// through this one method, which is what keeps the gate from being something either of them
+    /// could forget.
+    private static func chosenSound(
+        for event: SoundEvent,
+        sessionID: SessionID
+    ) -> UNNotificationSound? {
+        SoundResolution.sound(for: event, sessionID: sessionID).notificationSound()
     }
+
+    /// The sound a **state** alert carries: the chain's answer, unless a bell has just made this
+    /// session's noise for it.
+    ///
+    /// The double this removes is one edge with two answers. A `BEL` in a background session
+    /// settles `awaitingUser`, which is the `.blocked` alert below, and with Threading behind
+    /// another app that banner used to present with its own sound on top of the bell — two
+    /// unrelated sounds, ~0 ms apart, for one event.
+    ///
+    /// It is answered *here*, and in this direction, because of when each half decides. The ring
+    /// is synchronous inside `TerminalSession.onBell`; this runs a main-actor turn later, since
+    /// the center observes the activity edge through a `Task` and `post` reads the project icon
+    /// off disk — work that may not sit on the PTY's byte path. So by the time this is asked,
+    /// the bell either happened or it did not, and the question stops being the prediction that
+    /// kept this open: not *will* the alert be heard, but *was* the bell.
+    ///
+    /// **Only the sound goes.** The banner posts, the icon and the thread are unchanged, the
+    /// sidebar keeps its hand up and Notification Center keeps its entry. Silenced is not
+    /// unnoticed.
+    ///
+    /// **The error direction is one-way.** Every uncertainty leaves this alert sounding — no
+    /// note, an expired note, a bell the gate held, one the limiter rejected, one resolved to
+    /// `silent`, one from a standalone terminal. Nothing in this seam can quiet a *bell*, so a
+    /// bell cannot go missing for a reason the user cannot see, and the worst case is one sound
+    /// too many.
+    static func stateAlertSound(
+        for alert: AttentionAlert,
+        sessionID: SessionID,
+        bells: AudibleBellRegister = .shared,
+        now: Date = Date()
+    ) -> UNNotificationSound? {
+        guard !bells.heardBell(for: sessionID, at: now) else { return nil }
+        return chosenSound(for: SoundEvent(alert), sessionID: sessionID)
+    }
+
+    /// The sound a requested update carries, which asks the register nothing.
+    ///
+    /// An update the user told an agent to send is not an echo of a bell — no `BEL` produced it
+    /// and no state edge did either — so one arriving inside a bell's window is a coincidence,
+    /// and quieting it would drop the sound from the one notification the user asked for by
+    /// name. Named rather than inlined so that staying out of the seam is a decision with a
+    /// test behind it.
+    static func requestedUpdateSound(for sessionID: SessionID) -> UNNotificationSound? {
+        chosenSound(for: .alertRequestedUpdate, sessionID: sessionID)
+    }
+
+    // MARK: - Private Methods
 
     private func activityChanged(for sessionID: SessionID) {
         let new = AgentRuntime.shared.activity(sessionID: sessionID)
@@ -372,10 +428,11 @@ final class AttentionAlertCenter: NSObject {
         content.title = session?.displayTitle ?? "Threading session"
         if let project { content.subtitle = project.name }
         content.body = alert.body
-        // The ranking is the alert's (only `blocked` ever sounds); whether it is heard is the
-        // user's, and the two are separate questions — a sound switched off should not have to
-        // cost the banner that carries it.
-        content.sound = alert.sounds ? Self.chosenSound() : nil
+        // Whether this kind sounds and which sound it is are one question now, asked of the
+        // chain: the built-in answers say `blocked` sounds and the other two do not, which is
+        // the ranking the sidebar's filled-versus-hollow marks already draw. Nothing visual
+        // turns on it — a silent alert still posts its banner.
+        content.sound = Self.stateAlertSound(for: alert, sessionID: sessionID)
         content.userInfo = [AttentionAlertDefaults.sessionKey: sessionID.uuidString]
         if let project { content.threadIdentifier = project.id.uuidString }
         if let icon = project?.icon,
@@ -484,6 +541,10 @@ extension AttentionAlertCenter: UNUserNotificationCenterDelegate {
 // MARK: - Attention Alert Defaults
 
 enum AttentionAlertDefaults {
+    /// What an install that has never chosen hears: macOS's own notification tone, which is
+    /// what every alert carried before the sound was a setting.
+    static let sound: SoundChoice = .system
+
     /// The `userInfo` key carrying the session a notification is about.
     static let sessionKey = "sessionID"
     static let destinationKindKey = "destinationKind"

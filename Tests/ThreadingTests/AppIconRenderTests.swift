@@ -248,9 +248,10 @@ final class AppIconRenderTests: XCTestCase {
 
     // MARK: - The Phone's Copy
 
-    /// iOS receives the canonical full-bleed export byte-for-byte. Keeping this as an equality
-    /// assertion catches either a stale asset catalogue or an accidental hand edit.
-    func testThePhoneIconMatchesTheCanonicalBrandExport() throws {
+    /// The primary iOS icon keeps the canonical plate and ink, but holds the mark inside the
+    /// platform safe zone. Pin both facts: a stale hand-copied full-bleed raster crowds the icon,
+    /// while a transparent or recoloured edge stops behaving like an app-icon plate.
+    func testThePhoneIconKeepsCanonicalBrandInkInsideItsSafeZone() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -262,15 +263,37 @@ final class AppIconRenderTests: XCTestCase {
             "Sources/ThreadingMobile/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"
         )
 
-        XCTAssertEqual(
-            try Data(contentsOf: mobile),
-            try Data(contentsOf: canonical),
-            "run scripts/generate_mobile_app_icon.swift after exporting the brand assets"
+        let canonicalRaster = try XCTUnwrap(
+            NSBitmapImageRep(data: Data(contentsOf: canonical))
+        )
+        let mobileRaster = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: mobile)))
+        XCTAssertEqual(mobileRaster.pixelsWide, 1024)
+        XCTAssertEqual(mobileRaster.pixelsHigh, 1024)
+
+        let ground = try XCTUnwrap(canonicalRaster.colorAt(x: 0, y: 0))
+        for point in [
+            CGPoint(x: 0.02, y: 0.5),
+            CGPoint(x: 0.5, y: 0.02),
+            CGPoint(x: 0.98, y: 0.5),
+            CGPoint(x: 0.5, y: 0.98),
+        ] {
+            let pixel = try XCTUnwrap(sample(mobileRaster, at: point))
+            XCTAssertLessThan(
+                difference(pixel, ground), 0.02,
+                "the canonical navy safe zone was lost at \(point)"
+            )
+        }
+
+        let centre = try XCTUnwrap(sample(mobileRaster, at: CGPoint(x: 0.5, y: 0.5)))
+        XCTAssertGreaterThan(
+            difference(centre, ground), 0.25,
+            "the canonical Threading ink disappeared from the mobile icon"
         )
     }
 
     func testEveryStockStyleHasASelectablePhoneIcon() throws {
         let suffixByThemeID: [String: String] = [
+            "threading": "Threading",
             "editorial": "Editorial",
             "cyberpunk": "Cyberpunk",
             "swiss-minimalist": "SwissMinimalist",

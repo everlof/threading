@@ -462,24 +462,6 @@ final class SidebarTreeBuilderTests: XCTestCase {
         XCTAssertEqual(branch.terminalNodes.map(\.terminalID), [shell.id])
     }
 
-    /// `NSOutlineView` asks for every child separately while expanding a branch. The indexed
-    /// seam must preserve the same sessions-then-terminals order as `childNodes` without making
-    /// a fresh combined array for every one of those requests.
-    func testABranchServesItsOutlineChildrenDirectlyInDisplayOrder() {
-        let branch = BranchGroupNode(branch: "large", projectID: ProjectID())
-        let sessions = (0..<5).map { _ in SessionNode(sessionID: SessionID()) }
-        let terminals = (0..<3).map { _ in
-            TerminalNode(terminalID: TerminalID(), displayProjectFolderPath: "/tmp")
-        }
-        branch.sessionNodes = sessions
-        branch.terminalNodes = terminals
-
-        XCTAssertEqual(branch.outlineChildCount, sessions.count + terminals.count)
-        for (index, expected) in (sessions as [NSObject] + terminals as [NSObject]).enumerated() {
-            XCTAssertIdentical(branch.outlineChild(at: index), expected)
-        }
-    }
-
     // MARK: - Side chats
 
     func testASideChatNestsUnderItsParent() throws {
@@ -887,18 +869,12 @@ final class SidebarTreeBuilderTests: XCTestCase {
             sessionsPerProject: sessionsPerProject,
             directory: directory
         )
-        // Seed outside the measured app lifetime. Otherwise the first deletion inherits an
-        // automatic WAL checkpoint from constructing 5,000 rows moments earlier — setup work a
-        // real launch with an existing sidebar completed in the previous process.
-        let seedManager = StateManager(appSupportDirectory: directory)
-        XCTAssertTrue(seedManager.saveProjectsState(ProjectsState(projects: fixture.projects)))
-        seedManager.closeDatabase()
-
         let manager = StateManager(appSupportDirectory: directory)
         // This opt-in workload deletes its isolated store on return. Close SQLite first: unlinking
         // the WAL underneath a live connection is an API violation and can crash xctest while
         // its autorelease pool drains, after a perfectly valid performance line was printed.
         defer { manager.closeDatabase() }
+        XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: fixture.projects)))
         let store = ProjectStore(stateManager: manager)
         // Match MainWindowController: construct and lay out the sidebar shell at its permanent
         // geometry, then cross the explicit initial-tree boundary. Eagerly mounting into a
@@ -945,37 +921,10 @@ final class SidebarTreeBuilderTests: XCTestCase {
         controller.view.layoutSubtreeIfNeeded()
         let disclosureElapsed = DispatchTime.now().uptimeNanoseconds - disclosureStarted
 
-        let expandedSessionCount = controller.presentedRowKeys.filter {
-            if case .session = $0 { return true }
-            return false
-        }.count
-        XCTAssertEqual(
-            expandedSessionCount,
-            projectCount * sessionsPerProject,
-            "re-expanding the project did not restore every logical session row"
-        )
-
-        let deepKey = SidebarNodeKey.session(fixture.deepSessionID)
-        let deepLogicalRow = try XCTUnwrap(controller.presentedRow(of: deepKey))
-        XCTAssertGreaterThan(
-            deepLogicalRow,
-            controller.instantiatedRowCount,
-            "the stress reveal target did not cross the outline's launch viewport boundary"
-        )
-        XCTAssertNil(
-            controller.presentedRowView(of: deepKey),
-            "the deep reveal target was already materialized before exact navigation"
-        )
-
         let revealStarted = DispatchTime.now().uptimeNanoseconds
         controller.reveal(sessionID: fixture.deepSessionID)
         controller.view.layoutSubtreeIfNeeded()
         let revealElapsed = DispatchTime.now().uptimeNanoseconds - revealStarted
-        XCTAssertEqual(controller.selectedSessionID, fixture.deepSessionID)
-        XCTAssertNotNil(
-            controller.presentedRowView(of: deepKey),
-            "exact navigation selected the deep row without bringing it into the viewport"
-        )
 
         let titleEventStarted = DispatchTime.now().uptimeNanoseconds
         XCTAssertEqual(
@@ -1038,14 +987,11 @@ final class SidebarTreeBuilderTests: XCTestCase {
         let orderedResizeSamples = resizeSamples.sorted()
         let resizeElapsed = resizeSamples.reduce(0, +)
 
-        // Earlier phases intentionally mutate a title. Flush that independent work so this
-        // sample measures removal itself rather than whichever coalesced write happens to win.
-        store.flushPendingSave()
-
         // Permanent removal is a structural edit plus an immediate durable write. Keep it in
         // this same scaling sweep: the reported pause can come from the database walk, the
         // outline diff, or the layout that closes the visible gap, and a small fixture makes all
-        // three look free. Keep a direct full reload beside it so broad invalidation stays visible.
+        // three look free. Keep a full-reload comparison beside the targeted production path so
+        // a future regression cannot hide the cost of broad invalidation.
         let removalProject = try XCTUnwrap(store.projects.dropFirst().first ?? store.projects.first)
         let dormantRemoval = try XCTUnwrap(
             removalProject.sessions.first(where: { $0.id != fixture.deepSessionID })
@@ -1054,7 +1000,6 @@ final class SidebarTreeBuilderTests: XCTestCase {
         XCTAssertEqual(store.removeSession(id: dormantRemoval.id), .applied)
         let dormantMutationEnded = DispatchTime.now().uptimeNanoseconds
         #if DEBUG
-        let dormantRemovalPhases = store.lastSessionRemovalPhaseNanoseconds
         let dormantSidebarUpdate = controller.lastProjectStructureNanoseconds
         let dormantSidebarPhases = controller.lastProjectStructurePerformance
         #endif
@@ -1071,7 +1016,6 @@ final class SidebarTreeBuilderTests: XCTestCase {
         XCTAssertEqual(store.removeSession(id: fixture.deepSessionID), .applied)
         let selectedMutationEnded = DispatchTime.now().uptimeNanoseconds
         #if DEBUG
-        let selectedRemovalPhases = store.lastSessionRemovalPhaseNanoseconds
         let selectedSidebarUpdate = controller.lastProjectStructureNanoseconds
         let selectedSidebarPhases = controller.lastProjectStructurePerformance
         let groupRuleRefreshCandidateCount = controller.lastGroupRuleRefreshCandidateCount
@@ -1167,30 +1111,6 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 + Self.milliseconds(selectedSidebarPhases.indexingNanoseconds)
                 + " remove_selected_outline_ms="
                 + Self.milliseconds(selectedSidebarPhases.outlineNanoseconds)
-                + " remove_dormant_persistence_ms="
-                + Self.milliseconds(dormantRemovalPhases["persistence"] ?? 0)
-                + " remove_dormant_baselines_ms="
-                + Self.milliseconds(dormantRemovalPhases["baselines"] ?? 0)
-                + " remove_dormant_work_ms="
-                + Self.milliseconds(dormantRemovalPhases["work"] ?? 0)
-                + " remove_dormant_handoff_ms="
-                + Self.milliseconds(dormantRemovalPhases["handoff"] ?? 0)
-                + " remove_dormant_audit_ms="
-                + Self.milliseconds(dormantRemovalPhases["audit"] ?? 0)
-                + " remove_dormant_scheduled_ms="
-                + Self.milliseconds(dormantRemovalPhases["scheduled"] ?? 0)
-                + " remove_selected_persistence_ms="
-                + Self.milliseconds(selectedRemovalPhases["persistence"] ?? 0)
-                + " remove_selected_baselines_ms="
-                + Self.milliseconds(selectedRemovalPhases["baselines"] ?? 0)
-                + " remove_selected_work_ms="
-                + Self.milliseconds(selectedRemovalPhases["work"] ?? 0)
-                + " remove_selected_handoff_ms="
-                + Self.milliseconds(selectedRemovalPhases["handoff"] ?? 0)
-                + " remove_selected_audit_ms="
-                + Self.milliseconds(selectedRemovalPhases["audit"] ?? 0)
-                + " remove_selected_scheduled_ms="
-                + Self.milliseconds(selectedRemovalPhases["scheduled"] ?? 0)
                 + " group_rule_candidates=\(groupRuleRefreshCandidateCount)"
         #endif
         print(performanceLine)

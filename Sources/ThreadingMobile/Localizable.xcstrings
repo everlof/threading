@@ -1,9 +1,135 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Find the bug hiding in plain sight…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hitta buggen som gömmer sig helt öppet…" } } }
+    },
+    "Hunt down the flaky test…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Spåra upp det opålitliga testet…" } } }
+    },
+    "Make the impossible state impossible…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Gör det omöjliga tillståndet omöjligt…" } } }
+    },
+    "Polish the rough edges…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Putsa de grova kanterna…" } } }
+    },
+    "Teach this screen a new trick…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lär den här skärmen ett nytt trick…" } } }
+    },
+    "30d": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "30 d" } } }
+    },
+    "7d": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "7 d" } } }
+    },
+    "90d": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "90 d" } } }
+    },
+    "About private links": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Om privata länkar" } } }
+    },
+    "About sessions": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Om sessioner" } } }
+    },
+    "Camera scanning isn’t available here. Paste a secure link below.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kameraskanning är inte tillgänglig här. Klistra in en säker länk nedan." } } }
+    },
+    "Choose account": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Välj konto" } } }
+    },
+    "Current Mac": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktuell Mac" } } }
+    },
+    "Jump to latest message": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hoppa till senaste meddelandet" } } }
+    },
+    "New": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ny" } } }
+    },
+    "Open a session to continue it here. Long press a session for pin, rename, share, snooze, interface and archive actions.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppna en session för att fortsätta den här. Håll ned en session för att fästa, byta namn, dela, skjuta upp, välja gränssnitt eller arkivera den." } } }
+    },
+    "Paste a link": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Klistra in en länk" } } }
+    },
+    "Pinned": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fästa" } } }
+    },
+    "Rendering preview…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återger förhandsvisning…" } } }
+    },
+    "Scan a QR code": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skanna en QR-kod" } } }
+    },
+    "Scroll to the end of the repository": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Rulla till slutet av kodarkivet" } } }
+    },
+    "Sessions on your Mac": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessioner på din Mac" } } }
+    },
+    "Switch Mac": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Byt Mac" } } }
+    },
+    "Updated 3h ago": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdaterad för 3 tim sedan" } } }
+    },
+    "Use the private link from your Mac or an invited chat.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använd den privata länken från din Mac eller en inbjuden chatt." } } }
+    },
+    "What should the agent work on?": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vad ska agenten arbeta med?" } } }
+    },
+    "%@ will start in %@ on %@.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ startar i %@ på %@." } } }
+    },
+    "Claude Code": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Claude Code" } } }
+    },
+    "Fast": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Snabb" } } }
+    },
+    "First message": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Första meddelandet" } } }
+    },
+    "Inherit": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ärv" } } }
+    },
+    "Ready for a new task": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Redo för en ny uppgift" } } }
+    },
+    "Run settings": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Körinställningar" } } }
+    },
+    "Standard": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Standard" } } }
+    },
+    "The agent": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agenten" } } }
+    },
+    "the selected project": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "det valda projektet" } } }
+    },
+    "your Mac": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "din Mac" } } }
+    },
     "In an hour": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Om en timme" } } }
+    },
+    "Long press for session actions": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tryck länge för sessionsåtgärder" } } }
     },
     "Next week": {
       "extractionState": "manual",
@@ -979,6 +1105,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Chattar som delas med mig"
+          }
+        }
+      }
+    },
+    "Check the final layout.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontrollera den slutliga layouten."
           }
         }
       }
@@ -3115,6 +3251,26 @@
         }
       }
     },
+    "Hides tool output": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Döljer verktygsutdata"
+          }
+        }
+      }
+    },
+    "Tool completed without output": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verktyget slutfördes utan utdata"
+          }
+        }
+      }
+    },
     "Try Again": {
       "localizations": {
         "sv": {
@@ -4783,6 +4939,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Den h\u00e4r filen f\u00f6rhandsvisas p\u00e5 din Mac."
+          }
+        }
+      }
+    },
+    "%lld changed": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld \u00e4ndrade"
           }
         }
       }

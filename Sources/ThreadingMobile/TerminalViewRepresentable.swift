@@ -48,9 +48,19 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             view?.setAuthoritativeGrid(cols: cols, rows: rows)
         }
         if allowsDirectInput {
+#if DEBUG
+            if ProcessInfo.processInfo.environment[
+                "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_STATE"
+            ] == nil {
+                DispatchQueue.main.async {
+                    _ = view.becomeFirstResponder()
+                }
+            }
+#else
             DispatchQueue.main.async {
                 _ = view.becomeFirstResponder()
             }
+#endif
         }
         return view
     }

@@ -160,6 +160,26 @@ final class GitReviewViewController: NSViewController {
         table.dataSource = self
         return table
     }()
+    /// Commit history has the same scaling boundary as a file index: paging bounds each read,
+    /// but "Show more" can retain arbitrarily many model rows. A table keeps construction and
+    /// drawing proportional to the viewport instead of mounting every rich graph row in `stack`.
+    lazy var historyTableView: ThemedTableView = {
+        let table = ThemedTableView()
+        let column = NSTableColumn(identifier: GitReviewUIDefaults.historyTableColumnIdentifier)
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.selectionHighlightStyle = .none
+        table.style = .plain
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = .zero
+        table.rowHeight = GitReviewCommitRowDefaults.tableRowHeight
+        table.usesAutomaticRowHeights = false
+        table.autoresizingMask = [.width]
+        table.delegate = self
+        table.dataSource = self
+        return table
+    }()
     lazy var placeholderLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -201,6 +221,8 @@ final class GitReviewViewController: NSViewController {
     /// and one commit opened out of it.
     enum Phase {
         case message(String)
+        /// Stable file identities whose exact bodies are hydrated only around the viewport.
+        case fileIndex([GitFileDiff])
         case files([GitFileDiff])
         case commits(canLoadMore: Bool)
         case commitDetail(GitCommitSummary, [GitFileDiff])
@@ -211,10 +233,25 @@ final class GitReviewViewController: NSViewController {
     /// The history list survives opening a commit, so Back is free.
     var commits: [GitCommitSummary] = []
     var lastPageWasFull = false
+    private var pendingCommitStatsPages: Set<Int> = []
 
-    /// Stale async results are dropped by generation, not cancelled — git is already running.
-    private var generation = 0
-    private var isLoading = false {
+    /// Stale async results are dropped by generation. The one deliberately cancellable read is
+    /// a complete patch superseded by the large comparison's compact path roster.
+    var generation = 0
+    /// Lets a racing raw-index callback know the full patch has already won this generation.
+    private var completedDiffGeneration = -1
+    var activeDiffCancellation: GitProcessCancellation?
+    /// A large comparison retains one value roster and hydrates only the resting viewport.
+    /// These values are generation-scoped; no callback may update a later comparison.
+    var progressiveDiffGeneration = -1
+    var progressiveDiff: GitReviewReader.ProgressiveDiff?
+    var progressiveDiffRoot: URL?
+    var progressiveHydrationInFlight = false
+    var progressiveHydrationSchedule = 0
+    var progressiveStatsStarted = false
+    var progressiveStatsScheduled = false
+    var progressiveStatsCancellation: GitProcessCancellation?
+    var isLoading = false {
         didSet {
             guard isLoading != oldValue else { return }
             onLoadingChange?(isLoading)
@@ -238,6 +275,11 @@ final class GitReviewViewController: NSViewController {
     /// deep indexes superlinear. The table owns all model rows while creating views only around
     /// the viewport.
     var renderedFiles: [GitFileDiff] = []
+    var pendingDiffIndexPaths: Set<String> = []
+    var failedDiffHydrationPaths: Set<String> = []
+    var deferredHydratedFiles: [String: GitFileDiff] = [:]
+    var deferredFailedHydrationPaths: Set<String> = []
+    var deferredProgressiveStats: [GitFileLineStats]?
     var filePreludeViews: [NSView] = []
     var renderedFileRoot: URL?
     var instantiatedFileRowCount = 0
@@ -245,6 +287,15 @@ final class GitReviewViewController: NSViewController {
     var measuredFileRowHeights: [String: (width: CGFloat, height: CGFloat)] = [:]
     var measuredPreludeRowHeights: [Int: (width: CGFloat, height: CGFloat)] = [:]
     var fileRowHeightWidth: CGFloat = 0
+
+    /// The graph is value geometry and is cheap to retain for the complete loaded history.
+    /// `historyTableView` asks for the corresponding rich row only when it reaches the viewport.
+    var renderedCommitGraph: [GitGraphRow] = []
+    var historyPreludeViews: [NSView] = []
+    var measuredHistoryPreludeRowHeights: [Int: CGFloat] = [:]
+    var renderedCommitLaneCount = 1
+    var historyCanLoadMore = false
+    var instantiatedCommitRowCount = 0
 
     /// Whether a long line wraps to the pane or runs off it into a horizontal scroller. Wrapping
     /// is the default because the pane is often narrow, and hiding half a changed line off the
@@ -399,6 +450,8 @@ final class GitReviewViewController: NSViewController {
         }
         watcher?.stop()
         changeRequestTask?.cancel()
+        activeDiffCancellation?.cancel()
+        progressiveStatsCancellation?.cancel()
     }
 
     // MARK: - Setup
@@ -425,6 +478,9 @@ final class GitReviewViewController: NSViewController {
         clipView.postsBoundsChangedNotifications = true
         scrollEvents.observe(NSView.boundsDidChangeNotification, object: clipView) { [weak self] in
             self?.updateScrollControls()
+            self?.scheduleVisibleDiffHydration(
+                after: GitReviewDefaults.progressiveDiffHydrationSettleDelay
+            )
         }
         scrollEvents.observe(
             NSScrollView.willStartLiveScrollNotification,
@@ -683,7 +739,7 @@ final class GitReviewViewController: NSViewController {
     }
 
     /// Called when a load lands, so a change that arrived while git was running is not lost.
-    private func reloadIfPending() {
+    func reloadIfPending() {
         guard pendingReload, view.window != nil, !view.isHiddenOrHasHiddenAncestor else { return }
         DispatchQueue.main.async { [weak self] in self?.refresh(force: true) }
     }
@@ -695,8 +751,11 @@ final class GitReviewViewController: NSViewController {
     }
 
     private func loadDiff(_ request: GitReviewReader.DiffRequest, in root: URL) {
+        activeDiffCancellation?.cancel()
         generation += 1
         let expected = generation
+        completedDiffGeneration = -1
+        stopProgressiveDiffHydration()
         isLoading = true
         let span = PerformanceRecorder.shared.begin(
             "git.review.load-and-render",
@@ -704,7 +763,40 @@ final class GitReviewViewController: NSViewController {
             metadata: ["mode": mode.rawValue]
         )
 
-        GitReviewReader.diff(request, in: root, ignoringWhitespace: ignoresWhitespace) { [weak self] result in
+        if GitReviewReader.supportsProgressiveIndex(request) {
+            // Ordinary comparisons normally finish before this fires and pay no second process.
+            // Only a load that has already missed the responsiveness budget asks Git for the
+            // compact roster it can present while the expensive patch keeps running.
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + GitReviewDefaults.progressiveDiffDelay
+            ) { [weak self] in
+                guard let self,
+                      expected == self.generation,
+                      self.completedDiffGeneration != expected else { return }
+                GitReviewReader.diffIndex(
+                    request,
+                    in: root,
+                    ignoringWhitespace: self.ignoresWhitespace
+                ) { [weak self] result in
+                    guard let self,
+                          expected == self.generation,
+                          self.completedDiffGeneration != expected,
+                          case .success(let comparison) = result,
+                          comparison.files.count >= GitReviewDefaults.progressiveDiffFileThreshold else { return }
+                    self.beginProgressiveDiffHydration(
+                        comparison: comparison,
+                        root: root,
+                        generation: expected
+                    )
+                }
+            }
+        }
+
+        activeDiffCancellation = GitReviewReader.diff(
+            request,
+            in: root,
+            ignoringWhitespace: ignoresWhitespace
+        ) { [weak self] result in
             guard let self else {
                 span.end(metadata: ["result": "controller-released"])
                 return
@@ -713,10 +805,12 @@ final class GitReviewViewController: NSViewController {
                 span.end(metadata: ["result": "stale"])
                 return
             }
+            self.completedDiffGeneration = expected
             self.lastLoadedAt = Date()
 
             switch result {
             case .success(let files):
+                self.stopProgressiveDiffHydration()
                 self.loadedDiffRoot = root
                 self.show(files.isEmpty ? .message("No changes.") : .files(files))
                 span.end(metadata: [
@@ -724,10 +818,13 @@ final class GitReviewViewController: NSViewController {
                     "files": String(files.count),
                     "changed_lines": String(files.reduce(0) { $0 + $1.added + $1.removed })
                 ])
+            case .failure(.cancelled) where self.progressiveDiffGeneration == expected:
+                span.end(metadata: ["result": "progressive"])
             case .failure(let failure):
                 self.show(.message(failure.errorDescription ?? L10n.string("git failed.")))
                 span.end(metadata: ["result": "failure"])
             }
+            self.activeDiffCancellation = nil
             self.isLoading = false
             self.reloadIfPending()
         }
@@ -756,7 +853,13 @@ final class GitReviewViewController: NSViewController {
 
             switch result {
             case .success(let page):
-                if skip == 0 { self.commits = page } else { self.commits += page }
+                let knownStats = Dictionary(
+                    uniqueKeysWithValues: self.commits
+                        .filter(\.hasStats)
+                        .map { ($0.hash, $0) }
+                )
+                let presentedPage = page.map { knownStats[$0.hash] ?? $0 }
+                if skip == 0 { self.commits = presentedPage } else { self.commits += presentedPage }
                 self.lastPageWasFull = page.count == GitReviewDefaults.logPageSize
                 self.show(self.commits.isEmpty
                     ? .message("No commits yet.")
@@ -765,12 +868,45 @@ final class GitReviewViewController: NSViewController {
                     "result": "success",
                     "commits": String(self.commits.count)
                 ])
+                self.loadCommitStats(in: root, skip: skip)
             case .failure(let failure):
                 self.show(.message(failure.errorDescription ?? L10n.string("git failed.")))
                 span.end(metadata: ["result": "failure"])
             }
             self.isLoading = false
             self.reloadIfPending()
+        }
+    }
+
+    /// Enriches only values already retained by the history table. Fixed row height means this
+    /// is a targeted cell reload, not another graph/layout pass, and a commit opened while the
+    /// command runs simply receives its stats in the retained Back list.
+    private func loadCommitStats(in root: URL, skip: Int) {
+        guard pendingCommitStatsPages.insert(skip).inserted else { return }
+        let span = PerformanceRecorder.shared.begin(
+            "git.review.load-history-stats",
+            category: "git.review",
+            metadata: ["skip": String(skip)]
+        )
+        GitReviewReader.logStats(skip: skip, in: root) { [weak self] result in
+            guard let self else {
+                span.end(metadata: ["result": "controller-released"])
+                return
+            }
+            self.pendingCommitStatsPages.remove(skip)
+            switch result {
+            case .success(let page):
+                let changed = self.applyCommitStats(page)
+                span.end(metadata: [
+                    "result": "success",
+                    "commits": String(page.count),
+                    "changed": String(changed)
+                ])
+            case .failure:
+                // Statistics are supplementary: the complete history remains usable, and its
+                // next ordinary refresh may retry without replacing it with an error page.
+                span.end(metadata: ["result": "failure"])
+            }
         }
     }
 
@@ -945,6 +1081,7 @@ enum GitReviewUIDefaults {
     /// The chip's mark for every mode: the change itself, not any one comparison.
     static let modeSymbol = "plus.forwardslash.minus"
     static let turnSymbol = "clock.arrow.circlepath"
+    static let historyTableColumnIdentifier = NSUserInterfaceItemIdentifier("GitReviewCommit")
 
     static var commitPlaceholder: String { L10n.string("Commit staged changes…") }
 

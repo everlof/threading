@@ -178,9 +178,25 @@ final class AccountUsageSummaryTests: XCTestCase {
         )
         usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 54_000)]
 
+        var item = ThemedMenuItem(title: "Everlof")
+        AccountUsageMenu.apply(usage, to: &item, metering: "claude-fable-5[1m]", at: now)
+
+        XCTAssertEqual(item.titleDetail, "Max")
+        XCTAssertEqual(item.metrics.map(\.label), ["5h", "7d"])
+        XCTAssertEqual(item.metrics.map(\.value), ["7%", "56%"])
+        // The scoped window is the one thing a shared column cannot hold, so it — and only it —
+        // takes the row's second line.
+        XCTAssertEqual(item.subtitle, "7d Fable 89%")
+        XCTAssertEqual(item.trailingDetail, "7d Fable · 15h")
+        // The same row without a name in front of it — what a surface that has already said
+        // whose account this is puts in a tooltip.
         XCTAssertEqual(
             AccountUsageMenu.summary(for: usage, metering: "claude-fable-5[1m]", at: now),
-            "Max · 5h 7% · 7d 56% · 7d Fable 89% · 7d Fable resets in 15h"
+            "Max, 5h 7%, 7d 56%, 7d Fable · 15h, 7d Fable 89%"
+        )
+        XCTAssertEqual(
+            item.spokenSummary,
+            "Everlof, Max, 5h 7%, 7d 56%, 7d Fable · 15h, 7d Fable 89%"
         )
     }
 
@@ -200,11 +216,13 @@ final class AccountUsageSummaryTests: XCTestCase {
         )
         usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 54_000)]
 
-        // Metering Opus: Fable is named, but 7d is still what binds — and what the ring gauges.
-        XCTAssertEqual(
-            AccountUsageMenu.summary(for: usage, metering: "opus[1m]", at: now),
-            "Max · 5h 11% · 7d 62% · 7d Fable 89% · 7d resets in 15h"
-        )
+        // Metering Opus: Fable is named, but 7d is still what binds — and what the reset column
+        // and the ring both answer for.
+        var item = ThemedMenuItem(title: "Everlof")
+        AccountUsageMenu.apply(usage, to: &item, metering: "opus[1m]", at: now)
+
+        XCTAssertEqual(item.subtitle, "7d Fable 89%")
+        XCTAssertEqual(item.trailingDetail, "7d · 15h")
         XCTAssertEqual(usage.bindingWindow(at: now, metering: "opus[1m]")?.id, "7d")
     }
 
@@ -223,50 +241,77 @@ final class AccountUsageSummaryTests: XCTestCase {
 
     // MARK: - Model Menu
 
-    /// The row where the choice is made states everything a session on it would be measured
-    /// against — the account's windows and the model's own — and when the binding one comes back.
+    /// A model row states only what meters *it* beyond the account — the shared windows are the
+    /// header's, stated once — and when its own window is the binding one, its countdown. Bare
+    /// beside a single reading: naming the window there repeats a name three inches from itself.
     @MainActor
-    func testModelRowStatesEveryWindowThatWouldMeasureIt() {
+    func testModelRowStatesOnlyItsOwnScopedWindows() {
         var usage = makeUsage(windows: [window(id: "7d", fraction: 0.62, resetsIn: 54_000)])
         usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 54_000)]
 
         XCTAssertEqual(
             AccountUsageMenu.modelSummary(for: usage, running: "claude-fable-5[1m]", at: now),
-            "7d 62% · 7d Fable 89% · 7d Fable resets in 15h"
+            "7d Fable 89% · resets in 15h"
         )
     }
 
-    /// A model the plan meters no differently still carries its reading. The account's windows
-    /// are the same on every such row and distinguish nothing — but a blank row does not read as
-    /// "nothing of its own to say", it reads as a failed lookup beside the one row that worked.
+    /// A model the plan meters no differently says nothing of its own. That emptiness means
+    /// "nothing beyond the header", not a failed lookup — the reason repeating the account's
+    /// windows per row was retired: on an account with no scoped window at all it printed one
+    /// sentence five times, which reads as a rendering bug, not as five models.
     @MainActor
-    func testModelRowWithoutAScopedWindowFallsBackToTheAccountsOwn() {
+    func testModelRowWithoutAScopedWindowSaysNothingBeyondTheHeader() {
         var usage = makeUsage(windows: [window(id: "7d", fraction: 0.62, resetsIn: 54_000)])
         usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 54_000)]
 
-        XCTAssertEqual(
-            AccountUsageMenu.modelSummary(for: usage, running: "claude-opus-4-8", at: now),
-            "7d 62% · 7d resets in 15h"
-        )
+        XCTAssertNil(AccountUsageMenu.modelSummary(for: usage, running: "claude-opus-4-8", at: now))
         // The row that leaves the choice to the CLI, on an account naming no default: nothing is
-        // known about the model, so the account's own windows are the whole honest answer.
-        XCTAssertEqual(
-            AccountUsageMenu.modelSummary(for: usage, running: nil, at: now),
-            "7d 62% · 7d resets in 15h"
-        )
-    }
-
-    /// The one silence left: an account with no windows at all says nothing, rather than showing
-    /// a row furnished with an empty line.
-    @MainActor
-    func testModelRowSaysNothingWhenTheAccountHasNoWindows() {
+        // known about the model, so nothing scoped can honestly be said about it either.
+        XCTAssertNil(AccountUsageMenu.modelSummary(for: usage, running: nil, at: now))
+        // And an account with no windows at all keeps the same silence.
         XCTAssertNil(
             AccountUsageMenu.modelSummary(for: makeUsage(windows: []), running: "opus", at: now)
         )
     }
 
+    /// The countdown belongs to the window that stops the work. When the account's own window
+    /// binds, its reset already trails the header — the row repeats neither the number nor the
+    /// wait.
+    @MainActor
+    func testModelRowCountdownAppearsOnlyWhenItsOwnWindowBinds() {
+        var usage = makeUsage(windows: [window(id: "7d", fraction: 0.62, resetsIn: 54_000)])
+        usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.30, resetsIn: 54_000)]
+
+        XCTAssertEqual(
+            AccountUsageMenu.modelSummary(for: usage, running: "fable", at: now),
+            "7d Fable 30%"
+        )
+    }
+
+    /// A row naming more than one window attributes its countdown — an unattributed one is read
+    /// as belonging to whichever was written last, and the binding window is not always that.
+    @MainActor
+    func testModelRowWithTwoScopedWindowsNamesTheCountdownsWindow() {
+        var usage = makeUsage(windows: [window(id: "7d", fraction: 0.22, resetsIn: 54_000)])
+        usage.modelWindows = [
+            scopedWindow(
+                model: "Fable",
+                fraction: 0.89,
+                resetsIn: 54_000,
+                duration: UsageDefaults.fiveHourSeconds
+            ),
+            scopedWindow(model: "Fable", fraction: 0.40, resetsIn: 86_400)
+        ]
+
+        XCTAssertEqual(
+            AccountUsageMenu.modelSummary(for: usage, running: "fable", at: now),
+            "5h Fable 89% · 7d Fable 40% · 5h Fable resets in 15h"
+        )
+    }
+
     /// An expired scoped window loses its number here too, and stops binding the countdown —
-    /// a reset that has already happened is not a wait.
+    /// a reset that has already happened is not a wait, and the account window that binds
+    /// instead keeps its reset in the header.
     @MainActor
     func testExpiredModelRowKeepsItsWindowAndDropsTheNumber() {
         var usage = makeUsage(windows: [window(id: "7d", fraction: 0.62, resetsIn: 54_000)])
@@ -274,7 +319,37 @@ final class AccountUsageSummaryTests: XCTestCase {
 
         XCTAssertEqual(
             AccountUsageMenu.modelSummary(for: usage, running: "fable", at: now),
-            "7d 62% · 7d Fable — · 7d resets in 15h"
+            "7d Fable —"
+        )
+    }
+
+    /// The header above the rows: the plan and the account's own windows with their binding
+    /// reset — and none of the scoped ones, which belong to the rows that answer for their
+    /// models. A header restating them would put the same number on screen twice in one menu.
+    @MainActor
+    func testModelMenuHeaderStatesTheSharedWindowsAndNotTheScopedOnes() {
+        var usage = AccountUsage(
+            windows: [
+                window(id: "5h", fraction: 0.41, resetsIn: 3600),
+                window(id: "7d", fraction: 0.77, resetsIn: 54_000)
+            ],
+            planLabel: "Max",
+            observedAt: now,
+            source: .localCache
+        )
+        usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 54_000)]
+
+        XCTAssertEqual(
+            AccountUsageMenu.modelMenuHeaderSegments(for: usage, at: now).map(\.text).joined(),
+            "Max · 5h 41% · 7d 77% · 7d resets in 15h"
+        )
+    }
+
+    /// A header with nothing to say is no header at all — the same silence the rows keep.
+    @MainActor
+    func testModelMenuHeaderSaysNothingWithoutWindows() {
+        XCTAssertTrue(
+            AccountUsageMenu.modelMenuHeaderSegments(for: makeUsage(windows: []), at: now).isEmpty
         )
     }
 
@@ -289,17 +364,28 @@ final class AccountUsageSummaryTests: XCTestCase {
         XCTAssertNil(UsageDefaults.windowID(forDuration: 0))
     }
 
-    /// Without a model the line says only what it knows, and an account with no plan label
-    /// leads with its windows rather than an empty segment.
+    /// A row states only what it has. No plan means no qualifier after the name; no windows
+    /// means no columns and no reset — and, crucially, no subtitle either, so the row keeps the
+    /// single-line height rather than reserving a second line for nothing.
     @MainActor
-    func testAccountMenuLineOmitsWhatItCannotSay() {
-        let usage = makeUsage(windows: [window(id: "7d", fraction: 0.56, resetsIn: 54_000)])
-
-        XCTAssertEqual(
-            AccountUsageMenu.summary(for: usage, metering: nil, at: now),
-            "7d 56% · 7d resets in 15h"
+    func testAccountRowOmitsWhatItCannotSay() {
+        var item = ThemedMenuItem(title: "Everlof")
+        AccountUsageMenu.apply(
+            makeUsage(windows: [window(id: "7d", fraction: 0.56, resetsIn: 54_000)]),
+            to: &item,
+            at: now
         )
-        XCTAssertNil(AccountUsageMenu.summary(for: makeUsage(windows: []), metering: nil, at: now))
+        XCTAssertNil(item.titleDetail)
+        XCTAssertEqual(item.metrics.map(\.label), ["7d"])
+        XCTAssertEqual(item.trailingDetail, "7d · 15h")
+        XCTAssertNil(item.subtitle)
+
+        var empty = ThemedMenuItem(title: "Everlof")
+        AccountUsageMenu.apply(makeUsage(windows: []), to: &empty, at: now)
+        XCTAssertTrue(empty.metrics.isEmpty)
+        XCTAssertNil(empty.trailingDetail)
+        XCTAssertNil(empty.subtitle)
+        XCTAssertEqual(empty.spokenSummary, "Everlof")
     }
 
     /// Banked resets are stated only when the account has some — a zero is what every account
@@ -358,55 +444,62 @@ final class AccountUsageSummaryTests: XCTestCase {
         ])
         usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.95, resetsIn: 86_400)]
 
-        let segments = AccountUsageMenu.summarySegments(for: usage, metering: nil, at: now)
+        var item = ThemedMenuItem(title: "Everlof")
+        AccountUsageMenu.apply(usage, to: &item, at: now)
 
-        XCTAssertEqual(
-            segments.map(\.text).joined(),
-            "5h 43% · 7d 80% · 7d Fable 95% · 7d resets in 1d"
-        )
-        XCTAssertEqual(tone(of: "43%", in: segments), .standard)
-        XCTAssertEqual(tone(of: "80%", in: segments), .warning)
-        XCTAssertEqual(tone(of: "95%", in: segments), .critical)
-        XCTAssertEqual(tone(of: "5h ", in: segments), .muted)
-        XCTAssertEqual(tone(of: "7d Fable ", in: segments), .muted)
-        XCTAssertEqual(tone(of: UsageDefaults.segmentSeparator, in: segments), .muted)
-        XCTAssertEqual(tone(of: "7d resets in 1d", in: segments), .muted)
+        XCTAssertEqual(item.metrics.map(\.tone), [.standard, .warning])
+        // The scoped window keeps the same rule on the second line it fell to.
+        XCTAssertEqual(tone(of: "95%", in: item.subtitleSegments ?? []), .critical)
+        XCTAssertEqual(tone(of: "7d Fable ", in: item.subtitleSegments ?? []), .muted)
     }
 
-    /// The plain string every non-drawing consumer keeps — the tooltip, the filter, the
-    /// measured width — is the segments' own text joined, so the two cannot disagree.
+    /// A column's bar and the number beside it come from one reading, so they cannot disagree
+    /// about whether there is anything to report. An expired window prints `—` and draws an
+    /// empty track — never a full one, which is what a fraction carried over from the *previous*
+    /// window would have drawn.
     @MainActor
-    func testMenuSegmentsAndTheirPlainLineSayTheSameThing() {
+    func testAColumnsBarAndItsNumberAgreeAboutAnExpiredWindow() throws {
+        let usage = makeUsage(windows: [
+            window(id: "5h", fraction: 0.9, resetsIn: -60),
+            window(id: "7d", fraction: 0.37, resetsIn: 54_000)
+        ])
+
+        var item = ThemedMenuItem(title: "Lundborg Viktor")
+        AccountUsageMenu.apply(usage, to: &item, at: now)
+
+        let expired = try XCTUnwrap(item.metrics.first)
+        XCTAssertEqual(expired.value, UsageDefaults.unknownValue)
+        XCTAssertNil(expired.fraction)
+        XCTAssertEqual(expired.tone, .standard)
+
+        XCTAssertEqual(item.metrics.last?.value, "37%")
+        XCTAssertEqual(item.metrics.last?.fraction, 0.37)
+        // The expired window is not what binds, so the reset column answers for the live one.
+        XCTAssertEqual(item.trailingDetail, "7d · 15h")
+    }
+
+    /// The plain line a tooltip and VoiceOver get is the row's own parts joined, so the two
+    /// cannot disagree — the numbers are columns and a drawn bar now, and neither consumer sees
+    /// either of those.
+    @MainActor
+    func testTheSpokenLineIsTheRowsOwnParts() {
         var usage = makeUsage(windows: [window(id: "7d", fraction: 0.56, resetsIn: 54_000)])
         usage.modelWindows = [scopedWindow(model: "Fable", fraction: nil, resetsIn: -60)]
 
+        var item = ThemedMenuItem(title: "Everlof")
+        AccountUsageMenu.apply(usage, to: &item, at: now)
+
+        XCTAssertEqual(item.spokenSummary, "Everlof, 7d 56%, 7d · 15h, 7d Fable —")
+        // `summary` is that same assembly with no name in front of it, rather than a second
+        // derivation of the same facts that could drift from what the row draws.
         XCTAssertEqual(
-            AccountUsageMenu.summarySegments(for: usage, metering: nil, at: now).map(\.text).joined(),
-            AccountUsageMenu.summary(for: usage, metering: nil, at: now)
+            AccountUsageMenu.summary(for: usage, metering: nil, at: now),
+            "7d 56%, 7d · 15h, 7d Fable —"
         )
         XCTAssertEqual(
             AccountUsageMenu.modelSummarySegments(for: usage, running: "fable", at: now).map(\.text).joined(),
             AccountUsageMenu.modelSummary(for: usage, running: "fable", at: now)
         )
-    }
-
-    /// The runtime leads the identity row's subtitle and survives a login with no reading —
-    /// it is identity, not decoration, and the one segment a network round trip cannot remove.
-    @MainActor
-    func testIdentitySegmentsLeadWithTheRuntimeAndSurviveAnEmptyReading() {
-        let usage = makeUsage(windows: [window(id: "5h", fraction: 0.22, resetsIn: 3600)])
-
-        let read = AccountUsageMenu.identitySegments(
-            runtime: .claude, for: usage, metering: nil, at: now
-        )
-        XCTAssertEqual(read.first?.text, "Claude Code")
-        XCTAssertEqual(read.first?.tone, .standard)
-        XCTAssertEqual(read.map(\.text).joined(), "Claude Code · 5h 22% · 5h resets in 1h")
-
-        let unread = AccountUsageMenu.identitySegments(
-            runtime: .claude, for: nil, metering: nil, at: now
-        )
-        XCTAssertEqual(unread.map(\.text), ["Claude Code"])
     }
 
     private func tone(

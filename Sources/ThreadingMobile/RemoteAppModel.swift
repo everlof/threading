@@ -588,6 +588,8 @@ final class RemoteAppModel: ObservableObject {
         accountHandle: String?,
         model: String?,
         reasoningEffort: String?,
+        fastMode: Bool?,
+        permissionMode: String?,
         surface: String,
         prompt: String
     ) async throws -> RemoteSessionSummaryDTO {
@@ -601,6 +603,8 @@ final class RemoteAppModel: ObservableObject {
             accountHandle: accountHandle,
             model: model,
             reasoningEffort: reasoningEffort,
+            fastMode: fastMode,
+            permissionMode: permissionMode,
             surface: surface,
             prompt: prompt
         )
@@ -1327,6 +1331,124 @@ final class RemoteAppModel: ObservableObject {
         )
     )
 
+    static let demoThreadingTheme = RemoteThemeDTO(
+        id: "threading",
+        name: "Threading",
+        mode: "dark",
+        colors: [
+            "ground": "#040A12",
+            "surface": "#071626",
+            "panel": "#0A1C2F",
+            "elevated": "#102A43",
+            "control_resting": "#0E253A",
+            "control_hover": "#173B55",
+            "border": "#2B4B65",
+            "divider": "#183A52",
+            "label": "#F7EFE6",
+            "secondary_label": "#B9AEA2",
+            "tertiary_label": "#827A72",
+            "accent": "#FF9A3D",
+            "accent_muted": "#FF9A3D21",
+            "selection": "#17405C",
+            "status_positive": "#74C49A",
+            "status_warning": "#E6A35D",
+            "status_negative": "#E06E65",
+            "diff_added": "#74C49A",
+            "diff_removed": "#E06E65",
+        ],
+        material: .init(
+            panelRadius: 10,
+            controlRadius: 7,
+            borderWidth: 1
+        )
+    )
+
+    private static func demoCatalogTheme(
+        id: String,
+        name: String,
+        mode: String,
+        ground: String,
+        surface: String,
+        panel: String,
+        label: String,
+        accent: String,
+        radius: Double = 10,
+        borderWidth: Double = 1
+    ) -> RemoteThemeDTO {
+        RemoteThemeDTO(
+            id: id,
+            name: name,
+            mode: mode,
+            colors: [
+                "ground": ground,
+                "surface": surface,
+                "panel": panel,
+                "elevated": panel,
+                "control_resting": label + "12",
+                "control_hover": accent + "24",
+                "border": label + "2E",
+                "divider": label + "1F",
+                "label": label,
+                "secondary_label": label + "B2",
+                "tertiary_label": label + "73",
+                "accent": accent,
+                "accent_muted": accent + "24",
+                "selection": accent + "30",
+                "status_positive": mode == "light" ? "#197149" : "#74C49A",
+                "status_warning": mode == "light" ? "#9A6700" : "#E6A35D",
+                "status_negative": mode == "light" ? "#B42318" : "#E06E65",
+                "diff_added": mode == "light" ? "#197149" : "#74C49A",
+                "diff_removed": mode == "light" ? "#B42318" : "#E06E65",
+            ],
+            material: .init(
+                panelRadius: radius,
+                controlRadius: max(0, radius / 2),
+                borderWidth: borderWidth
+            )
+        )
+    }
+
+    static let demoCatalogThemes: [RemoteThemeDTO] = [
+        demoTheme,
+        demoThreadingTheme,
+        demoLightTheme,
+        demoCatalogTheme(
+            id: "editorial", name: "Editorial", mode: "light",
+            ground: "#F2EEE7", surface: "#E8E1D7", panel: "#FBF8F2",
+            label: "#2A2520", accent: "#A85632", radius: 5
+        ),
+        demoCatalogTheme(
+            id: "swiss-minimalist", name: "Swiss Minimalist", mode: "light",
+            ground: "#FFFFFF", surface: "#F2F2F2", panel: "#FFFFFF",
+            label: "#111111", accent: "#FF3000", radius: 0, borderWidth: 2
+        ),
+        demoCatalogTheme(
+            id: "bauhaus", name: "Bauhaus", mode: "light",
+            ground: "#F0F0F0", surface: "#FFFFFF", panel: "#FFFFFF",
+            label: "#121212", accent: "#D02020", radius: 0, borderWidth: 4
+        ),
+        demoCatalogTheme(
+            id: "art-deco", name: "Art Deco", mode: "dark",
+            ground: "#0A0A0F", surface: "#050505", panel: "#141414",
+            label: "#F2F0E4", accent: "#D4AF37", radius: 4
+        ),
+        demoCatalogTheme(
+            id: "neo-brutalism", name: "Neo Brutalism", mode: "light",
+            ground: "#FFFDF5", surface: "#C4B5FD", panel: "#FFFFFF",
+            label: "#000000", accent: "#FF6B6B", radius: 0, borderWidth: 4
+        ),
+        demoCatalogTheme(
+            id: "claymorphism", name: "Claymorphism", mode: "light",
+            ground: "#E9E7F7", surface: "#DCD8F0", panel: "#F5F2FF",
+            label: "#332B55", accent: "#7C4DFF", radius: 24
+        ),
+        demoCatalogTheme(
+            id: "vaporwave", name: "Vaporwave", mode: "dark",
+            ground: "#120A26", surface: "#1B0E35", panel: "#261346",
+            label: "#F7E8FF", accent: "#FF4FCB", radius: 12
+        ),
+    ]
+
     static let demoTerminalTheme = RemoteTerminalThemeDTO(
         id: "app-cyberpunk-terminal",
         name: "Cyberpunk",
@@ -1339,6 +1461,21 @@ final class RemoteAppModel: ObservableObject {
             "#2E8BFF", "#FF00FF", "#00D4FF", "#B9C6C0",
             "#2E2E5A", "#FF6B93", "#7CFFC4", "#FFD166",
             "#7AB4FF", "#FF7AFF", "#7CE9FF", "#E6FFF4",
+        ]
+    )
+
+    static let demoThreadingTerminalTheme = RemoteTerminalThemeDTO(
+        id: "app-threading-terminal",
+        name: "Threading",
+        foreground: "#F7EFE6",
+        background: "#040A12",
+        cursor: "#FF9A3D",
+        selection: "#173A50",
+        ansi: [
+            "#071626", "#E06E65", "#74C49A", "#E6A35D",
+            "#6EA8D8", "#C486B9", "#7DC9D2", "#D9D1C8",
+            "#4F697E", "#F08A81", "#91D6AD", "#F2BC78",
+            "#8DBEE3", "#D9A0CC", "#9CDAE0", "#F7EFE6",
         ]
     )
 
@@ -1419,7 +1556,10 @@ final class RemoteAppModel: ObservableObject {
             host: RemoteHostDTO(id: "demo-mac", name: "David’s MacBook Pro"),
             theme: demoTheme,
             themeCatalog: .init(
-                appThemes: [demoTheme],
+                // More than one authored theme is part of the picker contract. Keeping the
+                // deterministic demo catalog representative prevents the evidence state from
+                // silently regressing into a single checked row.
+                appThemes: demoCatalogThemes,
                 terminalThemes: [demoTerminalTheme]
             ),
             archivedSessions: [],
@@ -1458,7 +1598,8 @@ final class RemoteAppModel: ObservableObject {
                                             .init(id: "high", name: "High"),
                                             .init(id: "xhigh", name: "Extra High"),
                                         ],
-                                        defaultReasoningID: "high"
+                                        defaultReasoningID: "high",
+                                        supportsFastMode: true
                                     )
                                 ],
                                 defaultModelID: "gpt-5.6-sol"
@@ -1477,7 +1618,8 @@ final class RemoteAppModel: ObservableObject {
                                             .init(id: "high", name: "High"),
                                             .init(id: "xhigh", name: "Extra High"),
                                         ],
-                                        defaultReasoningID: "high"
+                                        defaultReasoningID: "high",
+                                        supportsFastMode: true
                                     )
                                 ],
                                 defaultModelID: "gpt-5.6-sol"
@@ -1492,11 +1634,29 @@ final class RemoteAppModel: ObservableObject {
                                     .init(id: "high", name: "High"),
                                     .init(id: "xhigh", name: "Extra High"),
                                 ],
-                                defaultReasoningID: "high"
+                                defaultReasoningID: "high",
+                                supportsFastMode: true
                             )
                         ],
                         defaultModelID: "gpt-5.6-sol",
-                        supportsConversation: true
+                        supportsConversation: true,
+                        permissionModes: [
+                            .init(
+                                id: "manual",
+                                name: "Manual",
+                                detail: "Asks before making any change."
+                            ),
+                            .init(
+                                id: "acceptEdits",
+                                name: "Accept Edits",
+                                detail: "Edits files without asking. Commands still ask."
+                            ),
+                            .init(
+                                id: "auto",
+                                name: "Auto",
+                                detail: "Decides for itself when to ask."
+                            ),
+                        ]
                     ),
                     .init(
                         id: "claude",

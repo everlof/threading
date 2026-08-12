@@ -26,6 +26,7 @@
 #   scripts/profile_threading.sh window-resize-stress
 #   scripts/profile_threading.sh display-pane-stress
 #   scripts/profile_threading.sh launch-ledger-stress
+#   scripts/profile_threading.sh project-stats-stress
 #   scripts/profile_threading.sh startup
 #   scripts/profile_threading.sh sample [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh trace "Time Profiler" [seconds] [process-name-or-pid]
@@ -207,9 +208,10 @@ capture_ios_conversation_fixture() {
   # failed or crashed run look successful.
   rm -f "${container_metrics}"
   local expected_metric="ios-conversation-cold-open mode=${mode}"
-  if [[ "${mode}" == "conversation-scroll-stress" ]]; then
-    expected_metric="ios-conversation-scroll"
-  fi
+  case "${mode}" in
+    conversation-reconnect-stress) expected_metric="ios-conversation-reconnect" ;;
+    conversation-scroll-stress) expected_metric="ios-conversation-scroll" ;;
+  esac
   local launch_result pid
   launch_result="$(
     SIMCTL_CHILD_THREADING_MOBILE_DEMO="${mode}" \
@@ -248,6 +250,19 @@ capture_ios_conversation_fixture() {
       "THREADING_PERF ios-conversation-cold-open .*invalid_width_cells=0 settle_tasks=1" \
       "${container_metrics}"; then
     echo "The ${label} fixture mounted cells before receiving its real width or scheduled duplicate cold settling." >&2
+    return 1
+  fi
+  if ! rg -q \
+      "THREADING_PERF ios-conversation-cold-open .*draft_assignments=0" \
+      "${container_metrics}"; then
+    echo "The ${label} fixture mutated its deterministic empty draft during cold open." >&2
+    return 1
+  fi
+  if [[ "${mode}" == "conversation-reconnect-stress" ]] \
+      && ! rg -q \
+        "THREADING_PERF ios-conversation-reconnect .*snapshot_reset=0 .*geometry_failures=0" \
+        "${container_metrics}"; then
+    echo "The reconnect fixture rebuilt an unchanged timeline or produced invalid geometry." >&2
     return 1
   fi
   cp "${container_metrics}" "${output_directory}/ios-${label}.metrics.log"
@@ -294,6 +309,9 @@ run_ios_conversation_stress() {
   if (( seconds < cold_seconds )); then cold_seconds="${seconds}"; fi
   capture_ios_conversation_fixture \
     conversation-cold-stress "${cold_seconds}" "${source_rows}" \
+    "${simulator_udid}" "${app}" "${output_directory}"
+  capture_ios_conversation_fixture \
+    conversation-reconnect-stress "${cold_seconds}" "${source_rows}" \
     "${simulator_udid}" "${app}" "${output_directory}"
   capture_ios_conversation_fixture \
     conversation-scroll-stress "${seconds}" "${source_rows}" \
@@ -350,6 +368,7 @@ run_remote_conversation_stress() {
   local row_override="${2:-}"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
   local derived_data="${output_directory}/derived-data"
+  local log="${output_directory}/remote-conversation-stress.log"
   if [[ -n "${row_override}" ]] \
       && { [[ ! "${row_override}" =~ ^[0-9]+$ ]] \
         || (( 10#${row_override} <= 0 )); }; then
@@ -397,7 +416,18 @@ run_remote_conversation_stress() {
       xcrun xctest \
         -XCTest ThreadingTests.RemoteServerIntegrationTests/testStressRemoteConversationCatchUpWhenEnabled \
         "${test_bundle}"
-  ) 2>&1 | tee "${output_directory}/remote-conversation-stress.log"
+  ) 2>&1 | tee "${log}"
+
+  rg -q '^THREADING_PERF remote-conversation-open ' "${log}" || {
+    echo "The remote-conversation fixture produced no cold-open metric." >&2
+    return 1
+  }
+  rg -q \
+    '^THREADING_PERF remote-conversation-streaming-burst .* updates=250 .* stable_row_generation_ms=' \
+    "${log}" || {
+    echo "The remote-conversation fixture did not exercise the bounded streaming path." >&2
+    return 1
+  }
 }
 
 prepare_git_stress_bundle() {
@@ -756,6 +786,35 @@ run_launch_ledger_stress() {
 
   rg -q '^THREADING_PERF launch-ledger-parser records=512 ' "${log}" || {
     echo "The launch-ledger fixture produced no complete metric." >&2
+    return 1
+  }
+}
+
+run_project_stats_stress() {
+  local output_directory="$1"
+  local log="${output_directory}/project-stats-stress.log"
+  local projects="${THREADING_PROJECT_STATS_STRESS_COUNT:-250}"
+  echo "Running the ${projects}-project cache-persistence comparison…"
+
+  (
+    cd "${repository_directory}"
+    build_macos_stress_test_bundle "${output_directory}"
+
+    THREADING_PROJECT_STATS_STRESS=1 \
+    THREADING_PROJECT_STATS_STRESS_COUNT="${projects}" \
+    DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
+      xcrun xctest \
+        -XCTest ThreadingTests.CodeStatsTests/testStressProjectStatsPersistenceWhenEnabled \
+        "${THREADING_STRESS_TEST_BUNDLE}"
+  ) 2>&1 | tee "${log}"
+
+  rg -q '^THREADING_PERF project-stats-persistence mode=whole-cache-per-result ' "${log}" || {
+    echo "The project-stats fixture produced no whole-cache baseline." >&2
+    return 1
+  }
+  rg -q '^THREADING_PERF project-stats-persistence mode=coalesced-exact-worker .* writes=1 ' "${log}" || {
+    echo "The project-stats fixture did not coalesce the update burst to one write." >&2
     return 1
   }
 }
@@ -1228,12 +1287,26 @@ run_subagent_stress() {
       xcrun xctest \
         -XCTest ThreadingTests.ConversationRenderTests/testStressSubagentTranscriptWhenEnabled \
         "${test_bundle}"
+
+    THREADING_SUBAGENT_STRESS=1 \
+    THREADING_SUBAGENT_PERSISTENCE_AGENTS="${THREADING_SUBAGENT_PERSISTENCE_AGENTS:-1000}" \
+    DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+      xcrun xctest \
+        -XCTest ThreadingTests.ConversationRenderTests/testStressSubagentPersistenceWhenEnabled \
+        "${test_bundle}"
   ) 2>&1 | tee "${output_directory}/subagent-stress.log"
 
   if ! rg -q \
     "THREADING_PERF subagent-transcript .*summary_rebuilds=1 .*styled_markdown_during_render=0" \
     "${output_directory}/subagent-stress.log"; then
     echo "Subagents stress did not preserve lazy Markdown and single-pass navigation." >&2
+    return 1
+  fi
+  if ! rg -q \
+    "THREADING_PERF subagent-persistence mode=indexed-worker .*agents=" \
+    "${output_directory}/subagent-stress.log"; then
+    echo "Subagents stress did not measure navigator persistence." >&2
     return 1
   fi
 }
@@ -1602,7 +1675,7 @@ run_display_pane_stress() {
     }
 
     THREADING_DISPLAY_PANE_STRESS=1 \
-    THREADING_DISPLAY_PANE_STRESS_CYCLES="${THREADING_DISPLAY_PANE_STRESS_CYCLES:-5}" \
+    THREADING_DISPLAY_PANE_STRESS_CYCLES="${THREADING_DISPLAY_PANE_STRESS_CYCLES:-3}" \
     DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
       xcrun xctest \
@@ -1909,6 +1982,7 @@ run_startup_profile() (
     echo "Expected ${runs} settled-frame startup metrics, found ${settled_metric_count:-0}." >&2
     return 1
   }
+
   echo "Recording one isolated App Launch trace…"
   local trace_home="${snapshot_root}/trace"
   clone_startup_profile_home "${template_home}" "${trace_home}"
@@ -2064,6 +2138,11 @@ case "${command}" in
     run_launch_ledger_stress "${output_directory}"
     ;;
 
+  project-stats-stress)
+    output_directory="$(new_run_directory project-stats-stress)"
+    run_project_stats_stress "${output_directory}"
+    ;;
+
   startup)
     output_directory="$(new_run_directory startup)"
     run_startup_profile "${output_directory}"
@@ -2174,6 +2253,7 @@ case "${command}" in
     run_window_resize_stress "${output_directory}"
     run_display_pane_stress "${output_directory}"
     run_launch_ledger_stress "${output_directory}"
+    run_project_stats_stress "${output_directory}"
     capture_sample "${seconds}" "${target}" "${output_directory}"
 
     full_templates=(

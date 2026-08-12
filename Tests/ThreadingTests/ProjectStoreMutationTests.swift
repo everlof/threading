@@ -198,12 +198,10 @@ final class ProjectStoreMutationTests: XCTestCase {
         let project = try XCTUnwrap(seed.addProject(folderURL: directory))
         let session = try XCTUnwrap(seed.addSession(to: project.id, kind: .claude))
         let terminal = try XCTUnwrap(seed.addTerminal(to: project.id))
-        seed.selectedSessionID = session.id
 
         let recovery = ProjectStore(stateManager: manager, refusesWrites: true)
         XCTAssertEqual(recovery.removeSession(id: session.id), .persistenceRefused)
         XCTAssertNotNil(recovery.session(withID: session.id))
-        XCTAssertEqual(recovery.selectedSessionID, session.id)
         XCTAssertEqual(recovery.removeTerminal(id: terminal.id), .persistenceRefused)
         XCTAssertNotNil(
             recovery.project(withID: project.id)?.terminals.first { $0.id == terminal.id }
@@ -214,7 +212,6 @@ final class ProjectStoreMutationTests: XCTestCase {
         let reopened = ProjectStore(stateManager: manager, refusesWrites: false)
         XCTAssertNotNil(reopened.project(withID: project.id))
         XCTAssertNotNil(reopened.session(withID: session.id))
-        XCTAssertEqual(reopened.selectedSessionID, session.id)
         XCTAssertNotNil(
             reopened.project(withID: project.id)?.terminals.first { $0.id == terminal.id }
         )

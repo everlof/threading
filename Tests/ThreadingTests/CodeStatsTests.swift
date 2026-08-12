@@ -1,9 +1,14 @@
 import XCTest
 @testable import Threading
 
-/// The code-stats pipeline's pure halves: reading scc's JSON, and the bar arithmetic that
-/// folds a reading into segments. Neither should need a view — or scc — to be tested.
+/// The project-stats pipeline's pure halves plus the one packaging contract that makes code
+/// composition installation-free.
 final class CodeStatsTests: XCTestCase {
+
+    private struct ActivityCacheFixture: Codable, Equatable, Sendable {
+        let measuredAt: Date
+        let activity: ProjectActivity?
+    }
 
     // MARK: - Fixtures
 
@@ -148,34 +153,350 @@ final class CodeStatsTests: XCTestCase {
         XCTAssertTrue(bar.widths(totalWidth: 300, gap: 1, minimumWidth: 2).isEmpty)
     }
 
-    // MARK: - Locating
+    // MARK: - Bundled Tool
 
-    /// A login shell is free to print a greeting or a version-manager warning before the
-    /// answer; only the last non-empty line is the path.
-    func testLocateReadsPastALoginShellGreeting() {
+    func testBundledSCCIsExecutableAndAnswersPinnedVersion() throws {
+        let executable = try XCTUnwrap(CodeStatsRunner.bundledExecutable())
+        let result = try BoundedChildProcess.run(
+            executable: executable,
+            arguments: ["--version"],
+            timeout: 5,
+            maximumOutputBytes: 4_096,
+            output: .standardOutput
+        )
+
+        XCTAssertEqual(result.termination, .exited(0))
+        XCTAssertEqual(String(decoding: result.output, as: UTF8.self), "scc version 3.7.0\n")
+    }
+
+    func testBundledSCCMeasuresAProjectFolder() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Threading-CodeStats-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("struct BundledCounter { let value = 1 }\n".utf8)
+            .write(to: directory.appendingPathComponent("Counter.swift"))
+
+        let stats = try XCTUnwrap(CodeStatsRunner.measure(folder: directory.path))
+        XCTAssertEqual(stats.languages.first?.name, "Swift")
+        XCTAssertGreaterThan(stats.totalCode, 0)
+    }
+
+    func testBundledSCCSkipsAFolderThatDisappeared() {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Threading-CodeStats-Missing-\(UUID().uuidString)")
+        XCTAssertNil(CodeStatsRunner.measure(folder: missing.path))
+    }
+
+    // MARK: - Recent Activity
+
+    func testActivityBucketsRunOldestToNewestAcrossTwelveWeeks() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let start = now.addingTimeInterval(
+            -Double(ProjectActivity.bucketCount) * ProjectActivity.bucketDuration
+        )
+        let activity = ProjectActivity.make(
+            recentCommitDates: [
+                start.addingTimeInterval(1),
+                start.addingTimeInterval(ProjectActivity.bucketDuration + 1),
+                now.addingTimeInterval(-1),
+                start.addingTimeInterval(-1)
+            ],
+            latestCommitAt: now.addingTimeInterval(-1),
+            now: now
+        )
+
+        XCTAssertEqual(activity.weeklyCommits.count, 12)
+        XCTAssertEqual(activity.weeklyCommits[0], 1)
+        XCTAssertEqual(activity.weeklyCommits[1], 1)
+        XCTAssertEqual(activity.weeklyCommits[11], 1)
+        XCTAssertEqual(activity.commitCount, 3, "A timestamp before the window is not counted")
+    }
+
+    func testActivityKeepsAQuietWindowAndOlderLatestCommit() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let latest = now.addingTimeInterval(-20 * ProjectActivity.bucketDuration)
+        let activity = ProjectActivity.make(
+            recentCommitDates: [],
+            latestCommitAt: latest,
+            now: now
+        )
+
+        XCTAssertEqual(activity.weeklyCommits, Array(repeating: 0, count: 12))
+        XCTAssertEqual(activity.commitCount, 0)
+        XCTAssertEqual(activity.latestCommitAt, latest)
+    }
+
+    func testActivityTimestampParserFailsClosedOnMalformedGitOutput() {
         XCTAssertEqual(
-            CodeStatsRunner.locate(
-                shell: "/bin/sh",
-                fileManager: OnlyTrueIsExecutable(),
-                shellOutput: { _ in "Welcome to this machine\n\n/usr/bin/true\n" }
-            ),
-            "/usr/bin/true"
+            ProjectActivityRunner.parseTimestamps(Data("2000000000\n1999999000\n".utf8)),
+            [Date(timeIntervalSince1970: 2_000_000_000), Date(timeIntervalSince1970: 1_999_999_000)]
+        )
+        XCTAssertNil(ProjectActivityRunner.parseTimestamps(Data("2000000000\nnot-a-date\n".utf8)))
+    }
+
+    func testActivityRunnerScopesHistoryToTheProjectFolder() throws {
+        let root = try makeGitRepository()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = root.appendingPathComponent("project", isDirectory: true)
+        let neighboringFolder = root.appendingPathComponent("neighbor", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: neighboringFolder,
+            withIntermediateDirectories: true
+        )
+
+        let now = Date()
+        let projectCommit = now.addingTimeInterval(-3 * 24 * 60 * 60)
+        try Data("let project = true\n".utf8)
+            .write(to: project.appendingPathComponent("Project.swift"))
+        try git(["add", "."], in: root)
+        try gitCommit("project", at: projectCommit, in: root)
+
+        try Data("not part of the project folder\n".utf8)
+            .write(to: neighboringFolder.appendingPathComponent("README.md"))
+        try git(["add", "."], in: root)
+        try gitCommit("neighbor", at: now.addingTimeInterval(-24 * 60 * 60), in: root)
+
+        guard case .activity(let activity) = ProjectActivityRunner.measure(
+            folder: project.path,
+            now: now
+        ) else {
+            return XCTFail("Expected path-scoped Git activity")
+        }
+        XCTAssertEqual(activity.commitCount, 1)
+        XCTAssertEqual(activity.weeklyCommits.reduce(0, +), 1)
+        XCTAssertEqual(
+            try XCTUnwrap(activity.latestCommitAt).timeIntervalSince1970,
+            Double(Int(projectCommit.timeIntervalSince1970)),
+            accuracy: 0.001
         )
     }
 
-    func testLocateAnswersNilWhenTheShellFindsNothing() {
-        XCTAssertNil(CodeStatsRunner.locate(
-            shell: "/bin/sh",
-            fileManager: OnlyTrueIsExecutable(),
-            shellOutput: { _ in nil }
-        ))
+    func testActivityRunnerDistinguishesNonRepositoryAndUnbornRepository() throws {
+        let nonRepository = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Threading-Activity-Plain-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: nonRepository,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: nonRepository) }
+        XCTAssertEqual(
+            ProjectActivityRunner.measure(folder: nonRepository.path),
+            .notRepository
+        )
+
+        let unborn = try makeGitRepository()
+        defer { try? FileManager.default.removeItem(at: unborn) }
+        guard case .activity(let activity) = ProjectActivityRunner.measure(folder: unborn.path)
+        else {
+            return XCTFail("Expected an empty activity reading for an unborn repository")
+        }
+        XCTAssertEqual(activity.weeklyCommits, Array(repeating: 0, count: 12))
+        XCTAssertEqual(activity.commitCount, 0)
+        XCTAssertNil(activity.latestCommitAt)
+        XCTAssertFalse(activity.isTruncated)
     }
 
-    /// Denies the fixed candidate paths — this machine may genuinely have scc installed — so
-    /// a locate test exercises the shell probe rather than short-circuiting past it.
-    private final class OnlyTrueIsExecutable: FileManager {
-        override func isExecutableFile(atPath path: String) -> Bool {
-            path == "/usr/bin/true"
+    func testProjectStatsCacheWriterCoalescesExactUpdatesAndPreservesExistingValues() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "Threading-ProjectStats-Writer-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("cache.json")
+        let preservedID = ProjectID()
+        let changedID = ProjectID()
+        let store = RecoverableFileStore<[ProjectID: Int]>(
+            url: url,
+            fileManager: .default,
+            criticality: .rebuildableCache,
+            sizePolicy: .derivedCache
+        )
+        XCTAssertTrue(store.save([preservedID: 7]))
+
+        let writer = ProjectStatsCacheWriter(
+            store: store,
+            cacheKind: "test",
+            coalescingInterval: 60
+        )
+        writer.schedule(1, for: changedID)
+        writer.schedule(2, for: changedID)
+
+        XCTAssertTrue(writer.flushForTesting())
+        XCTAssertEqual(writer.completedWriteCountForTesting, 1)
+        XCTAssertEqual(writer.lastBatchSizeForTesting, 2)
+
+        let reader = RecoverableFileStore<[ProjectID: Int]>(
+            url: url,
+            fileManager: .default,
+            criticality: .rebuildableCache,
+            sizePolicy: .derivedCache
+        )
+        let persisted = reader.load(defaultValue: [:]).value
+        XCTAssertEqual(persisted[preservedID], 7)
+        XCTAssertEqual(persisted[changedID], 2)
+    }
+
+    /// Compares the old per-completion whole-cache rewrite with the current exact-update worker.
+    /// Opt-in because it is a performance comparison, not a correctness test.
+    func testStressProjectStatsPersistenceWhenEnabled() throws {
+        guard ProcessInfo.processInfo.environment["THREADING_PROJECT_STATS_STRESS"] == "1"
+        else { throw XCTSkip("Set THREADING_PROJECT_STATS_STRESS=1") }
+
+        let count = Int(
+            ProcessInfo.processInfo.environment["THREADING_PROJECT_STATS_STRESS_COUNT"] ?? "250"
+        ) ?? 250
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "Threading-ProjectStats-Stress-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("activity-whole-cache.json")
+        let store = RecoverableFileStore<[ProjectID: ActivityCacheFixture]>(
+            url: url,
+            fileManager: .default,
+            criticality: .rebuildableCache,
+            sizePolicy: .derivedCache,
+            dateEncodingStrategy: .iso8601,
+            dateDecodingStrategy: .iso8601
+        )
+        let activity = ProjectActivity(
+            weeklyCommits: Array(1...ProjectActivity.bucketCount),
+            commitCount: 78,
+            latestCommitAt: Date(timeIntervalSince1970: 2_000_000_000),
+            isTruncated: false
+        )
+        let fixture = ActivityCacheFixture(
+            measuredAt: Date(timeIntervalSince1970: 2_000_000_001),
+            activity: activity
+        )
+        let updates = (0..<count).map { _ in (ProjectID(), fixture) }
+        var cache: [ProjectID: ActivityCacheFixture] = [:]
+        cache.reserveCapacity(count)
+        var samples: [UInt64] = []
+        samples.reserveCapacity(count)
+
+        let totalStarted = DispatchTime.now().uptimeNanoseconds
+        for (projectID, reading) in updates {
+            cache[projectID] = reading
+            let started = DispatchTime.now().uptimeNanoseconds
+            XCTAssertTrue(store.save(cache))
+            samples.append(DispatchTime.now().uptimeNanoseconds - started)
         }
+        let total = DispatchTime.now().uptimeNanoseconds - totalStarted
+        let ordered = samples.sorted()
+        let p95Index = Int((Double(max(ordered.count - 1, 0)) * 0.95).rounded(.up))
+        let bytes = (try? Data(contentsOf: url).count) ?? 0
+        print(
+            "THREADING_PERF project-stats-persistence mode=whole-cache-per-result "
+                + "projects=\(count) writes=\(samples.count) bytes=\(bytes) "
+                + "total_ms=\(Self.milliseconds(total)) "
+                + "p95_ms=\(Self.milliseconds(ordered[p95Index])) "
+                + "max_ms=\(Self.milliseconds(ordered.last ?? 0))"
+        )
+
+        let coalescedURL = root.appendingPathComponent("activity-coalesced.json")
+        let coalescedStore = RecoverableFileStore<[ProjectID: ActivityCacheFixture]>(
+            url: coalescedURL,
+            fileManager: .default,
+            criticality: .rebuildableCache,
+            sizePolicy: .derivedCache,
+            dateEncodingStrategy: .iso8601,
+            dateDecodingStrategy: .iso8601
+        )
+        let writer = ProjectStatsCacheWriter(
+            store: coalescedStore,
+            cacheKind: "stress",
+            coalescingInterval: 60
+        )
+        // The app opens its first performance span during launch. Do the same outside this
+        // boundary so the comparison measures cache work, not OSSignposter initialization.
+        let recorderWarmup = PerformanceRecorder.shared.begin(
+            "project-stats.cache-stress-warmup",
+            category: "test"
+        )
+        recorderWarmup.end()
+        let coalescedStarted = DispatchTime.now().uptimeNanoseconds
+        for (projectID, reading) in updates {
+            writer.schedule(reading, for: projectID)
+        }
+        let enqueueElapsed = DispatchTime.now().uptimeNanoseconds - coalescedStarted
+        XCTAssertTrue(writer.flushForTesting())
+        let coalescedElapsed = DispatchTime.now().uptimeNanoseconds - coalescedStarted
+
+        let coalescedReader = RecoverableFileStore<[ProjectID: ActivityCacheFixture]>(
+            url: coalescedURL,
+            fileManager: .default,
+            criticality: .rebuildableCache,
+            sizePolicy: .derivedCache,
+            dateEncodingStrategy: .iso8601,
+            dateDecodingStrategy: .iso8601
+        )
+        let persisted = coalescedReader.load(defaultValue: [:]).value
+        XCTAssertEqual(persisted.count, count)
+        XCTAssertEqual(persisted, cache)
+        let coalescedBytes = (try? Data(contentsOf: coalescedURL).count) ?? 0
+        print(
+            "THREADING_PERF project-stats-persistence mode=coalesced-exact-worker "
+                + "projects=\(count) updates=\(updates.count) "
+                + "writes=\(writer.completedWriteCountForTesting) "
+                + "batch=\(writer.lastBatchSizeForTesting) bytes=\(coalescedBytes) "
+                + "enqueue_ms=\(Self.milliseconds(enqueueElapsed)) "
+                + "total_ms=\(Self.milliseconds(coalescedElapsed))"
+        )
+    }
+
+    // MARK: - Git Fixture
+
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.3f", Double(nanoseconds) / 1_000_000)
+    }
+
+    private func makeGitRepository() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Threading-Activity-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try git(["init", "--quiet"], in: root)
+        return root
+    }
+
+    private func gitCommit(_ message: String, at date: Date, in directory: URL) throws {
+        let timestamp = "@\(Int(date.timeIntervalSince1970)) +0000"
+        try git(
+            [
+                "-c", "user.email=tests@threading.codes",
+                "-c", "user.name=Threading Tests",
+                "-c", "commit.gpgsign=false",
+                "commit", "--quiet", "--message", message
+            ],
+            in: directory,
+            environment: ["GIT_AUTHOR_DATE": timestamp, "GIT_COMMITTER_DATE": timestamp]
+        )
+    }
+
+    private func git(
+        _ arguments: [String],
+        in directory: URL,
+        environment additions: [String: String] = [:]
+    ) throws {
+        var environment = ProcessInfo.processInfo.environment
+        environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        environment["GIT_CONFIG_SYSTEM"] = "/dev/null"
+        for (key, value) in additions { environment[key] = value }
+
+        let result = try BoundedChildProcess.run(
+            executable: GitDefaults.executablePath,
+            arguments: arguments,
+            environment: environment,
+            workingDirectory: directory,
+            timeout: 5,
+            maximumOutputBytes: 64 * 1_024
+        )
+        XCTAssertEqual(
+            result.termination,
+            .exited(0),
+            "git \(arguments.joined(separator: " ")): \(String(decoding: result.output, as: UTF8.self))"
+        )
     }
 }

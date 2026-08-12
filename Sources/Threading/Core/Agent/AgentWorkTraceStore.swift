@@ -454,9 +454,8 @@ final class AgentWorkTraceStore {
         let root = URL(fileURLWithPath: rootPath, isDirectory: true)
         GitReviewReader.repositoryFiles(in: root) { [weak self] result in
             guard let self else { return }
-            let files = try? result.get()
-            self.worker.buildAtlas(files: files ?? GitRepositoryFileList(paths: [])) {
-                [weak self] atlas in
+            let files = (try? result.get()) ?? []
+            self.worker.buildAtlas(files: files) { [weak self] atlas in
                 guard let self else { return }
                 self.atlases[rootPath] = .ready(atlas)
                 self.trimAtlases()
@@ -675,11 +674,11 @@ private final class AgentWorkWorker: @unchecked Sendable {
     }
 
     func buildAtlas(
-        files: GitRepositoryFileList,
+        files: [String],
         completion: @escaping @MainActor @Sendable (RepositoryFileAtlas) -> Void
     ) {
         topologyQueue.async {
-            let atlas = RepositoryFileAtlas(repositoryFiles: files)
+            let atlas = RepositoryFileAtlas(files: files)
             Task { @MainActor in completion(atlas) }
         }
     }

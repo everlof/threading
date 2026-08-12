@@ -3,10 +3,24 @@ import SwiftUI
 import ThreadingRemoteKit
 import UIKit
 
-/// The SwiftUI session router stops at this boundary. Everything that changes while a chat is
-/// open is observed and laid out by UIKit, so transcript updates, typing and keyboard changes do
-/// not invalidate a hosting-tree transaction.
-struct ConversationRemoteView: UIViewControllerRepresentable {
+/// Owns the edge treatment for every native conversation host.
+///
+/// SwiftUI otherwise decides inconsistently whether a hosted UIKit controller stops above the
+/// home-indicator safe area. Extending the controller is what lets the composer material reach
+/// the physical bottom edge; the controller's own safe-area constraints still keep controls out
+/// of that reserved region. Everything that changes while a chat is open remains observed and
+/// laid out by the UIKit bridge, so transcript and keyboard updates do not invalidate a hosting
+/// tree transaction.
+struct ConversationRemoteView: View {
+    let connection: RemoteSessionConnection
+
+    var body: some View {
+        RemoteConversationViewControllerBridge(connection: connection)
+            .ignoresSafeArea(.container, edges: .bottom)
+    }
+}
+
+private struct RemoteConversationViewControllerBridge: UIViewControllerRepresentable {
     let connection: RemoteSessionConnection
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var continuity: MobileSessionContinuityStore
@@ -42,6 +56,13 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     private var observations: Set<AnyCancellable> = []
     private var renderScheduled = false
     private var bottomConstraint: NSLayoutConstraint!
+    private var composerLeadingConstraint: NSLayoutConstraint!
+    private var composerTrailingConstraint: NSLayoutConstraint!
+    private var composerTopConstraint: NSLayoutConstraint!
+    private var composerBottomConstraint: NSLayoutConstraint!
+    private var composerPanelSafeBottomConstraint: NSLayoutConstraint!
+    private var composerStackSafeBottomConstraint: NSLayoutConstraint!
+    private var composerStackPanelBottomConstraint: NSLayoutConstraint!
 
     private let bottomStack = UIStackView()
     private let capabilityContainer = UIView()
@@ -73,10 +94,19 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         let saved = hostID.map {
             continuity.state(hostID: $0, sessionID: connection.session.id)
         }
+#if DEBUG
+        let fixtureViewport: (progress: Double?, followsBottom: Bool)? =
+            ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                == "conversation-away-from-latest"
+                ? (0.32, false)
+                : nil
+#else
+        let fixtureViewport: (progress: Double?, followsBottom: Bool)? = nil
+#endif
         return RemoteConversationTimelineViewController(
             connection: connection,
             theme: theme,
-            initialViewport: saved.map {
+            initialViewport: fixtureViewport ?? saved.map {
                 ($0.conversationViewportProgress, $0.conversationFollowsBottom)
             },
             onViewportChange: { [weak model, weak continuity, weak connection] progress, follows in
@@ -100,6 +130,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     private var lastSubmissionFeedback: RemotePromptSubmissionFeedback?
     private var lastCapabilities: [RemoteComposerCapabilityDTO] = []
     private var initiallyFocused = false
+    private var keyboardIsVisible = false
 
     init(
         connection: RemoteSessionConnection,
@@ -186,7 +217,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         ].forEach(bottomStack.addArrangedSubview)
 
         bottomConstraint = bottomStack.bottomAnchor.constraint(
-            equalTo: view.safeAreaLayoutGuide.bottomAnchor
+            equalTo: view.bottomAnchor
         )
         NSLayoutConstraint.activate([
             timelineController.view.topAnchor.constraint(equalTo: view.topAnchor),
@@ -244,9 +275,9 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         label.font = .preferredFont(forTextStyle: .caption1)
         label.adjustsFontForContentSizeCategory = true
         label.insets = UIEdgeInsets(
-            top: MobileDesign.Spacing.small,
+            top: MobileDesign.Spacing.medium,
             left: MobileDesign.Spacing.large,
-            bottom: MobileDesign.Spacing.small,
+            bottom: MobileDesign.Spacing.medium,
             right: MobileDesign.Spacing.large
         )
         label.isHidden = true
@@ -270,19 +301,20 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 
         [controlIcon, controlLabel, requestControlButton, controlMenuButton].forEach(controlBar.addSubview)
         NSLayoutConstraint.activate([
+            controlBar.heightAnchor.constraint(greaterThanOrEqualToConstant: 56),
             controlIcon.leadingAnchor.constraint(equalTo: controlBar.leadingAnchor, constant: MobileDesign.Spacing.large),
             controlIcon.centerYAnchor.constraint(equalTo: controlBar.centerYAnchor),
             controlIcon.widthAnchor.constraint(equalToConstant: 18),
             controlIcon.heightAnchor.constraint(equalToConstant: 18),
             controlLabel.leadingAnchor.constraint(equalTo: controlIcon.trailingAnchor, constant: MobileDesign.Spacing.small),
-            controlLabel.topAnchor.constraint(equalTo: controlBar.topAnchor, constant: MobileDesign.Spacing.tight),
-            controlLabel.bottomAnchor.constraint(equalTo: controlBar.bottomAnchor, constant: -MobileDesign.Spacing.tight),
+            controlLabel.topAnchor.constraint(equalTo: controlBar.topAnchor, constant: MobileDesign.Spacing.small),
+            controlLabel.bottomAnchor.constraint(equalTo: controlBar.bottomAnchor, constant: -MobileDesign.Spacing.small),
             requestControlButton.leadingAnchor.constraint(greaterThanOrEqualTo: controlLabel.trailingAnchor, constant: MobileDesign.Spacing.small),
             requestControlButton.centerYAnchor.constraint(equalTo: controlBar.centerYAnchor),
             requestControlButton.heightAnchor.constraint(greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget),
             controlMenuButton.leadingAnchor.constraint(greaterThanOrEqualTo: requestControlButton.trailingAnchor, constant: MobileDesign.Spacing.tight),
             controlMenuButton.leadingAnchor.constraint(greaterThanOrEqualTo: controlLabel.trailingAnchor, constant: MobileDesign.Spacing.tight),
-            controlMenuButton.trailingAnchor.constraint(equalTo: controlBar.trailingAnchor, constant: -MobileDesign.Spacing.small),
+            controlMenuButton.trailingAnchor.constraint(equalTo: controlBar.trailingAnchor, constant: -MobileDesign.Spacing.medium),
             controlMenuButton.centerYAnchor.constraint(equalTo: controlBar.centerYAnchor),
             controlMenuButton.widthAnchor.constraint(equalToConstant: MobileDesign.Size.minimumTapTarget),
             controlMenuButton.heightAnchor.constraint(equalToConstant: MobileDesign.Size.minimumTapTarget),
@@ -295,10 +327,15 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         composerPanel.translatesAutoresizingMaskIntoConstraints = false
         composerStack.translatesAutoresizingMaskIntoConstraints = false
         composerStack.axis = .horizontal
-        composerStack.alignment = .bottom
+        // Multiline prompts grow down from a stable top row. Bottom alignment made both action
+        // buttons appear to fall away from the first line and produced a different silhouette at
+        // every prompt length.
+        composerStack.alignment = .top
         composerStack.spacing = MobileDesign.Spacing.small
         composerShell.addSubview(composerPanel)
         composerPanel.addSubview(composerStack)
+        composerPanel.layer.cornerCurve = .continuous
+        composerPanel.clipsToBounds = true
         composerOutline.translatesAutoresizingMaskIntoConstraints = false
         composerPanel.addSubview(composerOutline)
 
@@ -338,15 +375,57 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         ])
 
         [capabilityButton, attentionButton, textView, sendButton].forEach(composerStack.addArrangedSubview)
+        composerLeadingConstraint = composerPanel.leadingAnchor.constraint(
+            equalTo: composerShell.leadingAnchor,
+            constant: MobileDesign.Spacing.small
+        )
+        composerTrailingConstraint = composerPanel.trailingAnchor.constraint(
+            equalTo: composerShell.trailingAnchor,
+            constant: -MobileDesign.Spacing.small
+        )
+        composerBottomConstraint = composerPanel.bottomAnchor.constraint(
+            equalTo: composerShell.bottomAnchor,
+            constant: -MobileDesign.Spacing.small
+        )
+        composerPanelSafeBottomConstraint = composerPanel.bottomAnchor.constraint(
+            equalTo: composerShell.safeAreaLayoutGuide.bottomAnchor,
+            constant: -MobileDesign.Spacing.small
+        )
+        composerStackSafeBottomConstraint = composerStack.bottomAnchor.constraint(
+            equalTo: composerShell.safeAreaLayoutGuide.bottomAnchor,
+            constant: -MobileDesign.Spacing.small
+        )
+        composerStackSafeBottomConstraint.priority = .defaultHigh
+        composerStackPanelBottomConstraint = composerStack.bottomAnchor.constraint(
+            equalTo: composerPanel.bottomAnchor,
+            constant: -MobileDesign.Spacing.composerVertical
+        )
+        composerTopConstraint = composerPanel.topAnchor.constraint(
+            equalTo: composerShell.topAnchor,
+            constant: MobileDesign.Spacing.small
+        )
         NSLayoutConstraint.activate([
-            composerPanel.leadingAnchor.constraint(equalTo: composerShell.leadingAnchor, constant: MobileDesign.Spacing.inset),
-            composerPanel.trailingAnchor.constraint(equalTo: composerShell.trailingAnchor, constant: -MobileDesign.Spacing.inset),
-            composerPanel.topAnchor.constraint(equalTo: composerShell.topAnchor, constant: MobileDesign.Spacing.small),
-            composerPanel.bottomAnchor.constraint(equalTo: composerShell.bottomAnchor, constant: -MobileDesign.Spacing.small),
-            composerStack.leadingAnchor.constraint(equalTo: composerPanel.leadingAnchor, constant: MobileDesign.Spacing.medium),
-            composerStack.trailingAnchor.constraint(equalTo: composerPanel.trailingAnchor, constant: -MobileDesign.Spacing.medium),
-            composerStack.topAnchor.constraint(equalTo: composerPanel.topAnchor, constant: MobileDesign.Spacing.small),
-            composerStack.bottomAnchor.constraint(equalTo: composerPanel.bottomAnchor, constant: -MobileDesign.Spacing.small),
+            composerLeadingConstraint,
+            composerTrailingConstraint,
+            composerTopConstraint,
+            composerBottomConstraint,
+            composerStack.leadingAnchor.constraint(
+                equalTo: composerPanel.leadingAnchor,
+                constant: MobileDesign.Spacing.composerHorizontal
+            ),
+            composerStack.trailingAnchor.constraint(
+                equalTo: composerPanel.trailingAnchor,
+                constant: -MobileDesign.Spacing.composerHorizontal
+            ),
+            composerStack.topAnchor.constraint(
+                equalTo: composerPanel.topAnchor,
+                constant: MobileDesign.Spacing.composerVertical
+            ),
+            composerStackSafeBottomConstraint,
+            composerStack.bottomAnchor.constraint(
+                lessThanOrEqualTo: composerPanel.bottomAnchor,
+                constant: -MobileDesign.Spacing.composerVertical
+            ),
             composerOutline.leadingAnchor.constraint(equalTo: composerPanel.leadingAnchor),
             composerOutline.trailingAnchor.constraint(equalTo: composerPanel.trailingAnchor),
             composerOutline.topAnchor.constraint(equalTo: composerPanel.topAnchor),
@@ -424,11 +503,13 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         } else if let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey]
             as? CGRect {
             let frameInView = view.convert(frame, from: nil)
-            overlap = max(0, view.bounds.maxY - frameInView.minY - view.safeAreaInsets.bottom)
+            overlap = max(0, view.bounds.maxY - frameInView.minY)
         } else {
             overlap = 0
         }
+        keyboardIsVisible = overlap > 0
         bottomConstraint.constant = -overlap
+        updateComposerGeometry()
         let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey]
             as? Double ?? 0
         UIView.animate(
@@ -486,10 +567,10 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         submissionLabel.backgroundColor = theme.uiSurface
         composerShell.backgroundColor = theme.uiGround
         composerPanel.backgroundColor = theme.uiPanel
-        composerPanel.layer.cornerRadius = theme.panelRadius
+        updateComposerGeometry()
         composerOutline.update(
             color: theme.uiBorder,
-            radius: theme.panelRadius,
+            radius: keyboardIsVisible ? 0 : theme.panelRadius,
             width: theme.borderWidth,
             glow: theme.glow
         )
@@ -500,7 +581,48 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         capabilityButton.tintColor = theme.uiLabel
         attentionButton.backgroundColor = theme.uiControlResting
         attentionButton.tintColor = theme.uiLabel
+        let controlRadius = min(
+            MobileDesign.Size.minimumTapTarget / 2,
+            max(theme.controlRadius, theme.panelRadius - MobileDesign.Spacing.small)
+        )
+        [capabilityButton, attentionButton, sendButton].forEach {
+            $0.layer.cornerRadius = controlRadius
+            $0.layer.cornerCurve = .continuous
+        }
         navigationTitleView.applyTheme(theme)
+    }
+
+    /// Keeps the composer attached to whichever physical edge currently owns text input.
+    /// The keyboard is already outside the app's authored chrome, so retaining a decorative
+    /// exterior gutter there exposed a strip of the conversation behind the field.
+    private func updateComposerGeometry() {
+        let fillsBottomEdge = theme.panelRadius <= MobileDesign.Spacing.tight
+        let joinsKeyboard = keyboardIsVisible
+        let exteriorInset = fillsBottomEdge || joinsKeyboard
+            ? 0
+            : MobileDesign.Spacing.small
+        composerLeadingConstraint.constant = exteriorInset
+        composerTrailingConstraint.constant = -exteriorInset
+        composerTopConstraint.constant = joinsKeyboard ? 0 : exteriorInset
+        composerPanel.layer.cornerRadius = joinsKeyboard ? 0 : theme.panelRadius
+        if joinsKeyboard {
+            composerPanelSafeBottomConstraint.isActive = false
+            composerStackSafeBottomConstraint.isActive = false
+            composerBottomConstraint.constant = 0
+            composerBottomConstraint.isActive = true
+            composerStackPanelBottomConstraint.isActive = true
+        } else if fillsBottomEdge {
+            composerPanelSafeBottomConstraint.isActive = false
+            composerStackPanelBottomConstraint.isActive = false
+            composerBottomConstraint.constant = 0
+            composerBottomConstraint.isActive = true
+            composerStackSafeBottomConstraint.isActive = true
+        } else {
+            composerBottomConstraint.isActive = false
+            composerStackSafeBottomConstraint.isActive = false
+            composerPanelSafeBottomConstraint.isActive = true
+            composerStackPanelBottomConstraint.isActive = true
+        }
     }
 
     private func installNavigationTitle() {
@@ -521,9 +643,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         switch connection.phase {
         case .connecting: return MobileL10n.string("Connecting to Mac…")
         case .connected:
-            return MobileL10n.string(
-                connection.capability == .interact ? "Remote control" : "View only"
-            )
+            return model.activeHost?.name ?? MobileL10n.string("Connected")
         case .ended(let reason), .failed(let reason): return reason
         }
     }
@@ -814,19 +934,61 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     }
 
     private func restoreDraft() {
+        // Deterministic fixtures share a simulator data container across captures. They must not
+        // inherit whichever draft an earlier fixture happened to persist, or a one-line layout
+        // journey silently turns into a multiline one. Production still restores the real draft.
+        if let fixtureDraft {
+            applyRestoredDraft(fixtureDraft)
+            return
+        }
         guard let hostID = model.activeHostID else { return }
         let draft = continuity.draft(
             surface: .conversation,
             hostID: hostID,
             sessionID: connection.session.id
         )
+        applyRestoredDraft(draft)
+    }
+
+    private func applyRestoredDraft(_ draft: String) {
         // Assigning even the same empty string makes UITextView coordinate a selection change
         // and cold-load dictation services. Most conversations have no saved draft, so keep that
         // framework out of first paint without delaying a real draft by one frame.
-        if textView.text != draft {
+        // Compare visible values: UIKit imports this property as optional even though an unset
+        // text view presents an empty string. There is no reason for nil and "" to cross the
+        // expensive mutation boundary differently.
+        if (textView.text ?? "") != draft {
+#if DEBUG
+            MobileConversationPerformanceProbe.restoredDraftWillAssign()
+#endif
             textView.text = draft
         }
         placeholderLabel.isHidden = !textView.text.isEmpty
+    }
+
+    private var fixtureDraft: String? {
+#if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        let mode = environment["THREADING_MOBILE_DEMO"]
+        if mode == "conversation-cold-stress"
+            || mode == "conversation-reconnect-stress"
+            || mode == "conversation-scroll-stress" {
+            return ""
+        }
+        guard environment["THREADING_MOBILE_UI_EVIDENCE_ID"] != nil else { return nil }
+        switch mode {
+        case "conversation", "conversation-collaboration":
+            return MobileL10n.string("Check the final layout.")
+        case "permission", "conversation-keyboard":
+            return MobileL10n.string(
+                "Check the final layout with the keyboard open and a longer prompt."
+            )
+        default:
+            return nil
+        }
+#else
+        return nil
+#endif
     }
 
     private func textDidChange() {
@@ -918,14 +1080,32 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 }
 
 private final class IntrinsicTextView: UITextView {
+    private var measuredWidth: CGFloat = 0
+
     override var intrinsicContentSize: CGSize {
-        let fittingWidth = max(bounds.width, 1)
+        // Auto Layout asks for an intrinsic height once before the horizontal stack has a width.
+        // Measuring against one point at that stage makes even a short prompt look like a
+        // six-line prompt. Start compact, then invalidate once layout supplies the real width.
+        guard bounds.width > 0 else {
+            return CGSize(
+                width: UIView.noIntrinsicMetric,
+                height: MobileDesign.Size.minimumTapTarget
+            )
+        }
+        let fittingWidth = bounds.width
         let height = sizeThatFits(CGSize(width: fittingWidth, height: .greatestFiniteMagnitude)).height
-        return CGSize(width: UIView.noIntrinsicMetric, height: min(max(height, 44), 132))
+        return CGSize(
+            width: UIView.noIntrinsicMetric,
+            height: min(max(height, MobileDesign.Size.minimumTapTarget), 132)
+        )
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        if bounds.width > 0, abs(bounds.width - measuredWidth) > 0.5 {
+            measuredWidth = bounds.width
+            invalidateIntrinsicContentSize()
+        }
         let shouldScroll = contentSize.height > 132
         if isScrollEnabled != shouldScroll { isScrollEnabled = shouldScroll }
     }

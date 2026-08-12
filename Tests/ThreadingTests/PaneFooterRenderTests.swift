@@ -95,14 +95,52 @@ final class PaneFooterRenderTests: XCTestCase {
         print("Rendered badged pane footer storybook to \(directory.path)")
     }
 
+    /// The band carrying the global silence gate, in both of its states.
+    ///
+    /// The worn state is the part no assertion can review. "Quiet when inactive, filled and
+    /// tinted while silenced" is a claim about a *relationship* — how loudly the on-state reads
+    /// against the Settings button it shares a band with, under themes whose control surfaces
+    /// differ as much as Cyberpunk's and Swiss Minimalist's — and a control that stops every
+    /// sound the app makes and then hides is the mystery-noise problem inverted.
+    func testRendersTheSilenceGateInBothStates() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        defer { AppThemePalette.set(.system) }
+
+        var written = 0
+        for (themeName, theme) in Render.themes {
+            AppThemePalette.set(theme)
+            for (appearanceName, appearanceID) in Render.appearances {
+                for (stateName, silenced) in [("audible", false), ("silenced", true)] {
+                    let data = try XCTUnwrap(
+                        footerImage(appearance: appearanceID, silenced: silenced),
+                        "Failed to render the \(stateName) gate under \(themeName) in \(appearanceName)"
+                    )
+                    try data.write(
+                        to: directory.appendingPathComponent(
+                            "footer-silence-\(stateName)-\(themeName)-\(appearanceName).png"
+                        )
+                    )
+                    written += 1
+                }
+            }
+        }
+
+        XCTAssertEqual(written, Render.themes.count * Render.appearances.count * 2)
+        print("Rendered silence-gate footer storybook to \(directory.path)")
+    }
+
     // MARK: - Helpers
 
     /// The sidebar footer's exact shape: the band at the pane's bottom on the pane's own
     /// ground, the titled Settings button at the leading margin — followed by the channel
-    /// badge when a channel is asked for, exactly as `ProjectSidebarViewController` builds it.
+    /// badge when a channel is asked for, exactly as `ProjectSidebarViewController` builds it,
+    /// and the silence gate in the trailing slot when a state for it is asked for.
     private func footerImage(
         appearance name: NSAppearance.Name,
-        channel: BuildChannel? = nil
+        channel: BuildChannel? = nil,
+        silenced: Bool? = nil
     ) -> Data? {
         let appearance = NSAppearance(named: name)
 
@@ -116,7 +154,17 @@ final class PaneFooterRenderTests: XCTestCase {
             gear.font = Design.Typography.controlRegular()
 
             let leading = [gear, channel.flatMap(BuildChannelBadge.make(for:))].compactMap { $0 }
-            let footer = PaneFooterView(leading: leading)
+            let trailing: [NSView] = silenced.map { isOn in
+                let gate = ThemedIconButton(
+                    symbolName: SidebarDefaults.silenceSymbol,
+                    accessibility: SidebarStrings.silenceSounds,
+                    target: .inline,
+                    inkSource: .chrome
+                )
+                gate.isSelected = isOn
+                return [gate]
+            } ?? []
+            let footer = PaneFooterView(leading: leading, trailing: trailing)
 
             let host = ThemedSurfaceView()
             host.frame = NSRect(

@@ -464,6 +464,70 @@ final class PaneNoticeTests: XCTestCase {
         XCTAssertTrue(notice.accessibilityLabel()?.contains(notice.message) == true)
     }
 
+    // MARK: - Evidence
+
+    /// A condition whose evidence is a picture puts the picture between the sentence and the
+    /// answers: with the words it belongs to, and out of the run of controls the user is meant to
+    /// press. It is not one of the answers, so it is not at the margin.
+    func testEvidenceSitsBetweenTheSentenceAndTheAnswers() throws {
+        let specimen = ColorPairSpecimenView(
+            ink: .white,
+            ground: .black,
+            accessibilityLabel: "Text color #FFFFFF shown on background color #000000"
+        )
+        let notice = PaneNoticeView(
+            tone: .attention,
+            title: "A program color conflicts with this terminal theme",
+            message: Fixture.longMessage,
+            accessory: specimen,
+            actions: [PaneNoticeAction(title: "Change Theme…") {}],
+            onDismiss: {}
+        )
+        host(notice)
+
+        XCTAssertIdentical(notice.accessoryView, specimen)
+        let sentence = try label(in: notice)
+        let action = try XCTUnwrap(notice.actionControls.first)
+        let dismiss = try XCTUnwrap(notice.dismissControl)
+
+        XCTAssertLessThanOrEqual(sentence.frame.maxX, specimen.frame.minX)
+        XCTAssertLessThanOrEqual(specimen.frame.maxX, action.frame.minX + 0.5)
+        XCTAssertLessThan(action.frame.maxX, dismiss.frame.minX + 0.5)
+
+        let rule = try separator(in: notice)
+        XCTAssertEqual(
+            specimen.frame.midY,
+            (rule.frame.maxY + notice.bounds.maxY) / 2,
+            accuracy: 0.5,
+            "the evidence counts the band's rule as breathing room"
+        )
+    }
+
+    /// The sentence is the flexible half of a band; a swatch is not. A specimen squeezed to fit a
+    /// narrow pane would be a picture of two colours in the wrong proportion, which is worse than
+    /// no picture.
+    func testEvidenceKeepsItsSizeInABandTooNarrowForTheSentence() throws {
+        let specimen = ColorPairSpecimenView(
+            ink: .white,
+            ground: .black,
+            accessibilityLabel: "Text color #FFFFFF shown on background color #000000"
+        )
+        let notice = PaneNoticeView(
+            tone: .attention,
+            message: Fixture.longMessage,
+            accessory: specimen,
+            actions: [PaneNoticeAction(title: "Change Theme…") {}],
+            onDismiss: {}
+        )
+        host(notice, width: Fixture.narrowWidth)
+
+        XCTAssertEqual(
+            specimen.frame.size,
+            specimen.intrinsicContentSize,
+            "the swatch gave up its proportions so the sentence could keep its words"
+        )
+    }
+
     func testTheBandIsBuiltEntirelyFromTheDesignSystem() {
         let notice = PaneNoticeView(
             tone: .attention,

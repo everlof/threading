@@ -17,6 +17,7 @@ say "Checking repository boundaries"
 "${script_directory}/check_architecture_boundaries.sh"
 "${script_directory}/check_localization_boundaries.sh"
 "${script_directory}/check_theme_boundaries.sh"
+"${script_directory}/check_bundled_scc.sh"
 python3 "${script_directory}/check_test_registration.py"
 
 say "Checking Debug entitlements"

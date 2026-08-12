@@ -304,22 +304,38 @@ public struct RemoteReasoningChoiceDTO: Codable, Equatable, Identifiable, Sendab
     }
 }
 
+public struct RemotePermissionModeChoiceDTO: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let name: String
+    public let detail: String
+
+    public init(id: String, name: String, detail: String) {
+        self.id = id
+        self.name = name
+        self.detail = detail
+    }
+}
+
 public struct RemoteModelChoiceDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let name: String
     public let reasoning: [RemoteReasoningChoiceDTO]
     public let defaultReasoningID: String?
+    /// Nil when decoded from a host predating remote speed selection.
+    public let supportsFastMode: Bool?
 
     public init(
         id: String,
         name: String,
         reasoning: [RemoteReasoningChoiceDTO] = [],
-        defaultReasoningID: String? = nil
+        defaultReasoningID: String? = nil,
+        supportsFastMode: Bool? = nil
     ) {
         self.id = id
         self.name = name
         self.reasoning = reasoning
         self.defaultReasoningID = defaultReasoningID
+        self.supportsFastMode = supportsFastMode
     }
 }
 
@@ -366,6 +382,8 @@ public struct RemoteAgentChoiceDTO: Codable, Equatable, Identifiable, Sendable {
     public let models: [RemoteModelChoiceDTO]
     public let defaultModelID: String?
     public let supportsConversation: Bool
+    /// Nil when decoded from a host predating remote permission-mode selection.
+    public let permissionModes: [RemotePermissionModeChoiceDTO]?
 
     public init(
         id: String,
@@ -373,7 +391,8 @@ public struct RemoteAgentChoiceDTO: Codable, Equatable, Identifiable, Sendable {
         accounts: [RemoteAccountChoiceDTO]? = nil,
         models: [RemoteModelChoiceDTO],
         defaultModelID: String?,
-        supportsConversation: Bool
+        supportsConversation: Bool,
+        permissionModes: [RemotePermissionModeChoiceDTO]? = nil
     ) {
         self.id = id
         self.name = name
@@ -381,6 +400,7 @@ public struct RemoteAgentChoiceDTO: Codable, Equatable, Identifiable, Sendable {
         self.models = models
         self.defaultModelID = defaultModelID
         self.supportsConversation = supportsConversation
+        self.permissionModes = permissionModes
     }
 }
 
@@ -1128,6 +1148,8 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
     public let accountHandle: String?
     public let model: String?
     public let reasoningEffort: String?
+    public let fastMode: Bool?
+    public let permissionMode: String?
     /// "terminal" or "conversation".
     public let surface: String
     public let prompt: String
@@ -1138,6 +1160,8 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         accountHandle: String? = nil,
         model: String? = nil,
         reasoningEffort: String? = nil,
+        fastMode: Bool? = nil,
+        permissionMode: String? = nil,
         surface: String,
         prompt: String
     ) {
@@ -1146,6 +1170,8 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         self.accountHandle = accountHandle
         self.model = model
         self.reasoningEffort = reasoningEffort
+        self.fastMode = fastMode
+        self.permissionMode = permissionMode
         self.surface = surface
         self.prompt = prompt
     }

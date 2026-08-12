@@ -36,7 +36,7 @@ general; a selector such as `NSView > NSStackView:nth-child(2)` is not.
 
 ## Project hover-card precedent
 
-The SCC hover proved the complete presentation pattern:
+The project-metrics hover proved the complete presentation pattern:
 
 ```text
 ProjectRowView hover shell
@@ -44,17 +44,19 @@ ProjectRowView hover shell
     └── fixed-width/inset composition host
         └── extension hook A
             └── extension hook B
-                └── selected replacement or native SCC content
+                └── selected replacement or native project metrics
 ```
 
 An extension-only card uses an empty native `.proceed` body. Removing the final contribution
-closes that card rather than leaving blank chrome. Native SCC availability and extension
+closes that card rather than leaving blank chrome. Native-metrics availability and extension
 availability are therefore independent reasons for presentation.
 
-The SCC data itself is not part of the visual contract. An extension that only adds CI or
+The project-metrics data itself is not part of the visual contract. An extension that only adds CI or
 repository information uses existing project snapshots. An extension that needs the exact
-language breakdown requires a separately reviewed brokered data capability; UI composition must
-not become an accidental route to private models.
+language breakdown or repository history aggregates requires a separately reviewed brokered data
+capability; UI composition must not become an accidental route to private models. The proposed
+bounded contract is recorded in
+[`project-insights-extension.md`](../feature-drafts/project-insights-extension.md).
 
 ## Named popover gate
 

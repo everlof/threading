@@ -729,6 +729,36 @@ enum RemoteConversationWirePolicy {
         )
     }
 
+    /// Builds a live delta after the controller's row generation proved the row arrays equal.
+    ///
+    /// Streaming updates are metadata-only and can arrive twenty times a second. Re-checking
+    /// every settled row here made that main-thread cost proportional to total chat history.
+    /// The count guard catches a broken caller cheaply; the stronger identity proof is the
+    /// controller-owned `(generation, revision)` pair and never crosses the wire.
+    static func deltaWithUnchangedRows(
+        from previous: RemoteConversationSnapshotDTO,
+        to current: RemoteConversationSnapshotDTO,
+        baseRevision: Int,
+        revision: Int
+    ) -> RemoteConversationDeltaDTO? {
+        guard previous.rows.count == current.rows.count else { return nil }
+        let previousCapabilities = safeCapabilities(previous.composerCapabilities)
+        let currentCapabilities = safeCapabilities(current.composerCapabilities)
+        return RemoteConversationDeltaDTO(
+            baseRevision: baseRevision,
+            revision: revision,
+            streamingText: truncated(
+                current.streamingText,
+                toUTF8Bytes: RemoteAccessDefaults.maximumRemoteStreamingBytes
+            ),
+            canSend: current.canSend,
+            composerCapabilities: previousCapabilities == currentCapabilities
+                ? nil
+                : currentCapabilities,
+            permission: current.permission.map(safePermission)
+        )
+    }
+
     /// Permission evidence may be shown to every collaborator, while the action is enabled only
     /// for members who were explicitly granted approval rights for this chat. This keeps
     /// collaboration and approval independently configurable without making a guest an owner.

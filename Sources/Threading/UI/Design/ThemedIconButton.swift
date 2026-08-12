@@ -484,8 +484,9 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         guard isEnabled else { return }
         isPressed = true
 
-        // The menu is the whole gesture: it takes the still-held mouse from here and returns only
-        // once it has closed, so there is no release left for this button to wait for.
+        // The menu is the whole gesture: it tracks the still-held press itself — a sweep onto a
+        // row and a release over it choose — so there is no release left for this button to wait
+        // for, and nothing here may consume one.
         if presentsMenu {
             performPress()
             isPressed = false

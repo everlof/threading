@@ -128,13 +128,13 @@ enum RemoteGitReviewBridge {
             return
         }
 
-        let cap = GitReviewDefaults.remoteRepositoryFileLimit
-        GitReviewReader.repositoryFilesForDisplay(limit: cap, in: root) { result in
+        GitReviewReader.repositoryFiles(in: root) { result in
             switch result {
-            case .success(let page):
+            case .success(let paths):
+                let cap = GitReviewDefaults.remoteRepositoryFileLimit
                 completion(.success(RemoteRepositoryFilesDTO(
-                    paths: page.paths,
-                    isTruncated: page.isTruncated
+                    paths: Array(paths.prefix(cap)),
+                    isTruncated: paths.count > cap
                 )))
             case .failure:
                 completion(.failure(.notRepository))

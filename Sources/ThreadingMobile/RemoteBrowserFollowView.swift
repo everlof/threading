@@ -17,17 +17,24 @@ struct RemoteBrowserFollowView: View {
     @State private var preview: UIImage?
     @State private var loadError: String?
     @State private var isLoading = false
+    private let loadsRemotely: Bool
 
     init(
         session: RemoteSessionSummaryDTO,
         client: RemoteClient,
         activity: MobileWorkspaceActivity,
-        initialTabID: String? = nil
+        initialTabID: String? = nil,
+        initialWorkspace: RemoteWorkspaceDTO = RemoteWorkspaceDTO(browserTabs: []),
+        initialPreview: UIImage? = nil,
+        loadsRemotely: Bool = true
     ) {
         self.session = session
         self.client = client
+        self.loadsRemotely = loadsRemotely
         _activity = ObservedObject(wrappedValue: activity)
+        _workspace = State(initialValue: initialWorkspace)
         _selectedTabID = State(initialValue: initialTabID)
+        _preview = State(initialValue: initialPreview)
     }
 
     private var selectedTab: RemoteBrowserTabDTO? {
@@ -70,6 +77,7 @@ struct RemoteBrowserFollowView: View {
         }
         .task(id: activity.changeSequence) {
             activity.markBrowserSeen()
+            guard loadsRemotely else { return }
             await refresh()
         }
     }

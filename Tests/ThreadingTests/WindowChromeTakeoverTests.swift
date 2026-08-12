@@ -200,6 +200,37 @@ final class WindowChromeTakeoverTests: XCTestCase {
                              "the native clearance returns with the native frame")
     }
 
+    /// The product theme owns the complete frame, not only the colors inside AppKit's frame.
+    /// This is the shipped path used by ordinary product captures.
+    func testTheStockThreadingThemeTakesTheWindowOverAndHandsItBack() throws {
+        let controller = MainWindowController()
+        self.controller = controller
+        let window = try window(of: controller)
+        let coordinator = try XCTUnwrap(controller.chromeCoordinator)
+
+        XCTAssertTrue(AppThemeStyles.threading.takesOverWindowChrome)
+        AppThemePalette.set(AppThemeStyles.threading)
+        coordinator.applyCurrentTheme()
+
+        XCTAssertEqual(window.styleMask, WindowChromeCoordinator.takeoverMask)
+        XCTAssertNil(window.toolbar)
+
+        let host = try XCTUnwrap(
+            window.contentViewController as? WindowChromeHostViewController
+        )
+        host.view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(host.isTakeoverActive)
+        XCTAssertTrue(host.takeoverChromeIsMaterialized)
+        XCTAssertGreaterThan(host.bandView.bounds.height, 0)
+        XCTAssertGreaterThan(host.commandBandView.bounds.height, 0)
+
+        AppThemePalette.set(.system)
+        coordinator.applyCurrentTheme()
+
+        XCTAssertEqual(window.styleMask, WindowChromeCoordinator.nativeMask)
+        XCTAssertNotNil(window.toolbar)
+    }
+
     /// The stock Windows 98 theme is the first real user of the mechanism; the fixture
     /// themes above prove the mechanics, this proves the shipped theme actually engages them.
     func testTheStockWin98ThemeTakesTheWindowOverAndHandsItBack() throws {

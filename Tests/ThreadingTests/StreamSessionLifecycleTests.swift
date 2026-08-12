@@ -1225,6 +1225,34 @@ final class SubagentSessionStateTests: XCTestCase {
         XCTAssertNil(store.load(sessionID: removed))
     }
 
+    func testDeferredSubagentSnapshotsStayOrderedAndRemovalWins() {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let sessionID = SessionID()
+        let store = SubagentStateStore(directory: directory)
+        let first = SubagentTimeline.Snapshot(agents: [])
+        let second = SubagentTimeline.Snapshot(agents: [
+            SubagentTimeline.AgentSnapshot(
+                descriptor: SubagentDescriptor(threadID: "child", role: "Explore"),
+                status: .completed,
+                message: "Done",
+                progress: nil,
+                activity: []
+            )
+        ])
+
+        store.saveEventually(first, sessionID: sessionID)
+        store.saveEventually(second, sessionID: sessionID)
+        store.waitForPendingSaves()
+        XCTAssertEqual(store.load(sessionID: sessionID), second)
+
+        store.saveEventually(first, sessionID: sessionID)
+        store.remove(sessionID: sessionID)
+        XCTAssertNil(store.load(sessionID: sessionID))
+    }
+
     func testInvalidatedStateIgnoresLateProviderUpdates() {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1349,6 +1377,26 @@ final class SubagentSessionStateTests: XCTestCase {
         XCTAssertTrue(timeline.contains(threadID: "tool-use-123"))
         XCTAssertTrue(timeline.contains(threadID: "agent-789"))
         XCTAssertFalse(timeline.contains(threadID: "agent-000"))
+    }
+
+    func testProviderIDsForOneTranscriptPathReconcileWithoutScanningChildren() throws {
+        var timeline = SubagentTimeline(sessionID: SessionID())
+        timeline.apply(.discovered(SubagentDescriptor(
+            threadID: "hook-child",
+            role: "Explore",
+            path: "/tmp/shared-child.jsonl"
+        )))
+        timeline.apply(.discovered(SubagentDescriptor(
+            threadID: "native-child",
+            path: "/tmp/shared-child.jsonl",
+            prompt: "Recovered from native history"
+        )))
+
+        let child = try XCTUnwrap(timeline.agents.first)
+        XCTAssertEqual(timeline.agents.count, 1)
+        XCTAssertEqual(child.descriptor.threadID, "hook-child")
+        XCTAssertEqual(child.descriptor.prompt, "Recovered from native history")
+        XCTAssertTrue(child.descriptor.alternateThreadIDs?.contains("native-child") == true)
     }
 
     func testTranscriptLoaderRejectsLogicalPathsAndAcceptsRegularFiles() throws {

@@ -61,6 +61,37 @@ final class GitReviewRenderTests: XCTestCase {
     +    return f"{version}-{channel}.2"
     """
 
+    /// The website's Threading-theme product capture. It names the same two decisions the
+    /// fixture demonstrates: the title band keeps one clean identity, and the theme page points
+    /// at a named capture rather than an unrelated audit surface.
+    private let productFixture = """
+    diff --git a/Sources/Threading/Core/Theme/AppThemeStyles.swift b/Sources/Threading/Core/Theme/AppThemeStyles.swift
+    index 1111111..2222222 100644
+    --- a/Sources/Threading/Core/Theme/AppThemeStyles.swift
+    +++ b/Sources/Threading/Core/Theme/AppThemeStyles.swift
+    @@ -170,7 +170,7 @@ enum AppThemeStyles {
+                         buttonGlyphStyle: .plain,
+                         buttonPlacement: .trailing,
+    -                    showsAppIcon: true,
+    +                    showsAppIcon: false,
+                         activeTexture: .init(kind: .rule, color: hex("#FF9A3D")),
+                         inactiveTexture: .init(kind: .rule, color: hex("#2B4B65"))
+                     ),
+    diff --git a/web/app/ThemePlayground.tsx b/web/app/ThemePlayground.tsx
+    index 3333333..4444444 100644
+    --- a/web/app/ThemePlayground.tsx
+    +++ b/web/app/ThemePlayground.tsx
+    @@ -30,7 +30,7 @@ const captures: Capture[] = [
+         slug: "threading",
+         name: "Threading",
+         detail: "A navy frame, warm text, and Threading orange.",
+    -    image: "/product/mac-browser-audit.png",
+    +    image: "/product/mac-threading-chat-review.png",
+         ground: "#040a12",
+         surface: "#0a1c2f",
+         ink: "#f7efe6",
+    """
+
     /// A change whose lines run far past any pane. This is the only shape that tells the two
     /// wrap modes apart — anything that fits draws identically either way.
     private let longLineFixture = """
@@ -522,9 +553,16 @@ final class GitReviewRenderTests: XCTestCase {
     func testRendersTheFilePaneItselfInBothAppearances() throws {
         let directory = Render.directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { AppThemePalette.set(.system) }
 
         let files = GitDiffParser.files(fromUnifiedDiff: fixture)
-        for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+        let fixtures: [(String, AppTheme, NSAppearance.Name)] = [
+            ("light", .system, .aqua),
+            ("dark", .system, .darkAqua),
+            ("threading-dark", AppThemeStyles.threading, .darkAqua),
+        ]
+        for (name, theme, appearanceName) in fixtures {
+            AppThemePalette.set(theme)
             let appearance = NSAppearance(named: appearanceName)
             var data: Data?
             var cardWidth: CGFloat = 0
@@ -548,6 +586,215 @@ final class GitReviewRenderTests: XCTestCase {
         }
 
         print("Rendered the review pane to \(directory.path)")
+    }
+
+    /// The product capture is the real native conversation beside the real Git Review pane.
+    /// The same fixture is rendered through every theme used by the website scroll story, so
+    /// its mask changes only the app's dress and never swaps the product story underneath it.
+    func testRendersThreadingConversationWithGitReviewPane() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { AppThemePalette.set(.system) }
+
+        let fixtures: [(filename: String, theme: AppTheme, appearance: NSAppearance.Name)] = [
+            ("threading-chat-git-review.png", AppThemeStyles.threading, .darkAqua),
+            ("theme-chat-review-system-dark.png", .system, .darkAqua),
+            ("theme-chat-review-cyberpunk-dark.png", AppThemeStyles.cyberpunk, .darkAqua),
+            ("theme-chat-review-swiss-light.png", AppThemeStyles.swissMinimalist, .aqua),
+            ("theme-chat-review-neo-brutalism-light.png", AppThemeStyles.neoBrutalism, .aqua),
+            ("theme-chat-review-claymorphism-light.png", AppThemeStyles.claymorphism, .aqua),
+            ("theme-chat-review-vaporwave-dark.png", AppThemeStyles.vaporwave, .darkAqua)
+        ]
+
+        for fixture in fixtures {
+            AppThemePalette.set(fixture.theme)
+            let appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
+            var result: (data: Data?, showsAppIcon: Bool)?
+            appearance.performAsCurrentDrawingAppearance {
+                result = self.threadingConversationWithGitReview(appearance: appearance)
+            }
+
+            let rendered = try XCTUnwrap(result)
+            if fixture.theme.id == AppThemeStyles.threading.id {
+                XCTAssertFalse(
+                    rendered.showsAppIcon,
+                    "Threading's title band should not repeat the app mark"
+                )
+            }
+            try XCTUnwrap(rendered.data, "failed to render \(fixture.filename)")
+                .write(to: directory.appendingPathComponent(fixture.filename))
+        }
+        print("Rendered the theme chat and review captures to \(directory.path)")
+    }
+
+    private func threadingConversationWithGitReview(
+        appearance: NSAppearance
+    ) -> (data: Data?, showsAppIcon: Bool) {
+        let size = NSSize(width: 1_280, height: 760)
+        let project = Project(
+            name: "Threading",
+            folderURL: URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        )
+        let session = AgentSession(
+            kind: .claude,
+            title: "Theme showcase",
+            usesNativeUI: true
+        )
+        let conversation = requireConversationViewController(
+            agentSession: session,
+            project: project,
+            customizationLookup: { _ in .empty }
+        )
+        let review = GitReviewViewController(
+            sessionID: session.id,
+            folderPath: project.folderPath,
+            mode: .uncommitted
+        )
+
+        let split = SidebarSplitViewController()
+        let conversationItem = NSSplitViewItem(viewController: conversation)
+        conversationItem.minimumThickness = 560
+        let reviewItem = NSSplitViewItem(viewController: review)
+        reviewItem.minimumThickness = 420
+        split.addSplitViewItem(conversationItem)
+        split.addSplitViewItem(reviewItem)
+
+        let host = WindowChromeHostViewController(workspace: split)
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.contentViewController = host
+        window.setContentSize(size)
+        window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.orderFront(nil)
+        defer { window.close() }
+
+        host.setTitle("Threading")
+        host.setTakeoverActive(true)
+        host.bandView.fixtureIsKey = true
+        host.commandBandView.setLeadingControls(makeProductWindowControls())
+        host.view.frame = NSRect(origin: .zero, size: size)
+        host.view.appearance = appearance
+        host.view.layoutSubtreeIfNeeded()
+        split.splitView.setPosition(720, ofDividerAt: 0)
+        host.view.layoutSubtreeIfNeeded()
+
+        applyProductConversation(to: conversation)
+        review.show(.files(GitDiffParser.files(fromUnifiedDiff: productFixture)))
+        conversation.scrollToConversationEnd()
+        AppThemeRefresh.repaint(host.view)
+        host.view.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        conversation.scrollToConversationEnd()
+        host.view.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        window.makeFirstResponder(nil)
+
+        guard let content = window.contentView,
+              let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds) else {
+            return (nil, host.bandView.showsApplicationIcon)
+        }
+        content.cacheDisplay(in: content.bounds, to: rep)
+        return (
+            rep.representation(using: .png, properties: [:]),
+            host.bandView.showsApplicationIcon
+        )
+    }
+
+    private func applyProductConversation(to conversation: ConversationViewController) {
+        let patch = """
+        *** Begin Patch
+        *** Update File: Sources/Threading/Core/Theme/AppThemeStyles.swift
+        @@
+        -                    showsAppIcon: true,
+        +                    showsAppIcon: false,
+        *** End Patch
+        """
+        let events: [StreamEvent] = [
+            .userMessage(
+                "The theme page should show the app people actually use, not Execution Audit."
+            ),
+            .assistantMessage(blocks: [
+                .text("I will use a populated native conversation with Git Review open beside it. The website will read the image through a named screenshot reference.")
+            ]),
+            .turnFinished(
+                text: nil,
+                outcome: .completed,
+                metrics: TurnMetrics(
+                    duration: 8.7,
+                    outputTokens: 132,
+                    effort: "high",
+                    contextTokens: 37_600,
+                    contextWindow: 200_000
+                )
+            ),
+            .userMessage(
+                "Give the Threading theme a cleaner title bar, then show the real change beside this chat."
+            ),
+            .assistantMessage(blocks: [
+                .thinking("I will keep the title and window controls, remove the repeated mark, and verify the diff in the app."),
+                .toolUse(
+                    id: "edit-threading-chrome",
+                    tool: .edit,
+                    input: ["patch": .string(patch)]
+                )
+            ]),
+            .toolResults([
+                ToolResult(
+                    toolUseID: "edit-threading-chrome",
+                    text: "Applied the title-bar change.",
+                    isError: false
+                )
+            ]),
+            .assistantMessage(blocks: [
+                .text("The repeated app mark is gone. Git Review is open on the right with the exact files changed.")
+            ]),
+            .turnFinished(
+                text: nil,
+                outcome: .completed,
+                metrics: TurnMetrics(
+                    duration: 12.4,
+                    outputTokens: 214,
+                    effort: "high",
+                    contextTokens: 38_400,
+                    contextWindow: 200_000
+                )
+            )
+        ]
+
+        for event in events {
+            for change in conversation.timeline.apply(event) {
+                conversation.apply(change)
+            }
+        }
+    }
+
+    /// Uses the same app-owned command controls the main window installs in this band.
+    private func makeProductWindowControls() -> [NSView] {
+        let sidebar = ThemedIconButton(
+            symbolName: "sidebar.leading",
+            accessibility: L10n.string("Show or hide sidebar"),
+            inkSource: .chrome
+        )
+        let back = ThemedIconButton(
+            symbolName: "chevron.left",
+            accessibility: L10n.string("Go back"),
+            inkSource: .chrome
+        )
+        back.isEnabled = false
+        let forward = ThemedIconButton(
+            symbolName: "chevron.right",
+            accessibility: L10n.string("Go forward"),
+            inkSource: .chrome
+        )
+        forward.isEnabled = false
+        return [sidebar, back, forward]
     }
 
     /// The real controller, laid out the way the app lays it out: the pane is sized and settled

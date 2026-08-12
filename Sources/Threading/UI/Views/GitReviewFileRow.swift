@@ -22,6 +22,8 @@ final class GitReviewFileRow: NSView {
     private let wraps: Bool
     private let initialDiffWidth: CGFloat?
     private let defersExpandedBody: Bool
+    private let contentIsPending: Bool
+    private let contentLoadFailed: Bool
 
     /// Where this file lives, when it still does. See `init`.
     private let fileURL: URL?
@@ -75,6 +77,23 @@ final class GitReviewFileRow: NSView {
     private weak var imageLoadingNote: NSView?
     private var awaitsImagePairProvider = false
 
+    /// The header's pointer-revealed actions — Copy Path and the one-press external open —
+    /// which the row's right-click menu already carries invisibly. They appear on hovering the
+    /// whole header *line*, the sidebar rows' reveal applied here, and are hidden rather than
+    /// merely transparent at rest: `hitTest` does not read `alphaValue`, so an invisible
+    /// button would still swallow the header's own click-to-toggle and copy a path nobody
+    /// asked for.
+    private var copyPathButton: ThemedIconButton?
+    private var openExternallyButton: ThemedIconButton?
+
+    /// Resolved on first reveal, never at construction: a virtual table materializes rows
+    /// mid-scroll, where even the launcher's cached registry read is not this row's to spend.
+    private var hasResolvedExternalOpen = false
+    private var externalOpenIsUnavailable = false
+
+    private var isHeaderHovered = false
+    private var headerTrackingArea: NSTrackingArea?
+
     private lazy var chevron: NSImageView = {
         let image = NSImageView()
         image.translatesAutoresizingMaskIntoConstraints = false
@@ -110,7 +129,7 @@ final class GitReviewFileRow: NSView {
     private var contextMenuSession: AnyObject?
 
     private var canExpand: Bool {
-        Self.isExpandable(file)
+        !contentIsPending && Self.isExpandable(file)
     }
 
     static func isExpandable(_ file: GitFileDiff) -> Bool {
@@ -197,6 +216,26 @@ final class GitReviewFileRow: NSView {
         )
     }
 
+    /// A patchless row still knows its exact numstat weight. One visual line per changed line is
+    /// intentionally conservative about wrapping but establishes the right order of magnitude
+    /// for the document extent; TextKit replaces the visible row with exact geometry later.
+    static func estimatedPendingTableHeight(for file: GitFileDiff, expanded: Bool) -> CGFloat {
+        guard expanded else { return 48 }
+        let totalLines = file.added + file.removed
+        guard totalLines > 0 else { return 48 }
+        let font = Design.Typography.code()
+        let lineHeight = ceil(font.ascender - font.descender + font.leading) + 2
+        let shown = min(totalLines, GitReviewDefaults.fileDisplayCap)
+        let omittedHeight: CGFloat = totalLines > shown ? lineHeight + Design.Spacing.tight : 0
+        return ceil(
+            54
+                + CGFloat(shown) * lineHeight
+                + 27
+                + omittedHeight
+                + Design.Spacing.small
+        )
+    }
+
     /// Extensions the compare surface decodes — raster formats. SVG stays out on purpose: it
     /// is text, and its diff says more than a render of it would.
     private static let rasterImageExtensions: Set<String> = [
@@ -231,6 +270,8 @@ final class GitReviewFileRow: NSView {
         file: GitFileDiff,
         expanded: Bool,
         defersExpandedBody: Bool = false,
+        contentIsPending: Bool = false,
+        contentLoadFailed: Bool = false,
         staging: GitStaging? = nil,
         wraps: Bool = true,
         initialDiffWidth: CGFloat? = nil,
@@ -241,11 +282,21 @@ final class GitReviewFileRow: NSView {
         self.wraps = wraps
         self.initialDiffWidth = initialDiffWidth
         self.defersExpandedBody = defersExpandedBody
+        self.contentIsPending = contentIsPending
+        self.contentLoadFailed = contentLoadFailed
         self.fileURL = fileURL
         super.init(frame: .zero)
         setupViews()
-        if expanded && canExpand {
-            defersExpandedBody ? showSkeletonExpandedState() : toggle()
+        if expanded {
+            if canExpand {
+                defersExpandedBody ? showSkeletonExpandedState() : toggle()
+            } else if contentIsPending, file.added + file.removed > 0 {
+                // A pending file's numstat weight already owns its expanded height in the
+                // table; the ghost is what keeps that space from reading as an empty card.
+                // Without known weight the estimate is a collapsed header, which has no body
+                // area for a ghost to stand in.
+                showSkeletonExpandedState()
+            }
         }
     }
 
@@ -255,6 +306,14 @@ final class GitReviewFileRow: NSView {
 
     override func layout() {
         super.layout()
+
+        // AppKit rebuilds tracking on frame changes and scrolls, but not when only a subview
+        // moved — and the hover rect ends where the body begins. Compared first so a steady
+        // layout pass rebuilds nothing.
+        if let headerTrackingArea, headerTrackingArea.rect != headerRegion {
+            updateTrackingAreas()
+        }
+
         guard bodyBuilt, isExpanded, bodyContainer.bounds.width > 1 else { return }
 
         // Make the real card width the source of truth after a pane resize. Each changed text
@@ -268,7 +327,12 @@ final class GitReviewFileRow: NSView {
     /// the recorded card and hunk surfaces once their actual appearance is known.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard window != nil else { return }
+        guard window != nil else {
+            // A table reload can discard the row without reuse and without a pointer exit;
+            // a rehosted row must not arrive with its actions already showing.
+            setHeaderActionsRevealed(false, animated: false)
+            return
+        }
         AppThemeRefresh.repaint(self)
     }
 
@@ -326,9 +390,12 @@ final class GitReviewFileRow: NSView {
             Self.makeActionButton($0.action.fileTitle, target: self, action: #selector(stageFileClicked))
         }
 
+        makeHoverActions()
+
         [glyphLabel, nameLabel, directoryLabel, metaLabel, stageButton, chevron, bodyContainer]
             .compactMap { $0 }
             .forEach(addSubview)
+        hoverActionButtons.forEach(addSubview)
 
         let inset = Design.Spacing.small
         let headerContentBottom = directoryText.isEmpty
@@ -346,8 +413,12 @@ final class GitReviewFileRow: NSView {
             nameLabel.leadingAnchor.constraint(equalTo: glyphLabel.trailingAnchor, constant: inset),
             nameLabel.firstBaselineAnchor.constraint(equalTo: glyphLabel.firstBaselineAnchor),
 
+            // The hover actions live in the flexible run between the name and the counters —
+            // beside the path, where Codex-style review headers put them — so the space they
+            // reserve is space the header was not using, and nothing shifts when they appear.
             metaLabel.leadingAnchor.constraint(
-                greaterThanOrEqualTo: nameLabel.trailingAnchor,
+                greaterThanOrEqualTo: hoverActionButtons.last?.trailingAnchor
+                    ?? nameLabel.trailingAnchor,
                 constant: Design.Spacing.small
             ),
             metaLabel.firstBaselineAnchor.constraint(equalTo: glyphLabel.firstBaselineAnchor),
@@ -384,6 +455,21 @@ final class GitReviewFileRow: NSView {
             NSLayoutConstraint.activate([
                 stageButton.leadingAnchor.constraint(equalTo: metaLabel.trailingAnchor, constant: Design.Spacing.small),
                 stageButton.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor)
+            ])
+        }
+
+        if let copyPathButton, let openExternallyButton {
+            NSLayoutConstraint.activate([
+                copyPathButton.leadingAnchor.constraint(
+                    equalTo: nameLabel.trailingAnchor,
+                    constant: Design.Spacing.small
+                ),
+                copyPathButton.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor),
+                openExternallyButton.leadingAnchor.constraint(
+                    equalTo: copyPathButton.trailingAnchor,
+                    constant: Design.Spacing.hairline
+                ),
+                openExternallyButton.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor)
             ])
         }
 
@@ -555,13 +641,190 @@ final class GitReviewFileRow: NSView {
         NSPasteboard.general.setString(fileURL.path, forType: .string)
     }
 
+    // MARK: - Header Hover Actions
+
+    /// Builds the pointer-revealed pair, or nothing where there is nothing on disk to act on.
+    ///
+    /// The gate is the *model* — a nil URL, or a change whose whole meaning is that the working
+    /// copy is gone — never `FileManager`: the context menu can afford an existence check
+    /// because a right-click is a user's own moment, while this runs inside a virtual table
+    /// materializing rows mid-scroll, where the scaling gate forbids filesystem work. A file
+    /// deleted behind the model's back fails at the press, which beeps rather than promising.
+    ///
+    /// Deferred glyphs for the same reason the sidebar's are: most rows are never hovered, and
+    /// a CoreUI symbol resolve per header is exactly the cost the collapse pattern avoids.
+    private func makeHoverActions() {
+        guard fileURL != nil, file.change != .deleted else { return }
+
+        let copy = ThemedIconButton(
+            symbolName: "doc.on.doc",
+            accessibility: L10n.string("Copy Path"),
+            target: .inline,
+            inkSource: .chrome,
+            glyphMaterialization: .deferred
+        )
+        copy.toolTip = L10n.string("Copy Path")
+        copy.onPress = { [weak self] in self?.copyPathClicked() }
+        copy.setAccessibilityIdentifier("git-review.file.copy-path")
+
+        let open = ThemedIconButton(
+            symbolName: OpenInToolbarDefaults.fallbackSymbol,
+            accessibility: L10n.string("Open in external app"),
+            target: .inline,
+            inkSource: .chrome,
+            glyphMaterialization: .deferred
+        )
+        open.toolTip = L10n.string("Open in external app")
+        open.onPress = { [weak self] in self?.openExternallyClicked() }
+        open.setAccessibilityIdentifier("git-review.file.open-external")
+
+        for button in [copy, open] {
+            button.isHidden = true
+            button.alphaValue = 0
+        }
+        copyPathButton = copy
+        openExternallyButton = open
+    }
+
+    private var hasHoverActions: Bool { copyPathButton != nil }
+
+    private var hoverActionButtons: [ThemedIconButton] {
+        [copyPathButton, openExternallyButton].compactMap { $0 }
+    }
+
+    /// What a reveal actually shows — everything, until the first reveal has asked the launcher
+    /// which app a press would use and found none. The unavailable button keeps its place in
+    /// the constraint chain so the counters' boundary survives; it simply never unhides.
+    private var revealableHoverButtons: [ThemedIconButton] {
+        hoverActionButtons.filter { !externalOpenIsUnavailable || $0 !== openExternallyButton }
+    }
+
+    /// The header line's own rect — everything above the body, gap included. The actions
+    /// answer a pointer anywhere on the *line*, not only over their own two targets.
+    private var headerRegion: NSRect {
+        guard !bodyContainer.isHidden else { return bounds }
+        return NSRect(
+            x: 0,
+            y: bodyContainer.frame.maxY,
+            width: bounds.width,
+            height: max(bounds.maxY - bodyContainer.frame.maxY, 0)
+        )
+    }
+
+    /// `NSView.hoverIsStale`, measured against the header's rect rather than `bounds`: a
+    /// pointer resting on the open body is not on the line these actions belong to.
+    private var headerHoverIsStale: Bool {
+        guard isHeaderHovered else { return false }
+        guard let window, window.isKeyWindow, !isHiddenOrHasHiddenAncestor else { return true }
+        let unclipped = headerRegion.intersection(visibleRect)
+        return !unclipped.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let headerTrackingArea {
+            removeTrackingArea(headerTrackingArea)
+            self.headerTrackingArea = nil
+        }
+        guard hasHoverActions else { return }
+        let area = NSTrackingArea(
+            rect: headerRegion,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self
+        )
+        addTrackingArea(area)
+        headerTrackingArea = area
+
+        // The header slides out from under a stationary pointer — a watched refresh, a
+        // collapse above it — and no exit is delivered for that; see `NSView.hoverIsStale`.
+        if headerHoverIsStale {
+            setHeaderActionsRevealed(false, animated: false)
+        }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        // Not through whatever floats over the pane — see `NSView.isPointerCovered(at:)`.
+        guard hasHoverActions, !isPointerCovered(at: event.locationInWindow) else { return }
+        setHeaderActionsRevealed(true, animated: true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHeaderActionsRevealed(false, animated: true)
+    }
+
+    /// The sidebar rows' reveal, applied to the header line. Hiding waits for the fade out so
+    /// a visible button never vanishes mid-frame; revealing unhides first so both targets are
+    /// hit-testable for the whole fade in.
+    private func setHeaderActionsRevealed(_ revealed: Bool, animated: Bool) {
+        isHeaderHovered = revealed
+        guard hasHoverActions else { return }
+        if revealed { resolveExternalOpenOnFirstReveal() }
+
+        let buttons = revealableHoverButtons
+        if revealed {
+            buttons.forEach {
+                $0.materializeGlyphIfNeeded()
+                $0.isHidden = false
+            }
+        }
+        guard animated else {
+            buttons.forEach {
+                $0.alphaValue = revealed ? 1 : 0
+                $0.isHidden = !revealed
+            }
+            return
+        }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = Design.Motion.quick
+            buttons.forEach { $0.animator().alphaValue = revealed ? 1 : 0 }
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !revealed, !self.isHeaderHovered else { return }
+                self.revealableHoverButtons.forEach { $0.isHidden = true }
+            }
+        })
+    }
+
+    /// Points the open button at the app a press would use — the toolbar's
+    /// `updateOpenInControls`, per row, paid on first reveal only. The app's own icon for the
+    /// toolbar's reason: the one question the button answers at a glance is "where will this
+    /// send me".
+    private func resolveExternalOpenOnFirstReveal() {
+        guard !hasResolvedExternalOpen else { return }
+        hasResolvedExternalOpen = true
+        guard let openExternallyButton, let openInTarget else { return }
+
+        let launcher = ExternalAppLauncher.shared
+        guard let app = launcher.preferred(for: openInTarget) else {
+            // Nothing installed can take the file: a control offering one dead option hides —
+            // `OpenInMenu.submenuEntry`'s rule, kept by the reveal instead of the menu.
+            externalOpenIsUnavailable = true
+            openExternallyButton.isHidden = true
+            return
+        }
+        let title = L10n.format("Open in %@", app.name)
+        if let icon = launcher.icon(for: app) {
+            openExternallyButton.setImage(icon, accessibility: title)
+        } else {
+            openExternallyButton.setSymbol(OpenInToolbarDefaults.fallbackSymbol, accessibility: title)
+        }
+        openExternallyButton.toolTip = title
+    }
+
+    /// The one-press open, aimed at the first line this diff changes — the same target the
+    /// right-click menu offers, without the submenu. Failure beeps inside the launcher.
+    @objc private func openExternallyClicked() {
+        guard let openInTarget else { return }
+        ExternalAppLauncher.shared.openInPreferredApp(openInTarget)
+    }
+
     // MARK: - Expansion
 
-    /// A scroller-thumb drag can cross hundreds of expanded files per frame. Building TextKit
-    /// for a row that exists for only that frame makes the thumb lag behind the pointer. Keep
-    /// the expanded geometry and disclosure state while the body holds a `DiffSkeletonView`
-    /// ghost instead of text; the table replaces the resting viewport with ordinary rows when
-    /// the drag ends.
+    /// A scroller-thumb drag can cross hundreds of expanded files per frame, and a pending
+    /// file's diff has not arrived at all. Building TextKit for either row is work the moment
+    /// cannot spend, so both keep the expanded geometry and disclosure state while the body
+    /// holds a `DiffSkeletonView` ghost instead of text — the table replaces the resting
+    /// viewport with ordinary rows when the drag ends, and hydration replaces a pending model.
     private func showSkeletonExpandedState() {
         guard let headerBottom, let bodyBottom else { return }
         installSkeletonBody()
@@ -581,12 +844,12 @@ final class GitReviewFileRow: NSView {
     /// table gave the row, so measuring it would replace the model's honest line-weight
     /// estimate with the header's own fitting height and collapse the document extent.
     var hasEstimatedGhostBody: Bool {
-        defersExpandedBody
+        defersExpandedBody || (contentIsPending && isExpanded)
     }
 
-    /// The ghost the empty body area shows while the real document is deferred by a scroller
-    /// seek. Pinned over the body container rather than arranged in it, so it takes exactly
-    /// the space the row's geometry already reserves.
+    /// The ghost the empty body area shows while the real document is deferred (a scroller
+    /// seek) or not yet read (progressive hydration). Pinned over the body container rather
+    /// than arranged in it, so it takes exactly the space the row's geometry already reserves.
     private func installSkeletonBody() {
         let skeleton = DiffSkeletonView(added: file.added, removed: file.removed)
         bodyContainer.addSubview(skeleton)
@@ -644,6 +907,9 @@ final class GitReviewFileRow: NSView {
             accessibilityDescription: nil
         )
         onHeightChange?()
+
+        // The header's hover rect ends where the body begins, and the body just moved.
+        updateTrackingAreas()
     }
 
     /// One `DiffView` per hunk with its `@@` header between, spending the file's line budget
@@ -950,6 +1216,18 @@ final class GitReviewFileRow: NSView {
     /// `+A −R` with each count in its own colour, or what stands in for a body that cannot
     /// be shown.
     private var metaText: NSAttributedString {
+        if contentIsPending {
+            return NSAttributedString(string: "loading…", attributes: [
+                .foregroundColor: Design.Text.quaternary,
+                .font: Design.Typography.caption()
+            ])
+        }
+        if contentLoadFailed {
+            return NSAttributedString(string: "preview unavailable", attributes: [
+                .foregroundColor: Design.Status.negative,
+                .font: Design.Typography.caption()
+            ])
+        }
         if isImageComparison {
             return NSAttributedString(string: "image", attributes: [
                 .foregroundColor: Design.Text.tertiary,
@@ -1003,6 +1281,15 @@ extension GitReviewFileRow: NSGestureRecognizerDelegate {
             return false
         }
         guard let superview else { return true }
-        return !(superview.hitTest(superview.convert(event.locationInWindow, from: nil)) is ThemedButton)
+
+        // Walked up from the deepest hit rather than type-checked once: an icon button answers
+        // a hit with the glyph view inside it, which is a plain NSView — the control the click
+        // belongs to is its ancestor.
+        var hit = superview.hitTest(superview.convert(event.locationInWindow, from: nil))
+        while let view = hit, view !== self, view !== superview {
+            if view is ThemedControl { return false }
+            hit = view.superview
+        }
+        return true
     }
 }

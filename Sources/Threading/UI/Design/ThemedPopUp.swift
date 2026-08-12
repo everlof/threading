@@ -182,18 +182,9 @@ final class ThemedPopUp: ThemedControl {
         _ = performPrimaryAction()
     }
 
-    // The press that opened the dropdown may still be held; its drag and release keep
-    // arriving here. Forwarding both is what makes press-drag-release choose an item, the
-    // way the stock pop-up this replaces always did.
-    override func mouseDragged(with event: NSEvent) {
-        guard let menuSession else { return }
-        ThemedMenuPresenter.dragUpdated(menuSession, event: event)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        guard let menuSession else { return }
-        ThemedMenuPresenter.dragEnded(menuSession, event: event)
-    }
+    // The press that opened the dropdown may still be held, and press-drag-release chooses the
+    // item it is let go over — the way the stock pop-up this replaces always did. The open menu
+    // tracks that press itself, so this control has nothing to forward.
 
     override func performPrimaryAction() -> Bool {
         presentMenu()

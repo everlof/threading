@@ -3,10 +3,12 @@
 // Installs ThreadingMobile's canonical app icon.
 //
 // The editable vector master is `Brand/ThreadingMark.svg`; `scripts/export_brand_assets.sh`
-// renders the full-bleed navy 1024px PNG once for every consumer. This script deliberately
-// copies that checked-in canonical raster instead of restating the mark in a second drawing
-// implementation. That makes the website and iOS use the same pixels, including the filled
-// center, while still leaving the build independent of librsvg.
+// renders the full-bleed navy 1024px PNG once for every consumer. This script deliberately uses
+// that checked-in canonical raster instead of restating the mark in a second drawing
+// implementation. The iOS tile keeps the canonical colours and geometry but fits them inside
+// the platform icon safe zone; the full-bleed navy ground remains opaque under the system mask.
+// That leaves the mark readable in Settings and on the Home Screen without changing the website
+// or runtime brand assets, and keeps the build independent of librsvg.
 //
 //   scripts/generate_mobile_app_icon.swift
 //
@@ -44,11 +46,65 @@ guard let raster = NSBitmapImageRep(data: png),
     exit(1)
 }
 
+let side = 1024
+let safeZoneInset: CGFloat = 92
+guard let sourceImage = NSImage(data: png),
+      let output = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: side,
+        pixelsHigh: side,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+      ),
+      let context = NSGraphicsContext(bitmapImageRep: output) else {
+    FileHandle.standardError.write(Data("Could not prepare the mobile app-icon raster\n".utf8))
+    exit(1)
+}
+
+NSGraphicsContext.saveGraphicsState()
+NSGraphicsContext.current = context
+context.imageInterpolation = NSImageInterpolation.high
+// Stretch an ink-free corner of the canonical raster across the plate. Drawing both the plate
+// and the fitted mark through the same colour-managed image path prevents a barely different
+// inner square from appearing around the scaled artwork.
+sourceImage.draw(
+    in: NSRect(x: 0, y: 0, width: side, height: side),
+    from: NSRect(x: 0, y: 0, width: 32, height: 32),
+    operation: .copy,
+    fraction: 1
+)
+sourceImage.draw(
+    in: NSRect(
+        x: safeZoneInset,
+        y: safeZoneInset,
+        width: CGFloat(side) - safeZoneInset * 2,
+        height: CGFloat(side) - safeZoneInset * 2
+    ),
+    from: NSRect(origin: .zero, size: sourceImage.size),
+    operation: .sourceOver,
+    fraction: 1
+)
+context.flushGraphics()
+NSGraphicsContext.restoreGraphicsState()
+
+guard let mobilePNG = output.representation(
+    using: NSBitmapImageRep.FileType.png,
+    properties: [:]
+) else {
+    FileHandle.standardError.write(Data("Could not encode the mobile app icon as PNG\n".utf8))
+    exit(1)
+}
+
 try FileManager.default.createDirectory(at: iconSet, withIntermediateDirectories: true)
-try png.write(to: destination, options: .atomic)
+try mobilePNG.write(to: destination, options: Data.WritingOptions.atomic)
 try FileManager.default.createDirectory(at: markSet, withIntermediateDirectories: true)
 try Data(contentsOf: repository.appendingPathComponent("Brand/ThreadingMark-1024.png"))
     .write(to: markDestination, options: .atomic)
 try FileManager.default.createDirectory(at: previewSet, withIntermediateDirectories: true)
-try png.write(to: previewDestination, options: .atomic)
+try mobilePNG.write(to: previewDestination, options: Data.WritingOptions.atomic)
 print("Wrote \(destination.path) from \(source.path)")

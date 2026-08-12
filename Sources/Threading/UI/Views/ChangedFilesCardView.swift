@@ -19,7 +19,6 @@ final class ChangedFilesCardView: NSView, NSTableViewDataSource, NSTableViewDele
     private let previews: [String: ChangedFileDiffPreview]
     private let onViewDiff: () -> Void
     private let onHeightChange: () -> Void
-    private let onCollapseStateChange: (Set<Int>) -> Void
 
     private var collapsedDirectories: Set<Int> = []
     /// The cheap projection the table presents. AppKit owns only cells intersecting the outer
@@ -75,22 +74,17 @@ final class ChangedFilesCardView: NSView, NSTableViewDataSource, NSTableViewDele
     init(
         tree: ChangedFilesTree,
         previews: [String: ChangedFileDiffPreview] = [:],
-        collapsedDirectories: Set<Int>? = nil,
         onViewDiff: @escaping () -> Void,
-        onHeightChange: @escaping () -> Void = {},
-        onCollapseStateChange: @escaping (Set<Int>) -> Void = { _ in }
+        onHeightChange: @escaping () -> Void = {}
     ) {
         self.tree = tree
         self.previews = previews
         self.onViewDiff = onViewDiff
         self.onHeightChange = onHeightChange
-        self.onCollapseStateChange = onCollapseStateChange
         super.init(frame: .zero)
 
-        if let collapsedDirectories {
-            self.collapsedDirectories = collapsedDirectories
-        } else if !tree.autoExpands {
-            self.collapsedDirectories = allDirectoryIndices
+        if !tree.autoExpands {
+            collapsedDirectories = allDirectoryIndices
         }
         rebuildPresentedNodes()
         setupViews()
@@ -133,9 +127,6 @@ final class ChangedFilesCardView: NSView, NSTableViewDataSource, NSTableViewDele
     /// Cheap logical rows and currently materialized AppKit cells, kept separate so stress tests
     /// can assert the ownership boundary rather than merely timing it.
     var presentedNodeCountForTesting: Int { presentedNodeIndices.count }
-    var collapsedDirectoryIndicesForTesting: Set<Int> { collapsedDirectories }
-    func toggleAllForTesting() { toggleAll() }
-    func viewDiffForTesting() { viewDiff() }
     var materializedRowCountForTesting: Int {
         materializedNodeIndicesForTesting.count
     }
@@ -260,7 +251,6 @@ final class ChangedFilesCardView: NSView, NSTableViewDataSource, NSTableViewDele
         rebuildPresentedNodes()
         rowsHeightConstraint?.constant = presentedRowsHeight
         if tableIsBound { rowsTable.reloadData() }
-        onCollapseStateChange(collapsedDirectories)
 
         // A row that just folded away cannot go on describing what the pointer is over.
         if let previewedNodeIndex, !presentedNodeIndices.contains(previewedNodeIndex) {

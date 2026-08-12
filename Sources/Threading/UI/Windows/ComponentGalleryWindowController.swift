@@ -89,6 +89,7 @@ final class ComponentGalleryViewController: NSViewController {
         "BrowserDeviceToolbar",
         "BrowserFindBar",
         "ChipView",
+        "ColorPairSpecimenView",
         "ConversationContextRailView",
         "ConversationHandoffView",
         "ConversationOutboxRailView",
@@ -152,9 +153,9 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedSegmentedControl",
         "ThemedSpinner",
         "ThemedSplitView",
+        "ThemedBarSparklineView",
         "ThemedStackedBandChartView",
         "ThemedTimeSeriesChartView",
-        "ThemedChartPlaceholderView",
         "ChartCardView",
         "ListSelectionStrength",
         "ThemedTableHeaderView",
@@ -245,6 +246,10 @@ final class ComponentGalleryViewController: NSViewController {
     private let galleryActivityBeam = AgentActivityBeamView()
     private let galleryUsageChart = ThemedTimeSeriesChartView()
     private let galleryStackedUsageChart = ThemedStackedBandChartView(frame: .zero)
+    private let gallerySparkline = ThemedBarSparklineView(
+        values: [1, 2, 0, 3, 4, 2, 7, 5, 8, 4, 10, 12],
+        accessibilityLabel: "Commits by week, oldest to newest"
+    )
     private var galleryUsageChartShowsAlternateData = false
     private var activityDemoFiles: [String] = []
     private var activityDemoCursor = 0
@@ -1679,6 +1684,7 @@ final class ComponentGalleryViewController: NSViewController {
         galleryUsageChart.widthAnchor.constraint(equalToConstant: 820).isActive = true
         galleryStackedUsageChart.translatesAutoresizingMaskIntoConstraints = false
         galleryStackedUsageChart.widthAnchor.constraint(equalToConstant: 820).isActive = true
+        gallerySparkline.widthAnchor.constraint(equalToConstant: 360).isActive = true
 
         let switchData = button("Switch data", action: #selector(toggleGalleryUsageChart))
         let chartSample = NSStackView(views: [galleryUsageChart, switchData])
@@ -1692,6 +1698,15 @@ final class ComponentGalleryViewController: NSViewController {
         stackedChartSample.alignment = .leading
         stackedChartSample.spacing = Design.Spacing.small
 
+        let switchSparklineData = button(
+            "Switch data",
+            action: #selector(toggleGalleryUsageChart)
+        )
+        let sparklineSample = NSStackView(views: [gallerySparkline, switchSparklineData])
+        sparklineSample.orientation = .vertical
+        sparklineSample.alignment = .leading
+        sparklineSample.spacing = Design.Spacing.small
+
         let dashboard = galleryUsageDashboardFixture()
         dashboard.translatesAutoresizingMaskIntoConstraints = false
         dashboard.widthAnchor.constraint(equalToConstant: 820).isActive = true
@@ -1700,6 +1715,11 @@ final class ComponentGalleryViewController: NSViewController {
             "Usage analytics",
             note: "Provider-neutral charts and the retained dashboard they compose.",
             rows: [
+                story(
+                    "ThemedBarSparklineView",
+                    "A compact accessible trend for a card; switch the fixed-size aggregate in place.",
+                    sparklineSample
+                ),
                 story(
                     "ThemedTimeSeriesChartView",
                     "Hover or arrow through points, then switch data to inspect the interrupted morph animation.",
@@ -1727,19 +1747,6 @@ final class ComponentGalleryViewController: NSViewController {
                 )
             ]
         )
-    }
-
-    @objc private func toggleGalleryUsageChart() {
-        galleryUsageChartShowsAlternateData.toggle()
-        galleryUsageChart.setModel(
-            galleryChartModel(alternate: galleryUsageChartShowsAlternateData),
-            animated: true
-        )
-        galleryStackedUsageChart.setModel(
-            galleryStackedChartModel(alternate: galleryUsageChartShowsAlternateData),
-            animated: true
-        )
-        showReceipt(L10n.string("Switched the chart data."))
     }
 
     /// The two states side by side, which is the only way to see that they do not look alike.
@@ -1774,6 +1781,26 @@ final class ComponentGalleryViewController: NSViewController {
         row.translatesAutoresizingMaskIntoConstraints = false
         row.widthAnchor.constraint(equalToConstant: 820).isActive = true
         return row
+    }
+
+    @objc private func toggleGalleryUsageChart() {
+        galleryUsageChartShowsAlternateData.toggle()
+        galleryUsageChart.setModel(
+            galleryChartModel(alternate: galleryUsageChartShowsAlternateData),
+            animated: true
+        )
+        galleryStackedUsageChart.setModel(
+            galleryStackedChartModel(alternate: galleryUsageChartShowsAlternateData),
+            animated: true
+        )
+        let values = galleryUsageChartShowsAlternateData
+            ? [8, 6, 7, 5, 3, 0, 9, 4, 2, 6, 1, 5]
+            : [1, 2, 0, 3, 4, 2, 7, 5, 8, 4, 10, 12]
+        gallerySparkline.setValues(
+            values.map(Double.init),
+            accessibilityLabel: L10n.string("Commits by week, oldest to newest")
+        )
+        showReceipt(L10n.string("Switched the chart data."))
     }
 
     private func galleryChartModel(alternate: Bool) -> ThemedChartModel {
@@ -3497,6 +3524,27 @@ final class ComponentGalleryViewController: NSViewController {
             return labelledInline(name, swatch)
         }
 
+        // Readable, the reported near-collapse, and the exact collision. The third one is the
+        // case the component exists for and the one worth checking under a new theme: it must
+        // stay a shape, and it must stay empty.
+        let colourPairSpecimens = [
+            ("Readable", NSColor(srgbRed: 0.87, green: 0.87, blue: 0.87, alpha: 1),
+             NSColor(srgbRed: 0.11, green: 0.11, blue: 0.11, alpha: 1)),
+            ("1.17:1", NSColor(srgbRed: 0x50 / 255, green: 0x50 / 255, blue: 0x50 / 255, alpha: 1),
+             NSColor(srgbRed: 0x46 / 255, green: 0x46 / 255, blue: 0x46 / 255, alpha: 1)),
+            ("1.00:1", .white, .white)
+        ].map { name, ink, ground -> NSView in
+            labelledInline(name, ColorPairSpecimenView(
+                ink: ink,
+                ground: ground,
+                accessibilityLabel: L10n.format(
+                    "Text color %@ shown on background color %@",
+                    ink.hexString,
+                    ground.hexString
+                )
+            ))
+        }
+
         return section(
             "Colour & theme",
             note: "The first swatch opens the system colour panel; the rest are read-only truth samples.",
@@ -3510,6 +3558,14 @@ final class ComponentGalleryViewController: NSViewController {
                     "ThemeSwatchImage",
                     "The compact terminal-palette preview used in menus and theme lists.",
                     themeImageView
+                ),
+                story(
+                    "ColorPairSpecimenView",
+                    "A reported text/background pair shown touching, for the diagnostic that "
+                        + "has to say two colours are the same colour. Nothing is drawn between "
+                        + "the halves: the third sample is one white on the same white, and it "
+                        + "has to read as one field with its specimen gone.",
+                    row(colourPairSpecimens)
                 ),
                 story(
                     "Semantic roles",

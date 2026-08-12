@@ -15,6 +15,7 @@ extension ConversationViewController {
 
     /// Brings the view tree in line with one change the timeline reported.
     func apply(_ change: ConversationTimeline.Change) {
+        remoteRowProjection.apply(change, timelineRows: timeline.rows)
         switch change {
         case .appended(let index):
             let row = timeline.rows[index]
@@ -350,29 +351,37 @@ extension ConversationViewController {
         after anchor: PresentationID?,
         offersViewDiff: Bool = true
     ) {
-        let cardID = PresentationID.changedFiles(UUID())
-        let content = PresentationItem.ChangedFilesContent(
+        let cardID = PresentationID.retained(UUID())
+        let card = ChangedFilesCardView(
             tree: tree,
             previews: previews,
-            checkpointID: checkpointID,
-            offersViewDiff: offersViewDiff
+            onViewDiff: { [weak self] in
+                // A replayed card has no checkpoint and its button is hidden below, so the
+                // absence is the same fact twice rather than a case to invent behaviour for.
+                guard let self, let checkpointID else { return }
+                self.delegate?.conversation(
+                    self,
+                    didRequestTurnDiff: checkpointID
+                )
+            },
+            onHeightChange: { [weak self] in
+                self?.notePresentationHeightChanged(cardID)
+            }
         )
 
-        // Replay appends after its just-settled turn, which is already the tail. Recognize that
-        // directly: searching a growing presentation for its final element once per turn made
-        // otherwise view-free replay quadratic.
-        let position: Int
-        if anchor == presentationItems.last?.id {
-            position = presentationItems.count
-        } else {
-            position = anchor
-                .flatMap { anchor in presentationItems.firstIndex { $0.id == anchor } }
-                .map { $0 + 1 }
-                ?? presentationItems.count
-        }
+        // Each card names its own checkpoint, so an older one still describes the turn it
+        // belongs to and keeps its diff — that is what durable checkpoints bought. Only a
+        // replayed card, which has no checkpoint to name, goes without.
+        if !offersViewDiff || checkpointID == nil { card.hideViewDiff() }
+        latestChangedFilesCard = card
+
+        let position = anchor
+            .flatMap { anchor in presentationItems.firstIndex { $0.id == anchor } }
+            .map { $0 + 1 }
+            ?? presentationItems.count
         presentationItems.insert(PresentationItem(
             id: cardID,
-            content: .changedFiles(content),
+            content: .retained(card),
             opensTurn: false
         ), at: position)
         reloadConversationRows()
@@ -756,30 +765,6 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
                     turnStart: turnStart
                 )
             }
-
-        case .changedFiles(let content):
-            let card = ChangedFilesCardView(
-                tree: content.tree,
-                previews: content.previews,
-                collapsedDirectories: changedFilesCollapseState[item.id],
-                onViewDiff: { [weak self] in
-                    // A replayed card has no checkpoint and its button is hidden below, so the
-                    // absence is the same fact twice rather than a case to invent behaviour for.
-                    guard let self, let checkpointID = content.checkpointID else { return }
-                    self.delegate?.conversation(self, didRequestTurnDiff: checkpointID)
-                },
-                onHeightChange: { [weak self] in
-                    self?.notePresentationHeightChanged(item.id)
-                },
-                onCollapseStateChange: { [weak self] state in
-                    self?.changedFilesCollapseState[item.id] = state
-                }
-            )
-            // Each card names its own checkpoint, so an older one still describes the turn it
-            // belongs to and keeps its diff. Replayed cards have no checkpoint to name.
-            if !content.offersViewDiff || content.checkpointID == nil { card.hideViewDiff() }
-            latestChangedFilesCard = card
-            return card
 
         case .retained(let view):
             AppThemeRefresh.repaintIfNeeded(view)

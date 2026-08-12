@@ -30,27 +30,50 @@ final class CodeStatsRenderTests: XCTestCase {
         var written = 0
 
         // This repository's own shape: one dominant language, a modest tail, no fold.
-        written += try write(story: "01-swift-dominant", info: info(name: "Threading", codes: [
+        written += try write(story: "01-swift-dominant", info: info(
+            name: "Threading",
+            codes: [
             ("Swift", 60_965, 374), ("Markdown", 4_762, 23), ("JSON", 821, 15),
             ("Python", 322, 2), ("YAML", 81, 2)
-        ]))
+            ],
+            activity: activity([1, 2, 0, 3, 4, 2, 7, 5, 8, 4, 10, 12])
+        ))
 
         // A polyglot monorepo: more languages than the cap, so the fold earns its keep.
-        written += try write(story: "02-polyglot", info: info(name: "sonda", codes: [
+        written += try write(story: "02-polyglot", info: info(
+            name: "sonda",
+            codes: [
             ("TypeScript", 48_200, 610), ("Rust", 31_450, 120), ("Python", 12_800, 95),
             ("Go", 8_400, 40), ("Swift", 5_100, 33), ("Shell", 2_200, 51),
             ("YAML", 1_900, 24), ("Dockerfile", 300, 6)
-        ]))
+            ],
+            activity: ProjectActivity(
+                weeklyCommits: Array(repeating: 1_700, count: 12),
+                commitCount: ProjectActivity.maximumCommitCount,
+                latestCommitAt: Date().addingTimeInterval(-60 * 60),
+                isTruncated: true
+            )
+        ))
 
         // One language only: the bar is a single run and the legend one row.
         written += try write(story: "03-single-language", info: info(name: "scripts", codes: [
             ("Python", 1_842, 12)
         ]))
 
-        // No scc on the machine: the popover is the install hint instead of silence.
-        written += try write(story: "04-missing-tool") {
-            ProjectStatsPopoverViewController(missingToolFor: "Threading")
-        }
+        // An unborn Git repository says so without inventing a history or an empty chart.
+        written += try write(
+            story: "04-no-commits",
+            info: info(
+                name: "new-project",
+                codes: [("Swift", 42, 2)],
+                activity: ProjectActivity(
+                    weeklyCommits: Array(repeating: 0, count: 12),
+                    commitCount: 0,
+                    latestCommitAt: nil,
+                    isTruncated: false
+                )
+            )
+        )
 
         XCTAssertEqual(written, 8, "Every story should render in both appearances")
         print("Rendered code-stats storybook to \(Render.directory.path)")
@@ -60,7 +83,8 @@ final class CodeStatsRenderTests: XCTestCase {
 
     private func info(
         name: String,
-        codes: [(String, Int, Int)]
+        codes: [(String, Int, Int)],
+        activity: ProjectActivity? = nil
     ) -> ProjectStatsPopoverViewController.Info {
         let stats = CodeStats(languages: codes.map {
             CodeStats.Language(
@@ -69,7 +93,19 @@ final class CodeStatsRenderTests: XCTestCase {
             )
         })
         return ProjectStatsPopoverViewController.Info(
-            projectName: name, stats: stats, measuredAt: measuredAt
+            projectName: name,
+            stats: stats,
+            activity: activity,
+            measuredAt: measuredAt
+        )
+    }
+
+    private func activity(_ buckets: [Int]) -> ProjectActivity {
+        ProjectActivity(
+            weeklyCommits: buckets,
+            commitCount: buckets.reduce(0, +),
+            latestCommitAt: Date().addingTimeInterval(-3 * 60 * 60),
+            isTruncated: false
         )
     }
 

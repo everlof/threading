@@ -121,7 +121,15 @@ private final class CompareInspectorSession {
             in: window,
             onDismiss: { [weak self] in self?.close() }
         )
-        window.makeFirstResponder(inspector.preferredFirstResponder)
+        // The canvas is preferred because it is what the arrow keys scrub — but it accepts focus
+        // only *while* it is scrubbable (`ImageCompareCanvas.acceptsFirstResponder`), and a
+        // difference view, a side-by-side, or a one-sided pair is not. Ignoring the answer would
+        // leave focus wherever it already was, on a composer or a terminal that is now behind a
+        // covering surface and still holding the keyboard. The inspector itself always accepts,
+        // so the fallback keeps focus inside the surface that was just opened.
+        if !window.makeFirstResponder(inspector.preferredFirstResponder) {
+            window.makeFirstResponder(inspector)
+        }
         NSAccessibility.post(element: inspector, notification: .layoutChanged)
     }
 
@@ -329,6 +337,18 @@ final class CompareInspectorView: NSView, ThemedComponent {
         }
         super.keyDown(with: event)
     }
+
+    /// **The route a plain Escape actually takes.**
+    ///
+    /// A modifier-less Escape is not a key equivalent, so AppKit does not offer it to the view
+    /// tree the way it offers ⌘W; it goes to the first responder as `keyDown`, and from there
+    /// `interpretKeyEvents` turns it into `cancelOperation(_:)`, which travels the responder
+    /// chain. Implementing only the two below therefore closes this surface in a fixture that
+    /// calls `performKeyEquivalent` by hand and leaves it open in the app — which is how it
+    /// shipped: expanding a comparison from the display panel gave a surface Escape would not
+    /// close. `ThemedAlert` and `ThemedPopover` have both answered `cancelOperation` all along;
+    /// this is the third transient surface in the app and the rule is the same for all of them.
+    override func cancelOperation(_ sender: Any?) { onDismiss?() }
 
     /// Escape belongs to the transient surface, not to whichever child holds focus — the canvas
     /// keeps the arrow keys, the chip keeps its menu, and Escape still closes from either.

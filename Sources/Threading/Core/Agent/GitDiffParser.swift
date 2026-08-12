@@ -12,6 +12,61 @@ enum GitDiffParser {
         UnifiedDiffParser.files(from: text)
     }
 
+    /// Parses `git diff --raw -z` into lightweight file identities. The full unified diff later
+    /// replaces these values in place; zero counts are therefore storage placeholders, never
+    /// presented as measurements. Rename/copy records consume both path fields.
+    static func files(fromRawDiff data: Data) -> [GitFileDiff] {
+        let records = decode(data)
+            .split(separator: "\u{00}", omittingEmptySubsequences: true)
+            .map(String.init)
+        var files: [GitFileDiff] = []
+        var index = 0
+        while index < records.count {
+            let header = records[index]
+            index += 1
+            guard header.hasPrefix(":"), index < records.count else { continue }
+            let fields = header.split(separator: " ", omittingEmptySubsequences: true)
+            guard let statusField = fields.last, let status = statusField.first else { continue }
+
+            let firstPath = records[index]
+            index += 1
+            let path: String
+            let change: GitFileDiff.Change
+            switch status {
+            case "R":
+                guard index < records.count else { continue }
+                path = records[index]
+                index += 1
+                change = .renamed(from: firstPath)
+            case "C":
+                guard index < records.count else { continue }
+                path = records[index]
+                index += 1
+                // NativeDiffCore has no copy case. A copy creates this destination, while the
+                // full parser will shortly replace it with its richer interpretation.
+                change = .added
+            case "A":
+                path = firstPath
+                change = .added
+            case "D":
+                path = firstPath
+                change = .deleted
+            default:
+                path = firstPath
+                change = .modified
+            }
+            guard !path.isEmpty else { continue }
+            files.append(GitFileDiff(
+                path: path,
+                change: change,
+                hunks: [],
+                added: 0,
+                removed: 0
+            ))
+        }
+        return files
+    }
+
     // MARK: - Status (porcelain v2)
 
     /// Parses `git status --porcelain=v2 -z`. With `-z`, records are NUL-separated and a
@@ -95,17 +150,54 @@ enum GitDiffParser {
         return GitChangeSummary(files: files, added: added, removed: removed)
     }
 
+    /// NUL-delimited per-file counts. A rename is the one irregular record: its count header
+    /// ends with an empty path, followed by old and new path records; the destination is the
+    /// identity the raw index and unified parser both expose.
+    static func fileStats(fromNumstat data: Data) -> [GitFileLineStats] {
+        let records = decode(data)
+            .split(separator: "\u{00}", omittingEmptySubsequences: false)
+            .map(String.init)
+        var stats: [GitFileLineStats] = []
+        var index = 0
+        while index < records.count {
+            let record = records[index]
+            index += 1
+            guard !record.isEmpty else { continue }
+            let fields = record.split(
+                separator: "\t",
+                maxSplits: 2,
+                omittingEmptySubsequences: false
+            )
+            guard fields.count == 3 else { continue }
+            let added = Int(fields[0]) ?? 0
+            let removed = Int(fields[1]) ?? 0
+            var path = String(fields[2])
+            if path.isEmpty {
+                // The source immediately follows; the destination after it is what survives.
+                guard index + 1 < records.count else { break }
+                index += 1
+                path = records[index]
+                index += 1
+            }
+            guard !path.isEmpty else { continue }
+            stats.append(GitFileLineStats(path: path, added: added, removed: removed))
+        }
+        return stats
+    }
+
     // MARK: - Log
 
     /// Parses `git log` in the reader's control-character format: records begin with 0x01,
-    /// header fields are NUL-separated, 0x02 ends the header, and `--numstat` lines follow.
-    static func commits(fromLog data: Data) -> [GitCommitSummary] {
+    /// header fields are NUL-separated, and 0x02 ends the header. `--numstat` lines follow only
+    /// for the progressive enrichment command; a metadata-first row must not present its
+    /// temporary zero values as real statistics.
+    static func commits(fromLog data: Data, includesStats: Bool = true) -> [GitCommitSummary] {
         decode(data)
             .split(separator: "\u{01}", omittingEmptySubsequences: true)
-            .compactMap { commit(fromRecord: String($0)) }
+            .compactMap { commit(fromRecord: String($0), includesStats: includesStats) }
     }
 
-    private static func commit(fromRecord record: String) -> GitCommitSummary? {
+    private static func commit(fromRecord record: String, includesStats: Bool) -> GitCommitSummary? {
         let sections = record.split(separator: "\u{02}", maxSplits: 1, omittingEmptySubsequences: false)
         let fields = sections[0].split(separator: "\u{00}", omittingEmptySubsequences: false).map(String.init)
         guard fields.count >= 5, let seconds = TimeInterval(fields[4]) else { return nil }
@@ -124,12 +216,13 @@ enum GitDiffParser {
 
         return GitCommitSummary(
             hash: fields[0],
-            shortHash: fields[1],
+            shortHash: includesStats ? fields[1] : String(fields[0].prefix(7)),
             subject: fields[2],
             author: fields[3],
             date: Date(timeIntervalSince1970: seconds),
             added: added,
             removed: removed,
+            hasStats: includesStats,
             parents: fields.count > 5 ? fields[5].split(separator: " ").map(String.init) : [],
             refs: fields.count > 6 ? decorations(in: fields[6]) : []
         )

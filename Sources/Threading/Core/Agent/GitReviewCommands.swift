@@ -7,6 +7,15 @@ import NativeDiffCore
 /// argv without spawning anything.
 enum GitReviewCommands {
 
+    private static let logPretty =
+        "--pretty=format:%x01%H%x00%h%x00%s%x00%an%x00%at%x00%P%x00%D%x02"
+    /// Metadata-first history deliberately avoids Git's unique-abbreviation and decoration
+    /// lookups. The reader already has the full hash, while refs and the exact abbreviation
+    /// arrive with progressive statistics. The repeated `%H` preserves the parser's field
+    /// framing; it is reduced to the ordinary seven-character placeholder in-process.
+    private static let logMetadataPretty =
+        "--pretty=format:%x01%H%x00%H%x00%s%x00%an%x00%at%x00%P%x00%x02"
+
     /// Prepended to every invocation: literal paths, and never taking `index.lock` for a read.
     static let common = ["-c", "core.quotepath=false", "--no-optional-locks"]
 
@@ -14,6 +23,13 @@ enum GitReviewCommands {
     static let diffFlags = [
         "--no-color", "--no-ext-diff", "--no-textconv", "--find-renames",
         "-U\(GitReviewDefaults.contextLines)"
+    ]
+
+    /// A path/change index without hunks. On large comparisons this reaches the pane while Git
+    /// is still generating the full patch, letting the virtual table present file identities
+    /// before it cancels that redundant complete read and hydrates visible files by path.
+    private static let diffIndexFlags = [
+        "--raw", "-z", "--no-color", "--no-ext-diff", "--no-textconv", "--find-renames"
     ]
 
     static let head = "HEAD"
@@ -26,27 +42,33 @@ enum GitReviewCommands {
         ["status", "--porcelain=v2", "-z", "--untracked-files=all"]
     }
 
-    /// Tracked plus non-ignored untracked files, NUL-delimited so every legal path survives.
-    /// `ls-files` supplies index order; deduplication makes that a unique lexical catalogue
-    /// rather than work every caller has to repeat in Swift.
-    static func repositoryFiles() -> [String] {
-        ["ls-files", "-co", "--exclude-standard", "--deduplicate", "-z"]
+    /// Untracked and non-ignored paths only. Review synthesis does not need tracked status
+    /// records, and asking `status` for those makes a clean Linux-sized checkout walk roughly
+    /// 95,000 tracked paths merely to return an empty untracked list.
+    static func untrackedFiles() -> [String] {
+        ["ls-files", "--others", "--exclude-standard", "-z"]
     }
 
-    /// One exact visible path. `literal` prevents wildcard/pathspec interpretation, while `top`
-    /// anchors the network-supplied spelling at the checkout root. Git may still treat a
-    /// directory pathspec recursively, so the reader verifies the one NUL-delimited result is
-    /// exactly the requested file before touching the filesystem.
+    /// Tracked plus non-ignored untracked files, NUL-delimited so every legal path survives.
+    static func repositoryFiles() -> [String] {
+        ["ls-files", "-co", "--exclude-standard", "-z"]
+    }
+
+    /// One exact tracked or non-ignored untracked path. The explicit literal pathspec prevents a
+    /// network-supplied name such as `*.swift` or `:(exclude)foo` from expanding into a catalogue.
     static func repositoryFile(_ path: String) -> [String] {
-        [
-            "ls-files", "-co", "--exclude-standard", "--deduplicate", "-z", "--",
-            ":(top,literal)\(path)"
-        ]
+        repositoryFiles() + ["--", ":(literal)\(path)"]
     }
 
     /// The diff flags for one read, with the whitespace-ignore flag folded in only when asked.
     private static func diffFlags(ignoringWhitespace: Bool) -> [String] {
         ignoringWhitespace ? diffFlags + [ignoreWhitespaceFlag] : diffFlags
+    }
+
+    /// Paths received from Git are data, not pathspec syntax. A literal magic signature keeps
+    /// brackets, globs, leading colons and exclude-looking names scoped to exactly that file.
+    private static func literalPathspecs(_ paths: [String]) -> [String] {
+        paths.map { ":(literal)\($0)" }
     }
 
     /// Index vs worktree when `ref` is nil; `ref` vs worktree otherwise.
@@ -70,6 +92,25 @@ enum GitReviewCommands {
         ["diff"] + diffFlags(ignoringWhitespace: ignoringWhitespace) + [oldTree, newTree]
     }
 
+    static func diff(
+        from oldTree: String,
+        to newTree: String,
+        paths: [String],
+        ignoringWhitespace: Bool = false
+    ) -> [String] {
+        diff(from: oldTree, to: newTree, ignoringWhitespace: ignoringWhitespace)
+            + ["--"] + literalPathspecs(paths)
+    }
+
+    static func diffIndex(
+        from oldTree: String,
+        to newTree: String,
+        ignoringWhitespace: Bool = false
+    ) -> [String] {
+        ["diff"] + diffIndexFlags + (ignoringWhitespace ? [ignoreWhitespaceFlag] : [])
+            + [oldTree, newTree]
+    }
+
     /// `--format=` suppresses the commit header, leaving pure diff on stdout.
     static func show(_ hash: String, ignoringWhitespace: Bool = false) -> [String] {
         ["show", hash, "--format="] + diffFlags(ignoringWhitespace: ignoringWhitespace)
@@ -84,7 +125,17 @@ enum GitReviewCommands {
     static func log(skip: Int) -> [String] {
         [
             "log", "--no-color", "--numstat",
-            "--pretty=format:%x01%H%x00%h%x00%s%x00%an%x00%at%x00%P%x00%D%x02",
+            logPretty,
+            "--skip=\(skip)", "--max-count=\(GitReviewDefaults.logPageSize)"
+        ]
+    }
+
+    /// The history surface can draw its graph and every textual field without opening the
+    /// commits' trees and blobs. Statistics follow as progressive enrichment; keeping this
+    /// first command metadata-only makes cold history presentation independent of diff weight.
+    static func logMetadata(skip: Int) -> [String] {
+        [
+            "log", "--no-color", logMetadataPretty,
             "--skip=\(skip)", "--max-count=\(GitReviewDefaults.logPageSize)"
         ]
     }
@@ -106,6 +157,30 @@ enum GitReviewCommands {
 
     static func diffNumstatStaged() -> [String] {
         ["diff", "--cached", "--numstat", "--no-color", "--no-ext-diff", "--no-textconv"]
+    }
+
+    /// Per-file counts for an immutable comparison. The broad pass explicitly disables rename
+    /// discovery: on Linux's 970-file stress range, asking diffcore to search for renames made
+    /// the same exact line count roughly five times slower despite the range containing none.
+    /// The reader re-runs only paths the already-complete raw roster identified as renames with
+    /// `detectingRenames` enabled, preserving rename semantics without making every file pay.
+    static func diffNumstat(
+        from oldTree: String,
+        to newTree: String,
+        paths: [String] = [],
+        detectingRenames: Bool = false,
+        ignoringWhitespace: Bool = false
+    ) -> [String] {
+        var arguments = [
+            "diff", "--numstat", "-z", "--no-color", "--no-ext-diff", "--no-textconv",
+            detectingRenames ? "--find-renames" : "--no-renames",
+        ]
+        if ignoringWhitespace { arguments.append(ignoreWhitespaceFlag) }
+        arguments += [oldTree, newTree]
+        if !paths.isEmpty {
+            arguments += ["--"] + literalPathspecs(paths)
+        }
+        return arguments
     }
 
     static func headHash() -> [String] {
@@ -198,6 +273,17 @@ enum GitReviewDefaults {
     static let contextLines = 3
     static let logPageSize = 100
 
+    /// Below this, an extra process costs more than the blank interval it could hide.
+    static let progressiveDiffFileThreshold = 100
+    static let progressiveDiffDelay: TimeInterval = 0.1
+    /// One process hydrates at most the current viewport. A serial hydration queue and this cap
+    /// keep a fast scroll from becoming one child per row or an unbounded pathspec argument list.
+    static let progressiveDiffHydrationBatch = 16
+    static let progressiveDiffHydrationSettleDelay: TimeInterval = 0.04
+    /// Totals are enrichment, never an input to the first useful viewport. Wait for a genuine
+    /// pause so their blob walk does not compete with a reader who immediately keeps moving.
+    static let progressiveDiffStatsSettleDelay: TimeInterval = 0.6
+
     /// How long the scroller thumb must hold still, mid-drag, before the ghost viewport is
     /// replaced with real rows. Short enough that a scrub's natural reading pause is answered;
     /// long enough that a slow continuous drag never pays TextKit per pointer event.
@@ -218,9 +304,6 @@ enum GitReviewDefaults {
     /// The mobile repository browser is an overview, not an unbounded archive transport.
     static let remoteRepositoryFileLimit = 5_000
     static let remoteRepositoryFileByteCap = 512 * 1024
-    /// One literal `ls-files` lookup should return exactly one path. The cap still allows the
-    /// longest inbound repository path plus Git's NUL terminator without admitting a catalogue.
-    static let exactRepositoryPathOutputCap = 16 * 1024 + 1
 
     static let lineNumberWidth: CGFloat = 36
 

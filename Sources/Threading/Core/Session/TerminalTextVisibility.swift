@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftTerm
 
@@ -23,14 +24,48 @@ struct TerminalTextVisibilityIssue: Hashable, Sendable {
         L10n.string("A program color conflicts with this terminal theme")
     }
 
+    /// Names the pair, and — when the renderer could quote it — the run that went missing.
+    ///
+    /// Two hex values alone are a true statement about a screen the reader has already looked at
+    /// and found nothing wrong with, because the evidence is the part they cannot see. The run's
+    /// own words are what turn the notice into a place to look; SwiftTerm has already bounded and
+    /// sanitized them, and an empty sample simply falls back to the colours.
     var detail: String {
-        L10n.format(
-            "%@ (%@) is %@ against %@ (%@). Threading shows it as sent. "
+        let ratio = String(format: "%.2f:1", conflict.contrastRatio)
+        guard !conflict.sample.isEmpty else {
+            return L10n.format(
+                "%@ (%@) is %@ against %@ (%@). Threading shows it as sent. "
+                    + "Use default foreground (ANSI 39), or change themes.",
+                conflict.foregroundSource.displayName,
+                conflict.foreground.hexString,
+                ratio,
+                conflict.backgroundSource.displayName,
+                conflict.background.hexString
+            )
+        }
+        return L10n.format(
+            "The text “%@” is %@ (%@) on %@ (%@): %@. Threading shows it as sent. "
                 + "Use default foreground (ANSI 39), or change themes.",
+            conflict.sample,
             conflict.foregroundSource.displayName,
             conflict.foreground.hexString,
-            String(format: "%.2f:1", conflict.contrastRatio),
             conflict.backgroundSource.displayName,
+            conflict.background.hexString,
+            ratio
+        )
+    }
+
+    /// The two colours as they were rendered, for the specimen that shows them touching.
+    var foregroundColor: NSColor { conflict.foreground.color }
+    var backgroundColor: NSColor { conflict.background.color }
+
+    /// What the specimen says to a reader who is not looking at it. The colours are the one part
+    /// of this diagnostic a picture states and a sentence cannot, so the sentence is spelled out
+    /// rather than left as an unlabelled swatch.
+    var specimenLabel: String {
+        L10n.format(
+            "Text color %@ shown on background color %@",
+            conflict.foreground.hexString,
             conflict.background.hexString
         )
     }
@@ -84,6 +119,18 @@ struct TerminalTextVisibilityDismissals {
 private extension TerminalRenderedColor {
     var hexString: String {
         String(format: "#%02X%02X%02X", red, green, blue)
+    }
+
+    /// Built in sRGB, which is the space the renderer already reduced the pair to. A dynamic or
+    /// theme colour would be wrong here on purpose: this is the program's colour, reproduced,
+    /// and it must not follow the app's appearance the way chrome does.
+    var color: NSColor {
+        NSColor(
+            srgbRed: CGFloat(red) / 255,
+            green: CGFloat(green) / 255,
+            blue: CGFloat(blue) / 255,
+            alpha: 1
+        )
     }
 }
 

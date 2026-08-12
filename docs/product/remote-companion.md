@@ -84,8 +84,9 @@ the owner can change it in the Mac Sharing pane or on a paired companion, the co
 off, and the owner can always reclaim. The Remote Access setting only chooses the default for a
 new shared session.
 
-The Mac is the authority for every write surface—Native prompt, atomic terminal line, raw PTY
-input, paste/drop, mouse reporting and local keyboard entry—not the client-side disabled state.
+The Mac is the authority for every write surface: Native prompt, atomic terminal line, raw PTY
+input, paste/drop, mouse reporting and local keyboard entry. The client-side disabled state is not
+the authority.
 The identity is a participant rather than a socket, so reconnecting through another advertised
 Tailscale/relay endpoint or opening a second device does not accidentally acquire a second turn.
 A guest's last disconnect starts a 30-second grace period before control returns to the owner;
@@ -99,7 +100,7 @@ not add another notification switch. A client that does not understand the new c
 still cannot bypass the Mac's write gate; upgrading is required to expose the handoff UI.
 
 Human attention is deliberately not another composer grammar. A separate **@** control lets a
-collaborator ask one accepted chat member—including somebody currently away—for input and attach
+collaborator ask one accepted chat member, including somebody currently away, for input and attach
 a short optional note. The request is app-owned metadata: it sends neither a Claude or Codex
 prompt nor terminal bytes. Open clients show a quiet collaboration event, while the selected
 person can receive a push notification controlled by the independent **Requests for my input**

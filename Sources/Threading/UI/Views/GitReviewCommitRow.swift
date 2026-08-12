@@ -53,14 +53,23 @@ final class GitReviewCommitRow: NSView {
         subjectLabel.toolTip = commit.subject
 
         let counts = NSMutableAttributedString()
-        counts.append(NSAttributedString(string: "+\(commit.added)", attributes: [
-            .foregroundColor: Design.Diff.added,
-            .font: Design.Typography.caption()
-        ]))
-        counts.append(NSAttributedString(string: " −\(commit.removed)", attributes: [
-            .foregroundColor: Design.Diff.removed,
-            .font: Design.Typography.caption()
-        ]))
+        if commit.hasStats {
+            counts.append(NSAttributedString(string: "+\(commit.added)", attributes: [
+                .foregroundColor: Design.Diff.added,
+                .font: Design.Typography.caption()
+            ]))
+            counts.append(NSAttributedString(string: " −\(commit.removed)", attributes: [
+                .foregroundColor: Design.Diff.removed,
+                .font: Design.Typography.caption()
+            ]))
+        } else {
+            // Preserve the trailing column while the background stat read runs, without lying
+            // that an unknown count is zero or making the fixed-height row move when it arrives.
+            counts.append(NSAttributedString(string: "…", attributes: [
+                .foregroundColor: Design.Text.quaternary,
+                .font: Design.Typography.caption()
+            ]))
+        }
         let countsLabel = NSTextField.label(attributed: counts)
         countsLabel.setContentHuggingPriority(.required, for: .horizontal)
 
@@ -198,6 +207,10 @@ enum GitReviewCommitRowDefaults {
     /// The byline sits under a `control`-weight subject; caption's semibold reads too loud
     /// for a second line, so it is the same size at regular weight.
     static let bylineFontSize: CGFloat = 11
+
+    /// Two text lines, the hairline between them, and the row's vertical insets. Fixed height is
+    /// what lets `NSTableView` seek without first asking every offscreen commit to lay itself out.
+    static let tableRowHeight: CGFloat = 42
 
     static let maximumRefs = 2
     static let refBadgeHeight: CGFloat = 15

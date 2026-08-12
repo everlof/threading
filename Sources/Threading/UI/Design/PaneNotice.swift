@@ -109,6 +109,7 @@ final class PaneNoticeView: NSView, ThemedComponent {
     private var handlers: [() -> Void] = []
     private var actionButtons: [ThemedButton] = []
     private var dismissButton: ThemedIconButton?
+    private var accessory: NSView?
     private let appEvents = AppEventObservations()
     private var themeRedraw: ThemeRedraw?
 
@@ -120,10 +121,16 @@ final class PaneNoticeView: NSView, ThemedComponent {
 
     /// `onDismiss` is what the ✕ performs; a band without one carries no ✕ and the host owns
     /// when it leaves.
+    ///
+    /// `accessory` is for a condition whose evidence is a picture — a colour pair the sentence
+    /// can only spell out in hex. It sits between the sentence and the buttons, keeps its own
+    /// size, and is not a control: a band's answers are its actions, and a second pressable thing
+    /// beside them would compete with the one the user is meant to press.
     init(
         tone: Tone,
         title: String? = nil,
         message: String,
+        accessory: NSView? = nil,
         actions: [PaneNoticeAction],
         onDismiss: (() -> Void)? = nil
     ) {
@@ -137,7 +144,7 @@ final class PaneNoticeView: NSView, ThemedComponent {
         translatesAutoresizingMaskIntoConstraints = false
         themeRedraw = ThemeRedraw(self)
 
-        setupViews(actions: actions, onDismiss: onDismiss)
+        setupViews(accessory: accessory, actions: actions, onDismiss: onDismiss)
         applyMetrics()
         applyInk()
 
@@ -171,6 +178,9 @@ final class PaneNoticeView: NSView, ThemedComponent {
     /// The ✕, when the band has one.
     var dismissControl: ThemedIconButton? { dismissButton }
 
+    /// The evidence beside the sentence, when the band carries any.
+    var accessoryView: NSView? { accessory }
+
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
@@ -192,7 +202,11 @@ final class PaneNoticeView: NSView, ThemedComponent {
 
     // MARK: - Private Methods
 
-    private func setupViews(actions: [PaneNoticeAction], onDismiss: (() -> Void)?) {
+    private func setupViews(
+        accessory: NSView?,
+        actions: [PaneNoticeAction],
+        onDismiss: (() -> Void)?
+    ) {
         glyph.image = Design.Symbol.image(
             tone.symbol,
             slot: PaneNoticeDefaults.glyphSlot,
@@ -253,6 +267,13 @@ final class PaneNoticeView: NSView, ThemedComponent {
             button.setContentHuggingPriority(.required, for: .horizontal)
             addSubview(button)
             return button
+        }
+
+        if let accessory {
+            accessory.translatesAutoresizingMaskIntoConstraints = false
+            accessory.setContentHuggingPriority(.required, for: .horizontal)
+            addSubview(accessory)
+            self.accessory = accessory
         }
 
         if let onDismiss {
@@ -323,8 +344,13 @@ final class PaneNoticeView: NSView, ThemedComponent {
         // The trailing run, laid out from the edge inwards: the ✕ sits at the margin and the
         // actions queue to its leading side. Aligned by ink like the two bands beside it — a
         // glyph button's frame carries its click target, and its edge is not its mark.
+        //
+        // The accessory goes last, which puts it leading of every button: evidence belongs with
+        // the sentence it is evidence for, not out at the edge among the answers.
         var trailingNeighbour: NSView?
-        for view in ([dismissButton].compactMap { $0 } + actionButtons.reversed()) {
+        for view in ([dismissButton].compactMap { $0 }
+            + actionButtons.reversed()
+            + [accessory].compactMap { $0 }) {
             constraints.append(
                 view.centerYAnchor.constraint(equalTo: contentAreaGuide.centerYAnchor)
             )

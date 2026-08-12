@@ -11,88 +11,76 @@ struct MobileSettingsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("Appearance") {
-                    NavigationLink {
-                        MobileAppIconSettingsView()
-                    } label: {
-                        SettingsRow(
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
+                    settingsSection("Appearance") {
+                        SettingsNavigationRow(
                             symbol: "app.dashed",
                             title: "App icon",
                             detail: LocalizedStringKey(MobileAppIconChoice.current.displayName)
-                        )
-                    }
+                        ) {
+                            MobileAppIconSettingsView()
+                        }
 
-                    if model.canManageThemes {
-                        NavigationLink {
-                            MacAppearanceSettingsView()
-                        } label: {
-                            SettingsRow(
+                        if model.canManageThemes {
+                            ThemedSettingsDivider()
+                            SettingsNavigationRow(
                                 symbol: "paintpalette",
                                 title: "Mac appearance",
-                                detail: model.me?.theme.map {
-                                    LocalizedStringKey($0.name)
-                                }
-                            )
+                                detail: model.me?.theme.map { LocalizedStringKey($0.name) }
+                            ) {
+                                MacAppearanceSettingsView()
+                            }
                         }
                     }
-                }
 
-                Section("On this iPhone") {
-                    NavigationLink {
-                        CollaborationSettingsView()
-                    } label: {
-                        SettingsRow(
+                    settingsSection("On this iPhone") {
+                        SettingsNavigationRow(
                             symbol: "person.2",
                             title: "Collaboration",
                             detail: "Presence, typing and drafts"
-                        )
-                    }
+                        ) {
+                            CollaborationSettingsView()
+                        }
 
-                    NavigationLink {
-                        TerminalKeyboardAgentList()
-                    } label: {
-                        SettingsRow(
+                        ThemedSettingsDivider()
+                        SettingsNavigationRow(
                             symbol: "keyboard",
                             title: "Terminal keys",
                             detail: "The key bar under a remote terminal"
-                        )
-                    }
+                        ) {
+                            TerminalKeyboardAgentList()
+                        }
 
-                    Button {
-                        showsNotifications = true
-                    } label: {
-                        SettingsRow(
+                        ThemedSettingsDivider()
+                        SettingsActionRow(
                             symbol: "bell",
                             title: "Notifications",
                             detail: notificationStatus
-                        )
+                        ) {
+                            showsNotifications = true
+                        }
                     }
-                    .buttonStyle(.plain)
-                }
 
-                Section("Support") {
-                    Button {
-                        showsDiagnostics = true
-                    } label: {
-                        SettingsRow(
+                    settingsSection("Support") {
+                        SettingsActionRow(
                             symbol: "stethoscope",
                             title: "Diagnostics",
-                            detail: model.activeHost.map {
-                                LocalizedStringKey($0.name)
-                            }
-                        )
+                            detail: model.activeHost.map { LocalizedStringKey($0.name) }
+                        ) {
+                            showsDiagnostics = true
+                        }
                     }
-                    .buttonStyle(.plain)
-                }
 
-                Section {
                     Text("These iPhone preferences are available before you connect a Mac.")
                         .font(.footnote)
                         .foregroundStyle(theme.secondaryLabel)
+                        .padding(.horizontal, MobileDesign.Spacing.tight)
                 }
+                .padding(.horizontal, MobileDesign.Spacing.inset)
+                .padding(.top, MobileDesign.Spacing.medium)
+                .padding(.bottom, MobileDesign.Spacing.pane)
             }
-            .scrollContentBackground(.hidden)
             .background(theme.ground)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -117,6 +105,19 @@ struct MobileSettingsView: View {
                 .environment(\.remoteTheme, theme)
         }
         .presentationDetents([.large])
+    }
+
+    private func settingsSection<Content: View>(
+        _ title: LocalizedStringKey,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(theme.label)
+                .padding(.horizontal, MobileDesign.Spacing.inset)
+            ThemedSettingsGroup(content: content)
+        }
     }
 
     private var notificationStatus: LocalizedStringKey {
@@ -173,36 +174,120 @@ private struct SettingsRow: View {
     }
 }
 
+private struct ThemedSettingsGroup<Content: View>: View {
+    @Environment(\.remoteTheme) private var theme
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(spacing: 0, content: content)
+            .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: theme.panelRadius)
+                    .stroke(theme.border, lineWidth: theme.borderWidth)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: theme.panelRadius))
+            .remoteThemeGlow(theme)
+    }
+}
+
+private struct ThemedSettingsDivider: View {
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        Rectangle()
+            .fill(theme.divider)
+            .frame(height: max(theme.borderWidth, 1 / UIScreen.main.scale))
+            .padding(.horizontal, MobileDesign.Spacing.inset)
+    }
+}
+
+private struct SettingsNavigationRow<Destination: View>: View {
+    @Environment(\.remoteTheme) private var theme
+    let symbol: String
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey?
+    @ViewBuilder let destination: () -> Destination
+
+    var body: some View {
+        NavigationLink {
+            destination()
+        } label: {
+            HStack(spacing: MobileDesign.Spacing.small) {
+                SettingsRow(symbol: symbol, title: title, detail: detail)
+                Spacer(minLength: MobileDesign.Spacing.small)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.tertiaryLabel)
+            }
+            .padding(.horizontal, MobileDesign.Spacing.inset)
+            .padding(.vertical, MobileDesign.Spacing.small)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct SettingsActionRow: View {
+    let symbol: String
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            SettingsRow(symbol: symbol, title: title, detail: detail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, MobileDesign.Spacing.inset)
+                .padding(.vertical, MobileDesign.Spacing.small)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct CollaborationSettingsView: View {
     @EnvironmentObject private var notifications: RemoteNotificationManager
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
-        List {
-            Section {
-                Toggle("People in open sessions", isOn: $notifications.peoplePresenceEnabled)
-                Toggle("Typing indicators", isOn: $notifications.typingIndicatorsEnabled)
-                Toggle(
-                    "Independent terminal drafts",
-                    isOn: $notifications.independentTerminalDraftsEnabled
-                )
-            } footer: {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+                ThemedSettingsGroup {
+                    Toggle("People in open sessions", isOn: $notifications.peoplePresenceEnabled)
+                        .padding(.horizontal, MobileDesign.Spacing.inset)
+                        .padding(.vertical, MobileDesign.Spacing.small)
+                    ThemedSettingsDivider()
+                    Toggle("Typing indicators", isOn: $notifications.typingIndicatorsEnabled)
+                        .padding(.horizontal, MobileDesign.Spacing.inset)
+                        .padding(.vertical, MobileDesign.Spacing.small)
+                    ThemedSettingsDivider()
+                    Toggle(
+                        "Independent terminal drafts",
+                        isOn: $notifications.independentTerminalDraftsEnabled
+                    )
+                    .padding(.horizontal, MobileDesign.Spacing.inset)
+                    .padding(.vertical, MobileDesign.Spacing.small)
+                }
+
                 Text(MobileL10n.string(
                     """
                     Presence stays inside the live session. Independent drafts keep devices \
                     from mixing keystrokes in the same terminal.
                     """
                 ))
+                .font(.footnote)
+                .foregroundStyle(theme.secondaryLabel)
+                .padding(.horizontal, MobileDesign.Spacing.inset)
             }
+            .padding(MobileDesign.Spacing.inset)
         }
-        .scrollContentBackground(.hidden)
         .background(theme.ground)
         .navigationTitle("Collaboration")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-private struct MacAppearanceSettingsView: View {
+struct MacAppearanceSettingsView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
     @State private var pendingThemeID: String?
@@ -310,6 +395,7 @@ struct MobileAppIconSettingsView: View {
                                         .resizable()
                                         .scaledToFit()
                                         .frame(width: 76, height: 76)
+                                        .scaleEffect(choice.previewScale)
                                         .clipShape(RoundedRectangle(cornerRadius: 17))
                                         .shadow(color: .black.opacity(0.22), radius: 5, y: 3)
 
@@ -394,6 +480,10 @@ struct MobileAppIconChoice: Identifiable, Equatable {
     let alternateIconName: String?
     let previewAssetName: String
 
+    /// Alternate icon sources have different baked safe zones. A small authored presentation
+    /// scale normalises the visible mark while every choice retains the same 76-point cell.
+    var previewScale: CGFloat { alternateIconName == nil ? 0.86 : 1 }
+
     var id: String { alternateIconName ?? "default" }
 
     static let all: [MobileAppIconChoice] = [
@@ -403,6 +493,7 @@ struct MobileAppIconChoice: Identifiable, Equatable {
             alternateIconName: nil,
             previewAssetName: "AppIconPreviewDefault"
         ),
+        themed("threading", "Threading", "Threading"),
         themed("editorial", "Editorial", "Editorial"),
         themed("cyberpunk", "Cyberpunk", "Cyberpunk"),
         themed("swiss-minimalist", "Swiss Minimalist", "SwissMinimalist"),

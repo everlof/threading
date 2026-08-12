@@ -170,7 +170,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Performance spans, main-thread stalls, MetricKit payloads, `sample`/`xctrace`, and the full/full+ sweep | [`performance.md`](docs/architecture/performance.md) |
 | Entitlements, the TCC grants and who inherits them, the Privacy settings page, Info.plist usage strings | [`permissions.md`](docs/architecture/permissions.md) |
 | Developer ID signing, notarization, `scripts/release.sh`, and the Sparkle automatic-update plan | [`releasing.md`](docs/architecture/releasing.md) |
-| Reclaimable build output, the two deletion gates, `scc` code stats | [`storage-and-stats.md`](docs/architecture/storage-and-stats.md) |
+| Reclaimable build output, the two deletion gates, bundled project composition and Git activity | [`storage-and-stats.md`](docs/architecture/storage-and-stats.md) |
 | Persistence/wire failure semantics, dependency direction, strict concurrency, bounded work, CI and release gates | [`reliability-and-type-safety.md`](docs/architecture/reliability-and-type-safety.md) |
 | Application-level XCUITest journeys, recorded provider traffic and deterministic fixture agents | [`ui-scenario-testing.md`](docs/architecture/ui-scenario-testing.md) |
 | Any UI at all: the component vocabulary, themed controls, tabs, the composer, motion previews | [`design-system.md`](docs/architecture/design-system.md) |

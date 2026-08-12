@@ -363,10 +363,11 @@ final class ChipViewTests: XCTestCase {
         XCTAssertEqual(presentations, 4)
     }
 
-    /// The press that opened the menu may still be held. AppKit keeps routing its drag and
-    /// release to the chip, which forwards both to the open menu — so press-drag-release
-    /// chooses a row the way every platform menu does.
-    func testAHeldPressReleasedOverARowChoosesThroughTheChip() throws {
+    /// A row chosen in the open menu answers back through the chip: its selection, its callback
+    /// and the panel closing. How the row was chosen belongs to the menu — a click, the keyboard,
+    /// or a press-drag-release the presenter tracks on the chip's behalf — so the gesture itself
+    /// is exercised there, against every control that opens one.
+    func testARowChosenInTheMenuAnswersThroughTheChip() throws {
         let chip = ChipView(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
         chip.itemsProvider = { [self] in entries(titles: ["One", "Two"]) }
         var chosen: String?
@@ -394,15 +395,13 @@ final class ChipViewTests: XCTestCase {
                 $0.accessibilityRole() == .menuItem && $0.accessibilityTitle() == "Two"
             }
         )
-        let target = row.convert(NSPoint(x: row.bounds.midX, y: row.bounds.midY), to: nil)
-        chip.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: target, in: window))
-        chip.mouseUp(with: try mouseEvent(.leftMouseUp, at: target, in: window))
+        XCTAssertTrue(row.accessibilityPerformPress())
 
         XCTAssertEqual(chosen, "Two")
         XCTAssertEqual(chip.selectedItem?.title, "Two")
         XCTAssertFalse(
             descendants(in: root).contains { $0.accessibilityRole() == .menu },
-            "the release chose a row, so the menu should have closed"
+            "choosing a row left the menu open"
         )
     }
 

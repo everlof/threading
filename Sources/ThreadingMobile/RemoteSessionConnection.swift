@@ -525,6 +525,34 @@ final class RemoteSessionConnection: ObservableObject {
         }
     }
 
+#if DEBUG
+    /// Drives the UI half of a reconnect performance fixture after the initial conversation has
+    /// fully mounted. The socket's transport/hydration cost has its own host-side benchmark; this
+    /// boundary deliberately exercises the same published phase changes and authoritative store
+    /// replacement that the mounted UIKit surface observes.
+    @discardableResult
+    func performReconnectPerformanceFixture(
+        snapshot: RemoteConversationSnapshotDTO
+    ) -> Bool {
+        phase = .failed("Performance fixture reconnect")
+        phase = .connecting
+        composerCapabilities = []
+        supportsAtomicTerminalSubmission = false
+        supportsAttentionRequests = false
+        supportsFocusedInputControl = false
+        inputControl = nil
+        attentionRecipients = []
+
+        phase = .connected
+        supportsAttentionRequests = true
+        supportsFocusedInputControl = true
+        let change = conversationStore.replace(with: snapshot)
+        composerCapabilities = snapshot.composerCapabilities
+        if case .reset = change { return true }
+        return false
+    }
+#endif
+
     private struct Envelope: Decodable {
         let type: String
     }
@@ -839,10 +867,14 @@ final class RemoteSessionConnection: ObservableObject {
 
 #if DEBUG
     static func demoTerminal() -> RemoteSessionConnection {
+        let demoMode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] ?? ""
+        let isCodexFixture = demoMode == "terminal-ansi"
+            || demoMode == "terminal-codex-tui"
+        let agentName = isCodexFixture ? "Codex" : "Claude Code"
         let session = RemoteSessionSummaryDTO(
             id: "f50c77da-5716-470b-933c-d68310644b4f",
-            title: "Claude Code · AnotherTerminal",
-            agentKind: "claude",
+            title: "\(agentName) · AnotherTerminal",
+            agentKind: isCodexFixture ? "codex" : "claude",
             surface: "terminal",
             state: "running",
             projectName: "AnotherTerminal"
@@ -855,29 +887,125 @@ final class RemoteSessionConnection: ObservableObject {
         connection.phase = .connected
         connection.surface = "terminal"
         connection.capability = .interact
-        connection.theme = RemoteAppModel.demoTheme
-        connection.terminalTheme = RemoteAppModel.demoTerminalTheme
+        let usesThreadingTheme = ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"]
+            == "threading"
+        connection.theme = usesThreadingTheme
+            ? RemoteAppModel.demoThreadingTheme
+            : RemoteAppModel.demoTheme
+        connection.terminalTheme = usesThreadingTheme
+            ? RemoteAppModel.demoThreadingTerminalTheme
+            : RemoteAppModel.demoTerminalTheme
         connection.terminalColumns = 48
         connection.terminalRows = 18
         connection.serverFeatures = Set(RemoteWebSocketFeature.allCases.map(\.rawValue))
         connection.supportsAtomicTerminalSubmission = true
         connection.supportsAttentionRequests = true
         connection.supportsFocusedInputControl = true
-        let lines = [
-            "\u{1b}[2J\u{1b}[H\u{1b}[1;36mClaude Code\u{1b}[0m  AnotherTerminal",
-            "",
-            "● Collaboration is ready.",
-            "  Devices keep separate drafts.",
-            "",
-            "● Running transport and UI tests…",
-            "",
-            "  $ swift test",
-            "  All tests passed",
-            "",
-            "\u{1b}[2m──────────────────────────────────────\u{1b}[0m",
-            "❯ Waiting for the next instruction",
-        ]
+        let lines: [String]
+        switch demoMode {
+        case "terminal-ansi":
+            lines = [
+                "\u{1b}[2J\u{1b}[H\u{1b}[1;36mCodex\u{1b}[0m  ANSI and Unicode fixture",
+                "",
+                "\u{1b}[32m✓ build\u{1b}[0m  \u{1b}[33m⚠ 2 warnings\u{1b}[0m  \u{1b}[31m✗ 1 failure\u{1b}[0m",
+                "",
+                "Palette  \u{1b}[31mred\u{1b}[0m \u{1b}[32mgreen\u{1b}[0m \u{1b}[34mblue\u{1b}[0m \u{1b}[35mmagenta\u{1b}[0m",
+                "Unicode  café · 東京 · 🙂 · λ → ∑",
+                "",
+                "Wrapping a deliberately long command keeps the final flag and quoted value visible instead of clipping at the phone edge:",
+                "$ swift test --filter RemoteKeyboardLifecycleTests --parallel",
+                "",
+                "Progress [########################] 100%",
+                "\u{1b}[1;31merror:\u{1b}[0m expected keyboard inset to return to zero",
+                "  Sources/ThreadingMobile/Composer.swift:128:9",
+                "",
+                "❯ ",
+            ]
+        case "terminal-codex-tui":
+            lines = [
+                "\u{1b}[2J\u{1b}[H\u{1b}[1;36mCodex\u{1b}[0m  AnotherTerminal",
+                "\u{1b}[2mGPT-5.6 Sol · high reasoning\u{1b}[0m",
+                "",
+                "› Make keyboard dismissal deterministic and",
+                "  add visual regression evidence.",
+                "",
+                "• Inspected the composer and evidence harness",
+                "• Fixed the keyboard notification lifecycle",
+                "• Added open, dismissed, and multiline cases",
+                "",
+                "\u{1b}[32m✓ xcodebuild ThreadingMobileTests\u{1b}[0m",
+                "\u{1b}[32m✓ 58 evidence captures\u{1b}[0m",
+                "",
+                "Ready for review.  4 files changed",
+                "› ",
+            ]
+        case "terminal-claude-tui":
+            // Claude's tool marker must stay a single terminal cell. U+23FA ("⏺") falls
+            // back to an emoji glyph on iOS, occupies two cells in SwiftTerm, and visually
+            // collides with the following label. U+25CF is the text glyph Claude renders
+            // for completed tool activity and remains one cell across the supported chromes.
+            let completedTool = "\u{25CF}"
+            lines = [
+                "\u{1b}[2J\u{1b}[H\u{1b}[1;35mClaude Code\u{1b}[0m",
+                "\u{1b}[2mSonnet · plan mode · AnotherTerminal\u{1b}[0m",
+                "",
+                "❯ Review the mobile Git pane at 20k files.",
+                "",
+                "\u{1b}[35m\(completedTool)\u{1b}[0m  Read(RemoteGitReviewView.swift)",
+                "   ⎿ Read 912 lines",
+                "\u{1b}[35m\(completedTool)\u{1b}[0m  Search(ReviewScrollBottomReader)",
+                "   ⎿ Found 4 matches",
+                "\u{1b}[35m\(completedTool)\u{1b}[0m  Update(RemoteGitReviewView.swift)",
+                "   ⎿ Virtualized visible rows",
+                "     Added a conditional jump control",
+                "",
+                "● The list now allocates visible rows only, and",
+                "  shows the jump control only for content below.",
+                "",
+                "\u{1b}[32m✓ swift test --filter GitReview\u{1b}[0m",
+                "",
+                "────────────────────────────────────────",
+                "❯ ",
+            ]
+        case "terminal-scrollback":
+            lines = [
+                "\u{1b}[2J\u{1b}[H\u{1b}[1;36mClaude Code\u{1b}[0m  Test run",
+                "$ xcodebuild -scheme ThreadingMobile test",
+                "Compile RemoteConversationViewController.swift",
+                "Compile RemoteNotifications.swift",
+                "Link ThreadingMobileTests.xctest",
+                "Test Suite 'KeyboardLifecycleTests' started",
+                "  ✓ testConversationRestoresComposerGeometry (0.42s)",
+                "  ✓ testTerminalDismissesSoftwareKeyboard (0.31s)",
+                "  ✓ testPairingLinkFieldReturnsToBaseline (0.18s)",
+                "  ✓ testIssueReportEditorReturnsToBaseline (0.29s)",
+                "",
+                "Executed 48 tests, with 0 failures in 4.812 seconds",
+                "\u{1b}[32m** TEST SUCCEEDED **\u{1b}[0m",
+                "",
+                "❯ git status --short",
+                " M Tests/UIEvidence/ios-coverage.json",
+                " M scripts/ui-evidence-ios.sh",
+                "❯ ",
+            ]
+        default:
+            lines = [
+                "\u{1b}[2J\u{1b}[H\u{1b}[1;36mClaude Code\u{1b}[0m  AnotherTerminal",
+                "",
+                "● Collaboration is ready.",
+                "  Devices keep separate drafts.",
+                "",
+                "● Running transport and UI tests…",
+                "",
+                "  $ swift test",
+                "  All tests passed",
+                "",
+                "\u{1b}[2m──────────────────────────────────────\u{1b}[0m",
+                "❯ Waiting for the next instruction",
+            ]
+        }
         connection.pendingTerminalOutput = Data(lines.joined(separator: "\r\n").utf8)
+        guard demoMode == "terminal-collaboration" else { return connection }
         let anna = RemotePresenceDTO(
             presenceID: "terminal-anna",
             memberID: "member-anna",
@@ -930,6 +1058,7 @@ final class RemoteSessionConnection: ObservableObject {
         let environment = ProcessInfo.processInfo.environment
         let demoMode = environment["THREADING_MOBILE_DEMO"] ?? ""
         let isPerformanceFixture = demoMode == "conversation-cold-stress"
+            || demoMode == "conversation-reconnect-stress"
             || demoMode == "conversation-scroll-stress"
         let sourceRowCount = environment["THREADING_MOBILE_CONVERSATION_STRESS_ROWS"]
             .flatMap(Int.init)
@@ -955,10 +1084,22 @@ final class RemoteSessionConnection: ObservableObject {
         connection.serverFeatures = Set(RemoteWebSocketFeature.allCases.map(\.rawValue))
         connection.supportsAttentionRequests = true
         connection.supportsFocusedInputControl = true
-        connection.theme = ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"] == "light"
-            ? RemoteAppModel.demoLightTheme
-            : RemoteAppModel.demoTheme
-        connection.terminalTheme = RemoteAppModel.demoTerminalTheme
+        switch environment["THREADING_MOBILE_THEME"] {
+        case "light":
+            connection.theme = RemoteAppModel.demoLightTheme
+            connection.terminalTheme = RemoteAppModel.demoTerminalTheme
+        case "threading":
+            connection.theme = RemoteAppModel.demoThreadingTheme
+            connection.terminalTheme = RemoteAppModel.demoThreadingTerminalTheme
+        case let requestedTheme?:
+            connection.theme = RemoteAppModel.demoCatalogThemes.first(where: {
+                $0.id == requestedTheme
+            }) ?? RemoteAppModel.demoTheme
+            connection.terminalTheme = RemoteAppModel.demoTerminalTheme
+        default:
+            connection.theme = RemoteAppModel.demoTheme
+            connection.terminalTheme = RemoteAppModel.demoTerminalTheme
+        }
         let coreRows: [RemoteConversationRowDTO] = [
                 .init(
                     id: "0",
@@ -995,6 +1136,113 @@ final class RemoteSessionConnection: ObservableObject {
                     """
                 ),
             ]
+        let contentRows: [RemoteConversationRowDTO] = [
+            .init(
+                id: "content-user",
+                kind: "user",
+                text: "Review the keyboard lifecycle, quote the relevant file, and run the focused tests."
+            ),
+            .init(
+                id: "content-thinking",
+                kind: "thinking",
+                text: "I need to trace first-responder ownership and compare the editor frame before and after dismissal."
+            ),
+            .init(
+                id: "content-tool-success",
+                kind: "tool",
+                toolName: "Read",
+                summary: "RemoteConversationViewController.swift · 164 lines",
+                result: "Found keyboard frame observation and the composer bottom constraint."
+            ),
+            .init(
+                id: "content-tool-error",
+                kind: "tool",
+                toolName: "Bash",
+                summary: "swift test --filter KeyboardLifecycleTests",
+                result: "Exit 1 · editor stayed 291 pt above its baseline",
+                isError: true
+            ),
+            .init(
+                id: "content-notice",
+                kind: "notice",
+                text: "The connection recovered. Tool output before the reconnect was preserved."
+            ),
+            .init(
+                id: "content-assistant",
+                kind: "assistant",
+                text: """
+                Keyboard lifecycle passed: focus waits for `keyboardDidShow`, dismissal waits for
+                `keyboardDidHide`, and the composer returns to its original visual anchor.
+                """
+            ),
+        ]
+        let richContentRows: [RemoteConversationRowDTO] = [
+            .init(
+                id: "rich-user",
+                kind: "user",
+                text: "Show the release result with the structure and code intact."
+            ),
+            .init(
+                id: "rich-assistant",
+                kind: "assistant",
+                text: """
+                ## Release review
+
+                > Keyboard dismissal is now a measured lifecycle, not a delay.
+
+                - **Focus:** waits for the real keyboard
+                - **Dismissal:** clears the editor responder
+                - **Layout:** returns to its stable anchor
+
+                ```swift
+                focus.wrappedValue = false
+                window.endEditing(true)
+                ```
+
+                See `RemoteNotifications.swift` for the shared evidence contract.
+                """
+            ),
+        ]
+        let attachmentRows: [RemoteConversationRowDTO] = [
+            .init(
+                id: "attachment-user",
+                kind: "user",
+                text: "Compare the visual review with the implementation and keep the linked evidence together.",
+                contextAttachments: [
+                    .init(
+                        id: "attachment-image",
+                        kind: "reference",
+                        source: "attachment",
+                        title: "keyboard-dismissed.png",
+                        excerpt: "1179 × 2556 PNG · 184 KB",
+                        locator: "screenshots/keyboard-dismissed.png"
+                    ),
+                    .init(
+                        id: "attachment-pdf",
+                        kind: "reference",
+                        source: "attachment",
+                        title: "threading-ui-review.pdf",
+                        excerpt: "12-page review · 843 KB",
+                        locator: "artifacts/threading-ui-review.pdf"
+                    ),
+                    .init(
+                        id: "attachment-code",
+                        kind: "comment",
+                        source: "code",
+                        title: "RemoteConversationViewController.swift",
+                        comment: "Keep the composer anchored after keyboard dismissal.",
+                        locator: "Sources/ThreadingMobile/RemoteConversationViewController.swift",
+                        lineStart: 128,
+                        lineEnd: 156
+                    ),
+                ]
+            ),
+            .init(
+                id: "attachment-assistant",
+                kind: "assistant",
+                text: "The image, PDF, and code reference remain attached to the originating prompt, including their provenance and bounded locators."
+            ),
+        ]
         let isStressFixture = demoMode == "conversation-stress"
         let rows: [RemoteConversationRowDTO]
         if isPerformanceFixture {
@@ -1086,6 +1334,37 @@ final class RemoteSessionConnection: ObservableObject {
                     text: "Fixture contains 400 rows; only visible collection cells are mounted."
                 ),
             ]
+        } else if ["conversation-content-types", "conversation-tool-expanded"].contains(demoMode) {
+            rows = contentRows
+        } else if demoMode == "conversation-attachments" {
+            rows = attachmentRows
+        } else if demoMode == "conversation-away-from-latest" {
+            rows = (0..<28).map { index in
+                RemoteConversationRowDTO(
+                    id: "latest-\(index)",
+                    kind: index.isMultiple(of: 5) ? "user" : "assistant",
+                    text: index.isMultiple(of: 5)
+                        ? "Checkpoint \(index): keep my reading position while more work arrives."
+                        : "Verified checkpoint \(index). The timeline remains virtualized and the latest-message control only appears away from the bottom."
+                )
+            }
+        } else if demoMode == "conversation-rich-content" {
+            rows = richContentRows
+        } else if demoMode == "conversation-streaming" {
+            rows = [
+                .init(
+                    id: "stream-user",
+                    kind: "user",
+                    text: "Check the compact layout while the agent is still responding."
+                ),
+                .init(
+                    id: "stream-tool",
+                    kind: "tool",
+                    toolName: "Bash",
+                    summary: "xcodebuild -scheme ThreadingMobile build",
+                    result: "Build Succeeded"
+                ),
+            ]
         } else {
             rows = coreRows
         }
@@ -1123,13 +1402,17 @@ final class RemoteSessionConnection: ObservableObject {
         ]
         connection.composerCapabilities = capabilities
         let storeStarted = ProcessInfo.processInfo.systemUptime
-        connection.conversationStore.replace(with: RemoteConversationSnapshotDTO(
+        let conversationSnapshot = RemoteConversationSnapshotDTO(
             rows: rows,
-            canSend: true,
+            streamingText: demoMode == "conversation-streaming"
+                ? "I’m checking the keyboard-safe-area transaction and comparing the composer’s baseline frame…"
+                : "",
+            canSend: demoMode != "conversation-streaming",
             composerCapabilities: capabilities,
             hasEarlier: demoMode == "conversation-cold-stress"
                 && sourceRowCount > rows.count
-        ))
+        )
+        connection.conversationStore.replace(with: conversationSnapshot)
         if isPerformanceFixture {
             let storeEnded = ProcessInfo.processInfo.systemUptime
             MobileConversationPerformanceProbe.fixtureDidLoad(
@@ -1138,7 +1421,14 @@ final class RemoteSessionConnection: ObservableObject {
                 mountedRows: rows.count,
                 startedAt: fixtureStarted,
                 generationMilliseconds: (storeStarted - fixtureStarted) * 1_000,
-                storeMilliseconds: (storeEnded - storeStarted) * 1_000
+                storeMilliseconds: (storeEnded - storeStarted) * 1_000,
+                reconnect: demoMode == "conversation-reconnect-stress"
+                    ? { [weak connection] in
+                        connection?.performReconnectPerformanceFixture(
+                            snapshot: conversationSnapshot
+                        ) ?? false
+                    }
+                    : nil
             )
         }
         if ["conversation-collaboration", "attention-request"].contains(demoMode) {
@@ -1208,6 +1498,8 @@ final class RemoteSessionConnection: ObservableObject {
 
     static func demoPermissionConversation() -> RemoteSessionConnection {
         let connection = demoConversation()
+        let usesLongFixture = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+            == "permission-long"
         connection.conversationStore.replace(with: RemoteConversationSnapshotDTO(
             rows: [
                 .init(
@@ -1225,10 +1517,18 @@ final class RemoteSessionConnection: ObservableObject {
             composerCapabilities: connection.composerCapabilities,
             permission: .init(
                 id: "permission-preview",
-                toolName: "Edit",
-                summary: "Sources/ThreadingMobile/RemoteSessionConnection.swift",
-                filePath: "RemoteSessionConnection.swift",
-                diff: [
+                toolName: usesLongFixture ? "Bash" : "Edit",
+                summary: usesLongFixture
+                    ? "Run the complete mobile evidence matrix, compare keyboard geometry before and after every focus transition, and write the generated report under .build without changing repository baselines"
+                    : "Sources/ThreadingMobile/RemoteSessionConnection.swift",
+                filePath: usesLongFixture
+                    ? "scripts/ui-evidence-ios.sh --only native-conversation --verify-keyboard-lifecycle --report .build/ui-evidence-ios-reports/review/index.html"
+                    : "RemoteSessionConnection.swift",
+                diff: usesLongFixture ? [
+                    .init(id: "0", kind: "context", text: "# This command runs deterministic local fixtures only."),
+                    .init(id: "1", kind: "addition", text: "THREADING_UI_EVIDENCE_VERIFY_KEYBOARD=1 scripts/ui-evidence-ios.sh"),
+                    .init(id: "2", kind: "addition", text: "open .build/ui-evidence-ios-reports/latest/report/index.html"),
+                ] : [
                     .init(id: "0", kind: "removal", text: "onTerminalOutput?(data)"),
                     .init(id: "1", kind: "addition", text: "pendingTerminalOutput.append(data)"),
                 ]

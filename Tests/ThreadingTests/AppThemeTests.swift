@@ -2346,6 +2346,30 @@ final class AppThemeTests: XCTestCase {
         }
     }
 
+    /// Threading is the product dress, not a renamed generic dark palette. Its app, terminal,
+    /// sidebar, and window frame must remain one authored set as the theme system grows.
+    func testThreadingThemeShipsOneCompleteProductDress() throws {
+        let theme = AppThemeStyles.threading
+        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let variant = try XCTUnwrap(theme.variant(for: appearance))
+        let sidebar = try XCTUnwrap(variant.sidebar)
+        let chrome = try XCTUnwrap(variant.chrome)
+
+        XCTAssertEqual(theme.mode, .dark)
+        XCTAssertEqual(theme.resolved(.accent, appearance: appearance).hexString, "#FF9A3D")
+        XCTAssertEqual(theme.resolved(.selection, appearance: appearance).hexString, "#17405C")
+        XCTAssertEqual(variant.terminalPalette.background.hexString, "#040A12")
+        XCTAssertNotNil(sidebar.background?.gradient)
+        XCTAssertEqual(
+            sidebar.navigatorWell?.bevel,
+            SidebarStyle.NavigatorWell.Bevel.none
+        )
+        XCTAssertEqual(chrome.titleBar.height, 32)
+        XCTAssertFalse(chrome.titleBar.showsAppIcon)
+        XCTAssertEqual(chrome.titleBar.activeTexture?.kind, .rule)
+        XCTAssertEqual(chrome.frame?.cornerRadius, 12)
+    }
+
     // MARK: - Legibility
 
     /// A style that cannot be read is not a style. Every stock theme's text must clear the same
@@ -2377,10 +2401,10 @@ final class AppThemeTests: XCTestCase {
         let ids = AppThemeLibrary.stock.map(\.id.rawValue)
         XCTAssertEqual(Set(ids).count, ids.count, "two stock themes share an id")
         XCTAssertTrue(ids.contains(AppThemeID.system.rawValue))
-        // 23 = System + eleven design movements + Christmas + the ten takeover chromes
-        // (the Aqua lineage brought Cheetah and Tiger; TUI is the first takeover that
-        // reproduces no system, acknowledged here).
-        XCTAssertEqual(ids.count, 23, "the curated stock catalogue unexpectedly changed size")
+        // 24 = System + Threading + eleven design movements + Christmas + ten period and
+        // authored chrome themes. Threading now belongs to the takeover set too, without
+        // adding another catalogue entry.
+        XCTAssertEqual(ids.count, 24, "the curated stock catalogue unexpectedly changed size")
     }
 
     /// A takeover chrome is not complete merely because its Swift document exists. Every stock

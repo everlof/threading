@@ -507,18 +507,8 @@ final class ChipView: ThemedControl {
         _ = presentMenu()
     }
 
-    // The press that opened the menu may still be held. AppKit keeps routing its drag and
-    // release here — the mouse-down view — so both are forwarded to the menu, which is what
-    // makes press-drag-release choose a row the way every platform menu does.
-    override func mouseDragged(with event: NSEvent) {
-        guard let menuSession else { return }
-        ThemedMenuPresenter.dragUpdated(menuSession, event: event)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        guard let menuSession else { return }
-        ThemedMenuPresenter.dragEnded(menuSession, event: event)
-    }
+    // The press that opened the menu may still be held; the menu tracks it from there, so
+    // nothing about press-drag-release is this chip's business.
 
     override var acceptsFirstResponder: Bool { isEnabled }
 

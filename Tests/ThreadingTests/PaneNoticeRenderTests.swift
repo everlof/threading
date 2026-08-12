@@ -52,7 +52,8 @@ final class PaneNoticeRenderTests: XCTestCase {
     // MARK: - Stories
 
     /// The band exactly as `MainWindowController.presentUncleanExitNotice` puts it up when macOS
-    /// filed a report: the sentence, Restore, Show Crash Report, and the way out.
+    /// filed a report: the sentence, Restore, Show Crash Report, private reporting, and the way
+    /// out.
     func testRendersTheUncleanExitNoticeStorybook() throws {
         try writeStorybook(named: "notice-unclean") {
             PaneNoticeView(
@@ -65,6 +66,10 @@ final class PaneNoticeRenderTests: XCTestCase {
                     PaneNoticeAction(title: L10n.string("Restore")) {},
                     PaneNoticeAction(
                         title: L10n.string("Show Crash Report"),
+                        emphasis: .tertiary
+                    ) {},
+                    PaneNoticeAction(
+                        title: L10n.string("Send to Developer"),
                         emphasis: .tertiary
                     ) {}
                 ],
@@ -83,7 +88,13 @@ final class PaneNoticeRenderTests: XCTestCase {
                     "Threading quit unexpectedly last time. Its open session and browser windows "
                         + "were not reopened."
                 ),
-                actions: [PaneNoticeAction(title: L10n.string("Restore")) {}],
+                actions: [
+                    PaneNoticeAction(title: L10n.string("Restore")) {},
+                    PaneNoticeAction(
+                        title: L10n.string("Send to Developer"),
+                        emphasis: .tertiary
+                    ) {}
+                ],
                 onDismiss: {}
             )
         }
@@ -135,7 +146,8 @@ final class PaneNoticeRenderTests: XCTestCase {
                 backgroundSource: .defaultBackground,
                 foreground: .init(red: 255, green: 255, blue: 255),
                 background: .init(red: 255, green: 255, blue: 255),
-                contrastRatio: 1
+                contrastRatio: 1,
+                sample: "[last: 23s]"
             )
         )
 
@@ -158,6 +170,41 @@ final class PaneNoticeRenderTests: XCTestCase {
 
         XCTAssertEqual(written, Render.themes.count * Render.appearances.count)
         print("Rendered terminal text visibility storybook to \(directory.path)")
+    }
+
+    /// The pair from the field report, which is the harder case to draw: two 24-bit greys four
+    /// steps apart. The sentence can only spell them out as two different hex values; the
+    /// specimen is where they are visibly one field, and the quoted run is what the reader can
+    /// go and look for in the terminal below.
+    func testRendersTheNearCollapsedColourPairStorybook() throws {
+        let issue = TerminalTextVisibilityIssue(
+            identity: .ephemeral(UUID()),
+            themeID: TerminalTheme.systemDark.id.rawValue,
+            conflict: TerminalTextColorConflict(
+                foregroundSource: .trueColor(red: 0x50, green: 0x50, blue: 0x50),
+                backgroundSource: .trueColor(red: 0x46, green: 0x46, blue: 0x46),
+                foreground: .init(red: 0x50, green: 0x50, blue: 0x50),
+                background: .init(red: 0x46, green: 0x46, blue: 0x46),
+                contrastRatio: 1.17,
+                sample: "esc to interrupt"
+            )
+        )
+
+        try writeStorybook(named: "notice-color-pair") {
+            PaneNoticeView(
+                tone: .attention,
+                title: issue.title,
+                message: issue.detail,
+                accessory: ColorPairSpecimenView(
+                    ink: issue.foregroundColor,
+                    ground: issue.backgroundColor,
+                    caption: L10n.string("As drawn"),
+                    accessibilityLabel: issue.specimenLabel
+                ),
+                actions: [PaneNoticeAction(title: L10n.string("Change Theme…")) {}],
+                onDismiss: {}
+            )
+        }
     }
 
     // MARK: - Helpers
@@ -259,6 +306,12 @@ final class PaneNoticeRenderTests: XCTestCase {
                 tone: .attention,
                 title: issue.title,
                 message: issue.detail,
+                accessory: ColorPairSpecimenView(
+                    ink: issue.foregroundColor,
+                    ground: issue.backgroundColor,
+                    caption: L10n.string("As drawn"),
+                    accessibilityLabel: issue.specimenLabel
+                ),
                 actions: [PaneNoticeAction(title: L10n.string("Change Theme…")) {}],
                 onDismiss: {}
             )

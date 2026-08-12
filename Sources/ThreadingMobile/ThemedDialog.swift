@@ -180,6 +180,13 @@ private struct ThemedDialogPresentation: View {
         .onAppear {
             UIAccessibility.post(notification: .screenChanged, argument: nil)
             guard textField != nil else { return }
+#if DEBUG
+            // The evidence coordinator focuses and dismisses the real field itself when a
+            // keyboard lifecycle is declared. Let it establish the unfocused baseline first.
+            guard ProcessInfo.processInfo.environment[
+                "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_STATE"
+            ] == nil else { return }
+#endif
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(180))
                 textFieldIsFocused = true
@@ -254,6 +261,7 @@ private struct ThemedDialogPresentation: View {
                     .textInputAutocapitalization(.sentences)
                     .submitLabel(.done)
                     .focused($textFieldIsFocused)
+                    .mobileUIEvidenceKeyboardFocus($textFieldIsFocused)
                     .padding(.horizontal, MobileDesign.Spacing.medium)
                     .frame(minHeight: MobileDesign.Size.minimumTapTarget)
                     .foregroundStyle(theme.label)
@@ -283,7 +291,11 @@ private struct ThemedDialogPresentation: View {
         if style == .alert, actions.count <= 2, !dynamicTypeSize.isAccessibilitySize {
             HStack(spacing: MobileDesign.Spacing.medium) {
                 ForEach(actions) { action in
-                    actionButton(action, filled: action.role == .standard)
+                    actionButton(
+                        action,
+                        filled: action.role == .standard,
+                        outlined: action.role != .standard
+                    )
                 }
             }
             .frame(height: MobileDesign.Size.dialogActionHeight)
@@ -294,9 +306,9 @@ private struct ThemedDialogPresentation: View {
                     if index > 0 {
                         Divider()
                             .overlay(theme.divider)
-                            .padding(.leading, MobileDesign.Spacing.large)
+                            .padding(.horizontal, MobileDesign.Spacing.large)
                     }
-                    actionButton(action, filled: false)
+                    actionButton(action, filled: false, outlined: false)
                 }
             }
             .padding(.horizontal, MobileDesign.Spacing.inset)
@@ -306,7 +318,8 @@ private struct ThemedDialogPresentation: View {
 
     private func actionButton(
         _ action: ThemedDialogAction,
-        filled: Bool
+        filled: Bool,
+        outlined: Bool
     ) -> some View {
         Button {
             run(action)
@@ -331,6 +344,15 @@ private struct ThemedDialogPresentation: View {
             if filled {
                 RoundedRectangle(cornerRadius: theme.controlRadius)
                     .fill(theme.accent)
+            } else if outlined {
+                RoundedRectangle(cornerRadius: theme.controlRadius)
+                    .fill(theme.controlResting)
+            }
+        }
+        .overlay {
+            if outlined {
+                RoundedRectangle(cornerRadius: theme.controlRadius)
+                    .stroke(theme.border, lineWidth: theme.borderWidth)
             }
         }
         .opacity(action.isEnabled ? 1 : 0.42)
@@ -356,7 +378,7 @@ private struct ThemedDialogPresentation: View {
         for action: ThemedDialogAction,
         filled: Bool
     ) -> Color {
-        if filled { return theme.ground }
+        if filled { return theme.accentForeground }
         switch action.role {
         case .standard: return theme.accent
         case .cancel: return theme.secondaryLabel
@@ -435,6 +457,8 @@ struct ThemedDialogDemoView: View {
                     .foregroundStyle(theme.secondaryLabel)
                 Button("Show again") { isPresented = true }
                     .buttonStyle(.borderedProminent)
+                    .tint(theme.accent)
+                    .foregroundStyle(theme.accentForeground)
                 Spacer()
             }
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -745,6 +745,8 @@ final class RemoteProtocolTests: XCTestCase {
             accountHandle: "codex-work",
             model: "sol",
             reasoningEffort: "high",
+            fastMode: true,
+            permissionMode: "acceptEdits",
             surface: "conversation",
             prompt: "Review remote access"
         )
@@ -755,6 +757,15 @@ final class RemoteProtocolTests: XCTestCase {
             ),
             creation
         )
+
+        let olderCreation = try JSONDecoder().decode(
+            RemoteCreateSessionRequestDTO.self,
+            from: Data(
+                #"{"projectID":"project","agentKind":"codex","surface":"terminal","prompt":"Review"}"#.utf8
+            )
+        )
+        XCTAssertNil(olderCreation.fastMode)
+        XCTAssertNil(olderCreation.permissionMode)
 
         let rename = RemoteRenameSessionRequestDTO(title: "Remote review")
         XCTAssertEqual(

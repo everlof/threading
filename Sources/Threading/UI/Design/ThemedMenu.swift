@@ -36,6 +36,47 @@ struct ThemedMenuSubtitleSegment {
     }
 }
 
+/// One reading a row states as a *column* rather than as words inside its line.
+///
+/// The account rows are why this exists. A subtitle can hold `5h 27% · 7d 81% · 7d resets in
+/// 19h 36m`, and for one row it reads fine — but the menu's job is comparing several, and a
+/// value's position in a sentence is decided by the length of the name in front of it. Three
+/// logins therefore put their three 5-hour numbers at three different x positions, and the
+/// comparison the menu exists for becomes a search.
+///
+/// A metric names its column (`label`) instead of its place, so the row can stack every login's
+/// same-named window in one column with tabular digits under it. `fraction` is the same reading
+/// again as a length, which is what makes the ranking pre-attentive; nil draws the track alone,
+/// for a window whose number is not knowable rather than one that is empty. `tone` is semantic
+/// for the same reason `ThemedMenuSubtitleSegment.Tone` is — the row owns the palette, and a
+/// classic selection band flattens both text and bar to its own authored ink.
+struct ThemedMenuMetric {
+
+    /// The column this reading belongs in, and its written name — `5h`, `7d`. Rows sharing a
+    /// label share a column; a row with no metric for a column leaves it empty, which is how
+    /// a plan metering one window says so beside a plan metering two.
+    let label: String
+    /// The precise answer, in the column's own digits — `27%`, or `—` where the window's number
+    /// would be a leftover from the window before it.
+    let value: String
+    /// The same answer as a length, 0…1. Nil draws the empty track: no bar at all would read as
+    /// a missing column, and a full-length one as a spent window.
+    let fraction: Double?
+    let tone: ThemedMenuSubtitleSegment.Tone
+
+    init(
+        label: String,
+        value: String,
+        fraction: Double?,
+        tone: ThemedMenuSubtitleSegment.Tone = .standard
+    ) {
+        self.label = label
+        self.value = value
+        self.fraction = fraction
+        self.tone = tone
+    }
+}
+
 struct ThemedMenuItem {
     /// What choosing this row can do. Kept as one value because an action and a submenu are
     /// mutually exclusive interaction contracts: a row that carries both answers its press
@@ -58,6 +99,20 @@ struct ThemedMenuItem {
     /// every run, deliberately: tones change ink only, so the plain string measures exactly
     /// what the styled line draws.
     private(set) var subtitleSegments: [ThemedMenuSubtitleSegment]?
+    /// Readings this row states in shared columns beside its title, aligned with every other
+    /// row's. See `ThemedMenuMetric`. Empty on a row that has none — a menu whose rows all have
+    /// none reserves no columns at all.
+    var metrics: [ThemedMenuMetric] = []
+    /// The one fact that follows the columns, right-aligned in a column of its own: the account
+    /// rows' reset countdown. Separated from the metrics because it is not a reading of a
+    /// window, and separated from the subtitle because it is the fact that must never be the
+    /// thing an over-long line truncates.
+    var trailingDetail: String?
+    /// A quiet qualifier drawn immediately after the title, in the same line — the account
+    /// rows' plan name. It belongs to the title rather than to the subtitle: it identifies the
+    /// row, and demoting it to a second line gives a subtitle-height row to every login whose
+    /// provider happens to report a plan.
+    var titleDetail: String?
     var image: NSImage?
     var preview: ThemedMenuPreview?
     var representedValue: Any?
@@ -180,6 +235,31 @@ struct ThemedMenuItem {
         subtitleSegments = segments.isEmpty ? nil : segments
         subtitle = segments.isEmpty ? nil : segments.map(\.text).joined()
     }
+
+    /// Everything the row says, as one sentence — for the tooltip and for VoiceOver.
+    ///
+    /// Columns are a picture, and a picture is exactly what neither of those consumers gets.
+    /// Announcing `item.title` alone was survivable while the reading lived in the subtitle the
+    /// tooltip already carried; once it moved into aligned columns and a drawn bar, a row
+    /// announced by its name alone would be a login with no reading at all.
+    var spokenSummary: String {
+        var parts: [String] = []
+        // Every part is admitted only when it has something in it, the title included: a row
+        // built to carry a reading and no name — which is how `AccountUsageMenu.summary`
+        // borrows this — otherwise opens with the separator and reads as a dropped word.
+        if !title.isEmpty { parts.append(title) }
+        if let titleDetail, !titleDetail.isEmpty { parts.append(titleDetail) }
+        parts += metrics.map { "\($0.label) \($0.value)" }
+        if let trailingDetail, !trailingDetail.isEmpty { parts.append(trailingDetail) }
+        if let subtitle, !subtitle.isEmpty { parts.append(subtitle) }
+        return parts.joined(separator: ThemedMenuItemDefaults.spokenSeparator)
+    }
+}
+
+enum ThemedMenuItemDefaults {
+    /// Between the parts of a spoken or hovered summary. A comma rather than the drawn `·`,
+    /// because this string exists for the two consumers that read it aloud or wrap it.
+    static let spokenSeparator = ", "
 }
 
 /// A live view standing in for a choice, so a menu of animations can be watched rather than
@@ -238,6 +318,15 @@ enum ThemedMenuIcon {
 enum ThemedMenuEntry {
     case item(ThemedMenuItem)
     case separator
+    /// A name over the rows that follow it, choosing nothing itself.
+    ///
+    /// A separator says "these are different"; a header says what the next ones *are*, which is
+    /// what lets every row underneath stop repeating it. The composer's identity menu is the
+    /// case: one flat list of every runtime's logins had to write `Claude Code · ` on all three
+    /// Claude rows, and that segment — the longest on the line — is what pushed the reading past
+    /// the panel's width cap. Grouping is not navigation here: a header is not a submenu and
+    /// costs no extra trip, so the list stays one press deep.
+    case header(String)
 }
 
 /// The semantic payload handed to menu-presentation test seams.
@@ -336,8 +425,11 @@ enum ThemedMenuPresenter {
     }
 
     /// The press-drag-release idiom: the button went down on the source control and is still
-    /// down while the pointer moves over the open menu. The source forwards its drag here so
-    /// rows highlight under the pointer, exactly as a held `NSMenu` tracks.
+    /// down while the pointer moves over the open menu, so rows highlight under the pointer
+    /// exactly as a held `NSMenu` tracks.
+    ///
+    /// An open session watches that press itself (see `heldPressMask`); this is the same
+    /// tracking entered by hand, for a caller holding the events already.
     static func dragUpdated(_ token: AnyObject?, event: NSEvent) {
         (token as? ThemedMenuSession)?.dragUpdated(event)
     }
@@ -346,6 +438,35 @@ enum ThemedMenuPresenter {
     /// sticky (the ordinary click-then-browse open); anywhere else it lets the menu go.
     static func dragEnded(_ token: AnyObject?, event: NSEvent) {
         (token as? ThemedMenuSession)?.dragEnded(event)
+    }
+
+    /// Which half of a press-drag-release an opening menu should listen for, or nil for a menu
+    /// that no held button opened — a keyboard route, an accessibility action, a click already
+    /// released — where there is no press to track and every later drag belongs to something
+    /// else.
+    ///
+    /// `opening` is the event AppKit is dispatching as the menu opens, which is what makes this
+    /// *this* press rather than any button that happens to be down; the button state is the
+    /// corroboration, and either one alone is enough. A menu opened from a timer during a held
+    /// press is still tracking that press, and a synthesized open (tests, scripted UI) has no
+    /// current event to read.
+    static func heldPressMask(
+        opening event: NSEvent?,
+        pressedButtons: Int
+    ) -> NSEvent.EventTypeMask? {
+        let left: NSEvent.EventTypeMask = [.leftMouseDragged, .leftMouseUp]
+        let right: NSEvent.EventTypeMask = [.rightMouseDragged, .rightMouseUp]
+        switch event?.type {
+        case .leftMouseDown, .leftMouseDragged:
+            return left
+        case .rightMouseDown, .rightMouseDragged:
+            return right
+        default:
+            break
+        }
+        if pressedButtons & 0b01 != 0 { return left }
+        if pressedButtons & 0b10 != 0 { return right }
+        return nil
     }
 }
 
@@ -548,6 +669,10 @@ private final class ThemedMenuSession: NSObject {
     private weak var previousInitialFirstResponder: NSView?
     private var focusRunLoopObserver: CFRunLoopObserver?
     private var keyEventMonitor: Any?
+    private var heldPressMonitor: Any?
+    /// Where the press that opened this menu went down, in window coordinates — what a release
+    /// is measured against to tell a sweep from a click. Nil for a menu no press opened.
+    private var pressOrigin: NSPoint?
     private var isClosed = false
 
     init(
@@ -623,6 +748,7 @@ private final class ThemedMenuSession: NSObject {
         overlay.animateIn()
         installFocusRunLoopObserver()
         installKeyEventMonitor()
+        installHeldPressMonitor()
 
         // `willClose` joined the list when the roster became the session's owner: a session
         // that outlived a closing window would otherwise sit in the roster holding its dead
@@ -697,6 +823,63 @@ private final class ThemedMenuSession: NSObject {
         self.keyEventMonitor = nil
     }
 
+    /// The press that opened this menu, for as long as it is held.
+    ///
+    /// Press-drag-release — hold the button down, sweep to a row, let go — is the other half of
+    /// how every platform menu is used, and it belongs to the menu rather than to whatever
+    /// opened it. It used to be the opener's job: two controls forwarded their `mouseDragged`
+    /// and `mouseUp` here and the rest of the app did not, so the gesture worked on a pop-up and
+    /// on an account chip and nowhere else. A secondary-click menu could never have joined them
+    /// — nothing owns the right button between its press and its release, and the view that saw
+    /// `rightMouseDown` is not asked again.
+    ///
+    /// The monitor watches only the button already down when the menu opened, so a menu opened
+    /// from the keyboard, from accessibility, or on a click's *release* tracks nothing; it passes
+    /// every event on, because the press still belongs to the control underneath as well.
+    private func installHeldPressMonitor() {
+        let opening = NSApp.currentEvent
+        guard let matching = ThemedMenuPresenter.heldPressMask(
+            opening: opening,
+            pressedButtons: NSEvent.pressedMouseButtons
+        ) else { return }
+        pressOrigin = opening.map(windowPoint(of:))
+        heldPressMonitor = NSEvent.addLocalMonitorForEvents(matching: matching) {
+            [weak self] event in
+            guard let self, !self.isClosed else { return event }
+            switch event.type {
+            case .leftMouseUp, .rightMouseUp:
+                self.dragEnded(event)
+            default:
+                self.dragUpdated(event)
+            }
+            return event
+        }
+    }
+
+    private func removeHeldPressMonitor() {
+        guard let heldPressMonitor else { return }
+        NSEvent.removeMonitor(heldPressMonitor)
+        self.heldPressMonitor = nil
+    }
+
+    /// An event's location in the menu's own window.
+    ///
+    /// A drag keeps reporting through the window its press began in, which is this one — but a
+    /// release that lands outside every window of the app carries no window at all and states
+    /// itself on screen instead. Reading `locationInWindow` raw would then measure a screen
+    /// point against a window-relative panel, and let a release far outside the menu land on a
+    /// row.
+    private func windowPoint(of event: NSEvent) -> NSPoint {
+        guard let window else { return event.locationInWindow }
+        guard let eventWindow = event.window else {
+            return window.convertPoint(fromScreen: event.locationInWindow)
+        }
+        guard eventWindow !== window else { return event.locationInWindow }
+        return window.convertPoint(
+            fromScreen: eventWindow.convertPoint(toScreen: event.locationInWindow)
+        )
+    }
+
     @objc private func windowChanged() {
         close()
     }
@@ -715,23 +898,39 @@ private final class ThemedMenuSession: NSObject {
 
     func dragUpdated(_ event: NSEvent) {
         guard !isClosed else { return }
-        overlay.pointerHighlight(atWindowPoint: event.locationInWindow)
+        overlay.pointerHighlight(atWindowPoint: windowPoint(of: event))
     }
 
+    /// The held press ends. The menu answers first and the source only for a release that missed
+    /// it: a context menu is presented from the view it was invoked on — the terminal, a file
+    /// tree, a diff — and opens *over* it, so asking the source first would read every release on
+    /// a row as a release back on the control and choose nothing.
     func dragEnded(_ event: NSEvent) {
         guard !isClosed else { return }
-        let point = event.locationInWindow
-        if let source, source.bounds.contains(source.convert(point, from: nil)) {
-            // Released back on the control: the plain click-to-open. The menu stays for
-            // browsing, which is the other half of how platform menus track a press.
+        let point = windowPoint(of: event)
+        // This press is spent either way; what follows is a fresh gesture the overlay answers.
+        let origin = pressOrigin
+        pressOrigin = nil
+        removeHeldPressMonitor()
+
+        // Let go where it went down: a click, not a sweep, and the menu stays up to be browsed.
+        if let origin,
+           hypot(point.x - origin.x, point.y - origin.y)
+               <= ThemedMenuMotion.stickyPressDistance {
             return
         }
+
         switch overlay.dragTarget(atWindowPoint: point) {
         case .row(let index, let item):
             choose(index: index, item: item)
         case .surface:
             break
         case .outside:
+            if let source, source.bounds.contains(source.convert(point, from: nil)) {
+                // Released back on the control: the plain click-to-open. The menu stays for
+                // browsing, which is the other half of how platform menus track a press.
+                return
+            }
             closeFromUser()
         }
     }
@@ -755,6 +954,7 @@ private final class ThemedMenuSession: NSObject {
             Self.open.remove(self)
             removeFocusRunLoopObserver()
             removeKeyEventMonitor()
+            removeHeldPressMonitor()
             NotificationCenter.default.removeObserver(self)
             if let window, window.initialFirstResponder === overlay {
                 window.initialFirstResponder = previousInitialFirstResponder
@@ -1761,6 +1961,115 @@ enum ThemedMenuMetrics {
         }
     }
 
+    // MARK: - Metric Columns
+
+    /// The font every metric column is drawn and measured in. Tabular by role: a column of
+    /// proportional digits is only accidentally a column, and `27%` over `81%` misaligning by
+    /// the width of a `2` is the whole reason the numbers left the subtitle.
+    static var metricFont: NSFont {
+        usesClassicGrammar ? titleFont : Design.Typography.numericDetail()
+    }
+
+    /// The bar between a column's name and its value. Wide enough that two readings differing
+    /// by ten points differ visibly — the 14pt meter under `AccountMarkImage` could only ever
+    /// carry a hue, which the value's own tint already said.
+    static var metricBarWidth: CGFloat { usesClassicGrammar ? 24 : 32 }
+    /// Thick enough to hold a status hue at this size without becoming a second row of content.
+    static var metricBarHeight: CGFloat { Design.Spacing.tight - 1 }
+    /// Inside a column: name, bar, value.
+    static var metricInnerGap: CGFloat { Design.Spacing.tight }
+    /// Between one column and the next, and between the last one and the trailing detail. Wider
+    /// than the inner gap, so a column reads as one group rather than as three loose runs.
+    static var metricColumnGap: CGFloat { Design.Spacing.medium }
+    /// Below this a fill is shorter than its own cap and draws as a dot at the track's head.
+    static let metricMinimumFraction = 0.02
+    /// How much of its ink an empty track keeps — of `tertiary` normally, and of a classic
+    /// selection band's own label ink over a band, where an unrelated grey cannot be measured
+    /// against the band's solid fill.
+    static let metricTrackOpacity: CGFloat = 0.45
+
+    /// The columns this menu reserves, in first-seen order.
+    ///
+    /// A union across every row rather than per row: a plan metering one window and a plan
+    /// metering two must put their shared `7d` reading in the same place, which is exactly the
+    /// comparison that a per-row layout destroys. The empty cell that leaves on the shorter
+    /// plan's row is not a hole — it says that plan has no window there.
+    static func metricColumns(_ entries: [ThemedMenuEntry]) -> [String] {
+        var seen: Set<String> = []
+        var ordered: [String] = []
+        for entry in entries {
+            guard case .item(let item) = entry else { continue }
+            for metric in item.metrics where seen.insert(metric.label).inserted {
+                ordered.append(metric.label)
+            }
+        }
+        return ordered
+    }
+
+    /// One width for every column, measured from the widest name and the widest value anywhere
+    /// in the menu. Equal columns rather than each sized to its own content, because unequal
+    /// ones put the second column's bar at a different offset on rows whose first column is
+    /// absent — and a bar that moves sideways between rows cannot be compared by length.
+    static func metricColumnWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
+        let all = entries.flatMap { entry -> [ThemedMenuMetric] in
+            guard case .item(let item) = entry else { return [] }
+            return item.metrics
+        }
+        guard !all.isEmpty else { return 0 }
+
+        let font = metricFont
+        let label = all.map { ceil($0.label.size(withAttributes: [.font: font]).width) }.max() ?? 0
+        let value = all.map { ceil($0.value.size(withAttributes: [.font: font]).width) }.max() ?? 0
+        return label + metricInnerGap + metricBarWidth + metricInnerGap + value
+    }
+
+    /// The trailing detail's own column, measured from the longest one present.
+    static func trailingDetailWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
+        entries.compactMap { entry -> CGFloat? in
+            guard case .item(let item) = entry,
+                  let detail = item.trailingDetail,
+                  !detail.isEmpty else { return nil }
+            return ceil(detail.size(withAttributes: [.font: metricFont]).width)
+        }.max() ?? 0
+    }
+
+    /// Everything the columns take out of a row's width, including the gaps between them.
+    ///
+    /// Reserved off the *title's* width rather than added to the panel's, once the panel is at
+    /// its cap. That inversion is the point: today's rows overflow, and the segment that loses
+    /// its characters is the countdown — `7d resets in 5d 1…`, a sentence claiming to be
+    /// complete. A name is the one thing on this row a reader can still recognise from its
+    /// first half, so the name is what gives way and the numbers never do.
+    static func metricReservation(_ entries: [ThemedMenuEntry]) -> CGFloat {
+        let columns = metricColumns(entries)
+        let columnWidth = metricColumnWidth(entries)
+        let detail = trailingDetailWidth(entries)
+        var total: CGFloat = 0
+        if !columns.isEmpty {
+            total += CGFloat(columns.count) * columnWidth
+                + CGFloat(columns.count - 1) * metricColumnGap
+        }
+        if detail > 0 {
+            total += (total > 0 ? metricColumnGap : 0) + detail
+        }
+        return total > 0 ? total + metricColumnGap : 0
+    }
+
+    /// A section head is a *label*, not a quiet row: `caption` is the app's semibold 11pt
+    /// heading role, which is what keeps it from reading as a disabled choice in a menu whose
+    /// rows are 13pt.
+    static var headerFont: NSFont {
+        usesClassicGrammar ? titleFont : Design.Typography.caption()
+    }
+
+    /// A section head's slot: its line, plus the air that makes it belong to what follows it
+    /// rather than sitting between two groups equally.
+    static var headerHeight: CGFloat { usesClassicGrammar ? 20 : 30 }
+    /// How much of that slot is above the line. More above than below, so the header reads as
+    /// attached to the rows under it — the same proximity argument `subtitleRowHeight` makes
+    /// for a title and its subtitle.
+    static var headerTopInset: CGFloat { usesClassicGrammar ? 8 : 14 }
+
     static var shortcutGap: CGFloat { usesClassicGrammar ? 8 : Design.Spacing.large }
 
     /// One shared trailing column, measured from the widest key equivalent. Workbench draws
@@ -1878,17 +2187,52 @@ enum ThemedMenuMetrics {
             + previewColumn
     }
 
-    static func height(of entry: ThemedMenuEntry) -> CGFloat {
-        switch entry {
-        case .separator:
-            return separatorHeight
-        case .item(let item):
-            return item.subtitle?.isEmpty == false ? subtitleRowHeight : rowHeight
+    /// Every entry's height, in one pass over the whole menu.
+    ///
+    /// **A row's height is not its own business.** Asked entry by entry, a row with a second
+    /// line is 46 and one without is 28 — and a group of logins where three carry a scoped
+    /// window and two do not then has two rhythms stacked directly on top of each other, which
+    /// reads as a spacing defect rather than as rows that happen to differ. It is the same
+    /// argument `subtitleRowHeight` already makes one level down: proximity does the grouping,
+    /// and proximity cannot do it if the gaps are not equal.
+    ///
+    /// So the unit is a **run** — consecutive rows, delimited by separators and section heads —
+    /// and every row in a run takes the tallest kind in that run. The delimiters are what keep
+    /// this from flattening the whole app's menus into one tall rhythm: the project menu's two
+    /// actions sit after a separator, so they stay short while the projects above them keep the
+    /// height their paths need. A change of height across a rule or a heading is explained by
+    /// the rule or the heading; a change of height between two adjacent rows is not.
+    static func heights(for entries: [ThemedMenuEntry]) -> [CGFloat] {
+        var heights = [CGFloat](repeating: 0, count: entries.count)
+        var run: [Int] = []
+
+        func closeRun() {
+            guard !run.isEmpty else { return }
+            let tall = run.contains { index in
+                entries[index].item?.subtitle?.isEmpty == false
+            }
+            for index in run { heights[index] = tall ? subtitleRowHeight : rowHeight }
+            run.removeAll()
         }
+
+        for (index, entry) in entries.enumerated() {
+            switch entry {
+            case .separator:
+                closeRun()
+                heights[index] = separatorHeight
+            case .header:
+                closeRun()
+                heights[index] = headerHeight
+            case .item:
+                run.append(index)
+            }
+        }
+        closeRun()
+        return heights
     }
 
     static func height(for entries: [ThemedMenuEntry]) -> CGFloat {
-        entries.reduce(outerInset * 2) { $0 + height(of: $1) }
+        heights(for: entries).reduce(outerInset * 2, +)
     }
 
     /// The height to settle on when a panel cannot show every row: the tallest one within
@@ -1909,8 +2253,7 @@ enum ThemedMenuMetrics {
         var consumed: CGFloat = 0
         var peeked: CGFloat?
 
-        for entry in entries {
-            let height = height(of: entry)
+        for (entry, height) in zip(entries, heights(for: entries)) {
             if case .item = entry {
                 let candidate = consumed + height / 2
                 guard candidate <= budget else { break }
@@ -1935,7 +2278,7 @@ enum ThemedMenuMetrics {
     ) -> CGFloat {
         let text = entries.compactMap { entry -> CGFloat? in
             guard case .item(let item) = entry else { return nil }
-            let title = ceil(item.title.size(
+            let title = ceil(titleLine(of: item).size(
                 withAttributes: [.font: titleFont]
             ).width)
             let subtitle = ceil((item.subtitle ?? "").size(
@@ -1955,10 +2298,20 @@ enum ThemedMenuMetrics {
             ? max(markColumn, previewColumn)
             : ownCheckColumn + markColumn + previewColumn
         let content = outerInset * 2 + contentInset * 2
-            + leadingColumns + text + chevronColumn
+            + leadingColumns + text + chevronColumn + metricReservation(entries)
             + (shortcutColumn > 0 ? shortcutGap + shortcutColumn : 0)
         return min(max(minimum, content), ThemedMenuLayout.maximumWidth)
     }
+
+    /// The title as it is drawn: the name, and the qualifier that shares its line.
+    static func titleLine(of item: ThemedMenuItem) -> String {
+        guard let detail = item.titleDetail, !detail.isEmpty else { return item.title }
+        return item.title + titleDetailGap + detail
+    }
+
+    /// Between a title and the qualifier after it. Wider than a word space, so the pair reads as
+    /// a name and its footnote rather than as a two-word name.
+    static let titleDetailGap = "   "
 }
 
 /// How the menu moves. File-local because no other surface animates this way yet; a second
@@ -1989,6 +2342,15 @@ enum ThemedMenuMotion {
     /// slides under a stationary pointer; the tolerance is hysteresis for a physical mouse
     /// nudged while its wheel turns, not an allowance for deliberate movement.
     static let scrollHoverTolerance: CGFloat = 4
+    /// How far the held press must have travelled from where it opened the menu before its
+    /// release is read as a choice rather than as a click.
+    ///
+    /// A secondary-click menu opens *at* the pointer, so the row nearest the press point sits
+    /// under it from the first frame: without this, the ordinary right-click — press, release
+    /// without moving — would choose whatever the panel happened to place there. The platform's
+    /// sticky menu is the same rule, and the same number does for a hand that shifts a point or
+    /// two between the press and the release.
+    static let stickyPressDistance: CGFloat = 4
 }
 
 private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
@@ -2024,11 +2386,17 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         let hasPreviewColumn = ThemedMenuMetrics.hasPreviewColumn(entries)
         let hasSubmenuColumn = ThemedMenuMetrics.hasSubmenuColumn(entries)
         let shortcutColumnWidth = ThemedMenuMetrics.shortcutColumnWidth(entries)
+        let metricColumns = ThemedMenuMetrics.metricColumns(entries)
+        let metricColumnWidth = ThemedMenuMetrics.metricColumnWidth(entries)
+        let trailingDetailWidth = ThemedMenuMetrics.trailingDetailWidth(entries)
+        let entryHeights = ThemedMenuMetrics.heights(for: entries)
 
         for (index, entry) in entries.enumerated() {
             switch entry {
             case .separator:
                 views.append(ThemedMenuSeparatorView())
+            case .header(let title):
+                views.append(ThemedMenuHeaderView(title: title))
             case .item(let item):
                 let row = ThemedMenuRowView(
                     entryIndex: index,
@@ -2038,7 +2406,11 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
                     hasImageColumn: hasImageColumn,
                     hasPreviewColumn: hasPreviewColumn,
                     hasSubmenuColumn: hasSubmenuColumn,
-                    shortcutColumnWidth: shortcutColumnWidth
+                    shortcutColumnWidth: shortcutColumnWidth,
+                    preferredHeight: entryHeights[index],
+                    metricColumns: metricColumns,
+                    metricColumnWidth: metricColumnWidth,
+                    trailingDetailWidth: trailingDetailWidth
                 )
                 madeRows[index] = row
                 views.append(row)
@@ -2048,7 +2420,7 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
 
         rows = madeRows
         selectableIndices = selectable
-        document = ThemedMenuDocumentView(views: views)
+        document = ThemedMenuDocumentView(views: views, heights: entryHeights)
         super.init(frame: frame)
 
         let paintsIndexedFrame = [
@@ -2279,7 +2651,13 @@ private final class ThemedMenuDocumentView: NSView {
 
     override var isFlipped: Bool { true }
 
-    init(views: [NSView]) {
+    /// `heights` comes from `ThemedMenuMetrics.heights(for:)`, the same call that sized the
+    /// panel. It used to be re-derived here from each view's class — a row's own
+    /// `preferredHeight`, and `separatorHeight` for anything else — which is fine while every
+    /// non-row *is* a separator and silently wrong the moment one is not: a section head was
+    /// laid out in a 13pt slot while the panel had been sized for its 30, so the head drew
+    /// against the row above it and the difference pooled at the panel's bottom edge.
+    init(views: [NSView], heights: [CGFloat]) {
         self.views = views
         if ThemedMenuMetrics.appearance == .platinum, views.count > 1 {
             // The official Help-menu crop exposes the actual edge rhythm: the first and last
@@ -2294,10 +2672,7 @@ private final class ThemedMenuDocumentView: NSView {
                 return index == 0 || index == views.count - 1 ? 18 : 20
             }
         } else {
-            viewHeights = views.map { view in
-                (view as? ThemedMenuRowView)?.preferredHeight
-                    ?? ThemedMenuMetrics.separatorHeight
-            }
+            viewHeights = heights
         }
         naturalHeight = viewHeights.reduce(0, +)
         super.init(frame: .zero)
@@ -2316,6 +2691,51 @@ private final class ThemedMenuDocumentView: NSView {
             view.frame = NSRect(x: 0, y: y, width: bounds.width, height: height)
             y += height
         }
+    }
+}
+
+/// A section head: the name of the group under it, choosing nothing.
+///
+/// Drawn rather than hosted for the same reason the rows are — the panel places its children by
+/// frame — and read as a heading by accessibility so a screen reader announces the group before
+/// its logins instead of leaving them an undifferentiated run of names.
+private final class ThemedMenuHeaderView: NSView, ThemedComponent {
+
+    private let title: String
+
+    init(title: String) {
+        self.title = title
+        super.init(frame: .zero)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel(title)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // The rows' own text column, so the head sits over the names it introduces rather than
+        // over the checkmark gutter in front of them.
+        let font = ThemedMenuMetrics.headerFont
+        let height = Design.Typography.lineHeight(of: font)
+        (title as NSString).draw(
+            in: NSRect(
+                x: ThemedMenuMetrics.contentInset,
+                y: bounds.maxY - ThemedMenuMetrics.headerTopInset - height / 2
+                    - ThemedMenuMetrics.titleBaselineOffset,
+                width: max(0, bounds.width - ThemedMenuMetrics.contentInset * 2),
+                height: height
+            ),
+            withAttributes: [
+                .font: font,
+                .foregroundColor: Design.Text.tertiary,
+                .paragraphStyle: {
+                    let style = NSMutableParagraphStyle()
+                    style.lineBreakMode = .byTruncatingTail
+                    return style
+                }()
+            ]
+        )
     }
 }
 
@@ -2487,6 +2907,11 @@ private final class ThemedMenuRowView: ThemedControl {
     private let hasPreviewColumn: Bool
     private let hasSubmenuColumn: Bool
     private let shortcutColumnWidth: CGFloat
+    /// The menu's shared column plan, so this row puts its `7d` where every other row puts its
+    /// `7d` — including the rows that have no `7d` and leave the cell empty.
+    private let metricColumns: [String]
+    private let metricColumnWidth: CGFloat
+    private let trailingDetailWidth: CGFloat
     private var pressed = false { didSet { needsDisplay = true } }
     /// The pointer is on a row that cannot be chosen. It answers with a wash far fainter
     /// than the hover fill — feedback that the hover was seen, not an invitation.
@@ -2508,7 +2933,13 @@ private final class ThemedMenuRowView: ThemedControl {
         hasImageColumn: Bool,
         hasPreviewColumn: Bool,
         hasSubmenuColumn: Bool,
-        shortcutColumnWidth: CGFloat
+        shortcutColumnWidth: CGFloat,
+        /// The menu's, not the row's: `ThemedMenuMetrics.heights(for:)` decides it from the run
+        /// this row sits in, so neighbours stacked against each other keep one rhythm.
+        preferredHeight: CGFloat,
+        metricColumns: [String] = [],
+        metricColumnWidth: CGFloat = 0,
+        trailingDetailWidth: CGFloat = 0
     ) {
         self.entryIndex = entryIndex
         self.item = item
@@ -2518,11 +2949,16 @@ private final class ThemedMenuRowView: ThemedControl {
         self.hasPreviewColumn = hasPreviewColumn
         self.hasSubmenuColumn = hasSubmenuColumn
         self.shortcutColumnWidth = shortcutColumnWidth
-        preferredHeight = item.subtitle?.isEmpty == false
-            ? ThemedMenuMetrics.subtitleRowHeight
-            : ThemedMenuMetrics.rowHeight
+        self.metricColumns = metricColumns
+        self.metricColumnWidth = metricColumnWidth
+        self.trailingDetailWidth = trailingDetailWidth
+        self.preferredHeight = preferredHeight
         super.init(frame: .zero)
-        toolTip = item.subtitle
+        // The whole reading, not the subtitle alone: once the numbers are columns and a drawn
+        // bar, a tooltip carrying only the leftover line would name less than the row shows.
+        toolTip = item.metrics.isEmpty && item.trailingDetail == nil
+            ? item.subtitle
+            : item.spokenSummary
         installPreview()
     }
 
@@ -2676,7 +3112,10 @@ private final class ThemedMenuRowView: ThemedControl {
 
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .menuItem }
-    override func accessibilityTitle() -> String? { item.title }
+    /// The whole row, not its name. A login whose readings are columns and a drawn bar says
+    /// nothing at all to VoiceOver if only its title is announced — and "identifiable without
+    /// colour alone" is not met by a bar whose severity is a hue.
+    override func accessibilityTitle() -> String? { item.spokenSummary }
     override func accessibilityValue() -> Any? { selected }
     override func isAccessibilityEnabled() -> Bool { item.isEnabled }
     override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
@@ -2884,10 +3323,21 @@ private final class ThemedMenuRowView: ThemedControl {
         let shortcutReservation = shortcutColumnWidth > 0
             ? ThemedMenuMetrics.shortcutGap + shortcutColumnWidth
             : 0
+        // Drawn before the title, because what it returns is how much room the title has left.
+        // The columns are fixed and the name is elastic — the inversion of the line this
+        // replaced, where the name set the numbers' positions and the countdown lost its digits.
+        let metricReservation = drawMetricColumns(
+            trailingEdge: bounds.maxX - ThemedMenuMetrics.contentInset - chevronColumn
+                - shortcutReservation,
+            centeredOn: titleY + titleHeight / 2,
+            selection: selection,
+            alpha: alpha,
+            secondary: secondary
+        )
         let textWidth = max(
             0,
             bounds.maxX - ThemedMenuMetrics.contentInset - chevronColumn
-                - shortcutReservation - x
+                - shortcutReservation - metricReservation - x
         )
         // Win98's GDI text, Platinum's QuickDraw menu face, and Workbench's Topaz menu strike
         // are indexed bitmaps. Letting CoreGraphics smooth a fallback produces the right
@@ -2908,6 +3358,9 @@ private final class ThemedMenuRowView: ThemedControl {
             && AppSettings.chromeFontFamily == nil
             && titleFont.familyName?.caseInsensitiveCompare("Charcoal") != .orderedSame
             && !hasSubtitle
+            // The bitmap strike draws one ink. A title carrying a quieter qualifier after it is
+            // two, and drawing it here would silently drop the qualifier rather than tone it.
+            && item.titleDetail?.isEmpty != false
             && PlatinumBitmapFont.draw(
                 item.title,
                 penX: x + 1,
@@ -2925,11 +3378,26 @@ private final class ThemedMenuRowView: ThemedControl {
         let truncating = NSMutableParagraphStyle()
         truncating.lineBreakMode = .byTruncatingTail
         if !drewPlatinumBitmap {
-            (item.title as NSString).draw(
-                in: NSRect(x: x, y: titleY, width: textWidth, height: titleHeight),
-                withAttributes: [
-                    .font: titleFont, .foregroundColor: label, .paragraphStyle: truncating
-                ]
+            let titleLine = NSMutableAttributedString(string: item.title, attributes: [
+                .font: titleFont, .foregroundColor: label, .paragraphStyle: truncating
+            ])
+            if let detail = item.titleDetail, !detail.isEmpty {
+                // Quieter than the name and in the same line box: it identifies the row without
+                // competing with what the row is called. A classic band flattens it to the
+                // band's own label ink for the reason every other tone does.
+                titleLine.append(NSAttributedString(
+                    string: ThemedMenuMetrics.titleDetailGap + detail,
+                    attributes: [
+                        .font: titleFont,
+                        .foregroundColor: selection == nil
+                            ? ink(Design.Text.tertiary, alpha)
+                            : label,
+                        .paragraphStyle: truncating
+                    ]
+                ))
+            }
+            titleLine.draw(
+                in: NSRect(x: x, y: titleY, width: textWidth, height: titleHeight)
             )
         }
 
@@ -2983,6 +3451,176 @@ private final class ThemedMenuRowView: ThemedControl {
         if drawsIndexedText {
             NSGraphicsContext.restoreGraphicsState()
         }
+    }
+
+    /// Draws this row's readings into the menu's shared columns, and returns what they took out
+    /// of the row's width.
+    ///
+    /// Laid out from the trailing edge inward — trailing detail first, then the columns
+    /// right-to-left — so the whole block is anchored to the panel's edge and lands in the same
+    /// place on every row whatever its name is. A cell whose column this row has no reading for
+    /// is left empty rather than closed up: closing it would slide the remaining readings under
+    /// a different heading, which is the one thing a column must never do.
+    private func drawMetricColumns(
+        trailingEdge: CGFloat,
+        centeredOn centerY: CGFloat,
+        selection: SelectionSurface?,
+        alpha: CGFloat,
+        secondary: NSColor
+    ) -> CGFloat {
+        guard !metricColumns.isEmpty || trailingDetailWidth > 0 else { return 0 }
+
+        let font = ThemedMenuMetrics.metricFont
+        let height = Design.Typography.lineHeight(of: font)
+        let y = centerY - height / 2 + ThemedMenuMetrics.titleBaselineOffset
+        // A band flattens every tone to its own authored ink, text and bar alike: a status hue
+        // over a solid classic selection is exactly the unmeasured contrast the pair prevents.
+        let banded = selection?.ink.label
+        let muted = banded ?? ink(Design.Text.tertiary, alpha)
+
+        func toned(_ tone: ThemedMenuSubtitleSegment.Tone) -> NSColor {
+            if let banded { return banded }
+            switch tone {
+            case .standard: return secondary
+            case .muted: return muted
+            case .warning: return ink(Design.Status.warning, alpha)
+            case .critical: return ink(Design.Status.negative, alpha)
+            }
+        }
+
+        var cursor = trailingEdge
+        if trailingDetailWidth > 0 {
+            if let detail = item.trailingDetail, !detail.isEmpty {
+                draw(
+                    detail,
+                    rightAlignedIn: NSRect(
+                        x: cursor - trailingDetailWidth,
+                        y: y,
+                        width: trailingDetailWidth,
+                        height: height
+                    ),
+                    font: font,
+                    color: muted
+                )
+            }
+            cursor -= trailingDetailWidth + ThemedMenuMetrics.metricColumnGap
+        }
+
+        // Right-to-left over the reversed plan, so column order on screen stays left-to-right.
+        for label in metricColumns.reversed() {
+            let originX = cursor - metricColumnWidth
+            defer { cursor = originX - ThemedMenuMetrics.metricColumnGap }
+            guard let metric = item.metrics.first(where: { $0.label == label }) else { continue }
+
+            (metric.label as NSString).draw(
+                in: NSRect(x: originX, y: y, width: metricColumnWidth, height: height),
+                withAttributes: [.font: font, .foregroundColor: muted]
+            )
+
+            let labelWidth = ceil(metric.label.size(withAttributes: [.font: font]).width)
+            let barX = originX + labelWidth + ThemedMenuMetrics.metricInnerGap
+            drawMetricBar(
+                metric,
+                in: NSRect(
+                    x: barX,
+                    y: centerY - ThemedMenuMetrics.metricBarHeight / 2,
+                    width: ThemedMenuMetrics.metricBarWidth,
+                    height: ThemedMenuMetrics.metricBarHeight
+                ),
+                fill: banded ?? metricBarFill(metric.tone, alpha: alpha),
+                // `tertiary`, not `quaternary`. The fainter role is right for a ring drawn
+                // *around* a glyph and wrong here: at 3pt on an elevated panel it disappeared,
+                // and a fill with no visible track behind it reads as a coloured dash floating
+                // in the row rather than as a part of a whole — which is the one thing a bar
+                // says that the number beside it does not.
+                track: banded?.withAlphaComponent(
+                    ThemedMenuMetrics.metricTrackOpacity
+                ) ?? ink(Design.Text.tertiary, alpha * ThemedMenuMetrics.metricTrackOpacity)
+            )
+
+            let valueX = barX + ThemedMenuMetrics.metricBarWidth
+                + ThemedMenuMetrics.metricInnerGap
+            draw(
+                metric.value,
+                rightAlignedIn: NSRect(
+                    x: valueX,
+                    y: y,
+                    width: max(0, originX + metricColumnWidth - valueX),
+                    height: height
+                ),
+                font: font,
+                color: toned(metric.tone)
+            )
+        }
+
+        return trailingEdge - cursor
+    }
+
+    /// A calm bar is the same ink as the number beside it, not the accent.
+    ///
+    /// The accent was tried first and is what the standalone `UsageBarView` uses, but in a menu
+    /// it is wrong twice over. It breaks the rule the *values* already keep — calm is the absence
+    /// of a signal, not a third colour — so a row would have said "nothing to see" in text and
+    /// painted a saturated blue rod beside it. And the accent in this surface is already spoken
+    /// for by the selection, so six of them down a menu argue with the one row the pointer is on.
+    /// Neutral until it matters leaves the two orange and red bars as the only colour in the
+    /// panel, which is the entire reason for drawing lengths at all.
+    private func metricBarFill(
+        _ tone: ThemedMenuSubtitleSegment.Tone,
+        alpha: CGFloat
+    ) -> NSColor {
+        switch tone {
+        case .standard, .muted: return ink(Design.Text.secondary, alpha)
+        case .warning: return ink(Design.Status.warning, alpha)
+        case .critical: return ink(Design.Status.negative, alpha)
+        }
+    }
+
+    private func drawMetricBar(
+        _ metric: ThemedMenuMetric,
+        in rect: NSRect,
+        fill: NSColor,
+        track: NSColor
+    ) {
+        let radius = ThemedMenuMetrics.usesClassicGrammar ? 0 : rect.height / 2
+        // The full track is always drawn, so a window with no readable number still reads as a
+        // window rather than as a column this row forgot.
+        track.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+
+        guard let fraction = metric.fraction else { return }
+        // Below the floor the fill is shorter than its own cap and draws as a dot at the track's
+        // head; the floor is the honest picture of "barely touched". Same rule, same reason, as
+        // `AccountMarkImage`'s meter.
+        let visible = max(ThemedMenuMetrics.metricMinimumFraction, min(fraction, 1))
+        fill.setFill()
+        NSBezierPath(
+            roundedRect: NSRect(
+                x: rect.minX,
+                y: rect.minY,
+                width: max(rect.height, rect.width * CGFloat(visible)),
+                height: rect.height
+            ),
+            xRadius: radius,
+            yRadius: radius
+        ).fill()
+    }
+
+    private func draw(
+        _ text: String,
+        rightAlignedIn rect: NSRect,
+        font: NSFont,
+        color: NSColor
+    ) {
+        let style = NSMutableParagraphStyle()
+        style.alignment = .right
+        style.lineBreakMode = .byClipping
+        (text as NSString).draw(
+            in: rect,
+            withAttributes: [
+                .font: font, .foregroundColor: color, .paragraphStyle: style
+            ]
+        )
     }
 
     private func drawKeyEquivalent(

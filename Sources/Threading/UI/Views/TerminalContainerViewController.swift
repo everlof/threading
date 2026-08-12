@@ -458,6 +458,15 @@ final class TerminalContainerViewController: NSViewController {
             tone: .attention,
             title: issue.title,
             message: issue.detail,
+            // The pair as it was rendered, beside the sentence that spells it out in hex. Two
+            // values four steps apart read as two colours in words and as one field on screen,
+            // and the field is what the user was looking at when the text went missing.
+            accessory: ColorPairSpecimenView(
+                ink: issue.foregroundColor,
+                ground: issue.backgroundColor,
+                caption: L10n.string("As drawn"),
+                accessibilityLabel: issue.specimenLabel
+            ),
             actions: [
                 PaneNoticeAction(title: L10n.string("Change Theme…")) { [weak self] in
                     guard let self else { return }

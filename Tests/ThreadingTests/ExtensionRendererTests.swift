@@ -3560,7 +3560,7 @@ final class ExtensionRendererTests: XCTestCase {
     let row = ProjectRowView(
       customizationLookup: registry.customization(for:),
       projectHoverContentProvider: { _ in
-        self.labelController("Native SCC content")
+        self.labelController("Native project metrics")
       }
     )
     var actions: [ComponentCustomizationAction] = []
@@ -3573,7 +3573,7 @@ final class ExtensionRendererTests: XCTestCase {
 
     let labels = descendants(in: card)
       .compactMap { ($0 as? NSTextField)?.stringValue }
-    XCTAssertTrue(labels.contains("Native SCC content"))
+    XCTAssertTrue(labels.contains("Native project metrics"))
     XCTAssertTrue(labels.contains("CI passed"))
     XCTAssertTrue(labels.contains("Owned by Runtime"))
     XCTAssertEqual(card.fittingSize.width, ProjectPopoverDefaults.width, accuracy: 0.5)
@@ -3616,7 +3616,7 @@ final class ExtensionRendererTests: XCTestCase {
     )
     let refreshedLabels = descendants(in: card)
       .compactMap { ($0 as? NSTextField)?.stringValue }
-    XCTAssertTrue(refreshedLabels.contains("Native SCC content"))
+    XCTAssertTrue(refreshedLabels.contains("Native project metrics"))
     XCTAssertFalse(refreshedLabels.contains("CI passed"))
     XCTAssertTrue(refreshedLabels.contains("Owned by Runtime"))
   }
@@ -3662,7 +3662,7 @@ final class ExtensionRendererTests: XCTestCase {
     let withNative = ProjectRowView(
       customizationLookup: registry.customization(for:),
       projectHoverContentProvider: { _ in
-        self.labelController("Native SCC content")
+        self.labelController("Native project metrics")
       }
     )
     let replaced = try XCTUnwrap(withNative.makeProjectHoverCard(for: project))
@@ -3672,7 +3672,7 @@ final class ExtensionRendererTests: XCTestCase {
     XCTAssertTrue(replacementLabels.contains("Custom project card"))
     let retainedNativeLabel = try XCTUnwrap(
       descendants(in: replaced.view).first {
-        ($0 as? NSTextField)?.stringValue == "Native SCC content"
+        ($0 as? NSTextField)?.stringValue == "Native project metrics"
       }
     )
     XCTAssertTrue(

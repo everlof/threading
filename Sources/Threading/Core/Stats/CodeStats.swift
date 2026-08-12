@@ -7,10 +7,10 @@ import Foundation
 /// One record per language, in scc's own vocabulary — code, comment and blank lines are
 /// counted apart, so "how big is this" can be answered with the number that means it
 /// (`code`) rather than the one that flatters it (`lines`).
-struct CodeStats: Codable, Equatable {
+struct CodeStats: Codable, Equatable, Sendable {
 
     /// One language's share of the project.
-    struct Language: Codable, Equatable {
+    struct Language: Codable, Equatable, Sendable {
         let name: String
         let files: Int
         let code: Int

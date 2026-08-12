@@ -42,9 +42,9 @@ the investigation is the value, and an idea deleted without a record comes back.
   boundaries and cost ceilings.
 - [CCS launch profiles and GLM](ccs-launch-profiles-and-glm.md) — adopt CCS-managed launch
   profiles without importing credentials, with route-safe account support and a gated GLM path.
-- [Scoped sound overrides](scoped-sound-overrides.md) — let a sound say which chat is calling and
-  why, by scoping the notification and bell sounds to the chat, the project or the app and
-  splitting each into the events the activity tracker already tells apart.
+- [Scoped sound overrides](scoped-sound-overrides.md) — **shipped**; a pointer remains. The
+  durable decisions moved to
+  [`session-activity.md`](../architecture/session-activity.md).
 - [Pasteboard-aware prompt suggestions](pasteboard-prompt-suggestions.md) — offer a short-lived,
   privacy-safe Paste action when Threading observed a recent pasteboard ownership change, while
   leaving content reads to the user's ordinary Paste action.

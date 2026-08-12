@@ -17,18 +17,16 @@ import AppKit
 /// it is pixels. On a retina window every number in the report is half the number an agent
 /// measuring the image will count, and nothing in either artefact said so.
 ///
-/// **Nothing here is text the user typed.** A capture leaves this window for a chat, and Submit
-/// Issue sends it to a public tracker that outlives the conversation, so every value is a choice
-/// from a fixed catalogue: a stock theme's name, a named text size, a font family installed on
-/// the machine. A theme the user made and named is reported as `custom` rather than by its name.
-/// That is the same safe-by-construction rule `GitHubIssueEnvironment` states for the three facts
-/// it carries — and this type opens with that exact line rather than a second phrasing of it, so
-/// the ticket and the copied report agree about where they came from.
+/// **Nothing here is text the user typed.** A capture may leave this window in a copied report or
+/// through the private developer inbox, so every value is a choice from a fixed catalogue: a
+/// stock theme's name, a named text size, a font family installed on the machine. A theme the user
+/// made and named is reported as `custom` rather than by its name. This type opens with the shared
+/// private-report environment line so the uploaded and copied reports agree about their origin.
 struct InspectorEnvironment {
 
     // MARK: - Properties
 
-    /// Version, build and macOS, in the words every ticket filed from this app already closes
+    /// Version, build and macOS, in the words every report from this app already closes
     /// with.
     let build: String
 
@@ -105,7 +103,7 @@ struct InspectorEnvironment {
         let appearance = window?.effectiveAppearance ?? NSApplication.shared.effectiveAppearance
 
         return InspectorEnvironment(
-            build: GitHubIssueEnvironment.markdown(info: info),
+            build: DeveloperIssueReportComposer.environment(info: info),
             theme: currentTheme(in: window, appearance: appearance),
             terminal: terminalInView(for: sessionID),
             window: Window(

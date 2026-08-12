@@ -259,16 +259,30 @@ final class SoundPlayer {
 
     func play(_ url: URL) {
         guard admitsPlaybackNow() else { return }
-        stop()
-        guard let player = NSSound(contentsOf: url, byReference: true) else { return }
-        current = player
-        player.play()
+        playAdmitted(url)
     }
 
     /// The system alert sound, which is what a terminal bell has always been and what
     /// `NSSound.beep()` plays. Rate-limited alongside the rest, since it is a bell too.
     func playSystemAlert() {
         guard admitsPlaybackNow() else { return }
+        playSystemAlertAdmitted()
+    }
+
+    /// For a caller that has **already** consulted the window and been let through.
+    ///
+    /// The bell asks first, before deciding what to play, so that a rejected one pays for
+    /// neither the resolution chain nor the `stat`s a file name costs. Asking a second time
+    /// here would consume the window it was just admitted by and play nothing at all.
+    func playAdmitted(_ url: URL) {
+        stop()
+        guard let player = NSSound(contentsOf: url, byReference: true) else { return }
+        current = player
+        player.play()
+    }
+
+    /// The system alert sound, for a caller that has already been admitted — see above.
+    func playSystemAlertAdmitted() {
         NSSound.beep()
     }
 
@@ -293,6 +307,12 @@ final class SoundPlayer {
 
 /// The settings pages' shared audition player. No rate limit: every click is a deliberate ask
 /// to hear something, including clicking the same item twice.
+///
+/// **The global silence gate does not apply here** — `AppSettings.silencesAllSounds` holds what
+/// the app plays on its own initiative, and an audition is the user's initiative. A picker that
+/// went quiet while the gate held would read as a broken picker rather than as a quiet app, and
+/// would be the one surface where choosing a sound teaches you nothing. Same rule as
+/// `TerminalBell.play`.
 @MainActor
 enum NotificationSoundPreview {
 

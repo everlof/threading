@@ -16,6 +16,13 @@ enum MobileDesign {
         static let inset: CGFloat = 16
         static let large: CGFloat = 20
         static let pane: CGFloat = 24
+
+        /// Composer actions need the normal 44-point tap target, but not a second full inset
+        /// above and below it. Keeping these two axes explicit prevents a one-line composer from
+        /// becoming needlessly tall while preserving the more generous reading inset at its
+        /// leading and trailing edges.
+        static let composerHorizontal: CGFloat = inset
+        static let composerVertical: CGFloat = small
     }
 
     enum Size {
@@ -33,6 +40,8 @@ enum MobileDesign {
         static let diffMarkerColumnWidth: CGFloat = 18
         static let workspaceActivityDot: CGFloat = 7
         static let badgeStroke: CGFloat = 2
+        /// Fixed leading column used by the stacked terminal presence/control/activity rows.
+        static let terminalStatusIconColumn: CGFloat = 24
     }
 
     enum Offset {
@@ -45,6 +54,72 @@ enum MobileDesign {
 
     enum Motion {
         static let controlResponse: Double = 0.18
+    }
+}
+
+/// The compact two-line title shared by remote surfaces and owner flows.
+///
+/// The first line identifies the task or flow; the second always identifies connection state
+/// through colour and the Mac through its user-visible name. Keeping this in the mobile design
+/// layer prevents individual screens from drifting back to vague labels such as "Remote control"
+/// or duplicating the host name in their body content.
+struct MobileConnectionNavigationTitle: View {
+    let title: String
+    let status: String
+    let statusColor: Color
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        VStack(spacing: MobileDesign.Spacing.hairline) {
+            Text(title)
+                .font(.headline)
+                .lineLimit(1)
+                .foregroundStyle(theme.label)
+
+            HStack(spacing: MobileDesign.Spacing.tight) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(
+                        width: MobileDesign.Size.navigationStatusIndicator,
+                        height: MobileDesign.Size.navigationStatusIndicator
+                    )
+                Text(status)
+                    .lineLimit(1)
+            }
+            .font(.caption2)
+            .foregroundStyle(theme.secondaryLabel)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A single-line connection title for owner flows whose controls begin immediately below the
+/// navigation bar. The full two-line title remains appropriate above a reading surface; using it
+/// here made a standard navigation bar grow merely to repeat the host on its own line.
+struct MobileCompactConnectionNavigationTitle: View {
+    let title: String
+    let status: String
+    let statusColor: Color
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: MobileDesign.Spacing.tight) {
+            Text(title)
+                .font(.headline)
+                .lineLimit(1)
+            Circle()
+                .fill(statusColor)
+                .frame(
+                    width: MobileDesign.Size.navigationStatusIndicator,
+                    height: MobileDesign.Size.navigationStatusIndicator
+                )
+            Text(status)
+                .font(.caption2)
+                .lineLimit(1)
+                .foregroundStyle(theme.secondaryLabel)
+        }
+        .foregroundStyle(theme.label)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -73,6 +148,9 @@ struct RemoteThemePalette: Equatable {
     var secondaryLabel: Color { color("secondary_label", fallback: "#A7ABB4") }
     var tertiaryLabel: Color { color("tertiary_label", fallback: "#747983") }
     var accent: Color { color("accent", fallback: "#FFFFFF") }
+    /// Text/icon colour chosen from the resolved accent itself, not from an unrelated surface.
+    /// Authored themes may pair a pale accent with either a light or dark ground.
+    var accentForeground: Color { Color(uiAccentForeground) }
     var accentMuted: Color { color("accent_muted", fallback: "#FFFFFF24") }
     var selection: Color { color("selection", fallback: "#FFFFFF32") }
     var positive: Color { color("status_positive", fallback: "#55B978") }
@@ -92,12 +170,50 @@ struct RemoteThemePalette: Equatable {
     var uiSecondaryLabel: UIColor { uiColor("secondary_label", fallback: "#A7ABB4") }
     var uiTertiaryLabel: UIColor { uiColor("tertiary_label", fallback: "#747983") }
     var uiAccent: UIColor { uiColor("accent", fallback: "#FFFFFF") }
+    var uiAccentForeground: UIColor {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard uiAccent.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return colorScheme == .light ? .black : .white
+        }
+        func linear(_ component: CGFloat) -> CGFloat {
+            component <= 0.04045
+                ? component / 12.92
+                : pow((component + 0.055) / 1.055, 2.4)
+        }
+        let luminance = 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+        return luminance > 0.179 ? .black : .white
+    }
     var uiAccentMuted: UIColor { uiColor("accent_muted", fallback: "#FFFFFF24") }
     var uiPositive: UIColor { uiColor("status_positive", fallback: "#55B978") }
     var uiWarning: UIColor { uiColor("status_warning", fallback: "#D9A441") }
     var uiNegative: UIColor { uiColor("status_negative", fallback: "#D87878") }
     var uiDiffAdded: UIColor { uiColor("diff_added", fallback: "#55B978") }
     var uiDiffRemoved: UIColor { uiColor("diff_removed", fallback: "#D87878") }
+
+    /// Adaptive identity colours for categorical data such as providers or accounts.
+    ///
+    /// These deliberately do not use the theme's semantic positive, warning or negative roles:
+    /// a provider is not a connection state, warning, or failure. Keeping the distinction in the
+    /// palette makes charts legible under every authored chrome without weakening status colour.
+    func categorical(_ index: Int) -> Color {
+        let darkFallbacks = [
+            "#64A8FF", "#B69BFF", "#758BFD",
+            "#42C7D9", "#EA83C5", "#C5956B",
+        ]
+        let lightFallbacks = [
+            "#155DB1", "#6F42C1", "#3F51B5",
+            "#087E8B", "#A93686", "#855A38",
+        ]
+        let resolvedIndex = ((index % darkFallbacks.count) + darkFallbacks.count)
+            % darkFallbacks.count
+        let fallback = colorScheme == .light
+            ? lightFallbacks[resolvedIndex]
+            : darkFallbacks[resolvedIndex]
+        return color("data_series_\(resolvedIndex + 1)", fallback: fallback)
+    }
 
     var panelRadius: CGFloat { CGFloat(source?.material.panelRadius ?? 20) }
     var controlRadius: CGFloat { CGFloat(source?.material.controlRadius ?? 10) }
@@ -171,7 +287,10 @@ struct MobileThemedToggleStyle: ToggleStyle {
         .buttonStyle(.plain)
         .opacity(isEnabled ? 1 : 0.45)
         .animation(
-            reduceMotion ? nil : .easeInOut(duration: MobileDesign.Motion.controlResponse),
+            reduceMotion ? nil : .snappy(
+                duration: MobileDesign.Motion.controlResponse,
+                extraBounce: 0.08
+            ),
             value: configuration.isOn
         )
         .accessibilityRepresentation {
@@ -199,9 +318,11 @@ struct MobileThemedToggleStyle: ToggleStyle {
                     height: MobileDesign.Size.toggleThumb
                 )
                 .overlay {
-                    Image(systemName: isOn ? "checkmark" : "minus")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(isOn ? theme.accent : theme.ground)
+                    if isOn {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(theme.accent)
+                    }
                 }
                 .padding((MobileDesign.Size.toggleTrackHeight - MobileDesign.Size.toggleThumb) / 2)
         }

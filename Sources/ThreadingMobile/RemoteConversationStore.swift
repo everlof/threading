@@ -9,7 +9,8 @@ import ThreadingRemoteKit
 @MainActor
 final class RemoteConversationStore {
     enum Change: Equatable {
-        case reset
+        case unchanged
+        case reset(updated: [String])
         case delta(
             inserted: [String],
             updated: [String],
@@ -42,15 +43,55 @@ final class RemoteConversationStore {
         observers[id] = nil
     }
 
-    func replace(with snapshot: RemoteConversationSnapshotDTO) {
+    @discardableResult
+    func replace(with snapshot: RemoteConversationSnapshotDTO) -> Change {
+        let oldState = state
+        let oldRowsByID = rowsByID
         let oldCanSend = state.canSend
+        let wasLoadingEarlier = isLoadingEarlier
         state.apply(snapshot)
         rowsByID = Dictionary(uniqueKeysWithValues: state.rows.map { ($0.id, $0) })
         isLoadingEarlier = false
         if oldCanSend != state.canSend {
             onCanSendChange?(state.canSend)
         }
-        notify(.reset)
+
+        let hasSameRowIdentities = oldState.rows.count == state.rows.count
+            && zip(oldState.rows, state.rows).allSatisfy { oldRow, newRow in
+                oldRow.id == newRow.id
+            }
+        let updated = state.rows.compactMap { row -> String? in
+            guard let oldRow = oldRowsByID[row.id], oldRow != row else { return nil }
+            return row.id
+        }
+        guard hasSameRowIdentities else {
+            let change = Change.reset(updated: updated)
+            notify(change)
+            return change
+        }
+
+        let streamingChanged = oldState.streamingText != state.streamingText
+        let permissionChanged = oldState.permission != state.permission
+        let capabilitiesChanged = oldState.composerCapabilities != state.composerCapabilities
+        let historyChanged = oldState.hasEarlier != state.hasEarlier || wasLoadingEarlier
+        guard !updated.isEmpty
+                || streamingChanged
+                || permissionChanged
+                || capabilitiesChanged
+                || historyChanged else {
+            return .unchanged
+        }
+
+        let change = Change.delta(
+            inserted: [],
+            updated: updated,
+            streamingChanged: streamingChanged,
+            permissionChanged: permissionChanged,
+            capabilitiesChanged: capabilitiesChanged,
+            historyChanged: historyChanged
+        )
+        notify(change)
+        return change
     }
 
     /// Returns false when the delta cannot be reconciled and the socket must request a snapshot.
@@ -83,7 +124,7 @@ final class RemoteConversationStore {
         case .unchanged:
             break
         default:
-            notify(.reset)
+            notify(.reset(updated: []))
         }
         return true
     }

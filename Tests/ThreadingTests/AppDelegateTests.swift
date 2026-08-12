@@ -179,6 +179,50 @@ final class AppDelegateTests: XCTestCase {
         XCTAssertFalse(delegate.validateMenuItem(lone))
     }
 
+    /// The global silence gate's third surface. It sits in the application menu rather than
+    /// under View because it is the app's own voice rather than a view of anything — and
+    /// because that menu is present with no window open, which is the state the app is most
+    /// likely to be making noise nobody can trace.
+    func testTheApplicationMenuCarriesTheSilenceGateWithItsCheck() throws {
+        let previousMainMenu = NSApp.mainMenu
+        let previousWindowsMenu = NSApp.windowsMenu
+        let previousHelpMenu = NSApp.helpMenu
+        let previousGate = UserDefaults.standard.object(forKey: "silencesAllSounds")
+        defer {
+            NSApp.mainMenu = previousMainMenu
+            NSApp.windowsMenu = previousWindowsMenu
+            NSApp.helpMenu = previousHelpMenu
+            if let previousGate {
+                UserDefaults.standard.set(previousGate, forKey: "silencesAllSounds")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "silencesAllSounds")
+            }
+        }
+
+        AppSettings.shared.silencesAllSounds = false
+
+        let delegate = AppDelegate()
+        delegate.setupMenuBar()
+
+        // The application menu is the first, and AppKit names it from the process rather than
+        // from a title of ours — so it is found by position, the way the platform builds it.
+        let appMenu = try XCTUnwrap(NSApp.mainMenu?.items.first?.submenu)
+        let item = try XCTUnwrap(
+            appMenu.item(withTitle: L10n.string("Silence Sounds")),
+            "the application menu carries no silence gate"
+        )
+
+        XCTAssertEqual(item.keyEquivalent, "s")
+        XCTAssertEqual(item.keyEquivalentModifierMask, [.command, .shift])
+
+        XCTAssertTrue(delegate.validateMenuItem(item))
+        XCTAssertEqual(item.state, .off)
+
+        AppSettings.shared.silencesAllSounds = true
+        XCTAssertTrue(delegate.validateMenuItem(item), "the gate needs no window to be usable")
+        XCTAssertEqual(item.state, .on)
+    }
+
     func testCurrentThemeLivesInViewAndFollowsTheThemeToolCapability() throws {
         let previousMainMenu = NSApp.mainMenu
         let previousWindowsMenu = NSApp.windowsMenu

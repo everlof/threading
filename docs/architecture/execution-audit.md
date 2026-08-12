@@ -109,6 +109,9 @@ Browser events and embeds the session's real `BrowserViewController`. It is not 
 second browser: routing still targets that live session browser, so actions and page changes can be
 reviewed together. The mode and browser URL survive panel restoration.
 
-Rendered tests cover the inspector and browser split at 2560×1520 in System, Cyberpunk and Swiss,
-each in light and dark appearance. The browser fixture is loaded into WebKit and captured only after
-`takeSnapshot` succeeds; a blank placeholder is not visual verification.
+Rendered tests cover the inspector and browser split at 2560×1520 in System, Threading,
+Cyberpunk, Swiss Minimalist, Neo Brutalism, Claymorphism, and Vaporwave, each in light and dark
+appearance. The suite also records a Threading dark product capture with the real app-drawn title,
+window controls, command band, frame, and audit controller in one image. The browser fixture is
+loaded into WebKit and captured only after `takeSnapshot` succeeds; a blank placeholder is not
+visual verification.

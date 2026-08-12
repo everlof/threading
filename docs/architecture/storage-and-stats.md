@@ -1,4 +1,4 @@
-# Reclaimable Storage and Code Stats
+# Reclaimable Storage and Project Stats
 
 What a project can rebuild, and what it is made of.
 
@@ -74,32 +74,45 @@ in every fixture. See the 2026-08-12 entry in
 [`design-system.md`](design-system.md); the sizes read as a column only because that group is
 flush to the trailing inset.
 
-## Code Stats
+## Project Stats
 
-Hovering a project row opens a popover of the project's code composition — total code lines
-and files, a language bar, a legend — counted by **scc**, which is a tool the user installed
-rather than a dependency: `CodeStatsRunner.locate` probes the known install paths and then
-the login shell (taking the last non-empty line, since a login shell is free to print a
-greeting before the answer). Runs pass `--no-min-gen` so vendored bundles do not dominate
-a bar about what was *written* here, and scc honours `.gitignore` on its own, which is what
-keeps `node_modules` out and the count honest.
+Hovering a project row opens a compact, cached summary of two different questions:
 
-A machine **known** to have no scc gets the install hint in the popover's place — a feature
-whose only trace is a popover that never appears cannot be discovered, and the hover is the
-moment the user is already asking the question the hint answers. Three rules keep it honest:
-a project merely not counted *yet* still shows nothing ("not looked" is not "not
-installed"); the miss is cached with a timestamp and re-probed once it ages past
-`missingReprobeAfter`, so `brew install scc` starts counting within a minute with no
-relaunch and no button; and only the first miss is logged, not the re-probes repeating it.
+- **What is it?** Total code lines and files, a language bar, and a legend, counted by the
+  exact `scc` helper shipped in `Contents/Helpers`.
+- **How active is it?** Commits in twelve fixed seven-day buckets and the latest commit time,
+  read from Git and scoped to the project folder.
 
-`CodeStatsService` is `ArtifactScanService`'s shape with the economics inverted: scc answers
-a repository in tens of milliseconds (measured: 18ms for this repo's ~90k lines), so the
-cache exists for the first glance after launch and for scc-less machines, not to amortise a
-walk. The freshest trigger is the stopped-working edge — the same
-`sessionStateDidChange` moment that re-reads the branch — because a session that just stopped
-working is a project whose code most likely just changed. A hover also recounts, guarded by
-`hoverRefreshAfter` so crossing rows does not launch a process per project; kicked at
-*entry* rather than at the dwell, the count is usually fresh again before the popover opens.
+The app no longer depends on a user-installed executable or a Finder-launched process's `PATH`.
+`ThirdParty/scc/scc` is a pinned universal arm64/x86_64 build reproduced from the two official
+3.7.0 Darwin release archives by `scripts/update_bundled_scc.sh`. Xcode embeds and re-signs it;
+CI and release verify both architectures and the exact version. Its MIT license is part of the
+verified legal-notice bundle. The app invokes it from the project directory with `--no-min-gen`,
+so minified and generated bundles do not dominate the bar while scc's normal `.gitignore`,
+`.ignore`, and `.sccignore` handling keeps ignored dependencies out.
+
+`ProjectStatsService` gives code composition and Git activity separate persisted caches,
+utility queues, in-flight sets, and freshness clocks. A large bounded history query therefore
+cannot delay the code reading. Both refresh passively, on hover when aged, and at the
+`sessionStateDidChange` stopped-working edge — the moment at which project facts most likely
+changed. No measurement starts while that project's session is working. Hover triggers at row
+entry rather than after the dwell, guarded by `hoverRefreshAfter`, so crossing rows cannot launch
+a new pair of processes each time.
+
+Publishing a result never encodes or writes its cache on the main actor. Each cache has a serial
+utility writer that receives only the changed project reading, lazily owns a separate dictionary,
+and folds completions into one verified whole-file write per two-second window. Passing the whole
+main-actor dictionary to a background closure is not equivalent: retaining that snapshot makes
+the next dictionary mutation copy every project. The exact-update boundary keeps both caller work
+and background write frequency bounded as project count grows.
+
+Git activity is intentionally an aggregate rather than a log. One query finds the latest commit;
+a second reads at most 20,001 commit timestamps since the start of the oldest bucket. Each has a
+15-second/512-KiB process bound. At 20,001 results the reading becomes `20,000+ commits` and the
+chart is withheld: drawing a truncated distribution as complete would be false. Non-Git projects
+omit the section, an unborn repository says **No commits yet**, and a dormant repository retains
+its zero buckets and old latest-commit date. The two caches preserve those distinctions without
+storing commit messages, authors, file paths, or diffs.
 
 `CodeStatsBar` holds the arithmetic apart from the drawing (the `ConversationMinimap` split):
 which languages become segments, what folds into "Other", and segment widths. Two rules are
@@ -113,5 +126,6 @@ draws in the quaternary text tone, visibly not a language of its own.
 
 The popover is `SessionRowView`'s dwell-timer popover on `ProjectRowView`, at the session
 popover's width on purpose — the two hang off neighbouring rows. `CodeStatsRenderTests`
-draws it to PNGs both ways, which is what caught the legend packing its values beside the
-names instead of into a column at the trailing edge.
+draws normal, truncated, non-Git, and no-commit states in both themes. The full Project Insights
+surface remains an extension proposal rather than expanding this glanceable card; see
+[`project-insights-extension.md`](../feature-drafts/project-insights-extension.md).

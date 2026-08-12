@@ -13,23 +13,41 @@ import UniformTypeIdentifiers
 /// that genuinely differ. What it does not own is the order.
 enum SoundPickerMenu {
 
+    /// The installed sounds in the order both surfaces list them: the suggested handful, then
+    /// the rest of what macOS ships, then the user's own. Empty groups are already gone, so a
+    /// caller draws one separator per group without checking.
+    ///
+    /// The order lives here rather than in either caller because a settings pop-up and a row's
+    /// submenu offering the same sounds in different orders is the drift this file exists to
+    /// prevent.
+    static func groups() -> [[NotificationSound]] {
+        let (suggested, rest) = SuggestedNotificationSounds
+            .partition(NotificationSoundLibrary.available())
+
+        return [suggested, rest.filter { !$0.isUserInstalled }, rest.filter(\.isUserInstalled)]
+            .filter { !$0.isEmpty }
+    }
+
     /// Appends every installed sound to `popUp`, grouped and separated.
     ///
-    /// - Parameter representedValue: turns a file name into whatever the caller stores.
+    /// - Parameters:
+    ///   - groups: a reading taken already, for a surface filling several pickers at once. The
+    ///     Customize sheet has eleven, and every one of them lists the same folders; scanning
+    ///     three directories eleven times per click would be paying for one answer eleven times.
+    ///     Omitted, each call takes its own reading, which is what a lone picker wants — the
+    ///     list is a folder, and a sound can arrive in it between two of them.
+    ///   - representedValue: turns a file name into whatever the caller stores.
     /// - Returns: the item index of each file name, for restoring the selection afterwards.
     @discardableResult
     @MainActor
     static func addSounds(
         to popUp: ThemedPopUp,
+        groups: [[NotificationSound]]? = nil,
         representedValue: (String) -> Any
     ) -> [String: Int] {
         var indexOfSound: [String: Int] = [:]
 
-        let (suggested, rest) = SuggestedNotificationSounds
-            .partition(NotificationSoundLibrary.available())
-
-        for group in [suggested, rest.filter { !$0.isUserInstalled }, rest.filter(\.isUserInstalled)]
-        where !group.isEmpty {
+        for group in groups ?? self.groups() {
             popUp.addSeparator()
             for sound in group {
                 indexOfSound[sound.fileName] = popUp.numberOfItems
@@ -45,11 +63,29 @@ enum SoundPickerMenu {
         return indexOfSound
     }
 
+    /// The same list as menu entries, for the surfaces that build a submenu rather than fill a
+    /// pop-up — the sidebar rows' Sounds submenu.
+    ///
+    /// - Parameter item: turns one sound into the row that chooses it, so the caller keeps its
+    ///   own check state, represented value and action.
+    @MainActor
+    static func soundEntries(item: (NotificationSound) -> ThemedMenuItem) -> [ThemedMenuEntry] {
+        groups().flatMap { group in
+            [ThemedMenuEntry.separator] + group.map { .item(item($0)) }
+        }
+    }
+
     /// The way in for a sound of the user's own, always last and always after a separator.
     @MainActor
     static func addCustomSoundItem(to popUp: ThemedPopUp, onChoose: @escaping () -> Void) {
         popUp.addSeparator()
-        popUp.addItem(ThemedMenuItem(title: L10n.string("Add a Sound…"), onChoose: onChoose))
+        popUp.addItem(customSoundItem(onChoose: onChoose))
+    }
+
+    /// The same row, for a submenu. One definition so both surfaces say the same words.
+    @MainActor
+    static func customSoundItem(onChoose: @escaping () -> Void) -> ThemedMenuItem {
+        ThemedMenuItem(title: L10n.string("Add a Sound…"), onChoose: onChoose)
     }
 
     /// Runs the Add a Sound panel and hands back the installed sound.

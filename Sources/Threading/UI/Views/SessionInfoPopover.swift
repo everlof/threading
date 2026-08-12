@@ -23,6 +23,12 @@ final class SessionInfoPopoverViewController: NSViewController {
         let branch: String?
         /// The linked worktree's name, or nil for an ordinary checkout.
         let worktree: String?
+
+        /// A sound this chat does not inherit, or nil — the common case. The session row keeps
+        /// no tooltip of its own, so this card is the one hover surface where an overridden
+        /// chat is identifiable without opening a menu. Same rule as the project row's tooltip:
+        /// configuration is not status, and the row itself acquires no decoration for it.
+        let soundLine: String?
         let stateText: String
         let stateSymbol: String
 
@@ -76,6 +82,11 @@ final class SessionInfoPopoverViewController: NSViewController {
             // ran on, not whatever the checkout has moved to since.
             branch = session.branch ?? folderPath.flatMap { GitInfo.currentBranch(for: $0) }
             worktree = folderPath.flatMap { GitInfo.worktreeName(for: $0) }
+
+            soundLine = SoundOverrideAudit.toolTipLine(
+                for: .session(session.id),
+                overrides: session.soundOverrides
+            )
 
             dormancyReason = activity == .dormant
                 ? SessionRestorationLedger.shared.outcome(for: session.id)
@@ -210,6 +221,17 @@ final class SessionInfoPopoverViewController: NSViewController {
             ))
         }
 
+        // Beside the branch rather than under the state: a sound the chat carries is
+        // configuration, like the checkout it runs in, not a condition it is in.
+        if let soundLine = info.soundLine {
+            rows.append(row(
+                symbol: SessionPopoverDefaults.soundSymbol,
+                classicGlyph: .status,
+                text: soundLine,
+                emphasis: .secondary
+            ))
+        }
+
         rows.append(row(
             symbol: info.stateSymbol,
             classicGlyph: .status,
@@ -335,6 +357,9 @@ enum SessionPopoverDefaults {
 
     static let folderSymbol = "folder"
     static let branchSymbol = "arrow.triangle.branch"
+    /// The hover card's line for a sound the chat does not inherit — the same speaker the
+    /// Sounds submenu wears.
+    static let soundSymbol = "speaker.wave.2"
     static let handoffSymbol = "arrow.left.arrow.right"
 
     /// Precedes the parent's title on a side chat's agent line.

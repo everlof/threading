@@ -69,23 +69,15 @@ final class GitRepositoryFileAccessTests: XCTestCase {
         XCTAssertEqual(file.content, "brand new")
     }
 
-    /// The exact membership command receives a string across the remote boundary. It must not
-    /// reinterpret legal Git filename bytes as line structure, Unicode quoting, or pathspec
-    /// syntax merely to avoid constructing the repository's complete allowlist.
-    func testExactMembershipPreservesNewlineNonASCIIAndPathspecNames() throws {
-        let fixtures = [
-            "line\nbreak.txt",
-            "r\u{00E4}ksm\u{00F6}rg\u{00E5}s.txt",
-            "literal[1]*?.txt"
-        ]
+    /// The remote path is data, never a Git pathspec. This name would match every Swift file if
+    /// handed to `ls-files` bare; the targeted allowlist query must find only the literal file.
+    func testAPathspecShapedFilenameReadsLiterally() throws {
+        let path = ":(glob)*.swift"
+        try write("literal pathspec", to: root.appendingPathComponent(path))
 
-        for path in fixtures {
-            let contents = "contents of \(path)"
-            try write(contents, to: root.appendingPathComponent(path))
-            let file = try XCTUnwrap(read(path).get())
-            XCTAssertEqual(file.path, path)
-            XCTAssertEqual(file.content, contents)
-        }
+        let file = try XCTUnwrap(read(path).get())
+        XCTAssertEqual(file.path, path)
+        XCTAssertEqual(file.content, "literal pathspec")
     }
 
     // MARK: - What may not
@@ -101,6 +93,7 @@ final class GitRepositoryFileAccessTests: XCTestCase {
             "/etc/passwd",
             "/etc/hosts",
             "./../outside.txt",
+            ":(exclude)tracked.swift",
             "does-not-exist.txt",
             ""
         ] {

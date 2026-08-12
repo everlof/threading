@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 // MARK: - Session Activity
 
@@ -54,6 +55,86 @@ enum SessionActivity {
             return false
         }
     }
+
+    /// The name this state is written under in the log.
+    ///
+    /// Stated rather than reflected: a diagnostic trail is read months later beside the code
+    /// that wrote it, and `String(describing:)` would silently rename every past line the day
+    /// a case is renamed.
+    var logName: String {
+        switch self {
+        case .dormant: return "dormant"
+        case .idle: return "idle"
+        case .working: return "working"
+        case .awaitingUser: return "awaitingUser"
+        case .needsAttention: return "needsAttention"
+        case .limitReached: return "limitReached"
+        }
+    }
+}
+
+// MARK: - Session Activity Cause
+
+/// What moved a fact, for the one line the tracker leaves behind when the state changes.
+///
+/// Named for the **input** rather than the outcome, because the outcome is already in the state
+/// and the input is the thing that cannot be recovered afterwards. `needsAttention` has three
+/// ways in — a turn that ended off screen, a runtime's own idle-prompt notice, a bell — and they
+/// are fixed in three different places. Without this the row says a session wants you and the
+/// log says nothing at all about which of the three put it there, which is exactly the question
+/// somebody asks the first time a mark appears while they are looking straight at the session.
+enum SessionActivityCause: String {
+    /// The session came on screen or left it.
+    case seen
+
+    /// Output crossed the byte threshold, on a session with no hooks of its own.
+    case output
+
+    /// The quiet timer expired: an inferred turn ended because nothing was written for a while.
+    case quiet
+
+    case turnStarted
+    case turnFinished
+
+    /// A Codex turn closed by its rollout rather than by the `Stop` that never came.
+    case turnInterrupted
+
+    /// A turn the provider refused for something other than the account's allowance.
+    case turnRefused
+
+    /// The runtime's own "I am waiting" notice — Claude's `Notification` hook. The only cause
+    /// that raises the unread mark on a session that is **on screen**.
+    case awaitingUserReported
+
+    case blockingAskOpened
+    case blockingAskClosed
+    case limitParked
+    case limitCleared
+
+    /// The terminal bell, which agents ring to ask for attention.
+    case bell
+
+    /// The session lost its process, or gained one.
+    case dormant
+    case running
+
+    /// Whether the agent said this, as against Threading inferring it from bytes, timers or the
+    /// session's own transcript.
+    ///
+    /// The line that decides what is worth a log entry when the state does **not** move: a hook
+    /// arriving and changing nothing is the case that is impossible to reconstruct later (it
+    /// leaves no mark on the row, no notification, nothing), while output that changes nothing
+    /// is the normal condition of a working session and would bury the trail it belongs to.
+    var isReported: Bool {
+        switch self {
+        case .turnStarted, .turnFinished, .turnInterrupted, .awaitingUserReported,
+             .blockingAskOpened, .blockingAskClosed:
+            return true
+        case .seen, .output, .quiet, .turnRefused, .limitParked, .limitCleared, .bell,
+             .dormant, .running:
+            return false
+        }
+    }
 }
 
 // MARK: - Session Activity Tracker
@@ -97,6 +178,14 @@ final class SessionActivityTracker {
     /// Called whenever the activity changes.
     var onChange: ((SessionActivity) -> Void)?
 
+    /// Which session this is, for the log. Optional because the tracker is constructed before
+    /// its owner knows — and because a fixture has no session at all.
+    var sessionID: SessionID?
+
+    /// What moved the state last. Kept as a value as well as logged, so the rule can be
+    /// asserted in a test rather than only read in `log show`.
+    private(set) var lastCause: SessionActivityCause?
+
     /// Whether the session is currently on screen, which decides if finishing work is
     /// worth flagging.
     var isVisible: Bool = false {
@@ -121,7 +210,7 @@ final class SessionActivityTracker {
             // transcript states outright.
             guard isVisible, awaitsUser else { return }
             awaitsUser = false
-            settle()
+            settle(.seen)
         }
     }
 
@@ -228,6 +317,14 @@ final class SessionActivityTracker {
         /// session reads `idle`: no beam, no mark, no notification. The mark exists to explain
         /// an *unexplained* stop, and this one is accounted for.
         case recovering
+
+        var logName: String {
+            switch self {
+            case .none: return "none"
+            case .flagged: return "flagged"
+            case .recovering: return "recovering"
+            }
+        }
     }
 
     private var limitPark: LimitPark = .none
@@ -297,13 +394,13 @@ final class SessionActivityTracker {
             // which, so nothing has to be inferred from bytes.
             guard isVisible, turnInFlight, awaitsUser else { return }
             awaitsUser = false
-            settle()
+            settle(.output)
             return
         }
 
         turnInFlight = true
         awaitsUser = false
-        settle()
+        settle(.output)
         restartQuietTimer()
     }
 
@@ -359,7 +456,7 @@ final class SessionActivityTracker {
         // A turn beginning is the limit lifting, whoever typed it — the scheduled continuation
         // landing is exactly this edge.
         limitPark = .none
-        settle()
+        settle(.turnStarted)
     }
 
     /// The agent reported that its turn ended.
@@ -374,7 +471,7 @@ final class SessionActivityTracker {
     /// the agent is about to speak again. `BackgroundWorkLedger` draws both lines.
     func noteTurnFinished(backgroundWork inFlight: [BackgroundTask] = []) {
         adoptOwnReports()
-        finishReportedTurn(backgroundWork: inFlight)
+        finishReportedTurn(backgroundWork: inFlight, cause: .turnFinished)
     }
 
     /// Ends the active Codex turn when its rollout records the interrupt that `Stop` omitted.
@@ -390,7 +487,7 @@ final class SessionActivityTracker {
             return false
         }
 
-        finishReportedTurn(backgroundWork: [])
+        finishReportedTurn(backgroundWork: [], cause: .turnInterrupted)
         return true
     }
 
@@ -414,11 +511,16 @@ final class SessionActivityTracker {
             return false
         }
 
-        finishReportedTurn(backgroundWork: [])
+        finishReportedTurn(backgroundWork: [], cause: .turnRefused)
         return true
     }
 
-    private func finishReportedTurn(backgroundWork inFlight: [BackgroundTask]) {
+    /// The three ways a reported turn ends share every line of this but the one they are told
+    /// apart by in the log: `Stop`, a rollout's interrupt, a refusal read off the transcript.
+    private func finishReportedTurn(
+        backgroundWork inFlight: [BackgroundTask],
+        cause: SessionActivityCause
+    ) {
         turnInFlight = false
         reportedTurnID = nil
         // The turn cannot have ended around an open question, so an ask still held here is one
@@ -429,7 +531,7 @@ final class SessionActivityTracker {
         // Not merely unflagged — *nothing* is waiting to be read, so an off-screen session must
         // not take the unread mark either.
         awaitsUser = !isVisible && !pausedOnOwnWork
-        settle()
+        settle(cause)
     }
 
     /// The agent reported that it is waiting on the user.
@@ -450,7 +552,7 @@ final class SessionActivityTracker {
         // turn, and the turn's start already ended the grace.
         guard !launchedUnattended else { return }
         awaitsUser = true
-        settle()
+        settle(.awaitingUserReported)
     }
 
     /// The agent called a tool whose result is the user's answer — see `TurnBlockingTools`.
@@ -465,7 +567,7 @@ final class SessionActivityTracker {
         // Unlike the runtime's own notice, an unattended launch is no reason to ignore this: a
         // boot repaint cannot call a tool, so nothing about a relaunch produces one of these.
         openAsks.insert(askKey(id))
-        settle()
+        settle(.blockingAskOpened)
     }
 
     /// The asking tool returned — answered, dismissed or interrupted.
@@ -477,7 +579,7 @@ final class SessionActivityTracker {
         adoptOwnReports()
         openAsks.remove(askKey(id))
         awaitsUser = false
-        settle()
+        settle(.blockingAskClosed)
     }
 
     /// The provider refused the turn over a rate limit — read from the session's own
@@ -503,7 +605,7 @@ final class SessionActivityTracker {
         openAsks.removeAll()
         limitPark = recoveryArmed ? .recovering : .flagged
         reportedTurnID = nil
-        settle()
+        settle(.limitParked)
     }
 
     /// The session's own record no longer ends on a refusal: the conversation has spoken since,
@@ -516,7 +618,7 @@ final class SessionActivityTracker {
     func noteLimitCleared() {
         guard limitPark != .none else { return }
         limitPark = .none
-        settle()
+        settle(.limitCleared)
     }
 
     /// An ask that named no call still has to pair with its close, and the same stand-in on both
@@ -550,7 +652,25 @@ final class SessionActivityTracker {
     /// A bell asks; it does not say the turn is over. A reported turn is ended by its own
     /// `Stop`, so inside one the bell only raises the flag. Where nothing reports, the bell is
     /// the only boundary there is, so it still ends the inferred turn.
-    func recordBell() {
+    ///
+    /// Returns **why** it rang, so the one place that rings can say so. The four causes come
+    /// out of the same three facts the flag above is set from, and they are returned as
+    /// `SoundEvent` rather than an enum of this file's own: they are the same four cases, and a
+    /// parallel type mapped one-to-one is the thing that drifts.
+    ///
+    /// - Parameters:
+    ///   - attributesOtherPrograms: whether anybody has asked to hear another program's bell
+    ///     apart from the agent's. False — the default — skips `otherProgramHoldsPTY` entirely,
+    ///     because without an entry of its own that cause resolves to the same sound as
+    ///     `bellAgentAsking` and the question would buy a distinction nobody could hear.
+    ///   - otherProgramHoldsPTY: asked **fresh**, at the bell. The cached foreground reading
+    ///     that names a terminal is taken once a second and can be a full second stale, which
+    ///     is not an answer about the byte that just arrived.
+    @discardableResult
+    func recordBell(
+        attributesOtherPrograms: Bool = false,
+        otherProgramHoldsPTY: () -> Bool = { false }
+    ) -> SoundEvent {
         quietTimer?.invalidate()
         quietTimer = nil
         bytesSinceQuiet = 0
@@ -561,7 +681,29 @@ final class SessionActivityTracker {
         // A bell rung during an unattended boot is part of the boot, not an ask: no prompt
         // has been submitted for the agent to be asking about.
         awaitsUser = !isVisible && !launchedUnattended
-        settle()
+        let cause = bellCause(
+            attributesOtherPrograms: attributesOtherPrograms,
+            otherProgramHoldsPTY: otherProgramHoldsPTY
+        )
+        settle(.bell)
+        return cause
+    }
+
+    /// The causes overlap — another program can ring in a visible session, or during an
+    /// unattended launch — so the classification is ordered rather than exclusive:
+    /// `launch → agentVisible → otherProgram → agentAsking`.
+    ///
+    /// Visibility outranks attribution because the sound's job is telling you what you cannot
+    /// see: while you are watching, who rang matters less than that you saw it; while you are
+    /// away, attribution is the whole question.
+    private func bellCause(
+        attributesOtherPrograms: Bool,
+        otherProgramHoldsPTY: () -> Bool
+    ) -> SoundEvent {
+        if launchedUnattended { return .bellLaunch }
+        if isVisible { return .bellAgentVisible }
+        if attributesOtherPrograms, otherProgramHoldsPTY() { return .bellOtherProgram }
+        return .bellAgentAsking
     }
 
     /// Marks the session as having no terminal.
@@ -577,7 +719,7 @@ final class SessionActivityTracker {
         pausedOnOwnWork = false
         limitPark = .none
         backgroundWork.forget()
-        settle()
+        settle(.dormant)
     }
 
     /// Marks a launch nobody made by hand, so its boot noise raises no flags.
@@ -607,7 +749,7 @@ final class SessionActivityTracker {
         pausedOnOwnWork = false
         limitPark = .none
         backgroundWork.forget()
-        settle()
+        settle(.running)
     }
 
     // MARK: - Private Methods
@@ -635,7 +777,10 @@ final class SessionActivityTracker {
     /// bookkeeping changes what the row has to say. An armed recovery is `idle`, and both
     /// outrank `pausedOnOwnWork` deliberately — work the refused turn left running cannot wake
     /// a limited agent, and `working` would be a lie the sidebar holds for hours.
-    private func settle() {
+    private func settle(_ cause: SessionActivityCause) {
+        let previous = activity
+        lastCause = cause
+
         if isDormant {
             activity = .dormant
         } else if !openAsks.isEmpty {
@@ -649,6 +794,67 @@ final class SessionActivityTracker {
         } else {
             activity = turnInFlight || pausedOnOwnWork ? .working : .idle
         }
+
+        record(cause, from: previous)
+    }
+
+    /// The trail a row's state leaves behind.
+    ///
+    /// Every fact the branch above reads goes on the line, not only the two that moved. The
+    /// question this answers is never "what is the state" — the sidebar already says that — but
+    /// "why is it that", and the answer is always some combination of the facts *and* the cause:
+    /// a `turnFinished` with `visible=false` is an unread mark for a turn nobody watched, the
+    /// same cause with `visible=true` is a session going quietly back to idle, and neither can
+    /// be told from the other by its outcome alone.
+    ///
+    /// Written under `session` at **`info`**, which is the whole point of it: `debug` is not
+    /// retained. `HookLifecycleRelay.deliver` has recorded every arriving hook at `debug` since
+    /// the feature shipped, and that line is invisible to anyone asking afterwards what happened
+    /// — the level has to be turned on first (`log config --mode "level:debug" --subsystem
+    /// codes.threading`, or a live `log stream --level debug`), which nobody does before the
+    /// thing they wanted to explain. A trail for a question asked in the past tense has to be
+    /// kept in the past tense.
+    ///
+    /// Nothing here is user content: enum tokens, booleans, counts and an opaque session id,
+    /// every one of them `.public` — a `String` interpolation defaults to private and the whole
+    /// line would come back as `<mask.hash: …>`, which is how this subsystem's existing traces
+    /// read in `log show` today.
+    private func record(_ cause: SessionActivityCause, from previous: SessionActivity) {
+        guard activity != previous else {
+            // A reported cause that moved nothing leaves no trace anywhere else: no mark, no
+            // notification, no row change. It is also a real answer — "the mark was already up
+            // when the second notice arrived" is what a row stuck flagged looks like from here.
+            // Inferred causes are excluded because a working session settles on every burst of
+            // output, and per-turn hooks would drown in it.
+            if cause.isReported {
+                ThreadingLogger.session.info(
+                    """
+                    Activity held at \(self.activity.logName, privacy: .public) \
+                    cause=\(cause.rawValue, privacy: .public) \
+                    session=\(self.sessionID?.uuidString ?? "unowned", privacy: .public) \
+                    visible=\(self.isVisible, privacy: .public)
+                    """
+                )
+            }
+            return
+        }
+
+        ThreadingLogger.session.info(
+            """
+            Activity \(previous.logName, privacy: .public) -> \
+            \(self.activity.logName, privacy: .public) \
+            cause=\(cause.rawValue, privacy: .public) \
+            session=\(self.sessionID?.uuidString ?? "unowned", privacy: .public) \
+            visible=\(self.isVisible, privacy: .public) \
+            turn=\(self.turnInFlight, privacy: .public) \
+            awaits=\(self.awaitsUser, privacy: .public) \
+            asks=\(self.openAsks.count, privacy: .public) \
+            park=\(self.limitPark.logName, privacy: .public) \
+            paused=\(self.pausedOnOwnWork, privacy: .public) \
+            reports=\(self.reportsOwnActivity, privacy: .public) \
+            unattended=\(self.launchedUnattended, privacy: .public)
+            """
+        )
     }
 
     /// Output has stopped once this fires, so the session has finished whatever it was doing.
@@ -674,7 +880,7 @@ final class SessionActivityTracker {
 
         // Finishing while the session is on screen needs no flag; the user saw it happen.
         awaitsUser = !isVisible
-        settle()
+        settle(.quiet)
     }
 }
 

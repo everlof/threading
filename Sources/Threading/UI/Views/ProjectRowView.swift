@@ -19,7 +19,10 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// project rows; headings and grouped checkouts keep their text-only shape.
     private let iconView = NSImageView()
     private let nameLabel = MorphingTitleLabel()
-    private let countLabel = NSTextField(labelWithString: "")
+    /// Most project rows have no collapsed-session count. Besides an otherwise empty label and
+    /// three constraints, creating this eagerly pays AppKit's cold monospaced-digit font setup
+    /// in the first sidebar layout. Materialize it only when there are digits to show.
+    private var countLabel: NSTextField?
     private let nativeContent = NSView()
     private let afterTitleSlot = NSStackView()
     private let trailingSlot = NSView()
@@ -215,7 +218,16 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         }
 
         setCount(collapsedSessionCount)
-        nativeToolTip = project.folderPath
+        // A sound this checkout does not inherit is named on the line under its path, so an
+        // overridden row is identifiable without opening a menu. Nothing is drawn for the common
+        // case: configuration is not status, and a row acquires no badge for carrying one.
+        nativeToolTip = [
+            project.folderPath,
+            SoundOverrideAudit.toolTipLine(
+                for: .project(project.id),
+                overrides: project.soundOverrides
+            )
+        ].compactMap { $0 }.joined(separator: "\n")
         animatesNextName = wasShowingThisProject && nameLabel.stringValue != nativeName
         applyTextColors()
         captureNativePresentation()
@@ -296,7 +308,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             setHoverButtonVisible(isHovered, animated: false)
         } else {
             hoverControls.alphaValue = 0
-            countLabel.alphaValue = 1
+            countLabel?.alphaValue = 1
         }
     }
 
@@ -324,13 +336,6 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             if backgroundStyle == .emphasized { return Design.Text.selected }
             return isHeading ? Design.Text.secondary : Design.Text.label
         }
-
-        countLabel.applyFont(.numericDetail())
-        countLabel.alignment = .right
-        countLabel.setContentHuggingPriority(.required, for: .horizontal)
-        countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        countLabel.translatesAutoresizingMaskIntoConstraints = false
-        countLabel.setAccessibilityIdentifier("sidebar.project.count")
 
         setupTrailingSlot()
         setupCustomizableContent()
@@ -544,7 +549,6 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         trailingSlot.translatesAutoresizingMaskIntoConstraints = false
         trailingSlot.setAccessibilityIdentifier("sidebar.project.trailing")
         hoverControls.setAccessibilityIdentifier("sidebar.project.actions")
-        trailingSlot.addSubview(countLabel)
         trailingSlot.addSubview(hoverControls)
 
         let width = trailingSlot.widthAnchor.constraint(
@@ -556,19 +560,40 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             trailingSlot.heightAnchor.constraint(
                 equalToConstant: SidebarRowDefaults.trailingSlotSize
             ),
-            countLabel.leadingAnchor.constraint(equalTo: trailingSlot.leadingAnchor),
-            // A count is text, whose frame *is* its ink, so it takes back the padding the slot
-            // was widened by for the glyph beside it.
-            countLabel.trailingAnchor.constraint(
-                equalTo: trailingSlot.trailingAnchor,
-                constant: -hoverButton.opticalHorizontalInset
-            ),
-            countLabel.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor),
             hoverControls.trailingAnchor.constraint(
                 equalTo: trailingSlot.trailingAnchor
             ),
             hoverControls.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
         ])
+    }
+
+    /// Crosses the count boundary once. A reused row keeps the label warm and merely hides it
+    /// when its next project has no collapsed sessions.
+    private func countLabelForPresentation() -> NSTextField {
+        if let countLabel { return countLabel }
+
+        let label = NSTextField(labelWithString: "")
+        label.applyFont(.numericDetail())
+        label.alignment = .right
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.setAccessibilityIdentifier("sidebar.project.count")
+        // Preserve the original crossfade order: hover controls stay above partially faded
+        // count ink while the pointer transition is in flight.
+        trailingSlot.addSubview(label, positioned: .below, relativeTo: hoverControls)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: trailingSlot.leadingAnchor),
+            // A count is text, whose frame *is* its ink, so it takes back the padding the slot
+            // was widened by for the glyph beside it.
+            label.trailingAnchor.constraint(
+                equalTo: trailingSlot.trailingAnchor,
+                constant: -hoverButton.opticalHorizontalInset
+            ),
+            label.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
+        ])
+        countLabel = label
+        return label
     }
 
     // MARK: - Hover
@@ -604,9 +629,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
         guard let project = popoverProject else { return }
 
-        // Kicked at entry rather than at dwell: scc answers in tens of milliseconds, so the
-        // count is usually fresh again by the time the popover opens.
-        CodeStatsService.shared.refreshIfAged(project)
+        // Kicked at entry rather than at dwell: the cached readings are usually fresh again by
+        // the time the popover opens, without doing process work in the dwell callback.
+        ProjectStatsService.shared.refreshIfAged(project)
 
         popoverScheduler.pointerEntered()
     }
@@ -657,9 +682,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// Builds the presentation independently from the pointer shell so tests and future
     /// project-card triggers exercise the exact same customizable component.
     ///
-    /// The card exists when either Threading's native SCC feature or an extension has content.
-    /// This is what lets an extension introduce a useful hover on a machine where SCC has not
-    /// produced a reading, without taking over hover timing, placement, or dismissal.
+    /// The card exists when either Threading's native project metrics or an extension has content.
+    /// This lets an extension introduce a useful hover before the passive scan has produced a
+    /// reading, without taking over hover timing, placement, or dismissal.
     func makeProjectHoverCard(for project: Project) -> NSViewController? {
         let target = ExtensionComponentTarget.projectHoverCard(
             projectID: project.id.uuidString.lowercased()
@@ -705,11 +730,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         if let info = ProjectStatsPopoverViewController.Info(project: project) {
             return ProjectStatsPopoverViewController(info: info, isEmbedded: true)
         }
-        guard CodeStatsService.shared.toolIsMissing else { return nil }
-        return ProjectStatsPopoverViewController(
-            missingToolFor: project.name,
-            isEmbedded: true
-        )
+        return nil
     }
 
     private func dismissPopover() {
@@ -730,14 +751,14 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
         guard animated else {
             hoverControls.alphaValue = visible ? 1 : 0
-            countLabel.alphaValue = visible ? 0 : 1
+            countLabel?.alphaValue = visible ? 0 : 1
             return
         }
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Design.Motion.quick
             hoverControls.animator().alphaValue = visible ? 1 : 0
-            countLabel.animator().alphaValue = visible ? 0 : 1
+            countLabel?.animator().alphaValue = visible ? 0 : 1
         }
     }
 
@@ -762,10 +783,18 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
     private func setCount(_ count: Int) {
         hasCount = count > 0
-        countLabel.stringValue = count > 0 ? String(count) : ""
-        countLabel.isHidden = count <= 0
+        if count > 0 {
+            let label = countLabelForPresentation()
+            label.stringValue = String(count)
+            label.isHidden = false
+        } else if let countLabel {
+            countLabel.stringValue = ""
+            countLabel.isHidden = true
+        }
         updateTrailingSlotVisibility()
     }
+
+    var countLabelIsMaterialized: Bool { countLabel != nil }
 
     private func updateTrailingSlotVisibility() {
         trailingSlot.isHidden = !showsHoverButton && !hasCount
@@ -786,7 +815,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         hoverButton.hostGround = ground
 
         if backgroundStyle == .emphasized {
-            countLabel.textColor = Design.Text.selected.withAlphaComponent(
+            countLabel?.textColor = Design.Text.selected.withAlphaComponent(
                 SidebarRowDefaults.secondaryTextAlpha
             )
             iconView.contentTintColor = Design.Text.selected
@@ -794,7 +823,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             return
         }
 
-        countLabel.textColor = Design.Text.secondary
+        countLabel?.textColor = Design.Text.secondary
         iconView.contentTintColor = Design.Text.secondary
         nativeIconTint = iconView.contentTintColor
     }

@@ -60,8 +60,8 @@ answer without searching for the correct terminal window.
 ## 5. Review the result
 
 When work reaches a reviewable boundary, open Git review from the same
-project. Choose the comparison that matches your intent—unstaged, staged,
-last turn, branch, or commit—then inspect and stage only the work you want.
+project. Choose the comparison that matches your intent: unstaged, staged,
+last turn, branch, or commit. Then inspect and stage only the work you want.
 
 ## Next
 

@@ -218,6 +218,7 @@ done < <(find "$APP" -type f -perm +111)
 
 [[ $problems -eq 0 ]] || fail "the export is not notarizable — see above"
 codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -2
+"$ROOT/scripts/check_bundled_scc.sh" "$APP/Contents/Helpers/scc"
 
 # MARK: - Package
 

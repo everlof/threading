@@ -256,6 +256,7 @@ final class ProjectDatabaseTests: XCTestCase {
         try database.removeSession(
             id: removed.id,
             from: firstProject.id,
+            at: 1,
             selectedSessionID: nil
         )
 
@@ -264,27 +265,6 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertEqual(restored.projects[0].sessions.map(\.id), [first.id, last.id])
         XCTAssertEqual(restored.projects[1].sessions.map(\.id), [untouched.id])
         XCTAssertNil(restored.selectedSessionID)
-    }
-
-    func testSessionRemovalRefusesAStaleProjectAndRollsBackSelection() throws {
-        let database = try makeDatabase()
-        let first = AgentSession(kind: .claude, title: "First")
-        let removed = AgentSession(kind: .codex, title: "Removed")
-        let project = makeProject("alpha", sessions: [first, removed])
-        try database.save(ProjectsState(
-            projects: [project],
-            selectedSessionID: removed.id
-        ))
-
-        XCTAssertThrowsError(try database.removeSession(
-            id: removed.id,
-            from: ProjectID(),
-            selectedSessionID: nil
-        ))
-
-        let restored = try database.load().state
-        XCTAssertEqual(restored.projects[0].sessions.map(\.id), [first.id, removed.id])
-        XCTAssertEqual(restored.selectedSessionID, removed.id)
     }
 
     func testOneSessionsAuxiliaryRowsCanBeDeletedWithoutPruningTheTables() throws {
@@ -376,14 +356,12 @@ final class ProjectDatabaseTests: XCTestCase {
         )
     }
 
-    func testValidJSONSessionDecodeFailureStillNamesTheExactRowAcrossBatches() throws {
+    func testValidJSONSessionDecodeFailureStillNamesTheExactRow() throws {
         let database = try makeDatabase()
-        let sessions = (0..<600).map {
-            AgentSession(kind: .claude, title: "Session \($0)")
-        }
-        let malformed = sessions[333]
+        let first = AgentSession(kind: .claude, title: "First")
+        let malformed = AgentSession(kind: .codex, title: "Malformed")
         try database.save(ProjectsState(projects: [
-            makeProject("alpha", sessions: sessions)
+            makeProject("alpha", sessions: [first, malformed])
         ]))
 
         let payload = try XCTUnwrap(rawSessionPayload(id: malformed.id))
@@ -412,30 +390,11 @@ final class ProjectDatabaseTests: XCTestCase {
 
     func testSessionOrderSurvivesDecodeBatchAndWaveBoundaries() throws {
         let database = try makeDatabase()
-        let firstProjectSessions = (0..<1_100).map {
-            AgentSession(kind: .claude, title: "First \($0)")
-        }
-        let secondProjectSessions = (0..<300).map {
-            AgentSession(kind: .codex, title: "Second \($0)")
-        }
-        try database.save(ProjectsState(projects: [
-            makeProject("first", sessions: firstProjectSessions),
-            makeProject("second", sessions: secondProjectSessions)
-        ]))
-
-        let restored = try database.load().state.projects
-        XCTAssertEqual(restored.map(\.name), ["first", "second"])
-        XCTAssertEqual(restored[0].sessions.map(\.id), firstProjectSessions.map(\.id))
-        XCTAssertEqual(restored[1].sessions.map(\.id), secondProjectSessions.map(\.id))
-    }
-
-    func testSessionOrderSurvivesJustBelowTheBatchingThreshold() throws {
-        let database = try makeDatabase()
-        let sessions = (0..<511).map {
+        let sessions = (0..<1_100).map {
             AgentSession(kind: .claude, title: "Session \($0)")
         }
         try database.save(ProjectsState(projects: [
-            makeProject("ordinary", sessions: sessions)
+            makeProject("alpha", sessions: sessions)
         ]))
 
         let restored = try XCTUnwrap(try database.load().state.projects.first)
@@ -645,6 +604,56 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertTrue(restored.isArchived)
         XCTAssertEqual(restored.themeID, .ocean)
         XCTAssertEqual(restoredProject.themeID, .homebrew)
+    }
+
+    /// Sound overrides on all three record kinds, including a key naming an event this build
+    /// has never heard of.
+    ///
+    /// That last part is the point. The field is `[String: String]` rather than a typed
+    /// dictionary precisely so a record written by a **later** build survives being read and
+    /// written by this one; a round trip through `[SoundEvent: SoundChoice]` would delete
+    /// exactly the entries the constraint exists to keep, and it would do it silently.
+    func testSoundOverridesSurviveThePayloadIncludingUnknownEvents() throws {
+        let database = try makeDatabase()
+        var session = AgentSession(kind: .claude, title: "Chat")
+        session.soundOverrides = [
+            "all": "file:Purr.aiff",
+            "bell": "silent",
+            "bell.launch": "file:Tink.aiff",
+            "alert.somethingLater": "file:Hero.aiff"
+        ]
+        var terminal = ProjectTerminal(currentDirectory: "/tmp/alpha")
+        terminal.soundOverrides = ["all": "system"]
+
+        var project = makeProject("alpha", sessions: [session])
+        project.terminals = [terminal]
+        project.soundOverrides = ["alert": "file:Submarine.aiff", "all": "silent"]
+
+        try database.save(ProjectsState(projects: [project]))
+        let restoredProject = try XCTUnwrap(try database.load().state.projects.first)
+
+        XCTAssertEqual(restoredProject.soundOverrides, project.soundOverrides)
+        XCTAssertEqual(restoredProject.sessions.first?.soundOverrides, session.soundOverrides)
+        XCTAssertEqual(restoredProject.terminals.first?.soundOverrides, terminal.soundOverrides)
+    }
+
+    /// Absent is the common case and stays absent: nothing seeds an empty map, so a record that
+    /// has never chosen a sound is indistinguishable from one written before the field existed.
+    func testAbsentSoundOverridesStayAbsent() throws {
+        let database = try makeDatabase()
+        var project = makeProject("alpha", sessions: [AgentSession(kind: .codex, title: "Chat")])
+        project.terminals = [ProjectTerminal(currentDirectory: "/tmp/alpha")]
+
+        try database.save(ProjectsState(projects: [project]))
+        let restored = try XCTUnwrap(try database.load().state.projects.first)
+
+        XCTAssertNil(restored.soundOverrides)
+        XCTAssertNil(restored.sessions.first?.soundOverrides)
+        XCTAssertNil(restored.terminals.first?.soundOverrides)
+        XCTAssertFalse(
+            try XCTUnwrap(rawProjectPayload(id: project.id)).contains("soundOverrides"),
+            "an absent field is absent from the payload, not an empty object in it"
+        )
     }
 
     // MARK: - The Real Document

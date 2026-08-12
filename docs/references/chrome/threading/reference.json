@@ -1,0 +1,73 @@
+{
+  "schema_version": 2,
+  "chrome_id": "threading",
+  "target": {
+    "platform": "Threading",
+    "release": "Authored, not a reproduction"
+  },
+  "sources": [],
+  "coverage": {
+    "window_frame": {
+      "status": "not_applicable",
+      "note": "Authored chrome. A one-point navy edge and twelve-point corner seat the Threading window without copying another platform frame."
+    },
+    "title_bar": {
+      "status": "not_applicable",
+      "note": "Authored chrome. The title band uses a restrained two-stop navy fill with a one-point orange active seam and a muted navy inactive seam."
+    },
+    "window_buttons": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Shared semantic caption buttons use the plain glyph family and the title band's warm ink."
+    },
+    "toolbar": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Application commands use the shared WindowCommandBandView directly below the title band."
+    },
+    "buttons": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Buttons keep Threading's existing rounded control geometry and orange action color."
+    },
+    "choice_controls": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Choice controls use the host's semantic chip treatment with Threading palette roles."
+    },
+    "fields": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Fields use the host's semantic field surface and navy depth hierarchy."
+    },
+    "menus": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Menus use Threading materials through the shared menu presenter."
+    },
+    "popovers": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Popovers use the ordinary Threading material and shared presentation behavior."
+    },
+    "scrollbars": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Scrollbars keep the automatic host behavior and resolve against the dark application appearance."
+    },
+    "lists_tables": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Lists and tables use Threading's deep navy selection fill and warm text roles, keeping orange for actions and focus."
+    },
+    "progress": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Progress controls use the shared continuous treatment and Threading status colors."
+    },
+    "alerts_toasts": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Alerts and toasts use the same navy surfaces, warm text, and semantic status roles."
+    },
+    "typography": {
+      "status": "not_applicable",
+      "note": "Authored chrome. Threading uses the host's proportional system typography without reproducing a period face."
+    },
+    "icons": {
+      "status": "not_applicable",
+      "note": "Authored chrome. The title band keeps one text identity and shared semantic symbols without repeating the application icon."
+    }
+  },
+  "crops": [],
+  "reproductions": []
+}

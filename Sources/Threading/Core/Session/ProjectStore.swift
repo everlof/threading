@@ -106,17 +106,6 @@ final class ProjectStore {
     /// Pending coalesced write, see `scheduleSave()`.
     private var saveTimer: Timer?
 
-    /// A successful load rewrites only when it actually found legacy theme identities. Keep the
-    /// result so a mutation can distinguish its own pending coalesced edit from that launch-only
-    /// migration; the latter was already committed before `init` returned.
-    private var hasPendingCoalescedMutation = false
-
-    #if DEBUG
-    /// The sidebar stress sweep keeps the mutation's owners separately visible. A fast total can
-    /// otherwise hide a newly eager persistence or private-data cleanup behind outline work.
-    private(set) var lastSessionRemovalPhaseNanoseconds: [String: UInt64] = [:]
-    #endif
-
     /// Whether a multi-system transaction may safely begin a side effect that it will later
     /// need this store to record. This is a preflight, not a promise that the next disk write
     /// cannot fail; callers must still inspect the mutation result.
@@ -876,6 +865,67 @@ final class ProjectStore {
         return .applied
     }
 
+    /// Records which sounds one conversation overrides. Nil clears the record's whole say, so it
+    /// follows its project — and the app beyond that — again.
+    ///
+    /// The map is handed over **whole** rather than one key at a time, and it is the record's
+    /// own `[String: String]`: a key written by a later build, naming an event this one has
+    /// never heard of, has to survive a read and a write here. Callers read the current map,
+    /// change the level they mean, and pass the result back — see `SoundOverrides.setting`.
+    @discardableResult
+    func setSoundOverrides(
+        _ overrides: [String: String]?,
+        forSessionID sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        guard projects[location.projectIndex].sessions[location.sessionIndex].soundOverrides
+            != overrides else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex].soundOverrides = overrides
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
+        notifyChanged()
+        return .applied
+    }
+
+    /// The same for a whole checkout, which its chats and standalone terminals follow unless
+    /// they answered for themselves.
+    @discardableResult
+    func setSoundOverrides(
+        _ overrides: [String: String]?,
+        forProjectID projectID: ProjectID
+    ) -> ProjectMutationResult {
+        guard let index = index(ofProject: projectID) else { return .targetNotFound }
+        guard projects[index].soundOverrides != overrides else { return .unchanged }
+        projects[index].soundOverrides = overrides
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
+        notifyChanged()
+        return .applied
+    }
+
+    /// The same for one standalone terminal. Nil returns it to the project that persists it,
+    /// and then to the app.
+    @discardableResult
+    func setSoundOverrides(
+        _ overrides: [String: String]?,
+        forTerminalID terminalID: TerminalID
+    ) -> ProjectMutationResult {
+        guard let location = locate(terminalID: terminalID) else { return .targetNotFound }
+        guard projects[location.projectIndex].terminals[location.terminalIndex].soundOverrides
+            != overrides else { return .unchanged }
+        projects[location.projectIndex].terminals[location.terminalIndex].soundOverrides = overrides
+        guard save() else {
+            notifyChanged(sidebarImpact: .terminalRow(terminalID))
+            return .persistenceRefused
+        }
+        notifyChanged(sidebarImpact: .terminalRow(terminalID))
+        return .applied
+    }
+
     /// Every archived session, newest first, paired with the project it belongs to.
     func archivedSessions() -> [(project: Project, session: AgentSession)] {
         projects
@@ -886,14 +936,9 @@ final class ProjectStore {
 
     @discardableResult
     func removeSession(id sessionID: SessionID) -> ProjectMutationResult {
-        #if DEBUG
-        lastSessionRemovalPhaseNanoseconds = [:]
-        #endif
         guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
         let projectID = projects[location.projectIndex].id
         let sessionPosition = location.sessionIndex
-        let hadPendingSave = saveTimer != nil
-        let indexesStarted = DispatchTime.now().uptimeNanoseconds
         let indexSpan = PerformanceRecorder.shared.begin(
             "sidebar.session-remove.indexes",
             category: "sidebar",
@@ -912,10 +957,6 @@ final class ProjectStore {
             }
         }
         indexSpan.end(metadata: ["shifted_sessions": String(shiftedSessionCount)])
-        #if DEBUG
-        lastSessionRemovalPhaseNanoseconds["indexes"] =
-            DispatchTime.now().uptimeNanoseconds - indexesStarted
-        #endif
 
         if selectedSessionID == sessionID {
             // Selection and graph are one transaction. The observer's optimized scalar write
@@ -923,56 +964,26 @@ final class ProjectStore {
             // returned after relaunch.
             setSelectedSessionWithoutPersistence(nil)
         }
-        let persistenceStarted = DispatchTime.now().uptimeNanoseconds
         guard saveSessionRemoval(
             sessionID,
             from: projectID,
-            preservingPendingChangesWithFullSave: hadPendingSave
+            at: sessionPosition
         ) else {
             notifyChanged(sidebarImpact: .projectStructure(projectID))
             return .persistenceRefused
         }
-        #if DEBUG
-        lastSessionRemovalPhaseNanoseconds["persistence"] =
-            DispatchTime.now().uptimeNanoseconds - persistenceStarted
-        #endif
 
         // Archive/Restore never enters this method. Permanent removal collects only refs in
         // Threading's private namespace, and follows the authoritative commit so a refused
         // deletion cannot erase the history of a session that is still there.
-        let baselinesStarted = DispatchTime.now().uptimeNanoseconds
         GitTurnBaselineStore.shared.remove(sessionID: sessionID)
-        #if DEBUG
-        lastSessionRemovalPhaseNanoseconds["baselines"] =
-            DispatchTime.now().uptimeNanoseconds - baselinesStarted
-        #endif
-        let workStarted = DispatchTime.now().uptimeNanoseconds
         AgentWorkTraceStore.shared.remove(sessionID: sessionID, projectID: projectID)
-        #if DEBUG
-        lastSessionRemovalPhaseNanoseconds["work"] =
-            DispatchTime.now().uptimeNanoseconds - workStarted
-        #endif
-        let handoffStarted = DispatchTime.now().uptimeNanoseconds
         ConversationHandoffStore.remove(for: sessionID)
-        #if DEBUG
-        lastSessionRemovalPhaseNanoseconds["handoff"] =
-            DispatchTime.now().uptimeNanoseconds - handoffStarted
-        #endif
-        let auditStarted = DispatchTime.now().uptimeNanoseconds
         ExecutionAuditStore.shared.remove(sessionID: sessionID)
-        #if DEBUG
-        lastSessionRemovalPhaseNanoseconds["audit"] =
-            DispatchTime.now().uptimeNanoseconds - auditStarted
-        #endif
         // Here rather than in the sidebar's delete gesture: this is the one door every deletion
         // route passes through, and Settings ▸ Archived removes sessions without going near the
         // sidebar at all. A scheduled send left behind would keep naming a session that is gone.
-        let scheduledStarted = DispatchTime.now().uptimeNanoseconds
         ScheduledMessageStore.shared.forget(sessionID: sessionID)
-        #if DEBUG
-        lastSessionRemovalPhaseNanoseconds["scheduled"] =
-            DispatchTime.now().uptimeNanoseconds - scheduledStarted
-        #endif
         notifyChanged(sidebarImpact: .sessionRemoved(
             projectID: projectID,
             sessionID: sessionID
@@ -1395,7 +1406,6 @@ final class ProjectStore {
     /// Structural edits persist immediately; only high-frequency updates such as terminal
     /// titles come through here, where losing the last fraction of a second costs nothing.
     private func scheduleSave() {
-        hasPendingCoalescedMutation = true
         saveTimer?.invalidate()
         saveTimer = Timer.scheduledTimer(
             withTimeInterval: ProjectStoreDefaults.saveCoalescingInterval,
@@ -1433,25 +1443,16 @@ final class ProjectStore {
             return false
         }
         recordPersistedSnapshot()
-        hasPendingCoalescedMutation = false
         return true
     }
 
-    /// The permanent-delete fast path: one SQL delete with a sparse order key, instead of
+    /// The permanent-delete fast path: one SQL delete and one positional shift, instead of
     /// encoding and upserting every session in every project on the main actor.
-    ///
-    /// A pending coalesced write is the exception. It represents model fields SQLite has not
-    /// accepted yet, so an exact delete cannot cancel its timer and then record those values as
-    /// durable. That uncommon path deliberately falls back to the complete transaction.
     private func saveSessionRemoval(
         _ sessionID: SessionID,
         from projectID: ProjectID,
-        preservingPendingChangesWithFullSave hadPendingSave: Bool
+        at position: Int
     ) -> Bool {
-        if hadPendingSave && hasPendingCoalescedMutation {
-            return save()
-        }
-
         saveTimer?.invalidate()
         saveTimer = nil
 
@@ -1460,11 +1461,15 @@ final class ProjectStore {
         let span = PerformanceRecorder.shared.begin(
             "sidebar.session-remove.persist",
             category: "sidebar",
-            metadata: ["projects": String(projects.count)]
+            metadata: [
+                "projects": String(projects.count),
+                "sessions": String(projects.reduce(0) { $0 + $1.sessions.count })
+            ]
         )
         let saved = stateManager.removeSession(
             id: sessionID,
             from: projectID,
+            at: position,
             selectedSessionID: selectedSessionID
         )
         span.end(metadata: ["saved": String(saved)])
@@ -1474,7 +1479,6 @@ final class ProjectStore {
             return false
         }
         recordPersistedSnapshot()
-        hasPendingCoalescedMutation = false
         return true
     }
 

@@ -81,7 +81,8 @@ Components so far:
 | `SubagentSummaryView` | The compact child-agent navigator shared by the overview and transcript pane. Feature code supplies `SubagentSummaryItem.TranscriptAvailability` as one of three states: unavailable, openable from memory/while still running, or on disk with the file URL. A file-backed row is therefore structurally openable and revealable; the chevron and Finder action cannot disagree through independent Boolean/optional inputs. |
 | `ThemedSegmentedControl` | Two or three fixed choices with all of them on screen: a track at `controlResting` with the selected segment lifted to `controlHover`. Built as a container of small `ThemedControl`s, the same shape as `ThemedTabStripView`, so each segment inherits hover, focus and its `.radioButton` role rather than one element re-deriving all three for parts of itself that are not views. An unselected segment answers the pointer in *ink* rather than taking a third fill step, because the scale has two control fills and a third invented here is how a scale stops being a scale. Arrow keys walk the run and take the selection with them; the ends hold rather than wrap. |
 | `PromptView` | A rounded container holding a growing text view and its submit control, as one input. |
-| `PaneNoticeView` | A standing condition between a pane header and its content, pushed into layout rather than drawn over it. Ordinary notices are one message line; a technical diagnosis may add a short title above a two-line explanation. The warning/information mark, exact copy, compact intrinsic-width actions and keyboard-reachable dismissal remain one accessible group. It owns its ground because the pane beneath it may be an unrelated terminal palette. |
+| `PaneNoticeView` | A standing condition between a pane header and its content, pushed into layout rather than drawn over it. Ordinary notices are one message line; a technical diagnosis may add a short title above a two-line explanation. The warning/information mark, exact copy, compact intrinsic-width actions and keyboard-reachable dismissal remain one accessible group. It owns its ground because the pane beneath it may be an unrelated terminal palette. A condition whose evidence is a picture may add one `accessory` view, placed between the sentence and the answers and never squeezed by either: evidence belongs with the words it supports, not out at the margin among the controls. |
+| `ColorPairSpecimenView` | Two reported colours shown touching, with type-specimen glyphs drawn in the first over the second, under a two-word caption. Nothing is drawn between the halves on purpose — a divider is a seam the eye finds whether or not the colours differ, and a pair that still reads as one field is the finding. The outline is what keeps the swatch legible when that happens, and it is stroked outside the fills' clip. The caption is not decoration: the reported case draws *nothing*, and an unlabelled empty rounded box in a row of controls reads as a text field rather than as a colour sample — which is also why the swatch is a mark's height rather than nearly a button's. The pair is a *reported* colour and never follows the app theme; the outline, caption, glyph typography and size do. |
 | `ThemedControl` | The base for a control that draws itself from the theme. |
 | `ThemedToggle` | A drop-in `NSSwitch` whose on-track is the theme's accent. `material.toggle_style` may instead select the compact ON/OFF hardware latch; behavior, target/action, keyboard access, and its checkbox accessibility contract stay identical. |
 | `ThemedCheckbox` / `ThemedRadioButton` | Binary and mutually-exclusive option marks with their own focus, accessibility, disabled, and period geometry. Win98's named family uses a 13px square tick field and the pinned 98.css 12×12 indexed pixel radio sprite with a separate four-pixel dot, while modern materials retain the standard accent marks. |
@@ -95,9 +96,9 @@ Components so far:
 | `ThemedTimeSeriesChartView` / `ThemedStackedBandChartView` | Two reusable retained time-series boundaries over the same data model. The first keeps independent zero-baseline series; the second requires aligned timestamps and draws additive bands whose final upper edge is the total. Both own axes, native drawing, bounded monotone curves, hover/keyboard inspection, accessibility, a 240-point-per-series cap, two-edge morph animation and synchronous Reduce Motion. Material selects presentation: continuous curves normally, or a segmented spectrum analyzer for Classic Player and imported player skins. Projections may remain explicitly linear and dashed in either material. Both also draw **bars** — grouped or stacked, vertical or as a horizontal ranking — over a categorical axis, on the same geometry: a bar is `baselineY → y` in the space a line already occupies, so composition alone decides grouped versus stacked. A bar stays a bar in every material; the spectrum analyzer renders filled bands, and running a three-category comparison through it answers the question with a column of cells. With nothing to plot the model's `emptyMessage`/`emptyDetail`/`placeholder` reach `ThemedChartPlaceholderView` and the **value axis prints no numbers**: an empty chart labelling its rules 0/0.2/0.5/0.8/1 is the automatic domain describing itself rather than anything anyone measured. See [`usage-dashboard.md`](usage-dashboard.md) and [`mcp-and-display.md`](mcp-and-display.md). |
 | `UsageDashboardView` | The retained Usage composition has separate Overview and Limit History tabs. Overview pairs a large total and top-three tool split with the shared stacked-band chart—top three routes plus an additive Other band—then a five-metric strip, virtual breakdown and explicit coverage. Limit History owns its chooser, reset/projection summary and independent-series chart. It accepts immutable report/history values; filesystem scans, CLI exports, provider calls and journal I/O remain outside the design boundary. |
 | `ThemedSpinner` / `ThemedProgressBar` | `NSProgressIndicator`, in the theme's accent. A spinner nested in a host-painted emphasized selection takes that ground's label ink instead, so the accent does not draw invisibly on the accent. |
-| `DiffSkeletonView` | The ghost of a diff body whose real document is deferred or still loading — Git Review's scroller-thumb seek rows. A repeating hunk-shaped silhouette of quiet context bars whose changed run splits by the file's own +/− counts, tinted at `Opacity.skeletonDiffTint` so it whispers the weight without becoming content; a file lacking a kind ghosts none of it. Drawing visits only the bar rows intersecting `dirtyRect`, so a document-sized body costs the viewport. The pulse is a layer-opacity loop — the spinner's no-redraw-timer discipline — removed rather than slowed under Reduce Motion, the still bars remaining as the status; a rehosted row re-arms it itself, since a virtual table drops layer animations constantly. Decorative by contract: the row's header carries the loading state. |
-| `ThemedScroller` | AppKit's live scrollbar value and tracking with two authored presentations. `automatic` draws a modern proportional thumb/track from the correct ink source and owns SwiftTerm's otherwise-missing overlay fade; System delegates to AppKit. A named period family owns persistent legacy geometry, arrow hit regions and placement, track relief or stipple, and the era's thumb/grip — including Aqua gel — while continuing to use the normal `NSScroller` action path. |
+| `DiffSkeletonView` | The ghost of a diff body whose real document is deferred or still loading — Git Review's scroller-thumb seek rows and its pending progressive rows. A repeating hunk-shaped silhouette of quiet context bars whose changed run splits by the file's own +/− counts, tinted at `Opacity.skeletonDiffTint` so it whispers the weight without becoming content; a file lacking a kind ghosts none of it. Drawing visits only the bar rows intersecting `dirtyRect`, so a document-sized body costs the viewport. The pulse is a layer-opacity loop — the spinner's no-redraw-timer discipline — removed rather than slowed under Reduce Motion, the still bars remaining as the status; a rehosted row re-arms it itself, since a virtual table drops layer animations constantly. Decorative by contract: the row's header carries the loading state. |
 | `ThemedChartPlaceholderView` | What a chart says when it has no series: a ghost of the shape that is coming, the status in words, and a `ThemedProgressBar` when the work reports a total. It sits over the *plot rectangle*, so the message lands where the marks would be and the axes keep their gutters. Two states that must not look alike — `.empty` is a finished answer and stands still under a dotted zero baseline, `.loading` is a promise and breathes `DiffSkeletonView`'s pulse over a two-run silhouette at `Opacity.skeletonChartBand`. The status is real labels rather than a centred string in `draw(_:)`: drawn text cannot be reached by VoiceOver, cannot wrap in a narrow pane, and cannot carry a bar beside it. Not a target (`hitTest` returns nil), so the chart underneath keeps its hover and selection; not an accessibility element itself, since the chart's group value already carries the summary. Built lazily — a chart that always had data never constructs it. |
+| `ThemedScroller` | AppKit's live scrollbar value and tracking with two authored presentations. `automatic` draws a modern proportional thumb/track from the correct ink source and owns SwiftTerm's otherwise-missing overlay fade; System delegates to AppKit. A named period family owns persistent legacy geometry, arrow hit regions and placement, track relief or stipple, and the era's thumb/grip — including Aqua gel — while continuing to use the normal `NSScroller` action path. |
 | `ThemedScrollView` | An `NSScrollView` that starts transparent — the stock one paints a system surface — and installs themed vertical and horizontal scrollers without enabling either. A period scroller forces legacy-width space because its arrows are permanent furniture. A material may move the vertical scroller to the leading edge; layout mirrors AppKit's reservation. The project tree opts into `.sidebarNavigator`, which resolves an authored fill/bevel and insets the document inside its edge; every other call site stays transparent. A nested horizontal-only viewport opts into `forwardsVerticalScrollToAncestor`, so code and tables do not trap a conversation's vertical gesture. |
 | `ThemedTextView` | An `NSTextView` in theme colours; `.scrolling()` replaces `scrollableTextView()`. |
 | `ThemedTableRowView` | Every list's row, including the lists that never say so (`ThemedTableRowDefaults`). It draws selection — held back to the ink it contains under a style, handed to AppKit under System — and any *other* plate a row needs, today `isDropTarget`. Such a plate takes **the selection's own silhouette**, which is not always ours: under System an inset-style table pads its selection 10 points in from the row (`systemInsetStylePadding`) while our path stops a hairline in, so a wash drawn from `selectionPath` ran the full width of a list whose selection did not, and one drawn from the *cell* — inset further still — stood as tall as the selection and visibly narrower. Neither number is AppKit's to publish, so the pin is a pixel comparison of the two plates as drawn (`testTheDropWashTakesTheSelectionsOwnShape`). |
@@ -302,9 +303,9 @@ over the ground the ink was measured against.
 
 **A menu opens on the press; an action fires on the release.** Which of the two a button does is
 `ThemedIconButton.presentsMenu`, and the split is not a preference — press-drag-release onto an
-item is the platform's menu gesture (`ChipView` and `ThemedPopUp` already present theirs on the
-press, and `NSMenu.popUp` is modal, so the button reads as held for exactly as long as its menu is
-up). It is also the only *reliable* half. A press that waits for its release depends on AppKit
+item is the platform's menu gesture, and the open menu tracks the press for exactly as long as it
+is held (see below), so the button reads as held while its menu is up. It is also the only
+*reliable* half. A press that waits for its release depends on AppKit
 routing that release back to the same view instance, and nothing promises it will: the sidebar
 rebuilds a row under the pointer whenever the tree's shape changes, `reloadData` hands every cell
 back to the reuse pool, and a detached view is sent no mouse-up while the view that replaced it is
@@ -339,6 +340,38 @@ which is right, since those *are* content. Build one through `ThemedMenuIcon.sym
 place that states the size and weight — never a bare `NSImage(systemSymbolName:)`, which arrives
 at whatever size the system hands out. A row with no honest mark is left without one: a gap in
 the column beats two rows sharing a glyph they do not share a meaning with.
+
+**Press-drag-release belongs to the menu, not to whatever opened it.** Holding the button down,
+sweeping to a row and letting go is the other half of how every platform menu is used, and it was
+implemented per opener: `ThemedPopUp` and `ChipView` forwarded their `mouseDragged`/`mouseUp` to
+`ThemedMenuPresenter`, and the fifteen other call sites did not, so the gesture worked on a
+settings pop-up and on an account chip and nowhere else in the window. A secondary-click menu
+could never have joined them by forwarding — nothing owns the right button between its press and
+its release, and the view that saw `rightMouseDown` is not asked again — which is exactly where
+it was reported: the menu sat inert under a held press and only a second, separate click could
+choose anything.
+
+An open session now watches that press itself, through a local monitor for the button that was
+down as it opened (`ThemedMenuPresenter.heldPressMask`). A menu opened from the keyboard, from an
+accessibility action, or by a click already released adopts no press, so a later unrelated drag
+cannot end it. Three things had to be true before that generalized safely:
+
+- **The menu answers before the source does.** A release back on the opening control is the
+  ordinary click-to-open and leaves the menu up for browsing — but a context menu is presented
+  *from the view it was invoked on* and opens over it, so asking the source first read every
+  release on a row as a release on the control. Rows are resolved first, and the source only for
+  a release that missed the panel.
+- **A release where the press went down is a click, not a choice.** A `.pointer`-anchored menu
+  puts its first row under the pointer immediately, so tracking a right-click naively would
+  choose whatever landed there the instant the button came up. `ThemedMenuMotion.stickyPressDistance`
+  is the platform's sticky-menu rule: travel first, or the menu just stays.
+- **A release outside every window carries no window**, and states itself in screen coordinates.
+  Measured raw against a window-relative panel, a release far from the menu could name a row.
+
+AppKit's own routing was ruled out as the cause first: a full-window overlay added during
+`mouseDown`, with first responder moved to it, does not stop the window routing that press's drag
+and release back to the source view. The forwarding was sound; there was simply only ever two of
+it.
 
 **The click that dismisses a menu lands on a sibling that opens one.** The dropdown's overlay
 swallows its dismissing click the way `NSMenu` does — a click on the terminal to let a menu go
@@ -458,6 +491,26 @@ already under the pointer. This is deliberately menu-local: `PointerTracking`'s 
 ("only ever answers *left*, never *arrived*") stays untouched, because a chip sliding under
 the pointer keeping its hover invitation is the behaviour the overlay-handoff rule above
 depends on.
+
+**A menu row's line stops being a line once the menu is a table.** `ThemedMenuMetric` is a
+reading a row states as a *column* — a name, a bar, and the value — instead of as words inside
+its subtitle, and `ThemedMenuEntry.header` is the name over a group of such rows. Both exist for
+the account rows (see [`accounts.md`](accounts.md)), and both come from one observation: in a
+sentence, a value's position is decided by the length of the name in front of it, so three
+logins put their three 5-hour numbers at three different x positions and the comparison the menu
+exists for becomes a search. The menu measures **one column plan across every row**
+(`ThemedMenuMetrics.metricColumns` / `metricColumnWidth`), so a label appearing on any row gets
+the same slot on all of them; a row with no reading for a column leaves the cell **empty rather
+than closed up**, since closing it would slide that row's remaining readings under a different
+heading. The reservation comes out of the *title's* width rather than being added to the panel's
+once the width cap is reached — the inversion is the point, because the line this replaced
+truncated its countdown (`7d resets in 5d 1…`) while the name it was competing with stayed
+whole. A name is the one thing on a row still recognisable from its first half, so the name is
+what gives way. `trailingDetail` is the right-aligned column after the metrics, `titleDetail` the
+quiet qualifier sharing the title's line, and `spokenSummary` all of it joined for the two
+consumers that see neither a column nor a bar — the tooltip and VoiceOver. A header is not a
+submenu and adds no press, which is what lets grouping pay for itself: the group's name comes off
+every row inside it.
 
 **A menu subtitle is one ink until its line is a comparison.** `ThemedMenuSubtitleSegment` lets
 a row's subtitle carry toned runs — standard, muted, warning, critical — resolved to colours in
@@ -1979,7 +2032,6 @@ test files are still missing from the target.
 The new test is the one that fails on the old code: demote every row and assert the strength
 *immediately*, with no draw of any kind in between — which is the only form of the rule the
 running app ever exercises.
-
 
 ## 2026-08-12 — a row's trailing control is not always one view, and a stack does not hear the row
 

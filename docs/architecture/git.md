@@ -133,8 +133,9 @@ the common case two reads. Unstaged, Staged, Last Turn, Branch and Commit comple
 Branch diffs from `merge-base(default branch, HEAD)` **to the worktree**, so uncommitted work
 counts — a branch's `+362 −26` should not shrink when work is merely unstaged. On the default
 branch itself the merge-base is HEAD and the mode degrades to Uncommitted, which is honest.
-Commit mode is the history browser: a paged `git log --numstat` list (100 a page), one commit
-opened into its own diff with Back returning to the list.
+Commit mode is the history browser: a paged metadata-only `git log` list (100 a page), followed by
+an asynchronous `--numstat` enrichment of the retained rows; one commit opens into its own diff
+with Back returning to the list. Cold blob/tree work therefore cannot hold the graph's first paint.
 
 On an unborn branch, Uncommitted uses a repository-native empty tree as the missing HEAD and
 still compares it to the worktree. It must not fall back to `--cached`: a newly staged file can
@@ -158,18 +159,6 @@ add `--no-color --no-ext-diff --no-textconv`; parsing git's porcelain and unifie
 is `GitDiffParser`, pure functions with the fixture traps (C-quoted paths, the trailing tab
 after a path with spaces, `\ No newline` markers, `-z` rename records) pinned by unit tests.
 
-Repository discovery has one ordering boundary. `git ls-files -co --exclude-standard
---deduplicate -z` supplies a unique lexical `GitRepositoryFileList`; the Activity atlas consumes
-that answer directly instead of applying a second 100,000-path Swift sort. The remote repository
-browser deliberately derives its localized natural-order page on the reader queue, so its visible
-`File2`/`File10` order remains unchanged without making presentation order an internal topology
-contract. A request to read one remote file does not build that complete catalogue: it asks Git
-for one `:(top,literal)` pathspec under a one-path output cap and requires the sole NUL-delimited
-result to equal the requested path. The existing post-membership regular-file, resolved-root
-containment, ignored-file and byte-cap checks still apply. Newlines, non-ASCII names and
-wildcard-looking filenames are regression fixtures because none may be reinterpreted as output or
-pathspec syntax.
-
 The executable remains the absolute system Git, while its child environment uses the PATH from
 the user's login shell. Git itself does not need PATH discovery, but hooks, credential helpers,
 filters and Git LFS do; inheriting launchd's GUI PATH made those programs disappear only inside
@@ -177,7 +166,7 @@ app-owned worktree and push operations. The resolved PATH is cached once per she
 per-operation overrides (such as the alternate index used below) are applied afterwards.
 
 **`git diff` never mentions untracked files**, so the ordinary working-tree modes synthesize them:
-`status --porcelain=v2 -z -uall` lists them individually and each becomes an all-added file
+`git ls-files --others --exclude-standard -z` lists them individually and each becomes an all-added file
 diff read in-process — not `diff --no-index` per file, which would spawn a process per file
 in a freshly scaffolded project. Size-capped (256 KB), binary-sniffed by git's own NUL
 heuristic. Last Turn does not synthesize: both of its endpoints are complete trees, so a file
@@ -277,7 +266,7 @@ The collapsed body rule does **not** by itself make the file index cheap. Measur
 20-row materialization reduced the first viewport to about 29 ms, but a deep walk still became
 superlinear because every appended header remained in the stack.
 
-File comparisons now use a **reusable `ThemedTableView`**. The complete file model is available
+File comparisons now use a **reusable `ThemedTableView`**. A complete identity roster is available
 for immediate scrolling, while only viewport rows are constructed: the 1,000-file Debug fixture
 creates 14 rows initially and 28 total after a direct jump to the end. That run opens in about
 19 ms and the deep jump takes about 18 ms. A watched redraw preserves expansion overrides and
@@ -292,6 +281,34 @@ a 6,082pt card. Offscreen rows use cheap width-aware model estimates (line count
 hunk headers); a materialized row replaces its estimate with exact TextKit height keyed by width.
 This both preserves virtualization and keeps the scrollbar stable before the last viewport. Pane
 resize invalidates all estimates together while visible rows remeasure.
+
+Large staged and immutable turn-checkpoint comparisons split identity from body as well as model
+from view. A full patch starts first so ordinary comparisons pay one process. If it misses the
+100 ms responsiveness gate, a raw NUL-delimited path/change roster races it. At 100 files the
+roster becomes authoritative: the full-patch process group is cancelled, the staged index has
+already been copied to a private index and frozen as an immutable tree, and every later read uses
+that same tree pair. The table requests exact unified patches only for up to 16 visible pending
+paths after scrolling settles. Rename source and destination are sent as literal pathspecs, so
+wildcards and exclude-shaped filenames remain filenames.
+
+After the resting viewport is exact and remains still for another 600 ms, an independent,
+lower-priority NUL-delimited `--numstat --no-renames` read supplies exact totals and a stable
+offscreen line-weight estimate without constructing hunks. Repository-wide rename similarity is
+not part of that pass: only source/destination paths that the raw roster already classified as
+renames receive a second path-limited `--find-renames` read, whose results replace their temporary
+delete/add interpretation. Whitespace folding is applied to statistics as well as bodies. The
+statistics queue cannot hold the small summaries used by navigation chrome, moving the viewport
+invalidates a scheduled start, and changing comparison cancels a running one. Until it arrives,
+unknown counts are shown as loading rather than zero and staging controls remain disabled. A
+pending row whose numstat weight is known presents as an *expanded ghost*: the height its line
+weight already contributes is filled by a pulsing `DiffSkeletonView` rather than standing as an
+empty card, and the ghost's fitting height is never recorded as the row's exact height —
+`hasEstimatedGhostBody` keeps the model estimate authoritative until real hunks mount. Neither
+statistics nor hydrated rows mutate the table during a live-scroll transaction; after momentum,
+replacements are by path identity and restore either the first visible path plus its within-row
+offset or the true bottom. Images read their endpoints from the same frozen tree pair. A failed
+per-file hydration leaves the roster usable and marks that row unavailable instead of replacing
+the pane.
 
 Two operations are prohibited during `NSScrollView`'s live-scroll transaction. A checkout result
 coalesces to the newest phase and applies after momentum ends, and deferred exact-height reports
@@ -363,6 +380,23 @@ only surface in the app that knows which line the reader is looking at, which is
 worth the wiring; the pane resolves the absolute path (a diff carries only a checkout-relative
 one) and the row picks the line. See [`external-apps.md`](external-apps.md) for why it is the
 *new* numbering, and why a file this comparison deletes offers no menu at all.
+
+**The header also reveals two of those actions to the pointer** — Copy Path, and the
+launcher's one-press external open aimed at that same first changed line — because a
+right-click menu is invisible until guessed at. They follow the sidebar rows' reveal: fade in
+on hovering the whole header *line* (a tracking rect that ends where the body begins, refreshed
+from `layout()` since AppKit rebuilds tracking on frame changes but not when only a subview
+moved), and swept away by the same staleness check when the header scrolls out from under a
+stationary pointer. Three rules keep them honest in a virtual table. They sit in the flexible
+run beside the file name, so the space they reserve is space the header was not using and
+nothing shifts when they appear. They are *hidden* rather than transparent at rest, because
+`hitTest` reads no alpha — an invisible control would swallow the header's click-to-toggle and
+copy paths nobody asked for (the toggle's gesture delegate walks the hit ancestry for a
+`ThemedControl`, since an icon button answers a hit with the plain glyph view inside it). And
+both gates are the model's — a nil URL, or `.deleted` — never a `FileManager` existence check,
+because rows materialize mid-scroll; the open button resolves its app icon and name from the
+launcher's cached registry on first reveal only, and a press on a file deleted behind the
+model's back beeps inside the launcher rather than promising.
 
 **Staging is offered by two modes of six**, and the rule is not a UI preference: a patch
 applies to the index only when the index is what the diff was measured *from*. Unstaged

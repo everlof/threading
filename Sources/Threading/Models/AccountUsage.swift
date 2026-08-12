@@ -256,6 +256,11 @@ struct AccountUsage: Equatable {
         let name: String
         let value: String
         let severity: UsageSeverity
+        /// The same reading as a proportion, for a surface that draws it as a length rather than
+        /// writing it — the menu rows' metric columns. Nil under exactly the rule `value`
+        /// answers with `—`, so a bar and the number beside it cannot disagree about whether
+        /// there is anything to report.
+        let fraction: Double?
     }
 
     /// Every window a written-out reading names, in the order the line prints them.
@@ -268,14 +273,23 @@ struct AccountUsage: Equatable {
         metering model: String? = nil,
         scoped: ScopedWindows = .metering
     ) -> [Reading] {
-        let windows = scoped == .all ? self.windows + modelWindows : self.windows(metering: model)
-        return windows.map { window in
-            Reading(
+        readings(
+            of: scoped == .all ? windows + modelWindows : windows(metering: model),
+            at: now
+        )
+    }
+
+    /// The same readings for a window list the caller has already chosen — the model rows'
+    /// scoped-only line. One mapping, so the stale-value and severity rules cannot drift
+    /// between the lists.
+    func readings(of windows: [Window], at now: Date) -> [Reading] {
+        windows.map { window in
+            let live = window.isExpired(at: now) ? nil : window.fraction
+            return Reading(
                 name: window.compactName,
                 value: Self.value(of: window, at: now),
-                severity: UsageSeverity.from(
-                    fraction: window.isExpired(at: now) ? nil : window.fraction
-                )
+                severity: UsageSeverity.from(fraction: live),
+                fraction: live
             )
         }
     }

@@ -179,6 +179,7 @@ final class StateManager {
     func removeSession(
         id sessionID: SessionID,
         from projectID: ProjectID,
+        at position: Int,
         selectedSessionID: SessionID?
     ) -> Bool {
         guard writesAreAllowed(for: "session removal") else { return false }
@@ -186,6 +187,7 @@ final class StateManager {
             try database().removeSession(
                 id: sessionID,
                 from: projectID,
+                at: position,
                 selectedSessionID: selectedSessionID
             )
             return true

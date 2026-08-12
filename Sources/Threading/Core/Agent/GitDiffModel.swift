@@ -108,12 +108,40 @@ struct GitCommitSummary: Sendable {
     let added: Int
     let removed: Int
 
+    /// False only during the short interval between metadata-first history presentation and
+    /// progressive numstat enrichment. Zero is a real answer once this becomes true.
+    let hasStats: Bool
+
     /// Parent hashes, first parent first — what the graph is drawn from. More than one means
     /// a merge.
     let parents: [String]
 
     /// Branch, tag and HEAD names pointing at this commit, as git reports them.
     let refs: [String]
+
+    init(
+        hash: String,
+        shortHash: String,
+        subject: String,
+        author: String,
+        date: Date,
+        added: Int,
+        removed: Int,
+        hasStats: Bool = true,
+        parents: [String],
+        refs: [String]
+    ) {
+        self.hash = hash
+        self.shortHash = shortHash
+        self.subject = subject
+        self.author = author
+        self.date = date
+        self.added = added
+        self.removed = removed
+        self.hasStats = hasStats
+        self.parents = parents
+        self.refs = refs
+    }
 }
 
 // MARK: - Change Summary
@@ -128,6 +156,15 @@ struct GitChangeSummary: Equatable, Sendable {
     var isClean: Bool { files == 0 }
 
     static let clean = GitChangeSummary(files: 0, added: 0, removed: 0)
+}
+
+/// Exact line totals for one path without retaining its hunks. Progressive large comparisons
+/// use these values to establish aggregate counts and an honest document-height estimate before
+/// the row itself reaches the viewport.
+struct GitFileLineStats: Equatable, Sendable {
+    let path: String
+    let added: Int
+    let removed: Int
 }
 
 // MARK: - Status
@@ -147,31 +184,6 @@ struct GitStatus: Sendable {
 }
 
 // MARK: - Repository Files
-
-/// Git's complete visible-path answer, already unique and lexically ordered by `ls-files`.
-/// Keeping that provenance in the type prevents a large-repository consumer from sorting the
-/// same 100,000-path catalogue again merely because an ordinary array carries no ordering fact.
-struct GitRepositoryFileList: Sendable {
-    let paths: [String]
-
-    /// Presentation keeps the repository browser's natural filename order without making that
-    /// locale-dependent ordering the topology contract consumed by the shared Activity atlas.
-    func naturalDisplayPage(limit: Int) -> GitRepositoryFilePage {
-        let sorted = paths.sorted {
-            $0.localizedStandardCompare($1) == .orderedAscending
-        }
-        let boundedLimit = max(0, limit)
-        return GitRepositoryFilePage(
-            paths: Array(sorted.prefix(boundedLimit)),
-            isTruncated: sorted.count > boundedLimit
-        )
-    }
-}
-
-struct GitRepositoryFilePage: Sendable {
-    let paths: [String]
-    let isTruncated: Bool
-}
 
 /// One bounded source file read for a remote repository browser.
 struct GitRepositoryFile: Sendable {

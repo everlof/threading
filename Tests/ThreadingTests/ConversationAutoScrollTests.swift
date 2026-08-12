@@ -110,7 +110,7 @@ final class ConversationAutoScrollLayoutTests: XCTestCase {
         controller.autoScroll.noteUserScrolled(nearBottom: false)
         controller.updateScrollToEndControl()
 
-        XCTAssertFalse(controller.jumpToEndButton.isHidden)
+        XCTAssertTrue(controller.jumpToEndButton.isFloatingPresent)
 
         controller.scrollToConversationEnd()
 
@@ -119,7 +119,9 @@ final class ConversationAutoScrollLayoutTests: XCTestCase {
             maximumOffset,
             accuracy: 0.5
         )
-        XCTAssertTrue(controller.jumpToEndButton.isHidden)
+        // The arrow stops being on offer the moment the jump is taken; whether it is still
+        // *drawn* is the length of its departure, which `FloatingScrollTargetMotionTests` owns.
+        XCTAssertFalse(controller.jumpToEndButton.isFloatingPresent)
         XCTAssertTrue(controller.autoScroll.followsNewContent)
     }
 
