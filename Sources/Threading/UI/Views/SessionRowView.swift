@@ -866,26 +866,37 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             host: { identityCustomizationHost },
             changedTargets: changedTargets
         )
-        refreshCustomizationHost(
+        let rowSurfaceSettled = refreshCustomizationHost(
             target: rowTarget,
             isMaterialized: customizationHostIsMaterialized,
             host: { customizationHost },
             changedTargets: changedTargets
         )
+        // The title, tooltip and icon land only through `applyCustomizationProperties`,
+        // which a materialized host fires on every `updateTarget`. A row whose host stays
+        // dormant still owes its native content the same application.
+        if !rowSurfaceSettled {
+            applyCustomizationProperties([:])
+        }
     }
 
+    /// Returns whether the target's presentation is settled: the host consumed the update,
+    /// or `changedTargets` proves this row's content was not affected. `false` means the
+    /// deferral guard skipped a dormant host, so nothing applied the row's properties.
+    @discardableResult
     private func refreshCustomizationHost(
         target: ExtensionComponentTarget,
         isMaterialized: Bool,
         host: () -> ComponentCustomizationHost,
         changedTargets: Set<ExtensionComponentTarget>?
-    ) {
-        guard Self.isCustomizationTarget(target, affectedBy: changedTargets) else { return }
+    ) -> Bool {
+        guard Self.isCustomizationTarget(target, affectedBy: changedTargets) else { return true }
         guard !defersCustomizationUntilNeeded
                 || isMaterialized
                 || !customizationLookup(target).isEmpty
-        else { return }
+        else { return false }
         host().updateTarget(target)
+        return true
     }
 
     private static func isCustomizationTarget(

@@ -194,6 +194,25 @@ final class SessionRowActionsTests: XCTestCase {
         XCTAssertEqual(title.stringValue, "Published title")
     }
 
+    /// Deferring the hosts must not defer the row's *native* content: the title lands only
+    /// through the customization pipeline, so a row with nothing published applies it with
+    /// no overrides. Shipped as every sidebar session losing its name on the next launch.
+    func testDeferredRowStillShowsItsNativeTitle() throws {
+        let row = SessionRowView(
+            customizationLookup: { _ in .empty },
+            defersCustomizationUntilNeeded: true
+        )
+        let session = session("Native title")
+
+        row.configure(with: session, activity: .idle)
+
+        XCTAssertFalse(row.customizationHostsAreMaterialized)
+        let title = try XCTUnwrap(
+            optionalView(named: "sidebar.session.title", in: row) as? MorphingTitleLabel
+        )
+        XCTAssertEqual(title.stringValue, session.displayTitle)
+    }
+
     /// A standard login has no account chip. Resolving it during first paint used to scan the
     /// account directories and parse shell aliases even though the result could not be shown.
     func testStandardAccountSkipsDiscoveryButAnAlternateAccountStillResolvesItsChip() {
