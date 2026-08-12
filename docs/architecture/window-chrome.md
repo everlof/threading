@@ -85,7 +85,7 @@ to the pane it describes.** `NSToolbar` positions its items relative to the *win
 what makes it right for exactly two things: the sidebar toggle, which acts on the split rather
 than on either side of it, and the selection-history pair (`<` `>`, ⌃⌘←/⌃⌘→), which retraces
 the window's page selection — both stay beside the traffic lights in both collapse states. It
-is wrong for everything else that used to live there: the page tab, the `+`, the usage pill
+is wrong for everything else that used to live there: the page's name, the usage pill
 and the session's actions all name or act on the *content pane*, so at a fixed window x they
 drift away from it the moment a divider moves.
 
@@ -145,20 +145,48 @@ is crossed and there is nothing to track. Two things this settles that measuring
 the header follows a **collapse** as readily as a drag, and it stops where the pane stops, so
 the display panel's own strip lines up with it rather than sitting under a window-wide row.
 
-The header's leading control is the **page tab** (`MainWindowController.pageTabView`): one
-chip naming the current workspace page — session or composer. Deliberately one, not a strip:
-a page here swaps the whole workspace, so a row of them would be a second session switcher
-duplicating the sidebar (see `sessions.md`, "Why Sessions Are Not Tabs"). It is the same
-`ThemedTabItemView` the pane strips build from, inked from the backdrop, bounded by
-`SessionTitleDefaults.minWidth/maxWidth`.
+The header's leading control is the **page's name** (`MainWindowController.pageTitleView`):
+a mark, the current workspace page — session or composer — and the `⋯` that acts on it.
+Deliberately one name, not a strip: a page here swaps the whole workspace, so a row of tabs
+would be a second session switcher duplicating the sidebar (see `sessions.md`, "Why Sessions
+Are Not Tabs"). It is inked from the backdrop and capped by `SessionTitleDefaults.maxWidth`.
 
-**Settings is a mode, not a page tab.** It temporarily replaces the workspace and its sidebar,
+**It was a tab, and every part of that grammar promised something the window does not do.**
+A single chip drawn as a *selected tab* says it is one of a set with the rest just out of view;
+the `+` beside it completed the promise, and did not keep it — pressed, it started a session
+that took this page's place rather than joining it. The × had the same problem from the other
+end, reading as "close this document" for a gesture that only empties the pane while the
+session keeps running. So `PageTitleView` draws no plate at rest, carries no × and no `+`:
+plain text on the pane's own ground, with a quiet plate appearing under the pointer because the
+name *is* still pressable (it reveals its row in the sidebar, which is the question a page name
+raises once the list has scrolled elsewhere). The actions did not go anywhere — ⌘N still starts
+a session, the sidebar's per-project `+` still makes one in place, and ⌘W still clears the pane.
+What went is three affordances that misdescribed them.
+
+**The `⋯` sits against the name, not in the group at the far end.** Everything trailing in this
+row answers "what is on screen" — an editor to leave for, an account's budget, four surfaces to
+show or hide — while this menu acts on the page the header just named. Held at the other end of
+a wide pane it read as a fifth pane toggle, with the thing it acts on 1,200pt away. It is the
+same button and the same builder as before (`showSessionContextMenu`, which calls the sidebar
+row's `sessionActionEntries`), and `MainWindowController.sessionContextToolbarButton` still
+points at it so one state pass enables or stands down every control in the row.
+
+**Settings is a mode, not a page.** It temporarily replaces the workspace and its sidebar,
 and only one category can be visible; selecting another category replaces the same surface. A
 closable category tab therefore promised multiple settings documents, made × mean “leave the
 mode,” and repeated the category already named in both the sidebar and page heading. While the
 mode is active the header instead shows a plain **Settings** label and an ordinary **Done**
 button. Done, ⌘W, the ⌘, Settings command, and the sidebar's Settings button all take the same
 return path, restoring the session or composer the mode covered.
+
+**The label and Done sit at opposite ends of the row**, not side by side. The label takes the
+leading slot the page's name would have had, which is where this row says what you are looking at;
+Done goes to the trailing edge, after the pane's own controls, because leaving the mode changes
+what is on screen and that is what everything trailing answers. Shipped beside the label it was
+the only bordered button in the chrome and had nothing on either side of it to belong to — a
+sheet's commit button left behind in a header, floating a third of the way across an otherwise
+empty strip. The two views are one state: `setSettingsModeChrome(visible:)` shows and hides both,
+because a caller that remembered only one would leave a Done button over a session's name.
 
 Before those actions sits a second, smaller group: **Open in** — the visible checkout handed to
 the editor, terminal or Finder used last, with a chevron that picks another. It is a separate
@@ -293,23 +321,15 @@ layout pass, and it avoids a reveal to the chrome floor followed by a second tra
 remembered width. `isRestoringDisplayPaneWidth` is held for exactly that one transition instead
 of a guessed two turns.
 
-**A live TUI takes one final grid, not an animated sequence of grids.** A split animation beside
-a full-screen Codex or Claude TUI turns each intermediate width into emulator reflow, PTY resize,
-SIGWINCH and process repaint. Deferring those grids still left AppKit synchronously committing
-the window's backing tree before its first frame, so a terminal-backed workspace now takes the
-immediate split route even when the gesture requested motion. Its pixel frame, emulator, PTY,
-search, accessibility and scroller all reach the exact final width once. A remotely controlled
-terminal refuses that frame-derived grid through its existing ownership gate. Native conversation
-surfaces, which have no PTY repaint loop, retain the standard pane motion.
-
-**Opening a retained pane does not mean selecting its session again.** The toolbar toggle names
-the visible session before it reveals the panel, but if that is already the panel's session then
-the tab strip and active surface are already correct. Re-rendering there rebuilt a retained rich
-surface immediately before AppKit's split collapse, making a five-cycle 256-mark scene pay five
-unrelated render passes. `DisplayPaneController.showSession` therefore returns for an unchanged
-session, and `showSessionTabs` returns only when both session and global-document state are already
-the requested state. Content mutations continue to render at their own call sites; a visibility
-gesture does not manufacture a content mutation.
+**The terminal's pixel frame moves; its character grid does not chase the animation.** A split
+animation beside a full-screen Codex or Claude TUI used to turn each intermediate width into an
+emulator reflow, PTY resize, SIGWINCH and process repaint. For a visible animated pane,
+`MainWindowController` brackets the motion with
+`EmojiFixedTerminalView.beginDeferringFrameGridChanges()` / `endDeferringFrameGridChanges()`.
+The terminal remembers only the final natural grid and applies it once after the split settles.
+The hold nests when the user reverses the pane before the first motion completes, and a remote
+grid remains authoritative if phone control begins in the middle. Immediate, off-screen and
+session-switch routes still resize once without a hold.
 
 ### How a sidebar row arrives, leaves and moves
 

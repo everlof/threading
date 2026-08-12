@@ -26,9 +26,6 @@ struct MainWindowStartupPerformance: Sendable {
     var chromeCoordinatorNanoseconds: UInt64 = 0
     var initialFrameNanoseconds: UInt64 = 0
     var initialTitleNanoseconds: UInt64 = 0
-    var initialSidebarGeometryNanoseconds: UInt64 = 0
-    var initialSidebarMountNanoseconds: UInt64 = 0
-    var initialSidebarLogicalRowCount: Int = 0
 }
 
 /// The application's single window: a project sidebar beside the active session's terminal.
@@ -44,6 +41,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     private(set) var startupPerformance = MainWindowStartupPerformance()
     private var isMeasuringStartupToolbarItems = false
+
+    /// Installed by the application composition root. Sheets inject this further into their
+    /// submission closures, so neither UI surface reaches into account or diagnostic state.
+    var issueReportSubmitter: MacIssueReportSubmitter?
+    private var isSendingCrashReport = false
 
     // MARK: - Properties
 
@@ -198,47 +200,54 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// "native frame", which is also what it means.
     private(set) var chromeCoordinator: WindowChromeCoordinator?
 
-    /// The active workspace page, drawn as the selected tab of the window's page strip.
+    /// The active workspace page, named at the head of the pane's header.
     ///
-    /// Deliberately a *single* chip, not a strip: a page here swaps the whole workspace — the
-    /// drawer, the panel, the sidebar's selection — so a row of them would be a second session
-    /// switcher wearing tab clothes. The sidebar is the switcher; this names where you are.
+    /// Deliberately *one* name, and deliberately not a tab: a page here swaps the whole
+    /// workspace — the drawer, the panel, the sidebar's selection — so a row of tabs would be a
+    /// second session switcher, and a single tab drawn on its own promises the rest of that row
+    /// exists somewhere. The sidebar is the switcher; this says where you are and carries the
+    /// menu of what can be done to it. See `PageTitleView` for what the tab's plate, × and `+`
+    /// each claimed that the window does not do.
+    ///
     /// Settings is not one of these pages: it is a temporary window mode with its own static
-    /// label and Done action, because presenting a changing category as a closable tab implies
-    /// that several settings documents can coexist when they cannot.
-    /// The *same* class the pane strips use, inked from the backdrop rather than the chrome
-    /// because the header floats over the terminal's own palette — which is the only thing
-    /// that differs between the two, and now the only thing stated. See `ThemedTabItemView`.
-    var materializedPageTabView: ThemedTabItemView?
-    var pageTabView: ThemedTabItemView {
-        if let materializedPageTabView { return materializedPageTabView }
+    /// label and Done action, because presenting a changing category as a page implies that
+    /// several settings documents can coexist when they cannot.
+    ///
+    /// Inked from the backdrop rather than the chrome, because the header floats over the
+    /// terminal's own palette.
+    var materializedPageTitleView: PageTitleView?
+    var pageTitleView: PageTitleView {
+        if let materializedPageTitleView { return materializedPageTitleView }
 
-        let tab = ThemedTabItemView(
-            title: "",
+        let title = PageTitleView(
             symbolName: SessionTitleDefaults.projectSymbolName,
-            placement: .horizontal,
-            showsClose: true,
             inkSource: .backdrop
         )
-        tab.onClose = { [weak self] in self?.closeActivePageTab() }
-        tab.onSelect = { [weak self] in self?.revealActivePageInSidebar() }
-        tab.isSelected = true
-        tab.isHidden = containerViewController.isShowingSettings
-        tab.maxWidth = SessionTitleDefaults.maxWidth
+        title.onReveal = { [weak self] in self?.revealActivePageInSidebar() }
+        title.onActions = { [weak self] button in self?.showSessionContextMenu(from: button) }
+        title.isHidden = containerViewController.isShowingSettings
+        title.maxWidth = SessionTitleDefaults.maxWidth
         NSLayoutConstraint.activate([
-            tab.widthAnchor.constraint(greaterThanOrEqualToConstant: SessionTitleDefaults.minWidth),
-            tab.widthAnchor.constraint(lessThanOrEqualToConstant: SessionTitleDefaults.maxWidth)
+            title.widthAnchor.constraint(lessThanOrEqualToConstant: SessionTitleDefaults.maxWidth)
         ])
+        sessionContextToolbarButton = title.actionsAnchor
 
-        materializedPageTabView = tab
-        paneHeaderStackView?.insertArrangedSubview(tab, at: 0)
-        return tab
+        materializedPageTitleView = title
+        paneHeaderStackView?.insertArrangedSubview(title, at: 0)
+        return title
     }
-    var pageTabViewIsMaterialized: Bool { materializedPageTabView != nil }
+    var pageTitleViewIsMaterialized: Bool { materializedPageTitleView != nil }
 
     /// Settings replaces the workspace temporarily rather than opening a document. Its header
-    /// therefore states the mode and the way back without borrowing tab selection or close
-    /// semantics from `pageTabView`.
+    /// therefore states the mode and the way back rather than borrowing the shape of
+    /// `pageTitleView`, whose `⋯` acts on a session Settings does not have.
+    ///
+    /// **The two halves sit at the two ends of the row.** The label takes the leading slot the
+    /// page's name would have had, because that is where this row says what you are looking at.
+    /// Done goes to the trailing edge with the rest of what acts on the surface on screen. Held
+    /// beside the label it was the only bordered button in the chrome, floating in the middle of
+    /// an otherwise empty strip with nothing on either side of it to belong to — a dialog's
+    /// commit button left behind in a header, and read as one.
     let settingsModeLabel = NSTextField(labelWithString: L10n.string("Settings"))
     let settingsDoneButton = ThemedButton(title: L10n.string("Done"), target: nil, action: nil)
     private(set) lazy var settingsModeHeaderView: NSStackView = {
@@ -246,18 +255,33 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         settingsModeLabel.textColor = Design.Text.label
         settingsModeLabel.setContentHuggingPriority(.required, for: .horizontal)
 
-        settingsDoneButton.target = self
-        settingsDoneButton.action = #selector(settingsDoneClicked(_:))
-        settingsDoneButton.toolTip = L10n.string("Close Settings")
-        settingsDoneButton.setContentHuggingPriority(.required, for: .horizontal)
-
-        let header = NSStackView(views: [settingsModeLabel, settingsDoneButton])
+        let header = NSStackView(views: [settingsModeLabel])
         header.orientation = .horizontal
         header.alignment = .centerY
         header.spacing = Design.Spacing.medium
         header.isHidden = true
         return header
     }()
+
+    /// The way out of the mode, built once and parked at the trailing end of the pane header.
+    /// Hidden with `settingsModeHeaderView`; the two are only ever shown or hidden together, by
+    /// `setSettingsModeChrome(visible:)`.
+    private(set) lazy var settingsModeDoneButton: ThemedButton = {
+        settingsDoneButton.target = self
+        settingsDoneButton.action = #selector(settingsDoneClicked(_:))
+        settingsDoneButton.toolTip = L10n.string("Close Settings")
+        settingsDoneButton.setContentHuggingPriority(.required, for: .horizontal)
+        settingsDoneButton.isHidden = true
+        return settingsDoneButton
+    }()
+
+    /// Shows or hides both ends of the mode's chrome. They are one state wearing two views, and
+    /// a caller that set only the one it remembered would leave the other stranded over a
+    /// session — which is exactly what a header with a Done button and a session's name says.
+    func setSettingsModeChrome(visible: Bool) {
+        settingsModeHeaderView.isHidden = !visible
+        settingsModeDoneButton.isHidden = !visible
+    }
 
     /// Toolbar pill showing the current account's rate-limit usage.
     ///
@@ -273,10 +297,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         let item = AccountUsageItemView()
         materializedAccountUsageItemView = item
         if let paneHeaderStackView {
-            paneHeaderStackView.insertArrangedSubview(
-                item,
-                at: paneHeaderStackView.arrangedSubviews.count - 2
-            )
+            // Anchored on the control it belongs in front of rather than counted back from the
+            // end: the row's trailing items have changed twice, and an offset that has to be
+            // re-derived every time is how the pill ends up inside the session's action group.
+            let anchor = openInSplitControl
+                .flatMap { paneHeaderStackView.arrangedSubviews.firstIndex(of: $0) }
+                ?? paneHeaderStackView.arrangedSubviews.count
+            paneHeaderStackView.insertArrangedSubview(item, at: anchor)
         }
         return item
     }
@@ -288,10 +315,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     var sidebarToolbarButton: ThemedIconButton?
     var navBackToolbarButton: ThemedIconButton?
     var navForwardToolbarButton: ThemedIconButton?
-    var newSessionButton: ThemedIconButton?
     var shellDrawerToolbarButton: ThemedIconButton?
     var displayPaneToolbarButton: ThemedIconButton?
     var statusCardToolbarButton: ThemedIconButton?
+    /// The `⋯` beside the page's name. Owned by `PageTitleView`; held here because the same
+    /// state pass that enables the rest of the header's controls decides whether it has a
+    /// session to act on.
     var sessionContextToolbarButton: ThemedIconButton?
     var surfaceToggleToolbarButton: ThemedIconButton?
     var openInToolbarButton: ThemedIconButton?
@@ -676,18 +705,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         let initialSidebarWidth = SidebarWidth.stored
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            let geometryStarted = DispatchTime.now().uptimeNanoseconds
             self.updateSidebarMinimumThickness()
             self.restoreSidebarWidth(initialSidebarWidth)
-            self.startupPerformance.initialSidebarGeometryNanoseconds =
-                DispatchTime.now().uptimeNanoseconds - geometryStarted
-
-            let mountStarted = DispatchTime.now().uptimeNanoseconds
             self.sidebarViewController.mountInitialTreeIfNeeded()
-            self.startupPerformance.initialSidebarMountNanoseconds =
-                DispatchTime.now().uptimeNanoseconds - mountStarted
-            self.startupPerformance.initialSidebarLogicalRowCount =
-                self.sidebarViewController.outlineRowCount
         }
         startupPerformance.splitFinalizeNanoseconds = DispatchTime.now().uptimeNanoseconds
             - finalizeStarted
@@ -1373,6 +1393,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         escalation: UncleanExitEscalation = .none,
         restore: @escaping () -> Void
     ) {
+        MacRemoteDiagnostics.record(.uncleanExitDetected, level: .warning, fields: [
+            .result: crashReport == nil ? "withoutSystemReport" : "withSystemReport",
+            .reason: escalation == .none ? "singleExit" : "repeatedExit",
+        ])
         var actions: [PaneNoticeAction] = [
             PaneNoticeAction(title: L10n.string("Restore")) { [weak self] in
                 self?.containerViewController.dismissNotice()
@@ -1389,6 +1413,31 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 }
             )
         }
+        if let submitter = issueReportSubmitter {
+            actions.append(
+                PaneNoticeAction(
+                    title: L10n.string("Send to Developer"),
+                    emphasis: .tertiary
+                ) { [weak self] in
+                    guard let self, !isSendingCrashReport else { return }
+                    isSendingCrashReport = true
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        defer { isSendingCrashReport = false }
+                        let draft = DeveloperIssueReportDraft(
+                            kind: .problem,
+                            title: L10n.string("Previous launch ended unexpectedly"),
+                            details: Self.uncleanExitMessage(escalation: escalation)
+                        )
+                        let outcome = await submitter.submit(
+                            trigger: "postCrash",
+                            draft: draft
+                        )
+                        showCrashReportSubmissionOutcome(outcome)
+                    }
+                }
+            )
+        }
 
         let notice = PaneNoticeView(
             tone: .attention,
@@ -1397,6 +1446,31 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             onDismiss: { [weak self] in self?.containerViewController.dismissNotice() }
         )
         containerViewController.showNotice(notice)
+    }
+
+    private func showCrashReportSubmissionOutcome(
+        _ outcome: DeveloperIssueReportSubmission
+    ) {
+        let alert = ThemedAlert()
+        switch outcome {
+        case .delivered(let reference):
+            alert.messageText = L10n.string("Report received")
+            alert.informativeText = L10n.format(
+                "Threading’s developer inbox received the crash summary. Reference: %@",
+                reference
+            )
+        case .queued:
+            alert.messageText = L10n.string("Report saved")
+            alert.informativeText = L10n.string(
+                "The crash summary is saved securely and will retry when Threading is active."
+            )
+        case .failed(let message):
+            alert.alertStyle = .warning
+            alert.messageText = L10n.string("Couldn’t send report")
+            alert.informativeText = message
+        }
+        alert.addButton(withTitle: L10n.string("OK"))
+        alert.runModal()
     }
 
     /// Puts the recovery surface in the pane, with a standing band above it.
@@ -1565,6 +1639,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         accountHandle: AccountHandle,
         model: String?,
         reasoningEffort: String?,
+        fastMode: Bool?,
+        permissionMode: AgentPermissionMode?,
         usesNativeUI: Bool,
         prompt: String
     ) -> AgentSession? {
@@ -1574,6 +1650,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             accountHandle: accountHandle,
             model: model,
             reasoningEffort: reasoningEffort,
+            fastMode: fastMode,
+            permissionMode: permissionMode,
             usesNativeUI: usesNativeUI,
             prompt: prompt
         )
@@ -1701,27 +1779,27 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Keeps the header naming whatever is on screen.
     ///
-    /// Each workspace branch hands the tab an **identity** as well as a title, which is what lets
-    /// a rename morph while a change of page lands directly — see `ThemedTabItemView.update`.
+    /// Each workspace branch hands the header an **identity** as well as a title, which is what
+    /// lets a rename morph while a change of page lands directly — see `PageTitleView.update`.
     /// Settings instead shows one stable mode label: the selected category is already named by
     /// its sidebar row and page heading, and changing it does not create a new document.
     func updateSessionTitleItem() {
         if containerViewController.isShowingSettings {
-            materializedPageTabView?.isHidden = true
-            settingsModeHeaderView.isHidden = false
+            materializedPageTitleView?.isHidden = true
+            setSettingsModeChrome(visible: true)
             updateAccountUsageItem(session: nil)
             updateToolbarControlStates()
             return
         }
 
-        settingsModeHeaderView.isHidden = true
+        setSettingsModeChrome(visible: false)
 
         let sessionID = containerViewController.currentSessionID
         let session = sessionID.flatMap { ProjectStore.shared.session(withID: $0) }
 
         if let sessionID, let session {
             let project = ProjectStore.shared.project(forSessionID: sessionID)
-            showPageTab(
+            showPageTitle(
                 title: session.displayTitle,
                 symbolName: SessionTitleDefaults.projectSymbolName,
                 identity: session.id,
@@ -1732,7 +1810,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             )
         } else if let terminalID = containerViewController.currentTerminalID,
                   let terminal = ProjectStore.shared.terminal(withID: terminalID) {
-            showPageTab(
+            showPageTitle(
                 title: ProjectTerminalTitle.displayTitle(for: terminal),
                 symbolName: "terminal",
                 identity: terminalID,
@@ -1740,39 +1818,38 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             )
         } else if let projectID = containerViewController.currentComposerProjectID {
             let project = ProjectStore.shared.project(withID: projectID)
-            showPageTab(
+            showPageTitle(
                 title: project?.name ?? L10n.string("New Session"),
                 symbolName: SessionTitleDefaults.projectSymbolName,
                 identity: projectID,
                 toolTip: project?.name
             )
         } else {
-            materializedPageTabView?.isHidden = true
+            materializedPageTitleView?.isHidden = true
         }
         updateAccountUsageItem(session: session)
         updateToolbarControlStates()
     }
 
-    private func showPageTab(
+    private func showPageTitle(
         title: String,
         symbolName: String,
         identity: AnyHashable,
         icon: NSImage? = nil,
         toolTip: String? = nil
     ) {
-        settingsModeHeaderView.isHidden = true
-        let pageTabView = pageTabView
-        pageTabView.isHidden = false
-        pageTabView.update(
+        setSettingsModeChrome(visible: false)
+        let pageTitleView = pageTitleView
+        pageTitleView.isHidden = false
+        pageTitleView.update(
             title: title,
             symbolName: symbolName,
-            showsClose: true,
             identity: identity
         )
         if let icon {
-            pageTabView.setIcon(icon)
+            pageTitleView.setIcon(icon)
         }
-        pageTabView.toolTip = toolTip ?? title
+        pageTitleView.toolTip = toolTip ?? title
     }
 
     @objc private func settingsDoneClicked(_ sender: ThemedButton) {
@@ -2316,9 +2393,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             guard tabTransfer.canMove(
                 tabID: tabID, from: sourceID, to: destinationID, sessionID: sessionID
             ) else { return nil }
-            return .item(ThemedMenuItem(title: title, onChoose: { [weak self] in
-                self?.moveTab(tabID, from: sourceID, to: destinationID)
-            }))
+            return .item(ThemedMenuItem(
+                title: title,
+                image: ThemedMenuIcon.symbol(Self.transferSymbol(to: destinationID)),
+                onChoose: { [weak self] in
+                    self?.moveTab(tabID, from: sourceID, to: destinationID)
+                }
+            ))
         }
 
         // Offered from the panes only: a tab already in a window of its own has nowhere new to
@@ -2329,12 +2410,24 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         ) {
             entries.append(.item(ThemedMenuItem(
                 title: L10n.string("Open in New Window"),
+                image: ThemedMenuIcon.symbol("macwindow.on.rectangle"),
                 onChoose: { [weak self] in
                     self?.detachTabIntoWindow(tabID, from: sourceID)
                 }
             )))
         }
         return entries
+    }
+
+    /// The mark a "move this tab there" row wears: the destination's own glyph, which is the
+    /// same one its toggle wears in the header — so the row is read by where it sends the tab
+    /// rather than by the three words the three destinations share.
+    private static func transferSymbol(to destinationID: TabHostID) -> String {
+        switch destinationID {
+        case .displayPanel: return DisplayPanelToggle.symbolName
+        case .drawer: return "rectangle.bottomthird.inset.filled"
+        case .detachedWindow: return "macwindow"
+        }
     }
 
     /// Whether a tab could live in a window of its own — asked of a *prospective* detached host
@@ -2723,6 +2816,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         } else {
             setDisplayPaneVisible(false)
         }
+        updateToolbarControlStates()
     }
 
     /// Opens the app-wide theme document beside the conversation. Unlike ordinary panel tabs it
@@ -2888,10 +2982,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         let hasSession = session != nil
         updatePaneToggleSelection()
-        // **New Session is hidden while Settings is active.** It creates a session, which this
-        // temporary mode is not a context for. The design system's own rule: a control offering
-        // nothing here hides rather than sitting there dead.
-        newSessionButton?.isHidden = containerViewController.isShowingSettings
         updateOpenInControls()
         shellDrawerToolbarButton?.isEnabled = hasSession
         shellDrawerToolbarButton?.isSelected = containerViewController.isShellDrawerOpen
@@ -3652,6 +3742,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         SessionAttachmentStore.shared.removeSession(sessionID)
         DisplayPaneStore.shared.removeSession(sessionID)
         MCPSessionRegistry.remove(sessionID: sessionID)
+        GitTurnBaselineStore.shared.remove(sessionID: sessionID)
         BrowserAutoCaptureRing.shared.clear(for: sessionID)
 
         // `discardDeletedSession` already removed the live controller and subagent state at the
@@ -3866,7 +3957,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
             // And the project's code count: a session that just stopped working is a project
             // whose code most likely just changed.
-            CodeStatsService.shared.refreshProject(forSessionID: sessionID)
+            ProjectStatsService.shared.refreshProject(forSessionID: sessionID)
 
             // The tree probably changed too; an on-screen review tab refreshes itself.
             displayPaneController.noteSessionStoppedWorking(sessionID)

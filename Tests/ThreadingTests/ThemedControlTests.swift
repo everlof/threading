@@ -1046,13 +1046,15 @@ final class ThemedControlTests: XCTestCase {
             }
 
             let titleInset = ThemedMenuMetrics.titleInset(
+                checkColumn: .none,
                 hasImageColumn: true,
                 hasPreviewColumn: false
             )
+            let markInset = ThemedMenuMetrics.markInset(checkColumn: .none)
             let icon = try XCTUnwrap(
                 band(
-                    from: ThemedMenuMetrics.imageInset,
-                    to: ThemedMenuMetrics.imageInset + ThemedMenuMetrics.imageSize
+                    from: markInset,
+                    to: markInset + ThemedMenuMetrics.imageSize
                 ),
                 "\(name): the row drew no icon"
             )
@@ -1251,8 +1253,7 @@ final class ThemedControlTests: XCTestCase {
         // content the scroller shows ends one inset above the panel's lower edge.
         let cut = clipped - ThemedMenuMetrics.outerInset * 2
         var consumed: CGFloat = 0
-        for entry in entries {
-            let height = ThemedMenuMetrics.height(of: entry)
+        for (entry, height) in zip(entries, ThemedMenuMetrics.heights(for: entries)) {
             if consumed + height > cut {
                 XCTAssertTrue(entry.isItem, "the cut fell on a separator")
                 XCTAssertEqual(cut - consumed, height / 2, accuracy: 0.5)
@@ -1867,42 +1868,207 @@ final class ThemedControlTests: XCTestCase {
     // MARK: - Press-Drag-Release
 
     /// The other half of how a platform menu tracks a press: button down on the control, held
-    /// through the open, released over a row. The control keeps receiving the held press's
-    /// events and forwards them, so the release chooses the row it lands on.
+    /// through the open, released over a row, which chooses it.
     func testAHeldPressDraggedOntoARowChoosesItOnRelease() throws {
-        let (window, root, popUp) = try openedPopUp(titles: ["System", "Cyberpunk"])
+        let (window, root, source) = try menuHarness()
         defer { window.close() }
 
-        let row = try XCTUnwrap(
-            descendants(in: root).first {
-                $0.accessibilityRole() == .menuItem && $0.accessibilityTitle() == "Cyberpunk"
-            }
-        )
-        let target = windowCentre(of: row)
-        popUp.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: target, in: window))
-        popUp.mouseUp(with: try mouseEvent(.leftMouseUp, at: target, in: window))
+        var chosen: String?
+        let token = try XCTUnwrap(present(from: source, onChoose: { chosen = $0 }))
+        defer { ThemedMenuPresenter.dismiss(token) }
+        layOutMenu(in: root)
 
-        XCTAssertEqual(popUp.selectedItem?.title, "Cyberpunk")
+        let target = windowCentre(of: try row(titled: "Second", in: root))
+        ThemedMenuPresenter.dragUpdated(
+            token,
+            event: try mouseEvent(.leftMouseDragged, at: target, in: window)
+        )
+        ThemedMenuPresenter.dragEnded(
+            token,
+            event: try mouseEvent(.leftMouseUp, at: target, in: window)
+        )
+
+        XCTAssertEqual(chosen, "Second")
         XCTAssertFalse(
             descendants(in: root).contains { $0.accessibilityRole() == .menu },
             "the release chose a row, so the menu should have closed"
         )
     }
 
+    /// The user's half of the same gesture, before the release: the row under the pointer lights
+    /// up as the held press sweeps the menu. Without it the list is inert until the button comes
+    /// up, so nothing says what a release would choose — reported as the menu "not moving".
+    func testAHeldPressDraggedOverTheMenuMovesTheHighlight() throws {
+        let (window, root, source) = try menuHarness()
+        defer { window.close() }
+
+        var lit: [String] = []
+        let entries = ["First", "Second"].map { title in
+            ThemedMenuEntry.item(ThemedMenuItem(
+                title: title,
+                preview: ThemedMenuPreview(
+                    placement: .leading,
+                    view: NSView(frame: NSRect(x: 0, y: 0, width: 8, height: 8)),
+                    highlightChanged: { isLit in if isLit { lit.append(title) } }
+                )
+            ))
+        }
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: source.bounds.width),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        ))
+        defer { ThemedMenuPresenter.dismiss(token) }
+        layOutMenu(in: root)
+        // What the menu lit on the way up is not what the press did with it.
+        lit.removeAll()
+
+        for title in ["Second", "First"] {
+            ThemedMenuPresenter.dragUpdated(
+                token,
+                event: try mouseEvent(
+                    .leftMouseDragged,
+                    at: windowCentre(of: try row(titled: title, in: root)),
+                    in: window
+                )
+            )
+        }
+
+        XCTAssertEqual(lit, ["Second", "First"], "the highlight did not follow the held press")
+    }
+
     /// Releasing the held press back on the control is the ordinary click-to-open: the menu
     /// stays for browsing rather than reading the release as a choice or a dismissal.
     func testAHeldPressReleasedOnTheSourceLeavesTheMenuOpen() throws {
-        let (window, root, popUp) = try openedPopUp(titles: ["System", "Cyberpunk"])
+        let (window, root, source) = try menuHarness()
         defer { window.close() }
 
-        let onControl = windowCentre(of: popUp)
-        popUp.mouseUp(with: try mouseEvent(.leftMouseUp, at: onControl, in: window))
+        var chosen: String?
+        var dismissed = false
+        let token = try XCTUnwrap(
+            present(from: source, onChoose: { chosen = $0 }, onDismiss: { dismissed = true })
+        )
+        defer { ThemedMenuPresenter.dismiss(token) }
+        layOutMenu(in: root)
+
+        ThemedMenuPresenter.dragEnded(
+            token,
+            event: try mouseEvent(.leftMouseUp, at: windowCentre(of: source), in: window)
+        )
 
         XCTAssertTrue(
             descendants(in: root).contains { $0.accessibilityRole() == .menu },
             "releasing on the control dismissed the menu it had just opened"
         )
-        XCTAssertEqual(popUp.selectedItem?.title, "System", "a release on the control chose")
+        XCTAssertNil(chosen, "a release on the control chose")
+        XCTAssertFalse(dismissed)
+    }
+
+    /// A menu presented from the view it was invoked *on* — every secondary-click menu, whose
+    /// source is a whole terminal, file tree or diff — opens over that source. The menu is
+    /// therefore asked first: reading the release as "back on the control" because the panel
+    /// happens to sit inside the source's bounds made press-drag-release choose nothing at all
+    /// anywhere it is most used.
+    func testAReleaseOverAMenuCoveringItsSourceStillChoosesTheRow() throws {
+        let (window, root, _) = try menuHarness()
+        defer { window.close() }
+
+        let wholeView = NSView(frame: root.bounds)
+        root.addSubview(wholeView)
+
+        var chosen: String?
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [
+                    .item(ThemedMenuItem(title: "First")),
+                    .item(ThemedMenuItem(title: "Second"))
+                ],
+                minimumWidth: 0
+            ),
+            from: wholeView,
+            anchor: .pointer(NSPoint(x: 120, y: 140)),
+            selectedEntryIndex: nil,
+            onChoose: { _, item in chosen = item.title },
+            onDismiss: {}
+        ))
+        defer { ThemedMenuPresenter.dismiss(token) }
+        layOutMenu(in: root)
+
+        let target = windowCentre(of: try row(titled: "Second", in: root))
+        XCTAssertTrue(
+            wholeView.bounds.contains(wholeView.convert(target, from: nil)),
+            "the fixture no longer places the menu over its own source"
+        )
+        ThemedMenuPresenter.dragEnded(
+            token,
+            event: try mouseEvent(.leftMouseUp, at: target, in: window)
+        )
+
+        XCTAssertEqual(chosen, "Second")
+    }
+
+    /// A release that lands outside every window of the app carries no window and states itself
+    /// in screen coordinates. Measured raw against a window-relative panel it can name a row the
+    /// pointer is nowhere near, so it is converted before it is read.
+    func testAReleaseOutsideEveryWindowIsReadInThatWindowsCoordinates() throws {
+        let (window, root, source) = try menuHarness()
+        defer { window.close() }
+        window.setFrameOrigin(NSPoint(x: 400, y: 300))
+
+        var chosen: String?
+        var dismissed = false
+        let token = try XCTUnwrap(
+            present(from: source, onChoose: { chosen = $0 }, onDismiss: { dismissed = true })
+        )
+        defer { ThemedMenuPresenter.dismiss(token) }
+        layOutMenu(in: root)
+
+        // The row's place in the window, reported as a screen point by a windowless event: the
+        // same numbers, a different frame of reference, and a long way from the menu.
+        let target = windowCentre(of: try row(titled: "Second", in: root))
+        let windowless = try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: .leftMouseUp,
+                location: target,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 1,
+                pressure: 1
+            )
+        )
+        XCTAssertNil(windowless.window, "the fixture event was routed to a window after all")
+        ThemedMenuPresenter.dragEnded(token, event: windowless)
+
+        XCTAssertNil(chosen, "a release outside every window chose a row")
+        XCTAssertTrue(dismissed, "a release well outside the menu did not let it go")
+    }
+
+    /// Which press an opening menu adopts. A menu opened by a press tracks *that* button through
+    /// to its release; one opened from the keyboard, from accessibility, or by a click already
+    /// released tracks nothing, so an unrelated drag later on cannot end it.
+    func testAMenuTracksOnlyThePressThatOpenedIt() throws {
+        func mask(opening type: NSEvent.EventType?, pressed: Int) throws -> NSEvent.EventTypeMask? {
+            let event = try type.map {
+                try mouseEvent($0, at: NSPoint(x: 4, y: 4), in: try menuHarness().0)
+            }
+            return ThemedMenuPresenter.heldPressMask(opening: event, pressedButtons: pressed)
+        }
+
+        XCTAssertEqual(try mask(opening: .leftMouseDown, pressed: 0), [.leftMouseDragged, .leftMouseUp])
+        XCTAssertEqual(
+            try mask(opening: .rightMouseDown, pressed: 0),
+            [.rightMouseDragged, .rightMouseUp]
+        )
+        // No current event — a menu opened from a timer during a held press still adopts it.
+        XCTAssertEqual(try mask(opening: nil, pressed: 0b01), [.leftMouseDragged, .leftMouseUp])
+        XCTAssertEqual(try mask(opening: nil, pressed: 0b10), [.rightMouseDragged, .rightMouseUp])
+        XCTAssertNil(try mask(opening: .leftMouseUp, pressed: 0), "a spent click was tracked")
+        XCTAssertNil(try mask(opening: nil, pressed: 0))
     }
 
     /// A press dragged off the menu and released over nothing lets the menu go, the way a
@@ -1990,27 +2156,6 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertTrue(dismissed, "escape with no filter should let the menu go")
     }
 
-    /// A pop-up whose menu is already open, laid out, and ready for the drag lookups.
-    private func openedPopUp(titles: [String]) throws -> (NSWindow, NSView, ThemedPopUp) {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
-        let popUp = ThemedPopUp(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
-        for title in titles { popUp.addItem(withTitle: title) }
-        root.addSubview(popUp)
-
-        let window = NSWindow(
-            contentRect: root.bounds,
-            styleMask: [.titled],
-            backing: .buffered,
-            defer: false
-        )
-        window.isReleasedWhenClosed = false
-        window.contentView = root
-
-        XCTAssertTrue(popUp.accessibilityPerformShowMenu())
-        layOutMenu(in: root)
-        return (window, root, popUp)
-    }
-
     /// The drag lookup reads row frames, which only a layout pass assigns; a test window never
     /// displays, so the pass is run by hand.
     private func layOutMenu(in root: NSView) {
@@ -2093,6 +2238,7 @@ final class ThemedControlTests: XCTestCase {
 
     private func present(
         from source: NSView,
+        onChoose: @escaping (String) -> Void = { _ in },
         onDismiss: @escaping () -> Void = {}
     ) -> AnyObject? {
         ThemedMenuPresenter.present(
@@ -2105,8 +2251,19 @@ final class ThemedControlTests: XCTestCase {
             ),
             from: source,
             selectedEntryIndex: 0,
-            onChoose: { _, _ in },
+            onChoose: { _, item in onChoose(item.title) },
             onDismiss: onDismiss
+        )
+    }
+
+    /// The open menu's row for a title, as the accessibility tree reports it — the only public
+    /// handle a test has on a panel whose views are private to the presenter.
+    private func row(titled title: String, in root: NSView) throws -> NSView {
+        try XCTUnwrap(
+            descendants(in: root).first {
+                $0.accessibilityRole() == .menuItem && $0.accessibilityTitle() == title
+            },
+            "no row titled \(title) in the open menu"
         )
     }
 
@@ -2388,10 +2545,14 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(ThemedMenuMetrics.separatorHeight, 9)
         XCTAssertEqual(ThemedMenuMetrics.contentInset, 5)
         XCTAssertEqual(ThemedMenuMetrics.checkSize, 8)
-        XCTAssertEqual(ThemedMenuMetrics.imageInset, 5)
+        XCTAssertEqual(ThemedMenuMetrics.markInset(checkColumn: .none), 5)
         XCTAssertEqual(
-            ThemedMenuMetrics.titleInset(hasImageColumn: true, hasPreviewColumn: false),
-            24
+            ThemedMenuMetrics.titleInset(
+                checkColumn: .none,
+                hasImageColumn: true,
+                hasPreviewColumn: false
+            ),
+            5 + ThemedMenuMetrics.imageSlot
         )
         XCTAssertEqual(ThemedMenuMetrics.submenuChevronSize, 6)
         XCTAssertEqual(ThemedMenuMetrics.submenuTrailingInset, 4)
@@ -2453,6 +2614,180 @@ final class ThemedControlTests: XCTestCase {
             ThemedMenuMetrics.shortcutGap + column,
             accuracy: 0.5,
             "a semantic shortcut column must not be simulated with spaces inside each title"
+        )
+    }
+
+    /// Every row's `7d` lands in the same column, including on rows that have no `5h`.
+    ///
+    /// The whole argument for `ThemedMenuMetric` is that a value inside a sentence is positioned
+    /// by the name in front of it, so a plan metering one window must not slide its `7d` under
+    /// the heading of a plan metering two. The plan is a union in first-seen order, and the
+    /// column width is one measurement across the menu rather than per row — unequal columns
+    /// would move the second column's bar on rows whose first is absent, and a bar that moves
+    /// sideways between rows cannot be compared by length.
+    @MainActor
+    func testEveryRowsWindowLandsInTheSameColumn() {
+        AppThemePalette.set(.system)
+        var twoWindows = ThemedMenuItem(title: "Everlof")
+        twoWindows.metrics = [
+            ThemedMenuMetric(label: "5h", value: "27%", fraction: 0.27),
+            ThemedMenuMetric(label: "7d", value: "81%", fraction: 0.81, tone: .warning)
+        ]
+        var oneWindow = ThemedMenuItem(title: "David")
+        oneWindow.metrics = [
+            ThemedMenuMetric(label: "7d", value: "6%", fraction: 0.06)
+        ]
+        let entries: [ThemedMenuEntry] = [.item(twoWindows), .item(oneWindow)]
+
+        XCTAssertEqual(ThemedMenuMetrics.metricColumns(entries), ["5h", "7d"])
+
+        // One width across the menu, measured from the widest value *anywhere* in it: the row
+        // with the shortest number must still leave room for the longest, or the two rows'
+        // columns start at different places and the stack stops being a stack.
+        let narrow = ThemedMenuMetrics.metricColumnWidth([.item(oneWindow)])
+        let shared = ThemedMenuMetrics.metricColumnWidth(entries)
+        XCTAssertGreaterThan(
+            shared, narrow,
+            "adding a row whose value is wider must widen the column for every row"
+        )
+        XCTAssertGreaterThan(shared, ThemedMenuMetrics.metricBarWidth)
+
+        // Two columns of that width, their gap, and nothing else claimed for a menu with no
+        // trailing detail on any row.
+        XCTAssertEqual(
+            ThemedMenuMetrics.metricReservation(entries),
+            shared * 2 + ThemedMenuMetrics.metricColumnGap * 2,
+            accuracy: 0.5
+        )
+    }
+
+    /// The columns come out of the *title's* width, so a menu at its cap truncates the name and
+    /// never a number.
+    ///
+    /// This is the inversion the redesign exists for. The line it replaced put the reading in a
+    /// subtitle, so the panel's width cap cut whatever was last — which was the reset countdown,
+    /// leaving `7d resets in 5d 1…`, a sentence claiming to be complete. A name is the one thing
+    /// on the row still recognisable from its first half.
+    @MainActor
+    func testTheColumnsTakeTheirWidthFromTheNameNotThePanel() {
+        AppThemePalette.set(.system)
+        let name = String(repeating: "Lundborg Viktor ", count: 6)
+        var bare = ThemedMenuItem(title: name)
+        bare.metrics = []
+        var measured = ThemedMenuItem(title: name)
+        measured.metrics = [
+            ThemedMenuMetric(label: "5h", value: "27%", fraction: 0.27),
+            ThemedMenuMetric(label: "7d", value: "81%", fraction: 0.81)
+        ]
+        measured.trailingDetail = "7d · 19h 36m"
+
+        let withColumns = ThemedMenuMetrics.width(for: [.item(measured)], minimum: 0)
+        XCTAssertEqual(
+            withColumns,
+            ThemedMenuLayout.maximumWidth,
+            "a name this long must drive the panel to its cap either way"
+        )
+        XCTAssertEqual(
+            ThemedMenuMetrics.width(for: [.item(bare)], minimum: 0),
+            withColumns,
+            "the columns must not widen a panel already at its cap — they take the name's room"
+        )
+        XCTAssertGreaterThan(
+            ThemedMenuMetrics.metricReservation([.item(measured)]),
+            ThemedMenuMetrics.metricBarWidth * 2,
+            "the reservation covers both columns, their gaps and the trailing detail"
+        )
+    }
+
+    /// A section head names the rows under it and chooses nothing: it takes no keyboard
+    /// highlight, so arrowing down a grouped menu still walks logins rather than stopping on
+    /// their headings.
+    @MainActor
+    func testASectionHeadIsNotSomethingToLandOn() {
+        AppThemePalette.set(.system)
+        let entries: [ThemedMenuEntry] = [
+            .header("Claude Code"),
+            .item(ThemedMenuItem(title: "Everlof")),
+            .header("Codex"),
+            .item(ThemedMenuItem(title: "David"))
+        ]
+
+        XCTAssertNil(entries[0].item)
+        XCTAssertFalse(entries[0].isItem)
+        XCTAssertEqual(entries.compactMap(\.item).map(\.title), ["Everlof", "David"])
+        XCTAssertEqual(
+            ThemedMenuMetrics.heights(for: entries).first,
+            ThemedMenuMetrics.headerHeight
+        )
+    }
+
+    /// Rows stacked against each other keep one rhythm, whether or not each has a second line.
+    ///
+    /// Three logins carrying a scoped window and two without gave a group two row heights in
+    /// direct contact, which reads as a spacing defect rather than as rows that happen to
+    /// differ. A separator or a section head is what re-opens the question — the project menu's
+    /// two actions sit after a rule and stay short while the projects above them keep the height
+    /// their paths need.
+    @MainActor
+    func testRowsStackedAgainstEachOtherShareOneHeight() {
+        AppThemePalette.set(.system)
+        var withLine = ThemedMenuItem(title: "Everlof")
+        withLine.subtitle = "7d Fable 89%"
+
+        let mixedRun: [ThemedMenuEntry] = [
+            .header("Claude Code"),
+            .item(withLine),
+            .item(ThemedMenuItem(title: "Daniel Block"))
+        ]
+        XCTAssertEqual(
+            ThemedMenuMetrics.heights(for: mixedRun),
+            [
+                ThemedMenuMetrics.headerHeight,
+                ThemedMenuMetrics.subtitleRowHeight,
+                ThemedMenuMetrics.subtitleRowHeight
+            ],
+            "a row beside one with a second line takes that run's height"
+        )
+
+        let parted: [ThemedMenuEntry] = [
+            .item(withLine),
+            .separator,
+            .item(ThemedMenuItem(title: "New Worktree…"))
+        ]
+        XCTAssertEqual(
+            ThemedMenuMetrics.heights(for: parted),
+            [
+                ThemedMenuMetrics.subtitleRowHeight,
+                ThemedMenuMetrics.separatorHeight,
+                ThemedMenuMetrics.rowHeight
+            ],
+            "a rule ends the run, so an action after one is not padded to the list's height"
+        )
+
+        // And the panel's own arithmetic is the same list, so a head cannot be sized one way
+        // and laid out another.
+        XCTAssertEqual(
+            ThemedMenuMetrics.height(for: mixedRun),
+            ThemedMenuMetrics.heights(for: mixedRun).reduce(0, +)
+                + ThemedMenuMetrics.outerInset * 2
+        )
+    }
+
+    /// Neither of the two consumers that cannot see a column — the tooltip and VoiceOver — is
+    /// left with only the row's name.
+    @MainActor
+    func testARowSpeaksItsColumnsForTheConsumersThatCannotSeeThem() {
+        var item = ThemedMenuItem(title: "Everlof")
+        item.titleDetail = "Max"
+        item.metrics = [
+            ThemedMenuMetric(label: "5h", value: "27%", fraction: 0.27),
+            ThemedMenuMetric(label: "7d", value: "81%", fraction: 0.81, tone: .warning)
+        ]
+        item.trailingDetail = "7d · 19h 36m"
+
+        XCTAssertEqual(
+            item.spokenSummary,
+            "Everlof, Max, 5h 27%, 7d 81%, 7d · 19h 36m"
         )
     }
 
@@ -3102,6 +3437,99 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    // MARK: - The page's name
+
+    /// The header names the page as *text*, and the plate is feedback rather than furniture.
+    ///
+    /// This is the whole difference between this view and the tab it replaced. A tab draws its
+    /// selected fill whether or not anyone is looking at it, which is right for one of a row and
+    /// wrong for the only one there can be: it promised a strip of siblings just out of view,
+    /// and the `+` beside it completed the promise by starting a session that took this page's
+    /// place instead of joining it.
+    func testThePageTitleIsPlainUntilThePointerIsOnIt() throws {
+        let window = PointerFixtureWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 120),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: true
+        )
+        let root = try XCTUnwrap(window.contentView)
+        let title = PageTitleView(symbolName: "folder", inkSource: .chrome)
+        title.translatesAutoresizingMaskIntoConstraints = true
+        title.update(title: "Investigate icon rendering", symbolName: "folder", identity: 1)
+        title.frame = NSRect(x: 20, y: 40, width: 260, height: Design.Size.tabHeight)
+        root.addSubview(title)
+        root.layoutSubtreeIfNeeded()
+
+        func plateIsDrawn() throws -> Bool {
+            let rep = try XCTUnwrap(title.bitmapImageRepForCachingDisplay(in: title.bounds))
+            title.cacheDisplay(in: title.bounds, to: rep)
+            // The top-left corner of the row: inside the plate if there is one, and clear of
+            // every glyph the row draws either way.
+            let sample = try XCTUnwrap(rep.colorAt(x: 2, y: 2))
+            return sample.alphaComponent > 0.01
+        }
+
+        XCTAssertFalse(
+            try plateIsDrawn(),
+            "the page's name is drawing a resting plate — it is a label, not a tab"
+        )
+
+        window.pointerLocation = NSPoint(x: title.frame.midX, y: title.frame.midY)
+        title.mouseEntered(with: try enterEvent(at: window.pointerLocation, in: window))
+        XCTAssertTrue(title.isHovered)
+        XCTAssertTrue(
+            try plateIsDrawn(),
+            "the name answers a press but never says so — nothing appeared under the pointer"
+        )
+    }
+
+    /// What the pointer may land on: the `⋯`, the name behind it, and nothing else. The header
+    /// row is as wide as the pane, and a title view that claimed all of it would swallow clicks
+    /// meant for the pane below.
+    func testOnlyTheNameAndItsMenuTakeThePointer() throws {
+        let title = PageTitleView(symbolName: "folder", inkSource: .chrome)
+        title.translatesAutoresizingMaskIntoConstraints = true
+        title.update(title: "Short", symbolName: "folder", identity: 1)
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 60))
+        title.frame = NSRect(x: 0, y: 0, width: 600, height: Design.Size.tabHeight)
+        host.addSubview(title)
+        host.layoutSubtreeIfNeeded()
+
+        let onTheName = title.hitTest(NSPoint(x: 12, y: title.frame.midY))
+        XCTAssertTrue(onTheName === title, "the page's name stopped answering a click")
+
+        let anchor = title.actionsAnchor
+        let onTheMenu = title.hitTest(
+            title.convert(NSPoint(x: anchor.bounds.midX, y: anchor.bounds.midY), from: anchor)
+        )
+        XCTAssertTrue(onTheMenu === anchor, "the ⋯ is not reachable inside the title view")
+
+        XCTAssertNil(
+            title.hitTest(NSPoint(x: 560, y: title.frame.midY)),
+            "the title view is claiming the empty header past its own name"
+        )
+    }
+
+    /// A rename morphs and a change of page lands, which is the one thing the identity is for.
+    /// Accessibility names the page rather than the view.
+    func testThePageTitleNamesItsPageAndRevealsItOnPress() throws {
+        let title = PageTitleView(symbolName: "folder", inkSource: .chrome)
+        var revealed = 0
+        title.onReveal = { revealed += 1 }
+
+        title.update(title: "First", symbolName: "folder", identity: 1)
+        XCTAssertEqual(title.title, "First")
+        XCTAssertEqual(title.accessibilityTitle(), "First")
+        XCTAssertEqual(title.accessibilityRole(), .button)
+
+        title.update(title: "Second", symbolName: "folder", identity: 2)
+        XCTAssertEqual(title.title, "Second")
+
+        XCTAssertTrue(title.accessibilityPerformPress())
+        XCTAssertEqual(revealed, 1, "pressing the page's name did not reveal it")
+    }
+
     func testPaneHeaderCarriesThePageItsActionsAndTracksPaneState() throws {
         let controller = MainWindowController()
         let root = try XCTUnwrap(controller.window?.contentView)
@@ -3109,37 +3537,40 @@ final class ThemedControlTests: XCTestCase {
         root.layoutSubtreeIfNeeded()
 
         let all = descendants(in: root)
-        let tab = controller.pageTabView
+        let pageTitle = controller.pageTitleView
         XCTAssertTrue(
-            tab.isDescendant(of: root),
-            "the page tab is not in the window's content — it is still a toolbar item"
+            pageTitle.isDescendant(of: root),
+            "the page title is not in the window's content — it is still a toolbar item"
         )
-        let header = try XCTUnwrap(tab.superview as? NSStackView)
+        let header = try XCTUnwrap(pageTitle.superview as? NSStackView)
 
-        // Reading across: which page, then a way to open another. Adjacency is the claim; the
-        // gap between them is the stack's.
-        // The hidden Settings mode header occupies the same leading slot when active; hidden
-        // arranged subviews cost no geometry and are not neighbours in the visible strip.
+        // The page's name leads the row and its `⋯` travels *inside* that view rather than in
+        // the group at the far end: the menu acts on the page named beside it, and held at the
+        // other end of a wide pane it read as a fifth pane toggle.
+        let context = try XCTUnwrap(controller.sessionContextToolbarButton)
+        XCTAssertTrue(
+            context.isDescendant(of: pageTitle),
+            "the page's ⋯ left the title it acts on"
+        )
         let arranged = header.arrangedSubviews.filter { !$0.isHidden }
-        let tabIndex = try XCTUnwrap(arranged.firstIndex(of: tab))
         XCTAssertTrue(
-            arranged[tabIndex + 1] is ThemedIconButton,
-            "New Session must remain directly after the active page tab"
+            arranged.first === pageTitle,
+            "the page's name no longer leads the header"
         )
 
-        // The session's five actions travel as one group, so the row cannot space them as
-        // unrelated controls. Found through the Context button rather than by taking the first
+        // The pane's surface controls travel as one group, so the row cannot space them as
+        // unrelated controls. Found through the renderer switch rather than by taking the first
         // group in the row: the header carries a second one — the "Open in" pair — and "the
         // first group" silently became that the day it was added.
-        let context = try XCTUnwrap(controller.sessionContextToolbarButton)
+        let surface = try XCTUnwrap(controller.surfaceToggleToolbarButton)
         let group = try XCTUnwrap(
             all.compactMap { $0 as? ToolbarButtonGroupView }
-                .first { context.isDescendant(of: $0) }
+                .first { surface.isDescendant(of: $0) }
         )
         XCTAssertEqual(
             descendants(in: group).compactMap { $0 as? ThemedIconButton }.count,
-            5,
-            "the session actions group lost one of its buttons"
+            4,
+            "the pane's surface group lost one of its buttons"
         )
 
         XCTAssertEqual(controller.displayPaneToolbarButton?.isSelected, false)
@@ -3183,9 +3614,9 @@ final class ThemedControlTests: XCTestCase {
     func testPaneHeaderSafeAreaConstraintYieldsDuringWindowAttachment() throws {
         let controller = MainWindowController()
         let root = try XCTUnwrap(controller.window?.contentView)
-        let tab = controller.pageTabView
-        XCTAssertTrue(tab.isDescendant(of: root))
-        let headerHost = try XCTUnwrap(tab.superview?.superview)
+        let pageTitle = controller.pageTitleView
+        XCTAssertTrue(pageTitle.isDescendant(of: root))
+        let headerHost = try XCTUnwrap(pageTitle.superview?.superview)
         let pane = try XCTUnwrap(headerHost.superview)
 
         let safeAreaConstraint = try XCTUnwrap(
@@ -3211,11 +3642,7 @@ final class ThemedControlTests: XCTestCase {
         window.contentView?.layoutSubtreeIfNeeded()
 
         let split = controller.splitView
-        let tab = try XCTUnwrap(
-            descendants(in: try XCTUnwrap(window.contentView))
-                .compactMap { $0 as? ThemedIconButton }
-                .first { $0 === controller.newSessionButton }
-        )
+        let tab = controller.pageTitleView
 
         func tabLeadsThePane() -> Bool {
             let panes = split.arrangedSubviews
@@ -3345,24 +3772,37 @@ final class ThemedControlTests: XCTestCase {
         }
     }
 
-    /// New Session creates a workspace session, and the temporary Settings mode is no context
-    /// for that action. A control that offers nothing in the current context withdraws entirely.
+    /// The page's `⋯` acts on the session the header names, and the temporary Settings mode
+    /// names no session. A control that offers nothing in the current context withdraws
+    /// entirely — here by hiding the whole title view, since its name is as absent as its menu.
+    ///
+    /// Driven from a real page, because "no page at all" hides the header's name for its own
+    /// reason and would let this pass while saying nothing about Settings.
     @MainActor
-    func testNewSessionHidesWhileSettingsIsActive() throws {
+    func testThePageTitleHidesWhileSettingsIsActive() throws {
         let controller = MainWindowController()
         controller.window?.contentView?.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(controller.newSessionButton?.isHidden, false)
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(
+            folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("threading-page-title-settings-\(UUID().uuidString)")
+        ))
+        defer { ProjectStore.shared.removeProject(id: project.id) }
+        controller.projectSidebar(ProjectSidebarViewController(), didSelectProject: project.id)
+
+        let title = controller.pageTitleView
+        XCTAssertEqual(title.isHidden, false, "the composer page did not name itself")
 
         controller.toggleSettings()
         XCTAssertEqual(
-            controller.newSessionButton?.isHidden,
+            title.isHidden,
             true,
-            "New Session is still offered while Settings is active"
+            "the page title is still offered while Settings is active"
         )
+        XCTAssertFalse(controller.settingsModeHeaderView.isHidden)
 
         controller.toggleSettings()
-        XCTAssertEqual(controller.newSessionButton?.isHidden, false)
+        XCTAssertEqual(title.isHidden, false, "Settings did not give the page back its name")
     }
 
     /// Settings is a temporary mode over the workspace, not one more closable document. Its
@@ -3378,18 +3818,73 @@ final class ThemedControlTests: XCTestCase {
 
         controller.toggleSettings()
 
-        XCTAssertTrue(controller.pageTabView.isHidden, "Settings still looks like a page tab")
+        XCTAssertTrue(
+            controller.pageTitleView.isHidden,
+            "Settings is still wearing the workspace page's header"
+        )
         XCTAssertFalse(
             controller.settingsModeHeaderView.isHidden,
             "Settings has no mode header or visible way back"
         )
         XCTAssertEqual(controller.settingsModeLabel.stringValue, L10n.string("Settings"))
         XCTAssertEqual(controller.settingsDoneButton.accessibilityTitle(), L10n.string("Done"))
+        XCTAssertFalse(controller.settingsDoneButton.isHidden)
         XCTAssertTrue(container.isShowingSettings)
 
         XCTAssertTrue(controller.settingsDoneButton.accessibilityPerformPress())
         XCTAssertFalse(container.isShowingSettings, "Done did not return to the workspace")
         XCTAssertTrue(controller.settingsModeHeaderView.isHidden)
+        XCTAssertTrue(
+            controller.settingsDoneButton.isHidden,
+            "Done stayed in the header over the workspace it just returned to"
+        )
+    }
+
+    /// The mode names itself at one end of the row and offers the way out at the other. Held
+    /// beside the label, Done was the only bordered button in the chrome and sat a third of the
+    /// way across an empty strip with nothing to belong to.
+    @MainActor
+    func testSettingsNamesItselfLeadingAndOffersDoneAtTheTrailingEdge() throws {
+        let controller = MainWindowController()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        controller.toggleSettings()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let header = try XCTUnwrap(controller.settingsModeHeaderView.superview as? NSStackView)
+        let visible = header.arrangedSubviews.filter { !$0.isHidden }
+
+        XCTAssertEqual(
+            visible.first,
+            controller.settingsModeHeaderView,
+            "the mode does not name itself where the page's name would be"
+        )
+        XCTAssertEqual(
+            visible.last,
+            controller.settingsDoneButton,
+            "Done is not the trailing-most control in the header"
+        )
+
+        // Not just last in the list: last in the row. A stack that laid it out anywhere else
+        // would still satisfy the ordering above.
+        let label = controller.settingsModeLabel.convert(
+            controller.settingsModeLabel.bounds,
+            to: header
+        )
+        let done = controller.settingsDoneButton.convert(
+            controller.settingsDoneButton.bounds,
+            to: header
+        )
+        XCTAssertGreaterThan(
+            done.minX,
+            label.maxX,
+            "Done is drawn beside the mode label rather than across the row from it"
+        )
+        XCTAssertEqual(
+            done.maxX,
+            header.bounds.maxX,
+            accuracy: 1,
+            "Done does not reach the header's trailing edge"
+        )
     }
 
     /// ⌘, is the platform's *open* chord because preferences are normally their own window, with
@@ -4063,10 +4558,12 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertTrue(close.isHidden, "a non-closable destination kept the × visible")
     }
 
-    /// The toolbar holds the page tab to a minimum width, so the window's chrome does not resize
-    /// itself around every session name — which means a short name leaves the tab with room to
-    /// spare. That room belongs to the title. Under the stack's default gravity it landed *after*
-    /// the last view instead, leaving the × 43pt inboard of a tab whose fill ran to the edge.
+    /// A host may hold a tab wider than it wants to be — a strip that keeps its tabs to a floor
+    /// so it does not resize itself around every name — which means a short name leaves the tab
+    /// with room to spare. That room belongs to the title. Under the stack's default gravity it
+    /// landed *after* the last view instead, leaving the × 43pt inboard of a tab whose fill ran
+    /// to the edge. (The window's page header was where this was found, before its name stopped
+    /// being a tab at all; the rule is the tab's, so the fixture states its own floor.)
     ///
     /// The title's line still starts where it did, because it is drawn from the label's leading
     /// edge rather than centred in it. Asserted as the same start at both widths: a glyph's layer
@@ -4106,7 +4603,8 @@ final class ThemedControlTests: XCTestCase {
         }
         let snug = try lineStart()
 
-        width.constant = SessionTitleDefaults.minWidth
+        // Comfortably wider than "Fix" needs, which is all this fixture's floor has to be.
+        width.constant = tab.intrinsicContentSize.width + Design.Spacing.pane * 2
         host.layoutSubtreeIfNeeded()
         XCTAssertGreaterThan(
             tab.bounds.width,
@@ -6279,6 +6777,7 @@ final class ThemedControlTests: XCTestCase {
                 "BrowserDeviceToolbar",
                 "BrowserFindBar",
                 "ChipView",
+                "ColorPairSpecimenView",
                 "ConversationContextRailView",
                 "ConversationHandoffView",
                 "ConversationOutboxRailView",
@@ -6302,6 +6801,7 @@ final class ThemedControlTests: XCTestCase {
                 "MediaInspectorView",
                 "MorphingTitleLabel",
                 "NavigatorGridItemView",
+                "PageTitleView",
                 "PaneFooterView",
                 "PaneHeaderView",
                 "PaneNoticeView",

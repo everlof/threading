@@ -110,35 +110,35 @@ extension MainWindowController: NSToolbarDelegate {
     ///
     /// The window controller builds it because the window controller owns what these do — the
     /// composer, the panes, the session's menu. The pane owns only where the row sits, which is
-    /// what makes it move with the pane. Reading across: which page, a way to open another, then
-    /// what that page's account has left to spend, then what can be done to it. Settings swaps
-    /// the page tab for a plain mode label and Done action; its categories are destinations in
-    /// the sidebar, not documents in this row.
+    /// what makes it move with the pane. Reading across: which page and what can be done to it,
+    /// then what that page's account has left to spend, then which surfaces are on screen.
+    /// Settings swaps the page's name for a plain mode label and Done action; its categories are
+    /// destinations in the sidebar, not documents in this row.
+    ///
+    /// **The two halves answer different questions**, which is why the `⋯` sits against the name
+    /// rather than in the group at the far end: everything trailing is "what is on screen"
+    /// — an editor to leave for, an account's budget, four surfaces to show or hide — while the
+    /// menu acts on the page the header just named. Held at the other end of a wide pane it read
+    /// as a fifth pane toggle, and the thing it acts on was 1,200pt away.
     func makePaneHeaderView() -> NSView {
-        let newSessionButton = ThemedIconButton(
-            symbolName: "plus",
-            accessibility: L10n.string("New session")
-        )
-        newSessionButton.toolTip = L10n.string("New Session (⌘N)")
-        newSessionButton.onPress = { [weak self] in self?.newSession() }
-        self.newSessionButton = newSessionButton
-
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+        let openIn = makeOpenInControl()
         var headerItems: [NSView] = [
             settingsModeHeaderView,
-            newSessionButton,
             spacer,
-            makeOpenInControl(),
-            makeSessionActionsGroup()
+            openIn,
+            makeSessionActionsGroup(),
+            settingsModeDoneButton
         ]
-        if let materializedPageTabView {
-            headerItems.insert(materializedPageTabView, at: 0)
+        if let materializedPageTitleView {
+            headerItems.insert(materializedPageTitleView, at: 0)
         }
-        if let materializedAccountUsageItemView {
-            headerItems.insert(materializedAccountUsageItemView, at: headerItems.count - 2)
+        if let materializedAccountUsageItemView,
+           let openInIndex = headerItems.firstIndex(where: { $0 === openIn }) {
+            headerItems.insert(materializedAccountUsageItemView, at: openInIndex)
         }
 
         let header = NSStackView(views: headerItems)
@@ -236,14 +236,14 @@ extension MainWindowController: NSToolbarDelegate {
         return control
     }
 
-    /// The session's four actions, as one group.
+    /// The pane's four surface controls, as one group.
     ///
-    /// They belong together: each one acts on the session named at the other end of the header,
-    /// and two of them toggle a pane of the window. Kept as separate toolbar items they were
-    /// spaced as though unrelated — which is what `ToolbarButtonGroupView` exists to fix.
+    /// They belong together: each one decides what this pane shows — which renderer, and which
+    /// of its three attachable surfaces are on screen. Kept as separate toolbar items they were
+    /// spaced as though unrelated — which is what `ToolbarButtonGroupView` exists to fix. The
+    /// session's *menu* is deliberately not among them; see `makePaneHeaderView`.
     private func makeSessionActionsGroup() -> ToolbarButtonGroupView {
         ToolbarButtonGroupView(buttons: [
-            makeSessionContextButton(),
             makeSurfaceToggleButton(),
             // Beside the two drawers rather than off on its own: all three answer "is this
             // surface on screen", and the card is the one of the three that floats *over* the
@@ -306,27 +306,6 @@ extension MainWindowController: NSToolbarDelegate {
             self?.toggleCurrentSessionSurface()
         }
         surfaceToggleToolbarButton = button
-        return button
-    }
-
-    /// The context button: the same menu as the session row, rebuilt on every open so live
-    /// checkmarks, runtime actions, accounts, and extension commands cannot drift.
-    private func makeSessionContextButton() -> ThemedIconButton {
-        // "Context", as the user guide names it — "Session Options" is now the row menu's own
-        // folded submenu, and a button tooltip repeating a submenu title would read as a
-        // shortcut to it rather than to the whole menu.
-        let button = ThemedIconButton(
-            symbolName: "ellipsis",
-            accessibility: L10n.string("Session context menu")
-        )
-        button.toolTip = L10n.string("Context")
-        button.presentsMenu = true
-        button.onPress = { [weak self, weak button] in
-            guard let self, let button else { return }
-            self.showSessionContextMenu(from: button)
-        }
-        sessionContextToolbarButton = button
-
         return button
     }
 
@@ -394,7 +373,10 @@ extension MainWindowController: NSToolbarDelegate {
         openInToolbarButton?.toolTip = OpenInToolbarDefaults.tooltip(opening: app)
     }
 
-    private func showSessionContextMenu(from button: ThemedIconButton) {
+    /// The same menu as the session row, rebuilt on every open so live checkmarks, runtime
+    /// actions, accounts, and extension commands cannot drift. Opened by the `⋯` the page's name
+    /// carries — see `PageTitleView`.
+    func showSessionContextMenu(from button: ThemedIconButton) {
         // Settings has no session row to mirror, but the context button remains its door to
         // theme editing instead of opening an empty menu.
         let entries = visibleSessionActionEntries() ?? [
@@ -423,14 +405,14 @@ extension MainWindowController: NSToolbarDelegate {
 
 // MARK: - Page Tab Defaults
 
-/// How wide the toolbar's page tab is allowed to grow, and what stands in for a page with no
-/// mark of its own.
+/// How wide the page's name is allowed to grow, and what stands in for a page with no mark of
+/// its own.
 ///
-/// All that is left of what was once a parallel tab implementation: everything describing what a
-/// tab *is* now lives in `ThemedTabItemView`, and these two widths are a property of this
-/// particular slot in the toolbar rather than of tabs.
+/// A cap and no floor. The floor existed to keep a *tab* from changing width around every
+/// session name — a plate that resized itself as pages changed reads as chrome twitching — and
+/// with the plate gone there is nothing to hold open: a plain name hugs its own line the way the
+/// header's other labels do, and only the cap still has a job.
 enum SessionTitleDefaults {
-    static let minWidth: CGFloat = 120
     static let maxWidth: CGFloat = 360
     static let projectSymbolName = "folder"
 }
