@@ -95,7 +95,9 @@ extension GitReviewViewController {
         placeholderLabel.isHidden = true
         setBackVisible(false)
         counterLabel.isHidden = true
-        jumpToEndButton.isHidden = true
+        // Everything under the arrow is being replaced, so there is nothing for it to travel
+        // out of: it goes with the content it belonged to.
+        jumpToEndButton.setFloatingPresence(false, animated: false)
 
         switch phase {
         case .message(let text):

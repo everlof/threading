@@ -184,6 +184,36 @@ like every other token it is zero under Reduce Motion, which lands the same end 
 built. A future transition that hands an element over rather than swapping a surface takes this
 token rather than a second number near it.
 
+**A curve is chosen by the distance it covers, not by the direction it goes.** `glide` and `drop`
+were written for the toast — a card rising over a pane's lower edge and falling back out of it —
+and `glide` decelerates hard on purpose: it crosses most of its distance at once and eases in for
+the rest, which over a card's height reads as *put there*. The floating scroll target
+(`ThemedButton.floatingScrollToEnd`, the arrow that returns Git Review's diff or a conversation to
+its live end) took the same curve for the obvious reason, that it is also a thing arriving, and it
+was wrong: a 20pt rise on `glide` is four fifths finished within three frames at 60Hz, so the
+arrow appears at four fifths of its opacity already in place, and the movement paid for is never
+seen. Hence `Design.Motion.lift` — a gentler deceleration that spends the rise across the whole
+duration — with the departure still on `drop`, because that half is only ever a short fall the eye
+has already left. The rule to carry forward: an arrival's curve is picked against the distance
+that arrival covers, and a third curve here is cheaper than a movement nobody sees. The measured
+form of that claim is a test (`FloatingScrollTargetMotionTests`), which samples the *presented*
+layer through a paused animation and asks the timing function itself how far along the arrow is a
+quarter of the way in — `lift` answers about two fifths, `glide` about six sevenths.
+
+**The affordance itself is one component with two hosts, and its own presence transition.** The
+arrow is a `ThemedButton` factory rather than a view each pane builds: both hosts had switched it
+with `isHidden`, and switching is the one thing a target floating over content must not do, since
+it appears exactly when the reader is looking somewhere else. `setFloatingPresence(_:)` owns the
+whole contract — rise and fade in on `lift`, sink and fade out on `drop`, hidden only when the
+departure has finished (so it is still clickable while leaving), an arrival that interrupts a
+departure adopting the same arrow instead of racing a second animation against it, and a plain
+applied state under Reduce Motion. The transition is *presentation only*: the model transform and
+opacity stay the resting ones, so an arrival cut short by a rehost, a theme change or a dropped
+layer animation leaves the arrow exactly where it belongs rather than mid-flight. "Below" is read
+from the host's geometry rather than written down, because a layer-backed view under a flipped
+pane inherits flipped layer geometry and a bare `-rise` would invert the whole arrival the day a
+pane becomes flipped.
+
 **Two components say "every" for a reason, and it is the design system's sharpest lesson so
 far.** Each of them was two or three implementations, and each had already been "unified" by
 sharing constants — one radius, one type scale, one height, read from a common enum. It did not

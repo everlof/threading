@@ -29,20 +29,12 @@ enum ToastDefaults {
     /// nothing above it to cast it.
     static let clearance: CGFloat = Design.Size.glowGutter
 
-    /// The curve every card in the deck travels on — arriving, and settling forward when
-    /// the card in front goes. Hard deceleration: the card crosses most of its distance at
-    /// once and spends the rest easing into place, which reads as *put there*. The standard
-    /// ease-out at this distance reads as floated, and linear as conveyor-belted.
-    static var glide: CAMediaTimingFunction {
-        CAMediaTimingFunction(controlPoints: 0.19, 1, 0.22, 1)
-    }
-
-    /// The curve a dismissed card leaves on: acceleration, because a card let go of falls
-    /// rather than lowering itself out. Its mirror is `glide` — what arrives decelerates
-    /// into the hand, what leaves accelerates out of it.
-    static var drop: CAMediaTimingFunction {
-        CAMediaTimingFunction(controlPoints: 0.55, 0, 1, 0.45)
-    }
+    /// The curve every card in the deck travels on — arriving, and settling forward when the
+    /// card in front goes — and the curve a dismissed one leaves on. Both are the design
+    /// system's, since the toast is no longer the only thing that travels over a pane's lower
+    /// edge: see `Design.Motion.glide` for what each shape is doing to the eye.
+    static var glide: CAMediaTimingFunction { Design.Motion.glide }
+    static var drop: CAMediaTimingFunction { Design.Motion.drop }
 
     /// Between the band's edge and its content.
     static let contentInset: CGFloat = Design.Spacing.inset

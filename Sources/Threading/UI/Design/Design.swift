@@ -1385,6 +1385,15 @@ enum Design {
         /// card entering at a corner only has to read as *coming from somewhere*.
         static var travel: TimeInterval { reducesMotion ? 0 : 0.3 }
 
+        /// A floating target rising into its place over the surface it steers — the
+        /// scroll-to-end arrow arriving once the reader has left the live end.
+        ///
+        /// Between `appear` and `travel`, because it is between the two things they describe.
+        /// A dropdown materialises where it already is, and at `appear`'s length this arrival
+        /// reads as a pop; a toast carries a whole card up over the pane's edge and needs
+        /// `travel`'s length to stay readable, which on a single 40pt button reads as slow.
+        static var floatingTargetArrive: TimeInterval { reducesMotion ? 0 : 0.22 }
+
         /// One beat of a menu's confirmation blink — the chosen row flickering once before
         /// the panel fades, the acknowledgement every platform menu gives.
         static var confirmBeat: TimeInterval { reducesMotion ? 0 : 0.05 }
@@ -1416,6 +1425,39 @@ enum Design {
         /// faster demonstration, it is a flicker, and the honest reduced form is to hold the
         /// name still.
         static var demonstrationHold: TimeInterval { reducesMotion ? 0 : 0.9 }
+
+        // MARK: Curves
+
+        /// The curve something travelling a card's distance *into* place moves on — the toast
+        /// rising over a pane's lower edge. Hard deceleration: it crosses most of its distance
+        /// at once and spends the rest easing in, which reads as *put there*. The standard
+        /// ease-out over that distance reads as floated, and linear as conveyor-belted.
+        /// Curves carry no theme or accessibility state — they are the shape of a movement,
+        /// not a reading of one — so they stay off the main actor and any caller may name them.
+        nonisolated static var glide: CAMediaTimingFunction {
+            CAMediaTimingFunction(controlPoints: 0.19, 1, 0.22, 1)
+        }
+
+        /// The curve a *short* arrival rises on — tens of points rather than a card's height,
+        /// like the floating scroll target coming up over a transcript.
+        ///
+        /// `glide` is the wrong shape at that distance, and measurably so: sampling the
+        /// presented layer frame by frame, a 20pt rise on `glide` is 80% finished within three
+        /// frames at 60Hz, so what the eye gets is the arrow already in place at four fifths of
+        /// its opacity — the rise never reads. The gentler deceleration here spreads the same
+        /// trip across the whole duration, roughly a fifth of it per frame, which is the
+        /// movement being asked for. Distance decides between the two: what has a card's height
+        /// to cover can afford to spend it early, what has 20pt cannot.
+        nonisolated static var lift: CAMediaTimingFunction {
+            CAMediaTimingFunction(controlPoints: 0, 0, 0.58, 1)
+        }
+
+        /// The curve the same thing leaves on: acceleration, because something let go of falls
+        /// rather than lowering itself out. The mirror of the two above — what arrives
+        /// decelerates into the hand, what leaves accelerates out of it.
+        nonisolated static var drop: CAMediaTimingFunction {
+            CAMediaTimingFunction(controlPoints: 0.55, 0, 1, 0.45)
+        }
 
         // MARK: Name transitions
 
