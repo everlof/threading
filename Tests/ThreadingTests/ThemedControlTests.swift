@@ -3149,6 +3149,33 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(controller.displayPaneToolbarButton?.isSelected, false)
     }
 
+    /// The panel's tabs belong to a session, which is why `view.displayPanel` is declared
+    /// session-scoped and the View menu refuses without one. The toolbar's toggle was the one
+    /// route that did not ask: on a page with no session — the start page under a project — it
+    /// revealed a panel that can only ever show its placeholder, whose `+` does nothing, and
+    /// which the next selection shuts again on its own.
+    ///
+    /// An open panel stays shuttable whatever page is on screen, because the app-wide theme
+    /// document deliberately keeps one open with no session selected.
+    @MainActor
+    func testThePanelToggleIsUnavailableUntilThereIsASessionToShow() throws {
+        let controller = MainWindowController()
+        controller.window?.setContentSize(NSSize(width: 1200, height: 700))
+        let toggle = try XCTUnwrap(controller.displayPaneToolbarButton)
+
+        controller.updateToolbarControlStates()
+        XCTAssertNil(controller.currentSessionID, "the fixture came up with a session selected")
+        XCTAssertFalse(toggle.isEnabled, "a session-less page offered to open a panel it cannot fill")
+
+        controller.setDisplayPaneVisible(true, animated: false)
+        controller.updateToolbarControlStates()
+        XCTAssertTrue(toggle.isEnabled, "an open panel could not be shut from the toolbar")
+
+        controller.setDisplayPaneVisible(false, animated: false)
+        controller.updateToolbarControlStates()
+        XCTAssertFalse(toggle.isEnabled, "the toggle stayed live after the panel was shut")
+    }
+
     /// A full-size-content window reports a zero-height safe area for one layout pass while its
     /// toolbar is attaching. If this equality and the header's theme-sized band are both required,
     /// AppKit logs an unsatisfiable-constraints failure on every launch before settling on the
@@ -6294,6 +6321,7 @@ final class ThemedControlTests: XCTestCase {
                 "ThemeSwatchImage",
                 "ThemeSwatchView",
                 "ThemedAlert",
+                "ThemedBarSparklineView",
                 "ThemedButton",
                 "ThemedCheckbox",
                 "ThemedRadioButton",

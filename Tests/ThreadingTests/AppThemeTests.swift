@@ -2037,6 +2037,47 @@ final class AppThemeTests: XCTestCase {
         }
     }
 
+    // MARK: - The Divider That Arrives
+
+    /// A pane revealed from collapsed arrives at a strip nobody has painted.
+    ///
+    /// AppKit resizes the panes and posts `didResizeSubviewsNotification` through the whole
+    /// transition without calling `drawDivider(in:)` once, so the seam beside the display panel
+    /// kept whatever stood there while it was still inside the session pane — that pane's own
+    /// ground. On the start page under a project, where the panel and the pane beside it are the
+    /// same colour, the panel opened with no visible edge at all; the first hover fixed it,
+    /// because pointing at a seam invalidates it by hand.
+    ///
+    /// Asserted against the *panel's* leading edge rather than against the seam list the view
+    /// keeps, so this pins the strip that has to be repainted rather than restating how it is
+    /// computed. Read off `repaintedSeams` rather than the pixels: `cacheDisplay` redraws
+    /// everything unconditionally, which is exactly the redraw this bug never got.
+    func testRevealingTheDisplayPanelRepaintsTheSeamItArrivesAt() throws {
+        let controller = MainWindowController()
+        controller.window?.setContentSize(NSSize(width: 1200, height: 700))
+        let split = try XCTUnwrap(controller.splitViewController.splitView as? ThemedSplitView)
+        split.layoutSubtreeIfNeeded()
+
+        let before = split.repaintedSeams
+        controller.setDisplayPaneVisible(true, animated: false)
+        split.layoutSubtreeIfNeeded()
+
+        let panel = try XCTUnwrap(split.arrangedSubviews.last)
+        XCTAssertFalse(panel.frame.isEmpty, "the panel did not come out of its collapse")
+        XCTAssertNotEqual(
+            before,
+            split.repaintedSeams,
+            "the panel arrived and the view asked for no seam to be repainted"
+        )
+        XCTAssertTrue(
+            split.repaintedSeams.contains {
+                abs($0.minX - (panel.frame.minX - split.dividerThickness)) < 0.5
+                    && $0.height == split.bounds.height
+            },
+            "the strip the panel's own edge arrived at was never asked to repaint"
+        )
+    }
+
     /// The fixture proves the view; this proves the window. Its panes are placed by
     /// `NSSplitViewController` through constraints, which is a different path from a fixture's
     /// arranged subviews and the only one the user ever looks at.

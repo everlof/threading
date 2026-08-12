@@ -1874,6 +1874,8 @@ header, beside the **+** — that one shuts the panel, while the ✕ on a tab cl
 Your tabs are kept either way, and the panel reopens the next time the agent displays something. It can also be opened by hand — the
 panel toggle at the session header's right edge, or **View ▸ Display Panel** — so its tabs (the
 browser, Git Review, Session Info) are reachable without an agent putting content there first.
+Both wait for a session: the panel holds one conversation's tabs, so on a project's start page,
+where no session is selected yet, the toggle and the menu item are unavailable.
 
 The tabs are yours to arrange: drag one along the strip to reorder it, middle-click one to
 close it, or use its secondary-click menu — **Close Tab**, **Close Other Tabs**,

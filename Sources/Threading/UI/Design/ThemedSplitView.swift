@@ -66,6 +66,7 @@ final class ThemedSplitView: NSSplitView {
 
     @objc private func splitSubviewsDidResize(_ notification: Notification) {
         updateTrackingAreas()
+        repaintMovedSeams()
     }
 
     @available(*, unavailable)
@@ -160,6 +161,39 @@ final class ThemedSplitView: NSSplitView {
         } else {
             super.drawDivider(in: rect)
         }
+    }
+
+    // MARK: - The Seam That Arrives
+
+    /// Where the seams stood the last time this view asked for them to be painted. Read by
+    /// `AppThemeTests` rather than a rendered pixel, because `cacheDisplay` redraws the whole
+    /// view unconditionally — which is exactly the redraw the bug below never got.
+    private(set) var repaintedSeams: [NSRect] = []
+
+    /// Repaints a seam that has moved — or arrived.
+    ///
+    /// **AppKit does not.** Measured on a three-pane split whose trailing pane is revealed from
+    /// collapsed: the panes resize and `didResizeSubviewsNotification` arrives sixteen times
+    /// through the transition, while `drawDivider(in:)` is not called once and `needsDisplay`
+    /// stays false. The strip the arriving seam now occupies therefore keeps whatever was
+    /// painted there while it was still *inside* the pane beside it — that pane's own ground —
+    /// so the display panel opened with no visible edge at all, on a page whose panel and
+    /// session pane are the same colour.
+    ///
+    /// The first hover was what finally fixed it, and that is the bug's own fingerprint:
+    /// `activeDividerIndex` invalidates the seam by hand, so pointing at the panel's edge
+    /// painted a seam that then stayed painted. Nothing was wrong with the ink or the paint
+    /// path — nothing had asked them to run.
+    ///
+    /// Both the old and the new positions are invalidated, since a seam that moved leaves the
+    /// strip it came from to the pane that now covers it, and neither is more than a rule wide.
+    private func repaintMovedSeams() {
+        let seams = arrangedSubviews.dropLast().indices.map { dividerRect(at: $0) }
+        guard seams != repaintedSeams else { return }
+        for seam in repaintedSeams + seams where !seam.isEmpty {
+            setNeedsDisplay(seam)
+        }
+        repaintedSeams = seams
     }
 
     override func updateTrackingAreas() {

@@ -2848,6 +2848,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         updateOpenInControls()
         shellDrawerToolbarButton?.isEnabled = hasSession
         shellDrawerToolbarButton?.isSelected = containerViewController.isShellDrawerOpen
+        // The panel holds a *session's* tabs, which is why `view.displayPanel` is declared
+        // session-scoped and the View menu already refuses without one. This toggle was the one
+        // route that did not ask: pressed on a page with no session — the start page under a
+        // project — it revealed a panel whose placeholder is the only thing it can ever show and
+        // whose `+` does nothing, and which `syncDisplayPane` then shuts again on the very next
+        // selection. An **open** panel can always be shut, whatever page is on screen, because
+        // the app-wide theme document deliberately keeps one open with no session selected.
+        displayPaneToolbarButton?.isEnabled = hasSession || !displayItem.isCollapsed
         // The standing choice, not whether a card is on screen right now: a pane too narrow to
         // carry one withdraws it without the user having decided anything, and a button that
         // unfilled itself on a divider drag would report a switch nobody threw.

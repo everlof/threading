@@ -236,10 +236,33 @@ neither is opened by dragging. `WindowEdgeTests` asserts it where the bug lived,
 of a real unshown window, and was checked against a stubbed-out fix to confirm the seam
 reappears without it.
 
+**And the divider that comes back is not painted, because AppKit never asks for it.** The other
+half of the same edge: a pane revealed from collapsed arrives at a strip that has been standing
+inside the pane beside it, and nothing repaints it. Measured on a three-pane split, the reveal
+resizes the panes and posts `didResizeSubviewsNotification` sixteen times through the transition
+while `drawDivider(in:)` is not called once and `needsDisplay` stays false — so the strip keeps
+the neighbouring pane's ground, and on a page whose panel and session pane are the same colour
+the panel opened with **no visible edge at all**. It was reported as "the panel is invisible
+until the first hover", which is the fingerprint rather than a second bug: pointing at a seam
+invalidates it by hand (`activeDividerIndex`), so the first hover painted a seam that then
+stayed painted. Nothing was wrong with the ink or the paint path; nothing had asked them to run.
+`ThemedSplitView.repaintMovedSeams()` invalidates the seams from the notification it already
+observes for the hover strips, which is the same geometry change for the same reason one line
+later.
+
 `SidebarSplitViewController` overrides `toggleSidebar(_:)` to route through its own
 `setCollapsed(_:on:)`. The stock implementation collapses but does not restore here, which left
 no way back to the sidebar. Overriding it fixes the toolbar button and the View menu together,
 since both route through that one method.
+
+**The panel's toggle asks for a session, because the panel's tabs belong to one.**
+`view.displayPanel` is declared session-scoped, so the View menu already refused on a page with
+no session while the toolbar's toggle did not: pressed on the start page under a project it
+revealed a panel whose placeholder is the only thing it can ever show and whose `+` does
+nothing, and which `syncDisplayPane` shuts again on the very next selection. The toggle now
+follows the command's own scope. It stays live while a panel is *open*, whatever page is on
+screen, because the app-wide theme document deliberately keeps one open with no session
+selected — a control that cannot shut what it opened would be the worse bug.
 
 ### How a pane moves
 
