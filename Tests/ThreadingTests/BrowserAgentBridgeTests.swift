@@ -2238,6 +2238,52 @@ final class BrowserAgentBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func testTheAddressBarShowsWhereTheBrowserWentEvenWhileTheFieldHoldsFocus() throws {
+        // Focus alone used to suppress the write, and the browser hands its own empty field first
+        // responder when it opens with no page — so the agent navigation that followed loaded a
+        // site under a blank address bar.
+        XCTAssertFalse(
+            BrowserViewController.addressSyncIsSuppressed(editing: nil, lastSynced: ""),
+            "A field nobody is editing takes the page's address"
+        )
+        XCTAssertFalse(
+            BrowserViewController.addressSyncIsSuppressed(editing: "", lastSynced: ""),
+            "The empty field the browser focuses on open holds nothing worth protecting"
+        )
+        XCTAssertFalse(
+            BrowserViewController.addressSyncIsSuppressed(
+                editing: "https://example.test/one",
+                lastSynced: "https://example.test/one"
+            ),
+            "A focused field still showing the last navigation's URL is not a pending edit"
+        )
+        XCTAssertTrue(
+            BrowserViewController.addressSyncIsSuppressed(editing: "exam", lastSynced: ""),
+            "A half-typed destination is not yanked out from under the cursor"
+        )
+
+        let browser = BrowserViewController()
+        // The themed field restates its placeholder as an attributed string, which is where AppKit
+        // then keeps it, so the plain property reads back nil.
+        let address = try XCTUnwrap(
+            descendants(in: browser.view)
+                .compactMap { $0 as? ThemedTextField }
+                .first {
+                    ($0.placeholderAttributedString?.string ?? $0.placeholderString)
+                        == BrowserDefaults.addressPlaceholder
+                }
+        )
+        XCTAssertEqual(address.stringValue, "")
+
+        browser.navigate(to: "https://example.test/dashboard")
+        XCTAssertEqual(
+            address.stringValue,
+            "https://example.test/dashboard",
+            "A surface no window has taken yet still reports where it went"
+        )
+    }
+
+    @MainActor
     private func descendants(in root: NSView) -> [NSView] {
         root.subviews.flatMap { [$0] + descendants(in: $0) }
     }

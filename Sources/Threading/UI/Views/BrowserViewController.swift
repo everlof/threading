@@ -507,6 +507,9 @@ final class BrowserViewController: NSViewController {
     private var reloadButton: ThemedButton { chromeBar.reloadButton }
     private var closePopupButton: ThemedButton { chromeBar.closePopupButton }
     private var addressField: ThemedTextField { chromeBar.addressField }
+    /// The address text a navigation last wrote. `syncAddress` compares the field editor against
+    /// it to tell a user's half-typed destination from a field that merely holds focus.
+    private var syncedAddress = ""
     private let progressBar = ThemedProgressBar()
     private let annotationOverlay = BrowserAnnotationOverlay()
     /// The approved picture held over the live page, when the user has one up. A sibling of
@@ -3190,6 +3193,9 @@ final class BrowserViewController: NSViewController {
     }
 
     @objc private func addressEntered() {
+        // Submitting ends the edit even though the field keeps focus, so the navigation it starts
+        // is free to write its normalised URL back over what was typed.
+        syncedAddress = addressField.stringValue
         navigate(to: addressField.stringValue)
     }
 
@@ -3317,13 +3323,29 @@ final class BrowserViewController: NSViewController {
         layoutWebViews(resetScrollPosition: true)
     }
 
+    /// Whether an address sync should stand aside because the user has a destination half-typed.
+    ///
+    /// Holding focus is not the same as typing, and the difference is the whole bug this replaced:
+    /// `viewDidAppear` hands the empty field first responder whenever the browser opens with no
+    /// page, so the agent navigation that arrives next was suppressed and the page loaded under a
+    /// blank address bar. A field editor whose text is still what we last wrote has nothing to
+    /// protect. The editor is read rather than `stringValue` because the cell only takes the typed
+    /// text back at the end of editing.
+    static func addressSyncIsSuppressed(editing: String?, lastSynced: String) -> Bool {
+        guard let editing else { return false }
+        return editing != lastSynced
+    }
+
     private func syncAddress(url: URL? = nil) {
-        let shown = url ?? webView.url
-        // Leave the field alone while the user is editing it, so a background load does not yank
-        // the text out from under the cursor.
-        if view.window?.firstResponder !== addressField.currentEditor() {
-            addressField.stringValue = shown?.absoluteString ?? ""
+        guard !Self.addressSyncIsSuppressed(
+            editing: addressField.currentEditor()?.string,
+            lastSynced: syncedAddress
+        ) else {
+            return
         }
+        let shown = (url ?? webView.url)?.absoluteString ?? ""
+        addressField.stringValue = shown
+        syncedAddress = shown
     }
 
     private func updateNavButtons() {
