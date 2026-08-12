@@ -234,15 +234,24 @@ final class AgentPermissionModeTests: XCTestCase {
     /// decision goes when there is no default either.
     func testTheChipNamesTheModeThatWillActuallyApply() {
         XCTAssertEqual(
-            PermissionModePresentation.chipTitle(selected: .plan, inherited: .dontAsk),
+            PermissionModePresentation.chipTitle(
+                selected: .plan,
+                inherited: ResolvedPermissionMode(mode: .dontAsk, source: .appDefault)
+            ),
             AgentPermissionMode.plan.displayName
         )
         XCTAssertEqual(
-            PermissionModePresentation.chipTitle(selected: nil, inherited: .dontAsk),
+            PermissionModePresentation.chipTitle(
+                selected: nil,
+                inherited: ResolvedPermissionMode(mode: .dontAsk, source: .appDefault)
+            ),
             AgentPermissionMode.dontAsk.displayName
         )
         XCTAssertEqual(
-            PermissionModePresentation.chipTitle(selected: nil, inherited: nil),
+            PermissionModePresentation.chipTitle(
+                selected: nil,
+                inherited: ResolvedPermissionMode(mode: nil, source: .agentConfiguration)
+            ),
             PermissionModePresentation.agentSettingTitle
         )
     }
@@ -258,7 +267,10 @@ final class AgentPermissionModeTests: XCTestCase {
         AppSettings.shared.defaultPermissionMode = .dontAsk
         let chipTitle = PermissionModePresentation.chipTitle(
             selected: nil,
-            inherited: PermissionModePresentation.appDefault
+            inherited: ResolvedPermissionMode(
+                mode: PermissionModePresentation.appDefault,
+                source: .appDefault
+            )
         )
 
         let sidebar = ProjectSidebarViewController()
@@ -289,7 +301,7 @@ final class AgentPermissionModeTests: XCTestCase {
         let expected = PermissionModePresentation.rows(
             for: .claude,
             selected: nil,
-            inherited: .dontAsk,
+            inherited: ResolvedPermissionMode(mode: .dontAsk, source: .appDefault),
             timing: .whenTheSessionStarts
         )
         XCTAssertEqual(Self.choices(in: sidebarRows), Self.choices(in: expected))
@@ -316,7 +328,7 @@ final class AgentPermissionModeTests: XCTestCase {
         let rows = PermissionModePresentation.rows(
             for: .claude,
             selected: nil,
-            inherited: .auto,
+            inherited: ResolvedPermissionMode(mode: .auto, source: .appDefault),
             timing: .whenTheSessionStarts,
             onChoose: { chosen = $0 }
         )
@@ -350,7 +362,7 @@ final class AgentPermissionModeTests: XCTestCase {
         let pinned = PermissionModePresentation.rows(
             for: .claude,
             selected: .auto,
-            inherited: .auto,
+            inherited: ResolvedPermissionMode(mode: .auto, source: .appDefault),
             timing: .whenTheSessionStarts
         ).compactMap(\.item).filter(\.isSelected)
         XCTAssertEqual(pinned.count, 1)
@@ -366,7 +378,7 @@ final class AgentPermissionModeTests: XCTestCase {
         let items = PermissionModePresentation.rows(
             for: .claude,
             selected: nil,
-            inherited: nil,
+            inherited: ResolvedPermissionMode(mode: nil, source: .agentConfiguration),
             timing: .whenTheSessionStarts
         ).compactMap(\.item)
 
@@ -391,7 +403,7 @@ final class AgentPermissionModeTests: XCTestCase {
         let rows = PermissionModePresentation.rows(
             for: .claude,
             selected: nil,
-            inherited: nil,
+            inherited: ResolvedPermissionMode(mode: nil, source: .agentConfiguration),
             timing: .whenTheChatRestarts
         )
         let last = try XCTUnwrap(rows.last?.item)
@@ -428,7 +440,10 @@ final class AgentPermissionModeTests: XCTestCase {
         )
         XCTAssertNil(
             Self.chip(
-                titled: PermissionModePresentation.chipTitle(selected: nil, inherited: nil),
+                titled: PermissionModePresentation.chipTitle(
+                    selected: nil,
+                    inherited: ResolvedPermissionMode(mode: nil, source: .agentConfiguration)
+                ),
                 in: composer.view
             ),
             "a runtime with no permission mode was still offered one"

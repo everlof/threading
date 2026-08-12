@@ -179,7 +179,8 @@ enum AgentPermissionMode: String, Codable, CaseIterable {
     ///
     /// Codex answers nil by construction rather than by omission: its posture is two axes, so
     /// no single value it emits can name one of these, and a reader would have to be given the
-    /// pair. OpenCode has no shared vocabulary to read at all.
+    /// pair — which is `init?(codexApprovalPolicy:sandboxMode:)` below. OpenCode has no shared
+    /// vocabulary to read at all.
     ///
     /// Unrecognised is nil rather than a fallback. A newer CLI writing a seventh mode, or a
     /// record this app has never seen, has to read as "we do not know" and leave the surfaces
@@ -227,5 +228,26 @@ enum AgentPermissionMode: String, Codable, CaseIterable {
         case .acceptEdits, .auto, .dontAsk: AgentDefaults.codexSandboxWorkspaceWrite
         case .bypassPermissions: AgentDefaults.codexSandboxFullAccess
         }
+    }
+
+    /// The mode a Codex configuration's two axes name together, or nil when they name none of
+    /// the six.
+    ///
+    /// The inverse of the pair above, and exact rather than nearest: the six land on six
+    /// *distinct* configurations, so a pair either is one of them or is a posture this
+    /// vocabulary cannot state — `on-request` with `read-only`, say, which is neither Auto nor
+    /// Plan. Naming the closest one would be the guess this whole file avoids.
+    ///
+    /// Both axes are required. Codex defaults them independently and this app does not read that
+    /// pair of defaults out of the CLI, so a config that states one and leaves the other is a
+    /// posture Threading does not know rather than one it may complete.
+    init?(codexApprovalPolicy: String?, sandboxMode: String?) {
+        guard let codexApprovalPolicy, let sandboxMode else { return nil }
+
+        guard let mode = AgentPermissionMode.allCases.first(where: {
+            $0.codexApprovalPolicy == codexApprovalPolicy && $0.codexSandboxMode == sandboxMode
+        }) else { return nil }
+
+        self = mode
     }
 }

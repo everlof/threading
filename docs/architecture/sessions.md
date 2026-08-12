@@ -951,7 +951,14 @@ Delivery covers both surfaces:
   without restarting the app-server.
 
 The reply chip's effective reading follows the same precedence (conversation, app default,
-account/catalog, runtime fallback). Choosing Follow General can apply an explicit General
+account/catalog, runtime fallback) — and it now *asks* `AgentModels.effectiveFastMode` rather than
+restating three of its four steps. The two disagreed about the fourth: Claude's fast mode is a
+live control-channel flag that starts off, so an unpinned Claude conversation is a known
+**Standard** — which `effectiveFastMode` had always resolved and the chip reported as "Agent's
+Setting". The account's own `fastMode` key is read through the same settings layers as the
+permission mode, so a login that turned fast mode on for itself is no longer reported as Standard.
+Only an unreadable Codex service tier — one that is neither Fast nor Standard — still has no name
+to show. Choosing Follow General can apply an explicit General
 Standard/Fast value through the same live or next-turn channel as a pinned value. If General is
 Agent's Setting, there is no provider-neutral live reset operation; the record returns to
 inheritance, a notice says that the running speed is unchanged, and the provider setting takes
@@ -1035,6 +1042,40 @@ session restates nothing — the flags belong to the process. The broker is the 
 is ours: it re-reads the store on every call. Claude does expose a `set_permission_mode` control
 request on the stream transport (present in the binary beside `set_model`), so live switching on
 the native surface is a clean follow-on rather than a rewrite.
+
+**A chip that inherits still names a mode.** Nil is a third *state*, but "Agent's Setting" was a
+bad *label*: a control whose whole job is to say what the session will do, answering with the name
+of a place to go and look. The chips now resolve the same way the model chip already did
+(`ResolvedDefaultModel`) — name the value, qualify where it came from, and fall back to a generic
+label only when no source can name one. `ResolvedPermissionMode` is that chain, in order of
+authority:
+
+1. `AppSettings.defaultPermissionMode`, which *becomes* the launch flag and so outranks the rest.
+2. The runtime's own configuration. `ClaudeSettings.permissionMode` reads `permissions.defaultMode`
+   across the CLI's four layers (managed → `settings.local.json` → project `settings.json` → the
+   account's), first-match-wins, sharing one layer list with `ClaudeStatusLineSettings`. Codex
+   states the same posture as a *pair*, so `AgentPermissionMode(codexApprovalPolicy:sandboxMode:)`
+   inverts the table above — exactly, never to the nearest mode, and only when both axes are
+   present. Grok's `config.toml` states none of the six and OpenCode's policy is per-tool, so both
+   answer nothing.
+3. `ObservedPermissionMode` for this conversation, from memory only — `refreshConversationControls`
+   runs per streamed event, so the background re-read stays with the surfaces that own one.
+4. `ClaudeAccountLastRunPermissionMode`: the newest `permission-mode` record in this login's newest
+   transcript. Evidence, not configuration, and marked `(last used)` rather than `(default)` for
+   the same reason `ClaudeAccountLastRunModel`'s answer is.
+
+**One value is source-restricted, and the exception is load-bearing.** `auto` may be granted only
+by a layer a repository cannot write — measured against 2.1.228, which *drops the key* rather than
+falling through, so a project file's `auto` also discards the user's own mode. A reader that fell
+through to the layer below would report a posture the session will not run in.
+
+**The unset case is why step 4 exists.** With no layer stating a mode, the CLI chooses between
+`default` and `auto` on a server-side gate (`tengu_harbor_willow`, plus an interactive-session test
+that `--print` fails). That is not a file, so it is not predicted: on the machine this was written
+against, thirty-eight of forty recent transcripts had resolved to `auto` while every settings file
+was silent and Claude's own settings screen would have said `default`. Naming what the agent last
+ran in is the honest answer there; hard-coding `default` would have been wrong on every one of
+those forty sessions.
 
 **Reading the live posture back is a different question, and Claude answers it.** A terminal's own
 Shift+Tab still tells Threading nothing, but Claude writes each assertion of the posture into the

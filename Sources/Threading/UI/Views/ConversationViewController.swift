@@ -2701,13 +2701,21 @@ final class ConversationViewController: NSViewController {
         // already in flight closes it.
         modeChip.isHidden = !session.kind.supportsPermissionModes
         modeChip.isEnabled = !isChangingConversationConfiguration
+        let inheritedMode = inheritedPermissionMode(for: session)
         modeChip.configure(
             symbolName: PermissionModePresentation.symbol,
             title: PermissionModePresentation.chipTitle(
                 selected: session.permissionMode,
-                inherited: PermissionModePresentation.appDefault
+                inherited: inheritedMode
             )
         )
+        // `configure` puts the title on the tooltip, so whose value it is has to be said after.
+        if let tooltip = PermissionModePresentation.chipTooltip(
+            selected: session.permissionMode,
+            inherited: inheritedMode
+        ) {
+            modeChip.toolTip = tooltip
+        }
 
         let options = AgentModels.options(for: session.kind, account: account)
         guard !options.isEmpty else {
@@ -2758,7 +2766,8 @@ final class ConversationViewController: NSViewController {
             selected: session.fastMode,
             kind: session.kind,
             model: model,
-            account: account
+            account: account,
+            projectDirectory: session.workingDirectory(in: project)
         )
         speedChip.configure(
             symbolName: ConversationSpeedPresentation.symbol,
@@ -2856,8 +2865,24 @@ final class ConversationViewController: NSViewController {
         PermissionModePresentation.rows(
             for: storedSession.kind,
             selected: storedSession.permissionMode,
-            inherited: PermissionModePresentation.appDefault,
+            inherited: inheritedPermissionMode(for: storedSession),
             timing: permissionModeTiming
+        )
+    }
+
+    /// What this conversation runs in when it has pinned nothing of its own.
+    ///
+    /// The observed source is this session's own transcript, which is the one thing that can
+    /// answer for a conversation whose login configures no mode — and it is read from memory
+    /// only. `refreshConversationControls()` runs on every streamed event, so a scan here would
+    /// be a file read per event; the background re-read belongs to the surfaces that already own
+    /// one, and this picks up whatever they have found.
+    private func inheritedPermissionMode(for session: AgentSession) -> ResolvedPermissionMode {
+        ResolvedPermissionMode.inherited(
+            for: session.kind,
+            account: account,
+            projectDirectory: session.workingDirectory(in: project),
+            observed: ObservedPermissionMode.known(for: session, in: project)
         )
     }
 

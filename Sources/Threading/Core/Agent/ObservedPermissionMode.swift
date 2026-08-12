@@ -22,6 +22,12 @@ import Foundation
 /// since Shift+Tabbed out of is a promise the app cannot keep — so an unobservable runtime, an
 /// unreadable transcript and a session that has not started yet all answer nil, and the surfaces
 /// asking show nothing.
+///
+/// A second kind of caller asks the opposite question. `ResolvedPermissionMode` wants the mode a
+/// session *will* run in, and takes this as its third source — below the settings that decide the
+/// next launch, because what a session got to is not what the next one starts at. That is not the
+/// fallback refused above: it is this answer used where it is the only one, and labelled as an
+/// observation where it lands.
 @MainActor
 enum ObservedPermissionMode {
 

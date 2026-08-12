@@ -44,9 +44,11 @@ struct SessionSurfaceTogglePresentation: Equatable {
 enum PermissionModePresentation {
     static let symbol = "hand.raised"
 
-    /// What a chip says when nothing here and nothing in Settings has chosen: it names *where*
-    /// the decision is made rather than guessing what the CLI's own config says, which
-    /// Threading cannot read and must not claim to know.
+    /// What a chip says when *no* source can name a mode: no choice here, nothing in Settings,
+    /// nothing in the agent's own configuration, and no conversation on this login to have
+    /// observed one. It names where the decision is made because there is genuinely nothing else
+    /// to name — the same last resort, reached the same way, as the model chip's "Agent's
+    /// choice". Every other case names the posture and qualifies it below.
     static var agentSettingTitle: String { L10n.string("Agent's Setting") }
 
     /// The row offered when nothing here and nothing in Settings has chosen. It defers to the
@@ -63,19 +65,59 @@ enum PermissionModePresentation {
     /// the mode does.
     static var defaultSuffix: String { L10n.string("  (default)") }
 
-    /// The title of the row that carries `mode`, marked where it is the inherited answer.
-    static func rowTitle(_ mode: AgentPermissionMode, inherited: AgentPermissionMode?) -> String {
-        mode == inherited ? "\(mode.displayName)\(defaultSuffix)" : mode.displayName
+    /// A mode nothing configured, named because this agent ran in it before. Qualified apart
+    /// from a configured one for the reason `ClaudeAccountLastRunPermissionMode` states: it is
+    /// where the agent got to last time, not a setting anyone wrote. The model menu's
+    /// `(last used)` says the same thing about the same kind of evidence.
+    static var lastUsedSuffix: String { L10n.string("  (last used)") }
+
+    /// How the marked row qualifies where its mode came from.
+    static func suffix(for source: ResolvedPermissionMode.Source) -> String {
+        switch source {
+        case .appDefault, .agentConfiguration: return defaultSuffix
+        case .observedInThisConversation, .rememberedFromEarlierRun: return lastUsedSuffix
+        }
     }
 
-    /// Names the mode that will actually apply, not only the one chosen on this surface: with
-    /// no choice of its own the chip shows the app-wide default, and falls back to naming where
-    /// the decision goes when there is no default either.
+    /// The title of the row that carries `mode`, marked where it is the inherited answer.
+    static func rowTitle(
+        _ mode: AgentPermissionMode,
+        inherited: ResolvedPermissionMode
+    ) -> String {
+        mode == inherited.mode ? "\(mode.displayName)\(suffix(for: inherited.source))" : mode.displayName
+    }
+
+    /// Names the mode that will actually apply, not only the one chosen on this surface.
+    ///
+    /// With no choice of its own the chip shows what the session inherits — the app-wide
+    /// default, the agent's own configuration, or failing both what the agent was last observed
+    /// in — and names where the decision goes only when no source can answer at all.
     static func chipTitle(
         selected: AgentPermissionMode?,
-        inherited: AgentPermissionMode?
+        inherited: ResolvedPermissionMode
     ) -> String {
-        (selected ?? inherited)?.displayName ?? agentSettingTitle
+        (selected ?? inherited.mode)?.displayName ?? agentSettingTitle
+    }
+
+    /// What a chip's tooltip adds: the value is in the chip, and this says whose value it is.
+    /// Nil where the chip carries the user's own choice, which needs no explaining.
+    static func chipTooltip(
+        selected: AgentPermissionMode?,
+        inherited: ResolvedPermissionMode
+    ) -> String? {
+        guard selected == nil, let mode = inherited.mode else { return nil }
+
+        switch inherited.source {
+        case .appDefault:
+            return L10n.format("%@ — the default for new chats in Settings.", mode.displayName)
+        case .agentConfiguration:
+            return L10n.format("%@ — this agent's own setting.", mode.displayName)
+        case .observedInThisConversation, .rememberedFromEarlierRun:
+            return L10n.format(
+                "%@ — what this agent last ran in. It decides again each launch.",
+                mode.displayName
+            )
+        }
     }
 
     /// The app-wide default new conversations inherit, read in one place so three surfaces
@@ -118,15 +160,15 @@ enum PermissionModePresentation {
     }
 
     /// The rows every surface offers: each mode once, with what it does and what it costs on
-    /// this agent, and the app-wide default marked where it stands in that list.
+    /// this agent, and the inherited answer marked where it stands in that list.
     ///
     /// The inherited answer is *not* a row of its own. It was, and it named a mode the list
     /// then repeated — a menu of seven items for six postures, in which the pair that named the
     /// same mode were the two rows hardest to tell apart. The marked row answers `nil`, which is
-    /// what the row above it used to answer: choosing it leaves the session following Settings
-    /// rather than pinning a copy of what Settings says today. Only where there is no app-wide
-    /// default does a separate row appear, and then it duplicates nothing — "Agent's Setting" is
-    /// not one of the six.
+    /// what the row above it used to answer: choosing it leaves the session following whatever
+    /// it was following rather than pinning a copy of that value today. Only where *nothing* can
+    /// name the inherited mode does a separate row appear, and then it duplicates nothing —
+    /// "Agent's Setting" is not one of the six.
     ///
     /// Both `representedValue` and `onChoose` are filled, because the two kinds of caller read
     /// the answer differently — a `ChipView` reads the value back through its own `onSelect`,
@@ -135,13 +177,13 @@ enum PermissionModePresentation {
     static func rows(
         for kind: AgentKind,
         selected: AgentPermissionMode?,
-        inherited: AgentPermissionMode?,
+        inherited: ResolvedPermissionMode,
         timing: Timing,
         onChoose: ((AgentPermissionMode?) -> Void)? = nil
     ) -> [ThemedMenuEntry] {
         var rows: [ThemedMenuEntry] = []
 
-        if inherited == nil {
+        if inherited.mode == nil {
             rows.append(.item(ThemedMenuItem(
                 title: agentSettingRowTitle,
                 representedValue: nil,
@@ -155,7 +197,7 @@ enum PermissionModePresentation {
             // for a session that has chosen nothing as well as for one that chose this mode —
             // both run it, and a menu that marked only one of them would be reporting a
             // difference the session cannot act on.
-            let isDefault = mode == inherited
+            let isDefault = mode == inherited.mode
             // The description rides as the subtitle rather than a hover tooltip, so what a
             // mode actually permits is read in the same glance that chooses it.
             rows.append(.item(ThemedMenuItem(
@@ -219,19 +261,33 @@ enum ConversationSpeedPresentation {
         case whileRunning
     }
 
-    /// What the chip says the session will use. A provider setting is named only when it can
-    /// be read locally; otherwise the honest answer is Agent's Setting.
+    /// What the chip says the session will use.
+    ///
+    /// The same four sources, in the same order, as `AgentModels.effectiveFastMode` — and it
+    /// asks that function rather than restating three of them. The two used to disagree about
+    /// the fourth: a Claude conversation whose flag starts off *is* Standard, which
+    /// `effectiveFastMode` has always resolved and this chip reported as "Agent's Setting",
+    /// naming a place rather than the speed the session was about to run at.
+    ///
+    /// Nil survives only for a service tier this app cannot read — a Codex account whose
+    /// `config.toml` names a tier that is neither Fast nor Standard — where naming either would
+    /// be wrong.
     @MainActor
     static func chipTitle(
         selected: Bool?,
         kind: AgentKind,
         model: String?,
-        account: AgentAccount?
+        account: AgentAccount?,
+        projectDirectory: String? = nil
     ) -> String {
-        let startup = AppSettings.shared.startupSpeed(for: kind)
-        let effective = selected
-            ?? startup.fastModeOverride
-            ?? AgentModels.defaultFastMode(for: kind, model: model, account: account)
+        let effective = AgentModels.effectiveFastMode(
+            selected: selected,
+            kind: kind,
+            model: model,
+            account: account,
+            projectDirectory: projectDirectory,
+            startupSpeed: AppSettings.shared.startupSpeed(for: kind)
+        )
         switch effective {
         case true: return fastTitle
         case false: return standardTitle
@@ -893,9 +949,12 @@ extension ProjectSidebarViewController {
     /// either way. Each mode names what it does, and where the session's agent expresses it
     /// imperfectly the row says so rather than implying parity.
     ///
-    /// The inherit item names the app-wide default where there is one and defers where there is
-    /// not — Threading cannot read `permissions.defaultMode` or `config.toml`, and a row claiming
-    /// a value it guessed would be worse than one that says where the answer lives.
+    /// The inherited mode is marked where it stands in the list, named from whichever source can
+    /// answer: Settings, then the agent's own configuration — `permissions.defaultMode` across
+    /// Claude's settings layers, or Codex's `approval_policy` and `sandbox_mode` pair, both of
+    /// which this app does read — then what this session's transcript recorded, and then what
+    /// this login last ran in. A row naming where the decision lives appears only when none of
+    /// them can, which is a login that has never run this agent at all.
     ///
     /// Record-only from here whichever agent it is, which is why the rows carry the
     /// restart note: unlike the reply composer's chip, this menu never touches the running
@@ -903,12 +962,24 @@ extension ProjectSidebarViewController {
     private func permissionModeEntry(for session: AgentSession) -> ThemedMenuEntry? {
         guard session.kind.supportsPermissionModes else { return nil }
 
+        let project = projectStore.executionProject(forSessionID: session.id)
+
         return .item(ThemedMenuItem(
             title: L10n.string("Permission Mode"),
             submenu: PermissionModePresentation.rows(
                 for: session.kind,
                 selected: session.permissionMode,
-                inherited: PermissionModePresentation.appDefault,
+                inherited: ResolvedPermissionMode.inherited(
+                    for: session.kind,
+                    account: AgentAccountDiscovery.account(
+                        for: session.kind,
+                        handle: session.accountHandle
+                    ),
+                    projectDirectory: project.map { session.workingDirectory(in: $0) },
+                    observed: project.flatMap {
+                        ObservedPermissionMode.known(for: session, in: $0)
+                    }
+                ),
                 timing: .whenTheChatRestarts,
                 onChoose: { [weak self] mode in self?.setPermissionMode(mode) }
             )
