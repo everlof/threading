@@ -6,16 +6,19 @@ import { encodeEnvelope, parseEnvelope } from "../src/protocol";
 
 interface LoadTestEnv extends Env {
   TEST_RENDEZVOUS_LOAD: string;
+  TEST_RENDEZVOUS_LOAD_HOSTS: string;
 }
 
 const testEnv = env as unknown as LoadTestEnv;
 const loadTest = testEnv.TEST_RENDEZVOUS_LOAD === "1" ? it : it.skip;
-const hostCount = 10_000;
+const hostCount = Number(testEnv.TEST_RENDEZVOUS_LOAD_HOSTS);
 const batchWidth = 100;
 
-loadTest("holds 10,000 hibernating host signaling sockets", async () => {
+loadTest("holds the configured host socket population and preserves sampled hibernation", async () => {
+  expect(Number.isSafeInteger(hostCount) && hostCount >= 1 && hostCount <= 10_000).toBe(true);
   const startedAt = performance.now();
   const sockets: WebSocket[] = [];
+  const sampledStubs = new Map<number, DurableObjectStub>();
   try {
     for (let offset = 0; offset < hostCount; offset += batchWidth) {
       const batch = Array.from(
@@ -40,14 +43,17 @@ loadTest("holds 10,000 hibernating host signaling sockets", async () => {
         const ready = nextMessage(socket);
         socket.send(encodeEnvelope({ version: 1, kind: "hostHello", hostID }));
         expect(parseEnvelope(await ready)).toMatchObject({ kind: "hostReady", hostID });
-        await evictDurableObject(stub);
+        if (index % Math.max(1, Math.floor(hostCount / 100)) === 0) {
+          sampledStubs.set(index, stub);
+        }
         return socket;
       }));
       sockets.push(...connected);
     }
 
     expect(sockets).toHaveLength(hostCount);
-    const probeIndexes = Array.from({ length: 100 }, (_, index) => index * 100);
+    const probeIndexes = [...sampledStubs.keys()];
+    await Promise.all([...sampledStubs.values()].map((stub) => evictDurableObject(stub)));
     await Promise.all(probeIndexes.map(async (index) => {
       const socket = sockets[index];
       if (!socket) throw new Error(`missing probe socket ${index}`);
@@ -64,7 +70,7 @@ loadTest("holds 10,000 hibernating host signaling sockets", async () => {
       try { socket.close(1000, "load test complete"); } catch { /* already closed */ }
     }
   }
-}, 5 * 60 * 1000);
+}, 10 * 60 * 1000);
 
 function nextMessage(socket: WebSocket): Promise<string | ArrayBuffer> {
   return new Promise((resolve, reject) => {

@@ -34,6 +34,12 @@ xcodebuild archive        -configuration Release -destination 'generic/platform=
 xcodebuild -exportArchive -exportOptionsPlist (method: developer-id, signingStyle: automatic)
 ```
 
+Both invocations allow provisioning updates. That is load-bearing once the shipping app carries
+managed capabilities such as Sign in with Apple: automatic signing cannot create or download the
+matching profile from a command-line archive unless `-allowProvisioningUpdates` is present. The
+release machine therefore needs the team signed in through Xcode; an unattended runner must
+install the matching provisioning profile before invoking the same script.
+
 The consequence to keep in mind: `xcodebuild build -configuration Release` still produces a
 development-signed bundle carrying `get-task-allow`. That is fine — it is not the artefact
 anyone ships — but it means "did the entitlement change work?" cannot be answered by looking at

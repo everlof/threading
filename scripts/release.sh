@@ -154,6 +154,7 @@ run_xcodebuild "archive" "$BUILD_DIR/archive.log" archive \
     -scheme "$SCHEME" \
     -configuration Release \
     -destination 'generic/platform=macOS' \
+    -allowProvisioningUpdates \
     MARKETING_VERSION="$VERSION" \
     CURRENT_PROJECT_VERSION="$VERSION" \
     THREADING_CHANNEL="$CHANNEL" \
@@ -182,6 +183,7 @@ PLIST
 run_xcodebuild "export" "$BUILD_DIR/export.log" -exportArchive \
     -archivePath "$ARCHIVE" \
     -exportOptionsPlist "$BUILD_DIR/ExportOptions.plist" \
+    -allowProvisioningUpdates \
     -exportPath "$EXPORT_DIR"
 
 [[ -d "$APP" ]] || fail "the export produced no app bundle"
