@@ -53,8 +53,8 @@ enum ToastDefaults {
     /// own width.
     ///
     /// A fraction rather than a distance, because the band is as wide as the column it is in: the
-    /// same 80 points is most of the way across a narrow sidebar and a nudge on a band at its
-    /// full `maxWidth`. Set where a deliberate push clears it and the sideways part of a diagonal
+    /// same 80 points is most of the way across a narrow sidebar and a nudge on a band in a column
+    /// dragged wide. Set where a deliberate push clears it and the sideways part of a diagonal
     /// scroll does not.
     static let throwCommitFraction: CGFloat = 0.32
 
@@ -67,12 +67,14 @@ enum ToastDefaults {
     /// position is a change of mind rather than a throw in the other direction.
     static let throwVelocity: CGFloat = 450
 
-    /// Between the band and the pane it floats in.
-    static let hostInset: CGFloat = Design.Spacing.medium
-
-    /// Widest the band grows. It fills a narrow column and stops well short of spanning a pane:
-    /// a receipt read at a glance is a couple of short lines, not one long one.
-    static let maxWidth: CGFloat = 320
+    /// Between the band and the column it floats in.
+    ///
+    /// `Spacing.inset` rather than `medium`, because the band's edge is read against the footer
+    /// directly under it rather than against the column's edge: `PaneFooterView` stands its first
+    /// icon's *ink* at `Spacing.inset`, so at 10 the band sat two points inside the gear it was
+    /// stacked on. A card floating in the same column as a list, its brand and its footer shares
+    /// their one leading edge, or it reads as a near miss.
+    static let hostInset: CGFloat = Design.Spacing.inset
 
     /// How hard the band's words argue for the band's width — which is to say, not at all.
     ///
@@ -95,11 +97,11 @@ enum ToastDefaults {
     /// Hard enough to beat the silenced words, and softer than the grip *any* pane holds its
     /// width with — the same step below `defaultLow` that the sidebar and display panes hold
     /// above it (`SidebarDefaults.holdingPriority`), with the terminal's plain item at the
-    /// default in between. The pin must be this weak because in a pane wider than `maxWidth`
-    /// it cannot be satisfied by the band at all: the required cap holds the band, and a solver
-    /// forbidden from stretching the band satisfies the pin with the *pane* instead. At
-    /// `defaultHigh` it did exactly that — a sidebar dragged past the cap snapped in to meet it
-    /// as a receipt arrived, and sprang back out six seconds later when it left.
+    /// default in between. It stays this weak now that nothing caps the band, because the rule it
+    /// encodes is not about the cap: a receipt asks its column for the width, it does not tell the
+    /// column what to be. A pin the band cannot satisfy is one a solver will satisfy with the
+    /// *column* instead, and a sidebar that resizes twice over a message about something else is
+    /// the one failure this component has already shipped once.
     static let fillPriority = NSLayoutConstraint.Priority(
         NSLayoutConstraint.Priority.defaultLow.rawValue - 10
     )
@@ -337,7 +339,7 @@ final class ToastView: NSView {
     // MARK: - Layout
 
     /// A wrapping label measures its height against a width it has to be told, and the width
-    /// here is whatever the host column left — capped, but never fixed. Guarded on the values
+    /// here is whatever the host column left, which is never a fixed figure. Guarded on the values
     /// actually changing: assigning them unconditionally in `layout()` invalidates the size that
     /// caused the layout.
     ///
@@ -1324,31 +1326,28 @@ final class ToastPresenter {
     }
 
     /// The constraints that put the front band where it belongs, kept as a set so a promotion
-    /// can stand a new band in the deck's front slot and then move it — bottom, both sides and
-    /// the width cap together — into the resting position, rather than rebuilding it there.
+    /// can stand a new band in the deck's front slot and then move it — bottom and both sides
+    /// together — into the resting position, rather than rebuilding it there.
     private struct Placement {
 
         let bottom: NSLayoutConstraint
         let leading: NSLayoutConstraint
         let fill: NSLayoutConstraint
-        let cap: NSLayoutConstraint
 
-        /// At rest: `hostInset` in from every edge of the lane, the cap at full width.
+        /// At rest: `hostInset` in from every edge of the lane.
         func settle() {
             bottom.constant = -ToastDefaults.hostInset
             leading.constant = ToastDefaults.hostInset
             fill.constant = -ToastDefaults.hostInset
-            cap.constant = ToastDefaults.maxWidth
         }
 
-        /// The deck's front slot: one step up and one step in on either side, the cap stepped
-        /// in with it — where a promoted receipt stands at the moment its turn comes, so it
-        /// takes over exactly the silhouette of the edge that stood for it.
+        /// The deck's front slot: one step up and one step in on either side — where a promoted
+        /// receipt stands at the moment its turn comes, so it takes over exactly the silhouette
+        /// of the edge that stood for it.
         func standInDeckFront() {
             bottom.constant = -ToastDefaults.hostInset - ToastDefaults.stackStep
             leading.constant = ToastDefaults.hostInset + ToastDefaults.stackInset
             fill.constant = -(ToastDefaults.hostInset + ToastDefaults.stackInset)
-            cap.constant = ToastDefaults.maxWidth - ToastDefaults.stackInset * 2
         }
     }
 
@@ -1649,11 +1648,14 @@ final class ToastPresenter {
 
     /// Pins a band into the lane and hands back the constraints a transition moves.
     ///
-    /// The fill pin: the band fills the column it is given, up to its cap. It is breakable so
-    /// the cap wins in a pane wider than the band should ever be — and weaker than the pane's
-    /// own hold on its width, so losing to the cap never narrows the pane to make up the
-    /// difference; the lane's edges are required-equal to the pane's, so every priority
-    /// relationship reads through it unchanged. See `ToastDefaults.fillPriority`.
+    /// The fill pin: the band spans the column it is given, whatever that column is. Nothing caps
+    /// it, because the only hosts a receipt has are columns — the sidebar, an extension's
+    /// navigator shell, the gallery's stand-in for both — and a card that stops at a fixed width
+    /// in a column dragged wider than it reads as stranded beside its own list rather than as
+    /// part of it. It stays breakable, and weaker than the column's own hold on its width, so a
+    /// column that cannot give the band the width is never resized to; the lane's edges are
+    /// required-equal to the host's, so every priority relationship reads through it unchanged.
+    /// See `ToastDefaults.fillPriority`.
     private func place(_ toast: ToastView, in lane: ToastLaneView) -> Placement {
         let fill = toast.trailingAnchor.constraint(
             equalTo: lane.trailingAnchor,
@@ -1670,14 +1672,12 @@ final class ToastPresenter {
                 equalTo: lane.leadingAnchor,
                 constant: ToastDefaults.hostInset
             ),
-            fill: fill,
-            cap: toast.widthAnchor.constraint(lessThanOrEqualToConstant: ToastDefaults.maxWidth)
+            fill: fill
         )
         NSLayoutConstraint.activate([
             placement.bottom,
             placement.leading,
             placement.fill,
-            placement.cap,
             toast.trailingAnchor.constraint(
                 lessThanOrEqualTo: lane.trailingAnchor,
                 constant: -ToastDefaults.hostInset

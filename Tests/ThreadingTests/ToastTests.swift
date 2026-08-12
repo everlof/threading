@@ -71,7 +71,10 @@ final class ToastTests: XCTestCase {
 
     /// The same pane, held at a width the way a split view holds the sidebar's: by a constraint
     /// a shade above `defaultLow`, which anything inside the column can outrank and push.
-    private func column(width: CGFloat) -> (
+    private func column(
+        width: CGFloat,
+        footerLeading: [NSView] = []
+    ) -> (
         column: NSView,
         bottom: NSLayoutYAxisAnchor,
         window: NSWindow
@@ -92,7 +95,7 @@ final class ToastTests: XCTestCase {
         let held = column.widthAnchor.constraint(equalToConstant: width)
         held.priority = SidebarDefaults.holdingPriority
 
-        let footer = PaneFooterView()
+        let footer = PaneFooterView(leading: footerLeading, margin: .paneEdge)
         column.addSubview(footer)
 
         NSLayoutConstraint.activate([
@@ -236,13 +239,13 @@ final class ToastTests: XCTestCase {
         )
     }
 
-    /// The same rule from the other side: the divider has no maximum, so a column can be wider
-    /// than the band's cap plus its insets. The presenter's own fill pin is breakable so the cap
-    /// can win — but at `defaultHigh` it outranked the column's holding priority, and a pin the
-    /// *band* was not allowed to satisfy was satisfied with the column instead: the sidebar
-    /// snapped in to meet the cap as the receipt arrived, and sprang back out when it left.
-    func testTheBandDoesNotNarrowAWideColumnToMeetItsOwnCap() throws {
-        let width = ToastDefaults.maxWidth + ToastDefaults.hostInset * 2 + 60
+    /// The same rule from the other side: the divider has no maximum, so a column can be dragged
+    /// far wider than the app ever opens it. The band spans that column too — it once stopped at
+    /// a 320-point cap and left the rest of the column empty beside it, which read as a card
+    /// stranded next to the list it was reporting on — and the column keeps the width it had,
+    /// because the fill pin is still weaker than the column's own hold on itself.
+    func testTheBandSpansAColumnDraggedWideWithoutResizingIt() throws {
+        let width = SidebarDefaults.maxWidth + 60
         let (column, bottom, _) = column(width: width)
         let presenter = ToastPresenter(host: column, above: bottom)
 
@@ -253,20 +256,20 @@ final class ToastTests: XCTestCase {
             column.frame.width,
             width,
             accuracy: 0.5,
-            "the band's fill pin dragged the column in to meet the band's own cap"
+            "the band's fill pin dragged the column in to meet the band"
         )
         XCTAssertEqual(
             try XCTUnwrap(presenter.current).frame.width,
-            ToastDefaults.maxWidth,
+            width - ToastDefaults.hostInset * 2,
             accuracy: 0.5,
-            "the band stopped short of its cap in a column with room for it"
+            "the band stopped short of the column instead of spanning it"
         )
     }
 
     /// A receipt is a band, not a bubble: in a column with more room than its words need, it
-    /// still fills the width it is given, up to its cap. The words are silenced in *both*
-    /// directions — a label's hugging outranking the fill pin would shrink-wrap the band to
-    /// whatever its message happened to be.
+    /// still fills the width it is given. The words are silenced in *both* directions — a
+    /// label's hugging outranking the fill pin would shrink-wrap the band to whatever its
+    /// message happened to be.
     func testTheBandFillsANarrowColumnEvenWhenItsWordsAreShort() throws {
         let (column, bottom, _) = column(width: SidebarDefaults.minWidth)
         let presenter = ToastPresenter(host: column, above: bottom)
@@ -282,6 +285,34 @@ final class ToastTests: XCTestCase {
         )
     }
 
+    /// The band stands on the same leading edge as the footer directly under it.
+    ///
+    /// Its inset was `Spacing.medium` while the footer stands its first control's ink at
+    /// `Spacing.inset`, so the card's edge sat two points inside the gear it was stacked on —
+    /// close enough to read as a miss rather than as a decision. Asserted against the footer's
+    /// own answer rather than against the number, because the number is the thing that drifted.
+    func testTheBandStandsOnTheFootersLeadingInk() throws {
+        let settings = ThemedButton()
+        settings.title = "Settings"
+        settings.isBordered = false
+        let (column, bottom, _) = column(
+            width: SidebarDefaults.defaultWidth,
+            footerLeading: [settings]
+        )
+        let presenter = ToastPresenter(host: column, above: bottom)
+
+        presenter.present(archiveRequest())
+        column.superview?.layoutSubtreeIfNeeded()
+
+        let toast = try XCTUnwrap(presenter.current)
+        XCTAssertEqual(
+            toast.frame.minX,
+            settings.frame.minX + settings.opticalHorizontalInset,
+            accuracy: 0.5,
+            "the band's edge missed the ink column the footer under it aligns down"
+        )
+    }
+
     // MARK: - The clock
 
     func testPresentingPutsTheBandAboveThePanesFooter() throws {
@@ -294,9 +325,9 @@ final class ToastTests: XCTestCase {
         let toast = try XCTUnwrap(presenter.current)
         XCTAssertTrue(toast.isDescendant(of: host))
         XCTAssertLessThanOrEqual(
-            toast.frame.width,
-            ToastDefaults.maxWidth,
-            "the band grew past its cap"
+            toast.frame.maxX,
+            host.bounds.width - ToastDefaults.hostInset + 0.5,
+            "the band overhung the pane it floats in"
         )
         XCTAssertGreaterThan(toast.frame.minY, 0, "the band landed on top of the footer")
         XCTAssertEqual(window.contentView, host)

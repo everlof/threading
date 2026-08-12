@@ -55,6 +55,14 @@ final class ToastRenderTests: XCTestCase {
             case agent
             case queued
         }
+
+        /// A column dragged well past the width the app ever opens the sidebar at.
+        ///
+        /// The divider has no maximum (`SidebarDefaults.maxWidth` is only how wide the app opens
+        /// the column *itself*), so this is a shape a user can put the receipt in and the
+        /// storybook could not previously show: at 240 the band fills, and every fault in how it
+        /// meets a wider column is invisible there.
+        static let draggedColumnWidth: CGFloat = 460
     }
 
     // MARK: - Stories
@@ -94,7 +102,53 @@ final class ToastRenderTests: XCTestCase {
         print("Rendered archive toast storybook to \(directory.path)")
     }
 
+    /// The same receipts in a column the user has dragged wide, which is the one relationship the
+    /// 240-point storybook cannot show: whether a band in a column with more room than it needs
+    /// still belongs to the column, or reads as a card stranded at one edge of it.
+    func testRendersTheArchiveToastInADraggedColumn() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        defer { AppThemePalette.set(.system) }
+        AppThemePalette.set(.system)
+
+        for (appearanceName, appearanceID) in Render.appearances {
+            for story in [Render.Story.running, .agent] {
+                let data = try XCTUnwrap(
+                    toastImage(
+                        appearance: appearanceID,
+                        story: story,
+                        width: Render.draggedColumnWidth
+                    ),
+                    "Failed to render the \(story.rawValue) toast in \(appearanceName)"
+                )
+                try data.write(
+                    to: directory.appendingPathComponent(
+                        "toast-wide-\(story.rawValue)-\(appearanceName).png"
+                    )
+                )
+            }
+        }
+
+        print("Rendered the dragged-column receipts to \(directory.path)")
+    }
+
     // MARK: - Helpers
+
+    /// The sidebar's standing destination, built the way `ProjectSidebarViewController` builds
+    /// it: borderless, so its ink is its glyph and the footer aligns it by that.
+    @MainActor
+    private static func settingsButton() -> ThemedButton {
+        let button = ThemedButton()
+        button.title = L10n.string("Settings")
+        button.image = NSImage(
+            systemSymbolName: "gearshape",
+            accessibilityDescription: L10n.string("Settings")
+        )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
+        button.isBordered = false
+        button.applyFont(.controlRegular)
+        return button
+    }
 
     /// The receipts as the app builds them, rather than a second copy of their wording here that
     /// could drift from the one that ships.
@@ -115,7 +169,11 @@ final class ToastRenderTests: XCTestCase {
         }
     }
 
-    private func toastImage(appearance name: NSAppearance.Name, story: Render.Story) -> Data? {
+    private func toastImage(
+        appearance name: NSAppearance.Name,
+        story: Render.Story,
+        width: CGFloat = SidebarDefaults.defaultWidth
+    ) -> Data? {
         let appearance = NSAppearance(named: name)
 
         var data: Data?
@@ -128,18 +186,17 @@ final class ToastRenderTests: XCTestCase {
             // the message onto a second line, the agent's receipt carries three sentences of
             // detail under it, and a fixture cropping the top of the receipt reports a layout
             // fault the component does not have.
-            host.frame = NSRect(
-                x: 0,
-                y: 0,
-                width: SidebarDefaults.defaultWidth,
-                height: 280
-            )
+            host.frame = NSRect(x: 0, y: 0, width: width, height: 280)
             // The sidebar's ground, so the band is judged against the surface it floats on
             // rather than against a blank one.
             host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
             host.appearance = appearance
 
-            let footer = PaneFooterView()
+            // The footer carries the sidebar's own Settings control rather than being an empty
+            // band, because the edge the band is judged against is that control's ink: a card
+            // floating a couple of points inside the gear beneath it is exactly the kind of miss
+            // no assertion was going to be written for.
+            let footer = PaneFooterView(leading: [Self.settingsButton()], margin: .paneEdge)
             host.addSubview(footer)
             NSLayoutConstraint.activate([
                 footer.leadingAnchor.constraint(equalTo: host.leadingAnchor),
