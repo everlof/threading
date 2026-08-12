@@ -88,6 +88,85 @@ final class UsageDashboardRenderTests: XCTestCase {
         XCTAssertEqual(files.count, fixtures.count * UsageDashboardView.DashboardTab.allCases.count)
     }
 
+    /// The page before it has numbers: a scan in flight, and a scan that found nothing.
+    ///
+    /// Rendered because this is exactly the kind of bug an assertion does not catch. The state
+    /// this replaces passed every test it had while drawing one grey sentence through the middle
+    /// grid rule of a value axis labelled 0 to 1, over a dashboard that repeated that same
+    /// sentence under five dashes.
+    func testRendersTheWaitingAndEmptyDashboards() throws {
+        let directory = renderDirectory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let previousTheme = AppThemePalette.current
+        let previousMotion = Design.Motion.reduceMotionOverrideForTesting
+        defer {
+            AppThemePalette.set(previousTheme)
+            Design.Motion.reduceMotionOverrideForTesting = previousMotion
+        }
+        // The ghost's breath is a layer animation, so an offscreen render would catch it at an
+        // arbitrary opacity. Reduce Motion pins it to the still silhouette it must remain legible
+        // as anyway.
+        Design.Motion.reduceMotionOverrideForTesting = true
+
+        let reading = UsageScanProgress(
+            sourceName: "Claude Code",
+            completedSources: 128,
+            totalSources: 402
+        )
+        let states: [(name: String, report: TranscriptUsageReport?, progress: UsageScanProgress?, isBuilding: Bool)] = [
+            ("counting", nil, nil, true),
+            ("reading", nil, reading, true),
+            ("empty", nil, nil, false),
+            // A rescan behind a report says so beside the tabs and leaves the chart alone.
+            ("rescanning", reportFixture(), reading, true)
+        ]
+        let fixtures = [
+            Fixture(name: "system-dark", theme: .system, appearance: .darkAqua),
+            Fixture(name: "system-light", theme: .system, appearance: .aqua),
+            Fixture(name: "cyberpunk", theme: AppThemeStyles.cyberpunk, appearance: .darkAqua)
+        ]
+
+        var files: [URL] = []
+        for fixture in fixtures {
+            for state in states {
+                AppThemePalette.set(fixture.theme)
+                let appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
+                let dashboard = UsageDashboardView()
+                dashboard.update(
+                    report: state.report,
+                    limits: [],
+                    isBuilding: state.isBuilding,
+                    scanProgress: state.progress,
+                    animated: false
+                )
+                let host = laidOut(dashboard, appearance: appearance)
+                AppThemeRefresh.repaint(host)
+                host.layoutSubtreeIfNeeded()
+
+                if state.report == nil {
+                    XCTAssertEqual(dashboard.usageRenderedPointCountForTesting, 0)
+                    XCTAssertFalse(dashboard.scanStripForTesting.isVisible)
+                } else {
+                    XCTAssertTrue(dashboard.scanStripForTesting.isVisible)
+                }
+
+                var payload: Data?
+                appearance.performAsCurrentDrawingAppearance {
+                    payload = png(of: host)
+                }
+                let url = directory.appendingPathComponent(
+                    "usage-dashboard-\(state.name)-\(fixture.name).png"
+                )
+                try XCTUnwrap(payload, "No Usage \(state.name) render for \(fixture.name)")
+                    .write(to: url)
+                files.append(url)
+            }
+        }
+
+        print("Rendered Usage waiting fixtures to \(directory.path)")
+        XCTAssertEqual(files.count, fixtures.count * states.count)
+    }
+
     private var renderDirectory: URL {
         if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
             return URL(fileURLWithPath: override)

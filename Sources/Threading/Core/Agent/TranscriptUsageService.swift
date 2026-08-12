@@ -417,6 +417,92 @@ enum UsageLedgerBuilder {
     }
 }
 
+// MARK: - Scan progress
+
+/// How far a usage scan has got, while the report it will produce does not exist yet.
+///
+/// The dashboard used to have one bit for this: building or not. That is enough to choose a
+/// sentence and nothing else, so a scan of a well-used machine — thousands of transcripts across
+/// several accounts, seconds of filesystem work on a cold cache — looked exactly like a scan that
+/// had stalled. The counts are what make the difference visible.
+struct UsageScanProgress: Sendable, Equatable {
+
+    /// What is being read right now, named the way the coverage list names it.
+    let sourceName: String?
+    let completedSources: Int
+    /// Zero while the sources are still being enumerated, which is the one phase with no
+    /// denominator to report.
+    let totalSources: Int
+
+    /// `nil` while the total is unknown, so a caller shows an indeterminate state rather than a
+    /// bar pinned at zero.
+    var fraction: Double? {
+        guard totalSources > 0 else { return nil }
+        return min(max(Double(completedSources) / Double(totalSources), 0), 1)
+    }
+}
+
+/// Turns a per-file scan into a bounded stream of progress reports.
+///
+/// A warm scan answers nearly every file from `UsageScanCache` and gets through thousands of them
+/// a second. Reporting each one would post more main-actor work than the scan itself does, and the
+/// dashboard cannot show a number that changes 5,000 times either. So a report leaves here when
+/// the interval has elapsed, or when the source being read changes — the second condition is what
+/// keeps "Claude Code" from sitting on screen through the whole of the Codex half.
+///
+/// Created and used on the scan queue; the closure it is given is what crosses to the main actor.
+final class UsageScanProgressReporter {
+
+    private let interval: CFTimeInterval
+    private let clock: () -> CFTimeInterval
+    private let publish: (UsageScanProgress) -> Void
+
+    private var total = 0
+    private var completed = 0
+    private var sourceName: String?
+    private var lastPublishedAt: CFTimeInterval?
+
+    init(
+        interval: CFTimeInterval = UsageScanDefaults.progressInterval,
+        clock: @escaping () -> CFTimeInterval = { CFAbsoluteTimeGetCurrent() },
+        publish: @escaping (UsageScanProgress) -> Void
+    ) {
+        self.interval = interval
+        self.clock = clock
+        self.publish = publish
+    }
+
+    /// The sources have been counted. Always reported: it is the moment an indeterminate wait
+    /// becomes a determinate one.
+    func begin(totalSources: Int) {
+        total = totalSources
+        emit()
+    }
+
+    /// One source has been read. Reported only if this tick is due.
+    func advance(sourceName: String) {
+        completed += 1
+        let changedSource = sourceName != self.sourceName
+        self.sourceName = sourceName
+        guard changedSource || isDue else { return }
+        emit()
+    }
+
+    private var isDue: Bool {
+        guard let lastPublishedAt else { return true }
+        return clock() - lastPublishedAt >= interval
+    }
+
+    private func emit() {
+        lastPublishedAt = clock()
+        publish(UsageScanProgress(
+            sourceName: sourceName,
+            completedSources: completed,
+            totalSources: total
+        ))
+    }
+}
+
 // MARK: - Transcript Usage Service
 
 @MainActor
@@ -437,8 +523,19 @@ final class TranscriptUsageService {
         let lastActiveAt: Date
     }
 
+    /// One transcript or rollout waiting to be parsed, resolved during enumeration so the scan
+    /// knows how much work it has before it starts doing any of it.
+    private struct PendingSource {
+        let runtime: AgentKind
+        let account: AccountSource
+        let file: URL
+        let parserID: String
+    }
+
     private(set) var report: TranscriptUsageReport?
     private(set) var isBuilding = false
+    /// Non-nil only while `isBuilding`. Read by the dashboard's placeholder.
+    private(set) var scanProgress: UsageScanProgress?
 
     private let persistence: RecoverableFileStore<TranscriptUsageReport?>
     private let cacheDirectory: URL
@@ -466,6 +563,7 @@ final class TranscriptUsageService {
            Date().timeIntervalSince(builtAt) < UsageReportDefaults.staleAfter { return }
 
         isBuilding = true
+        scanProgress = nil
         notifyChanged()
 
         let accountSources = AgentKind.allCases
@@ -507,17 +605,26 @@ final class TranscriptUsageService {
         )
 
         queue.async { [weak self] in
+            let reporter = UsageScanProgressReporter { progress in
+                Task { @MainActor in
+                    guard let self, self.isBuilding else { return }
+                    self.scanProgress = progress
+                    NotificationCenter.default.post(TranscriptUsageScanProgressDidChange())
+                }
+            }
             let report = Self.build(
                 accountSources: accountSources,
                 exportSources: exports,
                 projects: projectDescriptors,
                 loginShellPath: loginShellPath,
-                cacheDirectory: cacheDirectory
+                cacheDirectory: cacheDirectory,
+                reporter: reporter
             )
 
             Task { @MainActor in
                 guard let self else { return }
                 self.isBuilding = false
+                self.scanProgress = nil
                 self.report = report
                 _ = self.persistence.save(report)
                 let failedCoverage = report.coverage.filter { $0.state == .failed }.count
@@ -534,7 +641,8 @@ final class TranscriptUsageService {
         exportSources: [ExportSource],
         projects: [UsageLedgerBuilder.ProjectDescriptor],
         loginShellPath: String,
-        cacheDirectory: URL
+        cacheDirectory: URL,
+        reporter: UsageScanProgressReporter
     ) -> TranscriptUsageReport {
         let started = CFAbsoluteTimeGetCurrent()
         let cache = UsageScanCache(directory: cacheDirectory)
@@ -568,6 +676,10 @@ final class TranscriptUsageService {
             detail: "Appears when a supported OpenCode export reports OpenRouter as its billing route."
         )
 
+        // Enumerated before anything is parsed, so the progress a reader sees has a denominator
+        // from the first file rather than a total that keeps growing under the bar. Listing a
+        // directory is the cheap half of this work; parsing it is the rest.
+        var pending: [PendingSource] = []
         for source in accountSources {
             guard let runtime = AgentKind(rawValue: source.runtimeID) else { continue }
             let files: [URL]
@@ -585,50 +697,63 @@ final class TranscriptUsageService {
                 files = []
                 parserID = "unused"
             }
-
-            for file in files {
-                let result = cache.records(for: file, parserID: parserID) {
-                    switch runtime {
-                    case .claude:
-                        return ClaudeUsageAdapter.records(
-                            inTranscriptAt: file,
-                            accountID: source.accountID,
-                            accountName: source.accountName
-                        )
-                    case .codex:
-                        return CodexUsageAdapter.records(
-                            inRolloutAt: file,
-                            accountID: source.accountID,
-                            accountName: source.accountName
-                        )
-                    case .grok, .openCode:
-                        return []
-                    }
-                }
-                scan.sourceFiles += 1
-                if result.wasCacheHit { scan.cacheHits += 1 } else { scan.cacheMisses += 1 }
-                records.append(contentsOf: result.records)
-                guard var item = coverage[runtime.rawValue] else {
-                    ThreadingLogger.usage.fault(
-                        "Usage coverage invariant missing runtime=\(runtime.rawValue, privacy: .public)"
-                    )
-                    assertionFailure("Missing usage coverage for \(runtime.rawValue)")
-                    continue
-                }
-                item.sourceCount += 1
-                item.recordCount += result.records.count
-                item.state = .complete
-                item.detail = nil
-                coverage[runtime.rawValue] = item
+            pending.append(contentsOf: files.map {
+                PendingSource(runtime: runtime, account: source, file: $0, parserID: parserID)
+            })
+        }
+        // Only runtimes whose usage arrives through an export are counted, so the bar is measured
+        // against the work that will actually be done.
+        let pendingExports = exportSources.filter { source in
+            guard let runtime = AgentKind(rawValue: source.runtimeID) else { return false }
+            switch runtime {
+            case .openCode: return true
+            case .claude, .codex, .grok: return false
             }
         }
+        reporter.begin(totalSources: pending.count + pendingExports.count)
 
-        for source in exportSources {
-            guard let runtime = AgentKind(rawValue: source.runtimeID) else { continue }
-            switch runtime {
-            case .openCode: break
-            case .claude, .codex, .grok: continue
+        for source in pending {
+            let runtime = source.runtime
+            let account = source.account
+            let file = source.file
+            let result = cache.records(for: file, parserID: source.parserID) {
+                switch runtime {
+                case .claude:
+                    return ClaudeUsageAdapter.records(
+                        inTranscriptAt: file,
+                        accountID: account.accountID,
+                        accountName: account.accountName
+                    )
+                case .codex:
+                    return CodexUsageAdapter.records(
+                        inRolloutAt: file,
+                        accountID: account.accountID,
+                        accountName: account.accountName
+                    )
+                case .grok, .openCode:
+                    return []
+                }
             }
+            scan.sourceFiles += 1
+            if result.wasCacheHit { scan.cacheHits += 1 } else { scan.cacheMisses += 1 }
+            records.append(contentsOf: result.records)
+            reporter.advance(sourceName: runtime.displayName)
+            guard var item = coverage[runtime.rawValue] else {
+                ThreadingLogger.usage.fault(
+                    "Usage coverage invariant missing runtime=\(runtime.rawValue, privacy: .public)"
+                )
+                assertionFailure("Missing usage coverage for \(runtime.rawValue)")
+                continue
+            }
+            item.sourceCount += 1
+            item.recordCount += result.records.count
+            item.state = .complete
+            item.detail = nil
+            coverage[runtime.rawValue] = item
+        }
+
+        for source in pendingExports {
+            guard let runtime = AgentKind(rawValue: source.runtimeID) else { continue }
             guard var item = coverage[runtime.rawValue] else {
                 ThreadingLogger.usage.fault(
                     "Usage coverage invariant missing runtime=\(runtime.rawValue, privacy: .public)"
@@ -683,6 +808,9 @@ final class TranscriptUsageService {
                     "Usage export failed runtime=\(runtime.rawValue, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
                 )
             }
+            // A source that failed is still a source the scan is done with; a bar that only
+            // counts successes stops short of its own end whenever an export breaks.
+            reporter.advance(sourceName: runtime.displayName)
             coverage[runtime.rawValue] = item
         }
 

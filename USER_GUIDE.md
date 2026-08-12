@@ -3334,7 +3334,12 @@ same fact as inventory and never means Threading will apply a reset automaticall
 
 The report is built in the background, deduplicates copied, resumed and subagent responses, and is
 remembered between launches. The page keeps the last completed snapshot visible while a rebuild
-is in progress. Claude, Codex, OpenCode and OpenRouter contribute where their supported sources
+is in progress; a short strip beside the Overview and Limit History tabs says a scan is running
+and how far it has got, so **Rebuild** is visibly doing something. The first build has nothing to
+keep, so the chart itself says what is happening instead: which source is being read, how many
+have been read, and a bar once the transcripts have been counted. If a scan finds nothing at all,
+the chart says so and says what would fill it, rather than drawing an axis for numbers nobody
+measured. Claude, Codex, OpenCode and OpenRouter contribute where their supported sources
 provide authoritative data; Grok remains explicitly partial until an authoritative token export
 exists.
 

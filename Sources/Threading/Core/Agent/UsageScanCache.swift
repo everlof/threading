@@ -260,3 +260,12 @@ enum UsageScanCacheDefaults {
     static let codexParserID = "codex-v1"
     static let openCodeParserID = "opencode-export-v1"
 }
+
+enum UsageScanDefaults {
+    /// The floor between two progress reports leaving the scan queue.
+    ///
+    /// Roughly six frames: fast enough that a bar moves rather than steps, slow enough that a
+    /// warm scan reading thousands of cached transcripts a second cannot flood the main actor
+    /// with work that outweighs the scan itself.
+    static let progressInterval: CFTimeInterval = 0.1
+}

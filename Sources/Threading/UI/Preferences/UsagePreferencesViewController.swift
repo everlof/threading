@@ -31,6 +31,12 @@ final class UsagePreferencesViewController: NSViewController {
         appEvents.observe(TranscriptUsageDidChange.self) { [weak self] _ in
             self?.prepareOverview(animated: true)
         }
+        appEvents.observe(TranscriptUsageScanProgressDidChange.self) { [weak self] _ in
+            self?.dashboard.updateScanProgress(
+                TranscriptUsageService.shared.scanProgress,
+                isBuilding: TranscriptUsageService.shared.isBuilding
+            )
+        }
         appEvents.observe(AccountUsageDidChange.self) { [weak self] _ in
             self?.loadLimitHistory(animated: true)
         }
@@ -59,6 +65,7 @@ final class UsagePreferencesViewController: NSViewController {
             overview: overviewProjection,
             limits: limitSeries,
             isBuilding: TranscriptUsageService.shared.isBuilding,
+            scanProgress: TranscriptUsageService.shared.scanProgress,
             animated: animated
         )
     }
