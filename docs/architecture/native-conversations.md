@@ -716,6 +716,22 @@ captured when the host was configured; scanning the full presentation for each o
 measurements made an exact jump grow with transcript depth even though its native view count did
 not.
 
+The collapsed header itself is one drawn semantic `ToolCallView`, not five child controls joined by
+an Auto Layout graph. A 1,000-turn history plus 500 live tools showed that cold exact navigation was
+otherwise dominated by solving about twenty copies of that graph. The view still exposes one button
+with label, value, expanded state and press action to accessibility; on first expansion it installs
+the same selectable result label or native `DiffView` as before. Drawing replaces only the fixed
+one-line chrome, never the content whose interaction and selection AppKit owns.
+
+Historical changed-files cards follow the same viewport ownership boundary as timeline rows. Their
+presentation item retains the bounded tree, preview data, immutable checkpoint identity and action
+capability, not a `ChangedFilesCardView`/nested table. The card is constructed when its outer table
+row enters the viewport and released with that row; directory disclosure is stored by the stable
+presentation identity so recycling cannot reset it. Replay appends a card after the current tail in
+constant time. This is load-bearing: eagerly retaining one nested table per edited turn turned a
+1,000-turn tool-heavy cold replay into 1.7–2.0 seconds and roughly 63 MB of renderer state even though
+only six outer rows were visible.
+
 The extension composition seam is similarly pay-for-play. A user, assistant or tool row whose
 customization resolution is empty keeps its native subtree directly instead of receiving a
 container, composition host and observer that immediately return that same subtree. One controller

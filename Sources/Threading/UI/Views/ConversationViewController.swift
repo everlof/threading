@@ -486,6 +486,7 @@ final class ConversationViewController: NSViewController {
         case timeline(Int)
         case divider(turnStart: Int)
         case fold(turnStart: Int)
+        case changedFiles(UUID)
         case retained(UUID)
         case streaming
     }
@@ -499,6 +500,13 @@ final class ConversationViewController: NSViewController {
     }
 
     struct PresentationItem {
+        struct ChangedFilesContent {
+            let tree: ChangedFilesTree
+            let previews: [String: ChangedFileDiffPreview]
+            let checkpointID: GitTurnCheckpointID?
+            let offersViewDiff: Bool
+        }
+
         enum Content {
             case timeline(Int)
             case divider
@@ -508,6 +516,7 @@ final class ConversationViewController: NSViewController {
                 duration: TimeInterval?,
                 outcome: TurnOutcome
             )
+            case changedFiles(ChangedFilesContent)
             case retained(NSView)
             case streaming(NSTextField)
         }
@@ -521,6 +530,10 @@ final class ConversationViewController: NSViewController {
     /// integer identity; expensive Markdown/tool views are constructed when the table requests
     /// a viewport row and released when that host is reused.
     var presentationItems: [PresentationItem] = []
+
+    /// Disclosure belongs to the stable presentation identity, not to a recycled card view.
+    /// Most historical cards never enter this dictionary because their default state is enough.
+    var changedFilesCollapseState: [PresentationID: Set<Int>] = [:]
 
     /// Exact timeline identity → table row lookup. Replay leaves it empty while folding mutates
     /// the presentation and builds it once at the final reload; live structural edits rebuild it

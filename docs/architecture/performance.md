@@ -1974,6 +1974,51 @@ Layout of about 21 visible collapsed headers, not work proportional to transcrip
 that further would require a materially different drawn/reconfigurable header, not another height
 cache or an off-screen view tree.
 
+That drawn-header step was taken in the 2026-08-12 scale sweep, together with a fixture that names
+the cases hidden by a generic middle jump: one exact file row, an edit row before and after opening
+its native diff, 24 bounded context attachments on one exact user row, and 240 production table
+offsets with a cubic momentum-shaped tail. All samples used the 1,000 settled-turn + 500 live-tool
+production controller path in fresh test processes. Five matched pre-change samples identified
+destination layout as the owner: exact file-row landing was 74–93 ms (86 ms median), of which
+67–83 ms was layout; scroll was 12.6–15.2 ms p50 and 25.7–39.4 ms p95 while only 20 rows lived.
+
+The fixed collapsed header now draws its one-line glyph/title/subject/meta/chevron as one semantic
+view. It keeps the lazy selectable output and `DiffView`, expansion state, hover, theme roles and
+accessibility press/expanded contract. Five final fresh-process runs measured:
+
+| Workload | Before | After |
+|---|---:|---:|
+| Exact file-row jump, median | 86 ms | 25.7 ms |
+| File destination layout, median | 72 ms | 17.5 ms |
+| Collapsed edit-row jump, median | 86 ms | 22.7 ms |
+| First edit-diff open, median | 14.0 ms | 8.4 ms |
+| 240-frame traversal p50, median run | 14.3 ms | 5.9 ms |
+| 240-frame traversal p95, median run | 27.4 ms | 8.1 ms |
+
+The final exact attachment-bearing row was 26–43 ms, the expanded diff re-landing was 8.9–10.7 ms,
+and the working set remained 21 rows. Geometry, correction and visible-turn bookkeeping remain
+sub-millisecond to roughly one millisecond; scroll physics and exact identities were not replaced.
+
+The same sweep caught a newer cold-open regression that the older fixture's row count hid. Each
+settled edit turn eagerly retained a `ChangedFilesCardView` and its nested `NSTableView`, even though
+the outer conversation table showed only a viewport. A one-second CLI sample placed 17 of 21 replay
+samples under changed-card construction, and replay also linearly searched for an anchor already
+known to be the presentation tail. Historical cards now retain typed bounded data and construct the
+card at viewport materialization; stable presentation identity owns directory disclosure and the
+exact checkpoint action. Five fresh 1,000-turn tool-heavy processes measured:
+
+| Metric | Before | After |
+|---|---:|---:|
+| Cold elapsed, median | 1,899 ms | 337 ms |
+| Presentation, median | 1,854 ms | 299 ms |
+| Renderer delta | 61–65 MB | 9–12 MB |
+| Exact deepest-turn jump | 40–55 ms typical | 38–46 ms |
+
+The post-change 1,000-turn controls stayed viewport-sized and measured 226–260 ms for mixed and
+246–270 ms for prose across five fresh processes. The registered tests also force a historical card
+through construction, disclosure, recycling and reconstruction, and assert that its bounded preview
+and exact immutable-checkpoint View diff action survive.
+
 The command writes `THREADING_PERF conversation-active-*` lines to
 `conversation-active-turn-stress.log`. Override either dimension for a one-point investigation
 with `THREADING_CONVERSATION_ACTIVE_BASE_TURNS` and `THREADING_CONVERSATION_ACTIVE_TOOLS`.

@@ -212,9 +212,14 @@ final class ConversationRenderTests: XCTestCase {
         )
 
         XCTAssertFalse(Self.descendants(in: edit).contains { $0 is DiffView })
-        edit.setExpanded(true)
+        XCTAssertEqual(edit.accessibilityRole(), .button)
+        XCTAssertEqual(edit.accessibilityLabel(), "Edit, Sources/Feature.swift")
+        XCTAssertFalse(edit.isAccessibilityExpanded())
+        XCTAssertTrue(edit.accessibilityPerformPress())
+        XCTAssertTrue(edit.isAccessibilityExpanded())
         XCTAssertEqual(Self.descendants(in: edit).filter { $0 is DiffView }.count, 1)
         edit.setExpanded(false)
+        XCTAssertFalse(edit.isAccessibilityExpanded())
         edit.setExpanded(true)
         XCTAssertEqual(
             Self.descendants(in: edit).filter { $0 is DiffView }.count,
@@ -689,10 +694,10 @@ final class ConversationRenderTests: XCTestCase {
             .flatMap(Int.init)
             .flatMap { $0 > 0 ? $0 : nil }
             ?? 100
-        let toolCount = environment["THREADING_CONVERSATION_ACTIVE_TOOLS"]
+        let toolCount = max(3, environment["THREADING_CONVERSATION_ACTIVE_TOOLS"]
             .flatMap(Int.init)
             .flatMap { $0 > 0 ? $0 : nil }
-            ?? 100
+            ?? 100)
         runActiveTurnStress(baseTurns: baseTurns, toolCount: toolCount)
     }
 
@@ -1024,7 +1029,7 @@ final class ConversationRenderTests: XCTestCase {
         XCTAssertEqual(controller.presentationItems.count, 4)
         XCTAssertEqual(
             controller.presentationItems.filter {
-                if case .retained = $0.content { return true }
+                if case .changedFiles = $0.content { return true }
                 return false
             }.count,
             1,
@@ -1067,10 +1072,17 @@ final class ConversationRenderTests: XCTestCase {
             customizationLookup: { _ in .empty }
         )
         _ = controller.view
+        controller.view.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: Render.width,
+            height: Render.viewportHeight
+        )
+        controller.view.layoutSubtreeIfNeeded()
         controller.isReplaying = true
         let patch = """
         *** Begin Patch
-        *** Update File: status.txt
+        *** Update File: Sources/status.txt
         @@
         -before
         +after
@@ -1093,18 +1105,105 @@ final class ConversationRenderTests: XCTestCase {
             .turnFinished(text: nil, outcome: .completed, metrics: .empty)
         ], to: controller)
 
-        let card = try XCTUnwrap(controller.presentationItems.compactMap { item -> ChangedFilesCardView? in
-            guard case .retained(let view) = item.content else { return nil }
-            return view as? ChangedFilesCardView
-        }.first)
-        let preview = try XCTUnwrap(card.preview(forNodeAt: 0))
-        XCTAssertEqual(preview.path, "status.txt")
+        XCTAssertNotNil(controller.presentationItems.first { item in
+            if case .changedFiles = item.content { return true }
+            return false
+        })
+        XCTAssertNil(
+            Self.firstDescendant(ChangedFilesCardView.self, in: controller.view),
+            "replay built a historical changed-files card before the table requested it"
+        )
+        controller.finishReplayRendering()
+        guard let cardRow = controller.presentationItems.firstIndex(where: { item in
+            if case .changedFiles = item.content { return true }
+            return false
+        }), case .changedFiles(let cardContent) = controller.presentationItems[cardRow].content else {
+            XCTFail("the replayed changed-files card had no typed presentation row")
+            return
+        }
+        controller.changedFilesCollapseState[controller.presentationItems[cardRow].id] = [0]
+        let cardHost = try XCTUnwrap(
+            controller.tableView.view(atColumn: 0, row: cardRow, makeIfNecessary: true)
+        )
+        let card = try XCTUnwrap(
+            Self.firstDescendant(ChangedFilesCardView.self, in: cardHost)
+        )
+        XCTAssertEqual(card.collapsedDirectoryIndicesForTesting, [0])
+        card.toggleAllForTesting()
+        XCTAssertTrue(
+            controller.changedFilesCollapseState[controller.presentationItems[cardRow].id]?.isEmpty == true,
+            "a materialized card did not persist its disclosure through the presentation identity"
+        )
+        controller.reloadConversationRows(force: true)
+        let rebuiltHost = try XCTUnwrap(
+            controller.tableView.view(atColumn: 0, row: cardRow, makeIfNecessary: true)
+        )
+        let rebuiltCard = try XCTUnwrap(
+            Self.firstDescendant(ChangedFilesCardView.self, in: rebuiltHost)
+        )
+        XCTAssertTrue(
+            rebuiltCard.collapsedDirectoryIndicesForTesting.isEmpty,
+            "recycling a changed-files card lost its disclosure state"
+        )
+        let preview = try XCTUnwrap(cardContent.previews["Sources/status.txt"])
+        XCTAssertEqual(preview.path, "Sources/status.txt")
         XCTAssertEqual(preview.added, 1)
         XCTAssertEqual(preview.removed, 1)
         XCTAssertNotNil(
             controller.presentationItems.first { $0.id == .fold(turnStart: 0) },
             "the replayed work row was not restored as a disclosure"
         )
+    }
+
+    func testLazyChangedFilesCardKeepsItsExactCheckpointDiffAction() throws {
+        let controller = requireConversationViewController(
+            agentSession: AgentSession(
+                kind: .codex,
+                title: "Changed files action",
+                usesNativeUI: true
+            ),
+            project: Project(
+                name: "Changed files action",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: Render.width,
+            height: Render.viewportHeight
+        )
+        let checkpoint = GitTurnCheckpointID(
+            UUID(uuidString: "AA000000-0000-0000-0000-000000000001")!
+        )
+        let spy = ConversationDelegateSpy()
+        controller.delegate = spy
+        let tree = ChangedFilesTree.build(from: [
+            ChangedFilesTree.File(path: "Sources/Feature.swift", added: 7, removed: 3)
+        ])
+        controller.presentationItems = [ConversationViewController.PresentationItem(
+            id: .changedFiles(UUID()),
+            content: .changedFiles(.init(
+                tree: tree,
+                previews: [:],
+                checkpointID: checkpoint,
+                offersViewDiff: true
+            )),
+            opensTurn: true
+        )]
+        controller.reloadConversationRows(force: true)
+
+        let host = try XCTUnwrap(
+            controller.tableView.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        )
+        let card = try XCTUnwrap(
+            Self.firstDescendant(ChangedFilesCardView.self, in: host)
+        )
+        card.viewDiffForTesting()
+
+        XCTAssertEqual(spy.requestedTurnDiff, checkpoint)
     }
 
     func testReplayFinishAttachesAnUnfinishedTail() {
@@ -1645,10 +1744,14 @@ final class ConversationRenderTests: XCTestCase {
         let baselineMemory = Self.physicalFootprintBytes()
         var peakMemory = baselineMemory
         let activeStartIndex = baseRows
+        let stressAttachments = Self.activeStressAttachments()
 
         let userStarted = DispatchTime.now().uptimeNanoseconds
         Self.apply([
-            .userMessage("Run a deliberately broad active-turn workload without folding it early.")
+            .userMessage(ConversationPrompt(
+                text: "Run a deliberately broad active-turn workload without folding it early.",
+                context: stressAttachments
+            ).transportText)
         ], to: controller)
         controller.view.layoutSubtreeIfNeeded()
         let userElapsed = DispatchTime.now().uptimeNanoseconds - userStarted
@@ -1679,6 +1782,20 @@ final class ConversationRenderTests: XCTestCase {
             "an unfolded active turn materialized more than a viewport"
         )
 
+        let attachmentJumpStarted = DispatchTime.now().uptimeNanoseconds
+        let attachmentJumpMeasurements = controller.scrollToTimelineRow(
+            activeStartIndex,
+            animated: false
+        )
+        controller.view.layoutSubtreeIfNeeded()
+        let attachmentJumpElapsed = DispatchTime.now().uptimeNanoseconds
+            - attachmentJumpStarted
+        XCTAssertNotNil(attachmentJumpMeasurements)
+        XCTAssertNotNil(
+            controller.rowViews[activeStartIndex],
+            "the exact attachment-bearing user row was not materialized"
+        )
+
         let targetTimelineRow = activeStartIndex + 1 + toolCount / 2
         guard let targetPresentationRow = controller.presentationRow(
             forTimelineIndex: targetTimelineRow
@@ -1705,6 +1822,139 @@ final class ConversationRenderTests: XCTestCase {
         )
         let targetRowHeight = controller.tableView.rect(ofRow: targetPresentationRow).height
         let activeMaterialized = controller.rowViews.count
+
+        // A generic middle-row jump can accidentally exercise only one of the three fixture
+        // shapes. Keep a separately named exact-file case: opening a read result at one known
+        // row is the production "open this file in the transcript" path, not a nearest-turn
+        // approximation.
+        var fileToolOffset = max(0, min(toolCount - 1, toolCount / 3 * 3))
+        fileToolOffset -= fileToolOffset % 3
+        let fileTimelineRow = activeStartIndex + 1 + fileToolOffset
+        let fileJumpStarted = DispatchTime.now().uptimeNanoseconds
+        let fileJumpMeasurements = controller.scrollToTimelineRow(
+            fileTimelineRow,
+            animated: false
+        )
+        controller.view.layoutSubtreeIfNeeded()
+        let fileJumpElapsed = DispatchTime.now().uptimeNanoseconds - fileJumpStarted
+        XCTAssertNotNil(fileJumpMeasurements)
+        XCTAssertNotNil(
+            controller.rowViews[fileTimelineRow],
+            "the exact file tool row was not materialized"
+        )
+
+        // Edit calls are the one tool whose disclosure contains a native DiffView. Measure its
+        // first construction independently from a collapsed-row jump, then land on the same
+        // exact timeline identity while its much taller body participates in table geometry.
+        var diffToolOffset = max(0, min(toolCount - 1, toolCount * 2 / 3))
+        diffToolOffset += (2 - diffToolOffset % 3 + 3) % 3
+        if diffToolOffset >= toolCount { diffToolOffset -= 3 }
+        let diffTimelineRow = activeStartIndex + 1 + diffToolOffset
+        let collapsedDiffJumpStarted = DispatchTime.now().uptimeNanoseconds
+        controller.scrollToTimelineRow(diffTimelineRow, animated: false)
+        controller.view.layoutSubtreeIfNeeded()
+        let collapsedDiffJumpElapsed = DispatchTime.now().uptimeNanoseconds
+            - collapsedDiffJumpStarted
+        guard let diffRow = controller.rowViews[diffTimelineRow],
+              let diffTool = Self.firstDescendant(ToolCallView.self, in: diffRow) else {
+            XCTFail("the exact edit tool row did not materialize")
+            return
+        }
+        let diffOpenStarted = DispatchTime.now().uptimeNanoseconds
+        diffTool.setExpanded(true)
+        controller.view.layoutSubtreeIfNeeded()
+        let diffOpenElapsed = DispatchTime.now().uptimeNanoseconds - diffOpenStarted
+        XCTAssertNotNil(
+            Self.firstDescendant(DiffView.self, in: diffTool),
+            "opening an edit tool did not construct its native diff"
+        )
+        let expandedDiffJumpStarted = DispatchTime.now().uptimeNanoseconds
+        controller.scrollToTimelineRow(diffTimelineRow, animated: false)
+        controller.view.layoutSubtreeIfNeeded()
+        let expandedDiffJumpElapsed = DispatchTime.now().uptimeNanoseconds
+            - expandedDiffJumpStarted
+        let diffCloseStarted = DispatchTime.now().uptimeNanoseconds
+        diffTool.setExpanded(false)
+        controller.view.layoutSubtreeIfNeeded()
+        let diffCloseElapsed = DispatchTime.now().uptimeNanoseconds - diffCloseStarted
+
+        // Drive the real table and clip view through a long, deterministic offset series. The
+        // first segment is constant-velocity scrolling and the tail decays like trackpad
+        // momentum. Fixed offsets isolate native row construction/layout from event-delivery
+        // jitter while retaining the production viewport, row recycling and scroll callbacks.
+        guard let firstActivePresentationRow = controller.presentationRow(
+            forTimelineIndex: activeStartIndex + 1
+        ), let lastActivePresentationRow = controller.presentationRow(
+            forTimelineIndex: activeStartIndex + toolCount
+        ) else {
+            XCTFail("the live tool range had no presentation identities")
+            return
+        }
+        let firstScrollY = controller.tableView.rect(ofRow: firstActivePresentationRow).minY
+        let lastScrollY = controller.tableView.rect(ofRow: lastActivePresentationRow).minY
+        let maximumScrollY = max(
+            0,
+            controller.tableView.bounds.height - controller.scrollView.contentSize.height
+        )
+        let scrollEndY = min(lastScrollY, maximumScrollY)
+        let scrollSpan = max(0, scrollEndY - firstScrollY)
+        let sustainedFrames = 180
+        let momentumFrames = 60
+        let totalFrames = sustainedFrames + momentumFrames
+        var scrollDurations: [UInt64] = []
+        scrollDurations.reserveCapacity(totalFrames)
+        var maximumMaterializedRows = 0
+        for frame in 0..<totalFrames {
+            let progress: CGFloat
+            if frame < sustainedFrames {
+                progress = CGFloat(frame + 1) / CGFloat(totalFrames)
+            } else {
+                let tail = CGFloat(frame - sustainedFrames + 1) / CGFloat(momentumFrames)
+                let easedTail = 1 - pow(1 - tail, 3)
+                progress = CGFloat(sustainedFrames) / CGFloat(totalFrames)
+                    + easedTail * CGFloat(momentumFrames) / CGFloat(totalFrames)
+            }
+            let elapsed = autoreleasepool { () -> UInt64 in
+                let started = DispatchTime.now().uptimeNanoseconds
+                controller.scrollView.contentView.setBoundsOrigin(NSPoint(
+                    x: 0,
+                    y: firstScrollY + scrollSpan * progress
+                ))
+                controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+                controller.view.layoutSubtreeIfNeeded()
+                return DispatchTime.now().uptimeNanoseconds - started
+            }
+            scrollDurations.append(elapsed)
+            maximumMaterializedRows = max(maximumMaterializedRows, controller.rowViews.count)
+        }
+        XCTAssertEqual(scrollDurations.count, totalFrames)
+        XCTAssertGreaterThan(scrollSpan, Render.viewportHeight)
+        XCTAssertLessThan(maximumMaterializedRows, 40)
+
+        print(
+            "THREADING_PERF conversation-active-navigation "
+                + "base_turns=\(baseTurns) tools=\(toolCount) "
+                + "attachments=\(stressAttachments.count) "
+                + "attachment_jump_ms=\(Self.milliseconds(attachmentJumpElapsed)) "
+                + "attachment_layout_ms="
+                + Self.milliseconds(
+                    attachmentJumpMeasurements?.landingLayoutNanoseconds ?? 0
+                ) + " "
+                + "file_jump_ms=\(Self.milliseconds(fileJumpElapsed)) "
+                + "file_layout_ms="
+                + Self.milliseconds(fileJumpMeasurements?.landingLayoutNanoseconds ?? 0) + " "
+                + "diff_collapsed_jump_ms=\(Self.milliseconds(collapsedDiffJumpElapsed)) "
+                + "diff_open_ms=\(Self.milliseconds(diffOpenElapsed)) "
+                + "diff_expanded_jump_ms=\(Self.milliseconds(expandedDiffJumpElapsed)) "
+                + "diff_close_ms=\(Self.milliseconds(diffCloseElapsed)) "
+                + "scroll_frames=\(totalFrames) "
+                + "scroll_p50_ms="
+                + Self.milliseconds(Self.percentile(scrollDurations, 0.50)) + " "
+                + "scroll_p95_ms="
+                + Self.milliseconds(Self.percentile(scrollDurations, 0.95)) + " "
+                + "scroll_max_ms=\(Self.milliseconds(scrollDurations.max() ?? 0)) "
+                + "scroll_live_max=\(maximumMaterializedRows)"
+        )
 
         let streamStarted = DispatchTime.now().uptimeNanoseconds
         for index in 0..<250 {
@@ -1869,6 +2119,30 @@ final class ConversationRenderTests: XCTestCase {
                     "old_string": .string("let value = \(index)"),
                     "new_string": .string("let value = \(index + 1)")
                 ]
+            )
+        }
+    }
+
+    private static func activeStressAttachments() -> [ConversationContextAttachment] {
+        (0..<24).map { index in
+            ConversationContextAttachment(
+                id: UUID(uuidString: String(
+                    format: "00000000-0000-0000-0000-%012d",
+                    index + 1
+                ))!,
+                kind: index.isMultiple(of: 4) ? .comment : .reference,
+                source: index.isMultiple(of: 3) ? .attachment : .code,
+                title: "Deterministic context \(index)",
+                excerpt: String(
+                    repeating: "bounded attachment context \(index) ",
+                    count: 20
+                ),
+                comment: index.isMultiple(of: 4)
+                    ? "Review this exact attachment before changing the target row."
+                    : nil,
+                locator: "Attachments/Fixture\(index).txt",
+                lineStart: 1,
+                lineEnd: 20
             )
         }
     }
@@ -2628,6 +2902,33 @@ final class ConversationRenderTests: XCTestCase {
 
         return data
     }
+}
+
+@MainActor
+private final class ConversationDelegateSpy: ConversationViewControllerDelegate {
+    var requestedTurnDiff: GitTurnCheckpointID?
+
+    func conversation(_ controller: ConversationViewController, didExitWithCode code: Int32) {}
+    func conversationDidChangeActivity(_ controller: ConversationViewController) {}
+    func conversationSubagentsDidChange(_ controller: ConversationViewController) {}
+    func conversation(
+        _ controller: ConversationViewController,
+        didSelectSubagent agent: SubagentTimeline.Agent
+    ) {}
+    func conversation(
+        _ controller: ConversationViewController,
+        didUpdateSelectedSubagent agent: SubagentTimeline.Agent
+    ) {}
+    func conversation(
+        _ controller: ConversationViewController,
+        didRequestTurnDiff checkpointID: GitTurnCheckpointID
+    ) {
+        requestedTurnDiff = checkpointID
+    }
+    func conversation(
+        _ controller: ConversationViewController,
+        didRequestOpenSession sessionID: SessionID
+    ) {}
 }
 
 @MainActor

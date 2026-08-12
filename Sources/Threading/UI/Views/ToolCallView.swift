@@ -9,36 +9,27 @@ import AppKit
 ///
 /// An edit is the exception worth opening for: its body is a rendered diff, and its size line
 /// reads `+7 −3` rather than a line count, because for an edit the change *is* the point.
-final class ToolCallView: NSView {
+final class ToolCallView: NSView, ThemedComponent {
 
     // MARK: - Properties
 
-    private let tool: ToolIdentity
     private let diffLines: [DiffLine]?
     private let summary: String
+    private let style: ToolGlyph.Style
+    private var displayedGlyph: String
+    private var displayedTitle: String
+    private var displayedMeta: String
+    private var hasFailed = false
+    private var themeRedraw: ThemeRedraw?
+    private var headerMetricsCache: HeaderMetrics?
 
-    private lazy var glyphLabel = makeLabel(
-        ToolGlyph.forTool(tool).symbol,
-        role: .code(weight: .medium)
-    )
-    private lazy var titleLabel = makeLabel(ToolGlyph.forTool(tool).label, role: .caption)
-    private lazy var detailLabel = makeLabel(summary, role: .code())
-    private lazy var metaLabel = makeLabel(Self.runningText, role: .caption)
-    private lazy var chevron: NSImageView = {
-        let image = NSImageView()
-        image.translatesAutoresizingMaskIntoConstraints = false
-        image.image = NSImage(
-            systemSymbolName: "chevron.right",
-            accessibilityDescription: nil
-        )
-        image.contentTintColor = Design.Text.quaternary
-        image.symbolConfiguration = Design.Symbol.configuration(
-            Design.Symbol.chevron,
-            weight: .semibold
-        )
-        image.isHidden = true
-        return image
-    }()
+    private struct HeaderMetrics {
+        let glyphFont: NSFont
+        let titleFont: NSFont
+        let detailFont: NSFont
+        let metaFont: NSFont
+        let height: CGFloat
+    }
 
     /// Whichever body this row expands to show — a diff for an edit, plain text otherwise.
     /// A cold table jump can materialize a viewport of collapsed tools at once; building hidden
@@ -69,10 +60,16 @@ final class ToolCallView: NSView {
     // MARK: - Initialization
 
     init(tool: ToolIdentity, summary: String, diff: [DiffLine]? = nil) {
-        self.tool = tool
         self.diffLines = diff
         self.summary = summary
+        let style = ToolGlyph.forTool(tool)
+        self.style = style
+        self.displayedGlyph = style.symbol
+        self.displayedTitle = style.label
+        self.displayedMeta = Self.runningText
         super.init(frame: .zero)
+        themeRedraw = ThemeRedraw(self)
+        setAccessibilityElement(true)
         setupViews(summary: summary)
     }
 
@@ -86,29 +83,11 @@ final class ToolCallView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         applySurface(fill: Design.Chat.toolRowResting, radius: .control)
 
-        glyphLabel.textColor = Design.Text.secondary
-        glyphLabel.alignment = .center
-
-        titleLabel.textColor = Design.Text.secondary
-
-        detailLabel.textColor = Design.Text.tertiary
-        detailLabel.lineBreakMode = .byTruncatingMiddle
-        // The subject arrives already flattened, but a label that *can* grow on a newline is a
-        // row whose height depends on its content — belt and braces, since the whole treatment
-        // rests on every collapsed row being the same height.
-        detailLabel.usesSingleLineMode = true
-        detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        // Reads while a call is still running, so the row is not blank until the result lands.
-        metaLabel.textColor = Design.Text.tertiary
-        [glyphLabel, titleLabel, detailLabel, metaLabel, chevron].forEach(addSubview)
-        setupConstraints()
-
         // A diff is known from the call's arguments, so an edit is expandable at once — its
         // result only confirms the change went through.
         if let diffLines {
             let (added, removed) = EditDiff.counts(diffLines)
-            metaLabel.stringValue = "+\(added) −\(removed)"
+            displayedMeta = "+\(added) −\(removed)"
             enableExpansion()
         }
 
@@ -130,7 +109,10 @@ final class ToolCallView: NSView {
             return diff
         }
 
-        let field = makeLabel("", role: .code())
+        let field = NSTextField(labelWithString: "")
+        field.applyFont(.code(), in: .conversation)
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.maximumNumberOfLines = 0
         field.stringValue = resultText ?? ""
         field.textColor = resultOutcome == .failed
             ? Design.Status.negative
@@ -140,59 +122,8 @@ final class ToolCallView: NSView {
         return field
     }
 
-    /// Every label in a tool row, carrying its **role** rather than a resolved font.
-    ///
-    /// A tool row is transcript, so its prose is set in the conversation's own font; the glyph
-    /// and the command stay code, which neither a surface nor a theme moves. Taking an `NSFont`
-    /// here was the bug: the sweep re-resolves a *recorded role*, and a font argument has none,
-    /// so these four labels sat out every live theme switch.
-    private func makeLabel(
-        _ text: String,
-        role: Design.FontRole,
-        surface: Design.Typography.FontSurface = .conversation
-    ) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.applyFont(role, in: surface)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.maximumNumberOfLines = text.isEmpty ? 0 : 1
-        return label
-    }
-
-    private lazy var headerBottom = titleLabel.bottomAnchor.constraint(
-        equalTo: bottomAnchor,
-        constant: -Design.Spacing.small
-    )
+    private var bodyTop: NSLayoutConstraint?
     private var bodyBottom: NSLayoutConstraint?
-
-    private func setupConstraints() {
-        let inset = Design.Spacing.small
-        headerBottom.isActive = true
-
-        NSLayoutConstraint.activate([
-            glyphLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            glyphLabel.topAnchor.constraint(equalTo: topAnchor, constant: inset),
-            glyphLabel.widthAnchor.constraint(equalToConstant: Design.Chat.toolIconWidth),
-
-            titleLabel.leadingAnchor.constraint(equalTo: glyphLabel.trailingAnchor, constant: inset),
-            titleLabel.firstBaselineAnchor.constraint(equalTo: glyphLabel.firstBaselineAnchor),
-
-            detailLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: Design.Spacing.small),
-            detailLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
-
-            metaLabel.leadingAnchor.constraint(
-                greaterThanOrEqualTo: detailLabel.trailingAnchor,
-                constant: Design.Spacing.small
-            ),
-            metaLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
-
-            chevron.leadingAnchor.constraint(equalTo: metaLabel.trailingAnchor, constant: Design.Spacing.small),
-            chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
-            chevron.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor)
-        ])
-
-        detailLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        metaLabel.setContentHuggingPriority(.required, for: .horizontal)
-    }
 
     // MARK: - Public Methods
 
@@ -205,24 +136,23 @@ final class ToolCallView: NSView {
     /// the slab-ink the resting-fill rule was written against.
     func setResult(_ text: String, outcome: ToolOutcome) {
         if outcome == .interrupted {
-            metaLabel.stringValue = L10n.string("stopped")
+            displayedMeta = L10n.string("stopped")
+            needsDisplay = true
             return
         }
 
         let failed = outcome == .failed
-        let style = ToolGlyph.forTool(tool)
-        let tint: NSColor = failed ? Design.Status.negative : Design.Text.secondary
-        glyphLabel.stringValue = failed ? ToolGlyph.failureSymbol : style.symbol
-        glyphLabel.textColor = tint
-        titleLabel.textColor = tint
-        titleLabel.stringValue = failed
+        hasFailed = failed
+        displayedGlyph = failed ? ToolGlyph.failureSymbol : style.symbol
+        displayedTitle = failed
             ? L10n.format("%@ · failed", style.label)
             : style.label
 
         // An edit already shows its diff and its `+/−` line; the result only settles whether
         // the change landed. A plain tool instead reveals its output here.
         if diffLines != nil {
-            if failed { metaLabel.stringValue = L10n.string("failed") }
+            if failed { displayedMeta = L10n.string("failed") }
+            needsDisplay = true
             return
         }
 
@@ -234,10 +164,11 @@ final class ToolCallView: NSView {
         }
 
         let hasText = !text.isEmpty
-        metaLabel.stringValue = hasText
+        displayedMeta = hasText
             ? sizeSummary(text)
             : (failed ? L10n.string("failed") : L10n.string("done"))
         if hasText { enableExpansion() }
+        needsDisplay = true
     }
 
     // MARK: - Private Methods
@@ -251,7 +182,7 @@ final class ToolCallView: NSView {
 
     private func enableExpansion() {
         canExpand = true
-        chevron.isHidden = false
+        needsDisplay = true
     }
 
     func setExpanded(_ expanded: Bool, notifying: Bool = true) {
@@ -261,15 +192,10 @@ final class ToolCallView: NSView {
 
         isExpanded = expanded
         bodyView.isHidden = !isExpanded
-        headerBottom.isActive = !isExpanded
         bodyBottom.isActive = isExpanded
-
-        chevron.image = NSImage(
-            systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
-            accessibilityDescription: nil
-        )
         updateSurface()
         invalidateIntrinsicContentSize()
+        needsDisplay = true
         superview?.needsLayout = true
         if notifying { onExpansionChanged?(isExpanded) }
     }
@@ -289,17 +215,240 @@ final class ToolCallView: NSView {
             equalTo: bottomAnchor,
             constant: -inset
         )
+        let top = body.topAnchor.constraint(
+            equalTo: topAnchor,
+            constant: headerHeight
+        )
         bodyView = body
+        bodyTop = top
         bodyBottom = bottom
         NSLayoutConstraint.activate([
-            body.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: inset),
-            body.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            top,
+            body.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: inset + Design.Chat.toolIconWidth + inset
+            ),
             body.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset)
         ])
     }
 
     @objc private func toggle() {
         setExpanded(!isExpanded)
+    }
+
+    // MARK: - Header Drawing
+
+    /// A viewport of cold tool calls is the common case, so the collapsed header is drawn as
+    /// one semantic element rather than solving five AppKit views and their constraint graph
+    /// for every visible row. Expanded output remains ordinary selectable AppKit content.
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: headerHeight)
+    }
+
+    override var isFlipped: Bool { true }
+
+    private var headerMetrics: HeaderMetrics {
+        if let headerMetricsCache { return headerMetricsCache }
+        let glyph = Design.Typography.code(weight: .medium)
+        let title = Design.Typography.caption(surface: .conversation)
+        let detail = Design.Typography.code()
+        let meta = Design.Typography.caption(surface: .conversation)
+        let lineHeight = [glyph, title, detail, meta]
+            .map(Design.Typography.lineHeight(of:))
+            .max() ?? 0
+        let metrics = HeaderMetrics(
+            glyphFont: glyph,
+            titleFont: title,
+            detailFont: detail,
+            metaFont: meta,
+            height: lineHeight + Design.Spacing.small * 2
+        )
+        headerMetricsCache = metrics
+        return metrics
+    }
+
+    private var headerHeight: CGFloat { headerMetrics.height }
+
+    override func invalidateIntrinsicContentSize() {
+        headerMetricsCache = nil
+        super.invalidateIntrinsicContentSize()
+    }
+
+    override func layout() {
+        let resolvedHeaderHeight = headerHeight
+        if let bodyTop, abs(bodyTop.constant - resolvedHeaderHeight) > 0.5 {
+            bodyTop.constant = resolvedHeaderHeight
+        }
+        super.layout()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let inset = Design.Spacing.small
+        let header = NSRect(x: 0, y: 0, width: bounds.width, height: headerHeight)
+        guard header.intersects(dirtyRect), header.width > inset * 2 else { return }
+
+        let identityColor = hasFailed ? Design.Status.negative : Design.Text.secondary
+        let metrics = headerMetrics
+        let glyphFont = metrics.glyphFont
+        let titleFont = metrics.titleFont
+        let detailFont = metrics.detailFont
+        let metaFont = metrics.metaFont
+
+        let glyphRect = verticallyCenteredRect(
+            x: inset,
+            width: Design.Chat.toolIconWidth,
+            font: glyphFont,
+            in: header
+        )
+        drawText(
+            displayedGlyph,
+            in: glyphRect,
+            font: glyphFont,
+            color: identityColor,
+            alignment: .center
+        )
+
+        let titleX = glyphRect.maxX + inset
+        let titleWidth = ceil((displayedTitle as NSString).size(withAttributes: [
+            .font: titleFont
+        ]).width)
+        let titleRect = verticallyCenteredRect(
+            x: titleX,
+            width: titleWidth,
+            font: titleFont,
+            in: header
+        )
+        drawText(
+            displayedTitle,
+            in: titleRect,
+            font: titleFont,
+            color: identityColor
+        )
+
+        let chevronWidth: CGFloat = canExpand ? Design.Symbol.chevron : 0
+        if canExpand {
+            drawChevron(in: NSRect(
+                x: header.maxX - inset - chevronWidth,
+                y: floor(header.midY - chevronWidth / 2),
+                width: chevronWidth,
+                height: chevronWidth
+            ))
+        }
+
+        let metaWidth = ceil((displayedMeta as NSString).size(withAttributes: [
+            .font: metaFont
+        ]).width)
+        let metaX = header.maxX - inset - chevronWidth
+            - (canExpand ? inset : 0) - metaWidth
+        let metaRect = verticallyCenteredRect(
+            x: metaX,
+            width: metaWidth,
+            font: metaFont,
+            in: header
+        )
+        drawText(
+            displayedMeta,
+            in: metaRect,
+            font: metaFont,
+            color: Design.Text.tertiary,
+            alignment: .right
+        )
+
+        let detailX = titleRect.maxX + inset
+        let detailWidth = max(0, metaRect.minX - inset - detailX)
+        guard detailWidth > 0 else { return }
+        let detailRect = verticallyCenteredRect(
+            x: detailX,
+            width: detailWidth,
+            font: detailFont,
+            in: header
+        )
+        drawText(
+            summary,
+            in: detailRect,
+            font: detailFont,
+            color: Design.Text.tertiary,
+            lineBreak: .byTruncatingMiddle
+        )
+    }
+
+    private func verticallyCenteredRect(
+        x: CGFloat,
+        width: CGFloat,
+        font: NSFont,
+        in container: NSRect
+    ) -> NSRect {
+        let height = Design.Typography.lineHeight(of: font)
+        return NSRect(
+            x: x,
+            y: floor(container.midY - height / 2),
+            width: width,
+            height: height
+        )
+    }
+
+    private func drawText(
+        _ text: String,
+        in rect: NSRect,
+        font: NSFont,
+        color: NSColor,
+        alignment: NSTextAlignment = .left,
+        lineBreak: NSLineBreakMode = .byClipping
+    ) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = alignment
+        paragraph.lineBreakMode = lineBreak
+        (text as NSString).draw(in: rect, withAttributes: [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: paragraph
+        ])
+    }
+
+    private func drawChevron(in rect: NSRect) {
+        let path = NSBezierPath()
+        path.lineWidth = max(1, Design.Radius.border)
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        if isExpanded {
+            path.move(to: NSPoint(x: rect.minX, y: rect.minY + rect.height * 0.3))
+            path.line(to: NSPoint(x: rect.midX, y: rect.maxY - rect.height * 0.3))
+            path.line(to: NSPoint(x: rect.maxX, y: rect.minY + rect.height * 0.3))
+        } else {
+            path.move(to: NSPoint(x: rect.minX + rect.width * 0.3, y: rect.minY))
+            path.line(to: NSPoint(x: rect.maxX - rect.width * 0.3, y: rect.midY))
+            path.line(to: NSPoint(x: rect.minX + rect.width * 0.3, y: rect.maxY))
+        }
+        Design.Text.quaternary.setStroke()
+        path.stroke()
+    }
+
+    override func accessibilityRole() -> NSAccessibility.Role? {
+        canExpand ? .button : .group
+    }
+
+    override func accessibilityLabel() -> String? {
+        "\(displayedTitle), \(summary)"
+    }
+
+    override func accessibilityValue() -> Any? {
+        displayedMeta
+    }
+
+    override func isAccessibilityExpanded() -> Bool { isExpanded }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard canExpand else { return false }
+        toggle()
+        return true
     }
 
     // MARK: - Hover
