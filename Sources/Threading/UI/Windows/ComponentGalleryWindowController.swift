@@ -2764,7 +2764,16 @@ final class ComponentGalleryViewController: NSViewController {
         showAgent.target = self
         showAgent.action = #selector(showGalleryAgentToast(_:))
 
-        let buttons = NSStackView(views: [show, showAgent])
+        // The deck is the one part of this component a single receipt cannot show: it takes a
+        // burst to have a queue at all, and what the deck does — fanning out under the pointer
+        // with a way back on every card — is only reviewable with something waiting in it.
+        let burst = ThemedButton()
+        burst.title = L10n.string("Burst")
+        burst.applyFont(.controlRegular)
+        burst.target = self
+        burst.action = #selector(showGalleryToastBurst(_:))
+
+        let buttons = NSStackView(views: [show, showAgent, burst])
         buttons.orientation = .vertical
         buttons.alignment = .leading
         buttons.spacing = Design.Spacing.small
@@ -2790,6 +2799,22 @@ final class ComponentGalleryViewController: NSViewController {
             wasRunning: true
         ) { [weak self] in
             self?.showReceipt(L10n.string("Undo"))
+        }
+    }
+
+    /// Enough receipts to fill the queue behind the band, so the deck can be opened and driven.
+    /// Named for what they are rather than repeated, since a fan of one line three times over
+    /// says nothing about whether a card names the receipt it stands for.
+    @objc private func showGalleryToastBurst(_ sender: NSButton) {
+        for title in ["Refactor the parser", "Empty state", "Rollout discovery", "Usage window"] {
+            toastPresenter?.present(
+                SessionCoordinator.archiveToast(
+                    for: AgentSession(kind: .claude, title: title),
+                    wasRunning: true
+                ) { [weak self] in
+                    self?.showReceipt(L10n.string("Undo"))
+                }
+            )
         }
     }
 

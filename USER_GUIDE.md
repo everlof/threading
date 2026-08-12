@@ -572,6 +572,13 @@ receipt still to come, so a band with more behind it never looks like the last t
 happened. Only the last few are kept if you archive faster than you can read — the sessions
 themselves are all in **Settings ▸ Archived** either way.
 
+**Point at the cards above a band to see what is behind it.** The stack fans out into one strip
+per waiting receipt, each naming the session it archived and carrying its own **Undo**, so the way
+back on the third one is reachable without sitting through the two in front of it. The band's own
+clock stops while the deck is open, and starts again where it left off when you move away. Taking
+one back removes just that receipt: the cards behind it step forward, and the band you were
+reading is untouched. The deck closes itself once nothing is left waiting in it.
+
 **A session can also file itself away when you ask it to.** "Commit this and then close the
 session" is one instruction, and the agent can now carry out both halves: it finishes the work,
 answers you as usual, and the session is archived a moment after that answer lands — never

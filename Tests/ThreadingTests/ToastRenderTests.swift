@@ -49,12 +49,27 @@ final class ToastRenderTests: XCTestCase {
         /// has to get right is only visible in a picture: whether two 4-point slivers above a
         /// card read as more receipts waiting or as a drawing error, and whether a style with
         /// square corners and a heavy rule (Swiss) still separates the three edges at all.
+        ///
+        /// The fifth is that burst with the deck opened. It is the one state where the deck has
+        /// to hold *words*: whether three stacked strips in a 240-point column read as a queue or
+        /// as a wall over the list, whether a truncated message still names its session, and
+        /// whether a way back set in a theme's own face still fits the strip it is standing in.
         enum Story: String, CaseIterable {
             case running
             case dormant
             case agent
             case queued
+            case opened
         }
+
+        /// What the cards in an opened deck stand for: three different sessions, one of them
+        /// named at a length no 240-point strip can hold, because a card that cannot name its
+        /// receipt is a card nobody can act on.
+        static let waitingSessions = [
+            "Rewrite the rollout discovery so Codex reports its own id",
+            "Parser",
+            "Empty state"
+        ]
 
         /// A column dragged well past the width the app ever opens the sidebar at.
         ///
@@ -155,7 +170,7 @@ final class ToastRenderTests: XCTestCase {
     @MainActor
     private func request(for story: Render.Story, session: AgentSession) -> ToastRequest {
         switch story {
-        case .running, .queued:
+        case .running, .queued, .opened:
             return SessionCoordinator.archiveToast(for: session, wasRunning: true, undo: {})
         case .dormant:
             return SessionCoordinator.archiveToast(for: session, wasRunning: false, undo: {})
@@ -209,11 +224,30 @@ final class ToastRenderTests: XCTestCase {
             presenter.present(request)
 
             // A burst, sent the way the sidebar sends one: each carries a way back, so none of
-            // them is thrown away and each waits behind the band as a card edge.
-            if story == .queued {
+            // them is thrown away and each waits behind the band as a card edge. The opened deck
+            // is drawn with the queue full, since what the fan has to survive is its own height:
+            // three strips of words standing over a band in a 240-point column.
+            switch story {
+            case .queued:
                 for _ in 0..<ToastDefaults.stackDepth {
                     presenter.present(self.request(for: story, session: session))
                 }
+            case .opened:
+                // Different sessions, because a deck of one repeated line says nothing about
+                // whether a card names the thing it stands for.
+                for title in Render.waitingSessions {
+                    presenter.present(
+                        self.request(
+                            for: story,
+                            session: AgentSession(kind: .claude, title: title)
+                        )
+                    )
+                }
+                // Unanimated: the fan is staggered, so a picture taken the moment it is asked
+                // for would be a deck two frames into opening.
+                presenter.openDeck(true, animated: false)
+            default:
+                break
             }
 
             AppThemeRefresh.repaint(host)

@@ -707,6 +707,251 @@ final class ToastTests: XCTestCase {
         XCTAssertEqual(host.subviews.count, 1, "an edge was left standing behind nothing")
     }
 
+    // MARK: - The deck, opened
+
+    /// A queue whose size you can see and whose contents you cannot tells you only that you are
+    /// behind. Opened, the deck is the *whole* queue — including the receipt the resting stack
+    /// keeps no edge for, because two of three is the dishonest answer once each card has words.
+    func testOpeningTheDeckLiftsEveryWaitingReceiptAndNamesIt() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        for index in 0...ToastDefaults.queueLimit {
+            presenter.present(archiveRequest(message: "Archived “\(index)”"))
+        }
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(presenter.stackEdges.count, ToastDefaults.stackDepth)
+
+        presenter.openDeck(true)
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(presenter.isDeckOpen)
+        XCTAssertEqual(
+            presenter.stackEdges.count,
+            ToastDefaults.queueLimit,
+            "the open deck stood fewer cards than there are receipts waiting"
+        )
+        XCTAssertEqual(
+            presenter.stackEdges.compactMap { labelTexts(in: $0).first },
+            presenter.queued.map(\.message),
+            "the open deck named its receipts in an order the queue does not have"
+        )
+
+        // Each card uncovers exactly one step of itself, which is the strip its line is read in.
+        let cards: [NSView] = [try XCTUnwrap(presenter.current)] + presenter.stackEdges
+        for (front, behind) in zip(cards, cards.dropFirst()) {
+            XCTAssertEqual(
+                behind.frame.maxY - front.frame.maxY,
+                ToastDefaults.peekStep,
+                accuracy: 0.5,
+                "a card in the open deck stands where its own words cannot be read"
+            )
+        }
+
+        presenter.openDeck(false)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            presenter.stackEdges.count,
+            ToastDefaults.stackDepth,
+            "the closed deck kept the card it only stands while it is open"
+        )
+        presenter.invalidate()
+    }
+
+    /// Opening a deck with nothing in it is not an empty fan, it is nothing: there is no card to
+    /// lift, and the grip the pointer would have reached into is not there either.
+    func testTheDeckDoesNotOpenOverABandWithNothingBehindIt() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest())
+        presenter.openDeck(true)
+
+        XCTAssertFalse(presenter.isDeckOpen)
+        XCTAssertTrue(presenter.stackEdges.isEmpty)
+        presenter.invalidate()
+    }
+
+    /// The point of opening the deck: the way back people wanted was on the third card, not the
+    /// first. Pressing it takes that receipt back and leaves the band in front alone — it is
+    /// reporting something else.
+    func testAWaitingCardCarriesTheWayBackOfTheReceiptItStandsFor() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        var undone: [String] = []
+        presenter.present(archiveRequest(message: "Archived “Band”"))
+        presenter.present(archiveRequest(message: "Archived “One”", undo: { undone.append("One") }))
+        presenter.present(archiveRequest(message: "Archived “Two”", undo: { undone.append("Two") }))
+        presenter.openDeck(true)
+        host.layoutSubtreeIfNeeded()
+
+        let second = try XCTUnwrap(presenter.stackEdges.last)
+        try XCTUnwrap(buttons(in: second).first).performClick()
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(undone, ["Two"], "the way back on a card took a different card's receipt")
+        XCTAssertEqual(presenter.queued.map(\.message), ["Archived “One”"])
+        XCTAssertEqual(
+            presenter.current?.request.message,
+            "Archived “Band”",
+            "taking back a waiting receipt took the band in front with it"
+        )
+        XCTAssertEqual(presenter.stackEdges.count, 1)
+        presenter.invalidate()
+    }
+
+    /// Taking back the last one leaves nothing to stand: the deck closes itself rather than
+    /// hanging an empty fan over a band whose clock it is still holding.
+    func testTakingBackTheLastWaitingReceiptClosesTheDeckAndStartsTheClock() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest(message: "Archived “Band”"))
+        presenter.present(archiveRequest(message: "Archived “One”", undo: {}))
+        presenter.openDeck(true)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertTrue(presenter.isHeldOpen)
+
+        let card = try XCTUnwrap(presenter.stackEdges.first)
+        try XCTUnwrap(buttons(in: card).first).performClick()
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(presenter.queued.isEmpty)
+        XCTAssertTrue(presenter.stackEdges.isEmpty)
+        XCTAssertFalse(presenter.isDeckOpen)
+        XCTAssertFalse(presenter.isHeldOpen, "the band's clock stayed stopped under an empty deck")
+        presenter.invalidate()
+    }
+
+    /// The fan is pinned to the band under it and every card in it carries a way back, so the
+    /// clock stops while it is open — and goes back on the remainder it came off, not on a fresh
+    /// dwell, for the same reason a held band does.
+    func testTheOpenDeckHoldsTheBandsClockAndGivesBackItsRemainder() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest(message: "Archived “Band”"))
+        presenter.present(archiveRequest(message: "Archived “One”"))
+        XCTAssertFalse(presenter.isHeldOpen)
+        waitForRunLoop(0.2)
+
+        presenter.openDeck(true)
+        XCTAssertTrue(presenter.isHeldOpen, "the deck opened over a clock that kept running")
+
+        presenter.openDeck(false)
+        XCTAssertFalse(presenter.isHeldOpen)
+        XCTAssertLessThan(
+            try XCTUnwrap(presenter.scheduledDwell),
+            30,
+            "the band went back on a whole fresh dwell rather than on what was left of its own"
+        )
+        presenter.invalidate()
+    }
+
+    /// The deck is drawn against the band — every card is pinned to its edges — so a band leaving
+    /// takes the fan with it rather than leaving a list hanging over the slot its own successor
+    /// is rising into.
+    func testTheDeckClosesWithTheBandItWasFannedAbove() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        for index in 0..<3 {
+            presenter.present(archiveRequest(message: "Archived “\(index)”"))
+        }
+        presenter.openDeck(true)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertTrue(presenter.isDeckOpen)
+
+        presenter.dismiss()
+        waitForRunLoop(0.2)
+
+        XCTAssertFalse(presenter.isDeckOpen)
+        XCTAssertEqual(presenter.current?.request.message, "Archived “1”")
+        XCTAssertEqual(presenter.stackEdges.count, 1)
+        presenter.invalidate()
+    }
+
+    /// A card in the deck is read out only while it is readable. At rest it is a four-point
+    /// sliver standing for a receipt VoiceOver is already promised when its turn comes; open, it
+    /// is the receipt, and the ear should be able to reach what the eye just did.
+    func testAWaitingCardIsAnAccessibilityElementOnlyWhileTheDeckIsOpen() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest(message: "Archived “Band”"))
+        presenter.present(archiveRequest(message: "Archived “One”"))
+        host.layoutSubtreeIfNeeded()
+
+        let card = try XCTUnwrap(presenter.stackEdges.first)
+        XCTAssertFalse(card.isAccessibilityElement())
+
+        presenter.openDeck(true)
+        XCTAssertTrue(card.isAccessibilityElement())
+        XCTAssertEqual(card.accessibilityLabel(), presenter.queued.first?.announcement)
+
+        presenter.openDeck(false)
+        XCTAssertFalse(card.isAccessibilityElement())
+        presenter.invalidate()
+    }
+
+    /// The region that opens the deck lies over the whole fan, so a pointer travelling up it
+    /// never leaves the thing holding it open — and it must therefore take no click at all, or it
+    /// would be the surface every way back in the deck was pressed through.
+    func testTheGripCoversTheDeckAndTakesNoClickOffIt() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+
+        presenter.present(archiveRequest(message: "Archived “Band”"))
+        presenter.present(archiveRequest(message: "Archived “One”", undo: {}))
+        presenter.openDeck(true)
+        host.layoutSubtreeIfNeeded()
+
+        let band = try XCTUnwrap(presenter.current)
+        let lane = try XCTUnwrap(band.superview)
+        let card = try XCTUnwrap(presenter.stackEdges.first)
+        let cards = Set(presenter.stackEdges.map { ObjectIdentifier($0) })
+        let grip = try XCTUnwrap(
+            lane.subviews.first {
+                $0 !== band && !cards.contains(ObjectIdentifier($0))
+            },
+            "the open deck had no grip over it"
+        )
+
+        XCTAssertGreaterThanOrEqual(
+            grip.frame.maxY,
+            band.frame.maxY,
+            "the grip started above the band it opens the deck over"
+        )
+        XCTAssertGreaterThanOrEqual(
+            grip.frame.maxY,
+            card.frame.maxY,
+            "a pointer on the top card of the fan is outside the region holding the fan open"
+        )
+        XCTAssertNil(
+            grip.hitTest(NSPoint(x: grip.frame.midX, y: grip.frame.midY)),
+            "the grip took a click of its own"
+        )
+
+        // The way back on the card under it is still what a press there lands on.
+        let button = try XCTUnwrap(buttons(in: card).first)
+        let centre = NSPoint(x: button.bounds.midX, y: button.bounds.midY)
+        let hit = lane.hitTest(button.convert(centre, to: host))
+        XCTAssertTrue(
+            hit?.isDescendant(of: card) ?? false,
+            "the grip swallowed the press aimed at a waiting receipt's way back"
+        )
+        presenter.invalidate()
+    }
+
     // MARK: - The lane
 
     /// The lane the deck rides in stretches over the whole pane, and covering is all it may do:
@@ -1227,6 +1472,10 @@ final class ToastTests: XCTestCase {
 
     private func buttons(in view: NSView) -> [ThemedButton] {
         descendants(of: view).compactMap { $0 as? ThemedButton }
+    }
+
+    private func labelTexts(in view: NSView) -> [String] {
+        descendants(of: view).compactMap { ($0 as? NSTextField)?.stringValue }
     }
 
     private func waitForRunLoop(_ interval: TimeInterval) {

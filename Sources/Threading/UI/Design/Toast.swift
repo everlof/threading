@@ -129,13 +129,63 @@ enum ToastDefaults {
     /// as the next in a deck, which is what it is.
     static let stackInset: CGFloat = Design.Spacing.small
 
-    /// How many edges are drawn, however many are waiting.
+    /// How many edges are drawn **at rest**, however many are waiting.
     ///
     /// The stack answers *is this the only one*, not *how many*: two edges say another is coming
     /// and a third is a distinction nobody counts at a glance. It is also the only honest answer
     /// — the queue is bounded and drops from the front when a burst overruns it, so a depth read
     /// as a count would be promising receipts the queue has already thrown away.
+    ///
+    /// Opening the deck lifts *every* waiting receipt (`queueLimit` of them at most), because
+    /// once each card carries its own words the question has changed: a reader looking at the
+    /// deck asked what is in it, and answering with two of three is the dishonest answer there.
     static let stackDepth = 2
+
+    /// How far each waiting receipt lifts when the deck is opened, which is also the height of
+    /// the strip its one line is read in.
+    ///
+    /// A chip's height, because that is what the scale calls one line of type with air around it,
+    /// and the card's own words are set in the same control face the band's message is.
+    static let peekStep: CGFloat = Design.Size.chipHeight
+
+    /// How far above the deck the pointer counts as reaching for it.
+    ///
+    /// The resting deck shows `stackStep` of card per waiting receipt — four points, twice — and
+    /// a target that small is one nobody finds twice. The grip is the whole strip over the band's
+    /// shoulders plus this, which is a reach *towards* the deck rather than a hit on it.
+    static let peekGripSlop: CGFloat = Design.Spacing.small
+
+    /// What a card rides out of the deck, and what it rides back into it.
+    ///
+    /// Out on `Design.Motion.settle`, the design system's one spring — a card pushed out of a
+    /// stack goes a hair past its slot and comes back. In on `drop`, which accelerates and is a
+    /// curve rather than a spring: the deck closing is a decision already made, and a card
+    /// bouncing as it is *put away* would be the animation arguing with the intent.
+    static var peekBack: CAMediaTimingFunction { Design.Motion.drop }
+
+    /// The key the fan's spring is added under, so a card asked to move again while it is still
+    /// settling replaces its own movement rather than stacking a second one on it.
+    static let peekAnimationKey = "toast.deck.fan"
+
+    /// How far behind the card in front of it each card starts.
+    ///
+    /// The deck opens from the band outward rather than all at once, because all at once is one
+    /// object changing shape and a hand fans cards one after another. Two frames at 60Hz: enough
+    /// that the eye reads an order, little enough that the fan still arrives as one gesture —
+    /// three cards are open 80 milliseconds after the first moves.
+    static let peekStagger: TimeInterval = 0.04
+
+    /// When the deck opens under the pointer and when it closes again.
+    ///
+    /// The dwell matches the app's other hover-opened surfaces (`SessionPopoverDefaults`), and
+    /// for their reason: the grip sits directly above the band, which is where a pointer on its
+    /// way *to* the band crosses. The deck holds itself open, because every card in it carries a
+    /// way back — a surface that closes as the hand reaches for its button cannot be operated.
+    static let peekPolicy = HoverPopoverScheduler.Policy(
+        openDelay: 0.35,
+        closeGrace: 0.25,
+        holdsWhilePointerOnPopover: true
+    )
 }
 
 // MARK: - Request
@@ -1185,7 +1235,8 @@ private final class ToastDwellRail: NSView, ThemedComponent {
 
 // MARK: - The Stack
 
-/// A receipt still waiting its turn, drawn as the edge of the card it is about to be.
+/// A receipt still waiting its turn: the edge of the card it is about to be, and — when the deck
+/// is opened — the receipt itself, a line early.
 ///
 /// Nothing with a way back on it may be thrown away to make room for the next report, so bursts
 /// queue (see `ToastPresenter.present`) — and until this, the queue was invisible. A band that
@@ -1199,12 +1250,42 @@ private final class ToastDwellRail: NSView, ThemedComponent {
 /// exactly like it, and the depth is carried by the offset and by the front band's own glow
 /// falling across it, which is where a card behind a card gets its depth anywhere else too.
 ///
-/// It carries no words and takes no clicks — the receipt it stands for says its piece when its
-/// turn comes, which is also why nothing here is announced: VoiceOver is read each band as it
-/// arrives, so the stack is telling the eye what the ear is already promised.
-private final class ToastStackEdgeView: NSView {
+/// At rest it carries no words and takes no clicks — the receipt it stands for says its piece
+/// when its turn comes, which is also why nothing here is announced then: VoiceOver is read each
+/// band as it arrives, so the stack is telling the eye what the ear is already promised.
+///
+/// **Opened, it is the receipt.** The deck lifts by `peekStep` instead of `stackStep` and the
+/// strip that uncovers is exactly this card's own top: one line naming what it reports, and the
+/// same way back the band would offer when its turn came. That is the whole point of opening a
+/// deck — a queue you can see the size of but not the contents of tells you only that you are
+/// behind, and the action people wanted was on the third card, not the first.
+private final class ToastWaitingCardView: NSView {
 
-    init() {
+    /// Pressed the way back on a receipt that never got its turn. The presenter runs the
+    /// caller's undo and takes this card out of the queue; the band in front is untouched.
+    var onTakeBack: (() -> Void)?
+
+    /// Which receipt this card stands for. Assigned rather than fixed at build time because the
+    /// deck is squared against the queue on every change: a card whose receipt was undone leaves,
+    /// and the ones behind it step forward into slots that were somebody else's.
+    var request: ToastRequest {
+        didSet { applyRequest() }
+    }
+
+    /// Everything the strip shows, in one view so opening and closing the deck is one fade and
+    /// one `isHidden` — an alpha-zero button still takes the click that lands on it, which on a
+    /// four-point sliver would be a way back nobody could see they were pressing.
+    private let strip = NSView()
+    private let messageLabel = NSTextField(labelWithString: "")
+    private let takeBackButton: ThemedButton
+
+    init(request: ToastRequest) {
+        self.request = request
+        takeBackButton = ThemedButton(
+            title: request.actionTitle ?? "",
+            target: nil,
+            action: nil
+        )
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityElement(false)
@@ -1216,11 +1297,179 @@ private final class ToastStackEdgeView: NSView {
             radius: .panel,
             border: Design.Surface.border
         )
+        installStrip()
+        applyRequest()
+        setOpen(false, animated: false)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    // MARK: - Public Methods
+
+    /// Shows or hides this card's words. The *lift* is the presenter's — the deck's step is one
+    /// decision made once for every card — so all this owns is what the strip that uncovers
+    /// says, and whether anything in it can be pressed.
+    ///
+    /// **Nothing fades.** The strip is behind the band at the moment the deck starts to open, so
+    /// the rise itself is what reveals it, and a fade laid over that is a second animation saying
+    /// the same thing — worse, an `alphaValue` fade on a view that is not layer-backed does not
+    /// commit its model value until the animation ends, which is how the storybook came out with
+    /// one card in three carrying words. Closing keeps them: what covers them on the way down is
+    /// the band, and they are hidden once they are behind it, so nothing live is ever left over
+    /// the band's shoulder where a click could find it.
+    func setOpen(_ open: Bool, animated: Bool) {
+        setAccessibilityElement(open)
+        guard !open else { return strip.isHidden = false }
+        guard animated, Design.Motion.vanish > 0 else { return strip.isHidden = true }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = Design.Motion.vanish
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated { self?.strip.isHidden = true }
+        })
+    }
+
+    // MARK: - Private Methods
+
+    private func installStrip() {
+        strip.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(strip)
+
+        messageLabel.translatesAutoresizingMaskIntoConstraints = false
+        messageLabel.applyFont(.control)
+        // Secondary ink, where the band's message is `label`: this receipt has not had its turn
+        // yet, and a queue set at the same strength as the thing in front of it reads as three
+        // reports rather than as one report and what is behind it.
+        messageLabel.textColor = Design.Text.secondary
+        messageLabel.maximumNumberOfLines = 1
+        messageLabel.lineBreakMode = .byTruncatingTail
+        // The words argue for nothing here either — see `ToastDefaults.contentWidthPriority`.
+        messageLabel.setContentCompressionResistancePriority(
+            ToastDefaults.contentWidthPriority,
+            for: .horizontal
+        )
+        messageLabel.setContentHuggingPriority(ToastDefaults.contentWidthPriority, for: .horizontal)
+        strip.addSubview(messageLabel)
+
+        takeBackButton.translatesAutoresizingMaskIntoConstraints = false
+        // Tertiary, against the band's secondary: the way back on the receipt being read is the
+        // one thing on screen asking to be pressed, and three bordered buttons up a fanned deck
+        // would each claim to be it.
+        takeBackButton.emphasis = .tertiary
+        takeBackButton.applyFont(.controlRegular)
+        takeBackButton.target = self
+        takeBackButton.action = #selector(takeBackPressed)
+        strip.addSubview(takeBackButton)
+
+        let inset = ToastDefaults.contentInset
+        NSLayoutConstraint.activate([
+            strip.topAnchor.constraint(equalTo: topAnchor),
+            strip.leadingAnchor.constraint(equalTo: leadingAnchor),
+            strip.trailingAnchor.constraint(equalTo: trailingAnchor),
+            // Exactly the height the deck's own step uncovers: the card behind this one stands
+            // one step higher, so a strip taller than the step would be drawing under it.
+            strip.heightAnchor.constraint(equalToConstant: ToastDefaults.peekStep),
+
+            messageLabel.leadingAnchor.constraint(equalTo: strip.leadingAnchor, constant: inset),
+            messageLabel.centerYAnchor.constraint(equalTo: strip.centerYAnchor),
+            messageLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: takeBackButton.leadingAnchor,
+                constant: -ToastDefaults.closeGap
+            ),
+
+            // By ink, like every other control aligned to a content edge here: a borderless
+            // button's own padding is not part of the words it stands beside.
+            takeBackButton.trailingAnchor.constraint(
+                equalTo: strip.trailingAnchor,
+                constant: -(inset - takeBackButton.opticalHorizontalInset)
+            ),
+            takeBackButton.centerYAnchor.constraint(equalTo: strip.centerYAnchor)
+        ])
+    }
+
+    private func applyRequest() {
+        messageLabel.stringValue = request.message
+        takeBackButton.title = request.actionTitle ?? ""
+        takeBackButton.isHidden = !request.hasAction
+        setAccessibilityLabel(request.announcement)
+        setAccessibilityRole(.group)
+        if let identifier = request.identifier {
+            setAccessibilityIdentifier("\(identifier).waiting")
+            takeBackButton.setAccessibilityIdentifier("\(identifier).waiting.action")
+        }
+    }
+
+    @objc
+    private func takeBackPressed() {
+        onTakeBack?()
+    }
+}
+
+// MARK: - The Grip
+
+/// The strip over the band's shoulders that opens the deck when the pointer reaches into it.
+///
+/// It exists because the thing worth hovering is four points tall. The resting deck shows one
+/// `stackStep` of card per waiting receipt, which is a target nobody finds on purpose, so what
+/// reads the reach is a region rather than the cards: the full width of the band, from the top of
+/// the deck up through `peekGripSlop`, growing with the deck as it opens so a pointer travelling
+/// up the fan never leaves the thing holding it open.
+///
+/// **It takes no clicks.** Laid over the cards so its region is unbroken, it would otherwise be
+/// the surface every way back in the deck was pressed through — so it hands every hit back the
+/// way `ToastLaneView` does. Tracking areas are geometric and do not consult hit testing, which
+/// is what makes a region that reports the pointer and swallows nothing possible at all.
+///
+/// Structural in the theme boundary's sense: it draws nothing and styles nothing.
+private final class ToastDeckGripView: NSView {
+
+    var onHoverChanged: ((Bool) -> Void)?
+
+    private var hoverTracking: NSTrackingArea?
+    private var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            onHoverChanged?(isHovered)
+        }
+    }
+
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTracking = area
+        // The deck grows and shrinks under this region, so it is re-tracked often — and a fresh
+        // tracking area assumes the pointer is outside. Corrected only in the leaving direction,
+        // for `ToastView`'s reason: a hover nothing ever clears would hold the band's clock.
+        if hoverIsStale(isHovered) { isHovered = false }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
     }
 }
 
@@ -1305,10 +1554,19 @@ final class ToastPresenter {
     /// the queue rather than by sitting through it.
     var queued: [ToastRequest] { pending }
 
-    /// The edges standing behind the band, front to back — one per waiting receipt, capped at
-    /// `ToastDefaults.stackDepth`. Readable for `queued`'s reason: what the stack says is state,
-    /// and a test should be able to ask for it rather than read it out of a picture.
+    /// The cards standing behind the band, front to back — one per waiting receipt, capped at
+    /// `ToastDefaults.stackDepth` while the deck is closed and at the whole queue while it is
+    /// open. Readable for `queued`'s reason: what the stack says is state, and a test should be
+    /// able to ask for it rather than read it out of a picture.
     var stackEdges: [NSView] { deck.map(\.view) }
+
+    /// Whether the deck is open — every waiting receipt lifted out from behind the band, each
+    /// showing its own line and its own way back.
+    ///
+    /// The pointer route into this is the grip above the band (`ToastDeckGripView`) through the
+    /// app's shared hover timing; `openDeck(_:)` is the same decision without the pointer, which
+    /// is how a test and the Component Gallery drive it.
+    private(set) var isDeckOpen = false
 
     /// The interval behind the current clock. Readable for the same reason as `queued`: choosing
     /// the request's dwell over the pane default is state, and tests should not sleep to infer it.
@@ -1317,11 +1575,11 @@ final class ToastPresenter {
     /// whole of it — see `holdOpen`.
     private(set) var scheduledDwell: TimeInterval?
 
-    /// One waiting receipt's edge and the pins holding it behind the band, kept together so a
+    /// One waiting receipt's card and the pins holding it behind the band, kept together so a
     /// promotion can re-pin the whole deck to a new front card and a deal can raise a fresh
     /// edge from behind the band it was dealt under.
     private struct DeckEdge {
-        let view: ToastStackEdgeView
+        let view: ToastWaitingCardView
         var pins: [NSLayoutConstraint]
     }
 
@@ -1358,6 +1616,41 @@ final class ToastPresenter {
     private var deck: [DeckEdge] = []
     private var dismissal: Timer?
     private var pending: [ToastRequest] = []
+
+    /// The region that opens the deck, and the one measurement it takes: how far up from the
+    /// band's top edge the reach counts, which is the deck's own height plus the slop.
+    private var grip: ToastDeckGripView?
+    private var gripHeight: NSLayoutConstraint?
+
+    /// Which band the grip is measured from, so a promotion is not left with a region pinned to
+    /// a card on its way out of the pane.
+    private weak var gripBand: ToastView?
+
+    /// Whether the pointer is on the band itself, and whether it is in the grip over it — as each
+    /// last reported. Kept because the clock now answers to three things rather than one, and two
+    /// of them are pointer state this presenter is told about rather than owns. See `updateHold`.
+    private var isBandHeld = false
+    private var isGripHovered = false
+
+    /// The pointer's timing into and out of the deck, in the app's one hover policy rather than
+    /// in timers of this component's own. See `ToastDefaults.peekPolicy`.
+    private lazy var peek: HoverPopoverScheduler = {
+        let scheduler = HoverPopoverScheduler(policy: ToastDefaults.peekPolicy)
+        scheduler.onPresent = { [weak self] in self?.openDeck(true) }
+        scheduler.onDismiss = { [weak self] in self?.openDeck(false) }
+        return scheduler
+    }()
+
+    /// How far the deck steps per card: a sliver at rest, a readable strip open.
+    private var deckStep: CGFloat {
+        isDeckOpen ? ToastDefaults.peekStep : ToastDefaults.stackStep
+    }
+
+    /// How many cards the deck stands. Closed, it says *another is coming*; open, it is a list
+    /// and has to be the whole one — see `ToastDefaults.stackDepth`.
+    private var wantedDeckCount: Int {
+        min(pending.count, isDeckOpen ? ToastDefaults.queueLimit : ToastDefaults.stackDepth)
+    }
 
     /// How many transitions are currently crossing the pane's edge. The lane crops while any
     /// is — a count rather than a flag, because a burst walked through quickly has the next
@@ -1403,7 +1696,7 @@ final class ToastPresenter {
     ///
     /// The queue is bounded (`ToastDefaults.queueLimit`), because a receipt that surfaces most of
     /// a minute after the click is news rather than a receipt. What is waiting is **visible**:
-    /// each one stands behind the band as a card edge (`ToastStackEdgeView`), so a band with more
+    /// each one stands behind the band as a card edge (`ToastWaitingCardView`), so a band with more
     /// coming no longer looks like the last thing that happened.
     func present(_ request: ToastRequest) {
         guard host != nil else { return }
@@ -1430,6 +1723,10 @@ final class ToastPresenter {
     /// to whatever was waiting behind it, so throwing one card after another walks the deck.
     func dismiss(_ departure: ToastDeparture = .settled) {
         guard let toast = current else { return }
+        // The deck is drawn *against the band* — every card is pinned to its edges — so a band
+        // leaving takes the open fan with it rather than leaving a list hanging over the slot
+        // its own successor is about to rise into.
+        closeDeck()
         stopClock()
         toast.stopDwell()
         // The departing band answers to nobody from here. Its gesture is spent, and its hover
@@ -1451,6 +1748,28 @@ final class ToastPresenter {
         depart(toast, by: departure) { [weak self] in
             self?.dropLaneIfIdle()
         }
+    }
+
+    /// Opens or closes the deck: every waiting receipt lifted into a strip of its own, or laid
+    /// back down to the sliver it reports itself with.
+    ///
+    /// The pointer arrives here through `ToastDeckGripView` and the shared hover policy; a caller
+    /// with its own idea of when — the gallery, a test — says so directly. **The band's clock
+    /// holds while it is open**, because everything in the fan is pinned to the band under it: a
+    /// dwell allowed to run would take the list out from under the hand reaching into it, and
+    /// each card in that list carries a way back.
+    ///
+    /// Opening with nothing waiting is not an empty deck, it is no deck: there is no card to lift
+    /// and nothing the grip could have been reaching for.
+    /// `animated` is the seam a still picture needs: the fan is staggered, so a caller that
+    /// captures the pane the moment it asks for the deck would otherwise photograph a deck two
+    /// frames into opening. Reduce Motion takes the same path without being asked.
+    func openDeck(_ open: Bool, animated: Bool = true) {
+        guard open != isDeckOpen, current != nil else { return }
+        guard !open || !pending.isEmpty else { return }
+        isDeckOpen = open
+        open ? raiseCards(animated: animated) : lowerCards(animated: animated)
+        updateHold()
     }
 
     /// Sends a band the rest of the way out of the pane — down the way it came, or on along the
@@ -1565,6 +1884,7 @@ final class ToastPresenter {
     /// `deinit`; short-lived off-screen renderers call it explicitly because AppKit may extend a
     /// local object's debug lifetime beyond its lexical scope while its layer work is committed.
     func invalidate() {
+        closeDeck()
         stopClock()
         pending.removeAll()
         current?.stopDwell()
@@ -1605,7 +1925,7 @@ final class ToastPresenter {
             // not known until its words have wrapped — hence a layout at rest first.
             host.layoutSubtreeIfNeeded()
             placement.bottom.constant = toast.frame.height
-                + ToastDefaults.stackStep * CGFloat(deck.count)
+                + deckStep * CGFloat(deck.count)
                 + ToastDefaults.clearance
             host.layoutSubtreeIfNeeded()
 
@@ -1641,7 +1961,12 @@ final class ToastPresenter {
         }
         toast.onHoldChanged = { [weak self] isHeld in
             guard let self else { return }
-            isHeld ? holdOpen() : scheduleDismissal()
+            isBandHeld = isHeld
+            // A pointer that came down off the fan onto the band is still in the deck's
+            // neighbourhood, and the scheduler is told so: a deck that closed the moment the hand
+            // moved between its own parts would be a list you cannot travel.
+            peek.popoverHoverChanged(isHeld)
+            updateHold()
         }
         return toast
     }
@@ -1723,6 +2048,7 @@ final class ToastPresenter {
     /// receipt with nothing to offer is replaced: sending one out while the next slides in over
     /// it reads as a glitch rather than as a replacement.
     private func removeCurrent() {
+        closeDeck()
         stopClock()
         current?.stopDwell()
         current?.removeFromSuperview()
@@ -1769,12 +2095,16 @@ final class ToastPresenter {
     @discardableResult
     private func squareDeck(behind front: ToastView, staged: Bool) -> [DeckEdge] {
         guard let lane else { return [] }
-        let wanted = min(pending.count, ToastDefaults.stackDepth)
+        let wanted = wantedDeckCount
         while deck.count > wanted {
             deck.removeLast().view.removeFromSuperview()
         }
 
         for (index, edge) in deck.enumerated() {
+            // Which receipt a card stands for is a fact about its *slot*, not about the view: a
+            // card whose receipt was taken back is gone and the ones behind it have moved up, so
+            // each surviving card is told again what it is now standing for.
+            edge.view.request = pending[index]
             NSLayoutConstraint.deactivate(edge.pins)
             let pins = deckPins(for: edge.view, behind: front, depth: CGFloat(index + 1))
             NSLayoutConstraint.activate(pins)
@@ -1784,7 +2114,12 @@ final class ToastPresenter {
         var dealt: [DeckEdge] = []
         while deck.count < wanted {
             let depth = CGFloat(deck.count + 1)
-            let edge = ToastStackEdgeView()
+            let edge = ToastWaitingCardView(request: pending[deck.count])
+            edge.onTakeBack = { [weak self, weak edge] in
+                guard let self, let edge else { return }
+                takeBack(edge)
+            }
+            edge.setOpen(isDeckOpen, animated: false)
             lane.addSubview(edge, positioned: .below, relativeTo: deck.last?.view ?? front)
             let pins = deckPins(for: edge, behind: front, depth: staged ? 0 : depth)
             NSLayoutConstraint.activate(pins)
@@ -1799,6 +2134,7 @@ final class ToastPresenter {
             deck.append(record)
             dealt.append(record)
         }
+        updateGrip()
         return dealt
     }
 
@@ -1815,11 +2151,11 @@ final class ToastPresenter {
         [
             edge.topAnchor.constraint(
                 equalTo: front.topAnchor,
-                constant: -ToastDefaults.stackStep * depth
+                constant: -deckStep * depth
             ),
             edge.bottomAnchor.constraint(
                 equalTo: front.bottomAnchor,
-                constant: -ToastDefaults.stackStep * depth
+                constant: -deckStep * depth
             ),
             edge.leadingAnchor.constraint(
                 equalTo: front.leadingAnchor,
@@ -1832,11 +2168,18 @@ final class ToastPresenter {
         ]
     }
 
-    /// Moves an edge's pins to another slot without re-making them, in `deckPins`' order.
-    private func reslot(_ pins: [NSLayoutConstraint], to depth: CGFloat) {
+    /// Moves an edge's pins to another slot without re-making them, in `deckPins`' order. The
+    /// step is passed rather than read, because closing the deck lowers cards that are still
+    /// standing at the open one.
+    private func reslot(
+        _ pins: [NSLayoutConstraint],
+        to depth: CGFloat,
+        step: CGFloat? = nil
+    ) {
         guard pins.count == 4 else { return }
-        pins[0].constant = -ToastDefaults.stackStep * depth
-        pins[1].constant = -ToastDefaults.stackStep * depth
+        let step = step ?? deckStep
+        pins[0].constant = -step * depth
+        pins[1].constant = -step * depth
         pins[2].constant = ToastDefaults.stackInset * depth
         pins[3].constant = -ToastDefaults.stackInset * depth
     }
@@ -1850,11 +2193,208 @@ final class ToastPresenter {
         }
     }
 
+    // MARK: - The Deck, Opened
+
+    /// Lifts every waiting receipt into a strip of its own. The cards already standing were
+    /// re-pinned to the open step by `squareDeck`; anything the closed deck was not standing —
+    /// the third receipt, which has no edge at rest — is dealt hidden behind the band and rises
+    /// with the rest, so the fan opens as one movement rather than as two cards moving and a
+    /// third appearing.
+    private func raiseCards(animated: Bool = true) {
+        guard let toast = current else { return }
+        let motion = animated ? Design.Motion.standard : 0
+        let dealt = squareDeck(behind: toast, staged: motion > 0)
+        for edge in deck {
+            edge.view.setOpen(true, animated: motion > 0)
+        }
+        guard motion > 0 else {
+            raiseDeck(dealt)
+            host?.layoutSubtreeIfNeeded()
+            return
+        }
+        // One card at a time, each a `peekStagger` behind the one in front of it, and each in an
+        // animation group of its own: a stagger is *when* a constant changes, and constants
+        // changed together are one movement however they are curved.
+        for (index, edge) in deck.enumerated() {
+            lift(edge, to: CGFloat(index + 1), after: ToastDefaults.peekStagger * Double(index))
+        }
+    }
+
+    /// Moves one card to its slot, now or a moment from now.
+    ///
+    /// The delayed half re-checks the world it was scheduled in: a pointer that leaves during the
+    /// stagger closes the deck, and a raise still in the queue would then lift a card back out of
+    /// a stack that is being put away.
+    private func lift(_ edge: DeckEdge, to depth: CGFloat, after delay: TimeInterval) {
+        let run: @MainActor () -> Void = { [weak self, weak card = edge.view] in
+            guard let self, let card, let layer = card.layer,
+                  isDeckOpen,
+                  let record = deck.first(where: { $0.view === card }) else { return }
+            // The constraint moves the card **now**, outside any animation group, and the spring
+            // animates the picture of it from where it stood. A spring cannot come from an
+            // animation context — a context takes a timing function, and no timing function
+            // overshoots (see `Design.Motion.Spring`) — so the model is settled first and the
+            // movement is added to the layer after.
+            let from = layer.position
+            reslot(record.pins, to: depth)
+            host?.layoutSubtreeIfNeeded()
+            layer.add(
+                Design.Motion.settle.animation(
+                    keyPath: "position",
+                    from: from,
+                    to: layer.position
+                ),
+                forKey: ToastDefaults.peekAnimationKey
+            )
+        }
+        guard delay > 0 else { return run() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            MainActor.assumeIsolated(run)
+        }
+    }
+
+    /// Lays the deck back down. A card the closed deck does not stand goes back **behind the
+    /// band** — depth zero, exactly hidden — and is taken away once it is there: a card removed
+    /// where it stood would blink out of the middle of a fan that is still closing.
+    private func lowerCards(animated: Bool = true) {
+        guard let toast = current else { return }
+        let motion = animated ? Design.Motion.vanish : 0
+        for edge in deck {
+            edge.view.setOpen(false, animated: motion > 0)
+        }
+        for (index, edge) in deck.enumerated() {
+            let depth = index < ToastDefaults.stackDepth ? CGFloat(index + 1) : 0
+            reslot(edge.pins, to: depth)
+        }
+        updateGrip()
+        guard motion > 0 else {
+            squareDeck(behind: toast, staged: false)
+            host?.layoutSubtreeIfNeeded()
+            return
+        }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = motion
+            context.timingFunction = ToastDefaults.peekBack
+            context.allowsImplicitAnimation = true
+            host?.layoutSubtreeIfNeeded()
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let toast = self.current, !self.isDeckOpen else { return }
+                self.squareDeck(behind: toast, staged: false)
+            }
+        })
+    }
+
+    /// Shuts the deck without moving anything, for a band that is leaving: its cards are about to
+    /// be re-pinned to a successor or taken off the pane altogether, and an animation aimed at
+    /// the geometry of the band that is going is an animation into a stale frame.
+    private func closeDeck() {
+        peek.cancelPendingWork()
+        removeGrip()
+        guard isDeckOpen else { return }
+        isDeckOpen = false
+        for edge in deck {
+            edge.view.setOpen(false, animated: false)
+        }
+    }
+
+    /// The way back on a receipt that never got its turn: the caller's undo runs, that receipt
+    /// leaves the queue, and the cards behind it step forward into the slots it freed. The band
+    /// in front is untouched — it is reporting something else, and its own clock is being held by
+    /// the open deck anyway.
+    private func takeBack(_ card: ToastWaitingCardView) {
+        guard let index = deck.firstIndex(where: { $0.view === card }),
+              index < pending.count else { return }
+        let request = pending.remove(at: index)
+        let taken = deck.remove(at: index)
+        // Its pins are left alone deliberately. Out of the deck, nothing re-slots it, so it
+        // stands exactly where the hand left it while the cards behind step past — and a card
+        // cut loose from its pins instead would be laid out at nothing and fade from a zero
+        // rect in the pane's corner. Removing the view is what finally takes them.
+        request.action?()
+
+        let motion = Design.Motion.vanish
+        guard let toast = current, motion > 0 else {
+            taken.view.removeFromSuperview()
+            if let current { squareDeck(behind: current, staged: false) }
+            host?.layoutSubtreeIfNeeded()
+            if pending.isEmpty { openDeck(false) }
+            return
+        }
+        squareDeck(behind: toast, staged: false)
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = motion
+            context.timingFunction = ToastDefaults.glide
+            context.allowsImplicitAnimation = true
+            // Taken back where it stood, so what leaves is the card the button was on rather
+            // than the last card in the deck standing in for it.
+            taken.view.animator().alphaValue = 0
+            host?.layoutSubtreeIfNeeded()
+        }, completionHandler: { [weak card] in
+            MainActor.assumeIsolated { card?.removeFromSuperview() }
+        })
+        if pending.isEmpty { openDeck(false) }
+    }
+
+    /// Puts the grip over the band's shoulders and keeps it as tall as the deck under it, or
+    /// takes it away when there is no deck left to reach for.
+    private func updateGrip() {
+        guard let lane, let toast = current, !deck.isEmpty else { return removeGrip() }
+        let grip = ensureGrip(in: lane, over: toast)
+        gripHeight?.constant = deckStep * CGFloat(deck.count) + ToastDefaults.peekGripSlop
+        // Topmost, so the region is unbroken over the fan — it takes no clicks, so nothing in
+        // the deck is any harder to press for it. See `ToastDeckGripView`.
+        lane.addSubview(grip, positioned: .above, relativeTo: nil)
+    }
+
+    private func ensureGrip(in lane: ToastLaneView, over band: ToastView) -> ToastDeckGripView {
+        // Pinned to the band, so a promotion — a new band, the old one still flying out — gets a
+        // new grip rather than one measuring from a card that has left.
+        if let grip, grip.superview === lane, gripBand === band { return grip }
+        removeGrip()
+        let grip = ToastDeckGripView()
+        grip.onHoverChanged = { [weak self] hovering in
+            guard let self else { return }
+            isGripHovered = hovering
+            hovering ? peek.pointerEntered() : peek.pointerExited()
+            updateHold()
+        }
+        lane.addSubview(grip, positioned: .above, relativeTo: nil)
+        let height = grip.heightAnchor.constraint(equalToConstant: ToastDefaults.peekGripSlop)
+        NSLayoutConstraint.activate([
+            grip.leadingAnchor.constraint(equalTo: band.leadingAnchor),
+            grip.trailingAnchor.constraint(equalTo: band.trailingAnchor),
+            grip.bottomAnchor.constraint(equalTo: band.topAnchor),
+            height
+        ])
+        self.grip = grip
+        gripHeight = height
+        gripBand = band
+        return grip
+    }
+
+    private func removeGrip() {
+        grip?.removeFromSuperview()
+        grip = nil
+        gripHeight = nil
+        gripBand = nil
+        isGripHovered = false
+    }
+
+    /// The clock answers to three things now: the pointer on the band, the pointer reaching for
+    /// the deck, and the deck standing open. Any of them holds it, and it goes back on the
+    /// remainder it came off when the last of them lets go — see `holdOpen`.
+    private func updateHold() {
+        isBandHeld || isGripHovered || isDeckOpen ? holdOpen() : scheduleDismissal()
+    }
+
     /// Takes the stack away outright — the band it stood behind is going with no departure of its
-    /// own, or there is no band left to stand behind.
+    /// own, or there is no band left to stand behind. The grip goes with it: a region that opens
+    /// a deck must not outlive the deck it opens.
     private func removeStack() {
         deck.forEach { $0.view.removeFromSuperview() }
         deck.removeAll()
+        removeGrip()
     }
 
     /// Starts the band's clock, and the countdown it shows for it. One method, because a rail
@@ -1885,7 +2425,12 @@ final class ToastPresenter {
     /// What was left of it is kept, because the pointer leaving is not a new receipt — the timer
     /// is read for the remainder before it is cancelled, so the clock the band goes back on is
     /// the one it came off.
+    ///
+    /// A hold on a band already held does nothing at all, which matters now that three things can
+    /// hold one: the remainder is read *from the live timer*, so a second hold arriving after the
+    /// first stopped it would read nothing and hand the band a whole fresh dwell on release.
     private func holdOpen() {
+        guard dismissal != nil else { return }
         let remainder = dismissal.map { max(0, $0.fireDate.timeIntervalSinceNow) }
         stopClock()
         heldRemainder = remainder

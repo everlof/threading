@@ -131,7 +131,7 @@ Components so far:
 | `WindowChromeButton` | A takeover window's Window menu/close/minimize/zoom/depth, one component for every role and glyph family (`squares`, `platinum`, `beos`, `openstep`, `irix`, `amiga`, `plain`) — the tab strip's "every" lesson applied to period chrome. Calls the *semantic* window operations, because the `perform*` forms animate a standard button a frameless window does not have and refuse outright; zoom follows the window and becomes Restore while maximized, Window menu opens app-owned `ThemedMenuPresenter` rows, and Workbench Depth orders the window behind its peers. Full `ThemedControl` contract: keyboard, focus ring, AX press. |
 | `WindowChromeFrameView` | The border around a takeover window's edges, in the theme's border role with the bevel inside when the material states one. A shaped title tab leaves transparent shoulders and seats the rectangular body beneath it. Draws nothing in native dress, where the terminal-palette backdrop showing through the titlebar strip is load-bearing. |
 | `PairingCodeImage` | The Remote Access QR code, drawn rather than scaled up from `CIQRCodeGenerator`: Chromium's geometry (dots at 0.8 of the pitch, rounded finder patterns), a four-module quiet zone Core Image does not supply, and a plate and ink carrying the accent's hue at a stated saturation. The only artwork here a *machine* has to read, so it is tested by decoding the render, not by asserting on the constants that drew it. |
-| `ToastView` / `ToastPresenter` | A receipt for something already done, floating above a pane's footer, with the way back on it. The view is one message, one optional detail line, one `ThemedButton` carrying the way back and one `ThemedIconButton` carrying the way out; the presenter owns everything that is about *time* — one band at a time, a six-second dwell (a request may ask for longer, and the one an agent raises does), the clock pausing while the pointer is on it, and the VoiceOver announcement a surface that takes no focus would otherwise never make. The pointer **pauses** the dwell rather than refunding it: the timer's remaining interval is read before it is cancelled and rescheduled when the pointer leaves, because time spent reading a receipt under the pointer is that receipt's time being used — restarting meant a pointer crossing the band en route somewhere else bought it a whole second dwell, and a band leant on twice never had to leave. The dwell is also *drawn*: the band's own bottom border, in the accent, drains as the clock runs, freezes with it under the pointer, and carries on from where it froze — at the same pace, since the line's remainder and the timer's are read at one instant. It is a layer animation for `ThemedSpinner`'s reason, it lives inside the band's existing bottom inset so showing the clock costs no height, and Reduce Motion removes it rather than freezing it full — a still rail is a band claiming a countdown it is not showing. **It rides the edge rather than floating in the padding**: held a step in from three sides it was a rule between nothing and nothing, read as an underline belonging to the way back under it. Pinned flush, masked to the band's own silhouette so its ends follow the corners, and weighed at `Design.Radius.border` like every other rule the theme draws, it is a second edge on top of the first — which is also why it needs no track: what it leaves behind as it drains is the band's own border. A layer draws its border above its sublayers, so the line sits one rule *inside* the edge rather than on it, or the band's own border would paint it out. The band's words argue for **no** width at all (`ToastDefaults.contentWidthPriority`, hugging and compression both): pinned inside a host, a wrapping label's 750 outranked the sidebar's own holding priority, and the column jumped wider as a receipt arrived and back again as it left. The presenter's own fill pin sits *below* every pane's holding priority for the mirror-image jump (`ToastDefaults.fillPriority`): in a sidebar dragged wider than the band's required `maxWidth` cap the pin cannot be satisfied by the band, and at `defaultHigh` the solver satisfied it with the *column* instead — the sidebar snapped in to cap-plus-insets as the receipt arrived and sprang back when it left. Anything **waiting** behind the band is drawn rather than merely queued: one `ToastStackEdgeView` per waiting receipt, capped at two, each the same card a step up and a step in on both sides, pinned to the band's own top *and* bottom so no theme's corner radius becomes a constant here — see the queue paragraph below. The **way out** is a ✕ in the corner and a throw across the band, and the two are one thing: see the paragraph below for why the mark is never hidden until hovered and why the gesture is only ever an accelerator for it. Two layout rules follow the ✕ and both were bugs first: the message stops at the mark while the detail runs the full width beneath it, so each wrapping label is told **its own** width rather than one figure derived from the band (handed the band's, the message believed it had 26 points it did not and a clipped receipt read *Archived “Refactor* with the session's name gone); and each label's height is measured with `cell.cellSize(forBounds:)` rather than taken from `intrinsicContentSize`, because the two disagree about whether a string wraps at a width it very nearly fits — under Claymorphism's rounded face the same receipt reported 175 points on one line inside the 178 it had while the cell typeset two, and the band clipped the second. |
+| `ToastView` / `ToastPresenter` | A receipt for something already done, floating above a pane's footer, with the way back on it. The view is one message, one optional detail line, one `ThemedButton` carrying the way back and one `ThemedIconButton` carrying the way out; the presenter owns everything that is about *time* — one band at a time, a six-second dwell (a request may ask for longer, and the one an agent raises does), the clock pausing while the pointer is on it, and the VoiceOver announcement a surface that takes no focus would otherwise never make. The pointer **pauses** the dwell rather than refunding it: the timer's remaining interval is read before it is cancelled and rescheduled when the pointer leaves, because time spent reading a receipt under the pointer is that receipt's time being used — restarting meant a pointer crossing the band en route somewhere else bought it a whole second dwell, and a band leant on twice never had to leave. The dwell is also *drawn*: the band's own bottom border, in the accent, drains as the clock runs, freezes with it under the pointer, and carries on from where it froze — at the same pace, since the line's remainder and the timer's are read at one instant. It is a layer animation for `ThemedSpinner`'s reason, it lives inside the band's existing bottom inset so showing the clock costs no height, and Reduce Motion removes it rather than freezing it full — a still rail is a band claiming a countdown it is not showing. **It rides the edge rather than floating in the padding**: held a step in from three sides it was a rule between nothing and nothing, read as an underline belonging to the way back under it. Pinned flush, masked to the band's own silhouette so its ends follow the corners, and weighed at `Design.Radius.border` like every other rule the theme draws, it is a second edge on top of the first — which is also why it needs no track: what it leaves behind as it drains is the band's own border. A layer draws its border above its sublayers, so the line sits one rule *inside* the edge rather than on it, or the band's own border would paint it out. The band's words argue for **no** width at all (`ToastDefaults.contentWidthPriority`, hugging and compression both): pinned inside a host, a wrapping label's 750 outranked the sidebar's own holding priority, and the column jumped wider as a receipt arrived and back again as it left. The presenter's own fill pin sits *below* every pane's holding priority for the mirror-image jump (`ToastDefaults.fillPriority`): a pin the band cannot satisfy is one the solver satisfies with the *column* instead, and at `defaultHigh` it did — the sidebar snapped in to meet the band's old 320-point cap as the receipt arrived and sprang back when it left. That cap is gone (2026-08-12, below): the band spans whatever column it is given, since every host a receipt has is a column and a card stopping short of one reads as stranded beside the list it is reporting on. Anything **waiting** behind the band is drawn rather than merely queued: one `ToastWaitingCardView` per waiting receipt — two at rest, the whole queue once the deck is opened — each the same card a step up and a step in on both sides, pinned to the band's own top *and* bottom so no theme's corner radius becomes a constant here. Opened, each card's uncovered strip carries that receipt's own line and its own way back, and the grip that opens it (`ToastDeckGripView`) reports the pointer without taking a click. See the queue paragraphs below. The **way out** is a ✕ in the corner and a throw across the band, and the two are one thing: see the paragraph below for why the mark is never hidden until hovered and why the gesture is only ever an accelerator for it. Two layout rules follow the ✕ and both were bugs first: the message stops at the mark while the detail runs the full width beneath it, so each wrapping label is told **its own** width rather than one figure derived from the band (handed the band's, the message believed it had 26 points it did not and a clipped receipt read *Archived “Refactor* with the session's name gone); and each label's height is measured with `cell.cellSize(forBounds:)` rather than taken from `intrinsicContentSize`, because the two disagree about whether a string wraps at a width it very nearly fits — under Claymorphism's rounded face the same receipt reported 175 points on one line inside the 178 it had while the cell typeset two, and the band clipped the second. |
 | `ThemedPopover` | Every app-owned anchored transient surface. It owns the themed body and arrow, preferred-edge placement with screen-edge flip and clamp, parent-window movement, live theme changes, transient/semitransient dismissal, Escape, accessibility announcement, and focus return. Content remains an ordinary view controller. Native application and context menus do not use it. The chrome is **one closed outline** — body and arrow walked as a single path, filled once and stroked once (`ThemedPopoverLayout.outline`); drawing them as two paths and repainting their seam erased the tails of the arrow's own sides, a border gap a picture showed and no assertion did (now one does, on drawn pixels). A popover also cannot outlive its owner or its anchor: `deinit` detaches a still-shown panel — a child window its parent *retains*, so a dropped reference otherwise floats forever with its monitors gone — and the next interaction anywhere closes one whose anchor left the window, since a sidebar reload discards rows without a pointer exit. Hover-presented sites drive it through `HoverPopoverScheduler`, whose `Policy` states the site's open dwell, close grace, and whether pointing at the popover itself holds it open — the sidebar's cards dwell and close on exit, the toolbar's usage pill is instant both ways while it shows the native reading and flips to a held policy the moment an extension composes actionable content in, an extension row's detail dwells, grants a grace and holds because it carries actions. Timing is configuration beside the site's other measurements, not four copies of timer code. |
 | `ThemedFloatingSurfaceChrome` / `ThemedFloatingGlyphView` | The rectangular and semantic-content halves of that same material grammar for an app-owned card inside another view. The resolver applies the popover style's opaque surface role, edge/bevel, material depth, and density; the glyph view selects SF Symbols or the theme's simple one-bit marks. `GitStatusOverlayView` uses both, so a terminal remains the ground around the card without becoming the card's visual owner. |
 | `ThemedAlert` | Every app-owned modal statement, confirmation, choice, error, and text prompt. It owns themed severity, copy, accessory, suppression choice, button hover/press/focus, Return policy, universal Escape, sheet/modal presentation, accessibility, and focus return. `ConfirmationAlert`, `NoticeAlert`, and `TextPromptAlert` remain the semantic policy layer above it. |
@@ -574,10 +574,36 @@ sides, because offset in one direction it reads as a page sliding off a desk rat
 next card in a deck. The edges are pinned to the band's own top *and bottom* rather than given a
 height, so everything below the band's top edge is behind an opaque surface however tall the
 receipt in front turns out to be, and no theme's corner radius has to be measured into a
-constant. Two edges at most (`ToastDefaults.stackDepth`), whatever the queue's depth: the stack
-answers *is this the only one* rather than *how many*, and a count is the one thing it could not
-honestly report — the bound drops from the front of the queue when a burst overruns it. It says
-nothing to VoiceOver, which is read each receipt as it arrives.
+constant. Two edges at most **at rest** (`ToastDefaults.stackDepth`), whatever the queue's depth: closed, the
+stack answers *is this the only one* rather than *how many*, and a count is the one thing it could
+not honestly report — the bound drops from the front of the queue when a burst overruns it. Closed
+it says nothing to VoiceOver either, which is read each receipt as it arrives.
+
+**A queue you can count but not read is only half the promise, so the deck opens.** Drawn edges
+answer *how many are coming* and nothing else, and the thing people wanted was on the third card:
+a burst of archives is four separate undos, and reaching the last one meant sitting through the
+three dwells in front of it. Reaching into the strip above the band (`ToastDeckGripView`, on the
+app's shared hover timing) fans the deck out — `peekStep` instead of `stackStep`, so what uncovers
+of each card is a strip its own line can be read in, with that receipt's way back on the end of
+it. Three decisions hold it up:
+
+- **Opened, the deck is the whole queue.** The resting stack stands two edges for up to three
+  waiting receipts, which is honest while a card says only *another is coming* and dishonest the
+  moment it has words: a reader looking at an open deck asked what is in it. The third card is
+  dealt hidden behind the band and rises with the rest, so the fan opens as one movement.
+- **The band's clock stops while it is open**, on the same remainder rule the pointer already had.
+  Every card in the fan is pinned to the band under it, so a dwell allowed to run would take the
+  list out from under the hand reaching into it — and each card in that list carries an action.
+- **The grip takes no click.** It has to lie over the whole fan or a pointer travelling up the
+  deck would leave the region holding it open, which means it lies over every way back in it;
+  tracking areas are geometric and do not consult hit testing, so a region can report the pointer
+  and swallow nothing (`ToastLaneView`'s trick, for the same reason).
+
+Taking one back removes that receipt alone: its card stays where the hand left it and fades while
+the ones behind step forward into the slots, the band in front is untouched, and a deck with
+nothing left in it closes itself rather than hanging an empty fan over a clock it is holding. A
+card is an accessibility element only while the deck is open — closed it is a four-point sliver
+standing for a receipt VoiceOver is already promised when its turn comes.
 
 **A receipt you have already read is furniture, so it can be sent away.** The band leaves on its
 own, which is what made it safe to archive without asking — but "on its own" is six seconds of a
@@ -2048,3 +2074,62 @@ over it, and the accent ink counted in each corner. Before: 64, 64, 126, 126. Af
 four. `MediaInspectorTests` keeps the geometry rather than the pixels, since the clip is a layer
 property no offscreen render reproduces: a picture flush inside a panel takes the panel's corner,
 a narrower one and a square host both keep the control's.
+## 2026-08-12 — a receipt stopped at a width the column it was reporting into did not have
+
+The archive band was capped at 320 points. In a sidebar dragged wider than that it sat at the
+leading edge with the rest of the column empty beside it: a card stranded next to the list it was
+reporting on rather than part of it. The cap read as a reasonable measure decision and was not one
+here — it only ever engaged in a column somebody had dragged, and at every width the app itself
+opens the sidebar at (180 to 400) the band already filled. What it produced was a layout that
+changes character mid-drag: filling at 340, floating at 360.
+
+The cap is gone, and nothing replaced it. Every host a receipt has is a column — the sidebar, an
+extension's navigator shell, the gallery's stand-in for both — so "stops well short of spanning a
+pane" was guarding against a pane no toast is presented in. The fill pin stays weak and breakable
+all the same, because that priority was never about the cap: it is what stops a receipt from
+resizing the column it reports into, which is a bug this component has already shipped once in
+each direction.
+
+The same edit moved `hostInset` from `Spacing.medium` to `Spacing.inset`. The band's edge is read
+against the pane footer directly under it rather than against the column's edge, and
+`PaneFooterView` stands its first control's *ink* at `Spacing.inset` — so at 10 the card sat two
+points inside the gear it was stacked on, close enough to read as a miss rather than as a
+decision. `ToastRenderTests` now builds its footer with the sidebar's real Settings button for
+this reason: the relationship that was wrong is only visible against the thing it was wrong
+against, and the storybook's empty footer band could not show it.
+
+## 2026-08-12 — a queue you can count but not read
+
+The deck of waiting receipts answered *how many are coming* and nothing else, and the way back
+people actually wanted was on the third card: a burst of archives is four separate undos, and
+reaching the last one meant sitting through three dwells. Reaching into the strip above the band
+now fans the deck out, each card showing its own line and its own way back. The rationale for the
+three decisions that hold it up — the whole queue rather than the resting two, the clock held
+while it is open, a grip that reports the pointer and takes no click — is in the queue section
+above, beside the drawn-stack note it extends.
+
+**The fan is the app's first spring, and it had to be one.** The deck opened on `glide` at first
+and read as a snap, which is `lift`'s documented failure exactly: over a step's distance `glide`
+is 84% finished within three frames, so the movement paid for is never seen. The fix wanted an
+overshoot — a hand fanning cards does not set each one down on its mark — and the obvious route is
+a cubic bezier whose second control point sits above 1. **That route does not exist.**
+`CAMediaTimingFunction(controlPoints: 0.15, 0, 0.4, 1.3)` stores the point back unchanged when
+asked for it, and then Core Animation clamps the value it interpolates: sampled off the
+presentation layer, a card authored with a 4.5% overshoot stopped dead on its slot, peak 25.93 of
+a 26-point step. So `Design.Motion.Spring` exists beside the curves, `Motion.settle` is its one
+instance (damping ratio 0.70), and the deck moves its cards by settling the constraint first and
+springing the *picture* of the card from where it stood. Measured the same way afterwards: peak
+27.18pt on a 26pt step — 4.5% past, exactly the ratio's arithmetic — back inside a third of a
+point by 0.4s. Cards also start one `peekStagger` after the one in front, so the deck unfolds from
+the band outward rather than changing shape as one object. Closing takes no spring at all: it is
+`drop`, an acceleration, because a card bouncing as it is *put away* is the animation arguing with
+the intent.
+
+Three other things were verified rather than assumed. That a `hitTest`-nil overlay still receives
+`mouseEntered` from its tracking area, and that a click aimed through it lands on the button
+underneath: both were probed with a throwaway AppKit binary before the grip was built on them,
+because the whole design rests on tracking being geometric where hit testing is not. And the fan
+itself is a rendered state (`toast-opened-*`), since whether three strips of words over a band in
+a 240-point column read as a queue or as a wall over the list is not a thing an assertion says —
+rendered through `openDeck(_:animated:)`, whose unanimated path exists so a still is a picture of
+the settled deck rather than of one two frames into opening.

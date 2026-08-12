@@ -1471,6 +1471,74 @@ enum Design {
             CAMediaTimingFunction(controlPoints: 0, 0, 0.58, 1)
         }
 
+        /// A movement with weight behind it, for the one thing here that is *physical* rather
+        /// than informational.
+        ///
+        /// Every other movement in this vocabulary is a curve, because every other movement is a
+        /// surface reporting something — arriving, leaving, handing over. A spring is a claim
+        /// about mass, and almost nothing in this app has any. See `Motion.settle` for the one
+        /// that does.
+        ///
+        /// It exists as a type because **a timing function cannot express it**: a cubic bezier
+        /// whose second control point sits above 1 describes an overshoot, `CAMediaTimingFunction`
+        /// stores that point back unchanged when asked — and Core Animation clamps the value it
+        /// interpolates, so a 4.5% overshoot authored that way reaches the screen as a 0.0%
+        /// overshoot. Sampled off the presentation layer, the card stopped dead on its slot every
+        /// time. A spring is the only route to the movement, so a spring is what this is.
+        nonisolated struct Spring {
+            let mass: CGFloat
+            let stiffness: CGFloat
+            let damping: CGFloat
+
+            /// How far past its destination the movement goes, as a fraction of the trip — the
+            /// standard second-order result, `exp(-πζ/√(1-ζ²))`, so a caller can state the
+            /// overshoot it wants in a comment and have the number check it.
+            var overshoot: CGFloat {
+                let ratio = damping / (2 * (stiffness * mass).squareRoot())
+                guard ratio < 1 else { return 0 }
+                return exp(-.pi * ratio / (1 - ratio * ratio).squareRoot())
+            }
+
+            /// The movement itself, for a layer whose model value is **already** where it is
+            /// going: Auto Layout has moved the view, and this animates the picture of it from
+            /// where it was. Its length is the spring's own `settlingDuration` — a spring is
+            /// finished when it has stopped moving and not before — except under Reduce Motion,
+            /// where it is nothing at all and the layer is simply where the model says. Callers
+            /// guard on that too; this is the second lock on the same door, because a movement
+            /// whose length comes from physics rather than from a token is exactly the kind that
+            /// keeps running when every other one in the app has been turned off.
+            /// On the main actor alone, unlike the curves beside it: the Reduce Motion reading it
+            /// takes belongs to the running app, where a curve is only a shape.
+            @MainActor
+            func animation(keyPath: String, from: CGPoint, to: CGPoint) -> CASpringAnimation {
+                let animation = CASpringAnimation(keyPath: keyPath)
+                animation.mass = mass
+                animation.stiffness = stiffness
+                animation.damping = damping
+                animation.fromValue = NSValue(point: from)
+                animation.toValue = NSValue(point: to)
+                animation.duration = Design.Motion.reducesMotion
+                    ? Design.Motion.immediate
+                    : animation.settlingDuration
+                return animation
+            }
+        }
+
+        /// What a card pushed out of a stack rides — the toast deck fanning open, each waiting
+        /// receipt lifting out from behind the band.
+        ///
+        /// A hand fanning cards does not put each one down exactly on its mark; the deck is the
+        /// one place in this app where the thing moving is a physical object rather than a report
+        /// about one, so it is the one place that gets a spring. Damping ratio 0.70, which is a
+        /// 4.5% overshoot: on the deck's 26-point step that is a point and a bit, and on the
+        /// third card's 78 it is three and a half. Bigger reads as a toy. Nothing at all reads as
+        /// a panel sliding, which is the wrong physics for a card.
+        ///
+        /// The deck shipped on `glide` first and read as a snap, for `lift`'s measured reason:
+        /// at a step's distance `glide` is 84% finished within three frames, so the movement paid
+        /// for is never seen.
+        nonisolated static let settle = Spring(mass: 1, stiffness: 320, damping: 25)
+
         /// The curve the same thing leaves on: acceleration, because something let go of falls
         /// rather than lowering itself out. The mirror of the two above — what arrives
         /// decelerates into the hand, what leaves accelerates out of it.

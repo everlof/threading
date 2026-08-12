@@ -6628,6 +6628,16 @@
         }
       }
     },
+    "Burst": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salva"
+          }
+        }
+      }
+    },
     "Button": {
       "extractionState": "stale",
       "localizations": {
