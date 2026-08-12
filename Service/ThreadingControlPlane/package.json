@@ -6,7 +6,7 @@
   "scripts": {
     "check": "tsc --noEmit",
     "test": "vitest run && node --test scripts/*.test.mjs",
-    "test:load": "THREADING_RENDEZVOUS_LOAD=1 vitest run test/rendezvous-load.test.ts",
+    "test:load": "THREADING_RENDEZVOUS_LOAD=1 THREADING_RENDEZVOUS_LOAD_HOSTS=100 vitest run test/rendezvous-load.test.ts",
     "dev": "wrangler dev",
     "preflight": "node scripts/preflight.mjs",
     "verify:production": "node scripts/verify-production.mjs",

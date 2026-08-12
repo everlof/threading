@@ -35,6 +35,7 @@ export default defineConfig({
             TURN_KEY_ID: "",
             TURN_KEY_API_TOKEN: "",
             TEST_RENDEZVOUS_LOAD: process.env.THREADING_RENDEZVOUS_LOAD ?? "0",
+            TEST_RENDEZVOUS_LOAD_HOSTS: process.env.THREADING_RENDEZVOUS_LOAD_HOSTS ?? "100",
             TEST_MIGRATIONS: migrations,
           },
         },

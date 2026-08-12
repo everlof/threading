@@ -16,6 +16,7 @@ Durable Object work; database-side guards keep product quotas intact under concu
 npm ci
 npm run check
 npm test
+npm run test:load
 cp .dev.vars.example .dev.vars
 npx wrangler d1 migrations apply threading-control-plane --local
 npm run dev
@@ -119,4 +120,12 @@ app builds are configured for `https://remote.threading.codes`.
 `/health` is a cheap liveness response. `/ready` additionally proves that the independent signing
 and Apple-token secrets are usable, the Apple private key can sign both shipping client IDs, TURN
 configuration is present, and D1 answers a query. It returns only a generic 503 when unavailable;
-configuration details remain in metadata-only Worker logs.
+the D1 probe selects the newest required columns so a missing migration also blocks readiness.
+It returns only a generic 503 when unavailable; configuration details remain in metadata-only
+Worker logs.
+
+`npm run test:load` is the repeatable local capacity regression: 100 authenticated host sockets
+across separate Durable Objects, explicitly evicted and probed through WebSocket auto-response.
+Cloudflare's local Vitest runtime currently overflows inside its own Durable Object test helper
+before reaching 1,000 objects. Run the unchanged 10,000-host and slow/hostile-client gate against
+the provisioned staging account rather than treating the smaller emulator pass as equivalent.

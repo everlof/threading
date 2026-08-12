@@ -72,7 +72,7 @@ loopback remote interface.
 | Wi-Fi → cellular physical path | Passed: 32 KiB verified bidirectionally with service-mediated one-use signaling and no TURN configured, proving application bytes used direct ICE rather than the signaling tunnel |
 | Scaling bounds | 64 KiB/message, 2 MiB inbound/outbound bytes, 4,096 unread messages, 64 ICE candidates, 256 KiB SDP, eight pending sessions per host and a 30-second first-message deadline |
 | First-install pairing | Passed in code: QR-carried rendezvous-only credential → ICE tunnel → one-time Mac bootstrap → durable device credential; no Tailscale or `cloudflared` dependency |
-| Strict concurrency | Peer transport 17 tests (15 passed; opt-in live STUN and credentialed TURN probes skipped without environment credentials), shared remote protocol 87/87, Worker 36/36 plus deployment verifier 3/3; macOS and physical-iOS targets build with complete concurrency checking |
+| Strict concurrency | Peer transport 17 tests (15 passed; opt-in live STUN and credentialed TURN probes skipped without environment credentials), shared remote protocol 87/87, Worker 36/36 plus deployment verifier 3/3 and local 100-object hibernation gate 1/1; macOS and physical-iOS targets build with complete concurrency checking |
 | Binary input | Community Google WebRTC M151 XCFramework: about 28.4 MB macOS universal and 12.2 MB iOS device before app slicing/compression |
 
 This is a **provisional direct-path pass**, not a complete NAT matrix. Bonjour advertised on the
@@ -301,6 +301,9 @@ routing/data processing, abuse handling, support SLA and volume price.
 - Bound APNs/activity/widget token counts per account and rotate them transactionally.
 - Load-test at least 10,000 simultaneously connected host signaling sockets and slow/hostile clients with
   the same frame, connection and high-water limits as production.
+  The checked-in local gate covers 100 separate hibernating objects. Cloudflare's local Vitest
+  helper overflows internally before 1,000 objects, so the unchanged full gate belongs on the
+  provisioned staging account and is not considered passed by the local result.
 - A control-plane outage leaves local agents and Tailscale sessions working. Managed relay and
   push show a clear degraded/offline state; no fallback opens a listening interface.
 - Budget alerts must fire before 50%, 80% and 100% of the monthly relay and control-plane budget.
