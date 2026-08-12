@@ -158,6 +158,18 @@ add `--no-color --no-ext-diff --no-textconv`; parsing git's porcelain and unifie
 is `GitDiffParser`, pure functions with the fixture traps (C-quoted paths, the trailing tab
 after a path with spaces, `\ No newline` markers, `-z` rename records) pinned by unit tests.
 
+Repository discovery has one ordering boundary. `git ls-files -co --exclude-standard
+--deduplicate -z` supplies a unique lexical `GitRepositoryFileList`; the Activity atlas consumes
+that answer directly instead of applying a second 100,000-path Swift sort. The remote repository
+browser deliberately derives its localized natural-order page on the reader queue, so its visible
+`File2`/`File10` order remains unchanged without making presentation order an internal topology
+contract. A request to read one remote file does not build that complete catalogue: it asks Git
+for one `:(top,literal)` pathspec under a one-path output cap and requires the sole NUL-delimited
+result to equal the requested path. The existing post-membership regular-file, resolved-root
+containment, ignored-file and byte-cap checks still apply. Newlines, non-ASCII names and
+wildcard-looking filenames are regression fixtures because none may be reinterpreted as output or
+pathspec syntax.
+
 The executable remains the absolute system Git, while its child environment uses the PATH from
 the user's login shell. Git itself does not need PATH discovery, but hooks, credential helpers,
 filters and Git LFS do; inheriting launchd's GUI PATH made those programs disappear only inside

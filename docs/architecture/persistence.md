@@ -125,6 +125,15 @@ by id later, so startup records `containsUnkeyedRows` and only skipping the tabl
 it. The project and session rows stay all-or-nothing and eagerly decoded because those are the copy
 of record.
 
+Eager does not mean unbounded. A large store retains indexed session columns beside at most one
+1,024-row wave, decodes 256-row JSON arrays on up to half the active processors (with a hard cap of
+four), then validates and appends the completed batches serially in database order. Stores and
+wave tails below 512 rows keep the cheaper row-at-a-time decoder; the array and dispatch setup was
+measurably slower at ordinary cardinality. If an array decode fails, only that bounded 256-row
+batch is retried individually so the all-or-nothing failure still identifies the exact corrupt
+authoritative row. Payload id, provider kind and last-active-time checks remain row-level after
+decode, and no later wave begins until the current wave has joined.
+
 Agent execution evidence has different write and trust needs from mutable application state, so it
 does not live in SQLite. [Execution Audit](execution-audit.md) keeps a bounded append-only,
 SHA-256-linked JSONL chain per session under `ExecutionAudit/`. Its directory and files are

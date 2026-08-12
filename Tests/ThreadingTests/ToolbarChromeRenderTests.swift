@@ -494,14 +494,21 @@ final class ToolbarChromeRenderTests: XCTestCase {
         // because every Mac has it — on a real strip this is VS Code, Xcode or Zed.
         let openInControl = openIn()
 
+        // The panel's toggle is drawn *unselected*, because that is the only state the group
+        // ever holds it in: an open panel draws the toggle in its own corner and this copy
+        // stands down (`DisplayPanelToggle`). The filled example is the shell drawer, which is
+        // open here.
         let actions = ToolbarButtonGroupView(buttons: [
             ThemedIconButton(symbolName: "ellipsis", accessibility: "Session options"),
             ThemedIconButton(symbolName: "terminal", accessibility: "Show as Claude Code UI"),
-            ThemedIconButton(
+            selected(ThemedIconButton(
                 symbolName: "rectangle.bottomthird.inset.filled",
                 accessibility: "Shell drawer"
-            ),
-            selected(ThemedIconButton(symbolName: "sidebar.trailing", accessibility: "Panel"))
+            )),
+            ThemedIconButton(
+                symbolName: DisplayPanelToggle.symbolName,
+                accessibility: "Display panel"
+            )
         ])
 
         return strip([pageTab, newSession, openInControl, actions], spacing: Design.Spacing.medium)
@@ -544,10 +551,14 @@ final class ToolbarChromeRenderTests: XCTestCase {
         )
     }
 
-    /// The pane's header row as it is drawn: the tabs and the `+` that adds one, with both of
-    /// the row's small hover surfaces raised so their silhouettes can be compared. They came
+    /// The pane's header row as it is drawn: a tab's own ✕ and the `+` that adds one, with both
+    /// of the row's hover surfaces raised so their silhouettes can be compared. They came
     /// from one radius token and drew as a rounded square and a *disc* — see
     /// `Design.Radius.control(fitting:)`.
+    ///
+    /// The `+` is a `.toolbar` icon button: the panel's header and the session header across
+    /// the split are one band, and the toggle beside this `+` is literally the same control the
+    /// session header holds while the panel is shut.
     private static func paneHeaderRow() -> NSView {
         let close = ThemedButton(
             symbol: "xmark",
@@ -559,9 +570,11 @@ final class ToolbarChromeRenderTests: XCTestCase {
         close.widthAnchor.constraint(equalToConstant: Design.Size.tabCloseTarget).isActive = true
         close.heightAnchor.constraint(equalToConstant: Design.Size.tabCloseTarget).isActive = true
 
-        let add = ThemedButton(symbol: "plus", accessibility: "New tab", target: nil, action: nil)
-        add.widthAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize).isActive = true
-        add.heightAnchor.constraint(equalToConstant: DisplayPaneDefaults.buttonSize).isActive = true
+        let add = ThemedIconButton(
+            symbolName: "plus",
+            accessibility: "New tab",
+            inkSource: .chrome
+        )
 
         // Both raised, because the hover surface *is* what is being compared: at rest a plain
         // button draws nothing and the two silhouettes cannot be told apart.

@@ -239,26 +239,44 @@ incrementally from file events, not computed by walking its subtree. Row queries
 current viewport, cache at most 256 paths, and run through `AgentWorkTraceStore`'s utility worker.
 Closed directories are neither enumerated nor represented by views merely because the pane opened.
 
-**The panel's one header row ends in two controls: `+`, and the pane's own close.** The `xmark`
-sits outermost, in the slot a close occupies in every corner of this app, with `+` beside it; it
-runs through the same `onClose` the last tab closing already used, so the window collapses the
-split item one way rather than two. It only ever *hides* — a control that is gone with its pane
-cannot bring the pane back, so reopening stays the toolbar's toggle and **View ▸ Display Panel**
-— and it hides nothing else: the tabs are waiting when the panel is next opened, as a dormant
-session's scrollback is. It is the *pane's* close, not a tab's: a tab chip carries its own ✕,
-drawn on the chip. Current Theme hides `+` and the session-only decoration beside it, because
-those act on a chat's tabs and the global document is not one; the close stays, because the pane
-is on screen either way. The sidebar at the other edge of the window has no equivalent — it is
-one column with one toggle, and the trailing panel is the pane that arrives unasked when an agent
-displays something, which is what earns it a way out where the eye already is.
+**The panel's one header row ends in two controls: `+`, and the panel's own toggle.** The toggle
+sits outermost with `+` beside it, and it runs through the same `onClose` the last tab closing
+already used, so the window collapses the split item one way rather than two. It hides nothing
+but the pane: the tabs are waiting when the panel is next opened, as a dormant session's
+scrollback is. It is the *pane's* control, not a tab's — a tab chip carries its own ✕, drawn on
+the chip. Current Theme hides `+` and the session-only decoration beside it, because those act on
+a chat's tabs and the global document is not one; the toggle stays, because the pane is on screen
+either way. The sidebar at the other edge of the window has no equivalent — it is one column with
+one toggle, and the trailing panel is the pane that arrives unasked when an agent displays
+something, which is what earns it a way out where the eye already is.
+
+**That corner control is the *same* toggle the session header holds, not a second one.**
+`DisplayPanelToggle` states the symbol (`sidebar.trailing`) and the copy once; the session
+header's actions group draws it while the panel is shut, and `updatePaneToggleSelection` hides
+that copy for exactly as long as the panel draws its own — so the switch is never offered twice,
+a pane's width apart. Both are `.toolbar` icon buttons at `PaneHeaderDefaults.inset` from their
+pane's trailing edge, and the two headers are one band, so the button is at the same point of the
+window in both states: pressing it opens the pane **underneath a control that never moved**.
+`DisplayPaneLayoutTests.testThePanelsToggleKeepsItsPlaceWhenThePanelOpensUnderIt` asserts the two
+frames match in the window's coordinates, which is the whole claim.
+
+The corner held an `xmark` first (2026-08). It read as "close" where the toolbar read as
+"toggle", and — worse — the act of opening the panel pushed the real toggle a pane's width to the
+left of where the eye had just been, so the way back was neither where it was pressed nor what it
+looked like. The ink still differs by ground and should: the panel paints itself in the app
+theme's surface (`inkSource: .chrome`) while the toolbar's copy floats over the terminal's
+palette (`.backdrop`). Same control, same place, each inked for what is behind it.
 
 The floor moves with that row. `DisplayPaneDefaults.slimmestWidth` is stated as its parts —
-`padding + buttonSize + controlGap + buttonSize` — so adding a control moves the number rather
-than leaving it a literal that quietly stops meaning "the pane's own chrome". What it does *not*
-include is the tab strip: both of the strip's trailing constraints sit at 999, so at the floor the
-strip closes to nothing instead of being asked for a negative width and having AppKit break a
-required constraint to grant it. That is the same rule the strip already follows for
-`fittingSize` (below), stated in the one other place the pane could still charge for it.
+`PaneHeaderDefaults.inset + toolbarButtonWidth + controlGap + toolbarButtonWidth` — so adding a
+control moves the number rather than leaving it a literal that quietly stops meaning "the pane's
+own chrome". Matching the session header's button size raised it from 60 to 82, and a pane
+minimum is also a window minimum: 22pt of window width is what the corner control being the
+*same button* costs. What the floor does *not* include is the tab strip: both of the strip's
+trailing constraints sit at 999, so at the floor the strip closes to nothing instead of being
+asked for a negative width and having AppKit break a required constraint to grant it. That is the
+same rule the strip already follows for `fittingSize` (below), stated in the one other place the
+pane could still charge for it.
 
 **Shown image and HTML output are attachments, not a second presentation model.** Every `display_image`
 used to open a tab that coexisted with the ones before it, so an afternoon of charts left a strip

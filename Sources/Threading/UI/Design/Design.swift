@@ -114,7 +114,9 @@ enum Design {
         /// Sized so the hover surface has room *around* the glyph: at 16 the drawn mark filled
         /// its box to within a point and the highlight read as a smudge on the character rather
         /// than as a target under the pointer. It also matches `DisplayPaneDefaults.buttonSize`,
-        /// which is the `+` at the other end of the same tab row.
+        /// the `⋯` in the panel's footer. The `+` and the toggle at the other end of the tab row
+        /// are *not* this size: they are `.toolbar` buttons, because the session header across
+        /// the split draws the same toggle and the two must land on one point.
         static let tabCloseTarget: CGFloat = 20
 
         /// An icon button nested inside another control — a tab's ×, a sidebar row's ⋯.

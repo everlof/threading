@@ -586,6 +586,10 @@ fallback. This ownership is part of the harness contract—a completed or interr
 leave neither a process nor a Dock tile behind.
 `THREADING_STARTUP_PROFILE_RUNS` controls the repetition count (three by default);
 `THREADING_STARTUP_PROFILE_CONFIGURATION` selects the build configuration (Debug by default).
+`THREADING_STARTUP_PROFILE_SESSIONS` raises the isolated database snapshot to the requested session
+cardinality (up to 50,000) by cloning a schema-valid production row with unique identity and
+position fields; an already-larger snapshot is reported and left intact, and the live database is
+never edited.
 Set `THREADING_STARTUP_PROFILE_DERIVED_DATA` to a trusted existing DerivedData directory for fast
 incremental tuning runs; omitting it keeps each retained artifact self-contained.
 The startup build explicitly disables code coverage and builds only the measured host architecture.
@@ -1475,6 +1479,34 @@ real 32 px Claude asset and a 23-row viewport with two style passes measured **7
 an owned primitive comparison, not an attributed end-to-end launch delta; the existing
 `sidebar-stress` fixture carries the production viewport path.
 
+### Large-store session decoding
+
+The retained startup cardinality control made the persistence scaling boundary reproducible. A
+Release launch against the isolated 5,000-session snapshot initially measured `state_ms` at
+**163.539 / 141.317 / 120.729 ms** (median **141.317 ms**), while the matched App Launch trace
+reported **120.501 ms**. Time Profiler attributed **54.641 ms** of sampled weight beneath
+`ProjectDatabase.load` to `JSONDecoder.decode`; **39.641 ms** was the `AgentSession` decoder and
+**10.439 ms** was SQLite stepping. The database was paying the top-level JSON parser's fixed cost
+once for every row.
+
+Large loads now retain no more than a 1,024-row wave and decode 256-row JSON arrays on bounded
+parallel workers: half the active processor count, capped at four. Results join and are consumed
+serially in database order. Array decode failure retries only its 256-row batch one row at a time,
+preserving the exact corrupt-row diagnosis rather than turning a speedup into a quarantine mystery.
+The 512-row entry threshold is load-bearing: an initial implementation batched the 127-session
+ordinary fixture and regressed its median `state_ms` to **48.926 ms**. Keeping smaller stores on
+the original decoder restored **33.385 / 24.702 / 27.499 ms** (median **27.499 ms**), versus the
+nearby 122-session reference median of **27.349 ms**.
+
+With that gate, the final 5,000-session direct lines were **103.996 / 87.823 / 696.891 ms**. The
+last line was discarded as an environmental outlier only because every startup phase inflated
+during the disk-full, multi-build interval; the raw triplet remains recorded here. The retained
+direct median is therefore **103.996 ms**, **26.4% / 37.321 ms** below baseline, and the matched
+trace measured **92.191 ms** versus **120.501 ms**. Total settled-frame time is intentionally not
+claimed as improved: native-window and machine-load variance dominated it. Boundary tests cover
+the row-at-a-time path at 511 rows, ordering across batch and wave boundaries, and exact failure
+identity inside a valid-JSON batch.
+
 ## Display-pane transition beside a live TUI
 
 Opening the right pane originally performed two consecutive 200 ms transitions: first the split
@@ -1644,6 +1676,32 @@ and 31.6 ms to seek and render the bottom viewport while instantiating three of 
 This is a harness baseline, not a Linux-scale conclusion. It does, however, identify the
 numstat-bearing 100-row history query as the first production phase to inspect when the larger
 checkout is run.
+
+The subsequent Linux checkout run changed that owner: 94,854 visible paths made the full file
+catalogue and the one-file remote read larger than history. The catalogue was natural-sorted in
+the reader and then sorted again for the Activity atlas; reading one exact file manufactured the
+same complete allowlist before testing membership. A matched five-pass Debug run before and after
+moving uniqueness/lexical order to `git ls-files --deduplicate`, retaining it in a typed catalogue,
+and using one bounded literal pathspec measured:
+
+| Linux-scale production phase | Before median | After median | Change |
+|---|---:|---:|---:|
+| Complete repository-file reader, 94,854 paths | 673.5 ms | 339.2 ms | −49.6% |
+| Raw `ls-files` process floor | 295.8 ms | 225.6 ms | diagnostic |
+| Authorize and read one exact repository file | 950.9 ms | 38.0 ms | −96.0%, 25.0× faster |
+
+The reader result is intentionally lexical, not presentation-sorted. Consumers that need natural
+filename order request a separately bounded display page, still computed off-main, while the
+Activity atlas consumes the catalogue without another whole-repository sort. Exact reads retain
+resolved-root containment and ignored-file semantics and cap Git output to one maximum-length
+remote path; a directory-shaped pathspec that expands to multiple results is refused.
+
+The same post-repair run kept the end-to-end revision-range view bounded: 970 files, 39,488 lines
+and 1.58 MiB parsed in 89.6 ms median, then installed/layout/drew/sought-bottom in
+22.1/29.5/26.7/40.1 ms while instantiating 3 of 970 file rows. The remaining 339 ms catalogue
+median is mostly the 226 ms Git process plus decoding/allocation for all 94,854 paths; do not
+reintroduce a locale sort into that internal path or use a complete catalogue to authorize one
+file.
 
 Height discovery is split at that boundary. AppKit automatic row height initially retained roughly
 twice the actual height for a 400-line body, creating blank content after the last glyph; and a
@@ -2445,7 +2503,8 @@ and filtering runs at keystroke frequency. Their implementation-time gate is exp
 
 - command catalogs filter off-main, cancel superseded work, check cancellation during the pass,
   and hand the main actor at most 100 value rows for a virtual table;
-- workspace discovery uses `git ls-files -co --exclude-standard -z` once per execution checkout,
+- workspace discovery uses `git ls-files -co --exclude-standard --deduplicate -z` once per
+  execution checkout,
   never recursive enumeration per keystroke; the queue-confined index admits at most 100,000
   contained regular paths and 16 MiB of Git output, cancels superseded queued queries, and returns
   at most 64 relative references;

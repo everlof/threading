@@ -389,6 +389,16 @@ struct RepositoryFileAtlas: Sendable {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && seen.insert($0).inserted }
             .sorted()
+        self.init(sortedUniquePaths: paths)
+    }
+
+    /// Production repository discovery already arrives unique and lexically ordered from Git.
+    /// The generic initializer above remains for generated/test inputs that make no such claim.
+    init(repositoryFiles: GitRepositoryFileList) {
+        self.init(sortedUniquePaths: repositoryFiles.paths)
+    }
+
+    private init(sortedUniquePaths paths: [String]) {
         self.paths = paths
         self.indexByPath = Dictionary(uniqueKeysWithValues: paths.enumerated().map { ($1, $0) })
         rail = Self.makeTopology(paths: paths, maximumBins: Limits.railBins)
