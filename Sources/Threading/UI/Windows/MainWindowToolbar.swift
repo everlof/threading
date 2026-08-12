@@ -264,10 +264,14 @@ extension MainWindowController: NSToolbarDelegate {
             ) { [weak self] in
                 self?.toggleShellDrawer()
             },
+            // The panel's toggle is *one* control with two homes: this one, and the panel's own
+            // corner while the panel is open — same glyph, same size, same distance from the
+            // window's trailing edge. `updatePaneToggleSelection` stands this copy down for
+            // exactly as long as the other is on screen. See `DisplayPanelToggle`.
             makePaneToggleButton(
-                symbolName: "sidebar.trailing",
-                label: "Panel",
-                toolTip: "Show or Hide the Display Panel",
+                symbolName: DisplayPanelToggle.symbolName,
+                label: DisplayPanelToggle.accessibility,
+                toolTip: DisplayPanelToggle.toolTip,
                 store: { [weak self] in self?.displayPaneToolbarButton = $0 }
             ) { [weak self] in
                 self?.toggleDisplayPane()

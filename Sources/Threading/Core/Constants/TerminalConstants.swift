@@ -517,11 +517,22 @@ enum DisplayPaneDefaults {
     /// 200pt is still where it opens; it is simply no longer where the *window* stops.
     ///
     /// Stated as the parts rather than as the number they came to, because the parts are what
-    /// moves it: the header's two trailing controls — `+` and the pane's close — and the margin
-    /// the row keeps from the pane's edge. The tab strip is not in the sum; it scrolls, and
-    /// yields its whole width here (see `DisplayPaneController.setupConstraints`).
-    static let slimmestWidth: CGFloat =
-        padding + buttonSize + controlGap + buttonSize + controlGap * 2
+    /// moves it: the header's two trailing controls — `+` and the panel's own toggle — and the
+    /// margin the row keeps from the pane's edge. The tab strip is not in the sum; it scrolls,
+    /// and yields its whole width here (see `DisplayPaneController.setupConstraints`).
+    ///
+    /// Both are `.toolbar` icon buttons on the *session* header's margin, because the toggle is
+    /// one control drawn in two headers and must not move between them (`DisplayPanelToggle`).
+    /// That is 22pt more floor than the pane's own smaller buttons cost, and therefore 22pt of
+    /// window minimum — the price of the corner control being the same button either way.
+    @MainActor
+    static var slimmestWidth: CGFloat {
+        PaneHeaderDefaults.inset
+            + Design.Size.toolbarButtonWidth
+            + controlGap
+            + Design.Size.toolbarButtonWidth
+            + controlGap * 2
+    }
 
     /// How hard the panel holds the width the divider was dragged to.
     ///
@@ -536,6 +547,11 @@ enum DisplayPaneDefaults {
         NSLayoutConstraint.Priority.defaultLow.rawValue + 10
     )
     static let padding: CGFloat = 8
+
+    /// The small square controls *inside* the pane — the footer's `⋯`, which sits with a caption
+    /// rather than in the window's chrome. The header row's two are not this size: `+` and the
+    /// panel's toggle are `.toolbar` icon buttons, because the session header across the split
+    /// draws the same toggle and the two must land on one point (`DisplayPanelToggle`).
     static let buttonSize: CGFloat = 20
 
     /// The air between two of the header row's own controls — tighter than `padding`, which is
