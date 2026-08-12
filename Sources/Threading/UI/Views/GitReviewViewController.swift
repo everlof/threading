@@ -522,12 +522,12 @@ final class GitReviewViewController: NSViewController {
         guard isViewLoaded,
               scrollView.documentView === fileTableView,
               !counterLabel.isHidden else {
-            if isViewLoaded { jumpToEndButton.isHidden = true }
+            if isViewLoaded { jumpToEndButton.setFloatingPresence(false) }
             return
         }
         let overflow = maximumScrollOffsetY()
         let distanceFromEnd = overflow - scrollView.contentView.bounds.origin.y
-        jumpToEndButton.isHidden = overflow <= 1 || distanceFromEnd <= 4
+        jumpToEndButton.setFloatingPresence(overflow > 1 && distanceFromEnd > 4)
     }
 
     /// AppKit's actual terminal scroll position. Let the clip view apply the same constraints

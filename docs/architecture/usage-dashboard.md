@@ -231,6 +231,44 @@ paths land synchronously, and a detached chart stops its driver. Hover tooltips,
 inspection, a group role, summary value and value-change announcements provide the pointerless and
 accessibility paths.
 
+## Before there are numbers
+
+The page has two states that are not the same thing, and for a long time both were one grey
+sentence drawn across the middle of the chart: a scan in flight, and a scan that found nothing.
+Neither told a reader anything they could act on, and the sentence was repeated verbatim under
+five dashed metric cards and beside the hero total, so a dashboard whose entire content was one
+line of text printed it six times over a value axis labelled 0/0.2/0.5/0.8/1 for a domain nobody
+had measured anything in.
+
+`ThemedChartPlaceholderView` now owns both states (see
+[`design-system.md`](design-system.md)), and the dashboard states them once. Empty says what would
+fill the page; the cards keep their titles and a dash and say nothing else. The scan states its
+own progress:
+
+- `UsageScanProgress` carries the source being read, how many sources are done, and the total.
+  `fraction` is `nil` until the total is known, so the counting phase shows a breathing ghost
+  rather than a bar pinned at zero.
+- `TranscriptUsageService.build` **enumerates every account's transcripts before parsing any of
+  them**, so the denominator exists from the first file instead of growing under the bar. Listing
+  a directory is the cheap half of that work.
+- `UsageScanProgressReporter` bounds the stream. A warm scan answers nearly every file from
+  `UsageScanCache` and gets through thousands a second, so a report leaves the scan queue only
+  when `UsageScanDefaults.progressInterval` has elapsed or the source being read changes — the
+  second condition is what stops "Claude Code" sitting on screen through the whole Codex half. A
+  failed OpenCode export still advances the count, because a bar that only counts successes stops
+  short of its own end whenever one breaks.
+- Progress arrives as `TranscriptUsageScanProgressDidChange`, deliberately separate from
+  `TranscriptUsageDidChange`, and reaches the dashboard through `updateScanProgress` rather than
+  `update`: the tick changes one line of text and one bar, and rebuilding the hero, five cards,
+  the breakdown table and the coverage list ten times a second would be a whole-page rebuild for
+  each of them.
+
+A rescan behind a report that is already on screen is a different situation and gets a different
+answer: a short strip beside the tabs, never a status over the chart. The page keeps its last
+complete snapshot visible by design, so covering it would hide the very thing being refreshed —
+and until this existed, pressing **Rebuild** produced no visible change at all until the new
+report swapped in. The strip carries the same fraction and disappears when the scan ends.
+
 ## Scaling gate and measurements
 
 The repeating breakdown is an `NSTableView`; only visible rows construct AppKit cells. Report

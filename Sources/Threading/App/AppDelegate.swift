@@ -68,7 +68,10 @@ private struct StartupProfileMeasurement: Sendable {
             + "mw_finalize_ms=\(milliseconds(window.splitFinalizeNanoseconds)) "
             + "mw_chrome_ms=\(milliseconds(window.chromeCoordinatorNanoseconds)) "
             + "mw_frame_ms=\(milliseconds(window.initialFrameNanoseconds)) "
-            + "mw_title_ms=\(milliseconds(window.initialTitleNanoseconds))\n"
+            + "mw_title_ms=\(milliseconds(window.initialTitleNanoseconds)) "
+            + "mw_initial_sidebar_geometry_ms=\(milliseconds(window.initialSidebarGeometryNanoseconds)) "
+            + "mw_initial_sidebar_mount_ms=\(milliseconds(window.initialSidebarMountNanoseconds)) "
+            + "mw_initial_sidebar_rows=\(window.initialSidebarLogicalRowCount)\n"
         try? FileHandle.standardOutput.write(contentsOf: Data(line.utf8))
     }
 
@@ -446,7 +449,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             let projects = ProjectStore.shared.projects
             let projectCount = projects.count
             let sessionCount = projects.reduce(0) { $0 + $1.sessions.count }
-            let windowPerformance = mainWindowController.startupPerformance
             DispatchQueue.main.async {
                 let firstReadyTurnNanoseconds = DispatchTime.now().uptimeNanoseconds
                 let layoutStartNanoseconds = DispatchTime.now().uptimeNanoseconds
@@ -468,7 +470,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                     mode: plan.isRecovery ? "recovery" : "normal",
                     projectCount: projectCount,
                     sessionCount: sessionCount,
-                    window: windowPerformance
+                    window: mainWindowController.startupPerformance
                 )
                 NSApp.terminate(nil)
             }

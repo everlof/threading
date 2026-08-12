@@ -343,6 +343,10 @@
 		B3A8CC7DE9D86E0F9002FAF2 /* GrokACPProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8827CC94B5DA00BDF535AAFC /* GrokACPProfileTests.swift */; };
 		1E64FFD2BDB9D541FB687C3B /* AttentionAlertSoundTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58BFE23CD5C62383CEB9E143 /* AttentionAlertSoundTests.swift */; };
 		CEA643FB16AD4DDAC57F40AF /* TerminalBellTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50D8858AD66AE3358263108C /* TerminalBellTests.swift */; };
+		E86A93565FABAA14281F12B4 /* FloatingScrollTargetMotionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1784F47953E85CFF7F09AAC2 /* FloatingScrollTargetMotionTests.swift */; };
+		F5697D82E62738F2BDD779A8 /* ThemedChartPlaceholderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79CC79A494A03080EA20263E /* ThemedChartPlaceholderTests.swift */; };
+		33E5AD11C103EC7D4EF85D03 /* UsageScanProgressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96FF3649D985927DDD31522A /* UsageScanProgressTests.swift */; };
+		40DC0CB1FDA124E5AFC4A80E /* UsageDashboardWaitingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 228EE98CDA5D7985CC649032 /* UsageDashboardWaitingTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -740,6 +744,10 @@
 		8827CC94B5DA00BDF535AAFC /* GrokACPProfileTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GrokACPProfileTests.swift; sourceTree = "<group>"; };
 		58BFE23CD5C62383CEB9E143 /* AttentionAlertSoundTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AttentionAlertSoundTests.swift; sourceTree = "<group>"; };
 		50D8858AD66AE3358263108C /* TerminalBellTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalBellTests.swift; sourceTree = "<group>"; };
+		1784F47953E85CFF7F09AAC2 /* FloatingScrollTargetMotionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FloatingScrollTargetMotionTests.swift; sourceTree = "<group>"; };
+		79CC79A494A03080EA20263E /* ThemedChartPlaceholderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedChartPlaceholderTests.swift; sourceTree = "<group>"; };
+		96FF3649D985927DDD31522A /* UsageScanProgressTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageScanProgressTests.swift; sourceTree = "<group>"; };
+		228EE98CDA5D7985CC649032 /* UsageDashboardWaitingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageDashboardWaitingTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1217,6 +1225,10 @@
 				8827CC94B5DA00BDF535AAFC /* GrokACPProfileTests.swift */,
 				58BFE23CD5C62383CEB9E143 /* AttentionAlertSoundTests.swift */,
 				50D8858AD66AE3358263108C /* TerminalBellTests.swift */,
+				1784F47953E85CFF7F09AAC2 /* FloatingScrollTargetMotionTests.swift */,
+				79CC79A494A03080EA20263E /* ThemedChartPlaceholderTests.swift */,
+				96FF3649D985927DDD31522A /* UsageScanProgressTests.swift */,
+				228EE98CDA5D7985CC649032 /* UsageDashboardWaitingTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -2066,6 +2078,10 @@
 				B3A8CC7DE9D86E0F9002FAF2 /* GrokACPProfileTests.swift in Sources */,
 				1E64FFD2BDB9D541FB687C3B /* AttentionAlertSoundTests.swift in Sources */,
 				CEA643FB16AD4DDAC57F40AF /* TerminalBellTests.swift in Sources */,
+				E86A93565FABAA14281F12B4 /* FloatingScrollTargetMotionTests.swift in Sources */,
+				F5697D82E62738F2BDD779A8 /* ThemedChartPlaceholderTests.swift in Sources */,
+				33E5AD11C103EC7D4EF85D03 /* UsageScanProgressTests.swift in Sources */,
+				40DC0CB1FDA124E5AFC4A80E /* UsageDashboardWaitingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -2478,7 +2478,7 @@ final class ConversationViewController: NSViewController {
 
     func updateScrollToEndControl() {
         guard isViewLoaded else { return }
-        jumpToEndButton.isHidden = isNearConversationBottom
+        jumpToEndButton.setFloatingPresence(!isNearConversationBottom)
     }
 
     func maximumConversationScrollOffsetY() -> CGFloat {

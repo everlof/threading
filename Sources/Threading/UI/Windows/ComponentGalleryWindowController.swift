@@ -153,6 +153,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedSplitView",
         "ThemedStackedBandChartView",
         "ThemedTimeSeriesChartView",
+        "ThemedChartPlaceholderView",
         "ChartCardView",
         "ListSelectionStrength",
         "ThemedTableHeaderView",
@@ -1717,6 +1718,11 @@ final class ComponentGalleryViewController: NSViewController {
                     galleryChartCards()
                 ),
                 story(
+                    "ThemedChartPlaceholderView",
+                    "What a chart says with no series: work in flight on the left, a finished empty answer on the right.",
+                    galleryChartPlaceholders()
+                ),
+                story(
                     "UsageDashboardView",
                     "Overview and Limit History are separate tabs; switch ranges or metrics to inspect the retained chart morph.",
                     dashboard
@@ -1736,6 +1742,40 @@ final class ComponentGalleryViewController: NSViewController {
             animated: true
         )
         showReceipt(L10n.string("Switched the chart data."))
+    }
+
+    /// The two states side by side, which is the only way to see that they do not look alike.
+    private func galleryChartPlaceholders() -> NSView {
+        let loading = ThemedStackedBandChartView(frame: .zero)
+        loading.setModel(ThemedChartModel(
+            title: L10n.string("Daily usage"),
+            accessibilitySummary: L10n.string("Reading usage sources…"),
+            series: [],
+            emptyMessage: L10n.string("Reading usage sources…"),
+            emptyDetail: L10n.format(
+                "%@ · %@",
+                "Claude Code",
+                L10n.format("%lld sources read", 128)
+            ),
+            placeholder: .loading(progress: 0.42)
+        ), animated: false)
+
+        let empty = ThemedTimeSeriesChartView(frame: .zero)
+        empty.setModel(ThemedChartModel(
+            title: L10n.string("Daily usage"),
+            accessibilitySummary: L10n.string("No usage recorded yet"),
+            series: [],
+            emptyMessage: L10n.string("No usage recorded yet"),
+            emptyDetail: L10n.string("Cost and tokens appear here once an agent session has run.")
+        ), animated: false)
+
+        let row = NSStackView(views: [loading, empty])
+        row.orientation = .horizontal
+        row.distribution = .fillEqually
+        row.spacing = Design.Spacing.medium
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.widthAnchor.constraint(equalToConstant: 820).isActive = true
+        return row
     }
 
     private func galleryChartModel(alternate: Bool) -> ThemedChartModel {

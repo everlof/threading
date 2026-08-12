@@ -45,6 +45,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
     private var overview: UsageDashboardOverviewProjection?
     private var limits: [UsageLimitDashboardSeries] = []
     private var isBuilding = false
+    private var scanProgress: UsageScanProgress?
     private var selectedDays = 30
     private var selectedMetric = Metric.cost
     private var selectedBreakdown = Breakdown.models
@@ -60,6 +61,9 @@ final class UsageDashboardView: NSView, ThemedComponent {
     }()
 
     private let tabControl = ThemedSegmentedControl()
+    private let scanStatusLabel = NSTextField(labelWithString: "")
+    private let scanProgressBar = ThemedProgressBar()
+    private let scanStatus = NSStackView()
     private let rangeControl = ThemedSegmentedControl()
     private let metricControl = ThemedSegmentedControl()
     private let consumptionHero = UsageConsumptionHeroView()
@@ -92,21 +96,54 @@ final class UsageDashboardView: NSView, ThemedComponent {
         overview: UsageDashboardOverviewProjection?,
         limits: [UsageLimitDashboardSeries],
         isBuilding: Bool,
+        scanProgress: UsageScanProgress? = nil,
         animated: Bool
     ) {
         self.overview = overview
         self.limits = limits.sorted { $0.title < $1.title }
         self.isBuilding = isBuilding
+        self.scanProgress = scanProgress
 
         let validIDs = Set(self.limits.map(\.id))
         if selectedLimitID.map({ !validIDs.contains($0) }) ?? true {
             selectedLimitID = self.limits.first?.id
         }
         configureLimitChooser()
+        applyScanStatus()
         refreshUsage(animated: animated && hasPresentedUsage)
         refreshLimits(animated: animated && hasPresentedLimits)
         hasPresentedUsage = overview != nil
         hasPresentedLimits = !limits.isEmpty
+    }
+
+    /// A scan tick, which arrives many times for one report and changes one line of text and one
+    /// bar. It deliberately does not run `update`: rebuilding the hero, five cards, the breakdown
+    /// table and the coverage list ten times a second would be a whole-page rebuild per tick, and
+    /// none of those surfaces are what the progress is about.
+    func updateScanProgress(_ progress: UsageScanProgress?, isBuilding: Bool) {
+        scanProgress = progress
+        self.isBuilding = isBuilding
+        applyScanStatus()
+        // With a report on screen the strip above is the whole answer: the chart is showing real
+        // numbers, and a status over them would cover the very thing being refreshed.
+        guard overview == nil else { return }
+        usageChart.setModel(placeholderChartModel(), animated: false)
+        showPlaceholderHero()
+    }
+
+    /// Whether a rescan is announced beside the tabs, and how far it has got.
+    private func applyScanStatus() {
+        let announces = isBuilding && overview != nil
+        scanStatus.isHidden = !announces
+        guard announces else { return }
+        if let fraction = scanProgress?.fraction {
+            scanProgressBar.isHidden = false
+            scanProgressBar.progress = fraction
+        } else {
+            // Still counting the sources. The sentence says the work is happening; a bar at zero
+            // would only say how little of an unknown total is done.
+            scanProgressBar.isHidden = true
+        }
     }
 
     /// Deterministic fixture compatibility. Production prepares the projection on a utility task
@@ -115,12 +152,14 @@ final class UsageDashboardView: NSView, ThemedComponent {
         report: TranscriptUsageReport?,
         limits: [UsageLimitDashboardSeries],
         isBuilding: Bool,
+        scanProgress: UsageScanProgress? = nil,
         animated: Bool
     ) {
         update(
             overview: report.flatMap { UsageDashboardProjector.overview(report: $0) },
             limits: limits,
             isBuilding: isBuilding,
+            scanProgress: scanProgress,
             animated: animated
         )
     }
@@ -131,6 +170,21 @@ final class UsageDashboardView: NSView, ThemedComponent {
     var usageChartCompositionForTesting: ThemedChartComposition { usageChart.composition }
     var limitChartCompositionForTesting: ThemedChartComposition { limitChart.composition }
     var breakdownVisibleSubviewCountForTesting: Int { breakdownTable.visibleCellCount }
+    /// What the Overview chart is saying instead of series, or `nil` when it has some.
+    var usagePlaceholderForTesting: ThemedChartPlaceholder? {
+        usageChart.showsPlaceholder ? usageChart.model.placeholder : nil
+    }
+    var usagePlaceholderTitleForTesting: String? {
+        usageChart.showsPlaceholder ? usageChart.model.emptyMessage : nil
+    }
+    var usagePlaceholderDetailForTesting: String? {
+        usageChart.showsPlaceholder ? usageChart.model.emptyDetail : nil
+    }
+    var metricCardDetailsForTesting: [String] { metricCards.map(\.detailForTesting) }
+    /// The rescan strip beside the tabs: whether it is up, and the fraction it is showing.
+    var scanStripForTesting: (isVisible: Bool, progress: Double?) {
+        (!scanStatus.isHidden, scanProgressBar.isHidden ? nil : scanProgressBar.progress)
+    }
     var topToolCountForTesting: Int { consumptionHero.toolCount }
     var visibleTabForTesting: DashboardTab { selectedTab }
 
@@ -172,10 +226,29 @@ final class UsageDashboardView: NSView, ThemedComponent {
             guard let tab = DashboardTab(rawValue: index) else { return }
             self?.select(tab: tab, animated: true)
         }
+        // The rescan strip. A page that already has its last complete report on screen says a new
+        // scan is running here, beside the tabs, rather than in the chart: the chart is showing
+        // real numbers and a status over them would be covering the thing being refreshed.
+        scanStatusLabel.applyFont(.detail())
+        scanStatusLabel.textColor = Design.Text.secondary
+        scanStatusLabel.stringValue = L10n.string("Reading usage sources…")
+        scanProgressBar.setAccessibilityLabel(L10n.string("Reading usage sources…"))
+        scanProgressBar.widthAnchor.constraint(
+            equalToConstant: Design.UsageDashboard.scanProgressWidth
+        ).isActive = true
+        scanStatus.orientation = .horizontal
+        scanStatus.alignment = .centerY
+        scanStatus.spacing = Design.Spacing.small
+        scanStatus.addArrangedSubview(scanStatusLabel)
+        scanStatus.addArrangedSubview(scanProgressBar)
+        scanStatus.isHidden = true
+
         let tabSpacer = NSView()
         tabSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let tabRow = NSStackView(views: [tabControl, tabSpacer])
+        scanStatus.setContentHuggingPriority(.required, for: .horizontal)
+        let tabRow = NSStackView(views: [tabControl, tabSpacer, scanStatus])
         tabRow.orientation = .horizontal
+        tabRow.alignment = .centerY
         tabRow.distribution = .fill
         column.addArrangedSubview(tabRow)
 
@@ -396,29 +469,18 @@ final class UsageDashboardView: NSView, ThemedComponent {
 
     private func refreshUsage(animated: Bool) {
         guard let range = overview?.range(days: selectedDays) else {
-            let status = isBuilding ? L10n.string("Reading usage sources…") : L10n.string("No usage recorded yet")
-            consumptionHero.show(
-                metric: selectedMetric == .cost ? L10n.string("Total cost") : L10n.string("Processed tokens"),
-                value: "—",
-                scope: status,
-                quality: "",
-                tools: [],
-                remainingToolCount: 0
-            )
+            showPlaceholderHero()
             let titles = [
                 L10n.string("Processed tokens"), L10n.string("Cached input"),
                 L10n.string("Uncached input"), L10n.string("Output"),
                 L10n.string("Cache saved")
             ]
             for (card, title) in zip(metricCards, titles) {
-                card.show(title: title, value: "—", detail: status)
+                // The status is said once, in the chart. Repeating it under five dashes made a
+                // page whose whole content was one sentence printed six times.
+                card.show(title: title, value: "—", detail: "")
             }
-            usageChart.setModel(.init(
-                title: L10n.string("Daily usage"),
-                accessibilitySummary: status,
-                series: [],
-                emptyMessage: status
-            ), animated: false)
+            usageChart.setModel(placeholderChartModel(), animated: false)
             breakdownTable.show([])
             coverageView.show(defaultCoverage())
             return
@@ -517,6 +579,67 @@ final class UsageDashboardView: NSView, ThemedComponent {
         coverageView.show(overview?.coverage ?? [])
     }
 
+    // MARK: - Nothing to plot yet
+
+    /// What the page says before it has numbers, in the two states that are not the same thing:
+    /// a scan in flight, and a scan that found nothing.
+    ///
+    /// The second one used to say "No usage recorded yet" and stop, which answers none of the
+    /// questions somebody looking at an empty dashboard actually has.
+    private var usagePlaceholder: (state: ThemedChartPlaceholder, title: String, detail: String?) {
+        guard isBuilding else {
+            return (
+                .empty,
+                L10n.string("No usage recorded yet"),
+                L10n.string("Cost and tokens appear here once an agent session has run.")
+            )
+        }
+        let title = L10n.string("Reading usage sources…")
+        guard let progress = scanProgress, progress.totalSources > 0 else {
+            // Enumeration is the one phase with no denominator to report: the transcripts are
+            // still being counted.
+            return (.loading(progress: nil), title, L10n.string("Looking for local transcripts."))
+        }
+        let read = L10n.format("%lld sources read", Int64(progress.completedSources))
+        return (
+            .loading(progress: progress.fraction),
+            title,
+            progress.sourceName.map { L10n.format("%@ · %@", $0, read) } ?? read
+        )
+    }
+
+    /// The hero with no total to lead on: its metric name, a dash, and nothing else.
+    ///
+    /// The status is said once, in the chart immediately to its right. The two sit on the same
+    /// row, so a hero repeating the sentence beside it printed the page's only content twice
+    /// within an inch of itself.
+    private func showPlaceholderHero() {
+        consumptionHero.show(
+            metric: selectedMetric == .cost
+                ? L10n.string("Total cost")
+                : L10n.string("Processed tokens"),
+            value: "—",
+            scope: "",
+            quality: "",
+            tools: [],
+            remainingToolCount: 0
+        )
+    }
+
+    private func placeholderChartModel() -> ThemedChartModel {
+        let placeholder = usagePlaceholder
+        return ThemedChartModel(
+            title: L10n.string("Daily usage"),
+            accessibilitySummary: [placeholder.title, placeholder.detail]
+                .compactMap { $0 }
+                .joined(separator: ". "),
+            series: [],
+            emptyMessage: placeholder.title,
+            emptyDetail: placeholder.detail,
+            placeholder: placeholder.state
+        )
+    }
+
     private func chartModel(_ range: UsageDashboardRangeProjection) -> ThemedChartModel {
         let series = range.metric(selectedMetric).chartSeries.map { projected in
             let title = projected.isOther ? L10n.string("Other") : (projected.title ?? "")
@@ -598,18 +721,17 @@ final class UsageDashboardView: NSView, ThemedComponent {
                     L10n.string("Current"), L10n.string("Projected 100%"),
                     L10n.string("Recorded resets"), L10n.string("Banked resets")
                 ]
-                card.show(
-                    title: titles[index],
-                    value: "—",
-                    detail: L10n.string("Claude and Codex publish authoritative windows")
-                )
+                card.show(title: titles[index], value: "—", detail: "")
             }
+            let detail = L10n.string("Claude and Codex publish authoritative windows")
+            let title = L10n.string("No authoritative limit history yet")
             limitChart.setModel(.init(
                 title: L10n.string("Limit history"),
-                accessibilitySummary: L10n.string("No authoritative limit history yet"),
+                accessibilitySummary: [title, detail].joined(separator: ". "),
                 series: [],
                 valueFormat: .percent,
-                emptyMessage: L10n.string("No authoritative limit history yet")
+                emptyMessage: title,
+                emptyDetail: detail
             ), animated: false)
             return
         }
@@ -812,6 +934,8 @@ private final class UsageMetricCardView: NSView, ThemedComponent {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    var detailForTesting: String { detailField.stringValue }
+
     func show(title: String, value: String, detail: String) {
         titleField.stringValue = title
         valueField.stringValue = value
@@ -907,7 +1031,12 @@ private final class UsageConsumptionHeroView: NSView, ThemedComponent {
         metricField.stringValue = metric
         valueField.stringValue = value
         scopeField.stringValue = scope
+        scopeField.isHidden = scope.isEmpty
         qualityField.stringValue = quality
+        qualityField.isHidden = quality.isEmpty
+        // A heading over nothing reads as a list that failed to load. With no split to name, the
+        // caption goes with it.
+        toolsField.isHidden = tools.isEmpty
         toolsStack.arrangedSubviews.forEach {
             toolsStack.removeArrangedSubview($0)
             $0.removeFromSuperview()

@@ -302,6 +302,15 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
 
     // MARK: - State
 
+    /// Whether the floating presentation is on its way out — still drawn, no longer offered.
+    /// See `setFloatingPresence(_:animated:)`, which is the only thing that writes it.
+    fileprivate var isFloatingLeaving = false
+
+    /// Which presence transition is the current one. A departure hides the view when its own
+    /// animation finishes, and an arrival that interrupts it must be able to say so — the
+    /// completion has no other way to tell "my departure ended" from "a departure ended".
+    fileprivate var floatingMotionGeneration = 0
+
     private var isPressed = false {
         didSet {
             guard isPressed != oldValue else { return }
@@ -1198,6 +1207,175 @@ extension ThemedButton {
         ])
         return button
     }
+
+    // MARK: Floating presence
+
+    /// Whether the floating target is currently being offered.
+    ///
+    /// Read rather than `isHidden`, because a target on its way out is still on screen and is
+    /// no longer on offer: the host asks the same question every scroll event, and answering it
+    /// from the pixels would restart the departure on every one of them.
+    var isFloatingPresent: Bool { !isHidden && !isFloatingLeaving }
+
+    /// Offers the floating target, or takes it back — travelling either way.
+    ///
+    /// The arrival comes **up** from below its resting place and grows to full size, so the
+    /// arrow reads as rising out of the edge it steers toward rather than being switched on
+    /// over the content. The departure is its mirror, and quicker: arriving is information the
+    /// eye follows, leaving is a decision already made.
+    ///
+    /// Idempotent, and safe to interrupt in either direction — the hosts call this from a
+    /// scroll callback, so "still absent" has to cost nothing and a reader who scrolls back up
+    /// mid-departure must get the arrow back rather than a second animation fighting the first.
+    ///
+    /// `animated: false` is for a host replacing everything under the target — a re-render has
+    /// no *from* picture to travel out of, so the arrow leaves with the content it belonged to.
+    func setFloatingPresence(_ present: Bool, animated: Bool = true) {
+        guard present != isFloatingPresent else { return }
+
+        // Whatever was in flight is now history: its completion must not hide a target that is
+        // arriving again, and its opacity animation must not keep dimming one.
+        floatingMotionGeneration &+= 1
+        let generation = floatingMotionGeneration
+        isFloatingLeaving = false
+        layer?.removeAnimation(forKey: FloatingTargetMotion.animationKey)
+        settleFloatingOpacity()
+
+        // Each branch below names its own token, because the durations are not one duration
+        // read twice: the arrival is the length of a rise, the departure the length of a drop.
+        let travelTime = present
+            ? Design.Motion.floatingTargetArrive
+            : Design.Motion.vanish
+        // No window means no render tree to animate in: a completion that may never arrive
+        // would leave the target visible and unhittable, so the state is simply applied.
+        guard animated, travelTime > 0, let layer, window != nil else {
+            isHidden = !present
+            return
+        }
+
+        guard present else {
+            isFloatingLeaving = true
+            let fall = floatingTransform(
+                dy: FloatingTargetMotion.fall * floatingDownward,
+                scale: FloatingTargetMotion.leaveScale
+            )
+            let sink = CABasicAnimation(keyPath: FloatingTargetMotion.transformKeyPath)
+            sink.toValue = NSValue(caTransform3D: fall)
+            sink.duration = Design.Motion.vanish
+            sink.timingFunction = Design.Motion.drop
+            sink.fillMode = .forwards
+            sink.isRemovedOnCompletion = false
+            layer.add(sink, forKey: FloatingTargetMotion.animationKey)
+
+            // The fade is driven through AppKit rather than Core Animation so that *this*
+            // group's completion is what hides the view: a layer animation's own completion
+            // is the render tree's to deliver, and this one has a model change hanging off it.
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = Design.Motion.vanish
+                context.timingFunction = Design.Motion.drop
+                self.animator().alphaValue = 0
+            }, completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.floatingMotionGeneration == generation else { return }
+                    self.isFloatingLeaving = false
+                    self.isHidden = true
+                    self.layer?.removeAnimation(forKey: FloatingTargetMotion.animationKey)
+                    self.settleFloatingOpacity()
+                }
+            })
+            return
+        }
+
+        isHidden = false
+        // Presentation only: the model transform and opacity are already the resting ones, so
+        // an arrival interrupted by anything at all leaves the target exactly where it belongs.
+        let rise = floatingTransform(
+            dy: FloatingTargetMotion.rise * floatingDownward,
+            scale: FloatingTargetMotion.arriveScale
+        )
+        let travel = CABasicAnimation(keyPath: FloatingTargetMotion.transformKeyPath)
+        travel.fromValue = NSValue(caTransform3D: rise)
+        let fade = CABasicAnimation(keyPath: FloatingTargetMotion.opacityKeyPath)
+        fade.fromValue = 0
+        let arrival = CAAnimationGroup()
+        arrival.animations = [travel, fade]
+        arrival.duration = Design.Motion.floatingTargetArrive
+        // `lift` rather than the `glide` every larger arrival here uses: over this rise glide
+        // finishes before the eye has it, and the arrow reads as switched on. See the curve.
+        arrival.timingFunction = Design.Motion.lift
+        layer.add(arrival, forKey: FloatingTargetMotion.animationKey)
+    }
+
+    /// The resting transform, moved and shrunk about the button's own visual centre.
+    ///
+    /// Composed about that centre whatever the layer's anchor point, so the arithmetic holds
+    /// under AppKit's own layer geometry rather than assuming a particular one — the same
+    /// composition `ThemedMenu` uses for its panels.
+    private func floatingTransform(dy: CGFloat, scale: CGFloat) -> CATransform3D {
+        let anchor = layer?.anchorPoint ?? CGPoint(x: 0.5, y: 0.5)
+        let centre = CGPoint(
+            x: (0.5 - anchor.x) * bounds.width,
+            y: (0.5 - anchor.y) * bounds.height
+        )
+        var transform = CATransform3DMakeTranslation(0, dy, 0)
+        transform = CATransform3DTranslate(transform, centre.x, centre.y, 0)
+        transform = CATransform3DScale(transform, scale, scale, 1)
+        transform = CATransform3DTranslate(transform, -centre.x, -centre.y, 0)
+        return transform
+    }
+
+    /// Which way is *down* on screen, in the coordinates the transform is composed in.
+    ///
+    /// A layer-backed view under a flipped host inherits that host's flipped layer geometry,
+    /// where y grows downward; under an unflipped one it grows upward. Both of this affordance's
+    /// hosts are unflipped today, and a bare `-rise` written on that fact would silently invert
+    /// the whole arrival the day a pane becomes flipped.
+    private var floatingDownward: CGFloat {
+        let flipped = superview?.layer?.isGeometryFlipped ?? superview?.isFlipped ?? false
+        return flipped ? 1 : -1
+    }
+
+    /// Returns the view to full opacity *now*, cancelling an in-flight fade rather than
+    /// starting a second one — `Design.Motion.immediate` is the group that makes an
+    /// `animator()` proxy apply its value immediately instead of taking AppKit's default
+    /// quarter second.
+    private func settleFloatingOpacity() {
+        guard alphaValue != 1 else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Design.Motion.immediate
+            self.animator().alphaValue = 1
+        }
+    }
+}
+
+// MARK: - Floating Target Motion
+
+/// The picture a floating navigation target arrives from, and leaves into.
+enum FloatingTargetMotion {
+
+    /// How far below its resting place the target starts. `Design.Spacing.large` is the
+    /// distance it reads as *rising from the pane's edge*: the arrow rests
+    /// `Design.Spacing.inset` above that edge, so a rise of one step more begins just past it
+    /// — far enough to be movement, and at the opacity it starts on, never a glyph seen
+    /// hanging over whatever is below the pane.
+    static let rise: CGFloat = Design.Spacing.large
+
+    /// How far it sinks on the way out. Shorter than the rise, because a departure only has to
+    /// read as *going*, and the eye is no longer following it.
+    static let fall: CGFloat = Design.Spacing.medium
+
+    /// How small it starts. Enough that the arrow visibly grows into its resting size; below
+    /// about this the arrival stops reading as approach and starts reading as a zoom.
+    static let arriveScale: CGFloat = 0.86
+
+    /// How small it ends. Held closer to full than the arrival, so the exit reads as the same
+    /// object leaving rather than as one collapsing.
+    static let leaveScale: CGFloat = 0.92
+
+    /// One key for both directions: adding either animation is what cancels the other.
+    static let animationKey = "threading.floatingTarget.presence"
+    static let transformKeyPath = "transform"
+    static let opacityKeyPath = "opacity"
 }
 
 // MARK: - ControlRowMember

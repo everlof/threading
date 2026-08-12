@@ -293,15 +293,23 @@ layout pass, and it avoids a reveal to the chrome floor followed by a second tra
 remembered width. `isRestoringDisplayPaneWidth` is held for exactly that one transition instead
 of a guessed two turns.
 
-**The terminal's pixel frame moves; its character grid does not chase the animation.** A split
-animation beside a full-screen Codex or Claude TUI used to turn each intermediate width into an
-emulator reflow, PTY resize, SIGWINCH and process repaint. For a visible animated pane,
-`MainWindowController` brackets the motion with
-`EmojiFixedTerminalView.beginDeferringFrameGridChanges()` / `endDeferringFrameGridChanges()`.
-The terminal remembers only the final natural grid and applies it once after the split settles.
-The hold nests when the user reverses the pane before the first motion completes, and a remote
-grid remains authoritative if phone control begins in the middle. Immediate, off-screen and
-session-switch routes still resize once without a hold.
+**A live TUI takes one final grid, not an animated sequence of grids.** A split animation beside
+a full-screen Codex or Claude TUI turns each intermediate width into emulator reflow, PTY resize,
+SIGWINCH and process repaint. Deferring those grids still left AppKit synchronously committing
+the window's backing tree before its first frame, so a terminal-backed workspace now takes the
+immediate split route even when the gesture requested motion. Its pixel frame, emulator, PTY,
+search, accessibility and scroller all reach the exact final width once. A remotely controlled
+terminal refuses that frame-derived grid through its existing ownership gate. Native conversation
+surfaces, which have no PTY repaint loop, retain the standard pane motion.
+
+**Opening a retained pane does not mean selecting its session again.** The toolbar toggle names
+the visible session before it reveals the panel, but if that is already the panel's session then
+the tab strip and active surface are already correct. Re-rendering there rebuilt a retained rich
+surface immediately before AppKit's split collapse, making a five-cycle 256-mark scene pay five
+unrelated render passes. `DisplayPaneController.showSession` therefore returns for an unchanged
+session, and `showSessionTabs` returns only when both session and global-document state are already
+the requested state. Content mutations continue to render at their own call sites; a visibility
+gesture does not manufacture a content mutation.
 
 ### How a sidebar row arrives, leaves and moves
 

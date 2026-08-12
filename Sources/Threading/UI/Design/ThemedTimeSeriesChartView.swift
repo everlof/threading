@@ -177,6 +177,11 @@ struct ThemedChartModel: Equatable, Sendable {
     let yRange: ClosedRange<Double>?
     let valueFormat: ThemedChartValueFormat
     let emptyMessage: String
+    /// The second line under `emptyMessage`: what would put marks here, or what is being read
+    /// right now. A chart that says only "no data" has told the reader nothing they could act on.
+    let emptyDetail: String?
+    /// Whether the absence is final or still being resolved. See `ThemedChartPlaceholder`.
+    let placeholder: ThemedChartPlaceholder
     let xAxis: ThemedChartXAxis
     let orientation: ThemedChartOrientation
     let showsLegend: Bool
@@ -190,6 +195,8 @@ struct ThemedChartModel: Equatable, Sendable {
         yRange: ClosedRange<Double>? = nil,
         valueFormat: ThemedChartValueFormat = .number,
         emptyMessage: String = L10n.string("No data in this range"),
+        emptyDetail: String? = nil,
+        placeholder: ThemedChartPlaceholder = .empty,
         xAxis: ThemedChartXAxis = .time,
         orientation: ThemedChartOrientation = .vertical,
         showsLegend: Bool = false
@@ -205,6 +212,8 @@ struct ThemedChartModel: Equatable, Sendable {
         self.yRange = yRange
         self.valueFormat = valueFormat
         self.emptyMessage = emptyMessage
+        self.emptyDetail = emptyDetail
+        self.placeholder = placeholder
     }
 
     static let empty = Self(title: "", accessibilitySummary: "", series: [])
@@ -230,7 +239,9 @@ struct ThemedChartModel: Equatable, Sendable {
         valueFormat: ThemedChartValueFormat = .number,
         yRange: ClosedRange<Double>? = nil,
         showsLegend: Bool? = nil,
-        emptyMessage: String = L10n.string("No data to compare")
+        emptyMessage: String = L10n.string("No data to compare"),
+        emptyDetail: String? = nil,
+        placeholder: ThemedChartPlaceholder = .empty
     ) -> Self {
         let count = max(categories.count, 1)
         let first = categoryPosition(0).addingTimeInterval(-0.5)
@@ -243,6 +254,8 @@ struct ThemedChartModel: Equatable, Sendable {
             yRange: yRange,
             valueFormat: valueFormat,
             emptyMessage: emptyMessage,
+            emptyDetail: emptyDetail,
+            placeholder: placeholder,
             xAxis: .categories(categories),
             orientation: orientation,
             // One series needs no key: the title already says what the bars are, and a legend
@@ -643,6 +656,10 @@ class ThemedTimeSeriesChartView: ThemedControl {
     private var movementTrackingArea: NSTrackingArea?
     private var selected: (series: Int, point: Int)?
 
+    /// Built the first time a chart is actually empty. A chart with data never constructs this
+    /// subtree, which is most of them and all of the ones inside a conversation timeline.
+    private var placeholderView: ThemedChartPlaceholderView?
+
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.setLocalizedDateFormatFromTemplate("MMM d")
@@ -691,6 +708,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
         renderedPointCount = target.reduce(0) { $0 + $1.points.count }
         selected = nil
         stopDriver()
+        updatePlaceholder()
 
         let duration = Design.Motion.standard
         guard animated, duration > 0, window != nil, !target.isEmpty, current != target else {
@@ -714,6 +732,54 @@ class ThemedTimeSeriesChartView: ThemedControl {
         )
         startDriver()
         needsDisplay = true
+    }
+
+    // MARK: - Placeholder
+
+    /// Whether the chart has anything to plot. A series present but empty is still nothing to
+    /// read, which is the state a range change with no records lands in.
+    var showsPlaceholder: Bool {
+        !model.series.contains(where: { !$0.points.isEmpty })
+    }
+
+    /// The status block, once one has been needed. Tests read it; production only ever sees it
+    /// through the view tree.
+    var placeholderViewForTesting: ThemedChartPlaceholderView? { placeholderView }
+
+    private func updatePlaceholder() {
+        guard showsPlaceholder else {
+            placeholderView?.isHidden = true
+            return
+        }
+        let view = placeholderView ?? {
+            let created = ThemedChartPlaceholderView()
+            addSubview(created)
+            placeholderView = created
+            return created
+        }()
+        view.isHidden = false
+        view.show(model.placeholder, title: model.emptyMessage, detail: model.emptyDetail)
+        // Placed now as well as at the next layout pass: a caller that renders a chart without
+        // ever laying it out — an offscreen `cacheDisplay`, a fixture — would otherwise draw the
+        // status into a zero rectangle and produce the blank picture this replaced.
+        view.frame = plotRect
+        needsLayout = true
+    }
+
+    /// The block sits over the plot rectangle rather than the whole control, so the message lands
+    /// where the marks would be and the axes keep their gutters.
+    override func layout() {
+        super.layout()
+        guard let placeholderView, !placeholderView.isHidden else { return }
+        placeholderView.frame = plotRect
+    }
+
+    /// The plot rectangle is derived from the control's own size, and a frame-positioned subview
+    /// is not moved by the constraint system when that size changes. A chart in a split pane is
+    /// resized constantly, so the pass is asked for here rather than hoped for.
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        if placeholderView != nil { needsLayout = true }
     }
 
     /// Split from the display link so interruption, Reduce Motion, and performance tests can
@@ -812,14 +878,17 @@ class ThemedTimeSeriesChartView: ThemedControl {
 
         let plot = plotRect
         guard plot.width > 0, plot.height > 0 else { return }
-        drawGrid(in: plot)
 
         // Do not flatten provider-sized source arrays on every animation frame. Geometry is
         // bounded, but the retained model deliberately keeps full source indices for tooltips.
-        if !model.series.contains(where: { !$0.points.isEmpty }) {
-            drawCentered(model.emptyMessage, in: plot)
-            return
-        }
+        //
+        // A chart with nothing to plot draws no scaffolding at all: the rules describe a domain
+        // nobody measured anything in, and the middle one runs straight through the sentence
+        // saying so. `ThemedChartPlaceholderView` owns that rectangle instead — its ghost is the
+        // structure while work is in flight, and a dotted rule along zero is the structure when
+        // the answer is that there is nothing.
+        if showsPlaceholder { return }
+        drawGrid(in: plot)
 
         if isSpectrum {
             // A bar stays a bar in every material. The spectrum analyzer is a rendering of a
@@ -884,12 +953,25 @@ class ThemedTimeSeriesChartView: ThemedControl {
         Design.Chart.style == .spectrum ? Design.Surface.accent : Design.Text.label
     }
 
+    /// What the value axis says, which is nothing at all when there is nothing to say it about.
+    ///
+    /// An empty chart used to print 0/0.2/0.5/0.8/1 beside its rules: that is the automatic domain
+    /// describing itself, a scale nobody measured anything in. The rules stay, because they are
+    /// the chart's own frame and the ghost stands against them; the numbers go.
+    var valueAxisLabels: [String] {
+        guard !showsPlaceholder else { return [] }
+        return (0..<Design.Chart.gridLineCount).map { index in
+            valueString(yValue(at: Double(index) / Double(Design.Chart.gridLineCount - 1)))
+        }
+    }
+
     private func drawGrid(in plot: NSRect) {
         let grid = NSBezierPath()
         let isRanking = model.orientation == .horizontal
+        let labels = valueAxisLabels
         for index in 0..<Design.Chart.gridLineCount {
             let phase = CGFloat(index) / CGFloat(Design.Chart.gridLineCount - 1)
-            let value = valueString(yValue(at: Double(phase)))
+            let value = labels.indices.contains(index) ? labels[index] : ""
             if isRanking {
                 // The value axis runs along the bottom, so the rules stand up and the numbers
                 // sit under them — the same grid, read a quarter turn round.
@@ -1718,16 +1800,6 @@ class ThemedTimeSeriesChartView: ThemedControl {
             with: rect.insetBy(dx: Design.Chart.tooltipInset, dy: Design.Chart.tooltipInset),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
         )
-    }
-
-    private func drawCentered(_ text: String, in rect: NSRect) {
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: Design.Typography.body(),
-            .foregroundColor: Design.Text.secondary
-        ]
-        let string = NSAttributedString(string: text, attributes: attributes)
-        let size = string.size()
-        string.draw(at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2))
     }
 
     private func draw(

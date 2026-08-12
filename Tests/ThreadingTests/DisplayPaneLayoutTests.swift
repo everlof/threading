@@ -12,6 +12,21 @@ import XCTest
 @MainActor
 final class DisplayPaneLayoutTests: XCTestCase {
 
+    func testShowingTheAlreadySelectedSessionDoesNotRenderItsRetainedSurfaceAgain() {
+        let pane = DisplayPaneController()
+        let sessionID = SessionID()
+        pane.showSession(sessionID)
+        pane.view.frame = NSRect(x: 0, y: 0, width: 420, height: 700)
+        pane.view.layoutSubtreeIfNeeded()
+
+        let before = pane.renderInvocationCount
+        pane.showSession(sessionID)
+        XCTAssertEqual(pane.renderInvocationCount, before)
+
+        pane.showSessionTabs(sessionID)
+        XCTAssertEqual(pane.renderInvocationCount, before)
+    }
+
     func testDisplayImagePixelGateBoundsDimensionsAndDecodedMemoryWithoutOverflow() {
         XCTAssertTrue(DisplayImageSafety.accepts(width: 1_440, height: 20_000))
         XCTAssertFalse(DisplayImageSafety.accepts(width: 0, height: 100))

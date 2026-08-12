@@ -462,6 +462,24 @@ final class SidebarTreeBuilderTests: XCTestCase {
         XCTAssertEqual(branch.terminalNodes.map(\.terminalID), [shell.id])
     }
 
+    /// `NSOutlineView` asks for every child separately while expanding a branch. The indexed
+    /// seam must preserve the same sessions-then-terminals order as `childNodes` without making
+    /// a fresh combined array for every one of those requests.
+    func testABranchServesItsOutlineChildrenDirectlyInDisplayOrder() {
+        let branch = BranchGroupNode(branch: "large", projectID: ProjectID())
+        let sessions = (0..<5).map { _ in SessionNode(sessionID: SessionID()) }
+        let terminals = (0..<3).map { _ in
+            TerminalNode(terminalID: TerminalID(), displayProjectFolderPath: "/tmp")
+        }
+        branch.sessionNodes = sessions
+        branch.terminalNodes = terminals
+
+        XCTAssertEqual(branch.outlineChildCount, sessions.count + terminals.count)
+        for (index, expected) in (sessions as [NSObject] + terminals as [NSObject]).enumerated() {
+            XCTAssertIdentical(branch.outlineChild(at: index), expected)
+        }
+    }
+
     // MARK: - Side chats
 
     func testASideChatNestsUnderItsParent() throws {
@@ -927,10 +945,37 @@ final class SidebarTreeBuilderTests: XCTestCase {
         controller.view.layoutSubtreeIfNeeded()
         let disclosureElapsed = DispatchTime.now().uptimeNanoseconds - disclosureStarted
 
+        let expandedSessionCount = controller.presentedRowKeys.filter {
+            if case .session = $0 { return true }
+            return false
+        }.count
+        XCTAssertEqual(
+            expandedSessionCount,
+            projectCount * sessionsPerProject,
+            "re-expanding the project did not restore every logical session row"
+        )
+
+        let deepKey = SidebarNodeKey.session(fixture.deepSessionID)
+        let deepLogicalRow = try XCTUnwrap(controller.presentedRow(of: deepKey))
+        XCTAssertGreaterThan(
+            deepLogicalRow,
+            controller.instantiatedRowCount,
+            "the stress reveal target did not cross the outline's launch viewport boundary"
+        )
+        XCTAssertNil(
+            controller.presentedRowView(of: deepKey),
+            "the deep reveal target was already materialized before exact navigation"
+        )
+
         let revealStarted = DispatchTime.now().uptimeNanoseconds
         controller.reveal(sessionID: fixture.deepSessionID)
         controller.view.layoutSubtreeIfNeeded()
         let revealElapsed = DispatchTime.now().uptimeNanoseconds - revealStarted
+        XCTAssertEqual(controller.selectedSessionID, fixture.deepSessionID)
+        XCTAssertNotNil(
+            controller.presentedRowView(of: deepKey),
+            "exact navigation selected the deep row without bringing it into the viewport"
+        )
 
         let titleEventStarted = DispatchTime.now().uptimeNanoseconds
         XCTAssertEqual(

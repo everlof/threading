@@ -196,6 +196,21 @@ final class BranchGroupNode: NSObject {
         sessionNodes.map { $0 as NSObject } + terminalNodes.map { $0 as NSObject }
     }
 
+    /// The outline asks for a count once, then for every child by index. Keep that indexed path
+    /// allocation-free: materializing `childNodes` for each request turns one large branch into
+    /// a quadratic launch walk even though the outline ultimately retains only logical indexes.
+    var outlineChildCount: Int {
+        sessionNodes.count + terminalNodes.count
+    }
+
+    func outlineChild(at index: Int) -> NSObject {
+        precondition(index >= 0 && index < outlineChildCount)
+        if index < sessionNodes.count {
+            return sessionNodes[index]
+        }
+        return terminalNodes[index - sessionNodes.count]
+    }
+
     init(branch: String, projectID: ProjectID) {
         self.branch = branch
         self.projectID = projectID

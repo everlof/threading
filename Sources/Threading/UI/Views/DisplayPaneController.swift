@@ -190,6 +190,12 @@ final class DisplayPaneController: NSViewController {
   )
   private let appEvents = AppEventObservations()
 
+#if DEBUG
+  /// Coarse profiling boundary for proving that a pane visibility gesture does not rebuild
+  /// retained content. Kept at the controller boundary rather than instrumenting every row.
+  private(set) var renderInvocationCount = 0
+#endif
+
   /// The live tab's view controller currently parented into `hostedView` — the browser or a
   /// review — so switching tabs can swap it out without rebuilding its state.
   private weak var installedController: NSViewController?
@@ -1646,14 +1652,16 @@ final class DisplayPaneController: NSViewController {
   /// global inspector first. Ordinary session selection uses `showSession` and intentionally
   /// preserves it.
   func showSessionTabs(_ sessionID: SessionID?) {
+    let changesSurface = isShowingCurrentTheme || currentSessionID != sessionID
     currentSessionID = sessionID
     if let sessionID { restoreIfNeeded(sessionID) }
     isShowingCurrentTheme = false
-    render()
+    if changesSurface { render() }
   }
 
   /// Switches the panel to a session's tabs. Passing nil empties it.
   func showSession(_ sessionID: SessionID?) {
+    guard currentSessionID != sessionID else { return }
     currentSessionID = sessionID
     if let sessionID { restoreIfNeeded(sessionID) }
     render()
@@ -1789,6 +1797,10 @@ final class DisplayPaneController: NSViewController {
     // The panel starts collapsed, so its views may not exist yet when content arrives.
     // Nothing is lost by skipping: `viewDidLoad` renders once they do.
     guard isViewLoaded else { return }
+
+#if DEBUG
+    renderInvocationCount += 1
+#endif
 
     let tabs = isShowingCurrentTheme
       ? []
