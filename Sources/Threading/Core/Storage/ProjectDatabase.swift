@@ -333,6 +333,35 @@ final class ProjectDatabase {
         try setSelectedSessionID(id)
     }
 
+    /// Deletes one session without re-encoding every other row in the project graph.
+    ///
+    /// The expected project is part of the delete predicate rather than trusted as an update
+    /// hint. Positions are order keys, not a contiguity promise: leaving a gap makes deletion one
+    /// indexed row instead of rewriting every later sibling. Any later full graph save compacts
+    /// the keys, while a reload sorts sparse keys exactly as it sorted contiguous ones.
+    /// Selection and the row disappear in the same transaction or not at all.
+    func removeSession(
+        id sessionID: SessionID,
+        from projectID: ProjectID,
+        selectedSessionID: SessionID?
+    ) throws {
+        try database.transaction {
+            let deletion = try database.prepare(
+                "DELETE FROM session WHERE id = ? AND project_id = ?"
+            )
+            defer { deletion.finalize() }
+            try deletion.bind(1, sessionID.uuidString)
+                .bind(2, projectID.uuidString)
+                .run()
+            guard try database.scalar("SELECT changes()") == 1 else {
+                throw SQLiteDatabase.Failure.step(
+                    "Session removal did not match its durable project"
+                )
+            }
+            try setSelectedSessionID(selectedSessionID)
+        }
+    }
+
     /// The sessions that held a live agent when the app last quit, for startup to relaunch.
     ///
     /// Read leniently rather than through `corruptRow`: this is derived navigation state whose
@@ -385,6 +414,16 @@ final class ProjectDatabase {
 
     func deletePanel(for sessionID: SessionID) throws {
         let statement = try database.prepare("DELETE FROM \(ProjectDatabaseSchema.panelTable) WHERE session_id = ?")
+        defer { statement.finalize() }
+        statement.bind(1, sessionID.uuidString)
+        try statement.run()
+    }
+
+    func deleteAttachments(for sessionID: SessionID) throws {
+        let statement = try database.prepare(
+            "DELETE FROM \(ProjectDatabaseSchema.attachmentsTable) WHERE session_id = ?"
+        )
+        defer { statement.finalize() }
         statement.bind(1, sessionID.uuidString)
         try statement.run()
     }
@@ -510,13 +549,15 @@ final class ProjectDatabase {
     private func setSelectedSessionID(_ id: SessionID?) throws {
         guard let id else {
             let statement = try database.prepare("DELETE FROM app_state WHERE key = ?")
+            defer { statement.finalize() }
             statement.bind(1, ProjectDatabaseSchema.selectedSessionKey)
             try statement.run()
             return
         }
 
-        try database.prepare(ProjectDatabaseSchema.upsertAppState)
-            .bind(1, ProjectDatabaseSchema.selectedSessionKey)
+        let statement = try database.prepare(ProjectDatabaseSchema.upsertAppState)
+        defer { statement.finalize() }
+        try statement.bind(1, ProjectDatabaseSchema.selectedSessionKey)
             .bind(2, id.uuidString)
             .run()
     }

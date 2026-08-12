@@ -157,6 +157,23 @@ final class StateManagerTests: XCTestCase {
         )
     }
 
+    func testRemovingASessionDoesNotCancelAPendingSessionMutation() throws {
+        let manager = makeManager()
+        let store = ProjectStore(stateManager: manager)
+        let project = try XCTUnwrap(store.addProject(
+            folderURL: testDirectory.appendingPathComponent("pending-delete")
+        ))
+        let removed = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let retained = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+
+        XCTAssertEqual(store.updateAgentTitle("Pending durable title", for: retained.id), .accepted)
+        XCTAssertEqual(store.removeSession(id: removed.id), .applied)
+
+        let reopened = ProjectStore(stateManager: manager)
+        XCTAssertNil(reopened.session(withID: removed.id))
+        XCTAssertEqual(reopened.session(withID: retained.id)?.agentTitle, "Pending durable title")
+    }
+
     func testMissingKeyFixtureDecodesWithModelDefaults() throws {
         let fixtureURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

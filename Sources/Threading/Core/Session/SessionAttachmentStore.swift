@@ -223,6 +223,7 @@ final class SessionAttachmentStore {
             loadPayload: { StateManager.shared.loadAttachmentsPayload(for: $0) },
             savePayload: { StateManager.shared.saveAttachmentsPayload($0, for: $1) },
             retainPersisted: { StateManager.shared.retainAttachments(sessionIDs: $0) },
+            removePersisted: { StateManager.shared.deleteAttachments(for: $0) },
             copiesDirectory: { StateManager.shared.attachmentCopiesDirectory },
             referenceRoot: { sessionID in
                 ProjectStore.shared.workingDirectory(forSessionID: sessionID).map {
@@ -241,6 +242,7 @@ final class SessionAttachmentStore {
     private let loadPayload: ((SessionID) -> String?)?
     private let savePayload: ((String, SessionID) -> Void)?
     private let retainPersisted: ((Set<SessionID>) -> Void)?
+    private let removePersisted: ((SessionID) -> Void)?
     private let stageCopy: @Sendable (URL, URL) throws -> Void
 
     /// Where a declared file from outside the checkout is copied to. Absent means the store may
@@ -265,6 +267,7 @@ final class SessionAttachmentStore {
         loadPayload: ((SessionID) -> String?)? = nil,
         savePayload: ((String, SessionID) -> Void)? = nil,
         retainPersisted: ((Set<SessionID>) -> Void)? = nil,
+        removePersisted: ((SessionID) -> Void)? = nil,
         copiesDirectory: (() -> URL)? = nil,
         referenceRoot: ((SessionID) -> URL?)? = nil,
         allowsFilesOutsideProject: @escaping () -> Bool = { false },
@@ -277,6 +280,7 @@ final class SessionAttachmentStore {
         self.loadPayload = loadPayload
         self.savePayload = savePayload
         self.retainPersisted = retainPersisted
+        self.removePersisted = removePersisted
         self.copiesDirectory = copiesDirectory
         self.referenceRoot = referenceRoot
         self.allowsFilesOutsideProject = allowsFilesOutsideProject
@@ -1126,6 +1130,21 @@ final class SessionAttachmentStore {
         loadedSessions = loadedSessions.intersection(sessionIDs)
         retainPersisted?(sessionIDs)
         discardCopiesOutside(sessionIDs)
+    }
+
+    /// Drops one deleted session without filtering every in-memory entry or enumerating every
+    /// attachment directory. Owned bytes can leave on a utility worker after their references
+    /// have disappeared from the main-thread store.
+    func removeSession(_ sessionID: SessionID) {
+        attachmentsBySession.removeValue(forKey: sessionID)
+        withheldBySession.removeValue(forKey: sessionID)
+        loadedSessions.remove(sessionID)
+        removePersisted?(sessionID)
+
+        guard let directory = copiesRoot(for: sessionID) else { return }
+        Task.detached(priority: .utility) {
+            try? FileManager().removeItem(at: directory)
+        }
     }
 
     // MARK: Persistence

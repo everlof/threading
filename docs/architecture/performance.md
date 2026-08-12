@@ -2178,6 +2178,42 @@ a project opened later did not regain their default-open state. A flattened visi
 remains an option only if a future product target demands substantially less than the now-bounded
 AppKit mount and resize phases.
 
+### Permanent session removal
+
+The same opt-in fixture removes one dormant session and then the selected session after all earlier
+title work has been flushed. It times the synchronous mutation and the following layout separately,
+keeps a direct full reload as a comparison, and asserts that both rows, selection, and outline count
+are exact. Seed, close, reopen, and then measure: seeding and measuring through one live SQLite/WAL
+owner makes checkpoint state dominate the result and is not a launch-realistic process boundary.
+
+The 2026-08-12 comparison used committed `master` at
+`dff0173185bb495c4ec69c0522d86fe7f731eb2b` as the before binary. Its detached worktree changed only
+`SidebarTreeBuilderTests.swift` (52 insertions, 5 deletions): it added the production removal sample
+and the identical seed-close-reopen/flush protocol; no production behavior changed. Both binaries
+were Debug builds, used 10 projects × 500 manually ordered sessions, and ran each sample in a fresh
+`xctest` process with the same environment. The raw synchronous mutation samples in milliseconds
+were:
+
+| Path | Before, five fresh processes | Exact path, five fresh processes | Median |
+|---|---|---|---:|
+| Dormant session | 407.071, 320.003, 336.498, 299.018, 290.606 | 13.431, 12.432, 11.435, 12.094, 11.330 | **320.003 → 12.094 ms** |
+| Selected session | 420.418, 304.876, 354.137, 321.370, 276.078 | 4.115, 3.759, 3.460, 6.297, 3.256 | **321.370 → 3.759 ms** |
+
+Pairing each mutation with its immediately following layout gives median totals of 330.203 →
+22.140 ms for dormant removal and 328.220 → 8.788 ms for selected removal. The new owner timings
+make the remaining limit explicit: dormant removal spends a median 8.099 ms applying one outline
+leaf deletion and 0.143 ms in exact SQLite persistence; selected removal spends 1.412 ms and
+0.236 ms respectively. A future improvement therefore belongs in the AppKit outline application,
+not in persistence.
+
+The load-bearing rule is that one session removal stays proportional to that session. The store
+updates only its affected project index, persistence deletes one graph row and updates the selected
+scalar transactionally, and the sidebar applies one leaf edit or rebuilds only the affected project
+when grouping boundaries make a leaf edit ambiguous. Cleanup addresses only that session's runtime,
+attachments, panels, drawers, detached windows, MCP endpoint, history pages, and remote scopes.
+Pending unrelated coalesced model work deliberately falls back to the full graph transaction so an
+optimization cannot make an earlier mutation disappear.
+
 ## File pane stress target
 
 `FileTreeViewTests.testStressFileTreeWhenEnabled` builds a throwaway directory before its clock

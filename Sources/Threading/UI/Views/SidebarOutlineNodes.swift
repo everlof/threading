@@ -297,14 +297,19 @@ enum SidebarTreeBuilder {
     /// Rebuilds only one project's descendants for a content change that can alter their
     /// ordering but cannot add or remove a project/repository row. This keeps a session rename
     /// in Name order proportional to its project rather than every conversation in the app.
-    static func projectNode(for projectID: ProjectID, from projects: [Project]) -> ProjectNode? {
+    static func projectNode(
+        for projectID: ProjectID,
+        from projects: [Project],
+        visibility: SidebarSessionVisibility = .attention
+    ) -> ProjectNode? {
         guard let project = projects.first(where: { $0.id == projectID }) else { return nil }
         let terminals = terminalsByDisplayProject(from: projects)[projectID] ?? []
         return makeProjectNode(
             from: project,
-            terminals: terminals,
+            terminals: visibility == .attention ? terminals : [],
             order: AppSettings.sidebarSessionOrder,
-            isReversed: AppSettings.sidebarSessionOrderIsReversed
+            isReversed: AppSettings.sidebarSessionOrderIsReversed,
+            visibility: visibility
         )
     }
 

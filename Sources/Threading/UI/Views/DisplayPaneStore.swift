@@ -400,6 +400,17 @@ final class DisplayPaneStore {
 
   // MARK: Cleanup
 
+  /// Drops one deleted session without enumerating every panel cache in the application.
+  func removeSession(_ sessionID: SessionID) {
+    quarantined.remove(sessionID)
+    StateManager.shared.deletePanelLayout(for: sessionID)
+
+    let directory = cacheDirectory(sessionID)
+    Task.detached(priority: .utility) {
+      try? FileManager().removeItem(at: directory)
+    }
+  }
+
   /// Drops the stored layout and cache of every session not in the set, called when sessions are
   /// deleted so a removed session leaves nothing behind on disk.
   func retainOnly(sessionIDs: Set<SessionID>) {

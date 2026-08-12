@@ -1305,7 +1305,7 @@ final class RemoteSessionMirrorRegistry {
     /// choices together; every client then re-fetches its own scoped snapshot.
     private func broadcastSessionsChanged(_ change: ProjectsDidChange) {
         switch change.sidebarImpact {
-        case .structure:
+        case .structure, .projectStructure:
             let message = encode(RemoteSessionsChangedDTO())
             for connection in themeEventSubscribers.values {
                 connection.sendText(message)
@@ -1313,6 +1313,15 @@ final class RemoteSessionMirrorRegistry {
         case .terminalRow:
             // Project terminals are not part of the agent-session catalogue.
             return
+        case .sessionRemoved:
+            for connection in themeEventSubscribers.values {
+                guard let authorization = connection.authenticatedPeer?.authorization,
+                      let delta = Self.sessionRemovalDelta(
+                          for: change,
+                          authorization: authorization
+                      ) else { continue }
+                connection.sendText(encode(delta))
+            }
         case .sessionOrder(let sessionID), .sessionRow(let sessionID):
             let session = ProjectStore.shared.session(withID: sessionID)
             let project = ProjectStore.shared.project(forSessionID: sessionID)
@@ -1332,6 +1341,21 @@ final class RemoteSessionMirrorRegistry {
                 )))
             }
         }
+    }
+
+    /// The permanent-delete catalogue delta is exact and scope-bound. Keeping the authorization
+    /// decision beside the payload construction makes this small but security-sensitive branch
+    /// independently testable without opening a real event socket.
+    static func sessionRemovalDelta(
+        for change: ProjectsDidChange,
+        authorization: RemoteAuthorization
+    ) -> RemoteSessionsChangedDTO? {
+        guard case .sessionRemoved(_, let sessionID) = change.sidebarImpact,
+              authorization.scope.covers(sessionID) else { return nil }
+        return RemoteSessionsChangedDTO(
+            session: nil,
+            removedSessionID: sessionID.uuidString
+        )
     }
 
     /// Invalidates the owner phone's read-only companion surfaces without steering its UI.

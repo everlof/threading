@@ -240,6 +240,74 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertEqual(restored.projects.map(\.name), ["Persisted"])
     }
 
+    func testOneSessionCanBeRemovedWithoutRewritingTheGraph() throws {
+        let database = try makeDatabase()
+        let first = AgentSession(kind: .claude, title: "First")
+        let removed = AgentSession(kind: .codex, title: "Removed")
+        let last = AgentSession(kind: .claude, title: "Last")
+        let untouched = AgentSession(kind: .codex, title: "Untouched")
+        let firstProject = makeProject("alpha", sessions: [first, removed, last])
+        let secondProject = makeProject("beta", sessions: [untouched])
+        try database.save(ProjectsState(
+            projects: [firstProject, secondProject],
+            selectedSessionID: removed.id
+        ))
+
+        try database.removeSession(
+            id: removed.id,
+            from: firstProject.id,
+            selectedSessionID: nil
+        )
+
+        let restored = try database.load().state
+        XCTAssertEqual(restored.projects.map(\.name), ["alpha", "beta"])
+        XCTAssertEqual(restored.projects[0].sessions.map(\.id), [first.id, last.id])
+        XCTAssertEqual(restored.projects[1].sessions.map(\.id), [untouched.id])
+        XCTAssertNil(restored.selectedSessionID)
+    }
+
+    func testSessionRemovalRefusesAStaleProjectAndRollsBackSelection() throws {
+        let database = try makeDatabase()
+        let first = AgentSession(kind: .claude, title: "First")
+        let removed = AgentSession(kind: .codex, title: "Removed")
+        let project = makeProject("alpha", sessions: [first, removed])
+        try database.save(ProjectsState(
+            projects: [project],
+            selectedSessionID: removed.id
+        ))
+
+        XCTAssertThrowsError(try database.removeSession(
+            id: removed.id,
+            from: ProjectID(),
+            selectedSessionID: nil
+        ))
+
+        let restored = try database.load().state
+        XCTAssertEqual(restored.projects[0].sessions.map(\.id), [first.id, removed.id])
+        XCTAssertEqual(restored.selectedSessionID, removed.id)
+    }
+
+    func testOneSessionsAuxiliaryRowsCanBeDeletedWithoutPruningTheTables() throws {
+        let database = try makeDatabase()
+        let removed = SessionID()
+        let kept = SessionID()
+        for sessionID in [removed, kept] {
+            try database.savePanelPayload("panel-\(sessionID.uuidString)", for: sessionID)
+            try database.saveAttachmentsPayload(
+                "attachments-\(sessionID.uuidString)",
+                for: sessionID
+            )
+        }
+
+        try database.deletePanel(for: removed)
+        try database.deleteAttachments(for: removed)
+
+        XCTAssertNil(try database.panelPayload(for: removed))
+        XCTAssertNil(try database.attachmentsPayload(for: removed))
+        XCTAssertNotNil(try database.panelPayload(for: kept))
+        XCTAssertNotNil(try database.attachmentsPayload(for: kept))
+    }
+
     // MARK: - Running Sessions at Quit
 
     func testRunningSessionsRoundTripInOrder() throws {

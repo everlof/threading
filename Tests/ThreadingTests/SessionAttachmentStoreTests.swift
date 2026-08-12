@@ -53,11 +53,44 @@ final class SessionAttachmentStoreTests: XCTestCase {
             retainPersisted: { [weak self] ids in
                 self?.payloads = self?.payloads.filter { ids.contains($0.key) } ?? [:]
             },
+            removePersisted: { [weak self] id in self?.payloads.removeValue(forKey: id) },
             copiesDirectory: takesCustody ? { [copies] in copies! } : nil,
             referenceRoot: { [checkout] _ in checkout },
             allowsFilesOutsideProject: { [weak self] in self?.allowsFilesOutsideProject ?? false },
             stageCopy: stageCopy
         )
+    }
+
+    func testRemovingOneSessionLeavesEveryOtherAttachmentDocumentAlone() throws {
+        let removed = SessionID()
+        let kept = SessionID()
+        let removedFile = elsewhere.appendingPathComponent("removed.png")
+        let keptFile = elsewhere.appendingPathComponent("kept.png")
+        try Data("removed".utf8).write(to: removedFile)
+        try Data("kept".utf8).write(to: keptFile)
+
+        let store = makeStore()
+        XCTAssertNotNil(store.record(
+            declared: removedFile,
+            sessionID: removed,
+            projectRoot: checkout,
+            origin: .agent
+        ))
+        XCTAssertNotNil(store.record(
+            declared: keptFile,
+            sessionID: kept,
+            projectRoot: checkout,
+            origin: .agent
+        ))
+        XCTAssertNotNil(payloads[removed])
+        XCTAssertNotNil(payloads[kept])
+
+        store.removeSession(removed)
+
+        XCTAssertTrue(store.attachments(for: removed).isEmpty)
+        XCTAssertEqual(store.attachments(for: kept).map(\.name), ["kept.png"])
+        XCTAssertNil(payloads[removed])
+        XCTAssertNotNil(payloads[kept])
     }
 
     private final class CopyGate: @unchecked Sendable {

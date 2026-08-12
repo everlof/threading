@@ -46,6 +46,26 @@ struct SidebarTreeShape: Equatable {
         childrenByParent[parent] ?? []
     }
 
+    /// Removes one leaf without reconstructing the containing project's complete shape.
+    /// Returns its former child index, which is exactly the index `NSOutlineView` must receive.
+    mutating func removeLeaf(
+        _ key: SidebarNodeKey,
+        from parent: SidebarNodeKey
+    ) -> Int? {
+        guard childrenByParent[key] == nil,
+              var siblings = childrenByParent[parent],
+              let index = siblings.firstIndex(of: key) else { return nil }
+
+        siblings.remove(at: index)
+        if siblings.isEmpty {
+            childrenByParent.removeValue(forKey: parent)
+        } else {
+            childrenByParent[parent] = siblings
+        }
+        keys.remove(key)
+        return index
+    }
+
     /// Replaces only child ordering/parentage inside an identity-equivalent subtree.
     ///
     /// The caller proves the key sets match first. That invariant means the global `keys` set
@@ -60,6 +80,35 @@ struct SidebarTreeShape: Equatable {
                 childrenByParent.removeValue(forKey: key)
             }
         }
+    }
+
+    /// Replaces the descendants of one standing root, including identities that arrived or left.
+    ///
+    /// The `nil` child list belongs to the complete sidebar, while these two shapes were built
+    /// with the affected project as their temporary root. Keeping the global root list and
+    /// replacing only mappings below that shared project is what makes one deletion proportional
+    /// to its project without losing repository grouping around it.
+    mutating func replaceSubtree(
+        _ original: SidebarTreeShape,
+        with replacement: SidebarTreeShape
+    ) -> Bool {
+        guard original.children(of: nil) == replacement.children(of: nil),
+              let root = original.children(of: nil).first,
+              original.children(of: nil).count == 1 else { return false }
+
+        let originalDescendants = original.keys.subtracting([root])
+        keys.subtract(originalDescendants)
+        keys.formUnion(replacement.keys)
+
+        for key in original.keys {
+            childrenByParent.removeValue(forKey: key)
+        }
+        for key in replacement.keys {
+            if let children = replacement.childrenByParent[key] {
+                childrenByParent[key] = children
+            }
+        }
+        return true
     }
 }
 

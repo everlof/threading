@@ -270,8 +270,17 @@ final class ProjectSidebarViewController: NSViewController {
     /// chats has no disclosure triangle to remember a state for.
     private var collapsedSideChatParents: Set<SessionID> = []
 
+    /// The row views AppKit currently owns. Structural edits need to restamp compact group
+    /// rules on survivors, but asking the outline for every logical row to discover these views
+    /// made a one-row edit O(total sessions). The weak table follows AppKit's reuse lifecycle and
+    /// keeps that pass proportional to mounted rows.
+    private let instantiatedHoverRowViews = NSHashTable<SidebarHoverRowView>.weakObjects()
+
     #if DEBUG
     private(set) var lastReloadPerformance = ProjectSidebarReloadPerformance()
+    private(set) var lastProjectStructureNanoseconds: UInt64 = 0
+    private(set) var lastProjectStructurePerformance = ProjectSidebarReloadPerformance()
+    private(set) var lastGroupRuleRefreshCandidateCount = 0
     #endif
 
     // MARK: - Lifecycle
@@ -729,7 +738,8 @@ extension ProjectSidebarViewController {
         guard let presentedProject = projectNodesBySessionID[sessionID],
               let rebuiltProject = SidebarTreeBuilder.projectNode(
                   for: presentedProject.projectID,
-                  from: projectStore.projects
+                  from: projectStore.projects,
+                  visibility: sessionVisibility
               )
         else {
             reload()
@@ -766,6 +776,264 @@ extension ProjectSidebarViewController {
         span.end(metadata: ["steps": String(steps.count)])
     }
 
+    /// Rebuilds one project's descendants after a session is permanently removed.
+    ///
+    /// Repository grouping and every other project stand unchanged, so a complete tree build,
+    /// shape walk, adoption pass, and index rebuild made deletion scale with unrelated chats.
+    /// The same outline diff remains authoritative; only its input is the affected subtree.
+    private func applyProjectStructureChange(_ projectID: ProjectID) {
+        #if DEBUG
+        let updateStarted = DispatchTime.now().uptimeNanoseconds
+        var measuredUpdate = ProjectSidebarReloadPerformance()
+        defer {
+            measuredUpdate.totalNanoseconds = DispatchTime.now().uptimeNanoseconds - updateStarted
+            lastProjectStructureNanoseconds = measuredUpdate.totalNanoseconds
+            lastProjectStructurePerformance = measuredUpdate
+        }
+        let treeStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
+        guard let presentedProject = projectNodesByID[projectID],
+              let rebuiltProject = SidebarTreeBuilder.projectNode(
+                  for: projectID,
+                  from: projectStore.projects,
+                  visibility: sessionVisibility
+              )
+        else {
+            reload()
+            return
+        }
+        #if DEBUG
+        measuredUpdate.treeNanoseconds = DispatchTime.now().uptimeNanoseconds - treeStarted
+        let shapeStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
+
+        let span = PerformanceRecorder.shared.begin(
+            "sidebar.project-structure.apply",
+            category: "sidebar",
+            metadata: ["project_sessions": String(rebuiltProject.sessionNodes.count)]
+        )
+        let presentedProjectShape = SidebarTreeShape(roots: [presentedProject])
+        let rebuiltProjectShape = SidebarTreeShape(roots: [rebuiltProject])
+        #if DEBUG
+        measuredUpdate.shapeNanoseconds = DispatchTime.now().uptimeNanoseconds - shapeStarted
+        #endif
+        let steps = SidebarOutlineUpdate.steps(
+            from: presentedProjectShape,
+            to: rebuiltProjectShape
+        )
+        #if DEBUG
+        let adoptionStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
+        guard let adoptedProject = SidebarOutlineUpdate.adopt(
+            [rebuiltProject],
+            reusing: [presentedProject]
+        ).first as? ProjectNode else {
+            span.end(metadata: ["fallback": "adoption"])
+            reload()
+            return
+        }
+        #if DEBUG
+        measuredUpdate.adoptionNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - adoptionStarted
+        #endif
+
+        guard renderedShape.replaceSubtree(
+            presentedProjectShape,
+            with: rebuiltProjectShape
+        ) else {
+            span.end(metadata: ["fallback": "shape"])
+            reload()
+            return
+        }
+        #if DEBUG
+        let indexingStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
+        replaceIndexes(
+            for: adoptedProject,
+            removing: presentedProjectShape.keys
+        )
+        #if DEBUG
+        measuredUpdate.indexingNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - indexingStarted
+        let outlineStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
+        applyStructure(steps: steps, wholesale: false)
+        if let row = projectRow(for: projectID) {
+            outlineView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: [0])
+        }
+        #if DEBUG
+        measuredUpdate.outlineNanoseconds = DispatchTime.now().uptimeNanoseconds - outlineStarted
+        #endif
+        span.end(metadata: ["steps": String(steps.count)])
+    }
+
+    /// Removes one rendered leaf without rebuilding every sibling in its project.
+    ///
+    /// A deletion that changes grouping still takes the complete project-local path: a parent
+    /// with children becoming orphaned, or a two-item branch losing the level it had earned, can
+    /// move several rows. The overwhelmingly common leaf under a stable project/branch/session
+    /// parent changes one child array, one shape entry, three identity maps and one outline row.
+    private func applySessionRemoval(_ sessionID: SessionID, from projectID: ProjectID) {
+        guard let sessionNode = sessionNodesByID[sessionID] else {
+            // Archived or filtered into the other attention scope: no presented row changed.
+            return
+        }
+        guard let projectNode = projectNodesByID[projectID],
+              projectNodesBySessionID[sessionID] === projectNode,
+              sessionNode.childNodes.isEmpty,
+              let parent = ancestorsBySessionID[sessionID]?.last as? any SidebarOutlineNode
+        else {
+            applyProjectStructureChange(projectID)
+            return
+        }
+
+        // At one remaining item, branch grouping may dissolve or stay because another shared
+        // branch keeps lone headings enabled. Rebuild that uncommon boundary rather than copy
+        // the tree builder's grouping policy into the mutation path.
+        if let branch = parent as? BranchGroupNode,
+           branch.sidebarChildren.count <= 2 {
+            applyProjectStructureChange(projectID)
+            return
+        }
+
+        guard let flatIndex = projectNode.sessionNodes.firstIndex(where: { $0 === sessionNode })
+        else {
+            applyProjectStructureChange(projectID)
+            return
+        }
+
+        let parentKey = parent.sidebarKey
+        let childIndex: Int?
+        switch parent {
+        case let project as ProjectNode:
+            childIndex = project.childNodes.firstIndex(where: { $0 === sessionNode })
+        case let branch as BranchGroupNode:
+            childIndex = branch.sessionNodes.firstIndex(where: { $0 === sessionNode })
+        case let ancestor as SessionNode:
+            childIndex = ancestor.childNodes.firstIndex(where: { $0 === sessionNode })
+        default:
+            childIndex = nil
+        }
+
+        guard let childIndex,
+              renderedShape.children(of: parentKey).indices.contains(childIndex),
+              renderedShape.children(of: parentKey)[childIndex] == .session(sessionID),
+              renderedShape.children(of: .session(sessionID)).isEmpty else {
+            // No presentation mutation has happened yet. Rebuild from the authoritative store
+            // if a damaged presented tree did not agree with its own indexes.
+            applyProjectStructureChange(projectID)
+            return
+        }
+
+        #if DEBUG
+        let updateStarted = DispatchTime.now().uptimeNanoseconds
+        var measuredUpdate = ProjectSidebarReloadPerformance()
+        defer {
+            measuredUpdate.totalNanoseconds = DispatchTime.now().uptimeNanoseconds - updateStarted
+            lastProjectStructureNanoseconds = measuredUpdate.totalNanoseconds
+            lastProjectStructurePerformance = measuredUpdate
+        }
+        let indexingStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
+
+        projectNode.sessionNodes.remove(at: flatIndex)
+        switch parent {
+        case let project as ProjectNode:
+            project.childNodes.remove(at: childIndex)
+        case let branch as BranchGroupNode:
+            branch.sessionNodes.remove(at: childIndex)
+        case let ancestor as SessionNode:
+            ancestor.childNodes.remove(at: childIndex)
+        default:
+            preconditionFailure("Validated sidebar session parent changed type")
+        }
+        let removedShapeIndex = renderedShape.removeLeaf(
+            .session(sessionID),
+            from: parentKey
+        )
+        precondition(removedShapeIndex == childIndex)
+
+        nodesByKey.removeValue(forKey: .session(sessionID))
+        sessionNodesByID.removeValue(forKey: sessionID)
+        projectNodesBySessionID.removeValue(forKey: sessionID)
+        ancestorsBySessionID.removeValue(forKey: sessionID)
+        #if DEBUG
+        measuredUpdate.indexingNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - indexingStarted
+        let outlineStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
+
+        applyStructure(
+            steps: [.remove(parent: parentKey, indexes: IndexSet(integer: childIndex))],
+            wholesale: false
+        )
+        if let row = projectRow(for: projectID) {
+            outlineView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: [0])
+        }
+        #if DEBUG
+        measuredUpdate.outlineNanoseconds = DispatchTime.now().uptimeNanoseconds - outlineStarted
+        #endif
+    }
+
+    /// Replaces only the identity maps owned by one project subtree.
+    private func replaceIndexes(
+        for projectNode: ProjectNode,
+        removing oldKeys: Set<SidebarNodeKey>
+    ) {
+        for key in oldKeys where key != .project(projectNode.projectID) {
+            nodesByKey.removeValue(forKey: key)
+            switch key {
+            case .session(let sessionID):
+                sessionNodesByID.removeValue(forKey: sessionID)
+                projectNodesBySessionID.removeValue(forKey: sessionID)
+                ancestorsBySessionID.removeValue(forKey: sessionID)
+            case .terminal(let terminalID):
+                terminalNodesByID.removeValue(forKey: terminalID)
+                projectNodesByTerminalID.removeValue(forKey: terminalID)
+                ancestorsByTerminalID.removeValue(forKey: terminalID)
+            case .repository, .project, .branch:
+                break
+            }
+        }
+
+        let projectAncestors: [NSObject] = rootNodes.compactMap { root in
+            guard let repository = root as? RepoGroupNode,
+                  repository.projectNodes.contains(where: { $0 === projectNode }) else {
+                return nil
+            }
+            return repository
+        }
+
+        func index(_ node: NSObject, ancestors: [NSObject]) {
+            guard let outlineNode = node as? any SidebarOutlineNode else { return }
+            nodesByKey[outlineNode.sidebarKey] = node
+            switch node {
+            case let branch as BranchGroupNode:
+                for child in branch.childNodes {
+                    index(child, ancestors: ancestors + [branch])
+                }
+            case let session as SessionNode:
+                sessionNodesByID[session.sessionID] = session
+                projectNodesBySessionID[session.sessionID] = projectNode
+                ancestorsBySessionID[session.sessionID] = ancestors
+                for child in session.childNodes {
+                    index(child, ancestors: ancestors + [session])
+                }
+            case let terminal as TerminalNode:
+                terminalNodesByID[terminal.terminalID] = terminal
+                projectNodesByTerminalID[terminal.terminalID] = projectNode
+                ancestorsByTerminalID[terminal.terminalID] = ancestors
+            default:
+                break
+            }
+        }
+
+        nodesByKey[.project(projectNode.projectID)] = projectNode
+        for child in projectNode.childNodes {
+            index(child, ancestors: projectAncestors + [projectNode])
+        }
+    }
+
     /// Tells the outline what moved, then opens whatever should be open.
     ///
     /// **`.effectFade`, and nothing else.** The slide options were measured against this list:
@@ -792,6 +1060,7 @@ extension ProjectSidebarViewController {
             let children = renderedShape.children(of: parent)
             return indexes.compactMap { children.indices.contains($0) ? children[$0] : nil }
         }
+        let needsExpansionPass = wholesale || !insertedKeys.isEmpty
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = animated ? Design.Motion.standard : Design.Motion.immediate
@@ -825,10 +1094,12 @@ extension ProjectSidebarViewController {
                 outlineView.endUpdates()
             }
 
-            expandStandingRows(
-                animated: animated,
-                recursively: recursivelyExpandStandingRows
-            )
+            if needsExpansionPass {
+                expandStandingRows(
+                    animated: animated,
+                    recursively: recursivelyExpandStandingRows
+                )
+            }
         }
 
         if animated, !insertedKeys.isEmpty {
@@ -959,13 +1230,15 @@ extension ProjectSidebarViewController {
         return rootNodes.first !== item
     }
 
-    /// Re-answers `showsGroupRule` for every row view the outline has built. Cheap enough to
-    /// run after any structural pass: it walks built views only and stamping is a no-op where
-    /// the answer stands.
+    /// Re-answers `showsGroupRule` for every row view the outline currently owns.
     private func refreshGroupRules() {
-        for row in 0..<outlineView.numberOfRows {
-            guard let rowView = outlineView.rowView(atRow: row, makeIfNecessary: false)
-                as? SidebarHoverRowView else { continue }
+        let rowViews = instantiatedHoverRowViews.allObjects
+        #if DEBUG
+        lastGroupRuleRefreshCandidateCount = rowViews.count
+        #endif
+        for rowView in rowViews {
+            let row = outlineView.row(for: rowView)
+            guard row >= 0 else { continue }
             rowView.showsGroupRule = showsGroupRule(forRow: row)
         }
     }
@@ -1062,7 +1335,6 @@ extension ProjectSidebarViewController {
         guard ConfirmationAlert.ask(request) else { return }
 
         guard projectStore.removeSession(id: sessionID) == .applied else {
-            reload()
             presentToast(ToastRequest(
                 message: L10n.format("Couldn’t delete “%@”", session.displayTitle),
                 detail: L10n.string(
@@ -1074,9 +1346,10 @@ extension ProjectSidebarViewController {
         }
         // Deleting the durable owner is the commitment point. A refused database write must not
         // kill a process whose row and resumable record still stand.
-        AgentRuntime.shared.discard(sessionID: sessionID)
-        reload()
-        delegate?.projectSidebarDidRemoveSessions(self)
+        AgentRuntime.shared.discardDeletedSession(sessionID)
+        // `removeSession` posts its project-scoped structural event synchronously. That pass has
+        // already removed the row; another reload here rebuilt and refreshed the same list.
+        delegate?.projectSidebar(self, didRemoveSession: sessionID)
     }
 
     /// Built separately from being asked, the same seam the close and archive requests offer.
@@ -1843,6 +2116,10 @@ private extension ProjectSidebarViewController {
             // Archive, add, remove, reorder, branch and grouping changes add, drop or move rows.
             // `reload` preserves selection and expansion around that structural rebuild.
             reload()
+        case .projectStructure(let projectID):
+            applyProjectStructureChange(projectID)
+        case .sessionRemoved(let projectID, let sessionID):
+            applySessionRemoval(sessionID, from: projectID)
         case .sessionOrder(let sessionID):
             applySessionOrderChange(sessionID)
         case .sessionRow(let sessionID):
@@ -2296,7 +2573,17 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     /// `refreshGroupRules()` re-stamps the survivors after each structural pass.
     func outlineView(_ outlineView: NSOutlineView, didAdd rowView: NSTableRowView, forRow row: Int) {
         guard let rowView = rowView as? SidebarHoverRowView else { return }
+        instantiatedHoverRowViews.add(rowView)
         rowView.showsGroupRule = showsGroupRule(forRow: row)
+    }
+
+    func outlineView(
+        _ outlineView: NSOutlineView,
+        didRemove rowView: NSTableRowView,
+        forRow row: Int
+    ) {
+        guard let rowView = rowView as? SidebarHoverRowView else { return }
+        instantiatedHoverRowViews.remove(rowView)
     }
 
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
@@ -2849,6 +3136,7 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
         createSideChatOf sessionID: SessionID,
         prompt: String?
     )
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didRemoveSession sessionID: SessionID)
     func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didCloseTerminal terminalID: TerminalID)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)

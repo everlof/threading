@@ -499,7 +499,7 @@ final class AgentRuntime {
     }
 
     /// Terminates the agent and releases its terminal, returning the session to dormant.
-    func discard(sessionID: SessionID) {
+    func discard(sessionID: SessionID, preservingViewport: Bool = true) {
 #if DEBUG
         fixtureLaunchPlanProviders.removeValue(forKey: sessionID)
 #endif
@@ -508,7 +508,7 @@ final class AgentRuntime {
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
 
         if let conversation = conversations.removeValue(forKey: sessionID) {
-            conversation.terminate()
+            conversation.terminate(preservingViewport: preservingViewport)
             subagentStates[sessionID]?.stopWorking(
                 message: "Stopped when the session process ended."
             )
@@ -522,6 +522,16 @@ final class AgentRuntime {
         )
         controller.view.removeFromSuperview()
         controllers[sessionID] = nil
+    }
+
+    /// Ends a permanently deleted session and drops its child-agent index without scanning the
+    /// state of every unrelated chat. Provider transcripts remain provider-owned.
+    func discardDeletedSession(_ sessionID: SessionID) {
+        discard(sessionID: sessionID, preservingViewport: false)
+        if let state = subagentStates.removeValue(forKey: sessionID) {
+            state.invalidate()
+        }
+        SubagentStateStore.shared.remove(sessionID: sessionID)
     }
 
     /// Drops memory and disk state for sessions that no longer exist.

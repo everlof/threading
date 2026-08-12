@@ -408,6 +408,47 @@ final class SidebarOutlineUpdateTests: XCTestCase {
         XCTAssertEqual(shape.keys.count, 4)
     }
 
+    /// A project-scoped update must preserve every unrelated root and descendant in the global
+    /// snapshot. Removing those identities would make the next outline diff reinsert the whole
+    /// sidebar even though the visible edit belonged to one project.
+    func testReplacingOneProjectSubtreePreservesTheRestOfTheSidebar() {
+        let changedProjectID = ProjectID()
+        let otherProjectID = ProjectID()
+        let leaving = SessionID()
+        let staying = SessionID()
+        let other = SessionID()
+
+        let originalProject = project(
+            changedProjectID,
+            children: [session(staying), session(leaving)]
+        )
+        let otherProject = project(otherProjectID, children: [session(other)])
+        var global = SidebarTreeShape(roots: [originalProject, otherProject])
+        let original = SidebarTreeShape(roots: [originalProject])
+        let replacement = SidebarTreeShape(roots: [
+            project(changedProjectID, children: [session(staying)])
+        ])
+
+        XCTAssertTrue(global.replaceSubtree(original, with: replacement))
+        XCTAssertEqual(global.children(of: nil), [.project(changedProjectID), .project(otherProjectID)])
+        XCTAssertEqual(global.children(of: .project(changedProjectID)), [.session(staying)])
+        XCTAssertEqual(global.children(of: .project(otherProjectID)), [.session(other)])
+        XCTAssertFalse(global.keys.contains(.session(leaving)))
+    }
+
+    func testReplacingASubtreeRefusesADifferentRootWithoutMutation() {
+        let standingProjectID = ProjectID()
+        let standing = project(standingProjectID, children: [session()])
+        var global = SidebarTreeShape(roots: [standing])
+        let before = global
+
+        XCTAssertFalse(global.replaceSubtree(
+            SidebarTreeShape(roots: [standing]),
+            with: SidebarTreeShape(roots: [project()])
+        ))
+        XCTAssertEqual(global, before)
+    }
+
     // MARK: - Adoption
 
     func testASurvivingRowKeepsTheObjectTheOutlineWasHanded() {

@@ -2573,6 +2573,53 @@ private final class InvitationPersistenceSpy: RemoteInvitationRedeeming {
 @MainActor
 final class RemoteAccessTransportPolicyTests: XCTestCase {
 
+    func testSessionRemovalDeltaNamesOnlyTheCoveredDeletedSession() {
+        let removedSessionID = SessionID()
+        let otherSessionID = SessionID()
+        let change = ProjectsDidChange(sidebarImpact: .sessionRemoved(
+            projectID: ProjectID(),
+            sessionID: removedSessionID
+        ))
+        let allSessions = RemoteAuthorization(
+            shareID: "all",
+            capability: .interact,
+            scope: .allSessions
+        )
+        let exactSession = RemoteAuthorization(
+            shareID: "exact",
+            capability: .view,
+            scope: .session(removedSessionID)
+        )
+        let otherSession = RemoteAuthorization(
+            shareID: "other",
+            capability: .view,
+            scope: .session(otherSessionID)
+        )
+
+        XCTAssertEqual(
+            RemoteSessionMirrorRegistry.sessionRemovalDelta(
+                for: change,
+                authorization: allSessions
+            )?.removedSessionID,
+            removedSessionID.uuidString
+        )
+        XCTAssertEqual(
+            RemoteSessionMirrorRegistry.sessionRemovalDelta(
+                for: change,
+                authorization: exactSession
+            )?.removedSessionID,
+            removedSessionID.uuidString
+        )
+        XCTAssertNil(RemoteSessionMirrorRegistry.sessionRemovalDelta(
+            for: change,
+            authorization: otherSession
+        ))
+        XCTAssertNil(RemoteSessionMirrorRegistry.sessionRemovalDelta(
+            for: ProjectsDidChange(sidebarImpact: .sessionRow(removedSessionID)),
+            authorization: allSessions
+        ))
+    }
+
     func testPromptReplayCacheRejectsConflictsExpiresAndStaysBounded() {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         var cache = RemotePromptReplayCache(maximumEntries: 2, lifetime: 10)

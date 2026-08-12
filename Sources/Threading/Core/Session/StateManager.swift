@@ -174,6 +174,30 @@ final class StateManager {
         }
     }
 
+    /// Commits one permanent session removal without walking the complete project graph.
+    @discardableResult
+    func removeSession(
+        id sessionID: SessionID,
+        from projectID: ProjectID,
+        selectedSessionID: SessionID?
+    ) -> Bool {
+        guard writesAreAllowed(for: "session removal") else { return false }
+        do {
+            try database().removeSession(
+                id: sessionID,
+                from: projectID,
+                selectedSessionID: selectedSessionID
+            )
+            return true
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to remove session: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            requireRecovery()
+            return false
+        }
+    }
+
     /// Whether this launch has read the record of what was running at the last quit.
     ///
     /// **A launch that never read it must not write over it.** Writing an empty list over a real
@@ -589,6 +613,20 @@ final class StateManager {
         }
     }
 
+    func deletePanelLayout(for sessionID: SessionID) {
+        guard writesAreAllowed(for: "display panel cleanup") else { return }
+        do {
+            try database().deletePanel(for: sessionID)
+            readablePanelRows.remove(sessionID)
+            unreadableAuxiliaryRows.panelLayouts.sessions.remove(sessionID)
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not remove display panel: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            requireRecovery()
+        }
+    }
+
     // MARK: - Session Attachments
 
     /// The attachment references a session has surfaced, stored beside its panel layout for the
@@ -653,6 +691,20 @@ final class StateManager {
         } catch {
             ThreadingLogger.mcp.error(
                 "Could not prune session attachments: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            requireRecovery()
+        }
+    }
+
+    func deleteAttachments(for sessionID: SessionID) {
+        guard writesAreAllowed(for: "session attachment cleanup") else { return }
+        do {
+            try database().deleteAttachments(for: sessionID)
+            readableAttachmentRows.remove(sessionID)
+            unreadableAuxiliaryRows.sessionAttachments.sessions.remove(sessionID)
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not remove session attachments: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             requireRecovery()
         }

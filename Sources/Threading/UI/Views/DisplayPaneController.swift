@@ -1641,6 +1641,15 @@ final class DisplayPaneController: NSViewController {
     render()
   }
 
+  /// Tears down one deleted session without filtering every resident panel.
+  func removeSession(_ sessionID: SessionID) {
+    tabsBySession.removeValue(forKey: sessionID)?.forEach { teardownHosted($0) }
+    activeTabIDBySession.removeValue(forKey: sessionID)
+    activeBrowserTabIDBySession.removeValue(forKey: sessionID)
+    if currentSessionID == sessionID { currentSessionID = nil }
+    render()
+  }
+
   // MARK: - Tab Interaction
 
   private func userActivatedTab(_ id: UUID) {

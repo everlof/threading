@@ -27,6 +27,17 @@ never blocks the writer, and `busy_timeout` turns "another process has it" into 
 makes multiple writers *possible*, not permitted — `SingleInstanceLock` still stands, and is a
 chosen concurrency model rather than a workaround.
 
+Permanent removal is an exact transaction, not an invitation to save that graph again. The delete
+predicate includes both session and project identifiers; `SELECT changes()` must report exactly one
+row, and the selected-session scalar changes in that same transaction. Session `position` values
+are order keys rather than a contiguity promise, so deletion leaves a sparse key instead of
+rewriting every later sibling; the next ordinary full graph save may compact them. `ProjectStore`
+uses this path only after flushing or ruling out unrelated coalesced mutations. If other unsaved
+model work exists it falls back to the full graph transaction, and if either transaction fails the
+in-memory graph and indexes are restored before a broad recovery notification. Session-owned panel
+and attachment rows have exact deletes of their own and run only after the graph removal is durable,
+so teardown cannot resurrect the deleted session and a failure cannot expose a half-removed graph.
+
 **SQLite handles have one deterministic lifetime.** `SQLiteDatabase.Statement` finalizes in
 `deinit` as well as after `run`: fluent binding can throw while the statement expression is still
 being built, before `run` has installed its own `defer`, and that must not leave a native statement

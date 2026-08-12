@@ -909,6 +909,14 @@ final class SubagentStateStore {
         writesBlocked = writesBlocked.filter { sessionIDs.contains($0) }
     }
 
+    func remove(sessionID: SessionID) {
+        writesBlocked.remove(sessionID)
+        let file = url(for: sessionID)
+        Task.detached(priority: .utility) {
+            try? FileManager().removeItem(at: file)
+        }
+    }
+
     private func url(for sessionID: SessionID) -> URL {
         directory
             .appendingPathComponent(sessionID.uuidString)

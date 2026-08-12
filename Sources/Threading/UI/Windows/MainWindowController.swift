@@ -1916,6 +1916,21 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
     }
 
+    /// Closes one deleted session's detached windows without rewriting its soon-to-be-deleted
+    /// panel document once per window.
+    func closeDetachedWindows(forSession sessionID: SessionID) {
+        let controllers = orderedDetachedWindows.filter { $0.sessionID == sessionID }
+        guard !controllers.isEmpty else { return }
+        for controller in controllers {
+            detachedBrowserWindows.removeValue(forKey: controller.windowID)
+            detachedWindowOrder.removeAll { $0 == controller.windowID }
+            controller.onPersist = nil
+            controller.onClose = nil
+            controller.close()
+        }
+        refreshDetachedWindowProxies()
+    }
+
     /// Moves every page in a detached window back into the panel. The window empties as its
     /// last tab leaves and closes itself, which is the same path a drag back takes — nothing
     /// here knows how to close a window, and nothing needs to.
@@ -3594,6 +3609,41 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         prompt: String?
     ) {
         sessionCoordinator.createSideChat(of: sessionID, prompt: prompt)
+    }
+
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        didRemoveSession sessionID: SessionID
+    ) {
+        let span = PerformanceRecorder.shared.begin(
+            "sidebar.session-remove.cleanup",
+            category: "sidebar"
+        )
+        defer { span.end() }
+
+        closeDetachedWindows(forSession: sessionID)
+
+        if currentSessionID == sessionID {
+            containerViewController.show(sessionID: nil)
+        }
+
+        // Release live surfaces first. The one persisted panel document belongs to both panel
+        // hosts and is deleted only after neither host can write it back during teardown.
+        displayPaneController.removeSession(sessionID)
+        containerViewController.removeDrawerSession(sessionID)
+        SessionAttachmentStore.shared.removeSession(sessionID)
+        DisplayPaneStore.shared.removeSession(sessionID)
+        MCPSessionRegistry.remove(sessionID: sessionID)
+        BrowserAutoCaptureRing.shared.clear(for: sessionID)
+
+        // `discardDeletedSession` already removed the live controller and subagent state at the
+        // durable mutation boundary. Prune only pages naming this chat from window history.
+        history.prune { page in
+            guard case .session(let candidate) = page else { return true }
+            return candidate != sessionID
+        }
+        updateNavigationButtons()
+        syncDisplayPane(to: containerViewController.currentSessionID)
     }
 
     func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController) {

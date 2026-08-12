@@ -1711,14 +1711,19 @@ final class ConversationViewController: NSViewController {
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
     }
 
-    func terminate() {
+    func terminate(preservingViewport: Bool = true) {
         // Runtime ownership has an explicit end edge (`discard` and `terminateAll` both come
         // through here), so actor-isolated UI state is settled there rather than from `deinit`.
         // Swift 6 correctly treats a class deinitializer as nonisolated: the previous workaround
         // marked the timer `nonisolated(unsafe)` and still raced the pending DispatchWorkItem.
         // Saving before the stream is stopped also preserves the last viewport if termination
         // synchronously changes presentation state.
-        saveConversationViewport()
+        if preservingViewport {
+            saveConversationViewport()
+        } else {
+            viewportSaveWorkItem?.cancel()
+            viewportSaveWorkItem = nil
+        }
         workingStatusTimer?.invalidate()
         workingStatusTimer = nil
 

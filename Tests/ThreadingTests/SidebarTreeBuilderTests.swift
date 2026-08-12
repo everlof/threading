@@ -869,8 +869,18 @@ final class SidebarTreeBuilderTests: XCTestCase {
             sessionsPerProject: sessionsPerProject,
             directory: directory
         )
+        // Seed outside the measured app lifetime. Otherwise the first deletion inherits an
+        // automatic WAL checkpoint from constructing 5,000 rows moments earlier — setup work a
+        // real launch with an existing sidebar completed in the previous process.
+        let seedManager = StateManager(appSupportDirectory: directory)
+        XCTAssertTrue(seedManager.saveProjectsState(ProjectsState(projects: fixture.projects)))
+        seedManager.closeDatabase()
+
         let manager = StateManager(appSupportDirectory: directory)
-        XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: fixture.projects)))
+        // This opt-in workload deletes its isolated store on return. Close SQLite first: unlinking
+        // the WAL underneath a live connection is an API violation and can crash xctest while
+        // its autorelease pool drains, after a perfectly valid performance line was printed.
+        defer { manager.closeDatabase() }
         let store = ProjectStore(stateManager: manager)
         // Match MainWindowController: construct and lay out the sidebar shell at its permanent
         // geometry, then cross the explicit initial-tree boundary. Eagerly mounting into a
@@ -983,14 +993,64 @@ final class SidebarTreeBuilderTests: XCTestCase {
         let orderedResizeSamples = resizeSamples.sorted()
         let resizeElapsed = resizeSamples.reduce(0, +)
 
+        // Earlier phases intentionally mutate a title. Flush that independent work so this
+        // sample measures removal itself rather than whichever coalesced write happens to win.
+        store.flushPendingSave()
+
+        // Permanent removal is a structural edit plus an immediate durable write. Keep it in
+        // this same scaling sweep: the reported pause can come from the database walk, the
+        // outline diff, or the layout that closes the visible gap, and a small fixture makes all
+        // three look free. Keep a direct full reload beside it so broad invalidation stays visible.
+        let removalProject = try XCTUnwrap(store.projects.dropFirst().first ?? store.projects.first)
+        let dormantRemoval = try XCTUnwrap(
+            removalProject.sessions.first(where: { $0.id != fixture.deepSessionID })
+        )
+        let dormantRemovalStarted = DispatchTime.now().uptimeNanoseconds
+        XCTAssertEqual(store.removeSession(id: dormantRemoval.id), .applied)
+        let dormantMutationEnded = DispatchTime.now().uptimeNanoseconds
+        #if DEBUG
+        let dormantRemovalPhases = store.lastSessionRemovalPhaseNanoseconds
+        let dormantSidebarUpdate = controller.lastProjectStructureNanoseconds
+        let dormantSidebarPhases = controller.lastProjectStructurePerformance
+        #endif
+        controller.view.layoutSubtreeIfNeeded()
+        let dormantLayoutEnded = DispatchTime.now().uptimeNanoseconds
+
+        let fullReloadComparisonStarted = DispatchTime.now().uptimeNanoseconds
+        controller.reload()
+        controller.view.layoutSubtreeIfNeeded()
+        let fullReloadComparisonEnded = DispatchTime.now().uptimeNanoseconds
+
+        store.selectedSessionID = fixture.deepSessionID
+        let selectedRemovalStarted = DispatchTime.now().uptimeNanoseconds
+        XCTAssertEqual(store.removeSession(id: fixture.deepSessionID), .applied)
+        let selectedMutationEnded = DispatchTime.now().uptimeNanoseconds
+        #if DEBUG
+        let selectedRemovalPhases = store.lastSessionRemovalPhaseNanoseconds
+        let selectedSidebarUpdate = controller.lastProjectStructureNanoseconds
+        let selectedSidebarPhases = controller.lastProjectStructurePerformance
+        let groupRuleRefreshCandidateCount = controller.lastGroupRuleRefreshCandidateCount
+        #endif
+        controller.view.layoutSubtreeIfNeeded()
+        let selectedLayoutEnded = DispatchTime.now().uptimeNanoseconds
+
         XCTAssertFalse(roots.isEmpty)
-        XCTAssertEqual(controller.selectedSessionID, fixture.deepSessionID)
+        XCTAssertNil(store.selectedSessionID)
+        XCTAssertFalse(controller.presentedRowKeys.contains(.session(dormantRemoval.id)))
+        XCTAssertFalse(controller.presentedRowKeys.contains(.session(fixture.deepSessionID)))
         XCTAssertEqual(
             controller.outlineRowCount,
-            nodeCount(roots),
-            "the chosen sort order left an expandable ancestor closed"
+            nodeCount(roots) - 2,
+            "removing two sessions did not leave the expected tree"
         )
         XCTAssertLessThan(controller.instantiatedRowCount, controller.outlineRowCount)
+        #if DEBUG
+        XCTAssertLessThan(
+            groupRuleRefreshCandidateCount,
+            controller.outlineRowCount,
+            "a structural edit scanned logical rows instead of mounted row views"
+        )
+        #endif
 
         var performanceLine =
             "THREADING_PERF project-sidebar "
@@ -1026,7 +1086,68 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 + "resize_total_ms=\(Self.milliseconds(resizeElapsed)) "
                 + "resize_p50_ms=\(Self.milliseconds(Self.percentile(0.50, in: orderedResizeSamples))) "
                 + "resize_p95_ms=\(Self.milliseconds(Self.percentile(0.95, in: orderedResizeSamples))) "
-                + "resize_max_ms=\(Self.milliseconds(orderedResizeSamples.last ?? 0))"
+                + "resize_max_ms=\(Self.milliseconds(orderedResizeSamples.last ?? 0)) "
+                + "remove_dormant_mutation_ms="
+                + Self.milliseconds(dormantMutationEnded - dormantRemovalStarted) + " "
+                + "remove_dormant_layout_ms="
+                + Self.milliseconds(dormantLayoutEnded - dormantMutationEnded) + " "
+                + "remove_full_reload_comparison_ms="
+                + Self.milliseconds(fullReloadComparisonEnded - fullReloadComparisonStarted) + " "
+                + "remove_selected_mutation_ms="
+                + Self.milliseconds(selectedMutationEnded - selectedRemovalStarted) + " "
+                + "remove_selected_layout_ms="
+                + Self.milliseconds(selectedLayoutEnded - selectedMutationEnded)
+        #if DEBUG
+        performanceLine += " remove_dormant_sidebar_ms="
+                + Self.milliseconds(dormantSidebarUpdate)
+                + " remove_dormant_tree_ms="
+                + Self.milliseconds(dormantSidebarPhases.treeNanoseconds)
+                + " remove_dormant_shape_ms="
+                + Self.milliseconds(dormantSidebarPhases.shapeNanoseconds)
+                + " remove_dormant_adopt_ms="
+                + Self.milliseconds(dormantSidebarPhases.adoptionNanoseconds)
+                + " remove_dormant_indexes_ms="
+                + Self.milliseconds(dormantSidebarPhases.indexingNanoseconds)
+                + " remove_dormant_outline_ms="
+                + Self.milliseconds(dormantSidebarPhases.outlineNanoseconds)
+                + " remove_selected_sidebar_ms="
+                + Self.milliseconds(selectedSidebarUpdate)
+                + " remove_selected_tree_ms="
+                + Self.milliseconds(selectedSidebarPhases.treeNanoseconds)
+                + " remove_selected_shape_ms="
+                + Self.milliseconds(selectedSidebarPhases.shapeNanoseconds)
+                + " remove_selected_adopt_ms="
+                + Self.milliseconds(selectedSidebarPhases.adoptionNanoseconds)
+                + " remove_selected_indexes_ms="
+                + Self.milliseconds(selectedSidebarPhases.indexingNanoseconds)
+                + " remove_selected_outline_ms="
+                + Self.milliseconds(selectedSidebarPhases.outlineNanoseconds)
+                + " remove_dormant_persistence_ms="
+                + Self.milliseconds(dormantRemovalPhases["persistence"] ?? 0)
+                + " remove_dormant_baselines_ms="
+                + Self.milliseconds(dormantRemovalPhases["baselines"] ?? 0)
+                + " remove_dormant_work_ms="
+                + Self.milliseconds(dormantRemovalPhases["work"] ?? 0)
+                + " remove_dormant_handoff_ms="
+                + Self.milliseconds(dormantRemovalPhases["handoff"] ?? 0)
+                + " remove_dormant_audit_ms="
+                + Self.milliseconds(dormantRemovalPhases["audit"] ?? 0)
+                + " remove_dormant_scheduled_ms="
+                + Self.milliseconds(dormantRemovalPhases["scheduled"] ?? 0)
+                + " remove_selected_persistence_ms="
+                + Self.milliseconds(selectedRemovalPhases["persistence"] ?? 0)
+                + " remove_selected_baselines_ms="
+                + Self.milliseconds(selectedRemovalPhases["baselines"] ?? 0)
+                + " remove_selected_work_ms="
+                + Self.milliseconds(selectedRemovalPhases["work"] ?? 0)
+                + " remove_selected_handoff_ms="
+                + Self.milliseconds(selectedRemovalPhases["handoff"] ?? 0)
+                + " remove_selected_audit_ms="
+                + Self.milliseconds(selectedRemovalPhases["audit"] ?? 0)
+                + " remove_selected_scheduled_ms="
+                + Self.milliseconds(selectedRemovalPhases["scheduled"] ?? 0)
+                + " group_rule_candidates=\(groupRuleRefreshCandidateCount)"
+        #endif
         print(performanceLine)
     }
 

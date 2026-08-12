@@ -910,6 +910,10 @@ final class TerminalContainerViewController: NSViewController {
         drawerHostController.retainOnly(sessionIDs: sessionIDs)
     }
 
+    func removeDrawerSession(_ sessionID: SessionID) {
+        drawerHostController.removeSession(sessionID)
+    }
+
     private func setupPlaceholder() {
         placeholderView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(placeholderView)

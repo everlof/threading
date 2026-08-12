@@ -154,6 +154,20 @@ final class MCPSessionRegistryTests: XCTestCase {
     XCTAssertEqual(MCPSessionRegistry.token(for: retainedSessionID), retainedToken)
   }
 
+  @MainActor
+  func testRemovingOneSessionRevokesOnlyItsEndpoint() {
+    let removedSessionID = SessionID()
+    let retainedSessionID = SessionID()
+    let removedToken = MCPSessionRegistry.token(for: removedSessionID)
+    let retainedToken = MCPSessionRegistry.token(for: retainedSessionID)
+
+    MCPSessionRegistry.remove(sessionID: removedSessionID)
+
+    XCTAssertNil(MCPSessionRegistry.session(forToken: removedToken))
+    XCTAssertEqual(MCPSessionRegistry.session(forToken: retainedToken), retainedSessionID)
+    XCTAssertEqual(MCPSessionRegistry.token(for: retainedSessionID), retainedToken)
+  }
+
   /// An ad-hoc endpoint is not `ProjectStore`'s to revoke: the retain sweep runs because some
   /// unrelated session was deleted, and a helper mid-run must keep its endpoint through it.
   /// Only its own explicit end revokes it — and does, in both directions, scope included.

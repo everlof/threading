@@ -346,12 +346,34 @@ enum MCPSessionRegistry {
         // Disk cleanup and permission cancellation can call into other subsystems. Keeping them
         // outside the registry lock prevents unrelated work from extending the critical section.
         for sessionID in removedSessionIDs {
-            for directory in MCPDefaults.cleanupDirectories {
-                try? FileManager.default.removeItem(at: supportFile(sessionID, in: directory))
-            }
-
-            PermissionBroker.discard(sessionID: sessionID)
+            removeSupportFilesAndPermissions(for: sessionID)
         }
+    }
+
+    /// Revokes one permanently deleted session without filtering the complete endpoint map.
+    @MainActor
+    static func remove(sessionID: SessionID) {
+        let removed = storage.withLock { storage -> Bool in
+            guard storage.adHocScopesBySession[sessionID] == nil else { return false }
+            guard let token = storage.tokensBySession.removeValue(forKey: sessionID) else {
+                return true
+            }
+            storage.sessionsByToken.removeValue(forKey: token)
+            return true
+        }
+        guard removed else { return }
+        removeSupportFilesAndPermissions(for: sessionID)
+    }
+
+    @MainActor
+    private static func removeSupportFilesAndPermissions(for sessionID: SessionID) {
+        let files = MCPDefaults.cleanupDirectories.map { supportFile(sessionID, in: $0) }
+        Task.detached(priority: .utility) {
+            for file in files {
+                try? FileManager().removeItem(at: file)
+            }
+        }
+        PermissionBroker.discard(sessionID: sessionID)
     }
 
     // MARK: - Private Methods

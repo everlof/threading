@@ -282,6 +282,20 @@ final class DrawerHostViewController: NSViewController {
         }
     }
 
+    /// Permanent deletion uses the same live teardown as closing; persistence is removed once
+    /// both panel hosts have released their surfaces.
+    func removeSession(_ sessionID: SessionID) {
+        openSessions.remove(sessionID)
+        if let state = statesBySession.removeValue(forKey: sessionID) {
+            state.tabs.forEach { teardownHosted($0) }
+        }
+        restoredSessions.remove(sessionID)
+        if currentSessionID == sessionID {
+            currentSessionID = nil
+            render()
+        }
+    }
+
     /// The session's first shell's root process — the info panel's attribution question,
     /// answered the way the lone drawer answered it.
     func shellRootPid(for sessionID: SessionID) -> pid_t? {

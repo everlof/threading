@@ -106,6 +106,17 @@ final class ProjectStore {
     /// Pending coalesced write, see `scheduleSave()`.
     private var saveTimer: Timer?
 
+    /// A successful load rewrites only when it actually found legacy theme identities. Keep the
+    /// result so a mutation can distinguish its own pending coalesced edit from that launch-only
+    /// migration; the latter was already committed before `init` returned.
+    private var hasPendingCoalescedMutation = false
+
+    #if DEBUG
+    /// The sidebar stress sweep keeps the mutation's owners separately visible. A fast total can
+    /// otherwise hide a newly eager persistence or private-data cleanup behind outline work.
+    private(set) var lastSessionRemovalPhaseNanoseconds: [String: UInt64] = [:]
+    #endif
+
     /// Whether a multi-system transaction may safely begin a side effect that it will later
     /// need this store to record. This is a preflight, not a promise that the next disk write
     /// cannot fail; callers must still inspect the mutation result.
@@ -875,10 +886,36 @@ final class ProjectStore {
 
     @discardableResult
     func removeSession(id sessionID: SessionID) -> ProjectMutationResult {
+        #if DEBUG
+        lastSessionRemovalPhaseNanoseconds = [:]
+        #endif
         guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
         let projectID = projects[location.projectIndex].id
+        let sessionPosition = location.sessionIndex
+        let hadPendingSave = saveTimer != nil
+        let indexesStarted = DispatchTime.now().uptimeNanoseconds
+        let indexSpan = PerformanceRecorder.shared.begin(
+            "sidebar.session-remove.indexes",
+            category: "sidebar",
+            metadata: [
+                "projects": String(projects.count),
+                "project_sessions": String(projects[location.projectIndex].sessions.count)
+            ]
+        )
         projects[location.projectIndex].sessions.remove(at: location.sessionIndex)
-        rebuildLookupIndexes()
+        sessionLocationsByID.removeValue(forKey: sessionID)
+        let shiftedSessionCount = projects[location.projectIndex].sessions.count - sessionPosition
+        if shiftedSessionCount > 0 {
+            for sessionIndex in sessionPosition..<projects[location.projectIndex].sessions.count {
+                let shiftedID = projects[location.projectIndex].sessions[sessionIndex].id
+                sessionLocationsByID[shiftedID] = (location.projectIndex, sessionIndex)
+            }
+        }
+        indexSpan.end(metadata: ["shifted_sessions": String(shiftedSessionCount)])
+        #if DEBUG
+        lastSessionRemovalPhaseNanoseconds["indexes"] =
+            DispatchTime.now().uptimeNanoseconds - indexesStarted
+        #endif
 
         if selectedSessionID == sessionID {
             // Selection and graph are one transaction. The observer's optimized scalar write
@@ -886,23 +923,60 @@ final class ProjectStore {
             // returned after relaunch.
             setSelectedSessionWithoutPersistence(nil)
         }
-        guard save() else {
-            notifyChanged()
+        let persistenceStarted = DispatchTime.now().uptimeNanoseconds
+        guard saveSessionRemoval(
+            sessionID,
+            from: projectID,
+            preservingPendingChangesWithFullSave: hadPendingSave
+        ) else {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
             return .persistenceRefused
         }
+        #if DEBUG
+        lastSessionRemovalPhaseNanoseconds["persistence"] =
+            DispatchTime.now().uptimeNanoseconds - persistenceStarted
+        #endif
 
         // Archive/Restore never enters this method. Permanent removal collects only refs in
         // Threading's private namespace, and follows the authoritative commit so a refused
         // deletion cannot erase the history of a session that is still there.
+        let baselinesStarted = DispatchTime.now().uptimeNanoseconds
         GitTurnBaselineStore.shared.remove(sessionID: sessionID)
+        #if DEBUG
+        lastSessionRemovalPhaseNanoseconds["baselines"] =
+            DispatchTime.now().uptimeNanoseconds - baselinesStarted
+        #endif
+        let workStarted = DispatchTime.now().uptimeNanoseconds
         AgentWorkTraceStore.shared.remove(sessionID: sessionID, projectID: projectID)
+        #if DEBUG
+        lastSessionRemovalPhaseNanoseconds["work"] =
+            DispatchTime.now().uptimeNanoseconds - workStarted
+        #endif
+        let handoffStarted = DispatchTime.now().uptimeNanoseconds
         ConversationHandoffStore.remove(for: sessionID)
+        #if DEBUG
+        lastSessionRemovalPhaseNanoseconds["handoff"] =
+            DispatchTime.now().uptimeNanoseconds - handoffStarted
+        #endif
+        let auditStarted = DispatchTime.now().uptimeNanoseconds
         ExecutionAuditStore.shared.remove(sessionID: sessionID)
+        #if DEBUG
+        lastSessionRemovalPhaseNanoseconds["audit"] =
+            DispatchTime.now().uptimeNanoseconds - auditStarted
+        #endif
         // Here rather than in the sidebar's delete gesture: this is the one door every deletion
         // route passes through, and Settings ▸ Archived removes sessions without going near the
         // sidebar at all. A scheduled send left behind would keep naming a session that is gone.
+        let scheduledStarted = DispatchTime.now().uptimeNanoseconds
         ScheduledMessageStore.shared.forget(sessionID: sessionID)
-        notifyChanged()
+        #if DEBUG
+        lastSessionRemovalPhaseNanoseconds["scheduled"] =
+            DispatchTime.now().uptimeNanoseconds - scheduledStarted
+        #endif
+        notifyChanged(sidebarImpact: .sessionRemoved(
+            projectID: projectID,
+            sessionID: sessionID
+        ))
         return .applied
     }
 
@@ -1321,6 +1395,7 @@ final class ProjectStore {
     /// Structural edits persist immediately; only high-frequency updates such as terminal
     /// titles come through here, where losing the last fraction of a second costs nothing.
     private func scheduleSave() {
+        hasPendingCoalescedMutation = true
         saveTimer?.invalidate()
         saveTimer = Timer.scheduledTimer(
             withTimeInterval: ProjectStoreDefaults.saveCoalescingInterval,
@@ -1346,27 +1421,7 @@ final class ProjectStore {
         saveTimer?.invalidate()
         saveTimer = nil
 
-        guard stateWritePolicy.allowsWrites else {
-            // The reason is stored with the refusal. Consulting the process-global recovery
-            // flag here made an injected recovery store report a fictional failed quarantine,
-            // and collapsed a failed write into a failed load in real diagnostics.
-            switch stateWritePolicy {
-            case .recoveryMode:
-                RecoveryMode.refuse("a projects-state save")
-            case .failedLoad:
-                ThreadingLogger.agent.error(
-                    "Refusing to save projects state because its earlier load was not authoritative"
-                )
-            case .failedWrite:
-                ThreadingLogger.agent.error(
-                    "Refusing to save projects state because an earlier write failed"
-                )
-            case .allowed:
-                break
-            }
-            restorePersistedSnapshot()
-            return false
-        }
+        guard prepareForImmediateSave("projects state") else { return false }
 
         let state = ProjectsState(
             projects: projects,
@@ -1378,6 +1433,74 @@ final class ProjectStore {
             return false
         }
         recordPersistedSnapshot()
+        hasPendingCoalescedMutation = false
+        return true
+    }
+
+    /// The permanent-delete fast path: one SQL delete with a sparse order key, instead of
+    /// encoding and upserting every session in every project on the main actor.
+    ///
+    /// A pending coalesced write is the exception. It represents model fields SQLite has not
+    /// accepted yet, so an exact delete cannot cancel its timer and then record those values as
+    /// durable. That uncommon path deliberately falls back to the complete transaction.
+    private func saveSessionRemoval(
+        _ sessionID: SessionID,
+        from projectID: ProjectID,
+        preservingPendingChangesWithFullSave hadPendingSave: Bool
+    ) -> Bool {
+        if hadPendingSave && hasPendingCoalescedMutation {
+            return save()
+        }
+
+        saveTimer?.invalidate()
+        saveTimer = nil
+
+        guard prepareForImmediateSave("session removal") else { return false }
+
+        let span = PerformanceRecorder.shared.begin(
+            "sidebar.session-remove.persist",
+            category: "sidebar",
+            metadata: ["projects": String(projects.count)]
+        )
+        let saved = stateManager.removeSession(
+            id: sessionID,
+            from: projectID,
+            selectedSessionID: selectedSessionID
+        )
+        span.end(metadata: ["saved": String(saved)])
+        guard saved else {
+            stateWritePolicy = .failedWrite
+            restorePersistedSnapshot()
+            return false
+        }
+        recordPersistedSnapshot()
+        hasPendingCoalescedMutation = false
+        return true
+    }
+
+    /// Applies the store-owned refusal policy before any immediate persistence operation.
+    private func prepareForImmediateSave(_ description: String) -> Bool {
+        guard stateWritePolicy.allowsWrites else {
+            // The reason is stored with the refusal. Consulting the process-global recovery
+            // flag here made an injected recovery store report a fictional failed quarantine,
+            // and collapsed a failed write into a failed load in real diagnostics.
+            switch stateWritePolicy {
+            case .recoveryMode:
+                RecoveryMode.refuse("a \(description) save")
+            case .failedLoad:
+                ThreadingLogger.agent.error(
+                    "Refusing to save \(description, privacy: .public) because its earlier load was not authoritative"
+                )
+            case .failedWrite:
+                ThreadingLogger.agent.error(
+                    "Refusing to save \(description, privacy: .public) because an earlier write failed"
+                )
+            case .allowed:
+                break
+            }
+            restorePersistedSnapshot()
+            return false
+        }
         return true
     }
 
