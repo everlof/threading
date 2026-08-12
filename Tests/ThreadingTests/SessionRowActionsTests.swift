@@ -712,7 +712,7 @@ final class SessionRowActionsTests: XCTestCase {
 
         XCTAssertEqual(
             slot.frame.width,
-            SidebarRowDefaults.sessionTrailingSlotWithStatusWidth,
+            SidebarRowDefaults.sessionTrailingSlotWidth,
             accuracy: 0.5,
             "the hovered working row did not contain both actions and its status target"
         )
@@ -742,8 +742,85 @@ final class SessionRowActionsTests: XCTestCase {
         )
     }
 
+    /// A click target does not move because a session started spinning.
+    ///
+    /// The slot used to size itself to the row's actual state: the pair took the row's edge when
+    /// there was no status to draw and stepped one column inboard when there was, so the archive
+    /// button stood 22pt apart on two rows of the same list. Reserving the status column
+    /// unconditionally costs an idle row a column of title while it is hovered, and buys a
+    /// trailing geometry that is a fact about the list rather than about each session.
+    func testTheActionPairSitsInOnePlaceWhateverTheRowIsDoing() throws {
+        func archiveCentre(activity: SessionActivity, isLoading: Bool) throws -> CGFloat {
+            let (host, row) = hostedRow()
+            row.configure(with: session(), activity: activity, isLoading: isLoading)
+            enter(row)
+            defer { leave(row) }
+            host.layoutSubtreeIfNeeded()
+
+            let archive = try view(named: "sidebar.session.archive", in: row)
+            return row.convert(
+                NSPoint(x: archive.bounds.midX, y: archive.bounds.midY),
+                from: archive
+            ).x
+        }
+
+        let idle = try archiveCentre(activity: .idle, isLoading: false)
+        for state in [
+            (activity: SessionActivity.working, isLoading: false, name: "a working row"),
+            (activity: .awaitingUser, isLoading: false, name: "a blocked row"),
+            (activity: .needsAttention, isLoading: false, name: "an unread row"),
+            (activity: .idle, isLoading: true, name: "a loading row")
+        ] {
+            XCTAssertEqual(
+                try archiveCentre(activity: state.activity, isLoading: state.isLoading),
+                idle,
+                accuracy: 0.5,
+                "\(state.name) put its archive button somewhere an idle row does not"
+            )
+        }
+    }
+
+    /// And it does not move *while it is being reached for*.
+    ///
+    /// This is the way the drift was actually met. `SessionLoadingState.presentation` is raised
+    /// because the sidebar is putting the session you just clicked on screen, so the row under the
+    /// pointer gained a spinner a moment after the click and the archive button stepped aside —
+    /// then stepped back when the load finished.
+    func testTheActionPairDoesNotMoveWhenAStatusArrivesUnderThePointer() throws {
+        let (host, row) = hostedRow()
+        let session = session()
+        row.configure(with: session, activity: .idle)
+        enter(row)
+        defer { leave(row) }
+        host.layoutSubtreeIfNeeded()
+
+        let archive = try view(named: "sidebar.session.archive", in: row)
+        func centre() -> CGFloat {
+            row.convert(NSPoint(x: archive.bounds.midX, y: archive.bounds.midY), from: archive).x
+        }
+        let reached = centre()
+
+        row.configure(with: session, activity: .idle, isLoading: true)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            centre(),
+            reached,
+            accuracy: 0.5,
+            "the archive button moved out from under the pointer when the row began loading"
+        )
+
+        row.configure(with: session, activity: .idle, isLoading: false)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            centre(),
+            reached,
+            accuracy: 0.5,
+            "the archive button moved back when the row finished loading"
+        )
+    }
+
     /// The dot must not move or disappear when actions arrive. Activity is durable state, so the
-    /// pair moves inboard while status keeps the list's stable trailing edge.
+    /// pair occupies the two columns inboard of the one status keeps at the list's trailing edge.
     func testTheStatusDotKeepsTheRowsTrailingEdge() throws {
         let (host, row) = hostedRow()
         row.configure(with: session(), activity: .working)

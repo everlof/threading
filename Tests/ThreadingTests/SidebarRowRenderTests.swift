@@ -133,7 +133,14 @@ final class SidebarRowRenderTests: XCTestCase {
             title: "Refactor the sidebar trailing slot and its hover controls"
         )
 
-        XCTAssertEqual(written, 26, "Every story should render in both appearances")
+        // The two states the pair used to be drawn in two places by. A loading row is the one
+        // that caught it: the spinner is raised because the sidebar is presenting the row that
+        // was just clicked, so it arrives under a pointer already on its way to the archive
+        // button. Both should put that button exactly where story 03 does.
+        written += try write(story: "14-hovered-while-loading", activity: .idle, hovered: true, loading: true)
+        written += try write(story: "15-hovered-while-blocked", activity: .awaitingUser, hovered: true)
+
+        XCTAssertEqual(written, 30, "Every story should render in both appearances")
         print("Rendered sidebar-row storybook to \(Render.directory.path)")
     }
 
@@ -220,6 +227,106 @@ final class SidebarRowRenderTests: XCTestCase {
         print("Rendered sidebar row kinds to \(Render.directory.path)")
     }
 
+    /// Every trailing state a session row can be hovered in, stacked at one width, so the archive
+    /// button's column can be read down the sheet rather than compared between two screenshots.
+    ///
+    /// This is the picture the bug was reported from: the pair took the row's edge when there was
+    /// no status and stepped a column inboard when there was, so the same button stood in two
+    /// places down one list — and moved under the pointer whenever a row's state changed while it
+    /// was being reached for. What to look for is a single vertical line of archive glyphs, with
+    /// each row's status, where it has one, on the line outboard of it.
+    func testRendersEveryHoveredTrailingState() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let states: [(name: String, activity: SessionActivity, loading: Bool)] = [
+            ("Idle session", .idle, false),
+            ("Loading session", .idle, true),
+            ("Working session", .working, false),
+            ("Blocked session", .awaitingUser, false),
+            ("Unread session", .needsAttention, false)
+        ]
+
+        for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let appearance = NSAppearance(named: appearanceName)
+            var data: Data?
+
+            let render = {
+                let host = NSView(
+                    frame: NSRect(
+                        x: 0,
+                        y: 0,
+                        width: Fixture.width,
+                        height: Fixture.height * CGFloat(states.count)
+                    )
+                )
+                host.appearance = appearance
+
+                // Each cell inside the hover ground the sidebar paints under it, so the sheet
+                // shows the pair on the surface it is actually inked against.
+                let rows: [NSView] = states.map { state in
+                    let cell = Self.hoveredSessionRow(
+                        AgentSession(kind: .claude, title: state.name),
+                        activity: state.activity,
+                        loading: state.loading
+                    )
+                    let ground = SidebarHoverRowView()
+                    ground.translatesAutoresizingMaskIntoConstraints = false
+                    ground.addSubview(cell)
+                    NSLayoutConstraint.activate([
+                        cell.leadingAnchor.constraint(equalTo: ground.leadingAnchor),
+                        cell.trailingAnchor.constraint(equalTo: ground.trailingAnchor),
+                        cell.topAnchor.constraint(equalTo: ground.topAnchor),
+                        cell.bottomAnchor.constraint(equalTo: ground.bottomAnchor)
+                    ])
+                    if let entered = Self.enterEvent() { ground.mouseEntered(with: entered) }
+                    return ground
+                }
+
+                let stack = NSStackView(views: rows)
+                stack.orientation = .vertical
+                stack.alignment = .leading
+                stack.spacing = 0
+                stack.translatesAutoresizingMaskIntoConstraints = false
+                host.addSubview(stack)
+                NSLayoutConstraint.activate([
+                    stack.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                    stack.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+                    stack.topAnchor.constraint(equalTo: host.topAnchor)
+                ])
+                for row in rows {
+                    NSLayoutConstraint.activate([
+                        row.widthAnchor.constraint(equalTo: host.widthAnchor),
+                        row.heightAnchor.constraint(equalToConstant: Fixture.height)
+                    ])
+                }
+
+                AppThemeRefresh.repaint(host)
+                host.layoutSubtreeIfNeeded()
+                host.wantsLayer = true
+                host.layer?.backgroundColor = Design.Surface.background.cgColor
+
+                guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+                    return
+                }
+                host.cacheDisplay(in: host.bounds, to: rep)
+                data = rep.representation(using: .png, properties: [:])
+            }
+
+            if #available(macOS 11.0, *) {
+                appearance?.performAsCurrentDrawingAppearance(render)
+            } else {
+                render()
+            }
+
+            let image = try XCTUnwrap(data, "Failed to render the hovered-state sheet in \(name)")
+            try image.write(
+                to: directory.appendingPathComponent("sidebar-hovered-states-\(name).png")
+            )
+        }
+        print("Rendered hovered trailing states to \(Render.directory.path)")
+    }
+
     // MARK: - Trailing Edge
 
     /// Every trailing mark lands on one optical line, whatever kind of thing it is.
@@ -229,9 +336,11 @@ final class SidebarRowRenderTests: XCTestCase {
     /// the row's trailing edge visibly steps inboard under the pointer. `OpticalInsetProviding`
     /// is what closes that gap; this asserts the row actually subtracts it.
     ///
-    /// Asserted on rows at rest: hovering only crossfades the slot's contents, so the geometry
-    /// under the pointer is the geometry here — and building it without a synthesized hover
-    /// keeps the code-stats service and the popover timer out of a layout test.
+    /// A project row is asserted at rest, where its count and the controls that replace it share
+    /// the one line. A session row keeps its status on that line under the pointer too, and puts
+    /// its actions on a second line one column inboard — reserved whether or not the row has any
+    /// status to draw, so the pair never moves. That second line is asserted here as well,
+    /// because "the archive button is one column in" is only true if the column is a constant.
     func testEveryTrailingMarkLandsOnOneOpticalLine() throws {
         let margin = Fixture.width - SidebarRowDefaults.trailingInset
 
@@ -266,11 +375,8 @@ final class SidebarRowRenderTests: XCTestCase {
             "the branch heading's gear"
         )
 
-        let sessionRow = SessionRowView(customizationLookup: { _ in .empty })
-        sessionRow.translatesAutoresizingMaskIntoConstraints = false
-        sessionRow.configure(
-            with: AgentSession(kind: .claude, title: "Fix the hover state"),
-            activity: .idle
+        let sessionRow = Self.hoveredSessionRow(
+            AgentSession(kind: .claude, title: "Fix the hover state")
         )
         Self.layOut(sessionRow)
 
@@ -284,7 +390,9 @@ final class SidebarRowRenderTests: XCTestCase {
         try assertOpticalEdge(
             ofControlsIn: "sidebar.session.hover-controls",
             of: sessionRow,
-            equals: margin,
+            equals: margin
+                - SidebarRowDefaults.trailingSlotSize
+                - SidebarRowDefaults.hoverButtonSpacing,
             "the session row's archive button"
         )
     }
@@ -675,13 +783,17 @@ final class SidebarRowRenderTests: XCTestCase {
         return row
     }
 
-    private static func hoveredSessionRow(_ session: AgentSession) -> SessionRowView {
+    private static func hoveredSessionRow(
+        _ session: AgentSession,
+        activity: SessionActivity = .idle,
+        loading: Bool = false
+    ) -> SessionRowView {
         let row = SessionRowView(customizationLookup: { _ in .empty })
         row.translatesAutoresizingMaskIntoConstraints = false
-        row.configure(with: session, activity: .idle)
+        row.configure(with: session, activity: activity, isLoading: loading)
         if let entered = enterEvent() {
             row.mouseEntered(with: entered)
-            row.configure(with: session, activity: .idle)
+            row.configure(with: session, activity: activity, isLoading: loading)
         }
         return row
     }
@@ -711,6 +823,7 @@ final class SidebarRowRenderTests: XCTestCase {
         hovered: Bool,
         selected: Bool = false,
         pinned: Bool = false,
+        loading: Bool = false,
         title: String = "Fix the hover state"
     ) throws -> Int {
         let directory = Render.directory
@@ -751,11 +864,11 @@ final class SidebarRowRenderTests: XCTestCase {
                 // hovered stories deterministic rather than a race with the crossfade.
                 var session = AgentSession(kind: .claude, title: title)
                 session.isPinned = pinned
-                cell.configure(with: session, activity: activity)
+                cell.configure(with: session, activity: activity, isLoading: loading)
                 if hovered, let entered = Self.enterEvent() {
                     row.mouseEntered(with: entered)
                     cell.mouseEntered(with: entered)
-                    cell.configure(with: session, activity: activity)
+                    cell.configure(with: session, activity: activity, isLoading: loading)
                 }
                 // The row view owns hover and selection ground; the cell owns the ink that
                 // must read on it. Keeping both in the evidence fixture prevents a hover story

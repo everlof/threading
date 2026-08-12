@@ -799,7 +799,7 @@ enum SidebarRowDefaults {
     /// clipped at the slot's edges.
     static let iconSlotWidth: CGFloat = 16
 
-    /// The row's trailing control — its status dot, and the `⋯` that replaces it on hover.
+    /// One trailing column: the width of a row's status mark, and of each hover control beside it.
     ///
     /// The same target as every other nested icon button, rather than the 16 it used to be: a
     /// row's `⋯` and a tab's `×` are one control, and sizing this one where it was used is what
@@ -808,23 +808,30 @@ enum SidebarRowDefaults {
     /// Gap between the `+` and `⋯` when a project row shows both on hover.
     static let hoverButtonSpacing: CGFloat = 2
 
-    /// Expanded width of a *session* row's trailing slot, which carries two buttons on hover.
+    /// Expanded width of a *session* row's trailing slot: the pair of actions, plus the status
+    /// target the row keeps reserved at its trailing edge.
     ///
-    /// Stated as the pair's full width rather than one button's, so both buttons lie inside
-    /// the slot. A button pinned to the slot's edge and allowed to overhang it draws
-    /// perfectly and cannot be clicked at all: `NSView.hitTest` stops at the container's
-    /// bounds, which is the same class of bug as the `⋯` the status dot used to swallow.
+    /// The status column is reserved whether or not the row is drawing anything in it. Sized to
+    /// the actual state instead, the trailing geometry became a function of activity, and the
+    /// archive button sat 22pt further out on an idle row than on a working one. Worse, that
+    /// difference moved *under the pointer*: `SessionLoadingState.presentation` is raised because
+    /// the sidebar is putting the row you just clicked on screen, so reaching for archive on a
+    /// row you had selected made the button step aside and step back. A click target does not
+    /// move for a spinner, so it does not share a column with one.
     ///
-    /// At rest the row reserves only `trailingSlotSize` for its status. It pays this full width
+    /// At rest the row reserves only `trailingSlotSize` for the status. It pays this full width
     /// while the buttons are visible, when yielding that title space describes what is actually
     /// on screen rather than taxing every truncated title for controls nobody can see.
-    static let sessionTrailingSlotWidth: CGFloat = trailingSlotSize * 2 + hoverButtonSpacing
-    /// A working/attention state is durable information, not chrome to trade for actions. On a
-    /// hovered active row the two action targets move inboard and the status keeps the stable
-    /// outer target it occupies at rest.
-    static let sessionTrailingSlotWithStatusWidth: CGFloat =
-        trailingSlotSize * 3 + hoverButtonSpacing * 2
-    static let projectTrailingSlotWidth: CGFloat = sessionTrailingSlotWidth
+    static let sessionTrailingSlotWidth: CGFloat = trailingSlotSize * 3 + hoverButtonSpacing * 2
+
+    /// Expanded width of a *project* row's trailing slot: the `+ ⋯` pair, which takes the row's
+    /// edge because the count it replaces is not durable state the way a session's status is.
+    ///
+    /// Stated as the pair's full width rather than one button's, so both buttons lie inside the
+    /// slot. A button pinned to the slot's edge and allowed to overhang it draws perfectly and
+    /// cannot be clicked at all: `NSView.hitTest` stops at the container's bounds, which is the
+    /// same class of bug as the `⋯` the status dot used to swallow.
+    static let projectTrailingSlotWidth: CGFloat = trailingSlotSize * 2 + hoverButtonSpacing
 
     /// Matches the inset of the source list's own selection shape.
     static let hoverHighlightInsetX: CGFloat = 10

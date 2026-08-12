@@ -977,12 +977,25 @@ The vocabulary these encode, which new work should follow:
   `SidebarRowRenderTests.testEveryTrailingMarkLandsOnOneOpticalLine` asserts the one line.
 
   **Only visible controls earn width.** A session row rests with one inline target reserved for
-  its 12pt status mark, then expands the trailing slot to two targets before the `...` and archive
-  actions fade in. On exit it collapses only after they have faded out, so a visible target never
-  overhangs the parent that hit-tests it. The title yielding while two controls are on screen is
-  honest; permanently truncating every title for an invisible second target was not. The hover
-  transition re-lays out only the recycled row under the pointer, so session cardinality never
-  reaches that path.
+  its 12pt status mark, then expands the trailing slot before the `...` and archive actions fade
+  in. On exit it collapses only after they have faded out, so a visible target never overhangs the
+  parent that hit-tests it. The title yielding while two controls are on screen is honest;
+  permanently truncating every title for an invisible second target was not. The hover transition
+  re-lays out only the recycled row under the pointer, so session cardinality never reaches that
+  path.
+
+  **The expansion is one geometry, not one per state.** It reserves three targets — the pair, plus
+  the status column at the row's edge — whether or not the row has a status to draw. Sized to the
+  row's actual state instead, the archive button sat 22pt further out on an idle row than on a
+  working one, so the same control stood in two places down one list. Worse, the difference moved
+  under the pointer: `SessionLoadingState.presentation` is raised because the sidebar is putting
+  the row you just clicked on screen, so reaching for archive on a row you had selected made the
+  button step aside and step back. A click target does not share a column with a spinner. The cost
+  is that an idle row's title yields one column more while it is hovered, and its actions stop a
+  column short of the margin — which is the empty status column that row already shows at rest.
+  `SessionRowActionsTests.testTheActionPairSitsInOnePlaceWhateverTheRowIsDoing` and
+  `...DoesNotMoveWhenAStatusArrivesUnderThePointer` hold both halves, and
+  `SidebarRowRenderTests.testRendersEveryHoveredTrailingState` draws the column.
 
   `ThemedTabItemView` is the same rule at the other end of a much shorter row, and was the last
   container not following it: a 12pt × inside a 20pt target put the "10pt after the title" at 14

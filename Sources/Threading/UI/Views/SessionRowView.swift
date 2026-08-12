@@ -33,7 +33,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     )
 
     /// Archiving without opening the menu first — the one row action reached often enough to
-    /// earn the row's own surface. It sits outermost, where a list is scanned to its edge.
+    /// earn the row's own surface. It sits outermost of the pair, one column in from the row's
+    /// edge, which the status keeps.
     private let archiveButton = ThemedIconButton(
         symbolName: SidebarRowDefaults.archiveSymbol,
         accessibility: SidebarRowDefaults.archiveAccessibilityLabel,
@@ -42,7 +43,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         glyphMaterialization: .deferred
     )
 
-    /// The buttons the pointer reveals, crossfaded against the status indicator as one.
+    /// The buttons the pointer reveals, fading in as one beside the status rather than over it.
     ///
     /// Sized into the slot rather than overhanging it — see `sessionTrailingSlotWidth` for why
     /// the slot expands before these buttons appear.
@@ -53,7 +54,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     private let trailingSlot = NSView()
     private var trailingSlotWidthConstraint: NSLayoutConstraint?
     private var hoverControlsAtEdgeConstraint: NSLayoutConstraint?
-    private var hoverControlsBeforeStatusConstraint: NSLayoutConstraint?
+    private var hoverControlsInStatusColumnConstraint: NSLayoutConstraint?
     private var presentsStatus = false
 
     private var trackingArea: NSTrackingArea?
@@ -308,11 +309,10 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             ),
             rowContentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-            // The slot is pulled out by the padding its outermost control holds around its
-            // glyph, the way `PaneFooterView` places a trailing button — see
-            // `OpticalInsetProviding`. Pinned by frame instead, the archive glyph and the
-            // status dot stop short of the margin a project row's count reaches, and the
-            // list's trailing edge reads as two edges.
+            // The slot is pulled out by the padding an inline button holds around its glyph,
+            // the way `PaneFooterView` places a trailing button — see `OpticalInsetProviding`.
+            // Pinned by frame instead, the status dot stops short of the margin a project row's
+            // count reaches, and the list's trailing edge reads as two edges.
             trailingSlot.trailingAnchor.constraint(
                 equalTo: trailingAnchor,
                 constant: -(
@@ -488,8 +488,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // session it was aimed at rather than read the row's current one when it fires.
         archiveButton.translatesAutoresizingMaskIntoConstraints = false
 
-        // Trailing-most last: the archive button takes the row's edge, and the `⋯` sits
-        // inboard of it.
+        // Trailing-most last: the archive button takes the outer of the two action columns, and
+        // the `⋯` sits inboard of it.
         hoverControls.orientation = .horizontal
         hoverControls.alignment = .centerY
         hoverControls.spacing = SidebarRowDefaults.hoverButtonSpacing
@@ -511,15 +511,18 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             equalToConstant: SidebarRowDefaults.trailingSlotSize
         )
         trailingSlotWidthConstraint = width
+        // Two positions, and only the second is ever seen: the pair lives inboard of the status
+        // column whenever it is visible. The at-edge one holds the invisible buttons inside the
+        // collapsed slot, so nothing overhangs a container that would not hit-test it.
         let hoverAtEdge = hoverControls.trailingAnchor.constraint(
             equalTo: trailingSlot.trailingAnchor
         )
-        let hoverBeforeStatus = hoverControls.trailingAnchor.constraint(
+        let hoverInsideStatusColumn = hoverControls.trailingAnchor.constraint(
             equalTo: trailingSlot.trailingAnchor,
             constant: -(SidebarRowDefaults.trailingSlotSize + SidebarRowDefaults.hoverButtonSpacing)
         )
         hoverControlsAtEdgeConstraint = hoverAtEdge
-        hoverControlsBeforeStatusConstraint = hoverBeforeStatus
+        hoverControlsInStatusColumnConstraint = hoverInsideStatusColumn
         NSLayoutConstraint.activate([
             width,
             trailingSlot.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize),
@@ -724,8 +727,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         popover = nil
     }
 
-    /// Reveals the action pair without erasing durable activity. An idle row gives the pair the
-    /// edge; an active row keeps its status at that edge and shifts both actions inboard.
+    /// Reveals the action pair without erasing durable activity, and without either one deciding
+    /// where the other sits: the status keeps the row's trailing column and the pair takes the two
+    /// columns inboard of it, on every row, whatever the row is doing.
     private func setActionVisible(_ visible: Bool, animated: Bool) {
         if visible {
             actionButton.materializeGlyphIfNeeded()
@@ -755,18 +759,18 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// Keeps invisible controls from taxing every title. Expansion happens before the actions
     /// fade in so both targets remain inside the hit-tested parent; collapse waits until the fade
     /// out completes so a visible button never overhangs it.
+    ///
+    /// The expanded geometry is the same one whatever the row is doing. It reserves the status
+    /// column even for a row with no status to draw, which is the empty column that row already
+    /// shows at rest, so revealing the actions moves nothing and neither does an activity change
+    /// arriving while the pointer is on the row. See `SidebarRowDefaults.sessionTrailingSlotWidth`
+    /// for the behaviour that bought.
     private func setTrailingSlotExpanded(_ expanded: Bool) {
-        let showsStatusBesideActions = expanded && presentsStatus
-        hoverControlsAtEdgeConstraint?.isActive = !showsStatusBesideActions
-        hoverControlsBeforeStatusConstraint?.isActive = showsStatusBesideActions
-        let target: CGFloat
-        if showsStatusBesideActions {
-            target = SidebarRowDefaults.sessionTrailingSlotWithStatusWidth
-        } else if expanded {
-            target = SidebarRowDefaults.sessionTrailingSlotWidth
-        } else {
-            target = SidebarRowDefaults.trailingSlotSize
-        }
+        hoverControlsAtEdgeConstraint?.isActive = !expanded
+        hoverControlsInStatusColumnConstraint?.isActive = expanded
+        let target = expanded
+            ? SidebarRowDefaults.sessionTrailingSlotWidth
+            : SidebarRowDefaults.trailingSlotSize
         guard trailingSlotWidthConstraint?.constant != target else { return }
         trailingSlotWidthConstraint?.constant = target
         layoutSubtreeIfNeeded()

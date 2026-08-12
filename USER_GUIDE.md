@@ -514,11 +514,15 @@ approval. Those keep the filled dot while you are looking at them, because looki
 answering: the agent is doing nothing until you pick. Answering puts the row back to the spinner
 rather than leaving it blank — the session is still working, and it says so.
 
-Hovering a session row swaps the indicator for two buttons, so the list stays quiet until you
-reach for it: a **⋯** holding the row's actions — Archive, Close Session, Rename, Delete — and,
-outboard of it at the row's trailing edge, an **archive** button that files the session away in
-one press without opening the menu first. The archive button is the menu item's shortcut, not a
-second behaviour.
+Hovering a session row fades in two buttons beside the indicator, so the list stays quiet until
+you reach for it: a **⋯** holding the row's actions — Archive, Close Session, Rename, Delete —
+and, outboard of it, an **archive** button that files the session away in one press without
+opening the menu first. The archive button is the menu item's shortcut, not a second behaviour.
+
+The indicator keeps the row's trailing edge either way, and the buttons keep the two places
+inboard of it whether or not that session has anything to show there. So the archive button is
+in the same place on every row of the list, and a session that starts working — or starts
+loading because you just clicked it — does not move the button out from under the pointer.
 
 Close and Archive sound alike and answer different questions. **Close Session** ends the
 agent but keeps the row — greyed out, ready to be resumed. (It ships without a keyboard
