@@ -46,6 +46,21 @@ final class PeerRendezvousTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? PeerRendezvousError, .invalidExpiry)
         }
+
+        let unknownFieldJSON = """
+        {"version":1,"kind":"hostHello","hostID":"host-1","unknown":true}
+        """
+        XCTAssertThrowsError(
+            try PeerRendezvousEnvelope.decode(Data(unknownFieldJSON.utf8))
+        ) { error in
+            XCTAssertEqual(error as? PeerRendezvousError, .invalidEnvelope)
+        }
+
+        XCTAssertThrowsError(
+            try PeerRendezvousEnvelope(kind: .hostHello, hostID: "host with spaces")
+        ) { error in
+            XCTAssertEqual(error as? PeerRendezvousError, .invalidEnvelope)
+        }
     }
 
     func testDecodingCannotBypassDescriptionCandidateOrICEServerBounds() throws {

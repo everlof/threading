@@ -72,12 +72,17 @@ public struct PeerRendezvousEnvelope: Codable, Equatable, Sendable {
         try validate(now: now)
     }
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case version, kind, hostID, deviceID, sessionID, sessionToken, expiresAt, iceServers
         case description, candidate, errorCode, errorMessage
     }
 
     public init(from decoder: Decoder) throws {
+        let rawContainer = try decoder.container(keyedBy: PeerRendezvousCodingKey.self)
+        let allowedKeys = Set(CodingKeys.allCases.map(\.stringValue))
+        guard rawContainer.allKeys.allSatisfy({ allowedKeys.contains($0.stringValue) }) else {
+            throw PeerRendezvousError.invalidEnvelope
+        }
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(Int.self, forKey: .version)
         kind = try container.decode(PeerRendezvousKind.self, forKey: .kind)
@@ -207,7 +212,8 @@ public struct PeerRendezvousEnvelope: Codable, Equatable, Sendable {
     private static func validateIdentifier(_ value: String?) throws {
         guard let value else { return }
         guard !value.isEmpty,
-              value.utf8.count <= PeerRendezvousBounds.maximumIdentifierBytes else {
+              value.utf8.count <= PeerRendezvousBounds.maximumIdentifierBytes,
+              value.unicodeScalars.allSatisfy(Self.isIdentifierScalar) else {
             throw PeerRendezvousError.invalidEnvelope
         }
     }
@@ -231,6 +237,28 @@ public struct PeerRendezvousEnvelope: Codable, Equatable, Sendable {
     /// encoding avoids equality and cache-key drift from JSON floating-point date round trips.
     private static func normalizedExpiry(_ value: Date?) -> Date? {
         value.map { Date(timeIntervalSince1970: floor($0.timeIntervalSince1970)) }
+    }
+
+    private static func isIdentifierScalar(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x30...0x39, 0x41...0x5A, 0x61...0x7A, 0x2D, 0x2E, 0x3A, 0x5F:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+private struct PeerRendezvousCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int? = nil
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+    }
+
+    init?(intValue: Int) {
+        return nil
     }
 }
 

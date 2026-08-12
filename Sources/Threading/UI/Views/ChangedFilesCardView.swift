@@ -97,6 +97,14 @@ final class ChangedFilesCardView: NSView, NSTableViewDataSource, NSTableViewDele
 
     // MARK: - Public Methods
 
+    /// Closes the door on a card that cannot open it. Durable checkpoints mean a settled turn's
+    /// card keeps its own diff rather than going stale behind the next one, so this is no longer
+    /// about age: a card reconstructed from a replayed transcript names no checkpoint, and there
+    /// is nothing for Git Review to scope.
+    func hideViewDiff() {
+        viewDiffButton.isHidden = true
+    }
+
     /// The preview a file row raises, built apart from the pointer that asks for it so it can
     /// be drawn and asserted without a live popover over a window on screen.
     func makePreviewSurface(for preview: ChangedFileDiffPreview) -> NSViewController {
