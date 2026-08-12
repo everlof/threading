@@ -12,13 +12,6 @@ $(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-GPL-2.0.txt
 $(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-FONT-EXCEPTION.txt
 $(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-UPSTREAM-README.txt
 $(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-SOURCE.md
-$(BUILD_DIR)/../../SourcePackages/checkouts/NativeDiffKit/LICENSE
-$(BUILD_DIR)/../../SourcePackages/checkouts/WebRTC/LICENSE.md
-$(BUILD_DIR)/../../SourcePackages/checkouts/Sparkle/LICENSE
-$(BUILD_DIR)/../../SourcePackages/checkouts/Sparkle/Vendor/ed25519-sparkle/license.txt
-$(BUILD_DIR)/../../SourcePackages/checkouts/WasmKit/LICENSE
-$(BUILD_DIR)/../../SourcePackages/checkouts/WasmKit/NOTICE.txt
-$(BUILD_DIR)/../../SourcePackages/checkouts/swift-system/LICENSE.txt
-$(BUILD_DIR)/../../SourcePackages/checkouts/swift-argument-parser/LICENSE.txt
+$(SRCROOT)/Threading.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 $(SRCROOT)/scripts/check_bundled_licenses.sh
 $(SRCROOT)/scripts/embed_legal_notices.sh

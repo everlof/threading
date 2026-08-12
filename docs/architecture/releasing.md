@@ -56,6 +56,13 @@ exit statuses are checked before any bundle-existence test. Do not pipe `xcodebu
 `grep … || true`: Xcode can create an archive directory before a later build phase fails, and a
 mere directory check would then let a broken or stale artefact advance to signing.
 
+The legal-notice phase resolves remote-package licenses from DerivedData by stripping the stable
+`/Build/…` suffix from `BUILD_DIR`. Parent counting is not equivalent: a normal build places that
+setting at `Build/Products`, while an archive moves it under
+`Build/Intermediates.noindex/ArchiveIntermediates/…`. The phase is deliberately always out of date;
+its input lists name `Package.resolved` as the remote dependency boundary, and the script validates
+every resolved license before copying it into the bundle.
+
 ## The version is injected, not committed
 
 Sparkle compares `CFBundleVersion`, so it has to increase per release. Threading's version fields

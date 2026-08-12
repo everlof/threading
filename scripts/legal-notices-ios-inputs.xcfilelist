@@ -9,7 +9,6 @@ $(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-GPL-2.0.txt
 $(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-FONT-EXCEPTION.txt
 $(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-UPSTREAM-README.txt
 $(SRCROOT)/Sources/Threading/Resources/Fonts/Topaz/Topaz-SOURCE.md
-$(BUILD_DIR)/../../SourcePackages/checkouts/NativeDiffKit/LICENSE
-$(BUILD_DIR)/../../SourcePackages/checkouts/WebRTC/LICENSE.md
+$(SRCROOT)/Threading.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 $(SRCROOT)/scripts/check_bundled_licenses.sh
 $(SRCROOT)/scripts/embed_legal_notices.sh

@@ -16,8 +16,19 @@ else
 fi
 
 legal_directory="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Legal"
-derived_data_directory="$(dirname "$(dirname "$BUILD_DIR")")"
-package_checkouts="${THREADING_SOURCE_PACKAGES_DIR:-$derived_data_directory/SourcePackages/checkouts}"
+if [[ -n "${THREADING_SOURCE_PACKAGES_DIR:-}" ]]; then
+    package_checkouts="$THREADING_SOURCE_PACKAGES_DIR"
+else
+    # A normal build uses <DerivedData>/Build/Products, while an archive moves BUILD_DIR down
+    # into Build/Intermediates.noindex/ArchiveIntermediates/…. Strip the stable /Build/ suffix
+    # rather than counting parents, which is necessarily wrong for one of those two layouts.
+    derived_data_directory="${BUILD_DIR%%/Build/*}"
+    if [[ -z "$derived_data_directory" || "$derived_data_directory" == "$BUILD_DIR" ]]; then
+        echo "error: cannot resolve DerivedData from BUILD_DIR: $BUILD_DIR" >&2
+        exit 1
+    fi
+    package_checkouts="$derived_data_directory/SourcePackages/checkouts"
+fi
 
 copy_notice() {
     local source_path="$1"
