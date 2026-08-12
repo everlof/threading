@@ -969,7 +969,7 @@ final class SessionComposerViewController: NSViewController {
 
         // Speed is offered only where the selected model publishes a usable Fast mechanism.
         // Standard and Fast remain per-conversation values; nil follows the provider-specific
-        // startup choice in General.
+        // startup choice in General, and then the agent's own settings.
         discardUnsupportedFastMode(account: account)
         speedChip.isHidden = !AgentModels.supportsFastMode(
             kind: selectedAgent,
@@ -982,21 +982,31 @@ final class SessionComposerViewController: NSViewController {
                 selected: selectedFastMode,
                 kind: selectedAgent,
                 model: model,
-                account: account
+                account: account,
+                projectDirectory: executionDirectory(of: project)
             )
         )
 
-        // Names the mode that will actually apply, not only the one chosen here: with no
-        // choice of its own the chip shows the app-wide default, and falls back to naming
-        // where the decision goes when there is no default either.
+        // Names the mode that will actually apply, not only the one chosen here. Nothing runs
+        // while the composer is open, so the observed source cannot answer — but the app-wide
+        // default, the agent's own settings and what this login last ran in all can, which is
+        // every case but a login that has never run this agent at all.
         modeChip.isHidden = !selectedAgent.supportsPermissionModes
+        let inheritedMode = inheritedPermissionMode(account: account, project: project)
         modeChip.configure(
             symbolName: PermissionModePresentation.symbol,
             title: PermissionModePresentation.chipTitle(
                 selected: selectedPermissionMode,
-                inherited: PermissionModePresentation.appDefault
+                inherited: inheritedMode
             )
         )
+        // `configure` puts the title on the tooltip, so whose value it is has to be said after.
+        if let tooltip = PermissionModePresentation.chipTooltip(
+            selected: selectedPermissionMode,
+            inherited: inheritedMode
+        ) {
+            modeChip.toolTip = tooltip
+        }
 
         // Offered only for runtimes whose conversation Threading can render through a
         // structured transport. See `AgentKind.supportsNativeUI`.
@@ -1195,13 +1205,34 @@ final class SessionComposerViewController: NSViewController {
     private func locationDetail(project: Project?, branch: String?) -> String? {
         guard let project else { return nil }
 
+        let path = abbreviatedPath(executionDirectory(of: project) ?? project.folderPath)
+        guard let branch else { return path }
+        return "\(path) \(ComposerDefaults.breadcrumbSeparator) \(branch)"
+    }
+
+    /// The folder the session will start in, which is what a project-scoped settings layer is
+    /// read relative to. A sibling checkout carries its own `.claude` directory, so resolving
+    /// the destination here is what keeps the permission-mode chip naming the settings the
+    /// session will actually be launched under.
+    private func executionDirectory(of project: Project?) -> String? {
+        guard let project else { return nil }
+
         let destination = selectedBranch
             .flatMap { ProjectStore.shared.checkout(onBranch: $0, inRepositoryOf: project.id) }
             .flatMap { ProjectStore.shared.project(withID: $0) } ?? project
+        return destination.folderPath
+    }
 
-        let path = abbreviatedPath(destination.folderPath)
-        guard let branch else { return path }
-        return "\(path) \(ComposerDefaults.breadcrumbSeparator) \(branch)"
+    /// What a session started from this composer would inherit if it pinned no mode of its own.
+    private func inheritedPermissionMode(
+        account: AgentAccount?,
+        project: Project?
+    ) -> ResolvedPermissionMode {
+        ResolvedPermissionMode.inherited(
+            for: selectedAgent,
+            account: account,
+            projectDirectory: executionDirectory(of: project)
+        )
     }
 
     /// Writes the chosen account's usage onto the box's own row, fetching when the reading has
@@ -1660,16 +1691,23 @@ final class SessionComposerViewController: NSViewController {
 
     /// How much the session may do before it has to ask.
     ///
-    /// The first item inherits, and names what it would inherit — the app-wide default where
-    /// there is one, and otherwise the CLI's own configuration, which Threading cannot read.
-    /// Each mode carries what it means, and where the chosen agent expresses it imperfectly it
-    /// says so: Codex has no plan mode, and a menu that offered "Plan" without that sentence
-    /// would be promising something it cannot deliver.
+    /// Inheriting is not a row of its own: the mode this session would inherit is marked where
+    /// it already stands in the list, qualified by where that answer was read from — Settings,
+    /// the agent's own configuration, or the run this login last made. Each mode carries what it
+    /// means, and where the chosen agent expresses it imperfectly it says so: Codex has no plan
+    /// mode, and a menu that offered "Plan" without that sentence would be promising something
+    /// it cannot deliver.
     private func permissionModeItems() -> [ThemedMenuEntry] {
-        PermissionModePresentation.rows(
+        let account = selectedAgent.supportsAccounts
+            ? AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
+            : nil
+        return PermissionModePresentation.rows(
             for: selectedAgent,
             selected: selectedPermissionMode,
-            inherited: PermissionModePresentation.appDefault,
+            inherited: inheritedPermissionMode(
+                account: account,
+                project: projectID.flatMap { ProjectStore.shared.project(withID: $0) }
+            ),
             timing: .whenTheSessionStarts
         )
     }

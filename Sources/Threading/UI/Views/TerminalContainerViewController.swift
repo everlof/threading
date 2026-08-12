@@ -1783,8 +1783,11 @@ private extension TerminalContainerViewController {
     ///
     /// One fact is deliberately withheld rather than guessed. Fast mode is a reading only where
     /// Threading sets it: `appendCodexConversationOverrides` is Codex-only, and Claude's own
-    /// fast-mode state belongs to its print transport (`AgentModels.defaultFastMode` returns nil
-    /// for Claude and says why), so a Claude *terminal* session has no honest speed to report.
+    /// fast-mode state is a *live* control-channel flag that its own `/fast` moves without
+    /// writing anything down. `AgentModels.defaultFastMode` can now name the value a Claude
+    /// session *launches* with — the composer chips say so, and that is honest there because
+    /// nothing has started yet — but this card reports a session already running, where the
+    /// launch value is exactly the stale reading `ObservedPermissionMode` exists to refuse.
     /// Effort for a Claude terminal session is the account's configured value — what the CLI will
     /// inherit, which is the best answer available and goes stale the moment the user types
     /// `/effort`.

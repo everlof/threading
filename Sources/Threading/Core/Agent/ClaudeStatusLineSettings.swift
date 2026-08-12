@@ -41,43 +41,12 @@ enum ClaudeStatusLineSettings {
     /// user's value outright (`policySettings.statusLine` is read *instead of* it), while the
     /// three writable layers override one another most-specific-first. Only `type: "command"`
     /// runs; any other shape draws nothing, so there is nothing to silence.
+    ///
+    /// That order is `ClaudeSettings`', not this type's: the permission mode and the speed
+    /// resolve through exactly the same four files, and one of the three reading them privately
+    /// would be a chain that could go stale in one place and not the others.
     static func resolvedCommand(account: AgentAccount, projectDirectory: String) -> String? {
-        if let managed = statusLine(inSettingsAt: URL(fileURLWithPath: ClaudeSettingsDefaults.managedSettingsPath)) {
-            return managed
-        }
-
-        let project = URL(fileURLWithPath: projectDirectory)
-            .appendingPathComponent(ClaudeSettingsDefaults.projectSettingsDirectory)
-
-        let layers = [
-            project.appendingPathComponent(ClaudeSettingsDefaults.localSettingsFile),
-            project.appendingPathComponent(ClaudeSettingsDefaults.settingsFile),
-            URL(fileURLWithPath: account.configPath)
-                .appendingPathComponent(ClaudeSettingsDefaults.settingsFile)
-        ]
-
-        for layer in layers {
-            if let command = statusLine(inSettingsAt: layer) { return command }
-        }
-
-        return nil
-    }
-
-    // MARK: - Private Methods
-
-    private static func statusLine(inSettingsAt url: URL) -> String? {
-        guard let data = try? BoundedFileReader.read(
-            url,
-            maximumBytes: ClaudeSettingsDefaults.maxSettingsBytes
-        ),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let statusLine = json[ClaudeSettingsDefaults.statusLineKey] as? [String: Any],
-              statusLine[ClaudeSettingsDefaults.typeKey] as? String == ClaudeSettingsDefaults.commandType,
-              let command = statusLine[ClaudeSettingsDefaults.commandKey] as? String,
-              !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { return nil }
-
-        return command
+        ClaudeSettings.statusLineCommand(account: account, projectDirectory: projectDirectory)
     }
 }
 
@@ -92,6 +61,11 @@ enum ClaudeSettingsDefaults {
     static let statusLineKey = "statusLine"
     static let typeKey = "type"
     static let commandKey = "command"
+
+    /// How much a session may do before it has to ask, in the CLI's own spelling.
+    /// `manual` is accepted as an alias for `default`; both read as `AgentPermissionMode.manual`.
+    static let permissionsKey = "permissions"
+    static let defaultModeKey = "defaultMode"
     /// The only shape that draws anything; a `statusLine` of any other type has nothing to hide.
     static let commandType = "command"
     static let maxSettingsBytes = 1 << 20

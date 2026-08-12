@@ -158,6 +158,12 @@ enum AgentDefaults {
     /// records carry it too. So it is written out, not accepted.
     static let agentInternalManualMode = "default"
 
+    /// The same two axes as the flags above, spelled the way `config.toml` states them. A
+    /// session Threading launches without a mode inherits whatever these say, which is what
+    /// lets its chip name a posture instead of naming where the answer lives.
+    static let codexApprovalPolicyKey = "approval_policy"
+    static let codexSandboxModeKey = "sandbox_mode"
+
     static let codexApprovalUntrusted = "untrusted"
     static let codexApprovalOnRequest = "on-request"
     static let codexApprovalNever = "never"

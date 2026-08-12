@@ -1,6 +1,9 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ — the default for new chats in Settings.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ — standardvalet för nya chattar i Inställningar."}}}},
+    "%@ — this agent's own setting.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ — den här agentens egen inställning."}}}},
+    "%@ — what this agent last ran in. It decides again each launch.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ — det som den här agenten kördes med senast. Den väljer på nytt vid varje start."}}}},
     "Running at last quit": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kördes vid senaste avslut"}}}},
     "Recently used": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Nyligen använda"}}}},
     "At most %d": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Högst %d"}}}},

@@ -1004,13 +1004,19 @@ Set it in three places:
 
 - The **mode chip** in the composer, on the row inside the prompt box beside the model, when
   starting a chat.
-- A single chat's **⋯** menu has a **Permission Mode** submenu. The mode from the setting below
-  is marked *(default)* where it stands in the list rather than repeated above it, and choosing
-  it keeps the chat following that setting. Where the setting is *Agent's Setting* there is no
-  mode to mark, so the submenu opens with **Use Agent's Setting** instead.
+- A single chat's **⋯** menu has a **Permission Mode** submenu. The mode the chat inherits is
+  marked where it stands in the list rather than repeated above it, and choosing it keeps the
+  chat inheriting. The mark says where that mode came from: *(default)* for a mode set in
+  Settings or in the agent's own configuration, *(last used)* for one read back from what the
+  agent actually ran in. Only when nothing can name a mode does the submenu open with **Use
+  Agent's Setting** instead.
 - **Settings > General > Permission Mode** sets what new chats use. *Agent's Setting* is the
   default and changes nothing — Claude's own `permissions.defaultMode` and Codex's `config.toml`
-  still decide.
+  still decide. Threading reads both, so the chip and the menu can still name the mode you will
+  get: Claude's four settings layers (a managed policy, the project's `.claude/settings.local.json`
+  and `settings.json`, then your account's), and Codex's `approval_policy` and `sandbox_mode`
+  pair. A repository cannot grant *Auto* to itself — Claude ignores that one value outside your
+  own settings, so Threading does not report it either.
 
 Codex has no plan mode of its own, so Plan there stops it writing but does not ask it to plan;
 the menu says so. Changing a running chat's mode applies the next time it launches — Claude's
@@ -1027,7 +1033,9 @@ independently:
 
 - **Agent's Setting** leaves the decision to Claude Code or Codex. This is the default, so an
   existing Claude `fastMode` choice or Codex `service_tier` configuration keeps working exactly
-  as it did before Threading exposed the setting.
+  as it did before Threading exposed the setting. The speed chip still names the speed you will
+  get rather than saying "Agent's Setting": Claude's fast mode starts off unless your settings
+  turn it on, so a chat that has chosen nothing reads **Standard**.
 - **Standard** explicitly turns Fast off. It also overrides an account configured for Fast.
 - **Fast** explicitly requests the provider's faster service on supported models. Fast uses more
   credits than Standard.
@@ -1429,8 +1437,13 @@ settings. Returning to Follow General while General says Agent's Setting is reco
 start; the running agent keeps its current speed and the chat says so.
 
 The **permission mode** chip is the same choice as Permission Mode in a session's **…** menu, and
-it shows the mode that will actually apply: the one this chat has chosen, or the app-wide default
-from Settings, or **Agent's Setting** when neither has. A running Claude chat changes mode there
+it shows the mode that will actually apply: the one this chat has chosen, then the app-wide
+default from Settings, then the agent's own configuration, and failing all three the mode this
+agent was last seen running in — its tooltip says which of those you are looking at. **Agent's
+Setting** appears only when none of them can name a mode, which on Claude means a login that has
+never run. With nothing configured anywhere, Claude picks between Manual and Auto itself at
+launch, and no file on your machine states which; what it last chose is the closest true answer,
+so that is what the chip shows. A running Claude chat changes mode there
 and then. Everywhere else the choice is recorded and the menu says so, with **Applies the next
 time this chat starts.** under the modes. If a mode is one the agent will not accept, such as
 Bypass Permissions on a chat that was not started with permissions skipped, the chat says why

@@ -316,14 +316,30 @@ enum AgentModels {
 
     /// The effective Fast setting inherited when a session has no explicit override.
     ///
-    /// Only Codex is mapped here. Claude's persistent print transport changes its own live
-    /// fast-mode state through a control request, so its account-default semantics belong to
-    /// that transport rather than being guessed from undocumented settings keys.
+    /// Two mechanisms, read from the two places their runtimes state them.
+    ///
+    /// Claude's is a live control-channel flag rather than a service tier, and it starts off —
+    /// so unset is a *known* Standard rather than an unknown, and the only thing that can move
+    /// it before launch is `fastMode` in a settings layer, which is the key Threading writes
+    /// into its own per-session `--settings` file. Reading the account's layers as well is what
+    /// keeps a login that turned fast mode on for itself from being reported as Standard.
+    ///
+    /// Codex's is a service tier, and an account naming a tier that is neither Fast nor Standard
+    /// stays nil: that is a posture this control cannot show, and nil is how the caller knows.
     static func defaultFastMode(
         for kind: AgentKind,
         model: String?,
-        account: AgentAccount?
+        account: AgentAccount?,
+        projectDirectory: String? = nil
     ) -> Bool? {
+        if kind.supports(.liveFastModeControl) {
+            guard let account else { return false }
+            return ClaudeSettings.fastMode(
+                account: account,
+                projectDirectory: projectDirectory
+            ) ?? false
+        }
+
         guard kind.supports(.serviceTierFastMode) else { return nil }
 
         if let configured = configuredCodexValue(
@@ -374,23 +390,47 @@ enum AgentModels {
     /// The Fast setting a conversation will actually run with, or nil where "whatever the
     /// account defaults to" is the only honest answer.
     ///
-    /// Four sources in the order the user set them, the same shape as `effectiveEffort`: the
-    /// conversation's own choice, the app-wide startup policy, the account or catalog tier, and
-    /// finally what *unset* means for this runtime. A live control-channel flag starts off until
-    /// Threading or its settings layer sends it, so unset is a known `false`; an unreadable
-    /// service tier stays nil rather than claiming Standard.
+    /// Three sources in the order the user set them, the same shape as `effectiveEffort`: the
+    /// conversation's own choice, the app-wide startup policy, and what the runtime's own
+    /// configuration says — which for a live control-channel flag includes what *unset* means,
+    /// because a flag that starts off is a known Standard. Only an unreadable service tier stays
+    /// nil, and it stays nil rather than claiming Standard.
     static func effectiveFastMode(
         for session: AgentSession,
         model: String?,
         account: AgentAccount?,
+        projectDirectory: String? = nil,
         startupSpeed: AgentStartupSpeed = .agentSetting
     ) -> Bool? {
-        if let chosen = session.fastMode { return chosen }
+        effectiveFastMode(
+            selected: session.fastMode,
+            kind: session.kind,
+            model: model,
+            account: account,
+            projectDirectory: projectDirectory,
+            startupSpeed: startupSpeed
+        )
+    }
+
+    /// The same resolution for a conversation that does not exist yet, kept beside the
+    /// existing-session form for the reason `effectiveEffort`'s pair is: the opening composer
+    /// and the reply composer must not disagree about what "leave it alone" resolves to.
+    static func effectiveFastMode(
+        selected: Bool?,
+        kind: AgentKind,
+        model: String?,
+        account: AgentAccount?,
+        projectDirectory: String? = nil,
+        startupSpeed: AgentStartupSpeed = .agentSetting
+    ) -> Bool? {
+        if let selected { return selected }
         if let appDefault = startupSpeed.fastModeOverride { return appDefault }
-        if let inherited = defaultFastMode(for: session.kind, model: model, account: account) {
-            return inherited
-        }
-        return session.kind.supports(.liveFastModeControl) ? false : nil
+        return defaultFastMode(
+            for: kind,
+            model: model,
+            account: account,
+            projectDirectory: projectDirectory
+        )
     }
 
     /// Whether a Claude model can run in fast mode.
@@ -614,7 +654,12 @@ enum AgentModels {
         configuredCodexValue(AgentDefaults.codexModelKey, account: account)
     }
 
-    private static func configuredCodexValue(
+    /// One top-level scalar out of the account's `config.toml`.
+    ///
+    /// Shared beyond this type because Codex states its permission posture in the same file:
+    /// `ResolvedPermissionMode` reads `approval_policy` and `sandbox_mode` through it rather
+    /// than opening the same file with a second parser that could disagree about quoting.
+    static func configuredCodexValue(
         _ key: String,
         account: AgentAccount?
     ) -> String? {
