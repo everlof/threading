@@ -452,6 +452,14 @@ final class ImageCompareCanvas: ThemedControl {
         ("Ag" as NSString).size(withAttributes: [.font: Design.Typography.caption()]).height
     }
 
+    /// The narrowest slot still worth writing in. Measured from the font for the same reason the
+    /// line height is: a slot narrower than a couple of glyphs and the ellipsis after them holds
+    /// no name, only the mark saying a name was truncated — which is what the last points of a
+    /// seam travelling to the edge would otherwise leave behind.
+    private var minimumCaptionWidth: CGFloat {
+        ("Ag…" as NSString).size(withAttributes: [.font: Design.Typography.caption()]).width
+    }
+
     /// Whether the two sides disagree about their pixel size — what the dimension note says.
     private var hasDimensionNote: Bool {
         guard old != nil, new != nil else { return false }
@@ -733,36 +741,43 @@ final class ImageCompareCanvas: ThemedControl {
 
     /// Names the two sides in the strips reserved beside the images.
     ///
-    /// Nothing here draws over the comparison. Position carries the mapping — start of the
-    /// travel is the old side, end of it the new — and the new side is inked a step stronger, so
-    /// which is which survives a title too long to read to its end.
+    /// Nothing here draws over the comparison, and neither title is styled as the important
+    /// one. Both come off one ramp read by how much of its picture each side is showing, and in
+    /// the horizontal wipe the band divides where the seam does — so a caption tracks the pixels
+    /// it names as they are revealed and covered, rather than sitting at a fixed edge naming an
+    /// image that may have been scrubbed out of view entirely.
     private func drawCaptions(layout: ImageCompareLayout) {
         let placement = layout.placement
         let top = layout.captions.top
         let bottom = layout.captions.bottom
+        let shares = visibleShares
         var bottomHoldsATitle = false
 
         switch effectiveMode {
         case .wipeVertical:
             // The seam sweeps downward, so the sides are named above and below the picture.
             if let old {
-                drawCaption(old.title, ink: Design.Text.secondary, in: top, edge: .top)
+                drawCaption(old.title, ink: captionInk(showing: shares.old), in: top, edge: .top)
             }
             if let new {
-                drawCaption(new.title, ink: Design.Text.label, in: bottom, edge: .bottom)
+                drawCaption(
+                    new.title, ink: captionInk(showing: shares.new), in: bottom, edge: .bottom
+                )
                 bottomHoldsATitle = true
             }
 
         case .sideBySide:
+            // Both sides are whole and each caption stands over its own picture, so neither is
+            // showing more than the other: they meet at the middle of the ramp.
             if let old {
                 drawCaption(
-                    old.title, ink: Design.Text.secondary,
+                    old.title, ink: captionInk(showing: shares.old),
                     in: slot(over: placement.canvasRect, in: top), edge: .top, alignment: .center
                 )
             }
             if let new, let secondary = placement.secondaryCanvasRect {
                 drawCaption(
-                    new.title, ink: Design.Text.label,
+                    new.title, ink: captionInk(showing: shares.new),
                     in: slot(over: secondary, in: top), edge: .top, alignment: .center
                 )
             }
@@ -773,7 +788,7 @@ final class ImageCompareCanvas: ThemedControl {
             // would imply a position this mode does not have.
             if let old, let new {
                 drawCaption(
-                    "\(old.title) → \(new.title)", ink: Design.Text.secondary,
+                    "\(old.title) → \(new.title)", ink: captionInk(showing: Self.balancedShare),
                     in: top, edge: .top, alignment: .center
                 )
             }
@@ -783,22 +798,78 @@ final class ImageCompareCanvas: ThemedControl {
             // side sits at the start of that travel and the new side at its end.
             switch (old, new) {
             case let (.some(old), .some(new)):
-                let (leading, trailing) = halves(of: top)
-                drawCaption(old.title, ink: Design.Text.secondary, in: leading, edge: .top)
+                let (leading, trailing) = halves(of: top, splitAt: captionSplit(in: layout))
                 drawCaption(
-                    newSideCaption(new), ink: Design.Text.label,
+                    old.title, ink: captionInk(showing: shares.old), in: leading, edge: .top
+                )
+                drawCaption(
+                    newSideCaption(new), ink: captionInk(showing: shares.new),
                     in: trailing, edge: .top, alignment: .right
                 )
             case let (.some(side), nil), let (nil, .some(side)):
                 // One side alone — an added or deleted file. There is nothing to tell it apart
-                // from, so it takes the whole band.
-                drawCaption(side.title, ink: Design.Text.label, in: top, edge: .top)
+                // from, so it takes the whole band, at the top of the ramp: it is all that is
+                // being shown.
+                drawCaption(side.title, ink: captionInk(showing: 1), in: top, edge: .top)
             case (nil, nil):
                 break
             }
         }
 
         drawDimensionNote(in: bottom, sharingTheBand: bottomHoldsATitle)
+    }
+
+    /// How much of the picture each side is showing at the current scrub, 0 to 1.
+    ///
+    /// The wipes divide the canvas at the seam — old before it, new after it — so the old
+    /// side's share *is* the fraction. The fade divides opacity rather than area and reads the
+    /// other way round, since its fraction is the new side's alpha. The number is turned into a
+    /// share here so the captions can share one ramp instead of each mode inking its own.
+    private var visibleShares: (old: CGFloat, new: CGFloat) {
+        guard isScrubbable else { return (Self.balancedShare, Self.balancedShare) }
+        switch effectiveMode {
+        case .wipeHorizontal, .wipeVertical:
+            return (fraction, 1 - fraction)
+        case .fade:
+            return (1 - fraction, fraction)
+        case .difference, .sideBySide:
+            return (Self.balancedShare, Self.balancedShare)
+        }
+    }
+
+    /// The share a caption is inked at when neither side is showing more than the other: the
+    /// static modes, and a scrub held at the middle.
+    private static let balancedShare: CGFloat = 0.5
+
+    /// One ramp for every caption, so neither side is inked as the one that matters: a title is
+    /// as present as its picture is. Held at the middle the two match exactly, and the ramp's
+    /// midpoint is the tier the captions used to be written in; scrubbed either way, the side
+    /// being revealed comes forward and the side being covered recedes.
+    ///
+    /// It is what ties a name to the image beside it. Two titles inked by rank say which file
+    /// is newer, which is not the question the surface is asking — the pair used to sit at fixed
+    /// weights while the seam moved, so a fully covered image kept a caption as solid as the one
+    /// filling the canvas.
+    ///
+    /// Bottoming out at `tertiary` rather than fading to nothing: a name scrubbed out of view is
+    /// still the answer to what is *not* being looked at.
+    private func captionInk(showing share: CGFloat) -> NSColor {
+        let ramp = ImageCompareLayout.clamped(share)
+        return Design.Text.tertiary.blended(withFraction: ramp, of: Design.Text.label)
+            ?? Design.Text.label
+    }
+
+    /// Where the top band divides between the two titles.
+    ///
+    /// The horizontal wipe divides at its seam, so the two names hinge on the handle and each
+    /// keeps to the pixels on its own side of it. Every other mode divides at the middle: the
+    /// fade stacks its sides rather than splitting the canvas, so there is nothing on the
+    /// picture for a moving divide to point at.
+    private func captionSplit(in layout: ImageCompareLayout) -> CGFloat {
+        guard effectiveMode == .wipeHorizontal else { return layout.captions.top.midX }
+        return ImageCompareLayout.seam(
+            in: layout.placement.canvasRect, mode: effectiveMode, fraction: fraction
+        )
     }
 
     /// The new side's caption. In the crossfade it carries the blend, which is the fraction's
@@ -822,13 +893,26 @@ final class ImageCompareCanvas: ThemedControl {
         )
     }
 
-    /// Two captions in one band, each capped at half of it, so a long title truncates rather
-    /// than running into the one opposite.
-    private func halves(of band: CGRect) -> (leading: CGRect, trailing: CGRect) {
-        let width = max(0, (band.width - Design.Spacing.medium) / 2)
+    /// Two captions in one band, divided at `split` with half the gap either side of it, so a
+    /// long title truncates rather than running into the one opposite.
+    ///
+    /// A slot may come out empty, which is the point of dividing at the seam: the side has been
+    /// scrubbed off the canvas, and its name goes with it rather than hanging over pixels that
+    /// belong to the other image.
+    private func halves(
+        of band: CGRect,
+        splitAt split: CGFloat? = nil
+    ) -> (leading: CGRect, trailing: CGRect) {
+        let gap = Design.Spacing.medium / 2
+        let divide = min(max(split ?? band.midX, band.minX), band.maxX)
+        let leadingWidth = max(0, divide - gap - band.minX)
+        let trailingWidth = max(0, band.maxX - divide - gap)
         return (
-            CGRect(x: band.minX, y: band.minY, width: width, height: band.height),
-            CGRect(x: band.maxX - width, y: band.minY, width: width, height: band.height)
+            CGRect(x: band.minX, y: band.minY, width: leadingWidth, height: band.height),
+            CGRect(
+                x: band.maxX - trailingWidth, y: band.minY,
+                width: trailingWidth, height: band.height
+            )
         )
     }
 
@@ -864,7 +948,7 @@ final class ImageCompareCanvas: ThemedControl {
         let margin = ImageCompareDefaults.captionMargin
         let leading = max(slot.minX, bounds.minX + margin)
         let trailing = min(slot.maxX, bounds.maxX - margin)
-        guard trailing > leading else { return }
+        guard trailing - leading >= minimumCaptionWidth else { return }
         let line = min(captionLineHeight, max(0, slot.height - margin))
         (text as NSString).draw(
             in: CGRect(

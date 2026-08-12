@@ -107,8 +107,36 @@ extension CompareExportPage {
             }
             .captions .join { display: none; flex: 0 0 auto; }
             .captions.top .old { text-align: left; }
-            .captions.top .new { text-align: right; color: var(--text); }
+            .captions.top .new { text-align: right; }
             .captions.bottom { display: none; }
+
+            /* One ramp for both titles, as in the app: a caption is as present as its picture
+               is, so neither side is styled as the one that matters and a name is tied to the
+               image it belongs to by moving with it. The wipes divide the canvas at the seam —
+               old before it — so their old share is the fraction; the fade divides opacity
+               instead and reads the other way. Held at the middle both land on the muted tier
+               the captions used to be fixed at. */
+            .captions span { color: var(--text); opacity: 0.65; }
+            html[data-mode="wipeHorizontal"] .captions .old,
+            html[data-mode="wipeVertical"] .captions .old,
+            html[data-mode="fade"] .captions .new { opacity: calc(0.3 + 0.7 * var(--fraction)); }
+            html[data-mode="wipeHorizontal"] .captions .new,
+            html[data-mode="wipeVertical"] .captions .new,
+            html[data-mode="fade"] .captions .old { opacity: calc(1 - 0.7 * var(--fraction)); }
+
+            /* The horizontal wipe's band divides where its seam does, so each title keeps to
+               the pixels on its own side of the handle and a side scrubbed off the canvas takes
+               its name with it. */
+            html[data-mode="wipeHorizontal"] .captions.top .old { flex-grow: var(--fraction); }
+            html[data-mode="wipeHorizontal"] .captions.top .new {
+              flex-grow: calc(1 - var(--fraction));
+            }
+
+            /* An added or deleted file has nothing to be scrubbed against, so its one name is
+               not a share of anything: it holds the band whole, whatever the page's mode says
+               and wherever a drag on the canvas leaves the fraction. */
+            .stage.single .captions .old,
+            .stage.single .captions .new { flex-grow: 1; opacity: 1; }
 
             .canvas { position: relative; isolation: isolate; display: flex; gap: var(--gap); }
             .frame {

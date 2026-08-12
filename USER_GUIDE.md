@@ -2054,7 +2054,10 @@ Five kinds of content:
   middle for an onion skin), **Difference** (identical pixels go black, so any change leaps
   out), or **Side by Side**. Each side is named in the margin beside the picture rather than
   on top of it — old where the wipe starts, new where it ends, above and below for the vertical
-  wipe — so no title ever sits on the pixels you are comparing. Mismatched pixel sizes are
+  wipe — so no title ever sits on the pixels you are comparing. The two names follow the seam:
+  they match while it is near the middle, and as you drag, the name of the side taking the
+  canvas comes forward while the one being covered fades back and finally leaves with it.
+  Mismatched pixel sizes are
   flagged rather than silently normalised. The button beside the mode chip **opens the same
   comparison at the window's size**, where the seam has room to be dragged and the modes are
   the same chip; Escape or the × closes it, and the mode and the position you left it at are

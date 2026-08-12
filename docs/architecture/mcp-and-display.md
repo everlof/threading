@@ -569,7 +569,9 @@ Review image row got it in the same change without knowing it had.
 the tab frozen into a `Sendable` value — the two sides' bytes, their pixel sizes, the mode, the
 diff — and `CompareExportPage` writes it as one HTML document that reproduces
 `ImageCompareLayout`'s rules in CSS: both sides fitted against the *union* of the two pixel
-sizes so a resized asset stays visibly resized, captions in bands beside the pixels, the five
+sizes so a resized asset stays visibly resized, captions in bands beside the pixels — inked by
+the same ramp the app's are, so a title in the exported page also grows into view with its
+picture and the horizontal wipe's band divides where its seam does — the five
 modes as buttons, the seam dragged or arrow-keyed. A screenshot of the tab would have lost
 exactly the thing worth sending, which is that the recipient can ask difference the same
 question the sender did. Nothing in the page loads from the network — a CDN in an exported file

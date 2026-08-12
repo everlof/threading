@@ -85,6 +85,81 @@ final class ImageCompareRenderTests: XCTestCase {
         XCTAssertGreaterThan(right.blueComponent, right.redComponent, "new is not on the right")
     }
 
+    // MARK: - Captions
+
+    /// The two names come off one ramp read by how much of its picture each side is showing:
+    /// even at the middle, and the side being revealed coming forward as the seam travels. It is
+    /// what says a caption belongs to the image beside it rather than to the comparison as a
+    /// whole — inked by rank instead, a fully covered picture kept a title as solid as the one
+    /// filling the canvas.
+    ///
+    /// Measured as ink, since the band is plain ground with words on it: how far each half of it
+    /// departs from that ground is how present its caption is.
+    func testTheCaptionsAreInkedByHowMuchOfEachPictureIsShowing() {
+        let (canvas, host) = makeCaptionFixture()
+
+        canvas.fraction = 0.5
+        let even = captionInk(of: canvas, in: host)
+        XCTAssertEqual(
+            even.leading, even.trailing, accuracy: max(even.leading, even.trailing) * 0.2,
+            "the pair is not even with the seam held at the middle"
+        )
+
+        canvas.fraction = 0.85
+        let oldShowing = captionInk(of: canvas, in: host)
+        canvas.fraction = 0.15
+        let newShowing = captionInk(of: canvas, in: host)
+
+        XCTAssertGreaterThan(
+            oldShowing.leading, newShowing.leading,
+            "the old side's name did not come forward as its picture was revealed"
+        )
+        XCTAssertGreaterThan(
+            newShowing.trailing, oldShowing.trailing,
+            "the new side's name did not come forward as its picture was revealed"
+        )
+    }
+
+    /// A name leaves with the picture it belongs to. The band divides where the seam does, so a
+    /// side scrubbed off the canvas takes its title with it instead of leaving a label hanging
+    /// over pixels that are entirely the other image's.
+    func testACaptionLeavesWithThePictureItNames() {
+        let (canvas, host) = makeCaptionFixture()
+
+        canvas.fraction = 0.5
+        let even = captionInk(of: canvas, in: host)
+
+        canvas.fraction = 0
+        let covered = captionInk(of: canvas, in: host)
+
+        XCTAssertLessThan(
+            covered.leading, even.leading * 0.05,
+            "the old side is not on the canvas at all, but its name is still in the band"
+        )
+        XCTAssertGreaterThan(covered.trailing, 0, "the side filling the canvas lost its name")
+    }
+
+    /// The fade divides opacity rather than area, so its fraction is the *new* side's presence —
+    /// the one mode where the ramp reads the other way round from the seam's own travel.
+    func testTheFadeInksTheNamesByTheBlendRatherThanBySeamPosition() {
+        let (canvas, host) = makeCaptionFixture()
+        canvas.mode = .fade
+
+        canvas.fraction = 0.85
+        let newShowing = captionInk(of: canvas, in: host)
+        canvas.fraction = 0.15
+        let oldShowing = captionInk(of: canvas, in: host)
+
+        XCTAssertGreaterThan(
+            newShowing.trailing, oldShowing.trailing,
+            "the new side's name did not follow the blend it is drawn at"
+        )
+        XCTAssertGreaterThan(
+            oldShowing.leading, newShowing.leading,
+            "the old side's name did not recede as it was faded out"
+        )
+    }
+
     // MARK: - Theming
 
     /// The seam is the control, so it wears the theme's accent — sampled by hue the way the
@@ -149,6 +224,52 @@ final class ImageCompareRenderTests: XCTestCase {
                     .appendingPathComponent("image-compare-\(mode.rawValue)-\(suffix).png")
                 try XCTUnwrap(data, "no render for \(mode) \(suffix)").write(to: url)
             }
+        }
+        print("Image compare renders: \(Render.directory.path)")
+    }
+
+    /// The caption ramp across the whole travel, since it is a change in ink over five positions
+    /// and no single frame shows it: the seam at each fifth, stacked. What a reviewer is looking
+    /// for is the pair even in the middle row, each name coming forward as its picture takes the
+    /// canvas, and the last row holding one title rather than two.
+    func testRendersTheCaptionRampAcrossTheTravel() throws {
+        try FileManager.default.createDirectory(
+            at: Render.directory, withIntermediateDirectories: true
+        )
+
+        for (appearanceName, suffix) in [
+            (NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")
+        ] {
+            guard let appearance = NSAppearance(named: appearanceName) else { continue }
+            var data: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                let width: CGFloat = 480
+                let stack = FilledHost(frame: .zero)
+                stack.appearance = appearance
+                var y: CGFloat = 0
+                // Stacked from the bottom up, since the host is not flipped — so the travel is
+                // laid out in reverse to arrive at 0 on top.
+                for fraction in [1, 0.75, 0.5, 0.25, 0] as [CGFloat] {
+                    let view = ImageCompareView(frame: .zero)
+                    view.appearance = appearance
+                    view.configure(
+                        old: .init(image: Self.patternImage(base: .systemRed), title: "baseline.png"),
+                        new: .init(image: Self.patternImage(base: .systemBlue), title: "current.png")
+                    )
+                    view.mode = .wipeHorizontal
+                    view.fraction = fraction
+                    let height = view.preferredHeight(forWidth: width)
+                    view.frame = NSRect(x: 0, y: y, width: width, height: height)
+                    stack.addSubview(view)
+                    y += height
+                }
+                stack.frame = NSRect(x: 0, y: 0, width: width, height: y)
+                stack.layoutSubtreeIfNeeded()
+                data = Self.png(of: stack)
+            }
+            let url = Render.directory
+                .appendingPathComponent("image-compare-caption-ramp-\(suffix).png")
+            try XCTUnwrap(data, "no caption ramp render for \(suffix)").write(to: url)
         }
         print("Image compare renders: \(Render.directory.path)")
     }
@@ -274,6 +395,73 @@ final class ImageCompareRenderTests: XCTestCase {
             image: Self.solidImage(.systemBlue, size: NSSize(width: 200, height: 100)), title: "new"
         )
         return canvas
+    }
+
+    /// A canvas inside the ground a pane would give it, both sides carrying the same title so
+    /// one caption's ink can be weighed against the other's without the glyphs themselves being
+    /// the difference. Dark, because white ink on a dark ground is the larger departure to
+    /// measure; the ramp is the same either way.
+    private func makeCaptionFixture() -> (canvas: ImageCompareCanvas, host: NSView) {
+        let canvas = ImageCompareCanvas(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        canvas.old = .init(
+            image: Self.solidImage(.systemRed, size: NSSize(width: 200, height: 100)),
+            title: "shot.png"
+        )
+        canvas.new = .init(
+            image: Self.solidImage(.systemBlue, size: NSSize(width: 200, height: 100)),
+            title: "shot.png"
+        )
+        canvas.mode = .wipeHorizontal
+
+        let host = FilledHost(frame: canvas.bounds)
+        let appearance = NSAppearance(named: .darkAqua)
+        host.appearance = appearance
+        canvas.appearance = appearance
+        host.addSubview(canvas)
+        return (canvas, host)
+    }
+
+    /// How much ink each half of the top caption band is carrying, as its distance from the
+    /// band's own ground. The halves are the band's, not the drawing's: where the titles are
+    /// divided is part of what is under test.
+    private func captionInk(
+        of canvas: ImageCompareCanvas,
+        in host: NSView
+    ) -> (leading: CGFloat, trailing: CGFloat) {
+        var measured: (leading: CGFloat, trailing: CGFloat) = (0, 0)
+        (host.appearance ?? NSAppearance.currentDrawing()).performAsCurrentDrawingAppearance {
+            let rendered = bitmap(of: host)
+            let band = canvas.currentLayout.captions.top
+            let half = band.width / 2
+            measured = (
+                ink(rendered, in: CGRect(x: band.minX, y: band.minY, width: half, height: band.height)),
+                ink(rendered, in: CGRect(x: band.midX, y: band.minY, width: half, height: band.height))
+            )
+        }
+        return measured
+    }
+
+    /// The ink in one rect: every other pixel's departure from the rect's first, which is the
+    /// empty ground above a caption that hugs the far side of its band.
+    private func ink(_ bitmap: (rep: NSBitmapImageRep, scale: CGFloat), in rect: CGRect) -> CGFloat {
+        let x0 = Int(rect.minX * bitmap.scale)
+        let x1 = min(Int(rect.maxX * bitmap.scale), bitmap.rep.pixelsWide)
+        let y0 = Int(rect.minY * bitmap.scale)
+        let y1 = min(Int(rect.maxY * bitmap.scale), bitmap.rep.pixelsHigh)
+        guard x1 > x0, y1 > y0 else { return 0 }
+        let ground = luma(bitmap.rep.colorAt(x: x0, y: y0))
+        var total: CGFloat = 0
+        for y in stride(from: y0, to: y1, by: 2) {
+            for x in stride(from: x0, to: x1, by: 2) {
+                total += abs(luma(bitmap.rep.colorAt(x: x, y: y)) - ground)
+            }
+        }
+        return total
+    }
+
+    private func luma(_ color: NSColor?) -> CGFloat {
+        guard let converted = color?.usingColorSpace(.sRGB) else { return 0 }
+        return (converted.redComponent + converted.greenComponent + converted.blueComponent) / 3
     }
 
     private func bitmap(of view: NSView) -> (rep: NSBitmapImageRep, scale: CGFloat) {

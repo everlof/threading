@@ -114,7 +114,8 @@ enum CompareExportPage {
         }
 
         page += """
-            <div class="stage" style="--union-width: \(number(union.width)); \
+            <div class="stage\(hasPair ? "" : " single")" \
+            style="--union-width: \(number(union.width)); \
             --union-height: \(number(union.height))">
             <div class="captions top">
             <span class="old">\((old?.title ?? "").htmlEscaped)</span>
