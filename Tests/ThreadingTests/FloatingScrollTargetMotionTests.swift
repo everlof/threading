@@ -253,7 +253,7 @@ final class FloatingScrollTargetMotionTests: XCTestCase {
         Design.Motion.reduceMotionOverrideForTesting = false
         let button = makeTarget(in: makePane(flipped: false))
         button.setFloatingPresence(true)
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: Design.Motion.floatingTargetArrive * 2))
+        waitForArrival(of: button)
 
         button.setFloatingPresence(true)
 
@@ -414,6 +414,19 @@ final class FloatingScrollTargetMotionTests: XCTestCase {
     private func waitForDeparture(of button: ThemedButton) {
         let deadline = Date(timeIntervalSinceNow: Fixture.settleWindow)
         while !button.isHidden, Date() < deadline {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
+        }
+    }
+
+    /// An arrival is over when Core Animation has taken the animation off the layer, which is
+    /// not the same as its nominal duration having elapsed. Waiting a multiple of the duration
+    /// instead passed alone and on an idle machine, and failed in a full run of the target —
+    /// the removal lands after the wall clock says it should when 5,000 other cases are
+    /// competing for the main thread. Poll for the departure's condition, as its wait does.
+    private func waitForArrival(of button: ThemedButton) {
+        let deadline = Date(timeIntervalSinceNow: Fixture.settleWindow)
+        while button.layer?.animation(forKey: FloatingTargetMotion.animationKey) != nil,
+              Date() < deadline {
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
         }
     }
