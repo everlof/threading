@@ -100,6 +100,7 @@ final class ComponentGalleryViewController: NSViewController {
         "CodeContextPreviewView",
         "CommandPaletteViewController",
         "ControlRowView",
+        "DiffSkeletonView",
         "ExecutionAuditEventView",
         "FileActivityMapView",
         "GlyphView",
@@ -134,6 +135,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemeSwatchView",
         "ThemedButton",
         "ThemedAlert",
+        "ThemedChartPlaceholderView",
         "ThemedCheckbox",
         "ThemedRadioButton",
         "ThemedClipView",
@@ -1602,6 +1604,13 @@ final class ComponentGalleryViewController: NSViewController {
                     row([spinner, spinnerButton])
                 ),
                 story(
+                    "DiffSkeletonView",
+                    "The ghost a review row holds while its diff is deferred. Each file's "
+                        + "own added and removed counts split the changed run, so the "
+                        + "silhouette never invents a removal the file does not have.",
+                    row(galleryDiffSkeletons())
+                ),
+                story(
                     "WorkingOrbView",
                     "All nine theme-accented variants. A conversation chooses one per turn; "
                         + "visibility starts and idles its animation.",
@@ -1747,6 +1756,21 @@ final class ComponentGalleryViewController: NSViewController {
                 )
             ]
         )
+    }
+
+    /// Three files whose counts pull the changed run three different ways. Side by side is the
+    /// only way to see that the silhouette follows the numstat rather than repeating one shape.
+    private func galleryDiffSkeletons() -> [NSView] {
+        [(added: 180, removed: 4), (added: 6, removed: 140), (added: 64, removed: 58)]
+            .map { counts in
+                let skeleton = DiffSkeletonView(added: counts.added, removed: counts.removed)
+                skeleton.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    skeleton.widthAnchor.constraint(equalToConstant: 190),
+                    skeleton.heightAnchor.constraint(equalToConstant: 150)
+                ])
+                return skeleton
+            }
     }
 
     /// The two states side by side, which is the only way to see that they do not look alike.

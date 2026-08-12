@@ -549,17 +549,18 @@ final class SessionComposerViewController: NSViewController {
         // window is tightest, which is the part that decides anything.
         usageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        // The model is the row's other pressure valve: it is normally the longest value, and
-        // ChipView keeps the complete title in its tooltip and reveals its natural width on
-        // hover. Making every chip required gave the footer a hidden 523pt minimum, which in
-        // turn widened a 560pt pane past its required insets. The shorter posture choices stay
-        // intact while the model name yields first.
-        modelChip.setContentCompressionResistancePriority(
-            ComposerDefaults.modelChipCompressionPriority,
-            for: .horizontal
-        )
-        for chip in [modeChip, effortChip, speedChip, surfaceChip] {
-            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // The chips are the row's other pressure valve, and they give way in a stated order
+        // rather than all at once — see `ComposerDefaults.modelChipCompressionPriority`. None
+        // of them may be required: a required chip is a hidden minimum width on the whole
+        // column, and the column is what has to fit the pane.
+        for (chip, priority) in [
+            (modelChip, ComposerDefaults.modelChipCompressionPriority),
+            (surfaceChip, ComposerDefaults.surfaceChipCompressionPriority),
+            (speedChip, ComposerDefaults.speedChipCompressionPriority),
+            (effortChip, ComposerDefaults.effortChipCompressionPriority),
+            (modeChip, ComposerDefaults.modeChipCompressionPriority)
+        ] {
+            chip.setContentCompressionResistancePriority(priority, for: .horizontal)
         }
         modelChip.setAccessibilityIdentifier("composer.session-start.model")
         modeChip.setAccessibilityIdentifier("composer.session-start.mode")
@@ -2009,6 +2010,25 @@ enum ComposerDefaults {
     /// Gives the footer's longest choice the same narrow-pane contract as the location
     /// breadcrumb: truncate its visible title before the prompt can acquire a minimum width.
     static let modelChipCompressionPriority = NSLayoutConstraint.Priority(239)
+
+    /// The posture chips' last-resort ladder: above the usage reading's `defaultLow`, below
+    /// required.
+    ///
+    /// Required was wrong in one direction and the model chip's priority in the other. A
+    /// required chip is a hidden minimum width on the whole column, and with a fourth posture
+    /// on the row that floor measured 569 points — so a 560pt pane produced a column wider than
+    /// the pane it hangs in, and Auto Layout broke a required inset to draw it. Dropping these
+    /// below the usage label instead made them the *first* thing to give, and a 720pt pane,
+    /// which has room to spare the moment the reading shortens, began truncating "Agent's
+    /// Setting" under its own arrow well.
+    ///
+    /// So a posture yields only after the model name and the usage reading have, and among
+    /// themselves in a stated order: the surface first, the permission mode last, because it is
+    /// the one posture that changes what a turn may do without asking.
+    static let surfaceChipCompressionPriority = NSLayoutConstraint.Priority(260)
+    static let speedChipCompressionPriority = NSLayoutConstraint.Priority(261)
+    static let effortChipCompressionPriority = NSLayoutConstraint.Priority(262)
+    static let modeChipCompressionPriority = NSLayoutConstraint.Priority(263)
 
     /// Below every control's own hugging, so a spacer is what stretches when a row has width to
     /// spare. Any real priority would leave the chips competing for the slack with it.

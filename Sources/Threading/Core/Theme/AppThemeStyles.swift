@@ -121,7 +121,9 @@ enum AppThemeStyles {
                 name: "Threading",
                 foreground: hex("#F7EFE6"),
                 background: hex("#040A12"),
-                cursor: hex("#FF9A3D"),
+                // The palette's own ink, not its orange. A block cursor sits *on* a character,
+                // so the accent drew an alarm block over the first letter of queued input.
+                cursor: hex("#F7EFE6"),
                 selection: hex("#173A50"),
                 black: hex("#071626"),
                 red: hex("#E06E65"),
