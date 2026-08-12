@@ -107,6 +107,54 @@ final class MediaInspectorTests: XCTestCase {
         XCTAssertFalse(preview.isHovered)
     }
 
+    /// A picture drawn flush inside a panel is clipped by the panel's corner, so the silhouette it
+    /// draws has to *be* that corner.
+    ///
+    /// Rounding it at `control` inside a `panel` clip put an 8pt shape inside a 12pt one, and the
+    /// clip took away the two corners the picture was flush with outright: the hover ring lost its
+    /// top-left and its top-right arc — both straight edges fading out over twelve points into
+    /// nothing — while the two bottom corners, sitting in the middle of the host where nothing
+    /// clips them, drew perfectly. Asserted on the geometry rather than on pixels because the clip
+    /// is a *layer* corner, and `cacheDisplay` renders the view tree without one.
+    func testPictureFillingAPanelIsRoundedByThePanelThatClipsIt() {
+        let host = panelHost(radius: .panel)
+        let preview = installedPreview(in: host)
+
+        // Far wider than it is tall, so fitting it across the width leaves it flush against the
+        // host's two top corners — which is exactly where the clip is.
+        preview.image = solidImage(size: NSSize(width: 1200, height: 400), color: .systemIndigo)
+        host.layoutSubtreeIfNeeded()
+
+        // A panel with no corner of its own clips nothing, so the picture keeps its own.
+        let clipped = Design.Radius.panel > 0 ? Design.Radius.panel : Design.Radius.control
+        XCTAssertEqual(preview.imageRect.width, preview.bounds.width, accuracy: 1)
+        XCTAssertEqual(
+            preview.silhouetteRadius(for: preview.imageRect),
+            clipped,
+            "a picture flush inside a panel drew a corner the panel's clip cuts away"
+        )
+
+        // A picture the panel does not reach is a smaller thing nested inside it, and keeps the
+        // nested corner it has always had.
+        preview.image = solidImage(size: NSSize(width: 80, height: 60), color: .systemIndigo)
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertLessThan(preview.imageRect.width, preview.bounds.width)
+        XCTAssertEqual(preview.silhouetteRadius(for: preview.imageRect), Design.Radius.control)
+    }
+
+    /// The display panel hosts its image on a square surface. Nothing clips the picture there, so
+    /// nothing should have widened its corner either.
+    func testPictureInASquareHostKeepsTheNestedCorner() {
+        let host = panelHost(radius: .fixed(0))
+        let preview = installedPreview(in: host)
+        preview.image = solidImage(size: NSSize(width: 1200, height: 400), color: .systemIndigo)
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(preview.imageRect.width, preview.bounds.width, accuracy: 1)
+        XCTAssertEqual(preview.silhouetteRadius(for: preview.imageRect), Design.Radius.control)
+    }
+
     func testCollectionNavigationAndThumbnailRailShareSelection() throws {
         let fixture = try imageFiles(count: 3)
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
@@ -611,6 +659,27 @@ final class MediaInspectorTests: XCTestCase {
         ).fill()
         image.unlockFocus()
         return image
+    }
+
+    /// The attachments pane's preview host: a surface with a themed corner, holding one preview
+    /// pinned to all four of its edges. Both halves matter — the corner is what clips, and being
+    /// pinned is what puts the picture in reach of it.
+    private func panelHost(radius: SurfaceRadius) -> NSView {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 260))
+        host.applySurface(fill: Design.Surface.ground, radius: radius)
+        return host
+    }
+
+    private func installedPreview(in host: NSView) -> ThemedImagePreview {
+        let preview = ThemedImagePreview()
+        host.addSubview(preview)
+        NSLayoutConstraint.activate([
+            preview.topAnchor.constraint(equalTo: host.topAnchor),
+            preview.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            preview.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            preview.bottomAnchor.constraint(equalTo: host.bottomAnchor)
+        ])
+        return preview
     }
 
     private func render(_ view: NSView) -> Data? {

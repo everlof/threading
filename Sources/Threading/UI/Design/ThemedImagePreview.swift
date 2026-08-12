@@ -24,6 +24,14 @@ import AppKit
 /// preview gesture, and VoiceOver's press.
 final class ThemedImagePreview: ThemedControl {
 
+    private enum Layout {
+        /// How near the host's edge counts as flush with it. `fittedRect` floors the scaled size,
+        /// so a picture scaled to exactly fill the width lands a fraction of a point short of it
+        /// as often as not — and a silhouette that reverted to the nested corner on that fraction
+        /// would put the bug back for one image in two.
+        static let flushTolerance: CGFloat = 1
+    }
+
     // MARK: - Properties
 
     /// The picture. Nil draws nothing and leaves the view out of the key loop — there is
@@ -110,8 +118,14 @@ final class ThemedImagePreview: ThemedControl {
         let target = imageRect
         guard !target.isEmpty else { return }
 
-        let shape = ThemedSurface.Shape(rect: target, radius: Design.Radius.control)
+        let clip = clippingPanelRadius(for: target)
+        let shape = ThemedSurface.Shape(rect: target, radius: silhouetteRadius(for: target))
 
+        // Clipped to the same silhouette the ring traces. Drawn square, a picture's own corners
+        // sit outside the rounded ring around it — invisible on a dark screenshot, and a wedge of
+        // unrounded picture at each corner on a light one.
+        NSGraphicsContext.saveGraphicsState()
+        shape.path.addClip()
         image.draw(
             in: target,
             from: .zero,
@@ -120,6 +134,7 @@ final class ThemedImagePreview: ThemedControl {
             respectFlipped: true,
             hints: [.interpolation: NSImageInterpolation.high]
         )
+        NSGraphicsContext.restoreGraphicsState()
 
         // The image is itself the control. A quiet themed wash makes that discoverable when the
         // pointer arrives, and holding the wash through mouse-down keeps the click from feeling
@@ -133,14 +148,60 @@ final class ThemedImagePreview: ThemedControl {
             Design.Surface.imageHoverWash.setFill()
             shape.path.fill()
             Design.Surface.accent.setStroke()
-            let hoverPath = shape.inset(by: Design.Radius.border / 2).path
+            let hoverPath = shape.inset(by: ringClearance(clip) + Design.Radius.border / 2).path
             hoverPath.lineWidth = Design.Radius.border
             hoverPath.stroke()
         }
 
         // Around the picture, not the view: the view is the whole content region and a ring at
         // its edge would read as the pane being focused rather than the image.
-        drawKeyboardFocus(around: shape)
+        drawKeyboardFocus(around: shape, keepingEdge: ringClearance(clip))
+    }
+
+    /// How far a ring is held inside the picture's silhouette.
+    ///
+    /// Nothing, ordinarily: a ring stroked on the silhouette's own edge *is* the picture's edge,
+    /// which is what "around the picture" means. A picture flush inside a panel is the exception.
+    /// Its silhouette is the panel's clip, and the two are not drawn by the same machinery — the
+    /// clip is a layer corner, `.continuous`, while `NSBezierPath` rounds circularly. The two
+    /// curves agree at the tangents and part company between them, so a ring stroked exactly on
+    /// the boundary is shaved along the corners by a curve it never quite matches. One border
+    /// width of clearance puts the whole stroke inside both.
+    private func ringClearance(_ clip: CGFloat?) -> CGFloat {
+        clip == nil ? 0 : Design.Radius.border
+    }
+
+    /// The corner the picture is drawn with.
+    ///
+    /// `fittedRect` pins the picture to the top edge and centres it across the width, so wherever
+    /// this view fills a panel — the attachments pane's preview, an image tab in the display
+    /// panel — a picture wide enough to fill it lands flush against the *panel's* own rounded
+    /// corner. `applySurface(radius: .panel)` puts that corner on the host's layer, and a layer
+    /// corner clips every subview under it.
+    ///
+    /// Rounding the picture at `control` inside that clip therefore drew an 8pt silhouette inside
+    /// a 12pt one, and the clip removed the two corners the picture was flush with outright. It
+    /// shipped as a hover ring with no top-left and no top-right arc — both straight edges fading
+    /// out over twelve points into nothing — while the bottom two corners, sitting in the middle
+    /// of the host where nothing clips them, drew perfectly. A picture the panel does not reach
+    /// keeps the nested `control` corner, which is what that token means.
+    ///
+    /// Read by the tests, which hold the picture's silhouette to the panel that clips it.
+    func silhouetteRadius(for target: NSRect) -> CGFloat {
+        clippingPanelRadius(for: target) ?? Design.Radius.control
+    }
+
+    /// The corner a host's applied surface clips this picture to, or nil when the picture is
+    /// drawing its own silhouette and nothing is cutting it.
+    private func clippingPanelRadius(for target: NSRect) -> CGFloat? {
+        guard let host = superview,
+              let radius = host.appliedSurfaceRadius,
+              radius > 0,
+              bounds.size == host.bounds.size
+        else { return nil }
+        // Pinned to the top and spanning the width is the only way a fitted picture reaches the
+        // host's corners; a narrower one floats clear of all four and is clipped by none of them.
+        return bounds.width - target.width <= Layout.flushTolerance ? radius : nil
     }
 
     // MARK: - Activation

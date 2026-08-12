@@ -1965,3 +1965,46 @@ column would mean nothing. Left alone deliberately.
 the buttons and the sizes each share a column, and at 420pt the group still keeps its fitting
 width. `SettingsDisclosureRenderTests`' storage-shaped fixture is now unfolded and carries the
 two-part control, because collapsed it drew none of this.
+
+## 2026-08-12 — a picture's own corner has to be the corner that clips it
+
+Reported from a screenshot: hovering the attachments pane's preview drew an accent ring with no
+top-left and no top-right arc. Both top edges simply faded out into nothing about twelve points
+short of the corner, while the two bottom corners drew a clean arc.
+
+The measurements name the culprit before the code does. The ring is a one-point stroke — a
+`borderWidth` hairline. Its bottom arcs have a radius of eight points — `controlRadius`. The alpha
+along each broken top edge follows a circular-arc coverage profile of radius twelve —
+`panelRadius`, to better than a twentieth over eleven samples. Three tokens, three matches: this is
+one silhouette being cut by another.
+
+`SessionAttachmentsViewController` gives its preview host `applySurface(fill:radius: .panel)` and
+pins every installed preview to all four of its edges. A layer corner clips what is under it, and
+`ThemedImagePreview.fittedRect` pins the picture to the *top* edge and stretches it across the
+width — so a picture wide enough to fill the pane lands exactly on the host's two rounded corners
+and nowhere near its other two. An eight-point silhouette drawn inside a twelve-point clip loses
+the corners it is flush with, keeps the ones it is not, and that asymmetry is the whole bug. It is
+the trap `ThemedControl.drawKeyboardFocus` already documents — "a layer corner clips what `draw(_:)`
+lays down" — arriving from the *superview* rather than from the control's own applied surface,
+which is why the existing defence did not catch it.
+
+So the picture asks what clips it: `superview.appliedSurfaceRadius`, when this view fills that
+superview and the fitted picture spans its width. Flush inside a panel, the picture is rounded at
+the panel's radius, because that corner is the one the user can actually see. Anywhere the panel
+does not reach — a narrower picture floating in the pane, the display panel's own square
+`.fixed(0)` host — it keeps the nested `control` corner, which is what that token means.
+
+Two smaller things came with it. The ring is now held one border width *inside* that silhouette
+rather than stroked along it: the clip is a layer corner and therefore `.continuous`, while
+`NSBezierPath` rounds circularly, and two curves that agree at the tangents and part company
+between them will shave a stroke laid exactly on the boundary. And the picture is clipped to the
+silhouette it is given, instead of being drawn square under a rounded ring — that mismatch was
+invisible on the dark screenshots this pane usually holds and a wedge of unrounded picture at each
+corner on a light one.
+
+Verified by rendering rather than by argument, because `cacheDisplay` runs `draw(_:)` and ignores
+the layer corner that causes this — the real drawing was captured, then the panel's clip applied
+over it, and the accent ink counted in each corner. Before: 64, 64, 126, 126. After: 124 in all
+four. `MediaInspectorTests` keeps the geometry rather than the pixels, since the clip is a layer
+property no offscreen render reproduces: a picture flush inside a panel takes the panel's corner,
+a narrower one and a square host both keep the control's.
