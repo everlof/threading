@@ -174,6 +174,17 @@ final class StateManager {
         }
     }
 
+    /// Whether this launch has read the record of what was running at the last quit.
+    ///
+    /// **A launch that never read it must not write over it.** Writing an empty list over a real
+    /// record is how a whole set of sessions stops coming back, and it does not take a crash: an
+    /// app opened and quit again within a second — a rebuild-and-open cycle, a scripted launch,
+    /// the second copy somebody starts by accident — relaunches nothing, has nothing running, and
+    /// stamps "nothing was running" over the list the previous real quit left. Measured on this
+    /// store: seventeen sessions live one evening, then twenty such launches, then none of them
+    /// ever came back. `AppDelegate` reads this to leave an unspent record alone.
+    private(set) var hasConsumedRunningSessionIDs = false
+
     /// Records which sessions held a live agent at quit, for the next launch to relaunch.
     @discardableResult
     func saveRunningSessionIDs(_ ids: [SessionID]) -> Bool {
@@ -202,6 +213,7 @@ final class StateManager {
             if !ids.isEmpty {
                 try database().saveRunningSessionIDs([])
             }
+            hasConsumedRunningSessionIDs = true
             return ids
         } catch {
             ThreadingLogger.agent.error(

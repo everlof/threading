@@ -904,6 +904,25 @@ struct AgentSession: Codable, Identifiable {
   let createdAt: Date
   var lastActiveAt: Date
 
+  /// When a turn last began in this conversation, whoever started it.
+  ///
+  /// Deliberately apart from `lastActiveAt`, which the runtime stamps on launch and on exit: a
+  /// background relaunch touches every session it brings back, so "last active" answers "last
+  /// *touched*" and cannot say when a chat was last used. Measured against this store, that
+  /// difference is days — sessions relaunched one morning read as active that morning while
+  /// their transcripts had not been written to since the week before.
+  ///
+  /// Nil for every record written before this field existed; `lastUsedAt` resolves that.
+  var lastTurnAt: Date?
+
+  /// When this conversation was last used, as well as the record can say.
+  ///
+  /// The real turn where there is one, and the runtime's own timestamp for records that predate
+  /// it. The launch restore window reads this, and this fallback is exactly why that window is
+  /// also capped: on the first launch after the field arrives, every older session reads as
+  /// recently touched, and the cap is what keeps that from booting the whole store.
+  var lastUsedAt: Date { lastTurnAt ?? lastActiveAt }
+
   /// Whether this record has no conversation, is waiting for an identifier, or can resume.
   ///
   /// Claude's identifier is minted at first launch. Codex reports its identifier after
@@ -1185,6 +1204,7 @@ struct AgentSession: Codable, Identifiable {
     self.agentTitleSource = nil
     self.createdAt = Date()
     self.lastActiveAt = Date()
+    self.lastTurnAt = nil
     self.resumeState = ResumeState.initial(for: configuration.kind)
     self.hasLaunched = false
     self.lastExitCode = nil
@@ -1207,7 +1227,7 @@ struct AgentSession: Codable, Identifiable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, kind, title, customTitle, createdAt, lastActiveAt
+    case id, kind, title, customTitle, createdAt, lastActiveAt, lastTurnAt
     case agentTitle = "terminalTitle"
     case agentTitleSource
     case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
@@ -1240,6 +1260,7 @@ struct AgentSession: Codable, Identifiable {
     lastActiveAt =
       try container.decodeIfPresent(Date.self, forKey: .lastActiveAt)
       ?? createdAt
+    lastTurnAt = try container.decodeIfPresent(Date.self, forKey: .lastTurnAt)
     resumeState = ResumeState.restoring(
       try container.decodeIfPresent(TranscriptID.self, forKey: .agentSessionID),
       for: decodedKind
@@ -1507,6 +1528,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(agentTitleSource, forKey: .agentTitleSource)
     try container.encode(createdAt, forKey: .createdAt)
     try container.encode(lastActiveAt, forKey: .lastActiveAt)
+    try container.encodeIfPresent(lastTurnAt, forKey: .lastTurnAt)
     try container.encodeIfPresent(resumeState.transcriptID, forKey: .agentSessionID)
     try container.encode(hasLaunched, forKey: .hasLaunched)
     try container.encodeIfPresent(lastExitCode, forKey: .lastExitCode)

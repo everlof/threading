@@ -667,13 +667,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // MCP listener's callback, which never runs), so leaving it untouched is what preserves
         // it end to end.
         var runningSessionIDs: [SessionID] = []
+        var preservedRunningSessionRecord = false
         if launchPlan.recordsRunningSessionsOnQuit {
             ProjectStore.shared.flushPendingSave()
             // What is live right now, recorded for the next launch to bring back — necessarily
             // ahead of `terminateAll`, after which nothing is. `AppRelaunch` exits without
             // running this on purpose: a reset comes back to nothing running.
             runningSessionIDs = Array(AgentRuntime.shared.runningSessionIDs)
-            StateManager.shared.saveRunningSessionIDs(runningSessionIDs)
+            // The same hazard the recovery note above describes, through a different door: a
+            // launch that quits again before it ever read the record has nothing running *and*
+            // nothing to say, and writing its emptiness over a real list is how the sessions from
+            // the last real quit stop coming back for good. An empty write is only honest once
+            // this launch has spent the record it is replacing.
+            if !runningSessionIDs.isEmpty || StateManager.shared.hasConsumedRunningSessionIDs {
+                StateManager.shared.saveRunningSessionIDs(runningSessionIDs)
+            } else {
+                preservedRunningSessionRecord = true
+            }
         }
         AgentRuntime.shared.terminateAll()
         ExtensionManager.shared.terminateAll()
@@ -691,7 +701,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         MainThreadStallMonitor.shared.stop()
         MetricKitDiagnostics.shared.stop()
         EventLog.shared.endLaunch(detail: [
-            "runningSessions": String(runningSessionIDs.count)
+            "runningSessions": String(runningSessionIDs.count),
+            // Said out loud because the two empty quits differ: one records that nothing was
+            // running, the other declines to record anything at all.
+            "recordPreserved": preservedRunningSessionRecord ? "yes" : "no"
         ])
         // The same fact in the ledger, and the ten-minute stability timer cancelled with it: a
         // timer left armed on a queue that is about to stop being drained would either never fire

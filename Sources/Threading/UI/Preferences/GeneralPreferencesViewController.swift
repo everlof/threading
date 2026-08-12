@@ -23,7 +23,9 @@ final class GeneralPreferencesViewController: NSViewController {
     private let outsideProjectAttachmentToggle = ThemedToggle()
     private let beforeActionCaptureToggle = ThemedToggle()
     private let restoreSessionToggle = ThemedToggle()
-    private let relaunchSessionsToggle = ThemedToggle()
+    private let restorePolicyPopUp = ThemedPopUp()
+    private let restoreWindowPopUp = ThemedPopUp()
+    private let restoreLimitPopUp = ThemedPopUp()
     private let attentionNotificationToggle = ThemedToggle()
     private let automaticUpdateToggle = ThemedToggle()
 
@@ -132,9 +134,7 @@ final class GeneralPreferencesViewController: NSViewController {
             action: #selector(beforeActionCaptureChanged)
         )
         configure(restoreSessionToggle, isOn: AppSettings.shared.restoresLastSession, action: #selector(restoreSessionChanged))
-        configure(relaunchSessionsToggle,
-                  isOn: AppSettings.shared.restoresRunningSessions,
-                  action: #selector(relaunchSessionsChanged))
+        configureRestoreControls()
         for (prompt, toggle) in confirmationToggles {
             configure(toggle,
                       isOn: AppSettings.shared.asks(before: prompt),
@@ -253,6 +253,95 @@ final class GeneralPreferencesViewController: NSViewController {
             .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
     }
 
+    /// The three launch-restore controls.
+    ///
+    /// The window and the limit are pop-ups rather than fields because both decide how many agent
+    /// processes a launch spawns: the range belongs to the product, not to whatever somebody can
+    /// type. See `SessionRestoreDefaults`.
+    private func configureRestoreControls() {
+        let settings = AppSettings.shared
+
+        for policy in SessionRestorePolicy.allCases {
+            restorePolicyPopUp.addItem(
+                ThemedMenuItem(title: policy.settingsTitle, representedValue: policy)
+            )
+        }
+        restorePolicyPopUp.selectItem(
+            at: SessionRestorePolicy.allCases.firstIndex(of: settings.sessionRestorePolicy) ?? 0
+        )
+        configureRestorePopUp(
+            restorePolicyPopUp,
+            action: #selector(restorePolicyChanged),
+            accessibilityIdentifier: "settings.general.session-restore-policy"
+        )
+
+        for days in SessionRestoreDefaults.windowDayChoices {
+            restoreWindowPopUp.addItem(
+                ThemedMenuItem(title: Self.windowTitle(days: days), representedValue: days)
+            )
+        }
+        restoreWindowPopUp.selectItem(
+            at: SessionRestoreDefaults.windowDayChoices
+                .firstIndex(of: settings.sessionRestoreWindowDays) ?? 0
+        )
+        configureRestorePopUp(
+            restoreWindowPopUp,
+            action: #selector(restoreWindowChanged),
+            accessibilityIdentifier: "settings.general.session-restore-window"
+        )
+
+        for limit in SessionRestoreDefaults.limitChoices {
+            restoreLimitPopUp.addItem(
+                ThemedMenuItem(title: Self.limitTitle(limit), representedValue: limit)
+            )
+        }
+        restoreLimitPopUp.selectItem(
+            at: SessionRestoreDefaults.limitChoices
+                .firstIndex(of: settings.sessionRestoreLimit) ?? 0
+        )
+        configureRestorePopUp(
+            restoreLimitPopUp,
+            action: #selector(restoreLimitChanged),
+            accessibilityIdentifier: "settings.general.session-restore-limit"
+        )
+
+        updateRestoreRefinements()
+    }
+
+    private func configureRestorePopUp(
+        _ popUp: ThemedPopUp,
+        action: Selector,
+        accessibilityIdentifier: String
+    ) {
+        popUp.target = self
+        popUp.action = action
+        popUp.setAccessibilityIdentifier(accessibilityIdentifier)
+        popUp.translatesAutoresizingMaskIntoConstraints = false
+        popUp.widthAnchor
+            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+    }
+
+    /// The window and the limit belong to one policy, so they are dimmed rather than hidden under
+    /// the others: a row that disappears takes the explanation of what the policy does with it.
+    private func updateRestoreRefinements() {
+        let refines = AppSettings.shared.sessionRestorePolicy == .recentlyUsed
+        restoreWindowPopUp.isEnabled = refines
+        restoreLimitPopUp.isEnabled = refines
+    }
+
+    /// "1 day", "3 days", localized by the system rather than by a plural rule of ours.
+    private static func windowTitle(days: Int) -> String {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.day]
+        formatter.unitsStyle = .full
+        let seconds = Double(days) * SessionRestoreDefaults.secondsPerDay
+        return formatter.string(from: seconds) ?? "\(days)"
+    }
+
+    private static func limitTitle(_ limit: Int) -> String {
+        L10n.format("At most %d", limit)
+    }
+
     private func setupLayout() {
         let sessions = SettingsCard(rows: [
             SettingsUI.row(title: "New sessions use",
@@ -297,10 +386,23 @@ final class GeneralPreferencesViewController: NSViewController {
         let startup = SettingsCard(rows: [
             SettingsUI.row(title: "Reopen the last session at launch", control: restoreSessionToggle),
             SettingsUI.row(
-                title: "Relaunch sessions that were running at quit",
-                subtitle: "They resume in the background, one at a time, and are already "
-                    + "running when you open them.",
-                control: relaunchSessionsToggle
+                title: "Bring back at launch",
+                subtitle: "Sessions resume in the background, one at a time, and are already "
+                    + "running when you open them. Everything else stays dormant and resumes "
+                    + "when you open it.",
+                control: restorePolicyPopUp
+            ),
+            SettingsUI.row(
+                title: "Counts as recently used",
+                subtitle: "How far back to look. Measured from the last time a turn ran in the "
+                    + "conversation, not from the last time Threading opened it.",
+                control: restoreWindowPopUp
+            ),
+            SettingsUI.row(
+                title: "Sessions brought back",
+                subtitle: "Most recent first. Each one is a real agent process, so this is the "
+                    + "ceiling on what a launch may start.",
+                control: restoreLimitPopUp
             )
         ])
 
@@ -638,9 +740,23 @@ final class GeneralPreferencesViewController: NSViewController {
         AppSettings.shared.restoresLastSession = restoreSessionToggle.state == .on
     }
 
-    @objc private func relaunchSessionsChanged() {
-        AppSettings.shared.restoresRunningSessions = relaunchSessionsToggle.state == .on
+    @objc private func restorePolicyChanged() {
+        guard let value = restorePolicyPopUp.selectedItem?.representedValue
+            as? SessionRestorePolicy else { return }
+        AppSettings.shared.sessionRestorePolicy = value
+        updateRestoreRefinements()
     }
+
+    @objc private func restoreWindowChanged() {
+        guard let days = restoreWindowPopUp.selectedItem?.representedValue as? Int else { return }
+        AppSettings.shared.sessionRestoreWindowDays = days
+    }
+
+    @objc private func restoreLimitChanged() {
+        guard let limit = restoreLimitPopUp.selectedItem?.representedValue as? Int else { return }
+        AppSettings.shared.sessionRestoreLimit = limit
+    }
+
 
     @objc private func confirmationChanged(_ sender: ThemedToggle) {
         guard let prompt = confirmationToggles.first(where: { $0.value === sender })?.key else { return }

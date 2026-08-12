@@ -165,7 +165,14 @@ final class AgentSessionViewController: NSViewController {
             // turn with background work may remain visually `working`; AgentRuntime explicitly
             // scans that boundary because there is intentionally no activity edge to observe.
             let turnFinished = self.activityHadTurnInFlight && !activity.hasTurnInFlight
+            // The same shared edge, the other way round, and the only honest answer to "when was
+            // this conversation last used": it fires for a reported turn and for an inferred one,
+            // and it cannot fire for the relaunch that merely brought the session back.
+            let turnBegan = !self.activityHadTurnInFlight && activity.hasTurnInFlight
             self.activityHadTurnInFlight = activity.hasTurnInFlight
+            if turnBegan {
+                ProjectStore.shared.noteTurnStarted(sessionID: self.sessionID)
+            }
             if turnFinished {
                 self.noteTurnFinishedForAttachmentDetection()
             }
@@ -531,6 +538,10 @@ final class AgentSessionViewController: NSViewController {
         guard terminal.cols > 0, terminal.rows > 0 else {
             return  // Retried from the sizeChanged callback once layout settles.
         }
+
+        // Whatever the launch decided about this session stops being the reason it is dormant the
+        // moment it runs. See `SessionRestorationLedger`.
+        SessionRestorationLedger.shared.forget(sessionID: sessionID)
 
         let recorded = ProjectStore.shared.update(sessionID: sessionID) { stored in
             stored.hasLaunched = true

@@ -730,19 +730,38 @@ libdispatch treat `EV_VANISHED` as a fatal client bug.
 
 Quitting with agents running keeps the records and loses the processes — that is the app's
 premise — but it used to mean the next launch began as a sidebar of dormant rows, one resume
-per click. `AppSettings.restoresRunningSessions` (Settings ▸ General ▸ Startup, on by default)
-closes that loop: `applicationShouldTerminate` records `AgentRuntime.runningSessionIDs` just
-before `terminateAll`, and the next launch relaunches those sessions in the background, so
-selecting one attaches an agent that is already up instead of paying the resume on the click.
+per click. `AppSettings.sessionRestorePolicy` (Settings ▸ General ▸ Startup) closes that loop:
+`applicationShouldTerminate` records `AgentRuntime.runningSessionIDs` just before
+`terminateAll`, and the next launch relaunches sessions in the background, so selecting one
+attaches an agent that is already up instead of paying the resume on the click.
 The rules, each of which is the answer to a way this goes wrong:
 
-- **The candidate set is what was running at quit, never "every session in the sidebar".**
-  That is what keeps the cost honest: the machine ran exactly those agents side by side a
+- **Every policy is a policy about a bound, and there are two of them.**
+  `.runningAtLastQuit` (the default, and what the `restoresRunningSessions` toggle it replaced
+  now migrates to) is bounded by evidence: the machine ran exactly those agents side by side a
   moment before the quit, so bringing the same set back returns it to a load it has
-  demonstrably carried. A store with forty dormant conversations must not boot forty CLIs.
-  `StartupSessionRelaunch.plan` also drops what was deleted or archived since, and orders by
-  `lastActiveAt` — the stagger means the last in line waits the whole line, so the session
-  touched last goes first.
+  demonstrably carried. `.recentlyUsed` is bounded only by `sessionRestoreLimit`, because a
+  time window is not a bound — a heavy week is a heavy launch. Neither may become "every
+  session in the sidebar": a store with forty dormant conversations must not boot forty CLIs at
+  a couple of hundred megabytes each. `StartupSessionRelaunch.plan` also drops what was deleted
+  or archived since, and orders most recently used first — the stagger means the last in line
+  waits the whole line, so the session touched last goes first.
+- **The window exists because the record is fragile, not because the record is wrong.** A
+  reboot, a force quit, or a launch that erased the record (see below) leaves
+  `.runningAtLastQuit` with nothing to bring back, and no later launch can recover it. Reading
+  the conversations themselves survives all three, which is the choice a user who reboots often
+  should have.
+- **`.recentlyUsed` reads `AgentSession.lastUsedAt`, never `lastActiveAt`.** The runtime stamps
+  `lastActiveAt` on launch and on exit, so a background relaunch marks every session it brought
+  back as active today: a window read from it feeds itself its own last launch and never lets
+  go of anything. Measured on a real store, the gap was days — seventeen sessions relaunched
+  one morning read as active that morning while their transcripts had not been written to since
+  the week before, and a three-day window selected all thirty-two sessions. `lastTurnAt` is
+  stamped instead from the turn-start edge in `AgentSessionViewController`'s activity observer,
+  which fires for a reported turn and an inferred one and cannot fire for a relaunch, and is
+  coalesced through `ProjectStore.noteTurnStarted`. Records written before the field existed
+  fall back to `lastActiveAt`, which is the second reason the limit exists: on the first launch
+  after the update, the fallback makes every old session look recent, and the cap bounds that.
 - **The record is consumed on read** (`StateManager.consumeRunningSessionIDs`), the same
   pattern as `EventLog`'s launch marker: only a clean quit rewrites it, so a list that
   outlived the launch that read it would relaunch sessions the user has since closed the
@@ -783,6 +802,26 @@ The rules, each of which is the answer to a way this goes wrong:
   menu's Close) consult `windowShouldClose` and close only on true, so a declined quit leaves
   the window untouched. `windowWillClose` keeps its teardown for a `close()` called in code,
   which never consults the delegate.
+- **A launch that never read the record may not write over it.** The hazard is not a crash: an
+  app opened and quit again inside a second — a rebuild-and-open cycle, a scripted launch, a
+  second copy started by accident — relaunches nothing, has nothing running, and stamps "nothing
+  was running" over the list the last real quit left. That is a permanent loss, because the
+  record is the whole input to `.runningAtLastQuit`. It was found by reading a user's own
+  journals: seventeen sessions live one evening, then about twenty sub-second launches the next
+  afternoon, then those seventeen never came back and had sat dormant for two days.
+  `StateManager.hasConsumedRunningSessionIDs` says whether this launch spent the record, and the
+  quit writes an empty list only when it did (or when something really was running). The same
+  hazard through the recovery door was already guarded; this is the ordinary-launch door. The
+  `Quit` record carries `recordPreserved` so the two empty quits can be told apart.
+- **A dormant row can say why it is dormant.** `StartupSessionRelaunch.Plan` carries a
+  `SessionRestorationOutcome` for every unarchived session — restored, restore off, not running
+  at the last quit, nothing recorded, outside the window (with when it was last used), or past
+  the limit — and `SessionRestorationLedger` holds them for the launch. The session hover card
+  reads it under "Dormant · resumable" and names the settings page. Recorded rather than
+  recomputed for two reasons: the answer belongs to the decision that was actually made, and a
+  card built while the pointer rests on a row must not do work proportional to the whole store.
+  The ledger forgets a session the moment it launches, because from then on its dormancy is its
+  own agent's exit and the launch's reason would be a lie.
 - **Both ends of the handshake are journalled**, because neither was, and that is why the
   above stayed invisible: the `Quit` record carries `runningSessions`, and the launch records
   `recorded` beside `relaunching`. The pair is what separates the three ways this comes to

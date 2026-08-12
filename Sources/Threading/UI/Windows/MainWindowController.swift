@@ -1490,28 +1490,42 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// `restoreSelectedSession` is already bringing it back through the sidebar — its launch
     /// is a run-loop turn away, which `hasTerminal` alone would race.
     func relaunchSessionsFromLastQuit() {
+        // Consumed whatever the policy is, and before the policy is consulted: a list written
+        // under one choice must not be able to fire under a later one.
         let recorded = StateManager.shared.consumeRunningSessionIDs()
-        guard AppSettings.shared.restoresRunningSessions, !recorded.isEmpty else { return }
+        let settings = AppSettings.shared
+        let policy = settings.sessionRestorePolicy
 
-        let planned = StartupSessionRelaunch.plan(
+        let plan = StartupSessionRelaunch.plan(
+            policy: policy,
             recorded: recorded,
             sessions: ProjectStore.shared.projects.flatMap(\.sessions),
-            excluding: AppSettings.shared.restoresLastSession
+            windowDays: settings.sessionRestoreWindowDays,
+            limit: settings.sessionRestoreLimit,
+            excluding: settings.restoresLastSession
                 ? ProjectStore.shared.selectedSessionID
                 : nil
         )
+        // Recorded before the plan is allowed to be empty, and recorded for every policy: the
+        // hover card on a dormant row explains this decision, and "nothing came back" is the
+        // answer a user is most likely to be asking about.
+        SessionRestorationLedger.shared.record(plan)
+
         // Both counts, before the plan is allowed to be empty: "recorded 1, relaunching 0" is
         // the ordinary answer when the only session running at the quit was the selected one,
         // which `plan` leaves to `restoreSelectedSession`. Logging only the launches made that
         // case look exactly like a record that was never written.
         EventLog.shared.record(.session, "Relaunching sessions from last quit", [
+            "policy": policy.rawValue,
             "recorded": String(recorded.count),
-            "relaunching": String(planned.count)
+            "relaunching": String(plan.sessionIDs.count)
         ])
 
-        guard !planned.isEmpty else { return }
+        guard !plan.sessionIDs.isEmpty else { return }
 
-        let relauncher = StartupSessionRelauncher(sessionIDs: planned) { [weak self] sessionID in
+        let relauncher = StartupSessionRelauncher(
+            sessionIDs: plan.sessionIDs
+        ) { [weak self] sessionID in
             self?.containerViewController.launchInBackground(sessionID: sessionID)
         }
         startupRelauncher = relauncher
@@ -1938,7 +1952,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// much of the workspace comes back at all.
     func restoreDetachedBrowserWindowsAtLaunch() {
         guard AppSettings.shared.restoresLastSession
-            || AppSettings.shared.restoresRunningSessions else { return }
+            || AppSettings.shared.restoresSessionsAtLaunch else { return }
 
         for session in ProjectStore.shared.projects.flatMap(\.sessions) where !session.isArchived {
             restoreDetachedBrowserWindows(for: session.id)

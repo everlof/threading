@@ -167,7 +167,10 @@ enum SettingsPages {
                 // The Startup section's own verbs, added the day a search for
                 // "automatic loading on startup" found nothing: the section relaunches and
                 // reopens sessions, and none of those words appeared here.
-                "relaunch", "reopen", "restore", "resume automatically", "running at quit"
+                "relaunch", "reopen", "restore", "resume automatically", "running at quit",
+                // The window policy's own words, for the same reason: "dormant" is what the user
+                // sees, and none of the terms above lead to the setting that decides it.
+                "dormant", "recently used", "restore window", "restore limit", "days"
             )
         ) { GeneralPreferencesViewController() },
         Page(

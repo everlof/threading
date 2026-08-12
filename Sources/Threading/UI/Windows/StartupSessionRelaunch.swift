@@ -4,35 +4,179 @@ import AppKit
 
 /// Decides which sessions a launch brings back after the app was quit with agents running.
 ///
-/// The candidate set is exactly what was live at the last quit, which is what keeps the
-/// feature's cost honest: the machine already ran those agents side by side a moment before
-/// the quit, so bringing the same set back returns it to a load it has demonstrably carried.
-/// A rule like "every session in the sidebar" has no such bound — a store with forty dormant
-/// conversations would boot forty CLIs nobody asked for.
+/// **Every rule here is a rule about a bound.** `.runningAtLastQuit` is bounded by evidence: the
+/// machine already ran those agents side by side a moment before the quit, so bringing the same
+/// set back returns it to a load it has demonstrably carried. `.recentlyUsed` is bounded by the
+/// cap it is given, because a time window is not a bound at all — a heavy week is a heavy launch.
+/// A rule like "every session in the sidebar" has neither: a store with forty dormant
+/// conversations would boot forty CLIs nobody asked for, at a couple of hundred megabytes each.
+///
+/// The two exist together because the first depends on one record, and a reboot, a force quit, or
+/// an app that opened and closed again without restoring anything leaves that record saying
+/// nothing at all. The second reads the conversations themselves and survives all three.
 enum StartupSessionRelaunch {
 
-    /// Orders and filters the recorded sessions into the relaunch plan.
+    /// The launch set, and the reason for every session that is not in it.
+    struct Plan: Equatable {
+        /// To launch, in order.
+        let sessionIDs: [SessionID]
+
+        /// One answer per unarchived session, including the ones being launched.
+        let outcomes: [SessionID: SessionRestorationOutcome]
+
+        static let empty = Plan(sessionIDs: [], outcomes: [:])
+    }
+
+    /// Orders and filters the sessions into the relaunch plan for one policy.
     ///
     /// The record is navigation state that outlives the sessions it names: anything deleted or
     /// archived since the quit is dropped by lookup rather than trusted. The excluded id is the
     /// one `restoreSelectedSession` is already bringing back on screen — launching it here as
-    /// well would race the selection's own launch. Most recently active goes first, because the
+    /// well would race the selection's own launch. Most recently used goes first, because the
     /// stagger means the last in line waits the whole line, and the session touched last is the
     /// one most likely to be wanted first.
     static func plan(
+        policy: SessionRestorePolicy,
         recorded: [SessionID],
         sessions: [AgentSession],
-        excluding excludedID: SessionID?
-    ) -> [SessionID] {
-        let byID = Dictionary(
-            sessions.map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        return recorded
-            .compactMap { byID[$0] }
-            .filter { !$0.isArchived && $0.id != excludedID }
-            .sorted { $0.lastActiveAt > $1.lastActiveAt }
-            .map(\.id)
+        windowDays: Int = SessionRestoreDefaults.windowDays,
+        limit: Int = SessionRestoreDefaults.limit,
+        now: Date = Date(),
+        excluding excludedID: SessionID? = nil
+    ) -> Plan {
+        // Archived sessions are not dormant rows anybody can see, so they earn no outcome: the
+        // sidebar does not list them and Settings ▸ Archived is where they are explained.
+        let listed = sessions.filter { !$0.isArchived }
+
+        switch policy {
+        case .nothing:
+            return Plan(
+                sessionIDs: [],
+                outcomes: outcomes(for: listed, restored: [], otherwise: { _ in .restoreDisabled })
+            )
+
+        case .runningAtLastQuit:
+            let byID = Dictionary(
+                listed.map { ($0.id, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            let ordered = recorded
+                .compactMap { byID[$0] }
+                .sorted { $0.lastActiveAt > $1.lastActiveAt }
+                .map(\.id)
+            // An empty record and a session that simply was not running are different facts, and
+            // the difference is the one worth saying out loud: the first means the last quit left
+            // nothing to bring back, which is a thing that happens *to* a user rather than a
+            // thing they chose.
+            let reason: SessionRestorationOutcome =
+                recorded.isEmpty ? .nothingRecorded : .notRunningAtLastQuit
+            return Plan(
+                sessionIDs: ordered.filter { $0 != excludedID },
+                outcomes: outcomes(
+                    for: listed,
+                    restored: Set(ordered).union(excludedID.map { [$0] } ?? []),
+                    otherwise: { _ in reason }
+                )
+            )
+
+        case .recentlyUsed:
+            let days = SessionRestoreDefaults.clampWindowDays(windowDays)
+            let limit = SessionRestoreDefaults.clampLimit(limit)
+            let threshold = now.addingTimeInterval(
+                -Double(days) * SessionRestoreDefaults.secondsPerDay
+            )
+            let inWindow = listed
+                .filter { $0.lastUsedAt >= threshold }
+                .sorted { $0.lastUsedAt > $1.lastUsedAt }
+            let chosen = inWindow.prefix(limit).map(\.id)
+            let chosenIDs = Set(chosen)
+            return Plan(
+                sessionIDs: chosen.filter { $0 != excludedID },
+                outcomes: outcomes(
+                    for: listed,
+                    restored: chosenIDs.union(excludedID.map { [$0] } ?? []),
+                    otherwise: { session in
+                        session.lastUsedAt >= threshold
+                            ? .beyondLimit(limit: limit)
+                            : .outsideWindow(days: days, lastUsedAt: session.lastUsedAt)
+                    }
+                )
+            )
+        }
+    }
+
+    private static func outcomes(
+        for sessions: [AgentSession],
+        restored: Set<SessionID>,
+        otherwise reason: (AgentSession) -> SessionRestorationOutcome
+    ) -> [SessionID: SessionRestorationOutcome] {
+        sessions.reduce(into: [:]) { outcomes, session in
+            outcomes[session.id] = restored.contains(session.id) ? .restored : reason(session)
+        }
+    }
+}
+
+// MARK: - Restoration Outcome
+
+/// Why one session is, or is not, live after a launch.
+///
+/// Recorded rather than recomputed. The answer belongs to the decision that was actually made,
+/// and the row that asks for it may be hovered an hour later, by which time the ranking that
+/// produced it has moved — a card that explains today's ranking for yesterday's launch is worse
+/// than one that explains nothing. Recomputing per row would also make a pointer-driven surface
+/// do work proportional to the whole store, which the scaling gate rules out.
+enum SessionRestorationOutcome: Equatable, Sendable {
+
+    /// Brought back live by this launch, or being brought back by the restored selection.
+    case restored
+
+    /// Launch restore is switched off.
+    case restoreDisabled
+
+    /// It had no live agent at the last quit.
+    case notRunningAtLastQuit
+
+    /// The last quit recorded nothing — an unclean exit, or a launch that quit again before it
+    /// spent the record. This is the state the guard in `AppDelegate` exists to make rare.
+    case nothingRecorded
+
+    /// Last used before the window starts.
+    case outsideWindow(days: Int, lastUsedAt: Date)
+
+    /// Inside the window, but the limit was already full of more recent sessions.
+    case beyondLimit(limit: Int)
+}
+
+// MARK: - Restoration Ledger
+
+/// What this launch decided about each session, kept for as long as the answer is still true.
+///
+/// In memory only, and deliberately: it describes one launch, and a stale answer read from disk
+/// after two days of use would explain a decision nobody is looking at any more.
+@MainActor
+final class SessionRestorationLedger {
+
+    static let shared = SessionRestorationLedger()
+
+    private var outcomes: [SessionID: SessionRestorationOutcome] = [:]
+
+    func record(_ plan: StartupSessionRelaunch.Plan) {
+        outcomes = plan.outcomes
+    }
+
+    /// Forgotten the moment the session runs. From then on, dormancy is its own agent having
+    /// exited, not a decision this launch made, and the launch's reason would be a lie.
+    func forget(sessionID: SessionID) {
+        outcomes.removeValue(forKey: sessionID)
+    }
+
+    func outcome(for sessionID: SessionID) -> SessionRestorationOutcome? {
+        outcomes[sessionID]
+    }
+
+    /// For tests, and for a reset that must not leave one launch's answers behind.
+    func removeAll() {
+        outcomes.removeAll()
     }
 }
 
@@ -122,4 +266,13 @@ enum StartupRelaunchDefaults {
 
     /// Bounds below this are a pane mid-setup, not an answer worth adopting.
     static let minimumPaneDimension: CGFloat = 200
+}
+
+extension SessionRestoreDefaults {
+
+    /// The window is stated in days because that is how it is chosen and explained. Calendar
+    /// arithmetic would be wrong here for the opposite of the usual reason: this measures elapsed
+    /// use, not a date, so a session used 25 hours ago is outside a one-day window whichever side
+    /// of midnight it fell on.
+    static let secondsPerDay: TimeInterval = 24 * 60 * 60
 }

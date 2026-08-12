@@ -1150,6 +1150,23 @@ final class ProjectStore {
         return .applied
     }
 
+    /// Records that a turn began in this conversation, which is what "recently used" means.
+    ///
+    /// `lastActiveAt` cannot answer that question: the runtime stamps it on launch and on exit,
+    /// so a background relaunch marks every session it brings back as active today and the launch
+    /// restore window would keep feeding itself its own last launch.
+    ///
+    /// Coalesced on purpose. Losing the last fraction of a second of this costs nothing, and the
+    /// quit flushes what is pending, while a whole-graph write on every turn boundary of every
+    /// running session would be the one avoidable cost here. Nothing visible changes either, so
+    /// no observer is told: rows read activity from the tracker, never from this field.
+    func noteTurnStarted(sessionID: SessionID) {
+        guard let location = locate(sessionID: sessionID),
+              stateWritePolicy.allowsWrites else { return }
+        projects[location.projectIndex].sessions[location.sessionIndex].lastTurnAt = Date()
+        scheduleSave()
+    }
+
     // MARK: - Lookup
 
     func project(withID projectID: ProjectID) -> Project? {

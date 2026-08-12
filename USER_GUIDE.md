@@ -685,13 +685,29 @@ own id, which Threading reads back from the rollout file Codex writes on launch.
 assigns its own id; Threading reads the supported JSON session listing for the newest conversation
 in that checkout.
 
-**Sessions that were running when you quit come back on their own.** With **Relaunch sessions
-that were running at quit** on (Settings ▸ General ▸ Startup, the default), the next launch
-resumes them in the background: the last session you had selected opens on screen as before,
-and the rest come up behind it, one per second, most recently used first. Their sidebar rows
-show them idle and ready, and opening one attaches a session that is already running instead
-of resuming it on the click. Only what was live at quit comes back — closed and archived
-sessions stay dormant — and after a crash nothing relaunches automatically.
+**Sessions come back on their own, and you choose which ones.** **Bring back at launch**
+(Settings ▸ General ▸ Startup) offers three answers:
+
+- **Running at last quit** (the default) brings back exactly what had a live agent when you
+  quit. It is the cheapest honest rule, because the machine was already running that set a
+  moment earlier.
+- **Recently used** brings back the conversations you actually worked in inside a window you
+  set, most recent first, up to a limit you set (**1 day** and **at most 12** by default).
+  Unlike the rule above it does not depend on the quit, so it still works after a reboot, a
+  force quit, or a launch that ended before it restored anything. "Recently used" means the last
+  time a turn ran in the conversation, not the last time Threading opened it.
+- **Nothing** leaves every row dormant until you open it.
+
+Whatever comes back resumes in the background: the last session you had selected opens on screen
+as before, and the rest come up behind it, one per second. Their sidebar rows show them idle and
+ready, and opening one attaches a session that is already running instead of resuming it on the
+click. Archived sessions never come back, and after a crash nothing relaunches automatically.
+
+**A dormant session says why it is dormant.** Hovering a greyed-out row shows the usual card,
+and under **Dormant · resumable** it names the reason this launch did not bring that session
+back: it was not running when you quit, the last quit recorded nothing, it was last used before
+the window, or the limit was already full of more recent sessions. The card also names the
+settings page, so a rule you disagree with is one hover away from the switch that changes it.
 
 **After an unexpected quit, the workspace waits to be asked for.** If Threading did not shut
 down the last time it ran, the next launch leaves the workspace closed: the session you had
@@ -3027,9 +3043,11 @@ than borrowing an unrelated app translation.
 - **Discover project icons** — see [Project icons](#project-icons)
 - **Discover account avatars** — see [Icons and names](#icons-and-names)
 - **Reopen the last session at launch**
-- **Relaunch sessions that were running at quit** — the sessions that were live when the app
-  last quit resume in the background at launch, one at a time, so each is already running
-  when you open it; see [Resuming](#resuming)
+- **Bring back at launch** — nothing, the sessions that were running at the last quit, or the
+  ones used recently; whatever comes back resumes in the background, one at a time, so each is
+  already running when you open it; see [Resuming](#resuming)
+- **Counts as recently used** and **Sessions brought back** — the window and the ceiling for
+  the recently-used answer above; both are dimmed under the other two
 - **Confirmations** — one switch per prompt, plus **Hidden extension messages ▸ Show All**;
   see [Confirmations](#confirmations)
 - **Report Claude turn and subagent activity** — see [Agent hooks](#agent-hooks)

@@ -26,6 +26,15 @@ final class SessionInfoPopoverViewController: NSViewController {
         let stateText: String
         let stateSymbol: String
 
+        /// Why a dormant session is dormant, where this launch's own decision is still the
+        /// answer, and where that decision is made.
+        ///
+        /// Nil for a live session, and nil for one whose agent has since exited: the launch
+        /// ledger forgets a session the moment it runs, so the card never blames a setting for
+        /// something the setting did not do. "Dormant" alone was true and unhelpful — the state
+        /// is the one thing a user cannot act on without knowing which rule produced it.
+        let dormancyReason: String?
+
         /// Built from the session, so the row does not have to know how to read git or
         /// resolve accounts.
         init(session: AgentSession, activity: SessionActivity) {
@@ -67,6 +76,11 @@ final class SessionInfoPopoverViewController: NSViewController {
             // ran on, not whatever the checkout has moved to since.
             branch = session.branch ?? folderPath.flatMap { GitInfo.currentBranch(for: $0) }
             worktree = folderPath.flatMap { GitInfo.worktreeName(for: $0) }
+
+            dormancyReason = activity == .dormant
+                ? SessionRestorationLedger.shared.outcome(for: session.id)
+                    .flatMap(SessionPopoverDefaults.dormancyReason(for:))
+                : nil
 
             switch activity {
             case .dormant:
@@ -203,6 +217,15 @@ final class SessionInfoPopoverViewController: NSViewController {
             emphasis: .muted
         ))
 
+        // Under the state, not instead of it: the state is what the row is, and this is why.
+        if let dormancyReason = info.dormancyReason {
+            rows.append(wrappingRow(
+                symbol: SessionPopoverDefaults.restoreSymbol,
+                classicGlyph: .status,
+                text: dormancyReason
+            ))
+        }
+
         return rows
     }
 
@@ -319,6 +342,7 @@ enum SessionPopoverDefaults {
 
     static var dormantState: String { L10n.string("Dormant · resumable") }
     static let dormantSymbol = "moon.zzz"
+    static let restoreSymbol = "arrow.clockwise"
     static var workingState: String { L10n.string("Working") }
     static let workingSymbol = "play.circle"
     static var runningState: String { L10n.string("Running") }
@@ -341,6 +365,68 @@ enum SessionPopoverDefaults {
 
     static func worktreeBranchLabel(_ branch: String, _ worktree: String) -> String {
         "\(branch) · worktree \(worktree)"
+    }
+
+    /// Where launch restore is decided, appended to every reason below.
+    ///
+    /// The reason without it states a rule the reader has no way to find; naming the page is what
+    /// turns the card from an explanation into something they can act on.
+    static var restoreSettingHint: String {
+        L10n.string("Settings ▸ General decides what comes back at launch.")
+    }
+
+    /// One sentence for why a dormant session was not brought back, plus where to change it.
+    ///
+    /// Nil for a session that *was* restored: it is live, and the card is already saying so.
+    static func dormancyReason(for outcome: SessionRestorationOutcome) -> String? {
+        guard let reason = reasonSentence(for: outcome) else { return nil }
+        return "\(reason) \(restoreSettingHint)"
+    }
+
+    private static func reasonSentence(for outcome: SessionRestorationOutcome) -> String? {
+        switch outcome {
+        case .restored:
+            return nil
+
+        case .restoreDisabled:
+            return L10n.string("Launch restore is switched off.")
+
+        case .notRunningAtLastQuit:
+            return L10n.string("It was not running when Threading last quit.")
+
+        case .nothingRecorded:
+            return L10n.string("The last quit left no record of what was running.")
+
+        case .outsideWindow(let days, let lastUsedAt):
+            return L10n.format(
+                "Last used %@, outside the %@ restore window.",
+                relativeDate.localizedString(for: lastUsedAt, relativeTo: Date()),
+                windowLength(days: days)
+            )
+
+        case .beyondLimit(let limit):
+            // Numerals rather than a count of sessions, which would need plural agreement in
+            // every language for a number the user chose themselves.
+            return L10n.format(
+                "Inside the restore window, past the limit of %d.",
+                limit
+            )
+        }
+    }
+
+    /// "1 day", "3 days", localized by the system rather than by a plural rule of ours.
+    private static func windowLength(days: Int) -> String {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.day]
+        formatter.unitsStyle = .full
+        let seconds = Double(days) * SessionRestoreDefaults.secondsPerDay
+        return formatter.string(from: seconds) ?? "\(days)"
+    }
+
+    private static var relativeDate: RelativeDateTimeFormatter {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
     }
 
     /// Hover dwell before the popover opens, so it does not flash while the pointer crosses
