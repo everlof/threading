@@ -969,7 +969,18 @@ final class MediaInspectorCanvas: ThemedControl {
         stateChanged(notifyAccessibility: false)
     }
 
+    /// The clip is taken here rather than left to the view: a view's `draw(_:)` is no longer
+    /// confined to its own bounds, and this one draws an image deliberately larger than itself at
+    /// every zoom above fit. Unclipped, an image shown at 100% reached up out of the canvas and
+    /// over the inspector's header — the file's name, its dimensions, the zoom control and the
+    /// close button left standing on the picture with no band under them, which is what "100%
+    /// breaks the window" looked like. `clipsToBounds` says the same thing in one word but is
+    /// macOS 14, and this app runs on 13.
     override func draw(_ dirtyRect: NSRect) {
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSBezierPath(rect: bounds).addClip()
+
         ThemedSurface.draw(bounds, fill: Design.Surface.panel)
         guard let image else { return }
         image.draw(

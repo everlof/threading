@@ -1224,6 +1224,22 @@ Nine bugs are worth keeping, because each is a trap the next drawn control will 
   was only ever invisible because a full gutter hid it. `ThemedSurface.Shape.outset` is `inset`'s
   mirror, and keeps a squared theme square for the same reason.
 
+- **A view that draws more than it is does not get the clip for free.** `MediaInspectorCanvas`
+  draws the picture at whatever the zoom says, which above fit is deliberately larger than the
+  canvas — and nothing stopped it at the canvas's edge. At 100% the image climbed 36 of the
+  header's 52 points, leaving the file's name, its dimensions, the Fit/100% control and the close
+  button standing on the photograph with no band under them; the window read as broken, which is
+  how it was reported. A `ThemedControl` is layer-backed, and that used to be the same sentence as
+  "clipped", but `NSView.clipsToBounds` is `false` by default for anything built against the
+  macOS 14 SDK and `draw(_:)` now runs unbounded. The property itself is macOS 14 and this app
+  ships to 13, so the canvas takes the clip in `draw(_:)` — `NSBezierPath(rect: bounds).addClip()`
+  inside a saved graphics state, which every supported version honours. The focus ring is
+  unaffected: it is inset by half its width and was already inside `bounds`. Anything else that
+  draws content sized from *data* rather than from its own frame owes itself the same two lines.
+  The regression boundary is a picture the assertion can read — a saturated fixture image at 100%,
+  sampled across the empty middle of the header band, where every pixel must stay the palette's
+  grey.
+
 - **`withAlphaComponent` replaces alpha, it does not scale it.** Dimming a disabled button
   against a resting surface that is *already* translucent — Cyberpunk holds its neon at 10% —
   made the disabled controls the loudest things on the page. Resolve, then multiply.

@@ -473,7 +473,94 @@ final class MediaInspectorTests: XCTestCase {
         print("Rendered the dimmed window behind the inspector to \(directory.path)")
     }
 
+    /// An image shown at 100% is larger than the canvas by design — that is what the zoom is for
+    /// — and a view is no longer held to its own bounds when it draws. So the picture climbed out
+    /// of the canvas and up over the header, and the file's name, its dimensions, the Fit/100%
+    /// control and the close button were left standing on the image itself.
+    func testActualSizeDrawsNothingOverTheInspectorHeader() throws {
+        let fixture = try imageFile(
+            named: "Oversized.png",
+            size: NSSize(width: 1_040, height: 640),
+            color: .systemTeal
+        )
+        defer {
+            AppThemePalette.set(.system)
+            try? FileManager.default.removeItem(at: fixture.directory)
+        }
+        AppThemePalette.set(.system)
+        let inspector = MediaInspectorView(items: [fixture.item], selectedIndex: 0)
+        inspector.frame = NSRect(x: 0, y: 0, width: 1_050, height: 620)
+        inspector.appearance = NSAppearance(named: .darkAqua)
+        AppThemeRefresh.repaint(inspector)
+        inspector.layoutSubtreeIfNeeded()
+
+        let canvas = try XCTUnwrap(
+            descendants(of: inspector).compactMap { $0 as? MediaInspectorCanvas }.first
+        )
+        canvas.showActualSize()
+        XCTAssertGreaterThan(
+            canvas.imageRect.height,
+            canvas.bounds.height,
+            "the fixture image fits the canvas, so nothing here could overflow it"
+        )
+
+        // The band above the canvas, sampled between the title on its left and the zoom control
+        // on its right, where the header carries nothing but its own surface.
+        let header = try XCTUnwrap(headerSaturations(of: inspector))
+        XCTAssertFalse(header.isEmpty, "the header sample read no pixels")
+        XCTAssertTrue(
+            header.allSatisfy { $0 < 0.1 },
+            "the image drew over the inspector's header at 100%"
+        )
+    }
+
     // MARK: - Fixtures
+
+    /// How coloured each pixel is in the strip of header the inspector draws above its canvas,
+    /// sampled from the middle of the row where it carries no text and no control. The header is
+    /// drawn from the palette's greys, so any colour there arrived from the picture.
+    private func headerSaturations(of inspector: MediaInspectorView) -> [CGFloat]? {
+        guard let rep = inspector.bitmapImageRepForCachingDisplay(in: inspector.bounds) else {
+            return nil
+        }
+        inspector.cacheDisplay(in: inspector.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / inspector.bounds.width
+        let rows = stride(
+            from: Int(Design.Spacing.large * scale),
+            to: Int((Design.Size.inspectorHeaderHeight - Design.Spacing.large) * scale),
+            by: 2
+        )
+        let columns = stride(
+            from: Int(inspector.bounds.midX * scale) - 100,
+            to: Int(inspector.bounds.midX * scale) + 100,
+            by: 2
+        )
+        return rows.flatMap { row in
+            columns.compactMap { column -> CGFloat? in
+                guard let colour = rep.colorAt(x: column, y: row)?
+                    .usingColorSpace(.sRGB) else { return nil }
+                let channels = [colour.redComponent, colour.greenComponent, colour.blueComponent]
+                guard let high = channels.max(), let low = channels.min(), high > 0 else {
+                    return 0
+                }
+                return (high - low) / high
+            }
+        }
+    }
+
+    private func imageFile(named name: String, size: NSSize, color: NSColor) throws
+        -> (directory: URL, item: MediaInspectorItem) {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "threading-media-inspector-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let image = solidImage(size: size, color: color)
+        let url = directory.appendingPathComponent(name)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: image.tiffRepresentation ?? Data()))
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
+        return (directory, MediaInspectorItem(url: url, image: image))
+    }
 
     private func renderDirectory() -> URL {
         ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
