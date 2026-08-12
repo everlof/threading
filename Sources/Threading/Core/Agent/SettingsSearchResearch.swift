@@ -153,7 +153,7 @@ enum SettingsSearchResearch {
             return claudeResultEnvelope(fromOutput: output)
         case .codex:
             return CommitMessageComposer.finalAgentMessage(fromJSONL: output)
-        case .grok, .openCode:
+        case .grok, .openCode, .cursor:
             return nil
         }
     }

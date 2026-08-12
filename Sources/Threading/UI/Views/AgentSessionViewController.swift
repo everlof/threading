@@ -10,7 +10,7 @@ typealias AgentLaunchPlanProvider = @MainActor (
     _ session: AgentSession,
     _ project: Project,
     _ initialPrompt: String?
-) -> AgentLaunchPlan
+) throws -> AgentLaunchPlan
 
 /// Hosts the terminal for a single agent session.
 ///
@@ -99,7 +99,7 @@ final class AgentSessionViewController: NSViewController {
         self.subagentState = subagentState
             ?? SubagentSessionState(sessionID: agentSession.id)
         self.launchPlanProvider = launchPlanProvider ?? { session, project, prompt in
-            AgentLauncher.plan(for: session, in: project, initialPrompt: prompt)
+            try AgentLauncher.plan(for: session, in: project, initialPrompt: prompt)
         }
         self.session = TerminalSession(
             profile: ThemeAssignments.profile(for: agentSession.id),
@@ -107,6 +107,11 @@ final class AgentSessionViewController: NSViewController {
         )
         super.init(nibName: nil, bundle: nil)
         session.delegate = self
+
+        // Names the tracker's log lines. A window holds dozens of these and every one of them
+        // reports the same six states, so a trail that cannot say *which* session moved is a
+        // trail nobody can follow back to a row.
+        activityTracker.sessionID = agentSession.id
 
         // The CLI hosted here is what a dropped image has to be readable by. The shell drawer
         // below it says nothing and keeps the default, which converts nothing.
@@ -358,7 +363,19 @@ final class AgentSessionViewController: NSViewController {
             return
         }
 
-        let plan = launchPlanProvider(agentSession, project, initialPrompt)
+        let plan: AgentLaunchPlan
+        do {
+            plan = try launchPlanProvider(agentSession, project, initialPrompt)
+        } catch {
+            // A runtime with no terminal surface has no command line to run here, and running
+            // its interactive CLI anyway would open a different conversation from the one this
+            // row names. The surface clamp keeps ordinary paths away from this; a route that
+            // did not anticipate it stops rather than starting the wrong agent.
+            ThreadingLogger.agent.error(
+                "Cannot launch session \(self.sessionID, privacy: .public) in a terminal: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return
+        }
         pendingLaunchPlan = plan
 
         DispatchQueue.main.async { [weak self] in
@@ -674,7 +691,7 @@ final class AgentSessionViewController: NSViewController {
             return codexTranscriptURL
         case .claude:
             return resolvedClaudeTranscriptURL()
-        case .grok, .openCode:
+        case .grok, .openCode, .cursor:
             return nil
         }
     }
@@ -833,6 +850,10 @@ final class AgentSessionViewController: NSViewController {
             discoverGrokSessionID(for: agentSession)
         case .openCode:
             discoverOpenCodeSessionID(launchedAt: launchedAt)
+        case .cursor:
+            // No terminal surface, so nothing here ever hosts a Cursor session. Its identifier
+            // arrives on the wire in the ACP `session/new` result instead.
+            isDiscoveringIdentifier = false
         }
     }
 
@@ -979,8 +1000,20 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         }
     }
 
-    func terminalSessionDidRingBell(_ session: TerminalSession) {
-        activityTracker.recordBell()
+    /// The one surface that can say why a bell rang: it keeps the activity tracker, so the
+    /// three facts the causes are told apart by are all here.
+    ///
+    /// The attribution question is asked of the resolution chain first. Without an entry of its
+    /// own, `bell.otherProgram` resolves to whatever `bell.agentAsking` resolves to, so reading
+    /// the PTY's foreground group would cost two syscalls per bell to choose between two
+    /// identical sounds.
+    func terminalSessionDidReceiveBell(_ session: TerminalSession) -> SoundEvent? {
+        activityTracker.recordBell(
+            attributesOtherPrograms: SoundResolution.attributesOtherPrograms(
+                sessionID: sessionID
+            ),
+            otherProgramHoldsPTY: { session.foregroundIsAnotherProgram() }
+        )
     }
 
     func terminalSessionDidForwardMouseReport(_ session: TerminalSession) {

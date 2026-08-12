@@ -13,15 +13,52 @@ struct AgentLaunchPlan {
     /// await the identifier assigned by the CLI; fresh Grok launches await confirmation that
     /// its caller-supplied UUID was persisted. Research runs and shells have none.
     let resumeState: ResumeState
+
+    /// Environment entries this launch needs that the shared launch environment does not carry.
+    ///
+    /// A terminal launch states its environment as `env NAME=value` words inside the login-shell
+    /// command, which a native launch has no room for: it spawns the child directly and hands it
+    /// a dictionary. Empty for every plan that has nothing to add, so the mechanism costs the
+    /// other runtimes nothing — the first user is Cursor, whose CLI opens a browser to
+    /// authenticate unless `BROWSER` and `NO_OPEN_BROWSER` say otherwise.
+    ///
+    /// Read through `launchEnvironment()` rather than merged at each call site, so a transport
+    /// cannot pick up the plan and silently drop what it asked for.
+    let environmentOverrides: [String: String]
+
+    init(
+        executable: String,
+        arguments: [String],
+        resumeState: ResumeState,
+        environmentOverrides: [String: String] = [:]
+    ) {
+        self.executable = executable
+        self.arguments = arguments
+        self.resumeState = resumeState
+        self.environmentOverrides = environmentOverrides
+    }
+
+    /// The environment this plan's child is spawned with: the shared one, then this plan's own
+    /// entries on top.
+    func launchEnvironment() -> [String: String] {
+        var environment = AgentEnvironment.launchEnvironment()
+        for (key, value) in environmentOverrides {
+            environment[key] = value
+        }
+        return environment
+    }
 }
 
 enum AgentLaunchPlanningError: LocalizedError, Equatable {
     case unsupportedNativeConversation(AgentKind)
+    case unsupportedTerminalConversation(AgentKind)
 
     var errorDescription: String? {
         switch self {
         case .unsupportedNativeConversation(let kind):
             return "\(kind.displayName) does not provide a native conversation transport."
+        case .unsupportedTerminalConversation(let kind):
+            return "\(kind.displayName) conversations cannot be opened in a terminal."
         }
     }
 }
@@ -139,11 +176,18 @@ enum AgentLauncher {
 
     /// Builds the launch plan for a session, choosing a fresh launch or a resume
     /// based on whether the session has run before and carries a resumable identifier.
+    ///
+    /// Throws for a runtime with no `.terminalUI`. There is a command line that would start
+    /// Cursor's interactive TUI, and running it here is exactly the thing not to do: it would
+    /// open a *different, empty* chat beside the conversation the row names, because its two
+    /// interfaces do not share a conversation store (§11 of `CURSOR_ACP_FINDINGS.md`). Refusing
+    /// is the honest answer, and the surface clamp in `AgentSession.resolvedNativeSurface`
+    /// means no ordinary path reaches it.
     static func plan(
         for session: AgentSession,
         in project: Project,
         initialPrompt: String? = nil
-    ) -> AgentLaunchPlan {
+    ) throws -> AgentLaunchPlan {
         var executionProject = project
         executionProject.folderPath = session.workingDirectory(in: project)
         let command: ShellCommand
@@ -162,6 +206,8 @@ enum AgentLauncher {
             (command, resumeState) = grokCommand(for: session, prompt: initialPrompt)
         case .openCode:
             (command, resumeState) = openCodeCommand(for: session, prompt: initialPrompt)
+        case .cursor:
+            throw AgentLaunchPlanningError.unsupportedTerminalConversation(.cursor)
         }
 
         return launchPlan(
@@ -192,6 +238,8 @@ enum AgentLauncher {
             return codexStreamPlan(for: session, in: executionProject)
         case .grok:
             return grokStreamPlan(for: session, in: executionProject)
+        case .cursor:
+            return cursorStreamPlan(for: session, in: executionProject)
         case .openCode:
             throw AgentLaunchPlanningError.unsupportedNativeConversation(.openCode)
         }
@@ -424,6 +472,37 @@ enum AgentLauncher {
         )
     }
 
+    /// Cursor exposes the same Agent Client Protocol over `cursor-agent acp`, a hidden
+    /// subcommand that takes no options of its own — everything else the CLI configures is a
+    /// *global* placed before it, and the ACP session carries its own cwd, MCP servers, modes
+    /// and model over the wire. So the launch line is the shortest of the three: the executable
+    /// and the subcommand, plus whatever `routed` adds for the MCP bridge.
+    ///
+    /// No model flag, no permission mode: Cursor states the model inside `session/new` in one of
+    /// two mutually exclusive id spaces, and its execution modes are a different axis from
+    /// Threading's six.
+    ///
+    /// The two environment entries are not decoration. `authenticate` over ACP opens the user's
+    /// browser, and the CLI reaches for it whenever it decides it needs a login — from a native
+    /// app, mid-conversation. `BROWSER=/usr/bin/true` and `NO_OPEN_BROWSER=1` are what made the
+    /// original measurements safe to run, and a shipping launch has more reason to set them, not
+    /// less. They are the plan's own environment because a native launch spawns the child
+    /// directly and has no shell words to put them in.
+    private static func cursorStreamPlan(
+        for session: AgentSession,
+        in project: Project
+    ) -> AgentLaunchPlan {
+        var command = ShellCommand(word: AgentDefaults.cursorExecutable)
+        command.append(word: AgentDefaults.cursorACPSubcommand)
+
+        return launchPlan(
+            command: routed(command, for: session),
+            in: project.folderPath,
+            resumeState: session.resumeState,
+            environmentOverrides: AgentDefaults.cursorLaunchEnvironment
+        )
+    }
+
     /// Builds a one-shot, headless `codex exec` run used for background research — icon
     /// discovery today. Project folders do not have to be Git repositories, so the run
     /// explicitly skips Codex's repository preflight; the read-only sandbox remains the
@@ -438,7 +517,9 @@ enum AgentLauncher {
         // `env -u`, not a bare command: a login shell may export an override, which would
         // otherwise route research at whichever account that names.
         command.append(word: "env")
-        command.append(flag: "-u", value: AgentKind.codex.accountEnvironmentKey)
+        if let accountKey = AgentKind.codex.accountEnvironmentKey {
+            command.append(flag: "-u", value: accountKey)
+        }
         command.append(word: AgentDefaults.codexExecutable)
         appendCodexConfigOverride(
             AgentDefaults.codexReasoningEffortKey,
@@ -501,7 +582,9 @@ enum AgentLauncher {
 
         var command = ShellCommand()
         command.append(word: "env")
-        command.append(flag: "-u", value: kind.accountEnvironmentKey)
+        if let accountKey = kind.accountEnvironmentKey {
+            command.append(flag: "-u", value: accountKey)
+        }
 
         switch kind {
         case .claude:
@@ -552,7 +635,7 @@ enum AgentLauncher {
             command.append(flag: "--json")
             command.append(flag: AgentDefaults.codexSkipGitRepoCheckFlag)
 
-        case .grok, .openCode:
+        case .grok, .openCode, .cursor:
             // `.headlessResearch` is not granted here; the guard above already refused.
             return nil
         }
@@ -597,10 +680,12 @@ enum AgentLauncher {
 
         var command = ShellCommand()
         command.append(word: "env")
-        if account.isDefault {
-            command.append(flag: "-u", value: kind.accountEnvironmentKey)
-        } else {
-            command.append(word: "\(kind.accountEnvironmentKey)=\(account.configPath)")
+        if let accountKey = kind.accountEnvironmentKey {
+            if account.isDefault {
+                command.append(flag: "-u", value: accountKey)
+            } else {
+                command.append(word: "\(accountKey)=\(account.configPath)")
+            }
         }
 
         switch kind {
@@ -622,7 +707,7 @@ enum AgentLauncher {
             command.append(word: "exec")
             command.append(flag: AgentDefaults.codexSkipGitRepoCheckFlag)
 
-        case .grok, .openCode:
+        case .grok, .openCode, .cursor:
             // `.anchoredUsageWindow` is not granted here; the guard above already refused.
             return nil
         }
@@ -685,10 +770,12 @@ enum AgentLauncher {
                 )
             }
 
-        case .grok, .openCode:
-            // Do not rewrite either runtime's persistent configuration. OpenCode's TUI server
-            // has a dynamic MCP endpoint, but Threading does not own that server lifecycle yet;
-            // Grok's equivalent per-TUI contract remains unmeasured.
+        case .grok, .openCode, .cursor:
+            // Do not rewrite any of these runtimes' persistent configuration. OpenCode's TUI
+            // server has a dynamic MCP endpoint, but Threading does not own that server
+            // lifecycle yet; Grok's equivalent per-TUI contract remains unmeasured. Grok and
+            // Cursor both receive Threading's endpoint the honest way instead — in the
+            // `mcpServers` array of their ACP `session/new`, which touches nothing on disk.
             break
 
         }
@@ -1010,7 +1097,7 @@ enum AgentLauncher {
                 string: effort,
                 to: &command
             )
-        case .grok, .openCode:
+        case .grok, .openCode, .cursor:
             break
         }
     }
@@ -1191,14 +1278,16 @@ enum AgentLauncher {
     private static func launchPlan(
         command: ShellCommand,
         in folder: String,
-        resumeState: ResumeState
+        resumeState: ResumeState,
+        environmentOverrides: [String: String] = [:]
     ) -> AgentLaunchPlan {
         let source = ShellCommand.executing(command, in: folder)
 
         return AgentLaunchPlan(
             executable: loginShellPath,
             arguments: ["-l", "-c", source.source],
-            resumeState: resumeState
+            resumeState: resumeState,
+            environmentOverrides: environmentOverrides
         )
     }
 

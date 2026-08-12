@@ -245,7 +245,7 @@ enum SessionNaming {
                       handle: session.accountHandle
                   ) else { return }
             reading = .codex(transcriptID, account)
-        case .grok, .openCode:
+        case .grok, .openCode, .cursor:
             return
         }
 
@@ -286,7 +286,7 @@ enum SessionNaming {
                 switch session.kind {
                 case .codex:
                     break
-                case .claude, .grok, .openCode:
+                case .claude, .grok, .openCode, .cursor:
                     continue
                 }
                 guard let transcriptID = session.resumeState.transcriptID,

@@ -1008,10 +1008,12 @@ final class SessionComposerViewController: NSViewController {
             modeChip.toolTip = tooltip
         }
 
-        // Offered only for runtimes whose conversation Threading can render through a
-        // structured transport. See `AgentKind.supportsNativeUI`.
-        surfaceChip.isHidden = !selectedAgent.supportsNativeUI
-        if surfaceChip.isHidden { usesNativeUI = false }
+        // Offered only where there is a choice to make: a runtime whose conversation Threading
+        // can render *and* whose own terminal shows that same conversation. Cursor has the first
+        // half and not the second — its TUI and its ACP server keep separate chats — so its
+        // sessions are Native with nothing to pick. See `AgentCapabilities.terminalUI`.
+        surfaceChip.isHidden = !SessionSurfaceTogglePresentation.canSwitchSurface(selectedAgent)
+        usesNativeUI = AgentSession.resolvedNativeSurface(usesNativeUI, for: selectedAgent)
         surfaceChip.configure(
             symbolName: ComposerDefaults.surfaceSymbol,
             title: usesNativeUI ? ComposerDefaults.nativeTitle : selectedAgent.originalUITitle
@@ -1407,20 +1409,42 @@ final class SessionComposerViewController: NSViewController {
     /// list, and a row answers it completely.
     ///
     /// A runtime appears as a row of its own only where it offers no login to name — one that
-    /// routes no accounts at all, or one whose accounts have not been discovered yet. Otherwise
-    /// its name is carried by its logins' marks (`AccountMarkImage`), which is what lets the list
-    /// stay flat without a header per runtime.
+    /// routes no accounts at all, or one whose accounts have not been discovered yet. Such a row
+    /// gets no header, because a heading over a single row repeating its own name is furniture.
+    ///
+    /// **Its logins are filed under a section head.** They used to write the runtime into each
+    /// row's own subtitle — `Claude Code · Max · 5h 27% · …` — which said it three times over on
+    /// three Claude rows and, being the longest segment on the line, was what pushed the reading
+    /// past the panel's width cap until the countdown lost its digits. A head says it once. This
+    /// costs no navigation: a header is not a submenu, so reaching another runtime's login is
+    /// still the one press it became when this stopped being two sections.
     ///
     /// The readings on the account rows are the cached ones. `show(projectID:)` warms them as
     /// the composer appears (`AccountUsageMenu.prefetch`) for every agent's logins, not only
     /// the selected one — which is exactly what a list spanning every runtime needs, since a
     /// fetch started when a menu opens lands after that menu has been read and dismissed.
     private func identityItems() -> [ThemedMenuEntry] {
-        AgentKind.allCases.flatMap { kind -> [ThemedMenuEntry] in
+        var grouped: [ThemedMenuEntry] = []
+        var bare: [ThemedMenuEntry] = []
+
+        for kind in AgentKind.allCases {
             let accounts = kind.supportsAccounts ? AgentAccountDiscovery.accounts(for: kind) : []
-            guard !accounts.isEmpty else { return [.item(runtimeItem(for: kind))] }
-            return accountItems(for: kind, accounts: accounts)
+            if accounts.isEmpty {
+                bare.append(.item(runtimeItem(for: kind)))
+            } else {
+                grouped.append(.header(kind.displayName))
+                grouped += accountItems(for: kind, accounts: accounts)
+            }
         }
+
+        // The login-less runtimes go last, behind a rule. Left in runtime order they landed
+        // directly under the final group's logins with the same indent and no head of their
+        // own, which reads as that runtime having four logins — the last two named Grok and
+        // OpenCode. The rule costs no trip through the menu, which is the property the flat
+        // list exists to keep; what it collapsed was a runtime chooser standing between the
+        // pointer and a login, and this is not that.
+        guard !bare.isEmpty else { return grouped }
+        return grouped.isEmpty ? bare : grouped + [.separator] + bare
     }
 
     /// A runtime with no login to offer: the whole row *is* the choice, so it carries the plain
@@ -1597,6 +1621,15 @@ final class SessionComposerViewController: NSViewController {
 
         var items: [ThemedMenuEntry] = []
 
+        // The account's own windows, once. They are identical under every model by
+        // construction, so the rows carry only the windows scoped to them — and the header is
+        // what lets a row with no line of its own read as "nothing beyond this" rather than as
+        // a failed lookup.
+        if let account, let header = AccountUsageMenu.modelMenuHeader(for: account) {
+            items.append(.item(header))
+            items.append(.separator)
+        }
+
         // Kept for the two cases the list cannot mark: an account that names no model at all,
         // and one whose model this catalog does not carry.
         if !markedInList {
@@ -1614,9 +1647,9 @@ final class SessionComposerViewController: NSViewController {
         }
 
         // Where a scoped limit is finally actionable: a spent Fable window is escaped by
-        // picking another model, and this is the menu that does it. Every row states what a
-        // session on it would be measured against — the marked one included, which is a row
-        // naming a model like any other and is metered as one.
+        // picking another model, and this is the menu that does it. Each row states only the
+        // windows scoped to it — the shared ones live in the header — and the marked row is a
+        // row naming a model like any other and is metered as one.
         items += models.map { model in
             let isDefault = markedInList && model == resolved.identifier
             var item = ThemedMenuItem(

@@ -55,6 +55,10 @@ holds each pair to the other, because the failure mode is silent in both directi
 - `.nativeUI` is granted, the composer offers the surface, `ConversationViewController` has a
   transport for it, and `ProjectStore.addSession` refuses the record. **This one shipped.**
   Choosing Grok with the conversation surface created no session and reported no error.
+- `.terminalUI` is withheld — Cursor, whose two interfaces do not share a conversation store — and
+  some surface still offers the Original UI choice, or `AgentLauncher` still builds a terminal
+  command for it. The clamp in `AgentSession.resolvedNativeSurface` and the throw in
+  `AgentLauncher.plan(for:in:)` are the two halves; `CursorACPProfileTests` holds both.
 - `.headlessResearch` is granted, but `AgentLauncher.settingsResearchCommand` has no line for
   the runtime — the settings search's Ask AI button offers a provider it cannot run. The
   pairing test in `AgentLaunchQuotingTests` holds the claim to the delivery; the launch line
@@ -600,13 +604,20 @@ Codex session launched inside the app was told its network was disabled by a san
 longer existed.
 
 `AgentEnvironment.inheritedIdentityPrefixes` therefore names **families** — `CLAUDE_`, `CODEX_`,
-`GROK_`, `OPENCODE_`, `AI_AGENT` — rather than variables. It was written variable by variable and
+`GROK_`, `OPENCODE_`, `AI_AGENT` — rather than variables. `CURSOR_` is deliberately **not** among
+them yet, and the reason is worth keeping: that family carries run identity (`CURSOR_CHAT_ID`,
+`CURSOR_CONVERSATION_ID`, `CURSOR_SANDBOX`) *and* credentials (`CURSOR_API_KEY`,
+`CURSOR_AUTH_TOKEN`) under one prefix, while the exception mechanism below holds a single key per
+runtime. Adding the prefix today would strip the login. It was written variable by variable and
 the gap that produced is exactly the failure mode: `CODEX_THREAD` was listed and `CODEX_CI` beside
 it was not, and nothing reports a variable that should have been dropped. The one exception is
 `AgentKind.accountEnvironmentKey` — `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`,
 `OPENCODE_CONFIG_DIR` — which names *where a login lives* rather than who is running, and is how a
 launch reaches an account other than the default. Reading it off `AgentKind` means a new runtime
-arrives already covered. What the terminal path adds on top of this — the colour and pager claims,
+arrives already covered. It is `String?`, because a login does not have to live in a directory:
+Cursor's is in the system keychain, and pointing either `CURSOR_DATA_DIR` or `XDG_CONFIG_HOME` at
+an empty directory still reports `authenticated`. Nil is the honest answer there, and it keeps an
+inert invented name out of the one place this filter reads to decide what *not* to strip. What the terminal path adds on top of this — the colour and pager claims,
 which are about a stream rather than a run — is in [`themes.md`](themes.md).
 
 The MCP routing variables are the deliberate exception to stripping an inherited agent
@@ -624,7 +635,7 @@ rollout file it writes under `~/.codex/sessions/`. OpenCode also assigns its own
 its supported `opencode session list --format json` command and selects the newest record for
 the launching checkout. This intentionally avoids its private storage schema.
 
-**Claude, Codex, and Grok take the opening prompt as an operand, not a word.** The first two reject one that
+**Claude, Codex, Grok and Cursor take the opening prompt as an operand, not a word.** The first two reject one that
 begins with `-` before the session exists: Claude answers
 `error: unknown option '- Make sure all tests are green'` and exits 1, Codex answers
 `unexpected argument '- ' found` and points at the fix in its own message. A bulleted opening —
@@ -639,6 +650,23 @@ the command, so terminating options where the prompt used to sit would have fed
 OpenCode's parser differs honestly: its opening is the value of `--prompt`, and a resume is
 `--session <ses_…>`. Its optional model remains the provider-qualified OpenCode id passed to
 `--model` (for example an OpenRouter model), not a new `AgentKind`.
+
+**Cursor has no terminal contract, and that is the measurement rather than a gap.** Its
+interactive CLI writes chats to `~/.cursor/projects/<slugified-cwd>/agent-transcripts/<uuid>/`
+while `cursor-agent acp` writes `~/.cursor/acp-sessions/<uuid>/`, and neither store can read the
+other's identifier: ACP answers `session/load` for a TUI chat with
+`-32602 Session "…" not found`, and the TUI answers `--resume <an ACP id>` by opening a **blank
+chat with no error at all** — measured against 2026.08.11-e8db854, with a TUI-created id resumed
+in the same harness as the positive control. A surface switch is supposed to show one
+conversation another way; here it would silently show a different, empty one. So
+`AgentCapabilities.terminalUI` is the row Cursor does not have,
+`AgentSession.resolvedNativeSurface` clamps its sessions to Native, and
+`AgentLauncher.plan(for:in:)` throws `unsupportedTerminalConversation` rather than running a
+command line that opens the wrong chat. Two smaller facts fell out of the same pass: its first
+launch in any directory stops on a modal workspace-trust gate that ACP never raises, and its
+prompt is an operand with the same leading-dash hazard as Claude's and Codex's
+(`error: unknown option '- item one'`, fixed by `--`). The full record is §11 of
+[`CURSOR_ACP_FINDINGS.md`](../CURSOR_ACP_FINDINGS.md).
 
 Grok's terminal contract was measured against 0.2.118. A fresh TUI launch is
 `grok --session-id <uuid> -- <opening>` and a later launch is `grok --resume <uuid>` with no

@@ -199,7 +199,9 @@ final class AgentPermissionModeTests: XCTestCase {
     /// override a `permissions.defaultMode` or `config.toml` the user set themselves, which is
     /// the whole reason the value is optional rather than defaulted.
     func testNoChoiceAnywhereStatesNothing() throws {
-        for kind in AgentKind.allCases {
+        // A runtime with no terminal surface has no terminal launch line to inspect, and asking
+        // for one throws rather than inventing a command that would open the wrong chat.
+        for kind in AgentKind.allCases where kind.supports(.terminalUI) {
             let words = try Self.launchWords(kind: kind, mode: nil)
 
             XCTAssertFalse(words.contains("--permission-mode"), "\(kind) invented a permission mode")
@@ -582,7 +584,7 @@ final class AgentPermissionModeTests: XCTestCase {
     ) throws -> [String] {
         try tokenizing(
             XCTUnwrap(
-                AgentLauncher.plan(for: session(kind: kind, mode: mode), in: project).arguments.last
+                try AgentLauncher.plan(for: session(kind: kind, mode: mode), in: project).arguments.last
             )
         )
     }

@@ -34,6 +34,11 @@ enum TerminalDropReader: Equatable {
             return nil
         case .agent(.openCode):
             return ["png", "jpg", "jpeg", "gif", "webp"]
+        case .agent(.cursor):
+            // Cursor hosts no terminal here, so nothing ever drops onto one of its sessions.
+            // Its ACP handshake does advertise `promptCapabilities.image: true`, but that is a
+            // *prompt* content block rather than a pasted path, and this reader is about paths.
+            return nil
         }
     }
 }

@@ -7,6 +7,7 @@ enum UsageLimitSampleSource: String, Codable, Sendable {
     case codexRollout
     case grokRuntime
     case openCodeRuntime
+    case cursorRuntime
 }
 
 enum UsageLimitResetCause: String, Codable, Sendable {

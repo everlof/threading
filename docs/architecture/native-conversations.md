@@ -43,7 +43,9 @@ Two constraints survive, and the implementation is shaped by them:
 Codex is *not* covered by that measurement — only Claude was probed — so its behaviour on a
 switch is inference from a shared design, not evidence.
 
-The mode is gated behind `AgentKind.supportsNativeUI`, which admits Claude, Codex, and Grok.
+The mode is gated behind `AgentKind.supportsNativeUI`, which admits Claude, Codex, Grok and
+Cursor — and for Cursor it is the *only* surface, because its TUI and its ACP server keep
+separate conversation stores.
 OpenCode remains terminal-only: its TUI/resume CLI is enough for an honest terminal integration,
 but native rendering still requires a measured transport and transcript replay. Neither is
 inferred from terminal output or private storage.
@@ -85,17 +87,17 @@ explicitly as a pause. If it returns, native Claude sessions cost differently fr
                                   │
             ┌─────────────────┼─────────────────┐
             ▼                  ▼                  ▼
- CodexStreamSession    ClaudeStreamSession    ACPStreamSession(.grok)
- codex app-server      claude stream-json     grok agent stdio (ACP)
+ CodexStreamSession    ClaudeStreamSession    ACPStreamSession(.grok/.cursor)
+ codex app-server      claude stream-json     grok agent stdio · cursor-agent acp
             │                  │                  │
             └─────────────────┴─────────────────┘
                                   ▼
                     ConversationViewController
 ```
 
-The third leg is one runtime and one value: `ACPStreamSession` speaks the protocol, and
-`ACPProviderProfile` carries whatever a particular CLI does differently. `.grok` is the only
-profile that exists today.
+The third leg is one runtime and two values: `ACPStreamSession` speaks the protocol, and
+`ACPProviderProfile` carries whatever a particular CLI does differently. `.grok` and `.cursor`
+are the profiles that exist today, and the transport cannot tell them apart.
 
 Codex native rendering uses the CLI's **app-server**, not the one-shot `codex exec --json`
 surface. `CodexStreamSession` launches one `codex app-server --listen stdio://` process,
@@ -162,12 +164,37 @@ transport able to ask which runtime it is starts answering per runtime, the comp
 `scripts/check_architecture_boundaries.sh` refuses.
 
 A second ACP CLI is therefore one profile value plus a launch line in `AgentLauncher`. It adds no
-capability claim, no transport, and no branch. Cursor's CLI was measured against this seam
-(August 2026) and **deferred**: its ACP surface handshakes and advertises `session/load`, but the
-load-bearing lifecycle — replay, permissions, cancellation settling, tool fidelity — sits behind
-authentication this machine does not have, and five `cursor/*` methods are client-side UI
-Threading has not built. The measurements, the capability table, and the go/no-go gates are in
+capability claim, no transport, and no branch. **Cursor is that second CLI**, and it cost exactly
+that: `ACPStreamSession(.cursor)` over `cursor-agent acp`, `ACPProviderProfile+Cursor.swift`, and
+a launch line short enough to read — the executable, the hidden `acp` subcommand, and nothing
+else, because Cursor's model and mode are wire state rather than launch flags. It claims
+`.resume` (a session created in one process replayed in another), `.nativeUI` and
+`.threadingBridge` (its `session/new` connects a wire-injected MCP server before the first
+prompt), and deliberately claims no forking (`session/fork` is `-32601`), no permission modes
+(its `agent`/`plan`/`ask` are a different axis from Threading's six), no preset session id, no
+accounts, and nothing about transcripts or usage — that protocol carries no usage notification of
+any kind. Every one of those rows cites its measurement in
 [`CURSOR_ACP_FINDINGS.md`](../CURSOR_ACP_FINDINGS.md); nothing ships from inference.
+
+Two Cursor facts reach beyond the profile. Its CLI opens a browser when it decides it needs a
+login, so its plan carries `BROWSER=/usr/bin/true` and `NO_OPEN_BROWSER=1` through the new
+`AgentLaunchPlan.environmentOverrides` — a provider-neutral field applied by
+`AgentLaunchPlan.launchEnvironment()`, which every native transport now spawns through. And its
+interactive TUI keeps a *different conversation store* from its ACP server, with neither able to
+read the other's id, so a Cursor session has no terminal surface at all; see
+[`sessions.md`](sessions.md#launch-and-resume).
+
+Cursor also drove the three pieces of provider-neutral hardening in `ACPStreamSession`, all of
+which serve Grok equally. `initialize` and the session open now carry a response **deadline**
+(`ACPDefaults.handshakeTimeout`, 30 s), because an ACP agent may answer a malformed line with
+nothing at all — no response, no error, and no standard-error output — which makes a framing
+desync undetectable without a client-side timer; `session/prompt` deliberately has none, since a
+model turn is legitimately unbounded. Tool-call ids are treated as **opaque**: one measured id
+contains a literal newline, and every id path here is a dictionary key or a JSON string, which a
+transport test now pins. And a tool call **this client denied** is presented as denied even when
+the agent completes it with no output and never uses ACP's `failed` status — the client's own
+answer is the only record of a refusal, so the emitted `ToolResult` carries `isError` and, where
+the agent said nothing at all, a fixed sentence rather than an empty success.
 
 The behaviour below was verified against Grok 0.2.118 and ACP protocol version 1. A fresh chat sends
 `session/new`; a resumable one sends `session/load`, whose standard replay notifications rebuild
@@ -189,7 +216,7 @@ the per-session Threading endpoint without changing the project's or user's pers
 configuration.
 
 `ACPStreamSessionTests` drives the runtime against deterministic `/bin/sh` agents with a *fixture*
-profile rather than `.grok`, so nothing it pins can be true of one vendor only. A fake handed the
+profile rather than `.grok` or `.cursor`, so nothing it pins can be true of one vendor only. A fake handed the
 wrong line exits with a distinctive status, which fails a turn instead of hanging the suite, and
 every client line is recorded so an assertion reads the bytes that crossed the pipe. It holds the
 regressions this split could cause: replay gating (history before `initialised`, no deltas during
@@ -197,7 +224,11 @@ it, a late `user_message_chunk` dropped), exactly-once exit, permission option s
 standard kinds, the stop-reason settle, catalog bounds and policy, handshake parity including the
 omitted `_meta`, and framing across partial and malformed lines. `GrokACPProfileTests` keeps what
 is Grok's: the `_meta` readers, the catalog policy, the end-to-end handshake recorded against
-0.2.118, and byte-parity for the three transport sentences a user reads.
+0.2.118, and byte-parity for the three transport sentences a user reads. `CursorACPProfileTests`
+does the same for Cursor, and its fakes quote §10 of the findings verbatim — the four-key
+`session/new` result, chunks with no `messageId`, a `toolCallId` with a newline in it, three
+permission options whose ids are hyphenated while their kinds are underscored, and a rejected
+call the agent reports as `completed`.
 
 ## Composer commands and skills
 
@@ -716,22 +747,6 @@ captured when the host was configured; scanning the full presentation for each o
 measurements made an exact jump grow with transcript depth even though its native view count did
 not.
 
-The collapsed header itself is one drawn semantic `ToolCallView`, not five child controls joined by
-an Auto Layout graph. A 1,000-turn history plus 500 live tools showed that cold exact navigation was
-otherwise dominated by solving about twenty copies of that graph. The view still exposes one button
-with label, value, expanded state and press action to accessibility; on first expansion it installs
-the same selectable result label or native `DiffView` as before. Drawing replaces only the fixed
-one-line chrome, never the content whose interaction and selection AppKit owns.
-
-Historical changed-files cards follow the same viewport ownership boundary as timeline rows. Their
-presentation item retains the bounded tree, preview data, immutable checkpoint identity and action
-capability, not a `ChangedFilesCardView`/nested table. The card is constructed when its outer table
-row enters the viewport and released with that row; directory disclosure is stored by the stable
-presentation identity so recycling cannot reset it. Replay appends a card after the current tail in
-constant time. This is load-bearing: eagerly retaining one nested table per edited turn turned a
-1,000-turn tool-heavy cold replay into 1.7–2.0 seconds and roughly 63 MB of renderer state even though
-only six outer rows were visible.
-
 The extension composition seam is similarly pay-for-play. A user, assistant or tool row whose
 customization resolution is empty keeps its native subtree directly instead of receiving a
 container, composition host and observer that immediately return that same subtree. One controller
@@ -878,6 +893,21 @@ directly. A hosted `UIViewControllerRepresentable` remains the compatibility bou
 current SwiftUI dashboard navigates into a session. Rare modal work may still host SwiftUI—the
 attention-recipient sheet does—but no hosting transaction participates in conversation cold open,
 scrolling, typing or submission on the direct route.
+
+An authoritative reconnect snapshot is not automatically a timeline reset. The mobile store first
+reconciles ordered stable row identities: unchanged rows emit nothing, retained rows whose values
+changed are reconfigured exactly, and metadata updates address only their synthetic cells. Only an
+insert, removal or reorder takes the structural diffable path. That path preserves Markdown and
+measured-height caches for unchanged ids, invalidates changed retained rows, and prunes disappeared
+ids. Reverting to unconditional reset makes an unchanged 5,000-row reconnect a roughly half-second
+animated rebuild; `ios-conversation-stress` rejects that behavior.
+
+Remote tool calls are compact disclosures, not miniature transcript cards. Their collapsed header
+is one horizontal 44-point target: tool identity, a single truncating subject, exceptional outcome
+ink and a chevron. The result view is not materialized until expansion. This keeps a run of tools
+scannable without shrinking the tap target, and keeps long output out of both the initial layout and
+the ordinary reading path. Reconfiguration replaces the row's theme outline rather than layering a
+new border and glow on every result, expansion or live palette update.
 
 Do not anchor the cold composer to `UIKeyboardLayoutGuide`. On the measured simulator that caused
 UIKit to load and initialize its text-input tracking coordinator while attaching the first window,

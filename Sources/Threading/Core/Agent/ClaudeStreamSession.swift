@@ -152,7 +152,7 @@ final class ClaudeStreamSession:
             process = try AgentChildProcess.launch(
                 executable: plan.executable,
                 arguments: plan.arguments,
-                environment: AgentEnvironment.launchEnvironment(),
+                environment: plan.launchEnvironment(),
                 sessionID: sessionID
             ) { [weak self] status in
                 Task { @MainActor [weak self] in

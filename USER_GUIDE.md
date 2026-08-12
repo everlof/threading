@@ -49,7 +49,7 @@ the width you leave it at is the width it opens at next launch.
 **Project** — a folder you've added. Named after its git repository when there is one, with
 the current branch shown beneath.
 
-**Session** — one Claude Code, Codex, Grok, or OpenCode conversation running inside a project. A session
+**Session** — one Claude Code, Codex, Grok, OpenCode, or Cursor conversation running inside a project. A session
 outlives its terminal: when the agent exits, the terminal closes but the session stays in the
 sidebar so you can resume the same conversation later.
 
@@ -164,6 +164,14 @@ or **DEV** mark, so a screenshot or a bug report always says which kind of build
 it. Hovering it spells the name out; a release build shows nothing there. The exact version
 stays out of the chrome — it lives in the About box.
 
+At the other end of the same band, a **speaker** is the app's silence switch: one click stops
+every sound Threading makes — notification alerts and the terminal bell alike — and a second
+click gives both back exactly what they were set to, since the switch changes no sound
+setting. While it holds, the button is filled rather than quiet, so a silent app always says
+so on screen. It is the same state as **Settings ▸ General ▸ Silence** and the **Threading ▸
+Silence Sounds** menu item (⇧⌘S); all three follow each other, and the choice survives a
+relaunch. See [Notifications](#notifications) for what it does and does not silence.
+
 The mark answers the pointer: it lifts while the pointer is anywhere over the brand row, and
 a click turns it one sixth of a turn — the mark has six strands, so it lands back on itself.
 Nothing is opened by the click; the brand names the window rather than pointing anywhere.
@@ -265,21 +273,22 @@ Agents can also set the icon from inside a session through the `set_project_icon
 
 Icons are stored small (64px) under Application Support and never touch the project folder.
 
-### Code statistics
+### Project statistics
 **Rest the pointer on a project row** and a popover opens with what the project's code is
 made of: total lines of code and files, a **language-composition bar**, and a legend naming
 each language with its share and line count. Languages past the top five fold into a muted
 *Other* — unless only one would fold, which keeps its own name. The last line says when the
-count was taken.
+reading was updated.
 
-The counting is done by [`scc`](https://github.com/boyter/scc), which answers a whole
-repository in tens of milliseconds. **Without scc installed the popover says so instead** —
-it names the one command that gets it, `brew install scc`, and counting starts on its own
-within a minute of installing; no relaunch, no button. Counts refresh on their own: shortly
-after launch, when a session stops working (the moment the code most likely changed),
-periodically while the app runs, and on the hover itself when the reading is more than a
-minute old. A count honours `.gitignore`, skips minified and generated files, and never runs
-while a session in the project is working.
+For Git projects, the card also shows a **twelve-week activity chart**, the number of commits in
+that period, and when the latest commit was made. A new repository says *No commits yet*; a
+non-Git folder simply omits this section. Exceptionally active histories report *20,000+ commits*
+without drawing a partial chart as though it were complete.
+
+The app includes [`scc`](https://github.com/boyter/scc); there is nothing else to install.
+Readings refresh on their own shortly after launch, when a session stops working, periodically
+while the app runs, and on hover when aged. Code counts honour `.gitignore`, skip minified and
+generated files, and neither measurement runs while a session in the project is working.
 
 ### Managing
 **Hover a project row** — a **+** and **⋯** fade in at its trailing edge. The **+** opens the
@@ -334,7 +343,7 @@ follow the composer into the project you choose. The send stays disabled until t
 to run, and says so when you point at it.
 
 **The identity chip's menu is one list of logins.** Every login of every agent is one row deep —
-Claude Code, Codex, Grok and OpenCode together — each with the agent's mark beside it and what is
+Claude Code, Codex, Grok, OpenCode and Cursor together — each with the agent's mark beside it and what is
 left of it underneath (see [Usage when picking an account](#usage-when-picking-an-account)).
 Picking one sets the agent *and* the login at once, so moving to another agent's account is a
 single click rather than two. An agent appears as a row of its own only when it has no login to
@@ -649,14 +658,16 @@ row shows the sentence its notification would say:
 | **Blocked on an approval** | A turn has stopped on a permission request and is waiting. |
 | **Finished while you were elsewhere** | A session away from the pane finished or asked something. |
 | **Finished a turn in the background** | A turn ended while Threading was behind another app — the chattiest of the three. |
-| **Play a sound** | Only the blocked alert ever sounds; the other two are silent either way. Off keeps the banner without the ping. |
-| **Alert sound** | Which sound that is. Picking one plays it, so you can audition the list without waiting for a real alert. |
+| **Alert sound** | What an alert sounds like, including **Off**. A blocked approval sounds, and so does an update an agent sends you with `notify_user`; the other three — finished while you were elsewhere, finished in the background, and a scheduled message going out — stay silent whatever this is set to. Picking one plays it, so you can audition the list without waiting for a real alert. |
 
-**Choosing the sound.** The **Alert sound** menu starts with **macOS Alert Sound**, the tone
-the system uses for every app. Under it are five suggestions worth trying first — Submarine,
-Glass, Purr, Ping and Tink — then the rest of the sounds macOS ships, then any sounds of your
-own. Selecting a sound plays it immediately; the macOS default is the one item that stays
-silent, because that tone is not a file the app can reach to preview.
+**Choosing the sound.** The **Alert sound** menu starts with **Off**, then **macOS Alert
+Sound**, the tone the system uses for every app. Under them are five suggestions worth trying
+first — Submarine, Glass, Purr, Ping and Tink — then the rest of the sounds macOS ships, then
+any sounds of your own. Selecting a sound plays it immediately; Off and the macOS default are
+the two items that stay silent, because silence is the honest preview of one and that tone is
+not a file the app can reach to preview for the other. **Off** keeps the banner without the
+ping — nothing visual is suppressed — which is what the separate "Play a sound" switch used to
+say; an install that had it switched off comes back as **Off** in this menu.
 
 **Adding your own sound.** **Add a Sound…** at the bottom of the menu takes an AIFF, WAV or CAF
 file and copies it into your `~/Library/Sounds` folder, which is where macOS looks for
@@ -677,9 +688,24 @@ It sits apart from the notification rows because nothing above it applies to it.
 switch, the three alert kinds and **Mute Notifications** are all about Threading noticing
 something on your behalf; the bell is the program itself asking, so muting a project does not
 stop its terminal ringing. One consequence worth knowing: a bell from a session you are not
-looking at also marks it as waiting, which can post a notification, so with Threading in the
-background you may hear the bell and the alert. Setting either one to Off leaves you with a
-single sound.
+looking at also marks it as waiting, which can post a notification. You hear one sound rather
+than two — when a bell has just rung for a session, the notification that follows it arrives
+silently, while still appearing as a banner and in Notification Center. The bell itself is never
+held back: if you heard nothing, the notification keeps its sound.
+
+**Silencing everything at once.** The speaker at the sidebar's foot, **Settings ▸ General ▸
+Silence**, and **Threading ▸ Silence Sounds** (⇧⌘S) are one switch with three faces. It holds
+every sound the app can make — both cards above, and every sound a later release adds — and it
+changes none of them: switching it back on gives the alert sound and the bell exactly what they
+had. macOS's own Focus cannot do this job, because a Focus silences the notification sounds the
+system plays and not the bell, which Threading plays itself.
+
+Nothing is suppressed while it holds. Banners still arrive, the sidebar still marks the session,
+a bell still ends the turn it was reporting — they are simply quiet. That is what separates it
+from Mute below: **Mute** answers "don't tell me", the silence switch answers "tell me quietly".
+Choosing a sound in either picker still plays it while the switch holds, because picking a sound
+is asking to hear it. The button is filled while the app is silent, and the state survives a
+relaunch.
 
 **Silencing one chat or one project.** **Session Options ▸ Mute Notifications** in a session's `⋯` menu quiets
 that conversation; the same item on a project row quiets the whole checkout, including sessions
@@ -687,6 +713,74 @@ started in it later. A session follows its project unless you answer for it — 
 busy project and leave one conversation audible, or the reverse. The item reads **Unmute
 Notifications** whenever the chat is currently silent, whichever level silenced it. Anything
 already showing in Notification Center is withdrawn as you mute.
+
+**Giving one chat, project or terminal its own sound.** A **Sounds ▸** submenu sits beside
+**Theme** on all three sidebar rows — a session's `⋯` or right-click, a project row's, and a
+standalone terminal's — because both answer the same kind of question: how this scope looks, how
+it sounds. Pick **Off**, **macOS Alert Sound**, or any sound in the list, and that scope's
+notifications and terminal bell all use it. Picking one plays it, and **Add a Sound…** at the
+bottom takes a file of your own exactly as the Settings pickers do.
+
+The narrowest level wins, and it inherits by default:
+
+| Scope | Where to set it | Applies to |
+|---|---|---|
+| Session | The session row's `⋯` menu, or right-click ▸ **Sounds** | That conversation's notifications and bell |
+| Standalone terminal | The terminal row's `⋯` menu, or right-click ▸ **Sounds** | That terminal's bell |
+| Project | The project row's `⋯` menu ▸ **Sounds** | Every chat and terminal in it that has no sound of its own |
+| Default | Settings ▸ General ▸ **Notifications** and **Terminal Bell** | Everything else |
+
+The first item is **Inherit**, and it names what it falls back to — "Inherit (Purr)" means
+clearing this choice leaves the scope on Purr. It reads plain **Inherit** when the levels above
+do not agree, which is the ordinary case: the app has one sound for notifications and another
+for the bell, so there is no single name to give. Picking the sound a scope was already
+inheriting stores nothing, so it keeps *following* — change the project later and the chat
+follows it, rather than being frozen on a copy of the old answer.
+
+**Sounds and Mute are different verbs**, and they do not touch each other's setting.
+**Sounds ▸ Off** silences audio: banners still arrive and the sidebar still marks the session.
+**Mute** stops the banners and never touches the bell. Both together is no banners, and what
+does still happen is quiet. The speaker at the sidebar's foot beats all of it while it holds,
+and changes none of it.
+
+Two things stay silent whatever a scope is painted with: a turn simply finishing in the
+background, and a chat you have not read yet. Those have never made a sound in Threading, and a
+broad choice does not start them — though **Off** does still reach them, so a chat you silenced
+stays silent.
+
+**A sound per event.** The last item in that submenu, **Customize…**, opens a sheet listing the
+nine occasions Threading makes a sound, each with the same picker. Four are terminal bells — the
+agent ringing while you are away, a bell in the session you are watching, one during a launch,
+and one from another program — and five are notifications: blocked on an approval, finished or
+asked while you were away, finished in the background, an update the agent sends, and a
+scheduled message going out. Above each group is its own row, **All bells** and **All
+notifications**, which paints that whole half of the app.
+
+The sheet is the same at every scope and names which one it is editing in its title. Each row's
+first item says what that row falls back to if you clear it — "Inherit (Basso)" means this row
+is currently reading Basso from somewhere further out, and the three rows that have never made a
+sound read **Inherit (Silent)** until you give them one here. At **Settings ▸ General**, where
+both sound cards carry a **Customize Events…** button, the same item reads **Default (…)**
+instead, because there is nothing beyond the app to inherit from; the two group rows there are
+the page's own **Alert sound** and **Bell sound** pickers, so changing one changes the other.
+
+Setting a row to exactly what it already inherits stores nothing, the same way the one-click
+choice does. **Reset All to Inherited** clears every row at that scope at once and leaves the
+sheet open showing the result. While a scope carries per-event choices, its submenu item reads
+**Customize (3 Events)…** — opening it never clears anything, which is why the count is there
+rather than a checkmark: the sheet is where clearing happens, with what is being cleared on
+screen. A standalone terminal has no *Customize…* item, because nothing there can say why a bell
+rang.
+
+**Finding what is overriding.** **Settings ▸ General ▸ Custom Sounds** lists every chat,
+checkout and terminal carrying a sound of its own — what it is, where it lives, and what it
+amounts to ("Submarine", or "3 events"). **Customize…** on a row opens that scope's sheet and
+**Reset** puts it back to what it inherits; **Reset All** does that for every row at once,
+leaving the app's own sounds alone. The list is read from the records each time it is shown, so
+it cannot disagree with them, and a line under it says where added sound files live. The same
+answer is in a sidebar row's tooltip: rest the pointer on a project or terminal row and a sound
+it does not inherit is named under the path. Nothing is added to a row that inherits — an
+override is configuration, not status.
 
 ### Scrolling
 When the running program handles the mouse itself (Claude Code scrolls its own transcript),
@@ -718,13 +812,21 @@ Resuming works by session id:
 | Codex | `codex` (id discovered after launch) | `codex resume <uuid>` |
 | Grok | `grok --session-id <uuid> -- <opening>` | `grok --resume <uuid>` |
 | OpenCode | `opencode` (id discovered after the first prompt) | `opencode --session <ses_…>` |
+| Cursor | `cursor-agent acp` (Chat only; id assigned when the session opens) | the same command, loading the stored id |
 
 Claude Code and Grok accept ids chosen up front, so Threading assigns them. Grok is marked
 resumable only after its supported session listing confirms the conversation exists; quitting
 the first browser-login screen therefore leaves it safe to launch fresh again. Codex assigns its
 own id, which Threading reads back from the rollout file Codex writes on launch. OpenCode also
 assigns its own id; Threading reads the supported JSON session listing for the newest conversation
-in that checkout.
+in that checkout. Cursor is Chat-only and assigns its own id when the conversation opens, which
+Threading stores and hands back to resume it.
+
+**Cursor sessions have no Terminal surface**, and the reason is worth knowing: `cursor-agent`'s
+interactive terminal and the protocol Chat speaks keep *separate* conversation stores, and neither
+can open the other's chats. Showing a Cursor conversation in a terminal would therefore mean
+showing a different, empty one. So Cursor sessions are always Chat, and the surface chip offers no
+choice for them. Everything else about Cursor is its own CLI and your own Cursor login.
 
 **Sessions come back on their own, and you choose which ones.** **Bring back at launch**
 (Settings ▸ General ▸ Startup) offers three answers:
@@ -1341,25 +1443,33 @@ pill never eats into the limits it reports.
 Choosing a login is when the number actually changes a decision — an account at 90% of its
 week is a poor place to start a long task — so the composer shows it twice over:
 
-- **In the identity chip's menu**, each login carries its own `5h 43% · 7d 73%`, so the
-  accounts are compared before one is picked. Beside each is its agent's mark with a small meter
-  under it: the meter's length and colour are the same reading as the numbers, so the busiest
-  login stands out without reading every row. The agent is named in words too, at the start of
-  the same line — the same login name often exists on two agents. Within the line the values
-  carry the ink: window names and separators sit back, and a value turns amber as its window
-  nears the limit and red when it is nearly spent — the same colours the toolbar pill uses.
-- **In the model chip's menu**, every model carries what a session on it would be measured
-  against — the account's windows, plus that model's own where the plan meters one separately.
-  This is the menu where a spent limit is escaped, since switching model is the way out of it.
-  The same menu on a **running session's header** carries the same readings.
+- **In the identity chip's menu**, the logins are filed under a heading per agent — the same
+  login name often exists on two of them — and each row's reading is laid out in **columns**
+  rather than written as a line. Every window gets its own column with a small bar and its
+  value, so one login's `7d` sits directly under the next one's and the accounts compare at a
+  glance instead of by reading. A plan with only a weekly window leaves the `5h` column empty,
+  which is how the shape itself tells you which windows a plan has. The plan name sits quietly
+  after the login's name, the reset countdown has the last column to itself, and a window a
+  single model meters separately (`7d Fable 89%`) goes on a second line, only on the rows that
+  have one. Everything stays monochrome while usage is comfortable; a bar and its value turn
+  amber past 75% of their window and red past 92% — the same colours the toolbar pill uses, and
+  the numbers say the same thing in any ink. Point at a row for the whole reading in words.
+- **In the model chip's menu**, the account's own windows are stated once, in a header naming
+  the login they belong to — they are the same under every model. Each model row then carries
+  only a window the plan meters for *it* separately (`7d Fable 89% · resets in 15h`), with a
+  gauge per row so the model whose window is nearly spent stands out. This is the menu where a
+  spent limit is escaped, since switching model is the way out of it. The same menu on a
+  **running session's header** carries the same readings.
 - **Inside the prompt box**, beside the send: the same short reading the toolbar's pill carries
   once the session is running, so the number you start on is the number you keep watching.
   Point at it for the detail — which account it belongs to, when each window comes back, and
   how old the reading is. It stays out of the way when the account has nothing to report.
 
 A window is named by its length, and one that meters a single model adds that model: `5h`, `7d`,
-`7d Fable` in a line; `5-hour`, `Weekly`, `Weekly · Fable` on a bar. So the same window is
-recognisable wherever it is quoted.
+`7d Fable` in a line or at the head of a column; `5-hour`, `Weekly`, `Weekly · Fable` on a bar.
+So the same window is recognisable wherever it is quoted. A window whose reset has already
+passed shows `—` and an empty bar rather than a number: the old figure describes the window
+before it, not the one you are about to start in.
 
 Wherever a window is drawn as a bar — the pill's popover, **Settings ▸ Usage** — the bar carries
 a **time mark**: a thin line at the point the clock has reached in that window. Fill short of the
@@ -1415,11 +1525,20 @@ Normally a session shows the agent's own terminal. A **Chat** session instead le
 draw the conversation itself — messages, tool calls and replies as native views rather than
 text painted by the CLI.
 
-Chat is available for **Codex, Claude Code, and Grok sessions** — not yet for OpenCode. Choose
-**Chat (experimental)** from the surface chip when creating one. Codex keeps its app-server open,
-Claude keeps one `claude --print` process open, and Grok uses its supported ACP stdio transport.
-Each uses the same official CLI and login as its Terminal surface; Threading never reads a Grok
-credential.
+Chat is available for **Codex, Claude Code, Grok and Cursor sessions** — not yet for OpenCode,
+and for Cursor it is the only surface. Choose **Chat (experimental)** from the surface chip when
+creating one. Codex keeps its app-server open, Claude keeps one `claude --print` process open, and
+Grok and Cursor use their supported Agent Client Protocol transports (`grok agent stdio` and
+`cursor-agent acp`). Each uses the same official CLI and login as its Terminal surface; Threading
+never reads a Grok or Cursor credential.
+
+Cursor's Chat reports no usage or token counts — its protocol carries none — and it offers no
+Permission Mode control, because Cursor's own Agent/Plan/Ask modes are a different idea from
+Threading's six. It does ask before running a shell command, through the same approval sheet every
+other agent uses; a command you refuse is shown as refused even though Cursor reports it as
+finished. Four of Cursor's own slash commands stay listed but disabled in Chat —
+`/copy-request-id`, `/statusline`, `/update-cli-config` and `/loop` — because each acts on the
+Cursor terminal or on your global Cursor configuration rather than on this conversation.
 
 Chat runs the agent headlessly, so it draws on your subscription the same way the terminal
 does. Claude Chat was previously withheld while Anthropic's terms were read as excluding
@@ -2030,12 +2149,12 @@ The same **Open in ▸** submenu appears wherever a folder or a file is named: o
 and a session row in the sidebar, on a row of the **Activity** tab, and — the useful one — on a
 right-click in **Git Review**, where it opens the file *at the first line the diff changes*.
 
-The **⋯** beside the page's name opens the same full menu as the session row's `⋯`:
-pinning, archiving, side chats, **Theme**, **Permission Mode**, **Session Options** (Interface,
-Claude Remote Control, Mute Notifications, Attachments), rename, the **Copy ▸** submenu, account
-moves, sharing, deletion, and any installed extension actions that apply. It sits with the name
-because it acts on the page named beside it, while everything at the other end of the header
-decides what is on screen.
+The **⋯** beside the page's name opens the same full menu as the session row's `⋯`: pinning,
+archiving, side chats, **Theme**, **Sounds**, **Permission Mode**, **Session Options**
+(Interface, Claude Remote Control, Mute Notifications, Attachments), rename, the **Copy ▸**
+submenu, account moves, sharing, deletion, and any installed extension actions that apply. It
+sits with the name because it acts on the page named beside it, while everything at the other
+end of the header decides what is on screen.
 
 Four buttons sit at that end, and each one decides what this pane shows:
 
@@ -2504,6 +2623,12 @@ without leaving the terminal. You can stage and commit from it; **discarding is 
 not offered** — everything the pane can do is reversible by the control beside it, and
 throwing away a change an agent just made is not.
 
+Hovering a file's header line reveals two quick actions beside its name: **copy the file's
+path**, and **open the file** in the app you last opened something in — the same one-press
+open as the header's split control, landing at the first line the diff changes. The row's
+right-click menu keeps the full set: the **Open in ▸** app list, **Reveal in Finder**, and
+**Copy Path**. A file the comparison deletes offers neither, having no working copy to act on.
+
 ### Pull and merge requests
 
 For a checkout whose `origin` is on GitHub.com or GitLab.com, Git Review also shows the current
@@ -2889,6 +3014,23 @@ you have a saved profile holding the old fixed palette — pick **Follow App The
 Settings ▸ Themes ▸ **Use as Default**.
 
 Deleting a theme leaves anything using it inheriting again. Renaming one keeps them.
+
+#### When a program's own color vanishes into the theme
+
+A program can choose the color it prints in, and its choice can land on the palette you are
+using: bright white on a white background, or a grey four steps from the grey behind it. The
+text is still there, and it is still exactly the color that was sent — you simply cannot read it.
+
+When that happens to text that is actually on screen, a band appears above the terminal. It
+quotes the run that went missing, names both colors and how far apart they are, and shows the
+two of them side by side under **As drawn** — which is usually the moment it becomes obvious that
+they are the same color, since the sample goes as blank as the text did. **Change Theme…** opens Settings ▸ Themes; the other fix belongs to the program, which
+can print in the terminal's default foreground (ANSI 39) and let the palette choose a readable
+ink. Threading never rewrites the color: doing that would corrupt output and hide the real
+configuration problem.
+
+Dismissing the band is remembered for that exact pair under that exact theme, so the same prompt
+does not ask again in every tab — while a different theme, or a different pair, is a new question.
 
 Sessions shown as a conversation rather than a terminal are drawn in the system's own colours;
 a theme sets only the backdrop behind them.
@@ -3602,6 +3744,7 @@ screen says so and leads with the offers further down the list instead.
 | Full Screen | Cmd+Ctrl+F |
 | Minimize | Cmd+M |
 | Settings (opens, and closes again) | Cmd+, |
+| Silence Sounds (holds every sound without changing any of them) | Cmd+Shift+S |
 | Check for Updates… | unbound by default — assign one in Settings ▸ Keyboard |
 
 ### In the terminal

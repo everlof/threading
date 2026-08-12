@@ -69,7 +69,7 @@ enum ObservedPermissionMode {
         case .claude:
             return .claudeTranscript
 
-        case .codex, .grok, .openCode:
+        case .codex, .grok, .openCode, .cursor:
             return nil
         }
     }

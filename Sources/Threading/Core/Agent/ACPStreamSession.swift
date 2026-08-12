@@ -41,6 +41,7 @@ final class ACPStreamSession:
 
     private let workingDirectory: String
     private let profile: ACPProviderProfile
+    private let handshakeTimeout: TimeInterval
     private let plan: () throws -> AgentLaunchPlan
 
     private var process: AgentChildProcess?
@@ -69,17 +70,32 @@ final class ACPStreamSession:
     private var pendingAssistantBlocks: [ACPPendingBlock] = []
     private var toolCalls: [String: ACPToolCallState] = [:]
 
+    /// Tool calls this client itself refused a permission for.
+    ///
+    /// Kept because the wire will not say so twice: an agent may complete a call it never ran,
+    /// and the only record that it was denied is the answer this client gave. See
+    /// `finishToolIfNeeded`.
+    private var deniedToolCallIDs: Set<String> = []
+
+    private var handshakeDeadline: Task<Void, Never>?
+
     // MARK: - Initialization
 
+    /// - Parameter handshakeTimeout: how long `initialize` and `session/new`/`session/load` may
+    ///   go unanswered before the turn fails and the child is ended. A parameter rather than a
+    ///   constant read inline so a transport test can pin the behaviour in milliseconds instead
+    ///   of waiting out the real bound; production never passes it.
     init(
         sessionID: SessionID,
         workingDirectory: String,
         profile: ACPProviderProfile,
+        handshakeTimeout: TimeInterval = ACPDefaults.handshakeTimeout,
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
         self.workingDirectory = workingDirectory
         self.profile = profile
+        self.handshakeTimeout = handshakeTimeout
         self.plan = plan
     }
 
@@ -95,7 +111,7 @@ final class ACPStreamSession:
             process = try AgentChildProcess.launch(
                 executable: launchPlan.executable,
                 arguments: launchPlan.arguments,
-                environment: AgentEnvironment.launchEnvironment(),
+                environment: launchPlan.launchEnvironment(),
                 sessionID: sessionID
             ) { [weak self] status in
                 Task { @MainActor [weak self] in self?.handleTermination(status: status) }
@@ -212,6 +228,7 @@ final class ACPStreamSession:
 
         isTerminating = true
         isRunning = false
+        cancelHandshakeDeadline()
         if isTurnInFlight, let activeSessionID {
             sendNotification(
                 method: "session/cancel",
@@ -224,7 +241,46 @@ final class ACPStreamSession:
 
     // MARK: - Handshake
 
+    /// Arms the response deadline that covers the handshake.
+    ///
+    /// `initialize` and the session open are the two requests whose silence is otherwise
+    /// undetectable. An ACP agent is not obliged to answer a malformed line, and at least one
+    /// shipping CLI answers nothing at all — no response, no error, and nothing on standard
+    /// error — so a framing desync leaves a client waiting on a reply that is never coming. A
+    /// client-side deadline is the only detector.
+    ///
+    /// `session/prompt` deliberately gets none: a model turn is legitimately unbounded, and a
+    /// timeout there would end real work.
+    private func armHandshakeDeadline() {
+        handshakeDeadline?.cancel()
+        let seconds = handshakeTimeout
+        handshakeDeadline = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.handshakeDeadlineExpired()
+        }
+    }
+
+    private func cancelHandshakeDeadline() {
+        handshakeDeadline?.cancel()
+        handshakeDeadline = nil
+    }
+
+    private func handshakeDeadlineExpired() {
+        guard isRunning else { return }
+        handshakeDeadline = nil
+        let label = profile.diagnosticsLabel
+        ThreadingLogger.agent.error(
+            "\(label, privacy: .public) did not answer its handshake within the response deadline"
+        )
+        finishTurnWithTransportError(
+            ACPTransportMessage.handshakeTimedOut(profile.displayName)
+        )
+        terminate()
+    }
+
     private func resetForLaunch(resumeState: ResumeState) {
+        cancelHandshakeDeadline()
         launchResumeState = resumeState
         buffer.removeAll(keepingCapacity: true)
         errorBuffer.removeAll(keepingCapacity: true)
@@ -242,6 +298,7 @@ final class ACPStreamSession:
         lastContextWindow = nil
         resetMessageAccumulators()
         toolCalls.removeAll()
+        deniedToolCallIDs.removeAll()
         replaceComposerCapabilities([])
     }
 
@@ -271,6 +328,7 @@ final class ACPStreamSession:
             parameters: parameters,
             purpose: .initialize
         )
+        armHandshakeDeadline()
     }
 
     private func openSession() {
@@ -286,6 +344,7 @@ final class ACPStreamSession:
             method = "session/new"
         }
         _ = sendRequest(method: method, parameters: parameters, purpose: .openSession)
+        armHandshakeDeadline()
     }
 
     private func mcpServers() -> [[String: Any]] {
@@ -416,6 +475,11 @@ final class ACPStreamSession:
         error: String?
     ) {
         guard let purpose = pendingRequests.removeValue(forKey: id) else { return }
+
+        switch purpose {
+        case .initialize, .openSession: cancelHandshakeDeadline()
+        case .prompt: break
+        }
 
         if let error {
             switch purpose {
@@ -651,16 +715,32 @@ final class ACPStreamSession:
         onProviderExecution?(event)
     }
 
+    /// Emits the result row once a call reaches a terminal status.
+    ///
+    /// **A call this client denied is presented as denied even when the agent says it
+    /// completed.** ACP has a `failed` status and not every agent uses it: one shipping CLI
+    /// answers a refused permission by completing the same tool call with no output at all, so
+    /// status alone cannot tell a refusal from a success. This client already knows — it gave the
+    /// answer — and that memory is the only honest source. An agent that does report `failed`
+    /// reaches the same conclusion through the wire, so the override never changes its rows.
     private func finishToolIfNeeded(id: String) {
         guard var state = toolCalls[id], !state.didEmitResult,
               state.status == "completed" || state.status == "failed" else { return }
         state.didEmitResult = true
         toolCalls[id] = state
+
+        let reportedFailure = state.status == "failed"
+        let wasDenied = deniedToolCallIDs.contains(id)
+        var text = ACPWireAdapter.toolResultText(from: state.payload)
+        if wasDenied, !reportedFailure, text.isEmpty {
+            text = ACPTransportMessage.deniedToolCall
+        }
+
         onEvent?(.toolResults([
             ToolResult(
                 toolUseID: id,
-                text: ACPWireAdapter.toolResultText(from: state.payload),
-                isError: state.status == "failed"
+                text: text,
+                isError: reportedFailure || wasDenied
             )
         ]))
     }
@@ -698,12 +778,18 @@ final class ACPStreamSession:
         let options = parameters["options"] as? [[String: Any]] ?? []
 
         PermissionBroker.decide(request) { [weak self] decision in
-            self?.answerPermission(id: id, options: options, decision: decision)
+            self?.answerPermission(
+                id: id,
+                toolCallID: toolCallID,
+                options: options,
+                decision: decision
+            )
         }
     }
 
     private func answerPermission(
         id: JSONRPCRequestID,
+        toolCallID: String?,
         options: [[String: Any]],
         decision: PermissionDecision
     ) {
@@ -712,6 +798,7 @@ final class ACPStreamSession:
         case .allow: allowed = true
         case .deny: allowed = false
         }
+        if let toolCallID, !allowed { deniedToolCallIDs.insert(toolCallID) }
         let preferredKinds = allowed
             ? ACPDefaults.allowOptionKinds
             : ACPDefaults.rejectOptionKinds
@@ -740,7 +827,11 @@ final class ACPStreamSession:
         pendingPrompt = nil
         isTurnInFlight = false
         receivedTurnFinished = true
+        // The denied set annotates the tool state it is read beside, so it lives exactly as long:
+        // a turn's ids cannot recur, and keeping them would grow without bound across a long
+        // conversation.
         toolCalls.removeAll(keepingCapacity: true)
+        deniedToolCallIDs.removeAll(keepingCapacity: true)
         let duration = turnStartedAt.map {
             max(0, ProcessInfo.processInfo.systemUptime - $0)
         }
@@ -767,6 +858,7 @@ final class ACPStreamSession:
 
     private func handleTermination(status: Int32) {
         guard process != nil else { return }
+        cancelHandshakeDeadline()
         process?.standardOutput.readabilityHandler = nil
         process?.standardError.readabilityHandler = nil
         process = nil
@@ -832,6 +924,14 @@ enum ACPTransportMessage {
     static func exited(_ diagnosticsLabel: String, status: Int32) -> String {
         "\(diagnosticsLabel) exited with status \(status)."
     }
+
+    static func handshakeTimedOut(_ displayName: String) -> String {
+        "\(displayName) did not answer Threading's opening request."
+    }
+
+    /// Stands in for a denied call's result when the agent completes it with nothing at all, so
+    /// the row says what happened rather than reading as an empty success.
+    static let deniedToolCall = "Threading denied this tool call, so it did not run."
 }
 
 private enum ACPPendingBlock {
@@ -856,6 +956,17 @@ private enum ACPRequestPurpose {
 enum ACPDefaults {
     static let protocolVersion = 1
     static let maximumErrorBytes = 64 * 1024
+
+    /// How long the handshake may go unanswered before the turn fails and the child is ended.
+    ///
+    /// Thirty seconds is generous against what the handshake actually costs and short enough
+    /// that a hang is reported rather than endured: the slowest measured `session/new` — a
+    /// Cursor session, which makes a network round trip inside it — answered in 2.5 seconds,
+    /// and `initialize` in 0.6. The bound exists because the failure it catches is otherwise
+    /// invisible: that same CLI swallows a malformed line with no response, no error and no
+    /// standard-error output, so a framing desync produces silence rather than a complaint.
+    /// Only the handshake is bounded; `session/prompt` is a model turn and is left unbounded.
+    static let handshakeTimeout: TimeInterval = 30
 
     /// The option kinds the protocol itself names, in the order a decision prefers them.
     ///

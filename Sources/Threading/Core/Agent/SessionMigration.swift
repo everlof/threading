@@ -296,6 +296,12 @@ enum ConversationContinuation {
             return SessionMigration.sourceTranscript(for: session, in: project) != nil
         case .grok, .openCode:
             return session.resumeState.transcriptID != nil
+        case .cursor:
+            // Neither route exists: Cursor writes no transcript Threading can read, and its CLI
+            // has no export command. Its history is only recoverable by asking the CLI to replay
+            // it over ACP into a live session, which is not a snapshot a frozen handoff can hold.
+            // A Cursor conversation is still a valid *destination*.
+            return false
         }
     }
 
@@ -352,7 +358,10 @@ enum ConversationContinuation {
 
         let targetID = SessionID()
         let title = source.displayTitle
-        let usesNativeUI = source.usesNativeUI && account.provider.supportsNativeUI
+        let usesNativeUI = AgentSession.resolvedNativeSurface(
+            source.usesNativeUI,
+            for: account.provider
+        )
         let targetAccount = account.provider.supportsAccounts ? account : nil
         let targetModel = AgentModels.defaultModel(for: account.provider, account: targetAccount)
         guard let handoff = ConversationHandoff.continuing(
@@ -585,6 +594,11 @@ enum ConversationHandoffCapture {
                     : ConversationHistoryPage.historySegments(from: events)
                 current = .success((segments, truncated))
 
+            case .cursor:
+                current = .failure(.init(
+                    message: "Cursor conversations cannot be exported for continuation."
+                ))
+
             case .grok, .openCode:
                 guard let transcriptID else {
                     current = .failure(.init(
@@ -665,7 +679,7 @@ enum ConversationHandoffCapture {
                 return .success((segments, false))
             case .openCode:
                 return .success((try openCodeSegments(from: data), false))
-            case .claude, .codex:
+            case .claude, .codex, .cursor:
                 return .failure(.init(message: "This runtime uses its transcript directly."))
             }
         } catch {
@@ -708,7 +722,7 @@ enum ConversationHandoffCapture {
         case .openCode:
             command.append(word: "export")
             command.append(word: transcriptID.rawValue)
-        case .claude, .codex:
+        case .claude, .codex, .cursor:
             throw ConversationContinuation.ContinuationError(
                 message: "This runtime does not use the export adapter."
             )
@@ -724,7 +738,7 @@ enum ConversationHandoffCapture {
             standardOutput = try FileHandle(forWritingTo: output)
         case .grok:
             standardOutput = nil
-        case .claude, .codex:
+        case .claude, .codex, .cursor:
             throw ConversationContinuation.ContinuationError(
                 message: "This runtime does not use the export adapter."
             )

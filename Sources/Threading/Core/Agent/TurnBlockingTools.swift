@@ -29,7 +29,7 @@ enum TurnBlockingTools {
     ///
     /// A `switch` rather than a capability flag: this is vocabulary, like a launch line or a
     /// transcript layout, and the value differs per runtime rather than being present or absent.
-    /// The compiler makes a fifth runtime a build error here, which is the reminder that a new
+    /// The compiler makes a sixth runtime a build error here, which is the reminder that a new
     /// CLI's question tool has to be looked up rather than assumed empty.
     static func names(for kind: AgentKind) -> [String] {
         switch kind {
@@ -40,10 +40,12 @@ enum TurnBlockingTools {
             // Measured against CLI 2.1.222, whose dialog kinds are `permission_ask_user_question`
             // and `permission_exit_plan_mode_v2`.
             return ["AskUserQuestion", "ExitPlanMode"]
-        case .codex, .grok, .openCode:
-            // None as of Codex 0.144.6, Grok and OpenCode: each approves a *command* mid-work,
-            // which is the other kind of ask, and none of the three exposes a tool whose result
-            // is the user's answer. Their sessions keep the behaviour they have today.
+        case .codex, .grok, .openCode, .cursor:
+            // None as of Codex 0.144.6, Grok, OpenCode and Cursor: each approves a *command*
+            // mid-work, which is the other kind of ask, and none exposes a tool whose result is
+            // the user's answer. Cursor's `cursor/ask_question` would be one — but it never
+            // fired in any measured turn, and Threading registers no handler for it, so no
+            // Cursor turn can be waiting on one. Their sessions keep the behaviour they have.
             return []
         }
     }

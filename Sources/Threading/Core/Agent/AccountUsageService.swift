@@ -352,6 +352,8 @@ final class AccountUsageService {
             throw UsageFetchError.noCredential("Grok manages usage in its own TUI.")
         case .openCode:
             throw UsageFetchError.noCredential("OpenCode manages provider usage in its own TUI.")
+        case .cursor:
+            throw UsageFetchError.noCredential("Cursor reports no usage to Threading.")
         }
     }
 }

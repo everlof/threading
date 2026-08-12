@@ -102,6 +102,7 @@ struct UsageOrigin: Codable, Equatable, Hashable, Sendable {
         case .codex: return billingProviderID == "openai"
         case .grok: return billingProviderID == "xai"
         case .openCode: return billingProviderID == "opencode"
+        case .cursor: return billingProviderID == "cursor"
         case nil: return false
         }
     }
@@ -113,6 +114,7 @@ struct UsageOrigin: Codable, Equatable, Hashable, Sendable {
         case .codex: billing = ("openai", "Codex")
         case .grok: billing = ("xai", "Grok")
         case .openCode: billing = ("opencode", "OpenCode")
+        case .cursor: billing = ("cursor", "Cursor")
         }
         return Self(
             runtimeID: runtime.rawValue,

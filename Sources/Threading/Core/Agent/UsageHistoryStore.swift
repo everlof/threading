@@ -307,6 +307,9 @@ final class UsageHistoryStore {
         case (.codex, _): return .codexAPI
         case (.grok, _): return .grokRuntime
         case (.openCode, _): return .openCodeRuntime
+        // Cursor's protocol carries no usage, token or context notification at all, so nothing
+        // ever samples one. The case exists because the switch is total, not because it runs.
+        case (.cursor, _): return .cursorRuntime
         }
     }
 

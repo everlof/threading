@@ -48,7 +48,7 @@ extension AgentKind {
         switch self {
         case .claude: return AgentBrandIcons.claude
         case .codex: return AgentBrandIcons.codex
-        case .grok, .openCode: return nil
+        case .grok, .openCode, .cursor: return nil
         }
     }
 
@@ -56,7 +56,7 @@ extension AgentKind {
     var brandIconTone: CGFloat? {
         switch self {
         case .claude: return AgentBrandIcons.claudeTone
-        case .codex, .grok, .openCode: return nil
+        case .codex, .grok, .openCode, .cursor: return nil
         }
     }
 

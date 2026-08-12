@@ -82,7 +82,7 @@ enum AgentAccountDiscovery {
             switch provider {
             case .claude: return claudeAccounts()
             case .codex: return codexAccounts()
-            case .grok, .openCode: return []
+            case .grok, .openCode, .cursor: return []
             }
         }
 

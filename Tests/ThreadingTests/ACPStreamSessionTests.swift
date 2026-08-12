@@ -92,6 +92,191 @@ final class ACPStreamSessionTests: XCTestCase {
         XCTAssertEqual(exitCount, 1)
     }
 
+    /// A plan's own environment entries reach the child, on top of the shared launch
+    /// environment rather than instead of it.
+    ///
+    /// The mechanism is provider-neutral and the first caller is not: Cursor's CLI opens a
+    /// browser to authenticate, and a native launch has no shell words to say otherwise in.
+    func testPlanEnvironmentOverridesReachTheChild() throws {
+        let agent = makeAgent([
+            .recordEnvironment(ACPTestDefaults.overriddenEnvironmentName),
+            // Reported as a word rather than as its value: a `PATH` is long, and quoting it into
+            // the fake's JSON would make this test depend on the developer's own directories.
+            .recordEnvironmentPresence(EnvironmentKeys.path),
+            .exit(0)
+        ])
+        let session = makeSession(
+            agent,
+            environmentOverrides: [
+                ACPTestDefaults.overriddenEnvironmentName: ACPTestDefaults.overriddenEnvironmentValue
+            ]
+        )
+        defer { session.terminate() }
+        let exited = expectation(description: "transport exited")
+        session.onExit = { _ in exited.fulfill() }
+
+        session.start()
+        wait(for: [exited], timeout: ACPTestDefaults.timeout)
+
+        let reported = agent.clientLines().compactMap { $0["env"] as? String }
+        XCTAssertEqual(reported.first, ACPTestDefaults.overriddenEnvironmentValue)
+        // The shared environment is still underneath: an override adds, it does not replace.
+        XCTAssertEqual(reported.last, ACPTestDefaults.presentEnvironmentValue)
+    }
+
+    /// An agent that never answers `initialize` is the failure the deadline exists for: ACP
+    /// permits an agent to say nothing at all about input it did not like, so silence is
+    /// indistinguishable from work until a client stops waiting.
+    func testAnUnansweredHandshakeFailsTheTurnAndEndsTheTransportOnce() {
+        let agent = makeAgent([.idle])
+        let session = makeSession(agent, handshakeTimeout: ACPTestDefaults.shortHandshakeTimeout)
+        defer { session.terminate() }
+
+        let finished = expectation(description: "turn failed")
+        let exited = expectation(description: "transport exited")
+        var exitCount = 0
+        session.onEvent = { event in
+            guard case .turnFinished(let text, let outcome, _) = event else { return }
+            XCTAssertEqual(
+                text,
+                ACPTransportMessage.handshakeTimedOut(FixtureACP.displayName)
+            )
+            XCTAssertEqual(outcome, .failed)
+            finished.fulfill()
+        }
+        session.onExit = { _ in
+            exitCount += 1
+            exited.fulfill()
+        }
+
+        session.start()
+        XCTAssertTrue(session.send("anything"))
+        wait(for: [finished, exited], timeout: ACPTestDefaults.timeout)
+
+        XCTAssertFalse(session.isRunning)
+        XCTAssertEqual(exitCount, 1)
+    }
+
+    /// The other half of the bound: a slow handshake is still a handshake. Each request is
+    /// timed separately, so an agent that takes its time twice is not penalised for the sum.
+    func testASlowButAnsweredHandshakeIsUnaffectedByTheDeadline() {
+        let agent = makeAgent([
+            .awaitClientLine,
+            .pause(ACPTestDefaults.slowHandshakePause),
+            .emit(FakeACPAgent.response(id: ACPTestDefaults.initializeRequestID, result: [:])),
+            .awaitClientLine,
+            .pause(ACPTestDefaults.slowHandshakePause),
+            .emit(FakeACPAgent.response(
+                id: ACPTestDefaults.openSessionRequestID,
+                result: ["sessionId": FixtureACP.sessionID]
+            )),
+            .awaitClientLine,
+            .emit(FakeACPAgent.promptResponse(stopReason: "end_turn")),
+            .idle
+        ])
+        let session = makeSession(agent, handshakeTimeout: ACPTestDefaults.shortHandshakeTimeout)
+        defer { session.terminate() }
+
+        let finished = expectation(description: "turn finished")
+        session.onEvent = { event in
+            guard case .turnFinished(let text, let outcome, _) = event else { return }
+            XCTAssertNil(text)
+            XCTAssertEqual(outcome, .completed)
+            finished.fulfill()
+        }
+
+        session.start()
+        XCTAssertTrue(session.send("go"))
+        wait(for: [finished], timeout: ACPTestDefaults.timeout)
+        XCTAssertTrue(session.isRunning)
+    }
+
+    /// A `toolCallId` is opaque. One shipping agent joins two provider ids with a literal
+    /// newline, which is legal and which nothing here may assume away — the call and its result
+    /// still have to find each other.
+    func testAToolCallIdentifierCarryingANewlineStillCorrelatesItsResult() throws {
+        let agent = makeAgent(openedAgentSteps() + [
+            .awaitClientLine,
+            .emit(FakeACPAgent.update([
+                "sessionUpdate": "tool_call",
+                "toolCallId": FixtureACP.multilineToolCallID,
+                "title": "Run checks",
+                "kind": "execute",
+                "status": "pending",
+                "rawInput": ["command": FixtureACP.reviewedCommand]
+            ])),
+            .emit(FakeACPAgent.update([
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": FixtureACP.multilineToolCallID,
+                "status": "completed",
+                "rawOutput": FixtureACP.toolOutputText
+            ])),
+            .emit(FakeACPAgent.promptResponse(stopReason: "end_turn")),
+            .idle
+        ])
+        let session = makeSession(agent)
+        defer { session.terminate() }
+
+        var events: [StreamEvent] = []
+        let finished = expectation(description: "turn finished")
+        session.onEvent = { event in
+            events.append(event)
+            if case .turnFinished = event { finished.fulfill() }
+        }
+
+        session.start()
+        XCTAssertTrue(session.send("go"))
+        wait(for: [finished], timeout: ACPTestDefaults.timeout)
+
+        let toolUses = events.flatMap { event -> [String] in
+            guard case .assistantMessage(let blocks) = event else { return [] }
+            return blocks.compactMap { block in
+                guard case .toolUse(let id, _, _) = block else { return nil }
+                return id
+            }
+        }
+        XCTAssertEqual(toolUses, [FixtureACP.multilineToolCallID])
+
+        let results = events.flatMap { event -> [ToolResult] in
+            guard case .toolResults(let results) = event else { return [] }
+            return results
+        }
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results.first?.toolUseID, FixtureACP.multilineToolCallID)
+        XCTAssertEqual(results.first?.text, FixtureACP.toolOutputText)
+        XCTAssertEqual(results.first?.isError, false)
+    }
+
+    /// A call this client refused is shown as refused, whether or not the agent admits it.
+    ///
+    /// The three cases are the two wire behaviours plus the control: an agent that completes a
+    /// rejected call with nothing (measured on a shipping CLI), an agent that reports `failed`
+    /// itself, and an ordinary allowed call whose row must be untouched by any of this.
+    func testADeniedToolCallIsPresentedAsDeniedHoweverTheAgentReportsIt() throws {
+        let silentlyCompleted = try toolResult(
+            decision: .deny(reason: "test"),
+            completion: ["status": "completed"]
+        )
+        XCTAssertTrue(silentlyCompleted.isError)
+        XCTAssertEqual(silentlyCompleted.text, ACPTransportMessage.deniedToolCall)
+
+        // An agent that says `failed` reaches the same row through the wire, and its own text
+        // is kept rather than replaced by ours.
+        let reportedFailure = try toolResult(
+            decision: .deny(reason: "test"),
+            completion: ["status": "failed", "rawOutput": FixtureACP.toolFailureText]
+        )
+        XCTAssertTrue(reportedFailure.isError)
+        XCTAssertEqual(reportedFailure.text, FixtureACP.toolFailureText)
+
+        let allowed = try toolResult(
+            decision: .allow(reason: "test"),
+            completion: ["status": "completed", "rawOutput": FixtureACP.toolOutputText]
+        )
+        XCTAssertFalse(allowed.isError)
+        XCTAssertEqual(allowed.text, FixtureACP.toolOutputText)
+    }
+
     func testSessionLoadReplaysHistoryBeforeTheLiveTurnBecomesLive() throws {
         let agent = makeAgent([
             .awaitClientLine,
@@ -675,14 +860,20 @@ final class ACPStreamSessionTests: XCTestCase {
     private func makeSession(
         _ agent: FakeACPAgent,
         profile: ACPProviderProfile = FixtureACP.profile(),
-        resumeState: ResumeState = .unavailable
+        resumeState: ResumeState = .unavailable,
+        handshakeTimeout: TimeInterval = ACPDefaults.handshakeTimeout,
+        environmentOverrides: [String: String] = [:]
     ) -> ACPStreamSession {
         ACPStreamSession(
             sessionID: SessionID(),
             workingDirectory: FixtureACP.workingDirectory,
-            profile: profile
+            profile: profile,
+            handshakeTimeout: handshakeTimeout
         ) {
-            agent.launchPlan(resumeState: resumeState)
+            agent.launchPlan(
+                resumeState: resumeState,
+                environmentOverrides: environmentOverrides
+            )
         }
     }
 
@@ -737,6 +928,72 @@ final class ACPStreamSessionTests: XCTestCase {
         wait(for: [finished, exited], timeout: ACPTestDefaults.timeout)
         report.rootProcessIdentifier = session.rootProcessIdentifier
         return report
+    }
+
+    /// Runs one permission-gated tool call to its end and returns the row the timeline receives.
+    ///
+    /// `completion` is merged into the closing `tool_call_update`, which is the only thing that
+    /// differs between the wire behaviours under test.
+    private func toolResult(
+        decision: PermissionDecision,
+        completion: [String: Any]
+    ) throws -> ToolResult {
+        var closingUpdate: [String: Any] = [
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": FixtureACP.toolCallID
+        ]
+        closingUpdate.merge(completion) { _, new in new }
+
+        let agent = makeAgent(openedAgentSteps() + [
+            .awaitClientLine,
+            .emit(FakeACPAgent.update([
+                "sessionUpdate": "tool_call",
+                "toolCallId": FixtureACP.toolCallID,
+                "title": "Run checks",
+                "kind": "execute",
+                "status": "pending",
+                "rawInput": ["command": FixtureACP.reviewedCommand]
+            ])),
+            .emit(FakeACPAgent.serverRequest(
+                id: FixtureACP.serverRequestID,
+                method: "session/request_permission",
+                parameters: [
+                    "sessionId": FixtureACP.sessionID,
+                    "toolCall": [
+                        "toolCallId": FixtureACP.toolCallID,
+                        "title": "Run checks",
+                        "kind": "execute",
+                        "status": "pending"
+                    ],
+                    "options": FixtureACP.permissionOptions
+                ]
+            )),
+            .awaitClientLine,
+            .emit(FakeACPAgent.update(closingUpdate)),
+            .emit(FakeACPAgent.promptResponse(stopReason: "end_turn")),
+            .idle
+        ])
+        let session = makeSession(agent)
+        let previousPresenter = PermissionBroker.present
+        PermissionBroker.present = { _, completion in completion(decision) }
+        defer {
+            session.terminate()
+            PermissionBroker.present = previousPresenter
+        }
+
+        var results: [ToolResult] = []
+        let finished = expectation(description: "turn finished")
+        session.onEvent = { event in
+            if case .toolResults(let values) = event { results.append(contentsOf: values) }
+            if case .turnFinished = event { finished.fulfill() }
+        }
+
+        session.start()
+        XCTAssertTrue(session.send("go"))
+        wait(for: [finished], timeout: ACPTestDefaults.timeout)
+
+        XCTAssertEqual(results.count, 1)
+        return try XCTUnwrap(results.first)
     }
 
     private func permissionOutcome(
@@ -857,6 +1114,16 @@ private enum FakeACPStep {
     case emitFragment(String)
 
     case emitStandardError(String)
+
+    /// Appends the child's own value for one environment variable to the transcript.
+    case recordEnvironment(String)
+
+    /// Appends a fixed word to the transcript when one environment variable is set at all.
+    case recordEnvironmentPresence(String)
+
+    /// Answers late, but still inside the deadline.
+    case pause(TimeInterval)
+
     case exit(Int32)
 
     /// Stays alive until the client closes its end.
@@ -886,11 +1153,15 @@ private struct FakeACPAgent {
     let steps: [FakeACPStep]
     let transcript: URL
 
-    func launchPlan(resumeState: ResumeState) -> AgentLaunchPlan {
+    func launchPlan(
+        resumeState: ResumeState,
+        environmentOverrides: [String: String] = [:]
+    ) -> AgentLaunchPlan {
         AgentLaunchPlan(
             executable: FakeACPDefaults.shell,
             arguments: [FakeACPDefaults.commandFlag, script],
-            resumeState: resumeState
+            resumeState: resumeState,
+            environmentOverrides: environmentOverrides
         )
     }
 
@@ -970,6 +1241,21 @@ private struct FakeACPAgent {
             case .emitStandardError(let text):
                 lines.append("printf '%s' \(quoted(text)) >&2")
 
+            case .recordEnvironment(let name):
+                lines.append(
+                    "printf '{\"env\":\"%s\"}\\n' \"$\(name)\" >> \(quoted(transcript.path))"
+                )
+
+            case .recordEnvironmentPresence(let name):
+                lines.append(
+                    "test -n \"$\(name)\" && printf '{\"env\":\"%s\"}\\n' "
+                        + "\(quoted(ACPTestDefaults.presentEnvironmentValue)) "
+                        + ">> \(quoted(transcript.path))"
+                )
+
+            case .pause(let seconds):
+                lines.append("sleep \(seconds)")
+
             case .exit(let status):
                 lines.append("exit \(status)")
 
@@ -1036,6 +1322,16 @@ private enum ACPTestDefaults {
     static let floodOverflowBytes = 8 * 1_024
     static let oversizedCatalogCount = 300
     static let expectedCatalogPublications = 2
+
+    /// Short enough to expire inside a test, long enough that the slow agent below still beats
+    /// it twice on a loaded machine.
+    static let shortHandshakeTimeout: TimeInterval = 2
+    static let slowHandshakePause: TimeInterval = 0.4
+
+    /// Not a variable any launch of ours sets, so a value here can only have come from the plan.
+    static let overriddenEnvironmentName = "THREADING_ACP_FIXTURE_ENV"
+    static let overriddenEnvironmentValue = "fixture-value"
+    static let presentEnvironmentValue = "present"
 }
 
 private enum FixtureACP {
@@ -1052,6 +1348,9 @@ private enum FixtureACP {
     static let serverRequestID = "request-1"
     static let toolCallID = "tool-1"
 
+    /// Two provider ids joined by a literal newline, as one shipping agent spells them.
+    static let multilineToolCallID = "call-1\nfc_2"
+
     static let ordinaryCommand = "deep-research"
     static let refusedCommand = "reset-agent"
     static let sessionCommand = "condense"
@@ -1066,8 +1365,18 @@ private enum FixtureACP {
     static let diagnosticText = "boom"
     static let refusalText = "the fixture refuses to initialize"
     static let toolOutputText = "checks passed"
+    static let toolFailureText = "checks failed"
     static let reviewedCommand = "swift test"
     static let floodCharacter = "x"
+
+    /// The three options one measured agent always sends — note there is no `reject_always`.
+    static var permissionOptions: [[String: Any]] {
+        [
+            ["optionId": "allow-once", "name": "Allow once", "kind": "allow_once"],
+            ["optionId": "allow-always", "name": "Allow always", "kind": "allow_always"],
+            ["optionId": "reject-once", "name": "Reject", "kind": "reject_once"]
+        ]
+    }
 
     static var advertisedCommands: [[String: Any]] {
         [

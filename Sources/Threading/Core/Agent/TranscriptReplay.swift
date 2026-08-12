@@ -15,7 +15,7 @@ enum TranscriptReplayFormat: CaseIterable, Sendable {
         switch kind {
         case .claude: self = .claude
         case .codex: self = .codex
-        case .grok, .openCode: return nil
+        case .grok, .openCode, .cursor: return nil
         }
     }
 

@@ -132,6 +132,99 @@ final class TerminalColorQueryTests: XCTestCase {
         XCTAssertEqual(conflict.foreground, .init(red: 255, green: 255, blue: 255))
         XCTAssertEqual(conflict.background, .init(red: 255, green: 255, blue: 255))
         XCTAssertEqual(conflict.contrastRatio, 1, accuracy: 0.001)
+        XCTAssertEqual(
+            conflict.sample, "[last: 12s] git:main",
+            "the run that went missing is the one thing the reader can look for"
+        )
+    }
+
+    /// The quoted evidence is program output, and is treated as such: control characters never
+    /// reach the band as chrome, whitespace collapses, and a run as wide as the terminal is cut
+    /// to a few words with the cut declared rather than silently made.
+    func testTheQuotedRunIsSanitizedAndBounded() throws {
+        let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 100))
+        view.installColors(TerminalTheme.systemLight.asSwiftTermColors())
+        view.nativeForegroundColor = TerminalTheme.systemLight.foreground
+        view.nativeBackgroundColor = TerminalTheme.systemLight.background
+
+        var conflicts: [TerminalTextColorConflict] = []
+        view.onLowContrastText = { conflicts.append($0) }
+        view.getTerminal().feed(
+            text: "\u{1b}[97m   compiling\u{200b}   every single one of the workspace targets now"
+        )
+
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+
+        let sample = try XCTUnwrap(conflicts.first?.sample)
+        XCTAssertTrue(sample.hasPrefix("compiling every"), "got \(sample)")
+        XCTAssertFalse(sample.unicodeScalars.contains { $0 == "\u{200b}" })
+        XCTAssertLessThanOrEqual(
+            sample.count,
+            TerminalContrastSample.characterLimit + 1,
+            "a full-width run reached the band whole"
+        )
+        XCTAssertEqual(sample.last, TerminalContrastSample.ellipsis)
+    }
+
+    /// One collision, however many unreadable words it printed. The quote makes each report
+    /// distinct without making it a new finding — the pair is still what was wrong.
+    func testASecondUnreadableRunInTheSamePairIsStillOneCollision() throws {
+        let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 420, height: 100))
+        view.installColors(TerminalTheme.systemLight.asSwiftTermColors())
+        view.nativeForegroundColor = TerminalTheme.systemLight.foreground
+        view.nativeBackgroundColor = TerminalTheme.systemLight.background
+
+        var conflicts: [TerminalTextColorConflict] = []
+        view.onLowContrastText = { conflicts.append($0) }
+        view.getTerminal().feed(text: "\u{1b}[97mfirst hidden line\r\nsecond hidden line")
+
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+
+        XCTAssertEqual(conflicts.count, 1)
+        XCTAssertEqual(conflicts.first?.sample, "first hidden line")
+    }
+
+    /// What the pane actually says. The sentence names the run when there is one to name, and
+    /// falls back to the colours alone rather than quoting an empty string.
+    func testTheExplanationQuotesTheRunWhenTheRendererCouldCaptureOne() {
+        let base = TerminalTextColorConflict(
+            foregroundSource: .trueColor(red: 0x50, green: 0x50, blue: 0x50),
+            backgroundSource: .trueColor(red: 0x46, green: 0x46, blue: 0x46),
+            foreground: .init(red: 0x50, green: 0x50, blue: 0x50),
+            background: .init(red: 0x46, green: 0x46, blue: 0x46),
+            contrastRatio: 1.17,
+            sample: "esc to interrupt"
+        )
+        let quoted = TerminalTextVisibilityIssue(
+            identity: .ephemeral(UUID()),
+            themeID: "system-dark",
+            conflict: base
+        )
+        let bare = TerminalTextVisibilityIssue(
+            identity: quoted.identity,
+            themeID: quoted.themeID,
+            conflict: TerminalTextColorConflict(
+                foregroundSource: base.foregroundSource,
+                backgroundSource: base.backgroundSource,
+                foreground: base.foreground,
+                background: base.background,
+                contrastRatio: base.contrastRatio
+            )
+        )
+
+        XCTAssertTrue(quoted.detail.contains("“esc to interrupt”"), quoted.detail)
+        for detail in [quoted.detail, bare.detail] {
+            XCTAssertTrue(detail.contains("#505050"), detail)
+            XCTAssertTrue(detail.contains("#464646"), detail)
+            XCTAssertTrue(detail.contains("1.17:1"), detail)
+            XCTAssertTrue(detail.contains("ANSI 39"), detail)
+        }
+        XCTAssertFalse(bare.detail.contains("“"), bare.detail)
+
+        // A quote is not a new context: the same pair under the same theme stays one dismissal.
+        XCTAssertEqual(quoted.signature, bare.signature)
     }
 
     /// Spaces, ornament, deliberate SGR concealment and default text are not evidence that a
@@ -489,10 +582,18 @@ final class TerminalColorQueryTests: XCTestCase {
                 "every session would have been stranded on the default login"
             )
         }
+        // One key per runtime that *has* one. Cursor does not: its login is in the system
+        // keychain, and pointing either `CURSOR_DATA_DIR` or `XDG_CONFIG_HOME` somewhere else
+        // still reports it authenticated — so there is no name here for a launch to set, and an
+        // invented one would be an inert exception in the filter above.
         XCTAssertEqual(
             AgentEnvironment.accountConfigKeys.count,
-            AgentKind.allCases.count,
-            "a runtime names no config directory of its own"
+            AgentKind.allCases.filter { $0.accountEnvironmentKey != nil }.count,
+            "a runtime that names a config directory has to be exempt from the filter"
+        )
+        XCTAssertTrue(
+            AgentKind.allCases.contains { $0.accountEnvironmentKey == nil },
+            "if every runtime names one, this test has stopped covering the optional case"
         )
     }
 

@@ -174,7 +174,7 @@ final class CodexStreamSession:
             process = try AgentChildProcess.launch(
                 executable: launchPlan.executable,
                 arguments: launchPlan.arguments,
-                environment: AgentEnvironment.launchEnvironment(),
+                environment: launchPlan.launchEnvironment(),
                 sessionID: sessionID
             ) { [weak self] status in
                 Task { @MainActor [weak self] in

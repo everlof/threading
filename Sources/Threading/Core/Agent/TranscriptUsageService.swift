@@ -593,7 +593,7 @@ final class TranscriptUsageService {
                         projectPath: project.folderPath,
                         lastActiveAt: session.lastActiveAt
                     )
-                case .claude, .codex, .grok:
+                case .claude, .codex, .grok, .cursor:
                     return nil
                 }
             }
@@ -657,6 +657,7 @@ final class TranscriptUsageService {
             case .grok: detail = GrokUsageAdapter.coverageDetail
             case .openCode: detail = "No resumable OpenCode sessions are known to Threading yet."
             case .claude, .codex: detail = "No transcript source was found."
+            case .cursor: detail = "Cursor reports no usage over its protocol."
             }
             return (runtime.rawValue, UsageSourceCoverage(
                 runtimeID: runtime.rawValue,
@@ -693,7 +694,7 @@ final class TranscriptUsageService {
                 files = CodexUsageAdapter.rollouts(inAccountAt: source.path)
                     .sorted { $0.path < $1.path }
                 parserID = UsageScanCacheDefaults.codexParserID
-            case .grok, .openCode:
+            case .grok, .openCode, .cursor:
                 files = []
                 parserID = "unused"
             }
@@ -707,7 +708,7 @@ final class TranscriptUsageService {
             guard let runtime = AgentKind(rawValue: source.runtimeID) else { return false }
             switch runtime {
             case .openCode: return true
-            case .claude, .codex, .grok: return false
+            case .claude, .codex, .grok, .cursor: return false
             }
         }
         reporter.begin(totalSources: pending.count + pendingExports.count)
@@ -730,7 +731,7 @@ final class TranscriptUsageService {
                         accountID: account.accountID,
                         accountName: account.accountName
                     )
-                case .grok, .openCode:
+                case .grok, .openCode, .cursor:
                     return []
                 }
             }

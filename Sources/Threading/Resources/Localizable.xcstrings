@@ -19,6 +19,13 @@
     "Sessions resume in the background, one at a time, and are already running when you open them. Everything else stays dormant and resumes when you open it.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sessioner återupptas i bakgrunden, en i taget, och körs redan när du öppnar dem. Övriga förblir inaktiva och återupptas när du öppnar dem."}}}},
     "Settings ▸ General decides what comes back at launch.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inställningar ▸ Allmänt bestämmer vad som kommer tillbaka vid start."}}}},
     "The last quit left no record of what was running.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det senaste avslutet lämnade ingen notering om vad som kördes."}}}},
+    "Commits in each of the past 12 weeks, oldest to newest: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Incheckningar under var och en av de senaste 12 veckorna, äldst till nyast: %@"}}}},
+    "Latest commit %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Senaste incheckning %@"}}}},
+    "No commits yet": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inga incheckningar ännu"}}}},
+    "Past 12 weeks · %@ commit": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Senaste 12 veckorna · %@ incheckning"}}}},
+    "Past 12 weeks · %@ commits": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Senaste 12 veckorna · %@ incheckningar"}}}},
+    "Past 12 weeks · %@+ commits": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Senaste 12 veckorna · %@+ incheckningar"}}}},
+    "Recent activity": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Senaste aktivitet"}}}},
     "Apple's system-authored sign-in workflow, contained by the design boundary.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Apples systemskapade inloggningsflöde, inneslutet av designsystemets gräns."}}}},
     "HostedServiceSignInButton": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "HostedServiceSignInButton"}}}},
     "Account deletion failed. Try again.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kontot kunde inte raderas. Försök igen."}}}},
@@ -470,6 +477,9 @@
     "Chart numbers": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Rita diagram" } } } },
     "Plot measured values natively — comparisons, rankings, breakdowns, trends.": { "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Rita upp mätvärden inbyggt – jämförelser, rangordningar, uppdelningar, trender." } } } },
     "%@ (%@) is %@ against %@ (%@). Threading shows it as sent. Use default foreground (ANSI 39), or change themes.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ (%@) har kontrasten %@ mot %@ (%@). Threading visar färgen som den skickades. Använd standardförgrund (ANSI 39) eller byt tema." } } } },
+    "The text “%@” is %@ (%@) on %@ (%@): %@. Threading shows it as sent. Use default foreground (ANSI 39), or change themes.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Texten ”%@” är %@ (%@) på %@ (%@): %@. Threading visar färgen som den skickades. Använd standardförgrund (ANSI 39) eller byt tema." } } } },
+    "As drawn": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Så här ritades den" } } } },
+    "Text color %@ shown on background color %@": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Textfärgen %@ visad på bakgrundsfärgen %@" } } } },
     "24-bit color": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "24-bitarsfärg" } } } },
     "ANSI black": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-svart" } } } },
     "ANSI blue": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ANSI-blå" } } } },
@@ -510,6 +520,7 @@
     "%@ · %lld requests": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ · %lld anrop" } } } },
     "%@× measured cost": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@× uppmätt kostnad" } } } },
     "%lld active days": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld aktiva dagar" } } } },
+    "%lld changed": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld ändrade" } } } },
     "%lld days · %lld requests": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld dagar · %lld anrop" } } } },
     "%lld requests": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld anrop" } } } },
     "%lld records": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld poster" } } } },
@@ -528,6 +539,7 @@
     "At the observed weekly pace": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Med den observerade veckotakten" } } } },
     "1 reset available · No expiry reported": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 återställning tillgänglig · Ingen giltighetstid rapporterad" } } } },
     "Banked reset expires": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparad återställning löper ut" } } } },
+    "A compact accessible trend for a card; switch the fixed-size aggregate in place.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En kompakt tillgänglig trend för ett kort; byt ut aggregatet med fast storlek på plats."}}}},
     "Banked reset": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparad återställning" } } } },
     "Banked resets": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparade återställningar" } } } },
     "Breakdown": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fördelning" } } } },
@@ -535,6 +547,7 @@
     "Cached input": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Cachelagrad indata" } } } },
     "Claude Code": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Claude Code" } } } },
     "Claude and Codex publish authoritative windows": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Claude och Codex publicerar auktoritativa fönster" } } } },
+    "Commits by week, oldest to newest": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Incheckningar per vecka, äldst till nyast"}}}},
     "Comparison": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Jämförelse" } } } },
     "Consumption": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Förbrukning" } } } },
     "Cost": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kostnad" } } } },
@@ -578,6 +591,12 @@
     "Provider-reported cost where available; exact catalog pricing otherwise.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsrapporterad kostnad där den finns; annars exakt katalogpris." } } } },
     "Provider-neutral charts and the retained dashboard they compose.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsneutrala diagram och den beständiga instrumentpanel de bygger upp." } } } },
     "Providers": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörer" } } } },
+    "ThemedChartPlaceholderView": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ThemedChartPlaceholderView" } } } },
+    "What a chart says with no series: work in flight on the left, a finished empty answer on the right.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vad ett diagram säger utan serier: pågående arbete till vänster, ett färdigt tomt svar till höger." } } } },
+    "Cost and tokens appear here once an agent session has run.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kostnad och tokens visas här när en agentsession har körts." } } } },
+    "Looking for local transcripts.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Letar efter lokala transkript." } } } },
+    "%lld sources read": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld källor lästa" } } } },
+    "%@ · %@": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ · %@" } } } },
     "Reading usage sources…": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Läser användningskällor…" } } } },
     "Recorded reset boundary": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Registrerad återställningsgräns" } } } },
     "Recorded resets": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Registrerade återställningar" } } } },
@@ -589,17 +608,12 @@
     "Resets %@ · %@": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återställs %@ · %@" } } } },
     "Switch data": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Byt data" } } } },
     "Switched the chart data.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bytte diagramdata." } } } },
+    "ThemedBarSparklineView": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ThemedBarSparklineView"}}}},
     "ThemedTimeSeriesChartView": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ThemedTimeSeriesChartView" } } } },
     "Top tools": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Främsta verktyg" } } } },
     "Total cost": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Total kostnad" } } } },
     "Total measured usage and the tools driving it.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Total uppmätt användning och verktygen som står för den." } } } },
     "Tokens": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tokens" } } } },
-    "ThemedChartPlaceholderView": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ThemedChartPlaceholderView" } } } },
-    "What a chart says with no series: work in flight on the left, a finished empty answer on the right.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vad ett diagram säger utan serier: pågående arbete till vänster, ett färdigt tomt svar till höger." } } } },
-    "Cost and tokens appear here once an agent session has run.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kostnad och tokens visas här när en agentsession har körts." } } } },
-    "Looking for local transcripts.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Letar efter lokala transkript." } } } },
-    "%lld sources read": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld källor lästa" } } } },
-    "%@ · %@": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ · %@" } } } },
     "Two provider series with one recorded reset.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Två leverantörsserier med en registrerad återställning." } } } },
     "Usage analytics": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användningsanalys" } } } },
     "Usage chart": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användningsdiagram" } } } },
@@ -7654,17 +7668,6 @@
         }
       }
     },
-    "Code statistics are counted by scc, which is not installed.": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Kodstatistiken räknas av scc, som inte är installerat."
-          }
-        }
-      }
-    },
     "Codex": {
       "extractionState": "stale",
       "localizations": {
@@ -14279,8 +14282,14 @@
       }
     },
     "Opened the page's actions.": {
-      "extractionState": "manual",
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppnade sidans åtgärder." } } }
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppnade sidans åtgärder."
+          }
+        }
+      }
     },
     "Opened the new-session page.": {
       "extractionState": "stale",
@@ -15589,6 +15598,7 @@
         }
       }
     },
+    "Readable": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Läsbar" } } } },
     "Reading transcripts…": {
       "extractionState": "stale",
       "localizations": {
@@ -20427,6 +20437,7 @@
         }
       }
     },
+    "The git operation was cancelled.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Git-åtgärden avbröts."}}}},
     "This chat keeps the permission mode it is running with. The agent's own setting applies the next time it starts.": {
       "localizations": {
         "sv": {
@@ -25402,6 +25413,25 @@
         }
       }
     },
+    "Send to Developer": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skicka till utvecklaren"}}}},
+    "Sends a private report to Threading. Nothing is sent until you press Send.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skickar en privat rapport till Threading. Inget skickas förrän du trycker på Skicka."}}}},
+    "⌘Return sends the report · Return adds a line": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "⌘Retur skickar rapporten · Retur lägger till en rad"}}}},
+    "Sending…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skickar…"}}}},
+    "Sending to Threading’s private inbox…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skickar till Threadings privata inkorg…"}}}},
+    "Report received. Reference: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rapporten har tagits emot. Referens: %@"}}}},
+    "Report saved securely and queued for retry when Threading is active.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rapporten har sparats säkert och placeras i kö för nytt försök när Threading är aktivt."}}}},
+    "Previous launch ended unexpectedly": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Föregående start avslutades oväntat"}}}},
+    "Report received": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rapporten har tagits emot"}}}},
+    "Threading’s developer inbox received the crash summary. Reference: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threadings utvecklarinkorg tog emot kraschsammanfattningen. Referens: %@"}}}},
+    "Report saved": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rapporten har sparats"}}}},
+    "The crash summary is saved securely and will retry when Threading is active.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kraschsammanfattningen har sparats säkert och försöker igen när Threading är aktivt."}}}},
+    "Couldn’t send report": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kunde inte skicka rapporten"}}}},
+    "Threading couldn’t prepare the private report. Nothing was sent.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading kunde inte förbereda den privata rapporten. Inget skickades."}}}},
+    "The report did not pass Threading’s privacy checks.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rapporten klarade inte Threadings integritetskontroller."}}}},
+    "The private report outbox is full.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Utkorgen för privata rapporter är full."}}}},
+    "The screenshot could not be made safe for upload.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skärmbilden kunde inte göras säker för uppladdning."}}}},
+    "The report service returned an unreadable response.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rapporttjänsten returnerade ett oläsbart svar."}}}},
+    "The report service refused the request (%lld).": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rapporttjänsten avvisade begäran (%lld)."}}}},
     "Captured details": {
       "localizations": {
         "sv": {
@@ -27685,7 +27715,73 @@
     "beep": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "pip"}}}},
     "terminal bell": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "terminalens ljudsignal"}}}},
     "alert sound": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "aviseringsljud"}}}},
-    "Show or Hide the Display Panel": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa eller dölj visningspanelen"}}}}
+    "What a blocked approval carries, and an update an agent sends you. The other alerts stay silent. Picking one plays it. Add a Sound copies a sound file into your Sounds folder, where macOS looks for it.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Vad ett blockerat godkännande bär med sig, och en uppdatering som en agent skickar dig. Övriga aviseringar förblir tysta. Att välja ett spelar upp det. Lägg till ljud kopierar en ljudfil till din Sounds-mapp, där macOS letar efter den."}}}},
+    "Silence Sounds": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tysta ljud"}}}},
+    "Silence every sound Threading makes": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tysta varje ljud Threading gör"}}}},
+    "Sounds are silenced — banners and marks are unaffected": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ljuden är tystade — aviseringar och markeringar påverkas inte"}}}},
+    "Silence": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tystnad"}}}},
+    "Silence every sound": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tysta varje ljud"}}}},
+    "Holds every sound Threading makes — notification alerts and the terminal bell alike — without changing what either is set to; switching it off gives both back exactly what they had. Nothing is suppressed: banners still arrive and the sidebar still marks the session, quietly. The speaker at the sidebar's foot is the same switch.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Håller tillbaka varje ljud Threading gör — både aviseringsljud och terminalens ljudsignal — utan att ändra vad någon av dem är inställd på; när det stängs av får båda tillbaka precis det de hade. Ingenting undertrycks: aviseringar kommer fortfarande fram och sidofältet markerar fortfarande sessionen, fast tyst. Högtalaren längst ned i sidofältet är samma knapp."}}}},
+    "Holds every sound Threading makes — notification alerts and the terminal bell alike — without changing what either is set to.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Håller tillbaka varje ljud Threading gör — både aviseringsljud och terminalens ljudsignal — utan att ändra vad någon av dem är inställd på."}}}},
+    "silence": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "tysta"}}}},
+    "silence sounds": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "tysta ljud"}}}},
+    "Inherit": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ärv"}}}},
+    "Sounds": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ljud"}}}},
+    "Customize…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Anpassa…"}}}},
+    "Customize (%lld Event)…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Anpassa (%lld händelse)…"}}}},
+    "Customize (%lld Events)…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Anpassa (%lld händelser)…"}}}},
+    "Bells": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ljudsignaler"}}}},
+    "Silent": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tyst"}}}},
+    "Sounds — %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ljud — %@"}}}},
+    "What every chat, checkout and terminal starts from. Anything that has answered for itself keeps its own answer.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det varje chatt, utcheckning och terminal utgår från. Allt som har svarat för egen del behåller sitt eget svar."}}}},
+    "This checkout's chats and terminals follow these unless they answer for themselves.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här utcheckningens chattar och terminaler följer dessa om de inte svarar för egen del."}}}},
+    "This conversation only. Anything left inheriting follows its checkout, then the app.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Endast den här konversationen. Allt som lämnas ärvande följer sin utcheckning och därefter appen."}}}},
+    "This terminal only. It keeps no record of why a bell rang, so the bell rows below apply to every bell it makes.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Endast den här terminalen. Den för ingen anteckning om varför en ljudsignal ljöd, så raderna för ljudsignaler nedan gäller varje signal den gör."}}}},
+    "All bells": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Alla ljudsignaler"}}}},
+    "All notifications": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Alla aviseringar"}}}},
+    "The agent rings while you're away": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Agenten ringer medan du är borta"}}}},
+    "Rings while you're watching": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ringer medan du tittar"}}}},
+    "Rings during a launch": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ringer under en start"}}}},
+    "Another program rings": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ett annat program ringer"}}}},
+    "Finished or asked while you were away": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Klar eller frågade medan du var borta"}}}},
+    "Finished in the background": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Klar i bakgrunden"}}}},
+    "The agent sends an update": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Agenten skickar en uppdatering"}}}},
+    "A scheduled message went out": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ett schemalagt meddelande skickades"}}}},
+    "Events shown as Silent make no sound anywhere unless given one here — the group and one-click choices never turn them on.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Händelser som visas som Tyst ger inget ljud någonstans om de inte får ett här — grupp- och ettklicksvalen slår aldrig på dem."}}}},
+    "Default (%@)": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Standard (%@)"}}}},
+    "Reset All to Default": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ allt till standard"}}}},
+    "Reset All to Inherited": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ allt till ärvt"}}}},
+    "Sounds for each alert": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ljud för varje avisering"}}}},
+    "Give one alert its own sound — or silence one — without changing the rest. The same sheet a chat or a checkout opens, at the app's own scope.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ge en avisering ett eget ljud — eller tysta en — utan att ändra de övriga. Samma ark som en chatt eller en utcheckning öppnar, fast i appens eget omfång."}}}},
+    "Customize Events…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Anpassa händelser…"}}}},
+    "Sounds for each bell": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ljud för varje ljudsignal"}}}},
+    "Tell the reasons a bell rings apart: an agent asking while you are away, a bell in the session you are watching, one during a launch, and one from another program.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skilj på anledningarna till att en ljudsignal ljuder: en agent som frågar medan du är borta, en signal i sessionen du tittar på, en under en start, och en från ett annat program."}}}},
+    "Custom Sounds": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Egna ljud"}}}},
+    "Sounds you add are copied into ~/Library/Sounds, which is macOS's folder rather than Threading's: anything installed there also appears in System Settings' alert-sound list, and removing a file there removes it from both.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ljud du lägger till kopieras till ~/Library/Sounds, som är macOS mapp och inte Threadings: allt som installeras där syns även i listan över varningsljud i Systeminställningar, och att ta bort en fil där tar bort den från båda."}}}},
+    "Nothing overrides these sounds": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inget åsidosätter de här ljuden"}}}},
+    "A chat, a checkout or a terminal given a sound of its own from its Sounds menu is listed here.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En chatt, en utcheckning eller en terminal som fått ett eget ljud från sin Ljud-meny listas här."}}}},
+    "%lld more scope carries a sound": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld ytterligare omfång bär ett ljud"}}}},
+    "%lld more scopes carry a sound": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld ytterligare omfång bär ett ljud"}}}},
+    "Reset All clears every one of them.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ allt rensar var och en av dem."}}}},
+    "Every custom sound": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Alla egna ljud"}}}},
+    "Puts every chat, checkout and terminal back to what it inherits. The app's own sounds above are untouched.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställer varje chatt, utcheckning och terminal till det den ärver. Appens egna ljud ovan lämnas orörda."}}}},
+    "Chat in %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Chatt i %@"}}}},
+    "Terminal in %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Terminal i %@"}}}},
+    "%@: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@: %@"}}}},
+    "%lld event": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld händelse"}}}},
+    "%lld events": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld händelser"}}}},
+    "Set by a later version": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Angivet av en senare version"}}}},
+    "Sounds: %@ (this chat)": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ljud: %@ (den här chatten)"}}}},
+    "Sounds: %@ (this project)": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ljud: %@ (det här projektet)"}}}},
+    "Sounds: %@ (this terminal)": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ljud: %@ (den här terminalen)"}}}},
+    "custom sounds": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "egna ljud"}}}},
+    "per-event sounds": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ljud per händelse"}}}},
+    "customize events": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "anpassa händelser"}}}},
+    "override": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "åsidosättning"}}}},
+    "Show or Hide the Display Panel": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa eller dölj visningspanelen"}}}},
+    "A reported text/background pair shown touching, for the diagnostic that has to say two colours are the same colour. Nothing is drawn between the halves: the third sample is one white on the same white, and it has to read as one field with its specimen gone.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ett rapporterat text-/bakgrundspar visat kant i kant, för diagnostiken som måste säga att två färger är samma färg. Ingenting ritas mellan halvorna: det tredje provet är ett vitt på samma vitt, och det måste läsas som ett enda fält med sitt provexemplar borta."}}}},
+    "ColorPairSpecimenView": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ColorPairSpecimenView"}}}},
+    "Available in Cursor's own terminal; not available in native Chat yet": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tillgängligt i Cursors egen terminal men ännu inte i inbyggd chatt"}}}}
   },
   "version": "1.0"
 }

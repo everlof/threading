@@ -2,6 +2,116 @@ import AppKit
 import ThreadingExtensionKit
 import ThreadingRemoteKit
 
+/// The identity of the projected row array, separate from live metadata such as streaming text.
+/// A new controller gets a new generation; exact row edits advance only its value. Remote
+/// broadcasting can therefore prove that thousands of settled rows are unchanged without
+/// comparing every one on each streaming frame.
+struct RemoteConversationRowsRevision: Equatable {
+    let generation: UUID
+    let value: Int
+}
+
+struct RemoteConversationProjection {
+    let snapshot: RemoteConversationSnapshotDTO
+    let rowsRevision: RemoteConversationRowsRevision
+}
+
+/// Incremental provider-neutral projection of the native timeline.
+///
+/// Timeline changes already name the exact appended or result-bearing row. Mirroring that edit
+/// here avoids remapping the complete transcript every time `remoteSnapshot` is requested, which
+/// streaming remote clients do up to twenty times a second.
+struct RemoteConversationRowProjection {
+    private let generation = UUID()
+    private(set) var revision = 0
+    private(set) var rows: [RemoteConversationRowDTO] = []
+
+    var rowsRevision: RemoteConversationRowsRevision {
+        RemoteConversationRowsRevision(generation: generation, value: revision)
+    }
+
+    mutating func apply(
+        _ change: ConversationTimeline.Change,
+        timelineRows: [ConversationTimeline.Row]
+    ) {
+        switch change {
+        case .appended(let index):
+            guard index == rows.count, timelineRows.indices.contains(index) else {
+                rebuild(from: timelineRows)
+                return
+            }
+            rows.append(Self.dto(for: timelineRows[index], at: index))
+            revision &+= 1
+
+        case .resultAttached(let index):
+            guard rows.indices.contains(index), timelineRows.indices.contains(index) else {
+                rebuild(from: timelineRows)
+                return
+            }
+            rows[index] = Self.dto(for: timelineRows[index], at: index)
+            revision &+= 1
+
+        case .streaming, .status, .runProgress, .turnSettled, .adoptedSessionID:
+            return
+        }
+    }
+
+    mutating func rebuild(from timelineRows: [ConversationTimeline.Row]) {
+        rows = timelineRows.enumerated().map { Self.dto(for: $0.element, at: $0.offset) }
+        revision &+= 1
+    }
+
+    static func dto(
+        for row: ConversationTimeline.Row,
+        at index: Int
+    ) -> RemoteConversationRowDTO {
+        let id = String(index)
+        switch row {
+        case .userMessage(let message):
+            return RemoteConversationRowDTO(
+                id: id,
+                kind: "user",
+                text: message.text,
+                contextAttachments: message.context.map(\.remoteDTO)
+            )
+        case .assistant(let markdown):
+            return RemoteConversationRowDTO(id: id, kind: "assistant", text: markdown)
+        case .thinking(let text):
+            return RemoteConversationRowDTO(id: id, kind: "thinking", text: text)
+        case .toolCall(let call):
+            return RemoteConversationRowDTO(
+                id: id,
+                kind: "tool",
+                toolName: call.name,
+                summary: call.summary,
+                result: call.result?.text,
+                // The settled outcome, not the raw wire flag, so a sniffed failure reads
+                // as failed on remote clients too.
+                isError: call.result?.outcome == .failed
+            )
+        case .notice(let text, let kind):
+            return RemoteConversationRowDTO(
+                id: id,
+                kind: "notice",
+                text: text,
+                isError: kind == .error
+            )
+        case .turnOutcome(let outcome):
+            let text = switch outcome {
+            case .completed: L10n.string("Completed")
+            case .stopped: L10n.string("Interrupted")
+            case .failed: L10n.string("Failed")
+            }
+            return RemoteConversationRowDTO(
+                id: id,
+                kind: "notice",
+                text: text,
+                isError: outcome == .failed
+            )
+        }
+    }
+}
+
 enum ConversationComposerCommands {
     static let skillsID = RemoteComposerCatalog.skillsCommandID
     static let statusID = "threading.command:status"
@@ -96,6 +206,7 @@ final class ConversationViewController: NSViewController {
     /// tree follows the changes it reports rather than being built straight from events, so
     /// every decision about the shape of a row is testable on its own.
     var timeline: ConversationTimeline
+    var remoteRowProjection = RemoteConversationRowProjection()
     private let subagentState: SubagentSessionState
     var subagents: SubagentTimeline { subagentState.timeline }
     var selectedSubagentThreadID: String? { subagentState.selectedThreadID }
@@ -486,7 +597,6 @@ final class ConversationViewController: NSViewController {
         case timeline(Int)
         case divider(turnStart: Int)
         case fold(turnStart: Int)
-        case changedFiles(UUID)
         case retained(UUID)
         case streaming
     }
@@ -499,14 +609,17 @@ final class ConversationViewController: NSViewController {
         let totalNanoseconds: UInt64
     }
 
-    struct PresentationItem {
-        struct ChangedFilesContent {
-            let tree: ChangedFilesTree
-            let previews: [String: ChangedFileDiffPreview]
-            let checkpointID: GitTurnCheckpointID?
-            let offersViewDiff: Bool
-        }
+    #if DEBUG
+    struct TerminationMeasurements {
+        var viewportNanoseconds: UInt64 = 0
+        var permissionsNanoseconds: UInt64 = 0
+        var streamNanoseconds: UInt64 = 0
+    }
 
+    private(set) var lastTerminationMeasurements = TerminationMeasurements()
+    #endif
+
+    struct PresentationItem {
         enum Content {
             case timeline(Int)
             case divider
@@ -516,7 +629,6 @@ final class ConversationViewController: NSViewController {
                 duration: TimeInterval?,
                 outcome: TurnOutcome
             )
-            case changedFiles(ChangedFilesContent)
             case retained(NSView)
             case streaming(NSTextField)
         }
@@ -530,10 +642,6 @@ final class ConversationViewController: NSViewController {
     /// integer identity; expensive Markdown/tool views are constructed when the table requests
     /// a viewport row and released when that host is reused.
     var presentationItems: [PresentationItem] = []
-
-    /// Disclosure belongs to the stable presentation identity, not to a recycled card view.
-    /// Most historical cards never enter this dictionary because their default state is enough.
-    var changedFilesCollapseState: [PresentationID: Set<Int>] = [:]
 
     /// Exact timeline identity → table row lookup. Replay leaves it empty while folding mutates
     /// the presentation and builds it once at the final reload; live structural edits rebuild it
@@ -704,7 +812,7 @@ final class ConversationViewController: NSViewController {
         let plan = {
             let current = ProjectStore.shared.session(withID: agentSession.id) ?? agentSession
             if let launchPlanProvider {
-                return launchPlanProvider(current, project, nil)
+                return try launchPlanProvider(current, project, nil)
             }
             return try AgentLauncher.streamPlan(for: current, in: project)
         }
@@ -774,6 +882,17 @@ final class ConversationViewController: NSViewController {
                 sessionID: agentSession.id,
                 workingDirectory: agentSession.workingDirectory(in: project),
                 profile: .grok,
+                plan: plan
+            )
+        case .cursor:
+            // The second ACP provider, and the whole of what that costs: one profile value.
+            // The working directory is the session's own checkout every time, fresh or resumed,
+            // because `session/load` accepts any cwd and silently rebinds the live session to
+            // whatever it is handed (§10.4) — nothing on the agent side will catch a mismatch.
+            self.stream = ACPStreamSession(
+                sessionID: agentSession.id,
+                workingDirectory: agentSession.workingDirectory(in: project),
+                profile: .cursor,
                 plan: plan
             )
         case .openCode:
@@ -1731,6 +1850,9 @@ final class ConversationViewController: NSViewController {
         // marked the timer `nonisolated(unsafe)` and still raced the pending DispatchWorkItem.
         // Saving before the stream is stopped also preserves the last viewport if termination
         // synchronously changes presentation state.
+        #if DEBUG
+        let viewportStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
         if preservingViewport {
             saveConversationViewport()
         } else {
@@ -1739,6 +1861,9 @@ final class ConversationViewController: NSViewController {
         }
         workingStatusTimer?.invalidate()
         workingStatusTimer = nil
+        #if DEBUG
+        let viewportEnded = DispatchTime.now().uptimeNanoseconds
+        #endif
 
         // Anything still waiting on the user is denied rather than left to hang on the CLI's
         // timeout: the session it belonged to is going away. The card on screen resolves
@@ -1754,7 +1879,18 @@ final class ConversationViewController: NSViewController {
             pending.decide(.deny(reason: "The session ended before the request was answered."))
         }
 
+        #if DEBUG
+        let permissionsEnded = DispatchTime.now().uptimeNanoseconds
+        #endif
         stream.terminate()
+        #if DEBUG
+        let streamEnded = DispatchTime.now().uptimeNanoseconds
+        lastTerminationMeasurements = TerminationMeasurements(
+            viewportNanoseconds: viewportEnded - viewportStarted,
+            permissionsNanoseconds: permissionsEnded - viewportEnded,
+            streamNanoseconds: streamEnded - permissionsEnded
+        )
+        #endif
     }
 
     func focusPrompt() {
@@ -1794,75 +1930,36 @@ final class ConversationViewController: NSViewController {
     /// Provider-neutral rows for mobile/web conversation clients. Tool inputs have already
     /// been reduced to their safe one-line summary; raw provider arguments never cross this
     /// boundary accidentally.
-    var remoteSnapshot: RemoteConversationSnapshotDTO {
-        let rows = timeline.rows.enumerated().map { index, row in
-            let id = String(index)
-            switch row {
-            case .userMessage(let message):
-                return RemoteConversationRowDTO(
-                    id: id,
-                    kind: "user",
-                    text: message.text,
-                    contextAttachments: message.context.map(\.remoteDTO)
-                )
-            case .assistant(let markdown):
-                return RemoteConversationRowDTO(id: id, kind: "assistant", text: markdown)
-            case .thinking(let text):
-                return RemoteConversationRowDTO(id: id, kind: "thinking", text: text)
-            case .toolCall(let call):
-                return RemoteConversationRowDTO(
-                    id: id,
-                    kind: "tool",
-                    toolName: call.name,
-                    summary: call.summary,
-                    result: call.result?.text,
-                    // The settled outcome, not the raw wire flag, so a sniffed failure reads
-                    // as failed on remote clients too.
-                    isError: call.result?.outcome == .failed
-                )
-            case .notice(let text, let kind):
-                return RemoteConversationRowDTO(
-                    id: id,
-                    kind: "notice",
-                    text: text,
-                    isError: kind == .error
-                )
-            case .turnOutcome(let outcome):
-                let text = switch outcome {
-                case .completed: L10n.string("Completed")
-                case .stopped: L10n.string("Interrupted")
-                case .failed: L10n.string("Failed")
-                }
-                return RemoteConversationRowDTO(
-                    id: id,
-                    kind: "notice",
-                    text: text,
-                    isError: outcome == .failed
-                )
-            }
-        }
-        return RemoteConversationSnapshotDTO(
-            rows: rows,
-            streamingText: timeline.streamingText,
-            canSend: stream.canSend && !isPreparingTurn,
-            composerCapabilities: composerCapabilities.map { capability in
-                RemoteComposerCapabilityDTO(
-                    id: capability.id,
-                    name: capability.name,
-                    displayName: capability.displayName,
-                    description: capability.description,
-                    argumentHint: capability.argumentHint,
-                    aliases: capability.aliases,
-                    kind: capability.kind.rawValue,
-                    isAvailableInSkillCatalog: capability.isAvailableInSkillCatalog,
-                    trigger: capability.trigger.rawValue,
-                    presentation: capability.presentation.rawValue,
-                    isEnabled: capability.isEnabled,
-                    unavailableReason: capability.unavailableReason
-                )
-            },
-            permission: activePermissionCard?.remoteRequest
+    var remoteProjection: RemoteConversationProjection {
+        RemoteConversationProjection(
+            snapshot: RemoteConversationSnapshotDTO(
+                rows: remoteRowProjection.rows,
+                streamingText: timeline.streamingText,
+                canSend: stream.canSend && !isPreparingTurn,
+                composerCapabilities: composerCapabilities.map { capability in
+                    RemoteComposerCapabilityDTO(
+                        id: capability.id,
+                        name: capability.name,
+                        displayName: capability.displayName,
+                        description: capability.description,
+                        argumentHint: capability.argumentHint,
+                        aliases: capability.aliases,
+                        kind: capability.kind.rawValue,
+                        isAvailableInSkillCatalog: capability.isAvailableInSkillCatalog,
+                        trigger: capability.trigger.rawValue,
+                        presentation: capability.presentation.rawValue,
+                        isEnabled: capability.isEnabled,
+                        unavailableReason: capability.unavailableReason
+                    )
+                },
+                permission: activePermissionCard?.remoteRequest
+            ),
+            rowsRevision: remoteRowProjection.rowsRevision
         )
+    }
+
+    var remoteSnapshot: RemoteConversationSnapshotDTO {
+        remoteProjection.snapshot
     }
 
     private func refreshComposerCapabilitySurfaces() {
@@ -2825,6 +2922,15 @@ final class ConversationViewController: NSViewController {
 
         var items: [ThemedMenuEntry] = []
 
+        // The account's own windows, once. They are identical under every model by
+        // construction, so the rows carry only the windows scoped to them — and the header is
+        // what lets a row with no line of its own read as "nothing beyond this" rather than as
+        // a failed lookup.
+        if let account, let header = AccountUsageMenu.modelMenuHeader(for: account) {
+            items.append(.item(header))
+            items.append(.separator)
+        }
+
         // Kept for the two cases the list cannot mark: nothing has named a model at all, and a
         // model this catalog does not carry.
         if !markedInList {
@@ -3088,7 +3194,7 @@ final class ConversationViewController: NSViewController {
             guard stream.canSend else { return }
             persist(false)
 
-        case .grok, .openCode:
+        case .grok, .openCode, .cursor:
             // Unreachable today, and deliberately not silent. The chip is already hidden when
             // `AgentModels.options(for:)` is empty, which is every runtime here — so a runtime
             // that starts publishing a model catalog would reach this line, and returning
@@ -3146,7 +3252,7 @@ final class ConversationViewController: NSViewController {
             guard stream.canSend else { return }
             persist(false)
 
-        case .grok, .openCode:
+        case .grok, .openCode, .cursor:
             // Unreachable today, and deliberately not silent. The chip is already hidden when
             // `AgentModels.options(for:)` is empty, which is every runtime here — so a runtime
             // that starts publishing a model catalog would reach this line, and returning

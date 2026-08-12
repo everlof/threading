@@ -52,6 +52,7 @@ final class AppSettings {
         registerDefaults()
         migrateLegacyCodexHookPreferences(from: legacyPreferences)
         migrateClosingConfirmation()
+        migrateAttentionAlertSoundSwitch()
     }
 
     // MARK: - Settings
@@ -348,48 +349,113 @@ final class AppSettings {
         hiddenNotices = []
     }
 
-    /// Whether the one alert that sounds is heard.
-    ///
-    /// Separate from the alert itself: someone who wants to see that a turn is blocked without
-    /// being pinged has no way to say so if the sound rides along with the banner. On by
-    /// default, since the blocked alert is the one holding work up.
-    var playsAttentionAlertSound: Bool {
-        get { defaults.bool(forKey: Keys.playsAttentionAlertSound) }
-        set {
-            defaults.set(newValue, forKey: Keys.playsAttentionAlertSound)
-            notifyChanged()
-        }
-    }
-
     /// What a program's `BEL` sounds like, including not at all.
     ///
-    /// Deliberately *not* under `playsAttentionAlertSound` or any of the notification switches:
-    /// a bell is the program in front of you asking for attention, not Threading noticing
-    /// something on your behalf, so muting a project's notifications does not gag its terminal.
-    /// Unseeded, and an absent key is the system alert sound — which is what every install
-    /// heard before this setting existed.
-    var terminalBellSound: TerminalBellSound {
-        get { TerminalBellSound(storedValue: defaults.string(forKey: Keys.terminalBellSound)) }
+    /// Deliberately *not* under any of the notification switches: a bell is the program in
+    /// front of you asking for attention, not Threading noticing something on your behalf, so
+    /// muting a project's notifications does not gag its terminal. Unseeded, and an absent key
+    /// is the system alert sound — which is what every install heard before this setting
+    /// existed.
+    var terminalBellSound: SoundChoice {
+        get {
+            SoundChoice(storedValue: defaults.string(forKey: Keys.terminalBellSound))
+                ?? TerminalBellDefaults.sound
+        }
         set {
             defaults.set(newValue.storedValue, forKey: Keys.terminalBellSound)
             notifyChanged()
         }
     }
 
-    /// Which sound that is.
+    /// Which sound an alert that sounds carries, including none.
     ///
     /// Unseeded, because the default is the *absence* of a choice: no key means macOS's own
     /// notification tone, which is what every install has heard until it says otherwise. A
-    /// stored name is a file name resolved at delivery time, never a path — see
-    /// `AttentionAlertSound`.
-    var attentionAlertSound: AttentionAlertSound {
-        get { AttentionAlertSound(storedValue: defaults.string(forKey: Keys.attentionAlertSound)) }
+    /// stored name is a file name resolved at delivery time, never a path — see `SoundChoice`.
+    /// `silent` is what the retired "Play a sound" checkbox became.
+    var attentionAlertSound: SoundChoice {
+        get {
+            SoundChoice(storedValue: defaults.string(forKey: Keys.attentionAlertSound))
+                ?? AttentionAlertDefaults.sound
+        }
         set {
-            if let stored = newValue.storedValue {
-                defaults.set(stored, forKey: Keys.attentionAlertSound)
-            } else {
-                defaults.removeObject(forKey: Keys.attentionAlertSound)
-            }
+            defaults.set(newValue.storedValue, forKey: Keys.attentionAlertSound)
+            notifyChanged()
+        }
+    }
+
+    /// Sounds chosen for one event rather than for a whole kind, keyed by `SoundEvent` raw
+    /// value and holding `SoundChoice` stored strings.
+    ///
+    /// Typed `[String: String]` at the boundary on purpose, and read and written whole: a key
+    /// written by a **later** build, naming an event this one has never heard of, has to survive
+    /// being read and written here. Decoding to the typed form for use and writing back through
+    /// it would delete exactly those entries, which is how a downgrade-then-upgrade silently
+    /// discards someone's configuration.
+    ///
+    /// Unseeded. An absent key is not "no sound" but "no entry": resolution widens to the kind
+    /// level and then to the built-in answer — see `SoundResolution`.
+    var soundEventChoices: [String: String] {
+        // `dictionary(forKey:)` answers `[String: Any]`, and a value that is not a string is
+        // not a `SoundChoice` anybody wrote. Dropping those rather than casting the whole
+        // dictionary keeps one corrupt entry from discarding the eight beside it.
+        (defaults.dictionary(forKey: Keys.soundEventChoices) ?? [:])
+            .compactMapValues { $0 as? String }
+    }
+
+    /// The entry for one event, or nil when this scope has nothing to say about it.
+    func soundChoice(for event: SoundEvent) -> SoundChoice? {
+        SoundChoice(storedValue: soundEventChoices[event.rawValue])
+    }
+
+    /// Writes one entry, or removes it. `nil` means *inherit* and is stored as absence — a
+    /// stored value equal to what would have been inherited is what stops a later change to a
+    /// broader level from reaching this event.
+    func setSoundChoice(_ choice: SoundChoice?, for event: SoundEvent) {
+        var raw = soundEventChoices
+        raw[event.rawValue] = choice?.storedValue
+        if raw.isEmpty {
+            defaults.removeObject(forKey: Keys.soundEventChoices)
+        } else {
+            defaults.set(raw, forKey: Keys.soundEventChoices)
+        }
+        notifyChanged()
+    }
+
+    /// Clears every sound the app scope has been given — both pickers and the per-event map —
+    /// so each falls back to the built-in answer it had before anybody chose anything.
+    ///
+    /// What the Customize sheet's *Reset All* does at this scope. The keys are **removed**
+    /// rather than written back with their defaults, so an install that has reset reads exactly
+    /// like one that never chose: absence is the default's own encoding here, and writing the
+    /// value would leave a preference behind claiming somebody picked it.
+    func resetSoundChoices() {
+        defaults.removeObject(forKey: Keys.soundEventChoices)
+        defaults.removeObject(forKey: Keys.terminalBellSound)
+        defaults.removeObject(forKey: Keys.attentionAlertSound)
+        notifyChanged()
+    }
+
+    /// Whether every sound the app can make is held — the global silence gate.
+    ///
+    /// **A gate, not a scope.** It sits *ahead* of the resolution chain rather than at the front
+    /// of it, and it writes to no override map: toggling it off restores every scope's answer
+    /// untouched, for the same reason the mute writer stores `nil` for a matching value —
+    /// transient state must not rewrite configuration. The shape is `AttentionAlertScope`'s,
+    /// which explains why an app-wide switch is deliberately not one more fallback but a gate no
+    /// per-scope exception may outlive.
+    ///
+    /// It silences **audio** and nothing else. Banners still post, the sidebar still raises its
+    /// hand, a bell still ends the inferred turn: Mute answers "don't tell me", this answers
+    /// "tell me quietly", at app width. Settings auditions are deliberately outside it — see
+    /// `TerminalBell.play` and `NotificationSoundPreview`.
+    ///
+    /// It persists across relaunch, which a hidden state could not honestly do: the speaker at
+    /// the sidebar's foot is worn while it holds, so a quiet app is explicable from the window.
+    var silencesAllSounds: Bool {
+        get { defaults.bool(forKey: Keys.silencesAllSounds) }
+        set {
+            defaults.set(newValue, forKey: Keys.silencesAllSounds)
             notifyChanged()
         }
     }
@@ -1147,6 +1213,26 @@ final class AppSettings {
         defaults.set(true, forKey: Keys.didMigrateClosingConfirmation)
     }
 
+    /// `playsAttentionAlertSound` was a checkbox for something the picker can now say itself.
+    ///
+    /// Its meaning — "alerts never sound" — is `attentionAlertSound = .silent`, so an unchecked
+    /// box carries over as that value and silences exactly the alerts it silenced before. A
+    /// checked box and an install that never touched it both write nothing: sounding is what
+    /// the picker already answers.
+    ///
+    /// The old key's **seed is gone**, which is what makes the removal the marker: with nothing
+    /// registered, `object(forKey:)` answers non-nil only while a real stored value survives, so
+    /// this runs once and every later launch returns on the first line. Written through
+    /// `defaults` rather than the property, because the setter posts `AppSettingsDidChange`
+    /// while the singleton is still being built.
+    private func migrateAttentionAlertSoundSwitch() {
+        guard defaults.object(forKey: Keys.playsAttentionAlertSound) != nil else { return }
+        if !defaults.bool(forKey: Keys.playsAttentionAlertSound) {
+            defaults.set(SoundChoice.silent.storedValue, forKey: Keys.attentionAlertSound)
+        }
+        defaults.removeObject(forKey: Keys.playsAttentionAlertSound)
+    }
+
     /// The seeded values, and the one place they are registered on the standard defaults.
     ///
     /// This used to happen only in `init`, while the `nonisolated static` readers below go
@@ -1178,7 +1264,6 @@ final class AppSettings {
             Keys.convertsDroppedImages: true,
             Keys.notifiesOnAttention: true,
             Keys.automaticUpdateChecksEnabled: true,
-            Keys.playsAttentionAlertSound: true,
             Keys.reportsClaudeLifecycleEvents: true,
             Keys.remoteAccessAllowsOwnerRelayFallback: false,
             Keys.remoteAccessKeepsRelayReady: false,
@@ -1213,7 +1298,7 @@ final class AppSettings {
         switch kind {
         case .claude: return Keys.claudeStartupSpeed
         case .codex: return Keys.codexStartupSpeed
-        case .grok, .openCode: return nil
+        case .grok, .openCode, .cursor: return nil
         }
     }
 
@@ -1272,6 +1357,8 @@ final class AppSettings {
         static let copiesTerminalSelection = "copiesTerminalSelection"
         static let notifiesOnAttention = "notifiesOnAttention"
         static let disabledAttentionAlerts = "disabledAttentionAlerts"
+        /// Retired, and read only by `migrateAttentionAlertSoundSwitch`. Deliberately unseeded
+        /// now: the migration reads absence as "already carried over".
         static let playsAttentionAlertSound = "playsAttentionAlertSound"
         /// Unseeded on purpose: an absent key is the macOS default tone, which is a real
         /// answer rather than a missing one.
@@ -1279,6 +1366,12 @@ final class AppSettings {
         /// Unseeded for the same reason: absent is the system alert sound, which is what the
         /// bell did before it was a setting.
         static let terminalBellSound = "terminalBellSound"
+        /// Unseeded, and absent for every install that has not asked one event to sound unlike
+        /// its kind. Read and written whole so a key from a later build survives.
+        static let soundEventChoices = "soundEventChoices"
+        /// Unseeded on purpose: `bool(forKey:)` answering `false` for an absent key is exactly
+        /// the documented default — an install that has never asked for quiet is audible.
+        static let silencesAllSounds = "silencesAllSounds"
         static let disabledAttachmentDetectionAgentKinds = "disabledAttachmentDetectionAgentKinds"
         static let includesAttachmentsOutsideProject = "includesAttachmentsOutsideProject"
         static let capturesPageBeforeAgentActions = "capturesPageBeforeAgentActions"

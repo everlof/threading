@@ -79,10 +79,12 @@ enum AccountEmailProbe {
     /// for the default — so this asks about exactly the login a session would run as.
     private static func probe(_ account: AgentAccount, shell: String) -> String? {
         var environment = AgentEnvironment.launchEnvironment()
-        if account.isDefault {
-            environment.removeValue(forKey: AgentKind.claude.accountEnvironmentKey)
-        } else {
-            environment[AgentKind.claude.accountEnvironmentKey] = account.configPath
+        if let accountKey = AgentKind.claude.accountEnvironmentKey {
+            if account.isDefault {
+                environment.removeValue(forKey: accountKey)
+            } else {
+                environment[accountKey] = account.configPath
+            }
         }
         var command = ShellCommand(word: AgentDefaults.claudeExecutable)
         command.append(word: "auth")

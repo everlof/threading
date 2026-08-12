@@ -96,7 +96,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
     /// whitespace and `&&` is a word that reached the command line without passing through the
     /// quoter, which is the failure this design exists to prevent and the one a `ShellCommand`
     /// unit test cannot see.
-    func testAHostileProjectAndSessionProduceNoRawSyntax() {
+    func testAHostileProjectAndSessionProduceNoRawSyntax() throws {
         for hostile in Self.hostile {
             let project = Project(
                 name: hostile,
@@ -104,7 +104,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
             )
             let session = AgentSession(kind: .claude, title: hostile, model: hostile)
 
-            let plan = AgentLauncher.plan(for: session, in: project, initialPrompt: hostile)
+            let plan = try AgentLauncher.plan(for: session, in: project, initialPrompt: hostile)
             let source = try? XCTUnwrap(plan.arguments.last)
             let residue = Self.strippingQuotedSpans(source ?? "")
                 .replacingOccurrences(of: "&&", with: "")
@@ -120,11 +120,11 @@ final class AgentLaunchQuotingTests: XCTestCase {
 
     /// The launch is handed to a shell as **one argument**, so nothing after it can be read as
     /// a further command however the words inside it are shaped.
-    func testTheLaunchIsASingleShellArgument() {
+    func testTheLaunchIsASingleShellArgument() throws {
         let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
         let session = AgentSession(kind: .codex, title: "t")
 
-        let plan = AgentLauncher.plan(for: session, in: project)
+        let plan = try AgentLauncher.plan(for: session, in: project)
 
         XCTAssertEqual(
             plan.arguments.dropLast(),
@@ -209,7 +209,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
         )
 
         let plans = [
-            AgentLauncher.plan(for: session, in: project),
+            try AgentLauncher.plan(for: session, in: project),
             try AgentLauncher.streamPlan(for: session, in: project)
         ]
 
@@ -241,7 +241,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
 
             let words = try Self.tokenizing(
                 XCTUnwrap(
-                    AgentLauncher.plan(
+                    try AgentLauncher.plan(
                         for: session,
                         in: project,
                         initialPrompt: opening
@@ -266,7 +266,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
         session.model = "openrouter/x-ai/grok-4"
         let opening = "- inspect this safely"
 
-        let plan = AgentLauncher.plan(for: session, in: project, initialPrompt: opening)
+        let plan = try AgentLauncher.plan(for: session, in: project, initialPrompt: opening)
         let words = try Self.tokenizing(XCTUnwrap(plan.arguments.last))
 
         XCTAssertEqual(plan.resumeState, .awaitingIdentifier)
@@ -285,7 +285,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
         let transcriptID = TranscriptID("ses_test")
         session.resumeState = .resumable(transcriptID)
 
-        let plan = AgentLauncher.plan(
+        let plan = try AgentLauncher.plan(
             for: session,
             in: project,
             initialPrompt: "must not be replayed"
@@ -307,7 +307,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
         session.permissionMode = .acceptEdits
         let opening = "- inspect this safely"
 
-        let plan = AgentLauncher.plan(for: session, in: project, initialPrompt: opening)
+        let plan = try AgentLauncher.plan(for: session, in: project, initialPrompt: opening)
         let words = try Self.tokenizing(XCTUnwrap(plan.arguments.last))
         let transcriptID = TranscriptID(id.uuidString.lowercased())
 
@@ -334,7 +334,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
         let transcriptID = TranscriptID("01935b8d-8f29-7abc-9def-0123456789ab")
         session.resumeState = .resumable(transcriptID)
 
-        let plan = AgentLauncher.plan(
+        let plan = try AgentLauncher.plan(
             for: session,
             in: project,
             initialPrompt: "must not be replayed"
@@ -500,7 +500,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
 
         let words = try Self.tokenizing(
             XCTUnwrap(
-                AgentLauncher.plan(
+                try AgentLauncher.plan(
                     for: session,
                     in: project,
                     initialPrompt: opening

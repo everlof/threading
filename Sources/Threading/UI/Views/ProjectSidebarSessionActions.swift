@@ -27,6 +27,17 @@ struct SessionSurfaceTogglePresentation: Equatable {
     static func title(usesNativeUI: Bool, kind: AgentKind) -> String {
         usesNativeUI ? nativeTitle : kind.originalUITitle
     }
+
+    /// Whether this runtime has a surface to switch *to*.
+    ///
+    /// Both halves are required and neither is enough on its own: a runtime Threading cannot
+    /// render has nothing to offer, and a runtime whose own terminal shows a *different*
+    /// conversation must not be offered it. Cursor is the second case — its TUI and its ACP
+    /// server keep separate chats — which is why the answer is a capability pair rather than
+    /// `supportsNativeUI` alone. See `AgentCapabilities.terminalUI`.
+    static func canSwitchSurface(_ kind: AgentKind) -> Bool {
+        kind.supportsNativeUI && kind.supports(.terminalUI)
+    }
 }
 
 // MARK: - Permission Mode Presentation
@@ -636,6 +647,9 @@ extension ProjectSidebarViewController {
 
         appendGroupSeparator(&entries)
         entries.append(sessionThemeEntry(for: sessionID))
+        // Beside Theme rather than beside Mute: both of these are presentation — how this chat
+        // looks, how it sounds — while Mute is delivery and lives in the fold below.
+        entries.append(sessionSoundEntry(for: sessionID))
         if let permissionMode = permissionModeEntry(for: session) {
             entries.append(permissionMode)
         }
@@ -945,7 +959,7 @@ extension ProjectSidebarViewController {
     /// relaunches where it left off rather than starting over. What it does cost is the live
     /// process, which is why a working session confirms first.
     private func interfaceEntry(for session: AgentSession) -> ThemedMenuEntry? {
-        guard session.kind.supportsNativeUI else { return nil }
+        guard SessionSurfaceTogglePresentation.canSwitchSurface(session.kind) else { return nil }
 
         let rows: [ThemedMenuEntry] = [true, false].map { usesNativeUI in
             .item(ThemedMenuItem(

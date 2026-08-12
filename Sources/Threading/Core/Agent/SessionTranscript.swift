@@ -35,7 +35,7 @@ enum SessionTranscript {
             return ClaudeTranscript.url(sessionID: sessionID, account: account, in: project)
         case .codex:
             return CodexTranscript.url(sessionID: sessionID, account: account)
-        case .grok, .openCode:
+        case .grok, .openCode, .cursor:
             return nil
         }
     }

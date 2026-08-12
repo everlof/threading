@@ -18,7 +18,7 @@ enum ProjectsStateVersion {
 /// selected through OpenCode is still an OpenCode session, while the standalone `grok` program
 /// is its own runtime with its own sessions and launch contract.
 /// Each member documents which runtimes have it and why, because this declaration is where
-/// someone adding a fifth runtime reads the contract. The first seven also have a named
+/// someone adding a sixth runtime reads the contract. The first seven also have a named
 /// `supportsX` property on `AgentKind`, which predates `supports(_:)`; new capabilities are
 /// read through `supports(_:)` rather than growing that surface further.
 ///
@@ -225,6 +225,24 @@ struct AgentCapabilities: OptionSet {
   /// Narrow facts such as transcript titles, model records and refused-turn records imply
   /// this base capability rather than each quietly inventing its own runtime allow-list.
   static let transcriptReplay = Self(rawValue: 1 << 27)
+
+  /// The runtime's own interactive TUI can host a Threading session, and switching a session
+  /// between that terminal and native Chat keeps the same conversation.
+  ///
+  /// Claude, Codex, Grok and OpenCode: for each, the id Threading stores names one conversation
+  /// that both surfaces resume. Cursor does not, and it is the reason this capability exists.
+  /// Measured 2026-08-12 (§11 of `CURSOR_ACP_FINDINGS.md`): `cursor-agent acp` writes its chats
+  /// to `~/.cursor/acp-sessions/<uuid>/`, while the interactive `cursor-agent` writes
+  /// `~/.cursor/projects/<slug>/agent-transcripts/<uuid>/`, and **neither store can read the
+  /// other's id**. ACP answers `session/load` for a TUI chat with
+  /// `-32602 Session "…" not found`; the TUI answers `--resume <acp id>` by opening a blank
+  /// chat with no error at all. A Cursor session offered both surfaces would lose its
+  /// conversation on the first switch, silently — so it is offered one.
+  ///
+  /// This governs the *surface*, not the launch: `AgentSession.init` clamps `usesNativeUI` on
+  /// for a runtime without it, and `AgentLauncher.plan(for:in:)` refuses to build a terminal
+  /// command line for one.
+  static let terminalUI = Self(rawValue: 1 << 28)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -241,6 +259,7 @@ enum AgentKind: String, Codable, CaseIterable {
   case codex
   case grok
   case openCode = "opencode"
+  case cursor
 
   /// Human-readable name shown in menus and the sidebar.
   var displayName: String {
@@ -249,6 +268,7 @@ enum AgentKind: String, Codable, CaseIterable {
     case .codex: return "Codex"
     case .grok: return "Grok"
     case .openCode: return "OpenCode"
+    case .cursor: return "Cursor"
     }
   }
 
@@ -262,6 +282,7 @@ enum AgentKind: String, Codable, CaseIterable {
     case .codex: return AgentDefaults.codexExecutable
     case .grok: return AgentDefaults.grokExecutable
     case .openCode: return AgentDefaults.openCodeExecutable
+    case .cursor: return AgentDefaults.cursorExecutable
     }
   }
 
@@ -271,13 +292,13 @@ enum AgentKind: String, Codable, CaseIterable {
   /// This switch is the only place a runtime is named to decide what the host may do with it.
   /// Everywhere else asks `supports(_:)`, which is enforced by
   /// `scripts/check_architecture_boundaries.sh`: a feature that branches on the runtime's own
-  /// identity is a feature nobody can extend to a fifth runtime without re-reading the whole
+  /// identity is a feature nobody can extend to a sixth runtime without re-reading the whole
   /// app.
   var capabilities: AgentCapabilities {
     switch self {
     case .claude:
       return [
-        .resume, .presetSessionID, .accounts, .nativeUI, .permissionModes, .forking,
+        .resume, .presetSessionID, .accounts, .nativeUI, .terminalUI, .permissionModes, .forking,
         .threadingBridge, .remoteControl, .statusLine, .transcriptTitles,
         .transcriptModelRecord, .transcriptPermissionModeRecord, .transcriptUsageIndex,
         .liveFastModeControl, .slashCommandPrefix, .terminalThreadingBridge, .headlessResearch,
@@ -286,20 +307,57 @@ enum AgentKind: String, Codable, CaseIterable {
       ]
     case .codex:
       return [
-        .resume, .accounts, .nativeUI, .permissionModes, .threadingBridge,
+        .resume, .accounts, .nativeUI, .terminalUI, .permissionModes, .threadingBridge,
         .serviceTierFastMode, .sharedSubagentIdentity, .terminalThreadingBridge,
         .headlessResearch, .providerTitleMetadata, .providerArchive, .transcriptUsageIndex,
         .transcriptInterruptedTurnRecord, .transcriptReplay
       ]
     case .grok:
       return [
-        .resume, .presetSessionID, .nativeUI, .permissionModes, .threadingBridge,
+        .resume, .presetSessionID, .nativeUI, .terminalUI, .permissionModes, .threadingBridge,
         .deferredSessionIdentifier
       ]
     case .openCode:
       return [
-        .resume, .deferredSessionIdentifier, .openingFileAttachments, .transcriptUsageIndex
+        .resume, .terminalUI, .deferredSessionIdentifier, .openingFileAttachments,
+        .transcriptUsageIndex
       ]
+
+    // Every row below cites the measurement that grants it, in `CURSOR_ACP_FINDINGS.md`. The
+    // absences are as deliberate as the claims and are listed after them.
+    case .cursor:
+      return [
+        // §10.4: a session created in one process was loaded in another after the first died,
+        // and `session/load` replayed the whole conversation as ordinary `session/update`
+        // notifications before answering. The id survives on disk in
+        // `~/.cursor/acp-sessions/<uuid>/`.
+        .resume,
+        // §10.1/§10.3: `session/new` answers with a session, `session/prompt` streams a turn
+        // and settles on `stopReason`, and §10.7 a mid-turn `session/cancel` settles it as
+        // `cancelled` in 4 ms. That is the whole contract `ACPStreamSession` needs.
+        .nativeUI,
+        // §10.9: a `mcpServers` entry passed to `session/new` was connected during session
+        // creation — MCP `2025-11-25`, `tools/list` then `tools/call` — without touching the
+        // user's own `~/.cursor/mcp.json`.
+        .threadingBridge
+      ]
+      // Not `.terminalUI` (§11): the TUI and ACP keep disjoint conversation stores and neither
+      //   can read the other's id, so the surface switch would silently lose the chat.
+      // Not `.presetSessionID` (§6.1, §10.1): Cursor mints the id itself inside `session/new`;
+      //   Threading persists what the `initialised` event reports, as it does for Codex.
+      // Not `.deferredSessionIdentifier`: that is the *terminal* discovery poll, and Cursor has
+      //   no terminal surface here. The id arrives on the wire, at once.
+      // Not `.permissionModes` (§10.2): Cursor's `agent`/`plan`/`ask` are execution modes, a
+      //   different axis from Threading's six Claude-derived permission modes, and the `acp`
+      //   subcommand takes no mode flag. Claiming them would draw a chip that changes nothing.
+      // Not `.forking` (§4): `session/fork` answers `-32601 Method not found`.
+      // Not `.accounts`: measured 2026-08-12 — neither `CURSOR_DATA_DIR` nor `XDG_CONFIG_HOME`
+      //   moves the login (`status` still reports authenticated with either pointed at an empty
+      //   directory), because the token is in the system keychain rather than in a config
+      //   directory. There is nothing for `env` routing to point at.
+      // Not any transcript capability (§10.10, §10.4): there is no local conversation format to
+      //   replay — history comes back over `session/load` — and no usage, token or
+      //   context-window notification exists on this protocol at all.
     }
   }
 
@@ -370,13 +428,22 @@ enum AgentKind: String, Codable, CaseIterable {
   /// side-chat lifecycle, so neither is advertised here yet.
   var supportsForking: Bool { capabilities.contains(.forking) }
 
-  /// Environment variable redirecting this CLI to an alternate config directory.
-  var accountEnvironmentKey: String {
+  /// Environment variable redirecting this CLI to an alternate config directory, where it has
+  /// one.
+  ///
+  /// Optional because a login does not have to live in a directory. Cursor's does not: measured
+  /// 2026-08-12, pointing either `CURSOR_DATA_DIR` or `XDG_CONFIG_HOME` at an empty directory
+  /// still reports `status: authenticated`, because the token is held in the system keychain and
+  /// only `cli-config.json` follows the directory. There is therefore no name here that a launch
+  /// could set to reach a different Cursor login, and inventing one would put an inert lie in the
+  /// one place `AgentEnvironment` reads to decide what *not* to strip.
+  var accountEnvironmentKey: String? {
     switch self {
     case .claude: return "CLAUDE_CONFIG_DIR"
     case .codex: return "CODEX_HOME"
     case .grok: return "GROK_HOME"
     case .openCode: return "OPENCODE_CONFIG_DIR"
+    case .cursor: return nil
     }
   }
 }
@@ -440,6 +507,7 @@ enum AgentSessionConfiguration: Equatable {
   case codex(reasoningEffort: String?)
   case grok
   case openCode
+  case cursor
 
   var kind: AgentKind {
     switch self {
@@ -447,6 +515,7 @@ enum AgentSessionConfiguration: Equatable {
     case .codex: return .codex
     case .grok: return .grok
     case .openCode: return .openCode
+    case .cursor: return .cursor
     }
   }
 
@@ -461,6 +530,7 @@ enum AgentSessionConfiguration: Equatable {
     case .codex: return .codex(reasoningEffort: nil)
     case .grok: return .grok
     case .openCode: return .openCode
+    case .cursor: return .cursor
     }
   }
 
@@ -501,7 +571,7 @@ enum AgentSessionConfiguration: Equatable {
     case .codex:
       self = .codex(reasoningEffort: reasoningEffort)
 
-    case .grok, .openCode:
+    case .grok, .openCode, .cursor:
       guard reasoningEffort == nil else { return nil }
       self = .original(for: kind)
     }
@@ -511,7 +581,7 @@ enum AgentSessionConfiguration: Equatable {
     switch self {
     case .claude(_, _, .forked(let source)):
       return source
-    case .claude, .codex, .grok, .openCode:
+    case .claude, .codex, .grok, .openCode, .cursor:
       return nil
     }
   }
@@ -954,7 +1024,7 @@ struct AgentSession: Codable, Identifiable {
   var reasoningEffort: String? {
     switch configuration {
     case .claude(_, let value, _), .codex(let value): return value
-    case .grok, .openCode: return nil
+    case .grok, .openCode, .cursor: return nil
     }
   }
 
@@ -1047,7 +1117,7 @@ struct AgentSession: Codable, Identifiable {
         reasoningEffort: reasoningEffort,
         origin: .forked(from: id)
       )
-    case .codex, .grok, .openCode:
+    case .codex, .grok, .openCode, .cursor:
       return nil
     }
   }
@@ -1152,9 +1222,33 @@ struct AgentSession: Codable, Identifiable {
   /// See `AttentionAlertScope`.
   var notificationsMuted: Bool?
 
+  /// Sounds this conversation overrides. Absent — the common case — inherits everything.
+  /// Keys are `SoundEvent` raw values plus the reserved `all`, `bell` and `alert`; values are
+  /// `SoundChoice` stored strings. See `SoundResolution`.
+  ///
+  /// `[String: String]` rather than a typed dictionary **at the storage boundary on purpose**:
+  /// a record written by a later build, naming an event this one has never heard of, has to
+  /// survive being read and written here. Decoding to the typed form for use and writing back
+  /// through it would delete exactly those entries.
+  var soundOverrides: [String: String]?
+
   /// An execution directory owned for this session alone. Nil is the ordinary path: launch in
   /// the Project folder exactly as Threading always has.
   var managedWorkspace: ManagedWorkspace?
+
+  /// The surface a session of this runtime is actually shown on, given what was asked for.
+  ///
+  /// Two clamps, one rule, and both are corrections rather than refusals: the surface is
+  /// Threading's own choice about how to *draw* a conversation, not a setting a CLI was asked to
+  /// honour, so an impossible one is fixed instead of costing the record. A runtime with no
+  /// native transport falls back to its terminal, which is how a session flagged native for an
+  /// agent since changed keeps working. A runtime with no terminal surface is always native —
+  /// Cursor, whose two interfaces do not share a conversation store, so a terminal for a chat
+  /// created over ACP would be a different, empty chat.
+  static func resolvedNativeSurface(_ requested: Bool, for kind: AgentKind) -> Bool {
+    guard kind.supports(.terminalUI) else { return kind.supportsNativeUI }
+    return requested && kind.supportsNativeUI
+  }
 
   init(
     kind: AgentKind,
@@ -1220,9 +1314,13 @@ struct AgentSession: Codable, Identifiable {
     self.snoozedUntil = nil
     self.hadTurnInFlightWhenSnoozed = false
     self.wake = nil
-    self.usesNativeUI = usesNativeUI && configuration.kind.supportsNativeUI
+    self.usesNativeUI = AgentSession.resolvedNativeSurface(
+      usesNativeUI,
+      for: configuration.kind
+    )
     self.themeID = nil
     self.notificationsMuted = nil
+    self.soundOverrides = nil
     self.managedWorkspace = nil
   }
 
@@ -1236,7 +1334,7 @@ struct AgentSession: Codable, Identifiable {
     case forkParent
     case continuationSource, continuationSourceKind
     case handoff
-    case themeID, themeName, notificationsMuted
+    case themeID, themeName, notificationsMuted, soundOverrides
     case managedWorkspace
   }
 
@@ -1298,7 +1396,10 @@ struct AgentSession: Codable, Identifiable {
       forKey: .hadTurnInFlightWhenSnoozed
     ) ?? false
     wake = try container.decodeIfPresent(SessionWake.self, forKey: .wake)
-    usesNativeUI = try container.decodeIfPresent(Bool.self, forKey: .nativeUI) ?? false
+    usesNativeUI = AgentSession.resolvedNativeSurface(
+      try container.decodeIfPresent(Bool.self, forKey: .nativeUI) ?? false,
+      for: decodedKind
+    )
     let decodedForkParent = try container.decodeIfPresent(
       SessionID.self,
       forKey: .forkParent
@@ -1501,6 +1602,43 @@ struct AgentSession: Codable, Identifiable {
         )
       }
       configuration = .openCode
+    case .cursor:
+      guard decodedForkParent == nil else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .forkParent,
+          in: container,
+          debugDescription: "Cursor implements no session fork"
+        )
+      }
+      guard accountHandle == .standard else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .accountHandle,
+          in: container,
+          debugDescription: "Cursor holds its login outside any config directory Threading can route"
+        )
+      }
+      guard decodedReasoningEffort == nil else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .reasoningEffort,
+          in: container,
+          debugDescription: "Cursor states reasoning effort per model, not per launch"
+        )
+      }
+      guard fastMode == nil else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .fastMode,
+          in: container,
+          debugDescription: "Cursor sessions do not use Threading's Fast-mode control"
+        )
+      }
+      guard permissionMode == nil else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .permissionMode,
+          in: container,
+          debugDescription: "Cursor's execution modes are a different axis from Threading's"
+        )
+      }
+      configuration = .cursor
     }
     themeID = try container.decodeIfPresent(TerminalThemeID.self, forKey: .themeID)
     if themeID == nil,
@@ -1511,6 +1649,10 @@ struct AgentSession: Codable, Identifiable {
     notificationsMuted = try container.decodeIfPresent(
       Bool.self,
       forKey: .notificationsMuted
+    )
+    soundOverrides = try container.decodeIfPresent(
+      [String: String].self,
+      forKey: .soundOverrides
     )
     managedWorkspace = try container.decodeIfPresent(
       ManagedWorkspace.self,
@@ -1561,6 +1703,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(handoff, forKey: .handoff)
     try container.encodeIfPresent(themeID, forKey: .themeID)
     try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
+    try container.encodeIfPresent(soundOverrides, forKey: .soundOverrides)
     try container.encodeIfPresent(managedWorkspace, forKey: .managedWorkspace)
   }
 
@@ -1620,7 +1763,7 @@ struct AgentSession: Codable, Identifiable {
     case .codex:
       configuration = .codex(reasoningEffort: effort)
       return true
-    case .grok, .openCode:
+    case .grok, .openCode, .cursor:
       return false
     }
   }
@@ -1751,6 +1894,12 @@ struct ProjectTerminal: Codable, Identifiable {
   var currentDirectory: String
   var branch: String?
   var themeID: TerminalThemeID?
+
+  /// Sounds this terminal overrides, in the same stored shape `AgentSession` carries. The
+  /// submenu writes only its `all` entry: a standalone terminal keeps no activity tracker, so
+  /// nothing here can say *why* a bell rang and there is no finer level to scope. The
+  /// synthesized `Codable` handles a new optional without a custom initializer.
+  var soundOverrides: [String: String]?
   let createdAt: Date
 
   init(
@@ -1764,6 +1913,7 @@ struct ProjectTerminal: Codable, Identifiable {
     self.currentDirectory = currentDirectory
     self.branch = GitInfo.currentBranch(for: currentDirectory)
     self.themeID = nil
+    self.soundOverrides = nil
     self.createdAt = Date()
   }
 
@@ -1803,6 +1953,11 @@ struct Project: Codable, Identifiable {
   /// with an answer of its own overrides it either way. See `AttentionAlertScope`.
   var notificationsMuted: Bool?
 
+  /// Sounds this checkout overrides, in the same stored shape `AgentSession` carries — and for
+  /// the same reason it is a raw map rather than a typed one. Its chats and terminals follow
+  /// unless they answered for themselves. See `SoundResolution`.
+  var soundOverrides: [String: String]?
+
   init(name: String, folderURL: URL, id: ProjectID = ProjectID()) {
     self.id = id
     self.name = name
@@ -1814,11 +1969,12 @@ struct Project: Codable, Identifiable {
     self.icon = nil
     self.themeID = nil
     self.notificationsMuted = nil
+    self.soundOverrides = nil
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, name, folderPath, sessions, terminals, isExpanded, createdAt, icon, themeID, themeName
-    case notificationsMuted
+    case notificationsMuted, soundOverrides
   }
 
   init(from decoder: Decoder) throws {
@@ -1853,6 +2009,10 @@ struct Project: Codable, Identifiable {
       Bool.self,
       forKey: .notificationsMuted
     )
+    soundOverrides = try container.decodeIfPresent(
+      [String: String].self,
+      forKey: .soundOverrides
+    )
   }
 
   func encode(to encoder: Encoder) throws {
@@ -1867,6 +2027,7 @@ struct Project: Codable, Identifiable {
     try container.encodeIfPresent(icon, forKey: .icon)
     try container.encodeIfPresent(themeID, forKey: .themeID)
     try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
+    try container.encodeIfPresent(soundOverrides, forKey: .soundOverrides)
   }
 
   var folderURL: URL {

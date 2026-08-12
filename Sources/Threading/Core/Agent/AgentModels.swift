@@ -158,9 +158,11 @@ enum AgentModels {
                     )
                 ]
             } ?? []
-        case .grok, .openCode:
-            // These TUIs own live/custom model catalogs. An empty host catalog means the
-            // composer leaves `--model` unset and the runtime's TUI/config chooses honestly.
+        case .grok, .openCode, .cursor:
+            // These runtimes own their own catalogs. Grok's and OpenCode's TUIs publish live and
+            // custom models; Cursor answers 34 of them inside its ACP `session/new` result, in
+            // one of two mutually exclusive id spaces. An empty host catalog means the composer
+            // leaves the model unset and the runtime chooses honestly.
             return []
         }
     }
@@ -243,7 +245,7 @@ enum AgentModels {
             return configuredClaudeModel(account: account)
         case .codex:
             return configuredCodexModel(account: account)
-        case .grok, .openCode:
+        case .grok, .openCode, .cursor:
             return nil
         }
     }
@@ -263,7 +265,7 @@ enum AgentModels {
                 AgentDefaults.codexReasoningEffortKey,
                 account: account
             )
-        case .grok, .openCode:
+        case .grok, .openCode, .cursor:
             return nil
         }
     }
@@ -469,7 +471,7 @@ enum AgentModels {
                 identifier: identifier,
                 displayName: ModelName.display(for: identifier)
             )
-        case .codex, .grok, .openCode:
+        case .codex, .grok, .openCode, .cursor:
             return nil
         }
     }
@@ -506,13 +508,13 @@ enum AgentModels {
 
     /// The identifiers that stand for a whole tier rather than one version of it. A switch, not
     /// a capability: this is the same per-runtime catalog knowledge the rest of this file holds,
-    /// and the compiler makes a fifth runtime a build error here.
+    /// and the compiler makes a sixth runtime a build error here.
     private static func aliasIdentifiers(for kind: AgentKind) -> Set<String> {
         switch kind {
         case .claude: return Set(AgentDefaults.claudeModels)
-        // Codex publishes dated slugs and no aliases; Grok and OpenCode publish no host catalog
-        // at all. Nothing to lift, so every model sorts on its tier and its source's order.
-        case .codex, .grok, .openCode: return []
+        // Codex publishes dated slugs and no aliases; Grok, OpenCode and Cursor publish no host
+        // catalog at all. Nothing to lift, so every model sorts on its tier and source order.
+        case .codex, .grok, .openCode, .cursor: return []
         }
     }
 

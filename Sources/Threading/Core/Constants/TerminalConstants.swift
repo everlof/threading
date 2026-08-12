@@ -131,6 +131,26 @@ enum AgentDefaults {
     static let grokExecutable = "grok"
     static let openCodeExecutable = "opencode"
 
+    /// Cursor installs two names for one binary — `agent` and `cursor-agent`. The unambiguous
+    /// one is spawned: `agent` is a plausible name for something else on a user's PATH.
+    static let cursorExecutable = "cursor-agent"
+
+    /// The hidden subcommand that starts Cursor's Agent Client Protocol server. It takes no
+    /// options of its own; everything configurable is a global placed before it.
+    static let cursorACPSubcommand = "acp"
+
+    /// Keeps `cursor-agent` from opening the user's browser.
+    ///
+    /// Measured: ACP `authenticate` answers with a `cursor.com/loginDeepControl?…` URL wrapped
+    /// in an `-32602` error, and it gets there by *trying to launch a browser first*. A native
+    /// app cannot have a CLI it hosts throwing the user into Safari mid-conversation, so the
+    /// child is spawned with a browser that does nothing and with the CLI's own opt-out set.
+    /// `/usr/bin/true` rather than an empty value: `BROWSER=""` reads as unset.
+    static let cursorLaunchEnvironment = [
+        "BROWSER": "/usr/bin/true",
+        "NO_OPEN_BROWSER": "1"
+    ]
+
     static let claudeModelFlag = "--model"
     static let codexModelFlag = "--model"
     static let grokModelFlag = "--model"
@@ -322,9 +342,10 @@ enum AgentEnvironment {
 
     /// The exception inside those families: where an account's config lives is a *place*, not a
     /// run, and it is how a launch reaches a login other than the default. `AgentKind` owns the
-    /// four names, so a new runtime cannot be added and forgotten here.
+    /// names, so a new runtime cannot be added and forgotten here — and a runtime that keeps its
+    /// login somewhere other than a directory contributes none.
     static var accountConfigKeys: Set<String> {
-        Set(AgentKind.allCases.map(\.accountEnvironmentKey))
+        Set(AgentKind.allCases.compactMap(\.accountEnvironmentKey))
     }
 
     static func isInheritedAgentIdentity(_ key: String) -> Bool {
@@ -717,6 +738,11 @@ enum SidebarDefaults {
     /// closest thing the menu behind it (grouping, then sorting) has to one name.
     static let arrangementSymbol = "square.grid.3x1.below.line.grid.1x2"
 
+    /// The footer's silence gate. One glyph in both states rather than a speaker/speaker-slash
+    /// pair: a control whose mark changes reads as two different buttons in a band this small,
+    /// and the state is already worn by the button's own filled on-state.
+    static let silenceSymbol = "speaker.slash"
+
     /// How hard the sidebar holds its width against a window resize.
     ///
     /// The sidebar behaviour arranged this for itself; a plain split item does not, and without
@@ -748,6 +774,17 @@ enum SidebarStrings {
         L10n.string("Drop a folder here, or click + above.")
     }
     static var arrangementOptions: String { L10n.string("Grouping and Sorting") }
+
+    /// The silence gate's name, stable in both states: the button reports *which* state it is
+    /// in through its accessibility value, the way every toggle does, so the title stays the
+    /// one thing the control is. The tooltip below is the half that describes the state.
+    static var silenceSounds: String { L10n.string("Silence Sounds") }
+    static var silenceSoundsHint: String {
+        L10n.string("Silence every sound Threading makes")
+    }
+    static var silencedHint: String {
+        L10n.string("Sounds are silenced — banners and marks are unaffected")
+    }
 }
 
 // MARK: - Sidebar Row Defaults
@@ -1179,15 +1216,22 @@ struct ArtifactScanDidChange: AppEvent {
     static let name = Notification.Name("artifactScanDidChange")
 }
 
-/// A project's code count finished, or its cached reading changed.
-struct CodeStatsDidChange: AppEvent {
-    static let name = Notification.Name("codeStatsDidChange")
+/// A project's glanceable metrics finished, or one of its cached readings changed.
+struct ProjectStatsDidChange: AppEvent {
+    static let name = Notification.Name("projectStatsDidChange")
     let projectID: ProjectID
 }
 
 /// The transcript usage report was rebuilt.
 struct TranscriptUsageDidChange: AppEvent {
     static let name = Notification.Name("transcriptUsageDidChange")
+}
+
+/// A usage scan moved. Separate from `TranscriptUsageDidChange` because this arrives many times
+/// for one report and only the dashboard's own placeholder is interested: a listener that rebuilt
+/// a page from it would rebuild that page for every tick of a progress bar.
+struct TranscriptUsageScanProgressDidChange: AppEvent {
+    static let name = Notification.Name("transcriptUsageScanProgressDidChange")
 }
 
 struct AccountPreferencesDidChange: AppEvent {
@@ -1212,13 +1256,6 @@ struct UsageLimitHistoryDidChange: AppEvent {
 struct UsageWindowScheduleDidChange: AppEvent {
     static let name = Notification.Name("ThreadingUsageWindowScheduleDidChange")
 }
-/// A usage scan moved. Separate from `TranscriptUsageDidChange` because this arrives many times
-/// for one report and only the dashboard's own placeholder is interested: a listener that rebuilt
-/// a page from it would rebuild that page for every tick of a progress bar.
-struct TranscriptUsageScanProgressDidChange: AppEvent {
-    static let name = Notification.Name("transcriptUsageScanProgressDidChange")
-}
-
 
 /// A poke fired, failed, or the standing reason it is holding changed — the signal the settings
 /// page redraws its ledger on.

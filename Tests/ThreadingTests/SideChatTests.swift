@@ -130,7 +130,7 @@ final class SideChatTests: XCTestCase {
         let transcript = try writeTranscript(for: parent, in: project)
         addTeardownBlock { try? FileManager.default.removeItem(at: transcript) }
 
-        let command = try XCTUnwrap(AgentLauncher.plan(for: child, in: project).arguments.last)
+        let command = try XCTUnwrap(try AgentLauncher.plan(for: child, in: project).arguments.last)
         let parentID = try XCTUnwrap(parent.resumeState.transcriptID)
 
         XCTAssertTrue(command.contains("'--resume' '\(parentID)'"), command)
@@ -157,7 +157,7 @@ final class SideChatTests: XCTestCase {
         )
         project.sessions = [parent, child]
 
-        let command = try XCTUnwrap(AgentLauncher.plan(for: child, in: project).arguments.last)
+        let command = try XCTUnwrap(try AgentLauncher.plan(for: child, in: project).arguments.last)
 
         XCTAssertFalse(command.contains("--fork-session"), command)
         XCTAssertTrue(
@@ -174,11 +174,11 @@ final class SideChatTests: XCTestCase {
         let codex = AgentSession(kind: .codex, title: "Codex")
 
         XCTAssertEqual(
-            AgentLauncher.plan(for: claude, in: project).resumeState,
+            try AgentLauncher.plan(for: claude, in: project).resumeState,
             .resumable(TranscriptID(claude.id.uuidString.lowercased()))
         )
         XCTAssertEqual(
-            AgentLauncher.plan(for: codex, in: project).resumeState,
+            try AgentLauncher.plan(for: codex, in: project).resumeState,
             .awaitingIdentifier
         )
     }
@@ -256,7 +256,7 @@ final class SideChatTests: XCTestCase {
         session.customTitle = hostile
 
         let source = try XCTUnwrap(
-            AgentLauncher.plan(for: session, in: project, initialPrompt: hostile).arguments.last
+            try AgentLauncher.plan(for: session, in: project, initialPrompt: hostile).arguments.last
         )
         let quotedHostile = ShellCommand(word: hostile).source
         let occurrenceCount = source.components(separatedBy: quotedHostile).count - 1
@@ -362,7 +362,7 @@ final class SideChatTests: XCTestCase {
         )
 
         let command = try XCTUnwrap(
-            AgentLauncher.plan(
+            try AgentLauncher.plan(
                 for: session,
                 in: project,
                 initialPrompt: ConversationContinuation.openingPrompt(for: session)

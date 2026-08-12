@@ -104,7 +104,7 @@ enum AgentPermissionMode: String, Codable, CaseIterable {
     /// The dispatch lives here rather than in the launcher because everything it chooses
     /// between lives here. It used to be a `switch session.kind` in `AgentLauncher` selecting
     /// among the value properties below, which meant the two had to agree and nothing said so:
-    /// a fifth runtime could be given its value property and no launcher branch, or a branch
+    /// a sixth runtime could be given its value property and no launcher branch, or a branch
     /// naming the wrong axis, and both compile. Now the compiler requires the case, and the
     /// case is next to the values it returns.
     ///
@@ -148,6 +148,12 @@ enum AgentPermissionMode: String, Codable, CaseIterable {
             // OpenCode owns a richer per-tool policy in `opencode.json`, and its `--auto` is
             // not equivalent to any one of these six. Presenting a false mapping would be
             // worse than leaving that policy where the user set it.
+            return []
+
+        case .cursor:
+            // Cursor's `agent`/`plan`/`ask` are execution modes, a different axis from these
+            // six, and its ACP subcommand takes no flags at all. It claims no
+            // `.permissionModes`, so this is the belt-and-braces answer.
             return []
         }
     }
@@ -197,7 +203,7 @@ enum AgentPermissionMode: String, Codable, CaseIterable {
                 return nil
             }
 
-        case .codex, .openCode:
+        case .codex, .openCode, .cursor:
             return nil
         }
     }

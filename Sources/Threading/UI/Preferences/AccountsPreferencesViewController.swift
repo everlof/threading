@@ -288,6 +288,7 @@ extension AgentKind {
         case .codex: return "🌀"
         case .grok: return "𝕏"
         case .openCode: return "{}"
+        case .cursor: return "➤"
         }
     }
 }

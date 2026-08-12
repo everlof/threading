@@ -138,7 +138,7 @@ struct ResolvedPermissionMode: Equatable {
                 )
             )
 
-        case .grok, .openCode:
+        case .grok, .openCode, .cursor:
             return nil
         }
     }

@@ -683,6 +683,8 @@ final class AgentCapabilitiesTests: XCTestCase {
     @MainActor
     func testAPokeIsRoutedToItsAccountAndCarriesNoContext() throws {
         let kind = try XCTUnwrap(AgentKind.allCases.first { $0.supports(.anchoredUsageWindow) })
+        // A runtime with an anchored window necessarily routes accounts, so it has a key.
+        let accountKey = try XCTUnwrap(kind.accountEnvironmentKey)
 
         let alternate = AgentAccount(
             provider: kind,
@@ -694,7 +696,7 @@ final class AgentCapabilitiesTests: XCTestCase {
         ).source
 
         XCTAssertTrue(
-            routed.contains("\(kind.accountEnvironmentKey)=/Users/somebody/.claude-work"),
+            routed.contains("\(accountKey)=/Users/somebody/.claude-work"),
             "a poke has to name the account whose window it is opening: \(routed)"
         )
 
@@ -704,11 +706,11 @@ final class AgentCapabilitiesTests: XCTestCase {
         ).source
 
         XCTAssertTrue(
-            unset.contains("-u") && unset.contains(kind.accountEnvironmentKey),
+            unset.contains("-u") && unset.contains(accountKey),
             "the default login is reached by unsetting the override: \(unset)"
         )
         XCTAssertFalse(
-            unset.contains("\(kind.accountEnvironmentKey)="),
+            unset.contains("\(accountKey)="),
             "the default login is unset rather than pointed somewhere: \(unset)"
         )
         XCTAssertFalse(
