@@ -20,9 +20,14 @@ final class ThinkingOrbTintTests: XCTestCase {
         return rep
     }
 
+    /// The observer's debounce runs on an injected clock, so only the scan's own completion is
+    /// real time — a directory read off the main actor and its hop back. One second was enough
+    /// alone and marginal in a full run of the target, where it surfaced as "attachment
+    /// resolution did not finish" and then as every assertion after it. This is a hang bound,
+    /// not a measurement, so it can afford to be generous.
     private func waitForAttachmentScan(
         _ observer: TerminalAttachmentObserver,
-        timeout: TimeInterval = 1
+        timeout: TimeInterval = 5
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         while observer.isScanInFlight, Date() < deadline {

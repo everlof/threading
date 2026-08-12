@@ -474,7 +474,10 @@ final class SessionAttachmentStoreTests: XCTestCase {
         XCTAssertEqual(store.withheldReferences(for: session).map(\.path), [shot.path])
 
         let sessionRoot = copies.appendingPathComponent(session.uuidString, isDirectory: true)
-        let deadline = Date().addingTimeInterval(1)
+        // A bound on the reclaim hanging, not a measurement of how quickly it runs: it is
+        // filesystem work on a background executor, and a second is marginal in a full run of
+        // the target even though it is generous alone.
+        let deadline = Date().addingTimeInterval(5)
         while (try? FileManager.default.contentsOfDirectory(atPath: sessionRoot.path).isEmpty) == false,
               Date() < deadline {
             try await Task.sleep(nanoseconds: 5_000_000)
@@ -606,7 +609,8 @@ final class SessionAttachmentStoreTests: XCTestCase {
         }
 
         let sessionRoot = copies.appendingPathComponent(session.uuidString, isDirectory: true)
-        let deadline = Date().addingTimeInterval(1)
+        // Bounds a hang in the same background reclaim, for the same reason as above.
+        let deadline = Date().addingTimeInterval(5)
         var slotCount = try FileManager.default.contentsOfDirectory(atPath: sessionRoot.path).count
         while slotCount > SessionAttachmentDefaults.maximumPerSession, Date() < deadline {
             try await Task.sleep(nanoseconds: 5_000_000)
