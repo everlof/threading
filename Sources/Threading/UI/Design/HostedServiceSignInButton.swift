@@ -4,7 +4,7 @@ import AuthenticationServices
 /// The system-authored Sign in with Apple face, kept inside the design boundary so feature
 /// controllers never construct platform controls. Apple owns its typography, mark, and padding.
 @MainActor
-final class HostedServiceSignInButton: NSView {
+final class HostedServiceSignInButton: NSView, ThemedComponent, SystemChromeBoundary {
     private let button = ASAuthorizationAppleIDButton(type: .signIn, style: .black)
 
     override init(frame frameRect: NSRect) {
@@ -36,5 +36,12 @@ final class HostedServiceSignInButton: NSView {
 
     override func setAccessibilityIdentifier(_ accessibilityIdentifier: String?) {
         button.setAccessibilityIdentifier(accessibilityIdentifier)
+    }
+
+    /// Apple owns this one control's face and interaction contract. Keep the exception scoped
+    /// to the exact contained button so adding any sibling AppKit chrome still fails the runtime
+    /// theme-boundary audit.
+    func permitsSystemChrome(_ view: NSView) -> Bool {
+        view === button
     }
 }

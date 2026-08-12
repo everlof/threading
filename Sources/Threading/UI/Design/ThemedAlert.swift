@@ -580,8 +580,18 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
             iconView.contentTintColor = symbolColor
         }
         requesterTitleBand.isHidden = !usesClassicRequester
-        modernStackTopConstraint?.isActive = !usesClassicRequester
-        requesterStackTopConstraint?.isActive = usesClassicRequester
+        // Constraint activation is not atomic. Deactivate the outgoing top edge before enabling
+        // the incoming one so a live theme change never briefly asks the stack to sit at both
+        // the modern inset and below the requester band. That transient overlap was enough for
+        // AppKit to break the requester's required band-height constraint while the gallery
+        // cycled between classic and modern materials.
+        if usesClassicRequester {
+            modernStackTopConstraint?.isActive = false
+            requesterStackTopConstraint?.isActive = true
+        } else {
+            requesterStackTopConstraint?.isActive = false
+            modernStackTopConstraint?.isActive = true
+        }
         sectionStack?.spacing = usesClassicRequester ? Design.Spacing.small : Design.Spacing.large
         needsDisplay = true
         window?.invalidateShadow()

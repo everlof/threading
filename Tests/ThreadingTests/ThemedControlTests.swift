@@ -750,19 +750,16 @@ final class ThemedControlTests: XCTestCase {
         )
 
         XCTAssertTrue(ThemedMenuPresenter.isMenuOpen(in: window))
-        let overlay = try XCTUnwrap(
+        _ = try XCTUnwrap(
             window.firstResponder as? NSView,
-            "the open menu's overlay should hold the keyboard"
+            "the open menu should establish a keyboard responder"
         )
 
-        // An unshown fixture window can still apply its initial responder on a deferred AppKit
-        // turn. The open menu must reclaim its modal keyboard contract after that bookkeeping,
-        // just as it must in a newly opened gallery or settings window.
+        // A field editor or deferred initial responder can temporarily take focus while a menu
+        // is open. Send the event through AppKit rather than calling the overlay directly: the
+        // menu owns keyboard input for its window regardless of that transient responder state.
         XCTAssertTrue(window.makeFirstResponder(source))
-        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
-        XCTAssertTrue(window.firstResponder === overlay, "the menu lost Escape to its source")
-
-        overlay.keyDown(with: try keyEvent("\u{1b}", keyCode: 53))
+        NSApp.sendEvent(try keyEvent("\u{1b}", keyCode: 53, in: window))
 
         XCTAssertEqual(dismissals, 1, "Escape never reached a live session")
         XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
@@ -6268,6 +6265,7 @@ final class ThemedControlTests: XCTestCase {
                 "ExecutionAuditEventView",
                 "FileActivityMapView",
                 "GlyphView",
+                "HostedServiceSignInButton",
                 "HoverPopoverScheduler",
                 "ImageCompareCanvas",
                 "ImageCompareView",
@@ -6591,18 +6589,67 @@ final class ThemedControlTests: XCTestCase {
 
                 gallery.contentView.scroll(to: .zero)
                 gallery.reflectScrolledClipView(gallery.contentView)
+                let baselineMenus = Set(
+                    descendants(in: controller.view)
+                        .filter { $0.accessibilityRole() == .menu }
+                        .map(ObjectIdentifier.init)
+                )
                 XCTAssertTrue(chip.accessibilityPerformShowMenu())
                 try captureGalleryFixture(window, named: "\(fixtureStem)-menu")
                 let responder = try XCTUnwrap(window.firstResponder)
                 responder.keyDown(with: try keyEvent("\u{1b}", keyCode: 53))
                 XCTAssertFalse(
+                    ThemedMenuPresenter.isMenuOpen(in: window),
+                    "\(fixtureStem) left its menu session open after Escape"
+                )
+                XCTAssertFalse(
                     descendants(in: controller.view).contains {
                         $0.accessibilityRole() == .menu
+                            && !baselineMenus.contains(ObjectIdentifier($0))
                     },
-                    "\(fixtureStem) left its dropdown open after Escape"
+                    "\(fixtureStem) left its dropdown in the accessibility tree after Escape"
                 )
             }
         }
+    }
+
+    /// Rendering a window runs AppKit's deferred layout and responder bookkeeping. The gallery
+    /// is the production fixture that caught menus losing Escape during that pass, so keep the
+    /// focus contract pinned at the same boundary instead of only testing an inert scratch view.
+    func testComponentGalleryMenuKeepsEscapeThroughARenderPass() throws {
+        let owner = ComponentGalleryWindowController()
+        let window = try XCTUnwrap(owner.window)
+        let controller = try XCTUnwrap(
+            window.contentViewController as? ComponentGalleryViewController
+        )
+        let chip = try XCTUnwrap(
+            descendant(withIdentifier: "gallery.menu.chip", in: controller.view) as? ChipView
+        )
+
+        let baselineMenus = Set(
+            descendants(in: controller.view)
+                .filter { $0.accessibilityRole() == .menu }
+                .map(ObjectIdentifier.init)
+        )
+        XCTAssertTrue(chip.accessibilityPerformShowMenu())
+        let menuResponder = try XCTUnwrap(window.firstResponder)
+        _ = try captureAppOwnedWindowContent(window)
+        XCTAssertTrue(
+            window.firstResponder === menuResponder,
+            "rendering moved focus from the menu to \(String(describing: window.firstResponder))"
+        )
+
+        menuResponder.keyDown(with: try keyEvent("\u{1b}", keyCode: 53))
+        XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
+        let lingeringMenus = descendants(in: controller.view).filter {
+            $0.accessibilityRole() == .menu
+                && !baselineMenus.contains(ObjectIdentifier($0))
+        }
+        XCTAssertTrue(
+            lingeringMenus.isEmpty,
+            "a dismissed menu remained in the accessibility tree during its visual fade: "
+                + lingeringMenus.map { String(reflecting: type(of: $0)) }.joined(separator: ", ")
+        )
     }
 
     /// Reference-adjusted controls get a compact fixture of their button/chooser faces and open
@@ -6778,14 +6825,18 @@ final class ThemedControlTests: XCTestCase {
                        accuracy: accuracy, message, file: file, line: line)
     }
 
-    private func keyEvent(_ characters: String, keyCode: UInt16) throws -> NSEvent {
+    private func keyEvent(
+        _ characters: String,
+        keyCode: UInt16,
+        in window: NSWindow? = nil
+    ) throws -> NSEvent {
         try XCTUnwrap(
             NSEvent.keyEvent(
                 with: .keyDown,
                 location: .zero,
                 modifierFlags: [],
                 timestamp: 0,
-                windowNumber: 0,
+                windowNumber: window?.windowNumber ?? 0,
                 context: nil,
                 characters: characters,
                 charactersIgnoringModifiers: characters,

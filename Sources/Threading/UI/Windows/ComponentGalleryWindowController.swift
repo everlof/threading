@@ -102,6 +102,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ExecutionAuditEventView",
         "FileActivityMapView",
         "GlyphView",
+        "HostedServiceSignInButton",
         "HoverPopoverScheduler",
         "ImageCompareCanvas",
         "ImageCompareView",
@@ -510,6 +511,10 @@ final class ComponentGalleryViewController: NSViewController {
 
         let buttonRow = row([ordinary, prominent, icon, disabled])
 
+        let hostedSignIn = HostedServiceSignInButton()
+        hostedSignIn.configure(target: self, action: #selector(buttonPressed))
+        hostedSignIn.setAccessibilityIdentifier("gallery.button.hosted-sign-in")
+
         let toggle = ThemedToggle()
         toggle.target = self
         toggle.action = #selector(sampleToggleChanged)
@@ -754,6 +759,13 @@ final class ComponentGalleryViewController: NSViewController {
             note: "Hover, press, disable, toggle, and open both menu-based controls.",
             rows: [
                 story("ThemedButton", "Bordered, prominent, icon-only, and disabled.", buttonRow),
+                story(
+                    L10n.string("HostedServiceSignInButton"),
+                    L10n.string(
+                        "Apple's system-authored sign-in workflow, contained by the design boundary."
+                    ),
+                    hostedSignIn
+                ),
                 story("ThemedToggle", "Off, on, disabled, target/action, and accessibility.", toggleRow),
                 story(
                     "ThemedCheckbox",

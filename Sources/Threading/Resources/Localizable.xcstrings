@@ -1,6 +1,8 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Apple's system-authored sign-in workflow, contained by the design boundary.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Apples systemskapade inloggningsflöde, inneslutet av designsystemets gräns."}}}},
+    "HostedServiceSignInButton": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "HostedServiceSignInButton"}}}},
     "Account deletion failed. Try again.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kontot kunde inte raderas. Försök igen."}}}},
     "Delete Account": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Radera konto"}}}},
     "Delete hosted account?": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Radera värdtjänstkontot?"}}}},

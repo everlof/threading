@@ -374,6 +374,16 @@ programmatically or forwards a held press's drag; it is no longer what keeps the
 so a call site forgetting it is a style nit rather than a hung window
 (`ThemedControlTests.testAMenuWhoseTokenWasDroppedStillDismissesForTheUser`).
 
+**An open menu owns key events, not merely the current first responder.** The overlay takes first
+responder and temporarily becomes the window's initial responder so focus and accessibility agree
+with what is on screen. That is not a sufficient event boundary: AppKit can install a field editor
+or apply deferred responder bookkeeping while the dropdown is already visible. The session
+therefore carries a window-scoped local key monitor for its whole lifetime and routes key-down
+events through the overlay before ordinary responder dispatch; `finish` removes it synchronously
+with the focus observer and restores the source. The regression sends Escape through `NSApp` after
+deliberately moving first responder away, because calling `overlay.keyDown` directly would only
+prove the handler and a timed run-loop wait would make scheduler speed part of the contract.
+
 **Scrolling a menu moves the rows, not the hand, and the highlight belongs to the hand.** A
 row's hover *is* the menu's highlight, and hover is a tracking-area fact: wheel a clamped menu
 (the session row's is the one that overflows `ThemedMenuLayout.maximumHeight`) and AppKit hands

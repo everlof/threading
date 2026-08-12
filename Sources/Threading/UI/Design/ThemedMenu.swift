@@ -526,6 +526,9 @@ private final class ThemedMenuSession: NSObject {
     private let overlay: ThemedMenuOverlayView
     private let onChoose: (Int, ThemedMenuItem) -> Void
     private let onDismiss: () -> Void
+    private weak var previousInitialFirstResponder: NSView?
+    private var focusRunLoopObserver: CFRunLoopObserver?
+    private var keyEventMonitor: Any?
     private var isClosed = false
 
     init(
@@ -591,19 +594,15 @@ private final class ThemedMenuSession: NSObject {
         // the app appearance under which its layer-backed fill first resolved. Re-resolve once
         // attached so menu fill, rows, and text all use the source window's appearance.
         AppThemeRefresh.repaint(overlay)
+        // AppKit may apply `initialFirstResponder` after attachment. Point that deferred choice
+        // at the modal menu itself instead of racing it with an arbitrarily delayed main-queue
+        // callback; a busy app can have more than one run-loop turn of work already queued.
+        previousInitialFirstResponder = window.initialFirstResponder
+        window.initialFirstResponder = overlay
         window.makeFirstResponder(overlay)
         overlay.animateIn()
-
-        // AppKit can apply a window's deferred initial-first-responder choice on the next run-
-        // loop turn, after the menu has already taken focus synchronously. A menu is modal
-        // keyboard UI while it is open: if that deferred choice wins, Escape and arrow keys go
-        // back to the underlying control and the overlay reads as hung. Reassert ownership once
-        // attachment and window focus bookkeeping have both settled. The closed-session guard
-        // prevents a menu dismissed in the same event from stealing focus on its way out.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, !self.isClosed, let window = self.window else { return }
-            window.makeFirstResponder(self.overlay)
-        }
+        installFocusRunLoopObserver()
+        installKeyEventMonitor()
 
         // `willClose` joined the list when the roster became the session's owner: a session
         // that outlived a closing window would otherwise sit in the roster holding its dead
@@ -625,6 +624,57 @@ private final class ThemedMenuSession: NSObject {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+    }
+
+    /// A dropdown is modal keyboard UI for as long as it is open. AppKit can apply a window's
+    /// deferred initial responder after attachment, and any main-queue backlog makes a one-shot
+    /// async reclaim arrive arbitrarily late. `beforeWaiting` alone is insufficient: a busy app
+    /// can keep dispatching sources without reaching an idle boundary at all. Enforce the
+    /// invariant both before source dispatch and before an eventual wait, so the next user event
+    /// and every idle interval begin with the open overlay owning Escape and arrows.
+    private func installFocusRunLoopObserver() {
+        let activities = CFRunLoopActivity.beforeSources.rawValue
+            | CFRunLoopActivity.beforeWaiting.rawValue
+        let observer = CFRunLoopObserverCreateWithHandler(
+            kCFAllocatorDefault,
+            activities,
+            true,
+            0
+        ) { [weak self] _, _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.isClosed, let window = self.window,
+                      window.firstResponder !== self.overlay else { return }
+                window.makeFirstResponder(self.overlay)
+            }
+        }
+        focusRunLoopObserver = observer
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+    }
+
+    private func removeFocusRunLoopObserver() {
+        guard let focusRunLoopObserver else { return }
+        CFRunLoopRemoveObserver(CFRunLoopGetMain(), focusRunLoopObserver, .commonModes)
+        self.focusRunLoopObserver = nil
+    }
+
+    /// AppKit's first-responder bookkeeping is not the menu's event boundary. A field editor,
+    /// deferred initial responder, or another control can temporarily take focus while the
+    /// overlay is up; a native menu still owns Escape, arrows, Return, and type-to-select in
+    /// that state. Route key events from this window through the open overlay before ordinary
+    /// responder dispatch, while the focus observer keeps the visible keyboard focus honest.
+    private func installKeyEventMonitor() {
+        keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+            [weak self, weak window] event in
+            guard let self, !self.isClosed, event.window === window else { return event }
+            self.overlay.keyDown(with: event)
+            return nil
+        }
+    }
+
+    private func removeKeyEventMonitor() {
+        guard let keyEventMonitor else { return }
+        NSEvent.removeMonitor(keyEventMonitor)
+        self.keyEventMonitor = nil
     }
 
     @objc private func windowChanged() {
@@ -683,7 +733,12 @@ private final class ThemedMenuSession: NSObject {
         // `onDismiss` runs inside this call and may ask `isMenuOpen(in:)` about the window.
         withExtendedLifetime(self) {
             Self.open.remove(self)
+            removeFocusRunLoopObserver()
+            removeKeyEventMonitor()
             NotificationCenter.default.removeObserver(self)
+            if let window, window.initialFirstResponder === overlay {
+                window.initialFirstResponder = previousInitialFirstResponder
+            }
             if let window, window.firstResponder === overlay, let source {
                 window.makeFirstResponder(source)
             }
@@ -1024,7 +1079,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
         isTearingDown = true
         cancelSubmenuTimers()
         for column in columns {
-            column.surface.setAccessibilityRole(nil)
+            column.surface.retireFromAccessibility()
         }
 
         let duration = Design.Motion.vanish
@@ -1302,7 +1357,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
 
         for column in closing {
             column.parentRow?.submenuDidClose()
-            column.surface.setAccessibilityRole(nil)
+            column.surface.retireFromAccessibility()
             let host = column.host
             let duration = Design.Motion.vanish
             if case .instant = exit {
@@ -1836,6 +1891,7 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
     private let scrollView = ThemedScrollView()
     private let document: ThemedMenuDocumentView
     private let rows: [Int: ThemedMenuRowView]
+    private var isRetiredFromAccessibility = false
     /// Echoes what has been typed, in the strip the filter opens across the panel's top —
     /// without it, typing visibly does nothing until a row happens to dim.
     private let filterLabel = NSTextField(labelWithString: "")
@@ -1910,8 +1966,6 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
             row.onChoose = { [weak self] index, item in self?.onChoose?(index, item) }
             row.onHighlight = { [weak self] index in self?.onHighlight?(index) }
         }
-        setAccessibilityRole(.menu)
-
         // Scrolling moves every row under any submenu anchored to one of them; the overlay
         // listens and closes what no longer lines up.
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -1925,6 +1979,21 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
 
     @objc private func contentScrolled() {
         onScrolled?()
+    }
+
+    /// Ends the semantic menu synchronously while its already-drawn pixels finish fading.
+    /// `setAccessibilityRole(nil)` is not a removal operation in AppKit: it restores the
+    /// receiver's inferred/default role, which leaves this surface reporting `.menu`. Mark the
+    /// whole subtree hidden and non-element, and have the role getter return nil once retired so
+    /// direct inspection cannot mistake the visual afterimage for a live menu.
+    func retireFromAccessibility() {
+        isRetiredFromAccessibility = true
+        setAccessibilityHidden(true)
+        setAccessibilityElement(false)
+    }
+
+    override func accessibilityRole() -> NSAccessibility.Role? {
+        isRetiredFromAccessibility ? nil : .menu
     }
 
     @available(*, unavailable)
