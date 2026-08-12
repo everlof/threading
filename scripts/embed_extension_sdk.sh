@@ -9,6 +9,7 @@ documentation_destination_directory="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES
 /bin/mkdir -p "${destination_directory}"
 /usr/bin/rsync -a --delete --delete-excluded \
   --exclude .build \
+  --exclude build \
   --exclude Build \
   --exclude .git \
   --exclude .swiftpm \
