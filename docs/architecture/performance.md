@@ -1545,6 +1545,33 @@ The final natural-grid fixture accepts at most one grid per completed action; a 
 grid accepts none. There are no synthetic transition ticks or secretly deferred grids. Run the
 fixture through `scripts/profile_threading.sh display-pane-stress`; routine `full` includes it.
 
+The first fixture drove that split route directly with an empty panel. The toolbar gesture has
+one more stage: it points the panel at the selected session before revealing it. `showSession`
+used to render even when that session and its retained active tab were already selected, so an
+open rebuilt the tab strip and the active native surface merely to expose the view that was
+already standing in the split item. A 256-mark semantic-scene fixture made that hidden work
+deterministic. Five fresh-process, five-cycle Debug runs measured:
+
+| Production toolbar gesture | Before | After |
+|---|---:|---:|
+| Retained render passes across five opens | 5 | 0 |
+| Open p50, median of five processes | 36.343 ms | 10.843 ms |
+| Open/close cycle, median of five processes | 44.082 ms | 20.688 ms |
+
+`showSession` and `showSessionTabs` now no-op only when their requested visible state is already
+the controller's state; switching session or leaving the global theme document still renders.
+The toolbar route also no longer repeats the full toolbar state walk that
+`setDisplayPaneVisible` already performs after the collapse state changes.
+
+A 50-cycle command-line Time Profiler trace of the after case attributed 957 ms of inclusive CPU
+to the pane controller, of which 927 ms was under Auto Layout and 915 ms under the split collapse;
+terminal resize was 48 ms, while display-pane render was 14 ms including fixture setup and zero
+gesture-time render passes. These inclusive stacks overlap by design, but identify the remaining
+owner clearly: AppKit committing a real split-item collapse and the one exact terminal grid, not
+retained pane reconstruction or an animation tick storm. The user-route line also reports actions
+over 16.7 and 33.3 ms, so a later AppKit-layout regression is visible even though TUI geometry is
+intentionally immediate rather than animated.
+
 ## Git Review as the first stress target
 
 `GitReviewViewTests.testStressLargeFileIndexesWhenEnabled` renders collapsed indexes with

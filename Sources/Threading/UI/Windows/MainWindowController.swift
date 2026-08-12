@@ -2711,7 +2711,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         } else {
             setDisplayPaneVisible(false)
         }
-        updateToolbarControlStates()
     }
 
     /// Opens the app-wide theme document beside the conversation. Unlike ordinary panel tabs it
