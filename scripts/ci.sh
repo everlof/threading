@@ -43,6 +43,9 @@ done
 say "Validating recorded agent scenarios"
 "${script_directory}/check_agent_scenarios.sh"
 
+say "Testing UI evidence tooling"
+python3 -m unittest "${repository_directory}/scripts/tests/test_ui_evidence_tools.py"
+
 say "Testing Threading (off-screen plan, complete concurrency checking)"
 "${script_directory}/test.sh" fast \
     SWIFT_STRICT_CONCURRENCY=complete \

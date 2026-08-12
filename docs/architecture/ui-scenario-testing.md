@@ -101,7 +101,9 @@ themes and sizes without multiplying fixture-agent processes. The checked-in
 - **component** entries capture every independently named Component Gallery story under System
   light and dark;
 - **surface** entries select real controller and window render tests for the composer, sidebar,
-  Git Review, settings, onboarding and Usage dashboard;
+  native conversation, Git Review, browser, collaboration, audit and recovery surfaces;
+  independently navigable Settings destinations remain separate entries so adding one page does
+  not make the broad Settings label look more complete than it is;
 - **journey** entries name both implemented critical promises and the next known gaps. A journey
   stays visible as implemented even when its slower result was not included in a particular
   render run, and a planned journey is visible as a gap rather than disappearing from the list.
@@ -113,10 +115,20 @@ scripts/ui-evidence.sh
 ```
 
 The command creates a unique directory under `.build/ui-evidence-reports/`, runs only the render
-tests selected by the manifest, and writes a self-contained `report/index.html`. Images are lazy
-loaded and independently described. The report filters by evidence kind and comparison status,
-and its Current/Baseline/Diff controls compute an amplified per-channel diff locally in the
-browser. It uploads nothing.
+tests selected by the manifest, and writes two static workflows beside `evidence.json`:
+
+- `report/review.html` (also `index.html`) is the design-review gallery. An annotation records a
+  stable artifact id, the exact image hash, normalized image coordinates, severity, description
+  and status. Export `annotations.json` to hand the review to an agent; importing it into the same
+  or a regenerated report draws markers only when the reviewed pixels still match.
+- `report/regression.html` is the approval gate. It defaults to changed, new and unbaselined
+  images, shows current/baseline/exact-difference-mask modes, and records Approve, Investigate or
+  Reject. The generator derives the mask from the same 16-bit decoder as the acceptance result;
+  it does not rely on a browser's lower-precision canvas.
+  Exported `decisions.json` is tied to the report id and the current hash of every reviewed image.
+
+All processing remains local. Browser state is convenient working state, not the durable record;
+export a JSON file before handing the review to another person or task.
 
 `scripts/ui-test.sh` also writes `evidence.json` beside every journey gallery. Include one or more
 such runs in the combined report without rerunning their XCUITests:
@@ -127,16 +139,77 @@ scripts/ui-evidence.sh \
 ```
 
 Approved references live under `Tests/UIEvidence/Baselines/` and mirror stable evidence paths;
-xcresult attachment UUIDs never become baseline names. Exact PNG equality is labelled Accepted,
-a missing reference New, and any other result Changed. These labels organize review rather than
-silently deciding that a visually acceptable change is a test failure. `--accept-new-baselines`
-copies only images with no existing reference and never overwrites an approved one. Replacing an
-existing baseline remains an explicit source change in an ordinary code review.
+xcresult attachment UUIDs never become baseline names. Equality is exact after decoding both PNGs
+to RGBA, so compression and metadata do not matter while one changed rendered pixel does. Changed
+reports state the pixel count, percentage and bounding rectangle.
+
+Apply reviewed decisions with:
+
+```bash
+python3 scripts/approve_ui_evidence.py \
+  --report .build/ui-evidence-reports/<run>/report \
+  --decisions ~/Downloads/decisions.json \
+  --baseline Tests/UIEvidence/Baselines \
+  --require-complete
+```
+
+The approval tool checks the report id, platform, artifact id, baseline path and current SHA-256
+before copying. An old decision cannot approve a newer capture. Investigated and rejected images
+never modify baselines. The copied PNGs remain visible source changes that must be reviewed and
+committed with the UI change.
+
+`--accept-new-baselines` is only a first-baseline bootstrap: it copies missing references and
+never overwrites an existing reference. `--require-accepted` is the strict local/CI gate and exits
+nonzero when any generated image is changed, new or unbaselined.
+
+### Complete and targeted visual passes
+
+The coverage manifest, not a hand-maintained test command, selects the canonical feature states.
+Run the full macOS catalogue before merging a broad design-system or layout change. For an isolated
+iteration, select a coverage entry without making partial output look like a complete run:
+
+```bash
+scripts/ui-evidence.sh --only conversation-timeline
+scripts/ui-evidence-ios.sh --only ios-native-conversation
+```
+
+macOS additionally catalogues `app-theme-chrome-matrix`: one rich conversation under every
+`AppThemeLibrary.stock` value, with both appearances for adaptive themes. The test derives its
+matrix from the product registry, so adding a stock theme adds evidence automatically. During one
+theme's polish loop, avoid paying for the whole matrix:
+
+```bash
+scripts/ui-evidence.sh --theme cyberpunk
+```
+
+iOS catalogues `ios-chrome-matrix`, the same rich conversation under every deterministic
+Mac-supplied `RemoteThemeDTO` fixture. These fixtures intentionally exercise materially different
+palette and material families; they do not pretend that iOS locally owns the Mac's complete stock
+registry. A new Mac theme that is expected to be a distinct supported mobile chrome needs a DTO
+fixture, its id in the manifest-level `themeIDs` contract, and a capture in that entry. The runner
+validates every requested fixture theme against that contract. Any individual iOS capture or entry
+remains targetable with `--only`.
+
+Use the two passes differently:
+
+1. While changing one surface/theme, run the narrow selection and use `review.html` for polish.
+2. When the implementation is ready, run the relevant complete platform catalogue and resolve
+   every item in `regression.html`.
+3. Apply only approved decisions, inspect the baseline diff in Git, and rerun with
+   `--require-accepted` to prove the checked-in references and current renderer agree.
+4. Commit approved baselines. Generated `.build` reports are not source artifacts. Commit an
+   annotation JSON only when it is an intentionally open design-review handoff; delete it when the
+   notes are resolved so it cannot become a stale shadow backlog.
 
 The opt-in component walk is bounded by the fixed developer-authored gallery. Product surfaces
 whose data comes from transcripts, sessions, files or usage history still use their ordinary
 virtualized fixture controllers; the evidence runner does not build an unbounded visual stack to
 make a screenshot.
+
+The report/approval machinery itself is covered by
+`scripts/tests/test_ui_evidence_tools.py`, which is part of `scripts/ci.sh`. It proves decoded
+16-bit PNG equality independent of compression, one-pixel strict failure with a written report,
+and refusal to apply an approval after its reviewed asset changes.
 
 ### iOS evidence catalogue
 
@@ -144,8 +217,10 @@ make a screenshot.
 capture plan names DEBUG-only deterministic scenes that route through the shipping
 `ThreadingMobile` view tree: welcome and pairing, the populated session dashboard, the real UIKit
 conversation timeline, permissions, collaboration, SwiftTerm, Git Review, Workspace, Usage,
-session creation, Settings, dialogs and issue reporting. It deliberately does not recreate those
-screens in a snapshot-only target.
+session creation, Settings and its independently navigable destinations, browser-follow privacy,
+attachments, share links, dialogs and issue reporting. It deliberately does not recreate those
+screens in a snapshot-only target. Native chat fixtures also cover rich row kinds and streaming;
+terminal fixtures cover ANSI colour, Unicode, wrapping and longer scrollback.
 
 Run it on the booted iPhone simulator with:
 
@@ -155,6 +230,9 @@ scripts/ui-evidence-ios.sh
 scripts/ui-evidence-ios.sh --simulator <UDID>
 ```
 
+By default the script briefly clones the selected iPhone, restores the template to its prior
+boot state, clears the cloned app data, and deletes the clone on exit. That gives software-keyboard
+captures a clean Simulator menu state without changing a developer's persistent keyboard setting.
 The script builds one Debug app in its own Derived Data directory, installs it once, and launches
 each declared scene with a fresh evidence identifier. The app repeatedly renders its own key
 window and publishes a marker from its temporary container only after asynchronous fixture data
@@ -164,21 +242,44 @@ equal adjacent frames, rather than requiring the entire screen to stop owning ti
 timeout or an unstabilized marker fails the run; it never becomes a screenshot with a successful
 label.
 
+Text-entry captures may declare `keyboardState` as `closed`, `open`, or
+`dismissed-after-open`. The coordinator sends one semantic focus request through each real
+SwiftUI `FocusState` (or focuses the UIKit-owned conversation/terminal editor directly), observes
+UIKit's keyboard show/hide lifecycle notifications, and records named checks in the marker.
+Dismissal fixtures fail unless the keyboard was visible first, no editor remains focused, and the
+safe area plus the surface's typed `keyboardLayout` contract (`frame` for fixed composers,
+`origin` for a platform Form editor) return to their stable pre-keyboard geometry. App-owned
+dismissed captures then have to become pixel-stable too. This is a shared lifecycle contract, not
+a per-screen delay.
+
 The canonical iPhone 17 Pro capture is 402×874 points / 1206×2622 pixels. Every image in one run
-must have that exact native scale. The capture is app-owned, so it does not start a full-display
-recording or require the macOS Screen Recording grant. Simulator status furniture is fixed for
-repeatability even though the app-window image ordinarily excludes it.
+must have that exact native scale. The ordinary capture is app-owned, so it does not start a
+full-display recording or require the macOS Screen Recording grant. A fixture whose
+`captureMode` is `display` uses `simctl io screenshot` after the app publishes its ready marker;
+this is reserved for the keyboard-open state where OS-owned pixels are required and still captures
+only the simulator display. Keyboard-dismissed evidence returns to app-owned, pixel-stable capture.
+Simulator status furniture is fixed for repeatability.
 
 Each run writes a unique static report under `.build/ui-evidence-ios-reports/` using the same
-Current/Baseline/Diff viewer as macOS. Approved iOS references live separately under
+design-review and regression-approval pages as macOS. Approved iOS references live separately under
 `Tests/UIEvidence/iOSBaselines/`; `--accept-new-baselines` has the same create-only rule and never
 overwrites an approved image. Do the explicit image-review lap first. Generated run images remain
 in `.build` and are not committed merely because capture succeeded.
 
+Apply iOS decisions with the iOS baseline root:
+
+```bash
+python3 scripts/approve_ui_evidence.py \
+  --report .build/ui-evidence-ios-reports/<run>/report \
+  --decisions ~/Downloads/decisions.json \
+  --baseline Tests/UIEvidence/iOSBaselines \
+  --require-complete
+```
+
 The current catalogue is surface evidence, not a substitute for application journeys. The
 manifest keeps the adaptive compact/Dynamic-Type/iPad matrix and the owner-only workspace detail
-recovery journey visible as planned gaps until they have their own deterministic interaction and
-durable-result assertions.
+recovery journey (file and attachment previews plus extension panels) visible as planned gaps
+until they have deterministic host payloads, interaction and durable-result assertions.
 
 ## A session tape is not a transcript
 

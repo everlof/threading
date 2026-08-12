@@ -7,6 +7,9 @@ manifest="${repository_directory}/Tests/UIEvidence/coverage.json"
 baseline_directory="${repository_directory}/Tests/UIEvidence/Baselines"
 requested_output=""
 accept_new_baselines=0
+require_accepted=0
+requested_only=""
+requested_theme=""
 journey_evidence_arguments=()
 
 usage() {
@@ -18,7 +21,10 @@ Render the checked-in component and surface catalogue and build a static HTML re
 Options:
   --output PATH                 Use a new run directory instead of .build/ui-evidence-reports/…
   --journey-evidence PATH       Include evidence.json (or its report directory); repeatable
+  --only ID[,ID…]               Capture only these coverage entries
+  --theme ID                    For app-theme-chrome-matrix, render one stock theme id
   --accept-new-baselines        Copy only captures that do not have an approved baseline yet
+  --require-accepted            Fail unless every rendered image exactly matches a baseline
   -h, --help                    Show this help
 EOF
 }
@@ -43,6 +49,26 @@ while (($#)); do
       ;;
     --accept-new-baselines)
       accept_new_baselines=1
+      shift
+      ;;
+    --only)
+      if (($# < 2)); then
+        printf 'error: --only requires one or more comma-separated coverage entries\n' >&2
+        exit 2
+      fi
+      requested_only="$2"
+      shift 2
+      ;;
+    --theme)
+      if (($# < 2)); then
+        printf 'error: --theme requires a stock theme id\n' >&2
+        exit 2
+      fi
+      requested_theme="$2"
+      shift 2
+      ;;
+    --require-accepted)
+      require_accepted=1
       shift
       ;;
     -h|--help)
@@ -82,13 +108,29 @@ derived_data_directory="${repository_directory}/.build/ui-evidence-derived-data"
 mkdir -p "${current_directory}"
 
 selected_tests=()
+selection_arguments=()
+if [[ -n "${requested_theme}" ]]; then
+  if [[ -n "${requested_only}" && "${requested_only}" != "app-theme-chrome-matrix" ]]; then
+    printf 'error: --theme can only target app-theme-chrome-matrix\n' >&2
+    exit 2
+  fi
+  requested_only="app-theme-chrome-matrix"
+fi
+if [[ -n "${requested_only}" ]]; then
+  IFS=',' read -r -a requested_entries <<<"${requested_only}"
+  for entry in "${requested_entries[@]}"; do
+    [[ -n "${entry}" ]] || continue
+    selection_arguments+=(--only-entry "${entry}")
+  done
+fi
 while IFS= read -r selector; do
   [[ -n "${selector}" ]] || continue
   selected_tests+=("-only-testing:${selector}")
 done < <(
   python3 "${script_directory}/generate_ui_evidence_report.py" \
     --manifest "${manifest}" \
-    --list-tests
+    --list-tests \
+    "${selection_arguments[@]}"
 )
 
 if ((${#selected_tests[@]} == 0)); then
@@ -99,6 +141,9 @@ fi
 cd "${repository_directory}"
 export THREADING_RENDER_OUT="${current_directory}"
 export THREADING_UI_EVIDENCE_OUT="${current_directory}"
+if [[ -n "${requested_theme}" ]]; then
+  export THREADING_UI_EVIDENCE_THEME_ID="${requested_theme}"
+fi
 
 scripts/test.sh fast -derivedDataPath "${derived_data_directory}" "${selected_tests[@]}"
 
@@ -109,10 +154,27 @@ generator_arguments=(
   --output "${report_directory}"
 )
 generator_arguments+=("${journey_evidence_arguments[@]}")
+generator_arguments+=("${selection_arguments[@]}")
+generator_arguments+=(--environment "runner=macOS AppKit render tests")
+if [[ -n "${requested_theme}" ]]; then
+  generator_arguments+=(--environment "theme=${requested_theme}")
+fi
 if ((accept_new_baselines)); then
   generator_arguments+=(--accept-new-baselines)
 fi
+if ((require_accepted)); then
+  generator_arguments+=(--require-accepted)
+fi
 
+set +e
 report_path="$(python3 "${script_directory}/generate_ui_evidence_report.py" "${generator_arguments[@]}")"
-printf '\nUI evidence report: %s\n' "${report_path}"
-printf 'Open it with: open %q\n' "${report_path}"
+generator_status=$?
+set -e
+if [[ -n "${report_path}" ]]; then
+  printf '\nUI evidence report: %s\n' "${report_path}"
+  printf 'Regression approval: %s/regression.html\n' "${report_directory}"
+  printf 'Open it with: open %q\n' "${report_path}"
+fi
+if ((generator_status != 0)); then
+  exit "${generator_status}"
+fi

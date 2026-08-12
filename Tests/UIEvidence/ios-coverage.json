@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "title": "Threading iOS UI evidence",
   "platform": "iOS",
+  "themeIDs": ["custom", "custom-light", "fallback"],
   "captures": [
     {"id": "welcome-custom-light", "entryID": "ios-welcome", "demo": "welcome", "appearance": "light", "theme": "custom-light"},
     {"id": "welcome-custom-dark", "entryID": "ios-welcome", "demo": "welcome", "appearance": "dark", "theme": "custom"},

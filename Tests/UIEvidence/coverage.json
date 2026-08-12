@@ -1,7 +1,42 @@
 {
   "schemaVersion": 1,
   "title": "Threading UI evidence",
+  "platform": "macOS",
   "entries": [
+    {
+      "id": "app-theme-chrome-matrix",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "All stock app themes",
+      "description": "One rich native conversation rendered under every stock app theme, automatically derived from AppThemeLibrary.stock so adding a theme cannot bypass visual approval.",
+      "states": [
+        "User and assistant content",
+        "Tool rows",
+        "Code",
+        "Diff",
+        "All stock themes"
+      ],
+      "matrix": {
+        "themes": [
+          "Every AppThemeLibrary.stock value"
+        ],
+        "appearances": [
+          "Both appearances for adaptive themes",
+          "Authored appearance for fixed themes"
+        ],
+        "sizes": [
+          "720-point conversation sentinel"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AppThemeRenderTests.swift",
+        "test": "ThreadingTests/AppThemeRenderTests/testRendersAConversationUnderEveryStockTheme"
+      },
+      "capture": {
+        "glob": "chrome-*.png"
+      }
+    },
     {
       "id": "design-system-components",
       "kind": "component",

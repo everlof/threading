@@ -46,9 +46,20 @@ final class AppThemeRenderTests: XCTestCase {
         let directory = Render.directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
+        let requestedThemeID = ProcessInfo.processInfo.environment[
+            "THREADING_UI_EVIDENCE_THEME_ID"
+        ]
+        let themes = AppThemeLibrary.stock.filter { theme in
+            requestedThemeID == nil || theme.id.rawValue == requestedThemeID
+        }
+        if let requestedThemeID, themes.isEmpty {
+            XCTFail("Unknown stock theme requested for evidence: \(requestedThemeID)")
+            return
+        }
+
         var written: [String] = []
 
-        for theme in AppThemeLibrary.stock {
+        for theme in themes {
             AppThemePalette.set(theme)
 
             if theme.isAdaptive {
@@ -81,7 +92,7 @@ final class AppThemeRenderTests: XCTestCase {
         }
 
         print("Rendered \(written.count) themed conversations to \(directory.path)")
-        let expected = AppThemeLibrary.stock.reduce(0) {
+        let expected = themes.reduce(0) {
             $0 + ($1.isAdaptive ? 2 : 1)
         }
         XCTAssertEqual(written.count, expected)

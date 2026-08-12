@@ -1,0 +1,4 @@
+interface:
+  display_name: "UI Evidence Review"
+  short_description: "Review and approve pixel-perfect UI evidence"
+  default_prompt: "Use $ui-evidence-review to capture, compare, annotate, and approve a targeted UI change."
