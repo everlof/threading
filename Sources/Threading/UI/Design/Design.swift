@@ -790,6 +790,10 @@ enum Design {
         static let consumptionSummaryWidth: CGFloat = 276
         static let rangeControlWidth: CGFloat = 148
         static let metricControlWidth: CGFloat = 144
+        /// The rescan strip's bar, beside the tabs. Short on purpose: a page already showing its
+        /// last complete report is being refreshed, not built, and a full-width bar over it would
+        /// claim the page is unusable while it runs.
+        static let scanProgressWidth: CGFloat = 88
     }
 
     // MARK: - Surface
@@ -1398,6 +1402,21 @@ enum Design {
         /// the panel fades, the acknowledgement every platform menu gives.
         static var confirmBeat: TimeInterval { reducesMotion ? 0 : 0.05 }
 
+        /// Where a loading ghost's breath bottoms out, and one half of its cycle.
+        ///
+        /// Shared by every skeleton — the deferred diff body, a chart waiting for its sources —
+        /// because they are one gesture appearing in two panes, and a second copy of the numbers
+        /// is how two ghosts in one window end up breathing at different rates. The floor is high
+        /// enough that the silhouette never reads as gone: a skeleton that blinks off looks like
+        /// the load failing on a loop. The period is a half-cycle, so the autoreversed round trip
+        /// is twice this, which reads as breathing rather than as flashing.
+        ///
+        /// Not collapsed to zero here, unlike the transitions above: the callers install the
+        /// animation only when `reducesMotion` is false and remove it outright otherwise, since
+        /// what the preference asks for is no perpetual movement rather than a fast one.
+        static let skeletonPulseFloor: Float = 0.55
+        static let skeletonPulsePeriod: CFTimeInterval = 0.9
+
         /// One surface handing an element over to the next — the composer's box travelling to
         /// where the conversation replies from.
         ///
@@ -1558,6 +1577,17 @@ enum Design {
 
         /// The same wash under Increase Contrast, where a faint tint is the first thing to go.
         static let imageHoverWashIncreasedContrast: CGFloat = 0.34
+
+        /// How much ink a chart's loading ghost keeps, and how much the band behind it keeps.
+        ///
+        /// Far below what a bar-shaped skeleton can carry, and measured rather than guessed: at
+        /// the tint a row of bars is drawn at, a filled *area* comes out a solid mid-grey shape
+        /// that reads as a series, and a rendered dashboard showed exactly that — a chart that
+        /// looked like it had loaded and then said it was still loading. A run of ink is a much
+        /// larger claim than a bar. The rear band is held further back again so the two read as
+        /// depth rather than as two series with a legend missing.
+        static let skeletonChartBand: CGFloat = 0.12
+        static let skeletonChartBandBehind: CGFloat = 0.07
 
         /// How much of the window a covering surface takes away behind it.
         ///

@@ -360,6 +360,9 @@
 			proxyType = 1;
 			remoteGlobalIDString = 1459DEBF5B7709D7DCD407A2;
 			remoteInfo = ThreadingExtensionHelperNetwork;
+		F5697D82E62738F2BDD779A8 /* ThemedChartPlaceholderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79CC79A494A03080EA20263E /* ThemedChartPlaceholderTests.swift */; };
+		33E5AD11C103EC7D4EF85D03 /* UsageScanProgressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96FF3649D985927DDD31522A /* UsageScanProgressTests.swift */; };
+		40DC0CB1FDA124E5AFC4A80E /* UsageDashboardWaitingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 228EE98CDA5D7985CC649032 /* UsageDashboardWaitingTests.swift */; };
 		};
 		28376D7AA2BB73D3CD291113 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -775,6 +778,9 @@
 				ThreadingMobile/RemoteUsageDashboardView.swift,
 				ThreadingMobile/RootView.swift,
 				ThreadingMobile/SessionDashboard.swift,
+		79CC79A494A03080EA20263E /* ThemedChartPlaceholderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedChartPlaceholderTests.swift; sourceTree = "<group>"; };
+		96FF3649D985927DDD31522A /* UsageScanProgressTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageScanProgressTests.swift; sourceTree = "<group>"; };
+		228EE98CDA5D7985CC649032 /* UsageDashboardWaitingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageDashboardWaitingTests.swift; sourceTree = "<group>"; };
 				ThreadingMobile/SessionDetailView.swift,
 				ThreadingMobile/SessionWorkspaceView.swift,
 				ThreadingMobile/ThreadingMobileApp.swift,
@@ -1276,6 +1282,9 @@
 				C0D100010000000000000002 /* ThreadingUITests.xctest */,
 				3F3EFEC8D4B4F821C9695ABA /* ThreadingExtensionHelper */,
 				A6563DF6216A83E7016B0C5B /* ThreadingExtensionHelperNetwork */,
+				79CC79A494A03080EA20263E /* ThemedChartPlaceholderTests.swift */,
+				96FF3649D985927DDD31522A /* UsageScanProgressTests.swift */,
+				228EE98CDA5D7985CC649032 /* UsageDashboardWaitingTests.swift */,
 				661FF20242AD94BEA7B16F91 /* ThreadingExtensionHelper */,
 				161EB5CC2018AEE0E4E9F95F /* ThreadingExtensionHelperNetwork */,
 				C20CE9CA503B8DC639CAB992 /* ThreadingExtensionHelper */,
@@ -2142,6 +2151,9 @@
 			target = F6000001000000000000001 /* Threading */;
 			targetProxy = 95814D89024CC2AED2A443AC /* PBXContainerItemProxy */;
 		};
+				F5697D82E62738F2BDD779A8 /* ThemedChartPlaceholderTests.swift in Sources */,
+				33E5AD11C103EC7D4EF85D03 /* UsageScanProgressTests.swift in Sources */,
+				40DC0CB1FDA124E5AFC4A80E /* UsageDashboardWaitingTests.swift in Sources */,
 		D2E000010000000000000008 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = Threading;

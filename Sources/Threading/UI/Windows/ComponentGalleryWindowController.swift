@@ -1737,6 +1737,11 @@ final class ComponentGalleryViewController: NSViewController {
         )
         showReceipt(L10n.string("Switched the chart data."))
     }
+                story(
+                    "ThemedChartPlaceholderView",
+                    "What a chart says with no series: work in flight on the left, a finished empty answer on the right.",
+                    galleryChartPlaceholders()
+                ),
 
     private func galleryChartModel(alternate: Bool) -> ThemedChartModel {
         let calendar = Calendar.autoupdatingCurrent
@@ -1746,6 +1751,40 @@ final class ComponentGalleryViewController: NSViewController {
         primary.reserveCapacity(21)
         for index in 0...20 {
             let date = calendar.date(byAdding: .day, value: index, to: start) ?? start
+    /// The two states side by side, which is the only way to see that they do not look alike.
+    private func galleryChartPlaceholders() -> NSView {
+        let loading = ThemedStackedBandChartView(frame: .zero)
+        loading.setModel(ThemedChartModel(
+            title: L10n.string("Daily usage"),
+            accessibilitySummary: L10n.string("Reading usage sources…"),
+            series: [],
+            emptyMessage: L10n.string("Reading usage sources…"),
+            emptyDetail: L10n.format(
+                "%@ · %@",
+                "Claude Code",
+                L10n.format("%lld sources read", 128)
+            ),
+            placeholder: .loading(progress: 0.42)
+        ), animated: false)
+
+        let empty = ThemedTimeSeriesChartView(frame: .zero)
+        empty.setModel(ThemedChartModel(
+            title: L10n.string("Daily usage"),
+            accessibilitySummary: L10n.string("No usage recorded yet"),
+            series: [],
+            emptyMessage: L10n.string("No usage recorded yet"),
+            emptyDetail: L10n.string("Cost and tokens appear here once an agent session has run.")
+        ), animated: false)
+
+        let row = NSStackView(views: [loading, empty])
+        row.orientation = .horizontal
+        row.distribution = .fillEqually
+        row.spacing = Design.Spacing.medium
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.widthAnchor.constraint(equalToConstant: 820).isActive = true
+        return row
+    }
+
             let value: Double = alternate
                 ? 12.0 + Double((index * 11 + 7) % 25)
                 : 8.0 + Double((index * 7 + 3) % 19)

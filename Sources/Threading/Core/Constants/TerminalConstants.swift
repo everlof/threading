@@ -1199,6 +1199,13 @@ struct UsageLimitHistoryDidChange: AppEvent {
 struct UsageWindowScheduleDidChange: AppEvent {
     static let name = Notification.Name("ThreadingUsageWindowScheduleDidChange")
 }
+/// A usage scan moved. Separate from `TranscriptUsageDidChange` because this arrives many times
+/// for one report and only the dashboard's own placeholder is interested: a listener that rebuilt
+/// a page from it would rebuild that page for every tick of a progress bar.
+struct TranscriptUsageScanProgressDidChange: AppEvent {
+    static let name = Notification.Name("transcriptUsageScanProgressDidChange")
+}
+
 
 /// A poke fired, failed, or the standing reason it is holding changed — the signal the settings
 /// page redraws its ledger on.
