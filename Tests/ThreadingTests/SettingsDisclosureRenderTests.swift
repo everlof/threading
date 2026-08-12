@@ -345,14 +345,30 @@ final class SettingsDisclosureRenderTests: XCTestCase {
                 ]
             )
 
+            // Unfolded, and with the two-part trailing control its rows actually carry: a size
+            // beside a Remove is one group, and a group is a stack view the row cannot hand its
+            // ordinary hugging contract to. Collapsed, this fixture drew none of that and the
+            // page shipped with all three groups floating in the middle of the card.
             let storageShaped = SettingsUI.disclosureCard(
                 title: "sonda · feature/deploy-pipeline",
                 subtitle: "~/repo/sonda/.worktrees/feature-deploy-pipeline",
                 summary: "12.4 GB",
                 control: SettingsUI.button("Remove All…", target: self, action: #selector(noop)),
-                isExpanded: false,
+                isExpanded: true,
                 localizes: false,
-                onToggle: { _ in }
+                onToggle: { _ in },
+                detailRows: [
+                    storageRow(path: "web/node_modules", size: "5.1 GB", age: "1 wk ago"),
+                    storageRow(path: "target", size: "3.14 GB", age: "2 hr ago"),
+                    SettingsUI.disclosureRow(
+                        title: "27 smaller directories",
+                        subtitle: "Under 1 GB, click to show each",
+                        summary: "1.37 GB",
+                        isExpanded: false,
+                        localizes: false,
+                        onToggle: { _ in }
+                    )
+                ]
             )
             let extensionShaped = SettingsUI.disclosureCard(
                 title: "Weather Panel",
@@ -814,6 +830,25 @@ final class SettingsDisclosureRenderTests: XCTestCase {
     @MainActor
     private func labels(in root: NSView) -> [NSTextField] {
         descendants(of: root, type: NSTextField.self)
+    }
+
+    /// One reclaimable directory, built the way the Storage page builds it.
+    @MainActor
+    private func storageRow(path: String, size: String, age: String) -> NSView {
+        let reading = NSTextField(labelWithString: size)
+        reading.applyFont(.numericBody)
+        reading.textColor = Design.Text.secondary
+        reading.alignment = .right
+
+        return SettingsUI.row(
+            title: path,
+            subtitle: "Rust build output · cargo build · last written \(age)",
+            control: SettingsUI.controlGroup([
+                reading,
+                SettingsUI.button("Remove", target: self, action: #selector(noop))
+            ]),
+            localizes: false
+        )
     }
 
     @objc private func noop() {}

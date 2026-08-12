@@ -254,10 +254,10 @@ final class ThemePreferencesViewController: NSViewController {
         duplicateAppThemeButton = duplicate
         deleteAppThemeButton = delete
 
-        let actions = NSStackView(views: [duplicate, delete])
-        actions.orientation = .horizontal
-        actions.alignment = .centerY
-        actions.spacing = Design.Spacing.small
+        let actions = SettingsUI.controlGroup(
+            [duplicate, delete],
+            spacing: Design.Spacing.small
+        )
 
         let importButton = SettingsUI.button(
             "Import…",

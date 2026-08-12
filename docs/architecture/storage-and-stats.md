@@ -68,6 +68,12 @@ page had been written two minutes earlier, in a worktree with no Threading sessi
 That is the second of two independent in-flight checks, the other being a running session in
 the project.
 
+A row's size and its Remove are one control, `SettingsUI.controlGroup`, because a hand-rolled
+stack of the two floated in the middle of the card in the real scrolling page while looking right
+in every fixture. See the 2026-08-12 entry in
+[`design-system.md`](design-system.md); the sizes read as a column only because that group is
+flush to the trailing inset.
+
 ## Code Stats
 
 Hovering a project row opens a popover of the project's code composition — total code lines

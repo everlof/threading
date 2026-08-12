@@ -1881,3 +1881,55 @@ test files are still missing from the target.
 The new test is the one that fails on the old code: demote every row and assert the strength
 *immediately*, with no draw of any kind in between — which is the only form of the rule the
 running app ever exercises.
+
+
+## 2026-08-12 — a row's trailing control is not always one view, and a stack does not hear the row
+
+Reported from the Storage page: the three artifact rows' Remove buttons floated in the middle of
+the card, each at a different distance, while the card's own Remove All sat on the trailing edge
+above them.
+
+Storage's rows carry two things at the trailing end — the size and the button that reclaims it —
+so what they hand `SettingsUI.row(title:subtitle:control:)` is an `NSStackView` rather than a
+control. The row does one thing to a control it is given, and it is the load-bearing thing:
+`setContentHuggingPriority(.required, for: .horizontal)`, so the label column beside it is the
+only view willing to absorb the row's slack. **A stack view does not lay out by that property.**
+It has no intrinsic content size for hugging to describe, and reads its own `huggingPriority`
+instead, which starts at `.defaultLow` — exactly the willingness to grow that the label column
+was given deliberately. Two views equally willing, and the layout engine picked.
+
+Which is why this shipped, and why it is worth writing down: **it picked differently in a fixture
+than in the app.** Measured in a `SettingsCard` held at 620pt by a width constraint, the group sat
+on the trailing inset and every assertion anyone would have written passed. Inside
+`SettingsUI.page`'s scroll view — same card, same 620pt — the group took the slack and its
+contents clustered at its leading edge, at 439/457/460pt of a 608pt row, each row's own size
+string setting where its group began. The 420pt case was accidentally correct in both, because a
+narrow row has no slack to misassign. This is the "component tested outside the container it ships
+in" trap from CLAUDE.md in its quietest form: the fixture was not wrong about the row, it was
+wrong about which of two ambiguous answers the engine would give.
+
+`SettingsUI.controlGroup(_:)` is the fix and the vocabulary: a composite trailing control, hugging
+its content at `.required`, spaced and centred like the row expects. `holdsItsWidth` applies it
+from both `assemble` and `disclosureHeader`, so a page that hands either one a stack cannot hit
+this again. Nothing else about the stack is touched — its clipping resistance is already required,
+so under pressure the group keeps its content width and the row's own title truncates, which is
+what should give.
+
+Two places in this codebase had already met this fault and solved it locally: the Usage dashboard's
+`sectionHeader` parks an inert spacer beside its compound controls, and the composer's column
+carries a comment naming the property a stack view does not lay out by. The kit that builds rows
+now says it once.
+
+Storage's sizes align as a consequence rather than by arithmetic: the group is flush to the
+trailing inset, the buttons all read "Remove", so every size label ends on one edge and the
+monospaced digits form the column the page exists to be read down. What is *not* aligned is the
+card's own summary and its fold row's total, which sit at their own trailing ends because their
+rows carry different controls — three numbers at three right edges. Making those one column means
+reserving a size column and an action column across a whole card, which is a table, and the
+disclosure summary is shared with Tools ("35 tools") and Extensions ("Running") where such a
+column would mean nothing. Left alone deliberately.
+
+`SettingsRowLayoutTests` pins it in the page, not in a card: the group reaches the trailing inset,
+the buttons and the sizes each share a column, and at 420pt the group still keeps its fitting
+width. `SettingsDisclosureRenderTests`' storage-shaped fixture is now unfolded and carries the
+two-part control, because collapsed it drew none of this.

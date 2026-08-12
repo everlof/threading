@@ -244,7 +244,7 @@ enum SettingsUI {
                 top: 0, left: 0, bottom: 0, right: Design.Spacing.inset
             )
             disclosure.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            control.setContentHuggingPriority(.required, for: .horizontal)
+            holdsItsWidth(control)
             row.addArrangedSubview(disclosure)
             row.addArrangedSubview(control)
             header = row
@@ -496,11 +496,52 @@ enum SettingsUI {
         row.addArrangedSubview(labels)
 
         if let control {
-            control.setContentHuggingPriority(.required, for: .horizontal)
+            holdsItsWidth(control)
             row.addArrangedSubview(control)
         }
 
         return padded(row)
+    }
+
+    /// Two things on a row's trailing edge as one control — a reading and the button that acts on
+    /// it, Storage's size beside its Remove.
+    ///
+    /// It exists because a composite control is a *stack view*, and the row cannot say to a stack
+    /// what it says to every other control: a stack has no intrinsic content size, so
+    /// `setContentHuggingPriority` describes nothing about it, and its own `huggingPriority`
+    /// starts low. The group is then exactly as willing to take the row's spare width as the
+    /// label column beside it, and which of the two gets it is the layout engine's choice rather
+    /// than the row's. Storage's rows shipped like that, and the choice went both ways: in a
+    /// fixed-width fixture the group sat on the trailing edge, while in the real scrolling page
+    /// all three groups floated mid-card, each at a different distance because each row's own
+    /// size string set where its group began. The Usage dashboard met the same fault and parked
+    /// an inert spacer beside its header controls; this says it once, in the kit that builds rows.
+    static func controlGroup(
+        _ views: [NSView],
+        spacing: CGFloat = Design.Spacing.medium
+    ) -> NSStackView {
+        let group = NSStackView(views: views)
+        group.orientation = .horizontal
+        group.alignment = .centerY
+        // A reading beside its button is two kinds of thing and takes the row's own spacing; a
+        // pair of sibling buttons is one control and may ask for the tighter step.
+        group.spacing = spacing
+        holdsItsWidth(group)
+        return group
+    }
+
+    /// The trailing half of a row keeps its fitting width, so the labels absorb the slack — the
+    /// contract `assemble` documents, stated for a stack as well as for a plain control.
+    private static func holdsItsWidth(_ control: NSView) {
+        control.setContentHuggingPriority(.required, for: .horizontal)
+        // The line above said nothing to a stack: `setContentHuggingPriority` is an `NSView`
+        // property a stack view does not lay out by, which the composer's column had already
+        // found out the hard way. `huggingPriority` is the one it reads, and it starts at 250 —
+        // the same willingness to grow the label column has. Nothing else is touched: a stack's
+        // clipping resistance is already required — measured for `ControlRowView`, see
+        // `design-system.md` — so the group keeps its content width under pressure and the row's
+        // own labels are what give.
+        (control as? NSStackView)?.setHuggingPriority(.required, for: .horizontal)
     }
 
     /// The common case — no caller needs the subtitle back.

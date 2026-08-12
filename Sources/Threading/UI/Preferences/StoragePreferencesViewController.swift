@@ -327,14 +327,14 @@ final class StoragePreferencesViewController: NSViewController {
         button.tag = tag
 
         let size = NSTextField(labelWithString: Self.size.string(fromByteCount: artifact.byteCount))
-        // Monospaced digits so the sizes form a column instead of jittering row to row.
+        // Monospaced digits and trailing alignment, so the sizes read as a column of numbers
+        // rather than jittering row to row. The column is only a column because the group holds
+        // its fitting width against the trailing inset — see `SettingsUI.controlGroup`.
         size.applyFont(.numericBody)
         size.textColor = Design.Text.secondary
         size.alignment = .right
 
-        let trailing = NSStackView(views: [size, button])
-        trailing.orientation = .horizontal
-        trailing.spacing = Design.Spacing.medium
+        let trailing = SettingsUI.controlGroup([size, button])
 
         return SettingsUI.row(
             title: artifact.url.path.replacingOccurrences(of: group.path + "/", with: ""),
@@ -462,9 +462,6 @@ private enum StorageDefaults {
 
     /// The artifact index meaning "every artifact in this checkout".
     static let wholeGroupTag = tagStride - 1
-
-    /// Matches `Design.Typography.body()`, in its monospaced-digit form.
-    static let sizeFontSize: CGFloat = 13
 
     /// Directories smaller than this fold into one row. A gigabyte is the line between "worth
     /// its own row" and "part of the tail" — a checkout gathers dozens of KB-sized caches, and

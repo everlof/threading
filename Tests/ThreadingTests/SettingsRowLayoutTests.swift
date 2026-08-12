@@ -176,6 +176,155 @@ final class SettingsRowLayoutTests: XCTestCase {
         )
     }
 
+    // MARK: - A Composite Trailing Control
+
+    /// Storage's rows carry two things on the trailing edge — the size and Remove — so the
+    /// "control" they hand `row` is a stack. A stack has no intrinsic content size, so the row's
+    /// `setContentHuggingPriority(.required)` said nothing to it, and the group was as willing to
+    /// take the row's slack as the label column was.
+    ///
+    /// **In a card held at a fixed width it looked right**, which is why this shipped: the tie
+    /// resolved in the labels' favour there and in the group's favour inside the real scrolling
+    /// page, where all three groups floated mid-card, each at a different distance because each
+    /// row's own size string set where its group began. So the fixture is the page, not the card
+    /// — the container the row actually ships in.
+    private func storagePage(
+        width: CGFloat = Design.Size.readableWidth
+    ) -> (page: NSView, card: NSView, sizes: [NSTextField], buttons: [ThemedButton], window: NSWindow) {
+        let fixtures = [
+            ("FestinaPackages/.build", "Swift build output · swift build · last written 1 wk ago", "5.1 GB"),
+            ("Android/chronos/build", "Gradle build output · gradle build · last written 1 wk ago", "3.1 GB"),
+            ("Android/watch/build", "Gradle build output · gradle build · last written 1 hr ago", "1.41 GB")
+        ]
+
+        var sizes: [NSTextField] = []
+        var buttons: [ThemedButton] = []
+        var rows: [NSView] = []
+        for fixture in fixtures {
+            let button = SettingsUI.button(
+                "Remove",
+                target: self,
+                action: #selector(noop),
+                localizes: false
+            )
+            buttons.append(button)
+
+            let size = NSTextField(labelWithString: fixture.2)
+            size.applyFont(.numericBody)
+            size.alignment = .right
+            sizes.append(size)
+
+            rows.append(SettingsUI.row(
+                title: fixture.0,
+                subtitle: fixture.1,
+                control: SettingsUI.controlGroup([size, button]),
+                localizes: false
+            ))
+        }
+
+        let card = SettingsUI.disclosureCard(
+            title: "app-mono · release/12.14.x",
+            subtitle: "~/fest/app-mono",
+            summary: "10.99 GB",
+            control: SettingsUI.button(
+                "Remove All…",
+                target: self,
+                action: #selector(noop),
+                localizes: false
+            ),
+            isExpanded: true,
+            localizes: false,
+            onToggle: { _ in },
+            detailRows: rows
+        )
+
+        let page = SettingsUI.page(
+            title: "Storage",
+            summary: "14.53 GB reclaimable in 43 directories",
+            actions: [
+                SettingsUI.button("Rescan", target: self, action: #selector(noop), localizes: false)
+            ],
+            sections: [card],
+            localizes: false
+        )
+        let window = NSWindow(
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: width + Design.Size.glowGutter * 2,
+                height: 600
+            ),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = page
+        page.layoutSubtreeIfNeeded()
+        return (page, card, sizes, buttons, window)
+    }
+
+    @objc private func noop() {}
+
+    func testACompositeTrailingControlReachesTheRowsTrailingInset() {
+        let built = storagePage()
+
+        XCTAssertEqual(built.card.bounds.width, Design.Size.readableWidth, accuracy: 0.5)
+        for (index, button) in built.buttons.enumerated() {
+            let frame = button.convert(button.bounds, to: built.card)
+            XCTAssertEqual(
+                frame.maxX,
+                built.card.bounds.width - Design.Spacing.inset,
+                accuracy: 0.5,
+                "row \(index)'s trailing group stopped at \(frame.maxX)pt of a "
+                    + "\(built.card.bounds.width)pt card"
+            )
+        }
+        withExtendedLifetime(built.window) {}
+    }
+
+    /// And they line up with each other: three Remove buttons at three x positions is the same
+    /// fault read a second way, since how wide a row's size string is is not the row's business.
+    func testCompositeTrailingControlsAlignAcrossRows() throws {
+        let built = storagePage()
+        let buttonEdges = built.buttons.map { $0.convert($0.bounds, to: built.card).minX }
+        let sizeEdges = built.sizes.map { $0.convert($0.bounds, to: built.card).maxX }
+
+        let firstButton = try XCTUnwrap(buttonEdges.first)
+        for edge in buttonEdges {
+            XCTAssertEqual(edge, firstButton, accuracy: 0.5,
+                           "the Remove buttons do not share a column: \(buttonEdges)")
+        }
+
+        let firstSize = try XCTUnwrap(sizeEdges.first)
+        for edge in sizeEdges {
+            XCTAssertEqual(edge, firstSize, accuracy: 0.5,
+                           "the sizes do not share a column: \(sizeEdges)")
+        }
+        withExtendedLifetime(built.window) {}
+    }
+
+    /// The group holds its own width rather than being squeezed by the label column, which is the
+    /// same contract the single-control row keeps at 420pt.
+    func testACompositeTrailingControlKeepsItsWidthInANarrowPage() throws {
+        let built = storagePage(width: 420)
+
+        for (index, button) in built.buttons.enumerated() {
+            let frame = button.convert(button.bounds, to: built.card)
+            XCTAssertEqual(
+                frame.maxX,
+                built.card.bounds.width - Design.Spacing.inset,
+                accuracy: 0.5,
+                "row \(index)'s group left the narrow card's trailing inset"
+            )
+            XCTAssertGreaterThanOrEqual(
+                button.frame.width,
+                button.fittingSize.width - 0.5,
+                "row \(index)'s Remove was squeezed by the labels beside it"
+            )
+        }
+        withExtendedLifetime(built.window) {}
+    }
+
     /// A row with no control at all still lays its subtitle out across the row.
     func testARowWithNoControlStillFillsItsWidth() throws {
         let narrow = try subtitle(in: row(width: 420, control: nil)).frame.width
