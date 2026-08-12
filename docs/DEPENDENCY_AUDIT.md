@@ -2,7 +2,8 @@
 
 - Audit date: 2026-08-12
 - Dependency baseline: `8360796d46742796646d38bc58e565fb1401688f`
-- Scope: shipped code dependencies, local package boundaries, submodules, and bundled font assets
+- Scope: shipped code dependencies, local package boundaries, submodules, the bundled `scc`
+  executable, and bundled font assets
 
 This is an engineering publication gate, not a legal opinion.
 
@@ -10,11 +11,11 @@ This is an engineering publication gate, not a legal opinion.
 
 | Gate | Result | Evidence |
 |---|---|---|
-| Source publication under GPLv3 | Pass | Every code dependency is MIT, BSD, zlib, or Apache-2.0 with the Swift runtime exception. |
+| Source publication under GPLv3 | Pass | Every code dependency and the bundled `scc` helper is MIT, BSD, zlib, or Apache-2.0 with the Swift runtime exception. |
 | Public dependency access | Pass | Every Git-backed dependency is anonymously readable on GitHub. |
-| Reproducible resolution | Pass | Submodules are gitlinks; remote Swift packages have committed `Package.resolved` revisions; vendored SwiftTerm is part of the parent repository. |
+| Reproducible resolution | Pass | Submodules are gitlinks; remote Swift packages have committed `Package.resolved` revisions; vendored SwiftTerm is part of the parent repository; the universal `scc` helper is reproduced from two checksum-pinned official archives. |
 | Known-vulnerability check | Pass | No resolved version or pinned revision matched OSV or GitHub Advisory Database records on the audit date. |
-| Binary license delivery | Pass | Fresh macOS and physical-iOS builds embed target-specific, build-verified legal-notice bundles containing 22 and 13 non-empty files respectively. |
+| Binary license delivery | Pass | macOS and physical-iOS builds embed target-specific, build-verified legal-notice bundles containing 23 and 13 non-empty files respectively. |
 | iOS export declaration | Release action required | WebRTC bundles standards-based DTLS/SRTP cryptography. The target now declares `ITSAppUsesNonExemptEncryption = YES`; complete Apple's App Store Connect determination and any required French declaration before distribution. |
 
 The source-publication and binary-distribution gates pass. App Store export-compliance review is
@@ -43,6 +44,12 @@ The SwiftTerm library target does not link its `termcast` executable's argument-
 but the standalone vendored package lock is included because it is still committed and can be
 built independently.
 
+### Bundled executable
+
+| Component | Form | Resolved version or revision | License | Advisory result |
+|---|---|---|---|---|
+| scc | Universal macOS executable made from official Darwin arm64 and x86_64 release assets | `3.7.0`; source commit `74d4df231aad307f24149456afb1bd420e0f71be` | MIT | No OSV match for Go module version or source revision; no GitHub advisory match for module version on 2026-08-12 |
+
 ### Bundled fonts and font-derived artwork
 
 | Asset | Provenance pin | License | Distribution state |
@@ -69,6 +76,11 @@ distribution.
 - `Packages/ThreadingWasmRuntime/Package.resolved` repeats the WasmKit graph pins.
 - `Packages/Vendor/SwiftTerm/Package.resolved` pins the vendored package's standalone tooling
   dependency.
+- `ThirdParty/scc/PROVENANCE.md` pins the official 3.7.0 archive URLs and SHA-256 values for both
+  Darwin architectures, the extracted slice hashes, and the checked-in universal binary hash.
+  `scripts/update_bundled_scc.sh` reproduces that file from the release assets and refuses any
+  mismatched archive or output; `scripts/check_bundled_scc.sh` verifies its architectures and
+  exact version in both the source tree and finished application.
 - Manifest version ranges do not weaken the committed build: SwiftPM consumes the checked-in
   lockfiles. Any intentional dependency update must include and review the lockfile diff.
 - SwiftTerm's former gitlink revision is recoverable from repository history but was not written
@@ -78,11 +90,14 @@ distribution.
 
 The audit queried both of these current databases:
 
-1. OSV `/v1/querybatch`, using every exact Git revision plus the six Swift package versions.
-2. GitHub's global advisory API with the Swift ecosystem and exact affected package versions.
+1. OSV `/v1/querybatch`, using every exact Git revision plus the six Swift package versions and
+   `github.com/boyter/scc/v3` at 3.7.0.
+2. GitHub's global advisory API with the Swift and Go ecosystems and exact affected package
+   versions.
 
 All exact queries returned zero affected advisories. The standalone argument-parser `1.6.2`
-lock was checked separately and also returned zero.
+lock was checked separately and also returned zero. The scc source commit was additionally
+queried as an OSV commit identity and returned zero.
 
 SwiftTerm has one historical high-severity advisory,
 [`GHSA-jq43-q8mx-r7mq`](https://github.com/advisories/GHSA-jq43-q8mx-r7mq), fixed before version
@@ -105,7 +120,7 @@ tree and resolved SwiftPM checkouts into the finished application's `Legal` reso
 
 The build remains sandboxed on iOS: target-specific `.xcfilelist` files declare each allowed
 input and output rather than disabling `ENABLE_USER_SCRIPT_SANDBOXING`. The macOS profile
-contains 22 required files; the smaller iOS graph contains 13. The shared verifier rejects any
+contains 23 required files, including scc's MIT license; the smaller iOS graph contains 13. The shared verifier rejects any
 missing or empty file and runs as part of every application build, including release builds.
 
 Verification on the audit date used fresh derived-data directories:
@@ -117,6 +132,12 @@ Verification on the audit date used fresh derived-data directories:
 
 Both builds passed `scripts/check_bundled_licenses.sh`. The verifier's failure path was also
 exercised against an empty directory and correctly reported every absent notice.
+
+After adding scc, the hosted macOS Debug product at
+`~/Library/Developer/Xcode/DerivedData/Threading-fsxzrzdjugmyxuasqpzdzjvwfkxk/Build/Products/Debug/Threading.app`
+passed the 23-notice verifier. Its signed `Contents/Helpers/scc` also passed the exact-version and
+two-architecture bundle check. The earlier physical-iOS evidence remains valid because scc is a
+macOS-only helper and does not change that target's 13-file profile.
 
 Release procedure: re-run the exact-version advisory queries, build the release archive, and run
 the same verifier against the archived `.app` immediately before tagging.

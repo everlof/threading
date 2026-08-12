@@ -10,6 +10,7 @@ complete license and notice texts shipped with this build are included beside th
 
 | Component | Resolved version or revision | License file in this directory |
 |---|---|---|
+| scc bundled source counter (macOS) | 3.7.0 official Darwin arm64 and x86_64 release executables | `scc-MIT.txt` |
 | SwiftTerm (vendored fork) | Imported from `06dbdd410f0684120e2bbb0d0b645eb9285db078`, then modified in-tree | `SwiftTerm-MIT.txt` |
 | NativeDiffKit | 0.1.1 / `363c6197d8e334fa0aaf30550fb0a0bcac540e71` | `NativeDiffKit-MIT.txt` |
 | WebRTC binary distribution | 151.0.0 / `19aa8c1fc7120d50df987b7111f42d5024df3d54` | `WebRTC-BSD-3-Clause.txt` |

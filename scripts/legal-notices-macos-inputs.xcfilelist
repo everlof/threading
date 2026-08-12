@@ -1,5 +1,6 @@
 $(SRCROOT)/Legal/THIRD_PARTY_NOTICES.md
 $(SRCROOT)/LICENSE
+$(SRCROOT)/ThirdParty/scc/LICENSE
 $(SRCROOT)/Packages/Vendor/SwiftTerm/LICENSE
 $(SRCROOT)/Packages/Vendor/BorderBeamKit/LICENSE
 $(SRCROOT)/Packages/Vendor/LabelMorph/LICENSE

@@ -42,6 +42,7 @@ common_notices=(
 )
 
 macos_notices=(
+    "scc-MIT.txt"
     "BorderBeamKit-MIT.txt"
     "LabelMorph-MIT.txt"
     "ThinkingOrbs-MIT.txt"

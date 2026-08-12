@@ -1,6 +1,8 @@
 $(SRCROOT)/Legal/THIRD_PARTY_NOTICES.md
 $(SRCROOT)/LICENSE
 $(SRCROOT)/Packages/Vendor/SwiftTerm/LICENSE
+$(BUILD_DIR)/../../SourcePackages/checkouts/NativeDiffKit/LICENSE
+$(BUILD_DIR)/../../SourcePackages/checkouts/WebRTC/LICENSE.md
 $(SRCROOT)/Sources/Threading/Resources/Fonts/W95FA/W95FA-OFL.txt
 $(SRCROOT)/Sources/Threading/Resources/Fonts/W95FA/W95FA-SOURCE.md
 $(SRCROOT)/Sources/Threading/Resources/Fonts/PlatinumBitmap/PlatinumBitmap-OFL.txt

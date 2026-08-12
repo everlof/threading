@@ -39,7 +39,11 @@ copy_notice() {
         exit 1
     fi
 
-    /usr/bin/install -m 0644 "$source_path" "$legal_directory/$destination_name"
+    # `install` creates an undeclared `INS@…` sibling before renaming it. Xcode's user-script
+    # sandbox correctly rejects that extra output even when the final notice is in the phase's
+    # output file list. Copy directly to the declared path, then normalize its mode.
+    /bin/cp "$source_path" "$legal_directory/$destination_name"
+    /bin/chmod 0644 "$legal_directory/$destination_name"
 }
 
 /bin/mkdir -p "$legal_directory"
@@ -61,6 +65,7 @@ copy_notice "$font_root/Topaz/Topaz-UPSTREAM-README.txt" "Topaz-UPSTREAM-README.
 copy_notice "$font_root/Topaz/Topaz-SOURCE.md" "Topaz-SOURCE.md"
 
 if [[ "$profile" == "macos" ]]; then
+    copy_notice "$repository_root/ThirdParty/scc/LICENSE" "scc-MIT.txt"
     copy_notice "$repository_root/Packages/Vendor/BorderBeamKit/LICENSE" "BorderBeamKit-MIT.txt"
     copy_notice "$repository_root/Packages/Vendor/LabelMorph/LICENSE" "LabelMorph-MIT.txt"
     copy_notice "$repository_root/Packages/Vendor/ThinkingOrbs/LICENSE" "ThinkingOrbs-MIT.txt"
