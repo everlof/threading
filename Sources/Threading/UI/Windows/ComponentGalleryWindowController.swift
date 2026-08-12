@@ -153,6 +153,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedSplitView",
         "ThemedStackedBandChartView",
         "ThemedTimeSeriesChartView",
+        "ThemedChartPlaceholderView",
         "ChartCardView",
         "ListSelectionStrength",
         "ThemedTableHeaderView",
@@ -1717,6 +1718,11 @@ final class ComponentGalleryViewController: NSViewController {
                     galleryChartCards()
                 ),
                 story(
+                    "ThemedChartPlaceholderView",
+                    "What a chart says with no series: work in flight on the left, a finished empty answer on the right.",
+                    galleryChartPlaceholders()
+                ),
+                story(
                     "UsageDashboardView",
                     "Overview and Limit History are separate tabs; switch ranges or metrics to inspect the retained chart morph.",
                     dashboard
@@ -1737,20 +1743,7 @@ final class ComponentGalleryViewController: NSViewController {
         )
         showReceipt(L10n.string("Switched the chart data."))
     }
-                story(
-                    "ThemedChartPlaceholderView",
-                    "What a chart says with no series: work in flight on the left, a finished empty answer on the right.",
-                    galleryChartPlaceholders()
-                ),
 
-    private func galleryChartModel(alternate: Bool) -> ThemedChartModel {
-        let calendar = Calendar.autoupdatingCurrent
-        let today = calendar.startOfDay(for: Date())
-        let start = calendar.date(byAdding: .day, value: -20, to: today) ?? today
-        var primary: [ThemedChartPoint] = []
-        primary.reserveCapacity(21)
-        for index in 0...20 {
-            let date = calendar.date(byAdding: .day, value: index, to: start) ?? start
     /// The two states side by side, which is the only way to see that they do not look alike.
     private func galleryChartPlaceholders() -> NSView {
         let loading = ThemedStackedBandChartView(frame: .zero)
@@ -1785,6 +1778,14 @@ final class ComponentGalleryViewController: NSViewController {
         return row
     }
 
+    private func galleryChartModel(alternate: Bool) -> ThemedChartModel {
+        let calendar = Calendar.autoupdatingCurrent
+        let today = calendar.startOfDay(for: Date())
+        let start = calendar.date(byAdding: .day, value: -20, to: today) ?? today
+        var primary: [ThemedChartPoint] = []
+        primary.reserveCapacity(21)
+        for index in 0...20 {
+            let date = calendar.date(byAdding: .day, value: index, to: start) ?? start
             let value: Double = alternate
                 ? 12.0 + Double((index * 11 + 7) % 25)
                 : 8.0 + Double((index * 7 + 3) % 19)
