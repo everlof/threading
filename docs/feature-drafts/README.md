@@ -48,3 +48,6 @@ the investigation is the value, and an idea deleted without a record comes back.
 - [Pasteboard-aware prompt suggestions](pasteboard-prompt-suggestions.md) — offer a short-lived,
   privacy-safe Paste action when Threading observed a recent pasteboard ownership change, while
   leaving content reads to the user's ordinary Paste action.
+- [Media documents and the Lottie viewer](media-documents-and-lottie.md) — give extensions a
+  host-rendered media document, bounded project file handles and an attachments preview seam, so a
+  safe extension can play an animation without a companion or a path.
