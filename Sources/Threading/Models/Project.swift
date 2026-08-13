@@ -1232,6 +1232,15 @@ struct AgentSession: Codable, Identifiable {
   /// through it would delete exactly those entries.
   var soundOverrides: [String: String]?
 
+  /// What happens when this conversation is refused over its account's usage limit. Nil inherits
+  /// the project's answer, which inherits the Settings choice — the same three scopes as the
+  /// theme, and optional for the same reason: a chat inside an armed checkout can still say no.
+  ///
+  /// Per-conversation rather than only global because the setting arms an unattended keystroke:
+  /// "this long-running chat carries on at reset, my other five do not" is the narrow opt-in, and
+  /// the global switch could only ever be the broad one. See `LimitRecoveryResolution`.
+  var limitRecoveryPolicy: LimitRecoveryPolicy?
+
   /// An execution directory owned for this session alone. Nil is the ordinary path: launch in
   /// the Project folder exactly as Threading always has.
   var managedWorkspace: ManagedWorkspace?
@@ -1321,6 +1330,7 @@ struct AgentSession: Codable, Identifiable {
     self.themeID = nil
     self.notificationsMuted = nil
     self.soundOverrides = nil
+    self.limitRecoveryPolicy = nil
     self.managedWorkspace = nil
   }
 
@@ -1335,6 +1345,7 @@ struct AgentSession: Codable, Identifiable {
     case continuationSource, continuationSourceKind
     case handoff
     case themeID, themeName, notificationsMuted, soundOverrides
+    case limitRecoveryPolicy
     case managedWorkspace
   }
 
@@ -1659,6 +1670,15 @@ struct AgentSession: Codable, Identifiable {
       [String: String].self,
       forKey: .soundOverrides
     )
+    // Through the raw string rather than the enum: `decodeIfPresent` on a `RawRepresentable`
+    // *throws* on a value it does not recognise, which would cost the whole session record —
+    // its title, its resume state, its account — over one unreadable setting. A policy name a
+    // later build invented reads as "never chose" instead, and the answer falls through to the
+    // project and the app, the conservative direction.
+    limitRecoveryPolicy = try container.decodeIfPresent(
+      String.self,
+      forKey: .limitRecoveryPolicy
+    ).flatMap(LimitRecoveryPolicy.init(rawValue:))
     managedWorkspace = try container.decodeIfPresent(
       ManagedWorkspace.self,
       forKey: .managedWorkspace
@@ -1709,6 +1729,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(themeID, forKey: .themeID)
     try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
     try container.encodeIfPresent(soundOverrides, forKey: .soundOverrides)
+    try container.encodeIfPresent(limitRecoveryPolicy, forKey: .limitRecoveryPolicy)
     try container.encodeIfPresent(managedWorkspace, forKey: .managedWorkspace)
   }
 
@@ -1963,6 +1984,11 @@ struct Project: Codable, Identifiable {
   /// unless they answered for themselves. See `SoundResolution`.
   var soundOverrides: [String: String]?
 
+  /// What happens when a chat in this checkout is refused over its account's usage limit. Nil
+  /// inherits the Settings choice; a chat with an answer of its own overrides it either way.
+  /// See `LimitRecoveryResolution`.
+  var limitRecoveryPolicy: LimitRecoveryPolicy?
+
   init(name: String, folderURL: URL, id: ProjectID = ProjectID()) {
     self.id = id
     self.name = name
@@ -1975,11 +2001,12 @@ struct Project: Codable, Identifiable {
     self.themeID = nil
     self.notificationsMuted = nil
     self.soundOverrides = nil
+    self.limitRecoveryPolicy = nil
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, name, folderPath, sessions, terminals, isExpanded, createdAt, icon, themeID, themeName
-    case notificationsMuted, soundOverrides
+    case notificationsMuted, soundOverrides, limitRecoveryPolicy
   }
 
   init(from decoder: Decoder) throws {
@@ -2018,6 +2045,12 @@ struct Project: Codable, Identifiable {
       [String: String].self,
       forKey: .soundOverrides
     )
+    // Leniently, for the reason `AgentSession` states: an unrecognised name must not cost the
+    // checkout and every session inside it.
+    limitRecoveryPolicy = try container.decodeIfPresent(
+      String.self,
+      forKey: .limitRecoveryPolicy
+    ).flatMap(LimitRecoveryPolicy.init(rawValue:))
   }
 
   func encode(to encoder: Encoder) throws {
@@ -2033,6 +2066,7 @@ struct Project: Codable, Identifiable {
     try container.encodeIfPresent(themeID, forKey: .themeID)
     try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
     try container.encodeIfPresent(soundOverrides, forKey: .soundOverrides)
+    try container.encodeIfPresent(limitRecoveryPolicy, forKey: .limitRecoveryPolicy)
   }
 
   var folderURL: URL {

@@ -111,41 +111,121 @@ final class LimitRecoveryCoordinator {
             return
         }
 
-        switch LimitRecoveryPolicy.current {
+        // The chat's answer, then its checkout's, then Settings'. Resolved per session rather
+        // than read globally because arming this is the narrow statement — see
+        // `LimitRecoveryResolution`.
+        let answer = LimitRecoveryResolution.answer(forSessionID: sessionID)
+
+        switch answer.policy {
         case .flagOnly:
             controller.activityTracker.noteLimitParked(recoveryArmed: false)
             EventLog.shared.record(.limitRecovery, "Session flagged, policy leaves it to the user", [
-                "session": sessionID.uuidString
+                "session": sessionID.uuidString,
+                "scope": String(describing: answer.scope)
             ])
             offerEscape(for: sessionID)
             recovering.remove(sessionID)
 
         case .waitForReset:
-            armWaitForReset(sessionID, controller: controller)
+            EventLog.shared.record(.limitRecovery, "Recovery armed by policy", [
+                "session": sessionID.uuidString,
+                "scope": String(describing: answer.scope)
+            ])
+            armWaitForReset(sessionID, controller: controller, trigger: .policy)
         }
+    }
+
+    // MARK: - Public Methods — Arming By Hand
+
+    /// Arms stop-and-wait for a refusal that is **already** standing, because somebody pressed
+    /// for it on the strip.
+    ///
+    /// The same routine the policy runs, and deliberately not a second implementation of it: the
+    /// chooser is answered by label, the plan is made before anything is typed, and the
+    /// continuation rides `ScheduledMessage`. Three things differ, each because a press is
+    /// watched where a policy is not — see `armWaitForReset(_:controller:trigger:)`.
+    ///
+    /// Reachable for a rendered conversation too, which the *policy* never is: that surface has
+    /// no chooser to answer, so the keystrokes are skipped and only the schedule is made.
+    func armWaitForReset(for sessionID: SessionID) {
+        guard LimitEscapeSuggestionStore.shared.hasStandingRefusal(for: sessionID) else {
+            EventLog.shared.record(.limitRecovery, "Wait-for-reset pressed with no refusal standing", [
+                "session": sessionID.uuidString
+            ])
+            return
+        }
+        // A recovery already in flight owns this refusal; a second arm would type twice.
+        guard !recovering.contains(sessionID) else { return }
+        recovering.insert(sessionID)
+
+        LimitEscapeSuggestionStore.shared.setBusy(.waitForReset, for: sessionID)
+        EventLog.shared.record(.limitRecovery, "Wait-for-reset pressed", [
+            "session": sessionID.uuidString
+        ])
+
+        // A rendered conversation is asked of the model rather than probed for: it has no
+        // terminal to read a chooser off, and the surface says so without anything being drawn.
+        let usesNativeUI = ProjectStore.shared.session(withID: sessionID)?.usesNativeUI ?? false
+        let controller = AgentRuntime.shared.controller(for: sessionID)
+        let terminal = (usesNativeUI || controller?.isRunning != true) ? nil : controller
+
+        armWaitForReset(sessionID, controller: terminal, trigger: .press)
     }
 
     // MARK: - Private Methods — Wait For Reset
 
+    /// Who asked for the recovery, which decides only how a *refusal to act* is reported.
+    ///
+    /// A policy acts when nobody is watching, so it degrades to `flagOnly` and says why in the
+    /// journal — that is the whole of `limit-recovery.md`'s "wrong in one direction only" rule.
+    /// A press is watched, and somebody is owed an answer on the strip they pressed.
+    private enum RecoveryTrigger {
+        case policy
+        case press
+    }
+
     /// The plan is computed before anything is typed, the chooser is answered before anything
     /// is scheduled, and every exit that is not "armed" flags the session instead — a policy
     /// whose precondition fails degrades to `flagOnly`, it never improvises.
-    private func armWaitForReset(_ sessionID: SessionID, controller: AgentSessionViewController) {
+    ///
+    /// A nil controller is the chooser-less case: a rendered conversation, or a terminal whose
+    /// process is already gone. Nothing to type into is not a failure — the schedule is the part
+    /// that matters, and delivery has its own rules about finding a prompt.
+    private func armWaitForReset(
+        _ sessionID: SessionID,
+        controller: AgentSessionViewController?,
+        trigger: RecoveryTrigger
+    ) {
         guard let plan = continuationPlan(for: sessionID) else {
-            flag(sessionID, controller: controller, because: "no usage reading to schedule against")
+            standDown(
+                sessionID,
+                controller: controller,
+                trigger: trigger,
+                because: "no usage reading to schedule against",
+                sentence: LimitRecoveryStrings.noReadingProblem
+            )
             return
         }
 
         // A continuation already waiting for this session means a previous arm is still in
         // flight — a re-armed reset, an undelivered send. A second one would type twice.
-        let pending = ScheduledMessageStore.shared.messages(for: sessionID)
-            .contains { $0.state.isOwed && $0.anchor?.usageWindowID != nil }
-        guard !pending else {
-            controller.activityTracker.noteLimitParked(recoveryArmed: true)
+        guard !Self.hasOwedContinuation(for: sessionID) else {
+            controller?.activityTracker.noteLimitParked(recoveryArmed: true)
             EventLog.shared.record(.limitRecovery, "Continuation already scheduled, re-armed the park", [
                 "session": sessionID.uuidString
             ])
+            // The press is answered by the offer going away: the send it asked for is already
+            // filed, and the scheduled-message strip is the surface that names it.
+            if trigger == .press { LimitEscapeSuggestionStore.shared.clear(sessionID) }
             recovering.remove(sessionID)
+            return
+        }
+
+        guard let controller else {
+            EventLog.shared.record(.limitRecovery, "No terminal to answer, scheduling the continuation", [
+                "session": sessionID.uuidString
+            ])
+            scheduleContinuation(plan, sessionID: sessionID, controller: nil, trigger: trigger)
             return
         }
 
@@ -158,7 +238,9 @@ final class LimitRecoveryCoordinator {
                     "session": sessionID.uuidString,
                     "keystrokes": keystrokes
                 ])
-                self.scheduleContinuation(plan, sessionID: sessionID, controller: controller)
+                self.scheduleContinuation(
+                    plan, sessionID: sessionID, controller: controller, trigger: trigger
+                )
 
             case .noticeOnly:
                 // The refusal's other shape: the sentence printed inline and the CLI already
@@ -167,12 +249,31 @@ final class LimitRecoveryCoordinator {
                 EventLog.shared.record(.limitRecovery, "No chooser to answer, the CLI printed the notice", [
                     "session": sessionID.uuidString
                 ])
-                self.scheduleContinuation(plan, sessionID: sessionID, controller: controller)
+                self.scheduleContinuation(
+                    plan, sessionID: sessionID, controller: controller, trigger: trigger
+                )
 
             case .unreadable(let reason, let screen):
-                self.flag(sessionID, controller: controller, because: reason, screen: screen)
+                self.standDown(
+                    sessionID,
+                    controller: controller,
+                    trigger: trigger,
+                    because: reason,
+                    sentence: LimitRecoveryStrings.unreadableScreenProblem,
+                    screen: screen
+                )
             }
         }
+    }
+
+    /// Whether a window-anchored continuation is already owed for this session.
+    ///
+    /// One predicate, two readers: the arm refuses to file a second send, and the strip stops
+    /// offering what is already filed. They were separate once and that is exactly how a button
+    /// comes to offer something the code behind it declines to do.
+    static func hasOwedContinuation(for sessionID: SessionID) -> Bool {
+        ScheduledMessageStore.shared.messages(for: sessionID)
+            .contains { $0.state.isOwed && $0.anchor?.usageWindowID != nil }
     }
 
     /// Which window stops this session and when it lifts — the same window the toolbar pill
@@ -209,7 +310,8 @@ final class LimitRecoveryCoordinator {
     private func scheduleContinuation(
         _ plan: ContinuationPlan,
         sessionID: SessionID,
-        controller: AgentSessionViewController
+        controller: AgentSessionViewController?,
+        trigger: RecoveryTrigger
     ) {
         let message = ScheduledMessage(
             dueAt: plan.dueAt,
@@ -220,7 +322,7 @@ final class LimitRecoveryCoordinator {
 
         switch ScheduledMessageStore.shared.add(message) {
         case .success:
-            controller.activityTracker.noteLimitParked(recoveryArmed: true)
+            controller?.activityTracker.noteLimitParked(recoveryArmed: true)
             EventLog.shared.record(.limitRecovery, "Continuation scheduled for the window reset", [
                 "session": sessionID.uuidString,
                 "window": plan.windowName,
@@ -232,10 +334,20 @@ final class LimitRecoveryCoordinator {
                 continuing in \(max(0, Int(plan.dueAt.timeIntervalSinceNow)), privacy: .public) seconds
                 """
             )
+            // The offer has been taken, so it stops standing there: from here the pending send
+            // is the fact, and the composer's scheduled-message strip is what names it. Two
+            // strips saying the same thing is the duplication this subsystem avoids by design.
+            LimitEscapeSuggestionStore.shared.clear(sessionID)
             recovering.remove(sessionID)
 
         case .failure(let refusal):
-            flag(sessionID, controller: controller, because: "the schedule was refused: \(refusal)")
+            standDown(
+                sessionID,
+                controller: controller,
+                trigger: trigger,
+                because: "the schedule was refused: \(refusal)",
+                sentence: ScheduledRefusalText.sentence(for: refusal)
+            )
         }
     }
 
@@ -323,16 +435,24 @@ final class LimitRecoveryCoordinator {
     /// as stopped on the user, with the reason — and the screen, where one was read — in the
     /// journal, because a refusal to act and a failure to act must be tellable apart weeks
     /// later.
-    private func flag(
+    ///
+    /// The `sentence` is the same fact in the user's words, and it is used only when somebody
+    /// pressed for this. An unattended policy has nobody to tell and says its piece in the
+    /// journal; a press is owed an answer on the strip it came from, and silence there reads as
+    /// a button that does nothing.
+    private func standDown(
         _ sessionID: SessionID,
-        controller: AgentSessionViewController,
+        controller: AgentSessionViewController?,
+        trigger: RecoveryTrigger,
         because reason: String,
+        sentence: String,
         screen: String? = nil
     ) {
-        controller.activityTracker.noteLimitParked(recoveryArmed: false)
+        controller?.activityTracker.noteLimitParked(recoveryArmed: false)
 
         var detail = ["session": sessionID.uuidString, "reason": reason]
         if let screen { detail["screen"] = screen }
+        detail["trigger"] = String(describing: trigger)
         EventLog.shared.record(.limitRecovery, "Recovery stood down, session flagged", detail)
         ThreadingLogger.agent.error(
             """
@@ -340,10 +460,20 @@ final class LimitRecoveryCoordinator {
             \(reason, privacy: .private(mask: .hash))
             """
         )
-        // A session left flagged is exactly the session the interactive offer is for, whichever
-        // policy put it there. This is the second of the two places `recoveryArmed: false`
-        // lands, and both make the same offer.
-        offerEscape(for: sessionID)
+
+        switch trigger {
+        case .policy:
+            // A session left flagged is exactly the session the interactive offer is for,
+            // whichever policy put it there. This is the second of the two places
+            // `recoveryArmed: false` lands, and both make the same offer.
+            offerEscape(for: sessionID)
+
+        case .press:
+            // Never `offerEscape` here: recomputing the suggestion would file a *new* refusal
+            // over the standing one, which clears the dismissal and wipes the very sentence
+            // being written. The offer is already on screen; it is told why instead.
+            LimitEscapeSuggestionStore.shared.note(problem: sentence, for: sessionID)
+        }
         recovering.remove(sessionID)
     }
 
@@ -393,4 +523,26 @@ enum LimitRecoveryDefaults {
     static let screenSampleRows = 14
     static let screenSampleLimit = 600
     static let screenSampleSeparator = " ⏎ "
+}
+
+// MARK: - Strings
+
+/// What a stood-down recovery says to somebody who asked for it by hand.
+///
+/// Separate from the journal's reasons on purpose: those name the defect for whoever reads the
+/// log weeks later, while these name the situation for the person looking at the strip now. The
+/// two should not be the same string — "no usage reading to schedule against" is a diagnosis,
+/// not an explanation.
+enum LimitRecoveryStrings {
+
+    /// No reading means no reset instant, and a continuation with no due date is not a plan.
+    static var noReadingProblem: String {
+        L10n.string("There is no usage reading yet to schedule against.")
+    }
+
+    /// The chooser was expected and something else was on screen. Deliberately vague about what:
+    /// the screen is in the journal, and a sentence quoting a half-drawn TUI helps nobody.
+    static var unreadableScreenProblem: String {
+        L10n.string("The session is not showing the limit prompt.")
+    }
 }

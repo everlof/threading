@@ -320,7 +320,7 @@ final class LimitEscapeSuggestionTests: XCTestCase {
         XCTAssertEqual(offer.reading, "5h 96% · 7d 40%", "the forced reading replaces the cached one")
         XCTAssertFalse(offer.isBusy)
 
-        store.setBusy(true, for: sessionID)
+        store.setBusy(.moveAccount, for: sessionID)
         offer = try XCTUnwrap(store.offer(for: sessionID))
         XCTAssertTrue(offer.isBusy)
         XCTAssertNil(offer.problem, "a press that started again still shows the last refusal")
@@ -345,12 +345,91 @@ final class LimitEscapeSuggestionTests: XCTestCase {
         defer { center.removeObserver(token) }
 
         store.record(Fixture.suggestion(for: sessionID))
-        store.setBusy(true, for: sessionID)
+        store.setBusy(.moveAccount, for: sessionID)
         store.note(problem: "Nope.", for: sessionID)
         store.dismiss(sessionID)
         store.clear(sessionID)
 
         XCTAssertEqual(announced, Array(repeating: sessionID, count: 5))
+    }
+
+    // MARK: - A Refusal With Nothing To Escape To
+
+    /// The record's shape, stated: a refusal with no login worth moving to is still a record.
+    ///
+    /// It used to be nothing at all, which is what left somebody with one login staring at a
+    /// sidebar triangle and no way to act on it. Waiting for the reset needs no second account,
+    /// so the refusal — not the escape — is what the entry is about.
+    func testARefusalWithNoLoginIsStillARecord() throws {
+        let store = LimitEscapeSuggestionStore(center: NotificationCenter())
+        let sessionID = SessionID()
+
+        store.record(LimitEscapeSuggestion(
+            sessionID: sessionID,
+            resetHint: "9:40pm (Europe/Rome)",
+            model: "claude-opus-5"
+        ))
+
+        let offer = try XCTUnwrap(store.offer(for: sessionID))
+        XCTAssertFalse(offer.offersAccountEscape)
+        XCTAssertNil(offer.accountName)
+        XCTAssertEqual(offer.resetHint, "9:40pm (Europe/Rome)")
+    }
+
+    /// Dismissal, busy and the problem sentence all live on the entry, so they keep working for a
+    /// refusal that names no login — which they could not when there was no entry to hold them.
+    func testARefusalWithNoLoginCanStillBeDismissedAndExplained() throws {
+        let store = LimitEscapeSuggestionStore(center: NotificationCenter())
+        let sessionID = SessionID()
+        store.record(LimitEscapeSuggestion(
+            sessionID: sessionID,
+            resetHint: "9:40pm (Europe/Rome)",
+            model: nil
+        ))
+
+        store.note(problem: "There is no usage reading yet to schedule against.", for: sessionID)
+        XCTAssertEqual(
+            try XCTUnwrap(store.offer(for: sessionID)).problem,
+            "There is no usage reading yet to schedule against."
+        )
+
+        store.dismiss(sessionID)
+        XCTAssertNil(store.offer(for: sessionID))
+        XCTAssertNotNil(store.suggestion(for: sessionID))
+    }
+
+    /// The upgrade the old shape could not express: a login frees up while somebody is parked,
+    /// and the standing refusal grows the button it never had. `update` bailed before, because
+    /// there was no entry to update.
+    func testALoginGainingHeadroomUpgradesAStandingRefusal() throws {
+        let store = LimitEscapeSuggestionStore(center: NotificationCenter())
+        let sessionID = SessionID()
+        store.record(LimitEscapeSuggestion(
+            sessionID: sessionID,
+            resetHint: "9:40pm (Europe/Rome)",
+            model: nil
+        ))
+        XCTAssertFalse(try XCTUnwrap(store.offer(for: sessionID)).offersAccountEscape)
+
+        store.update(Fixture.suggestion(for: sessionID))
+
+        let upgraded = try XCTUnwrap(store.offer(for: sessionID))
+        XCTAssertTrue(upgraded.offersAccountEscape)
+        XCTAssertEqual(upgraded.accountName, "Daniel Block")
+    }
+
+    /// And the upgrade is still the *same* refusal, so a dismissal survives it. Waving away one
+    /// refusal is not waving away the state of being refused, but it is also not undone by a
+    /// number arriving.
+    func testAnUpgradeKeepsTheDismissal() {
+        let store = LimitEscapeSuggestionStore(center: NotificationCenter())
+        let sessionID = SessionID()
+        store.record(LimitEscapeSuggestion(sessionID: sessionID, resetHint: nil, model: nil))
+        store.dismiss(sessionID)
+
+        store.update(Fixture.suggestion(for: sessionID))
+
+        XCTAssertNil(store.offer(for: sessionID))
     }
 
     /// A repeated call that changes nothing announces nothing, so a reading arriving twice does
@@ -370,7 +449,7 @@ final class LimitEscapeSuggestionTests: XCTestCase {
         defer { center.removeObserver(token) }
 
         store.update(Fixture.suggestion(for: sessionID))
-        store.setBusy(false, for: sessionID)
+        store.setBusy(nil, for: sessionID)
 
         XCTAssertEqual(announcements, 0)
     }

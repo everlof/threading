@@ -163,4 +163,76 @@ final class LimitRecoveryTests: XCTestCase {
     func testThePolicyStorageIsRedirectedUnderTheTestHost() {
         XCTAssertTrue(PreferenceStore.isRedirected)
     }
+
+    // MARK: - Scoping
+
+    /// The Settings choice is now the *last* word rather than the only one, so the global switch
+    /// stays where it was for anybody who never set a chat: `current` is what the chain lands on
+    /// when neither narrower scope answered.
+    func testTheAppPolicyIsWhatAnUnsetChatResolvesTo() {
+        withAppLimitRecovery(.waitForReset) {
+            XCTAssertEqual(
+                LimitRecoveryResolution.resolve(
+                    session: nil, project: nil, app: LimitRecoveryPolicy.current
+                ).policy,
+                .waitForReset
+            )
+        }
+    }
+
+    /// One chat armed while the app default stays quiet — the narrow opt-in this exists for.
+    func testOneChatCanBeArmedWithoutArmingTheRest() {
+        withAppLimitRecovery(.flagOnly) {
+            let armed = LimitRecoveryResolution.resolve(
+                session: .waitForReset, project: nil, app: LimitRecoveryPolicy.current
+            )
+            let untouched = LimitRecoveryResolution.resolve(
+                session: nil, project: nil, app: LimitRecoveryPolicy.current
+            )
+
+            XCTAssertEqual(armed.policy, .waitForReset)
+            XCTAssertEqual(armed.scope, .session)
+            XCTAssertEqual(untouched.policy, .flagOnly)
+            XCTAssertEqual(untouched.scope, .app)
+        }
+    }
+
+    // MARK: - Arming By Hand
+
+    /// The press is refused where nothing is standing, and says so rather than typing into a
+    /// session that never stopped. Reachable without an agent because the guard is the first
+    /// thing the entry point does.
+    func testArmingByHandWithNoRefusalStandingDoesNothing() {
+        let store = LimitEscapeSuggestionStore.shared
+        let sessionID = SessionID()
+        XCTAssertFalse(store.hasStandingRefusal(for: sessionID))
+
+        LimitRecoveryCoordinator.shared.armWaitForReset(for: sessionID)
+
+        XCTAssertNil(store.offer(for: sessionID))
+    }
+
+    /// The button's presence and the arm's own guard read one predicate, so the strip cannot
+    /// offer something the code behind it would decline. A session with nothing scheduled has
+    /// nothing owed.
+    func testASessionWithNothingScheduledOwesNoContinuation() {
+        XCTAssertFalse(
+            LimitRecoveryCoordinator.hasOwedContinuation(for: SessionID())
+        )
+    }
+
+    /// Seeds the app-scope answer without announcing a settings change.
+    ///
+    /// Written straight to the preference rather than through `LimitRecoverySettings.policy`,
+    /// whose setter posts `AppSettingsDidChange` into whatever observers the test host has live —
+    /// `SidebarTreeBuilderTests` writes `UserDefaults` directly for exactly this reason, and a
+    /// sidebar controller left alive by an earlier case will act on the broadcast.
+    private func withAppLimitRecovery(
+        _ policy: LimitRecoveryPolicy,
+        run: () throws -> Void
+    ) rethrows {
+        PreferenceStore.shared.set(policy.rawValue, forKey: LimitRecoverySettings.storageKey)
+        defer { PreferenceStore.shared.removeObject(forKey: LimitRecoverySettings.storageKey) }
+        try run()
+    }
 }

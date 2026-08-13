@@ -27,8 +27,14 @@ final class SessionInfoPopoverViewController: NSViewController {
         /// A sound this chat does not inherit, or nil — the common case. The session row keeps
         /// no tooltip of its own, so this card is the one hover surface where an overridden
         /// chat is identifiable without opening a menu. Same rule as the project row's tooltip:
-        /// configuration is not status, and the row itself acquires no decoration for it.
+        /// presentation is not status, and the row itself acquires no decoration for it.
         let soundLine: String?
+
+        /// How this chat behaves differently from the ones around it — it continues at its
+        /// reset, or it stays quiet when it finishes. Unlike the sound above, the row *does*
+        /// carry a mark for this, and this line is what the mark means: a silhouette can say
+        /// "configured" and nothing else, so the card is where it is spelled out.
+        let conductLine: String?
         let stateText: String
         let stateSymbol: String
 
@@ -87,6 +93,7 @@ final class SessionInfoPopoverViewController: NSViewController {
                 for: .session(session.id),
                 overrides: session.soundOverrides
             )
+            conductLine = RowConductSummary.forSession(session)?.sentence
 
             dormancyReason = activity == .dormant
                 ? SessionRestorationLedger.shared.outcome(for: session.id)
@@ -228,6 +235,17 @@ final class SessionInfoPopoverViewController: NSViewController {
                 symbol: SessionPopoverDefaults.soundSymbol,
                 classicGlyph: .status,
                 text: soundLine,
+                emphasis: .secondary
+            ))
+        }
+
+        // Beside the sound, for the same reason it is beside the branch: both are what this chat
+        // was set to, read together, above the state it happens to be in.
+        if let conductLine = info.conductLine {
+            rows.append(row(
+                symbol: RowConductDefaults.symbol,
+                classicGlyph: .status,
+                text: conductLine,
                 emphasis: .secondary
             ))
         }

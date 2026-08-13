@@ -279,6 +279,10 @@ final class AgentSessionViewController: NSViewController {
             guard let self else { return }
             NotificationCenter.default.post(LimitEscapeRequested(sessionID: self.sessionID))
         }
+        limitEscapeStrip.onWaitForReset = { [weak self] in
+            guard let self else { return }
+            NotificationCenter.default.post(LimitWaitForResetRequested(sessionID: self.sessionID))
+        }
         limitEscapeStrip.onDismiss = { [weak self] in
             guard let self else { return }
             LimitEscapeSuggestionStore.shared.dismiss(self.sessionID)
@@ -291,15 +295,8 @@ final class AgentSessionViewController: NSViewController {
     }
 
     private func refreshLimitEscapeStrip() {
-        let offer = LimitEscapeSuggestionStore.shared.offer(for: sessionID).map {
-            LimitEscapeStripView.Offer(
-                accountName: $0.accountName,
-                reading: $0.reading,
-                resetHint: $0.resetHint,
-                problem: $0.problem,
-                isBusy: $0.isBusy
-            )
-        }
+        let offer = LimitEscapeSuggestionStore.shared.offer(for: sessionID)
+            .map(LimitEscapeStripView.Offer.init)
         limitEscapeStrip.setOffer(offer)
 
         // The terminal gives up the rows the strip stands in rather than being drawn over, so

@@ -601,6 +601,14 @@ enum SessionActionMenuDefaults {
     /// The submenu holding the set-once-and-leave configuration. Named here because the row
     /// menu and its tests must agree on where those items went.
     static var sessionOptionsTitle: String { L10n.string("Session Options") }
+
+    /// **Not** the strip button's words, though it is the same behaviour. This is a standing
+    /// option — what this chat will do the next time it is refused — and it is phrased as the
+    /// outcome. The strip's control is an act performed on a refusal already in front of the
+    /// user, and is phrased as an instruction; see `LimitEscapeStripStrings.waitForReset` for
+    /// what sharing one name did to that row.
+    static var limitRecoveryTitle: String { L10n.string("Continue at Reset") }
+    static let limitRecoverySymbol = "clock.arrow.circlepath"
 }
 
 // MARK: - Session Row Actions
@@ -866,6 +874,7 @@ extension ProjectSidebarViewController {
         if let interface = interfaceEntry(for: session) { submenu.append(interface) }
         if let remote = remoteControlEntry(for: session) { submenu.append(remote) }
         submenu.append(muteEntry(for: session))
+        submenu.append(limitRecoveryEntry(for: session))
         submenu.append(attachmentsEntry())
         return .item(ThemedMenuItem(
             title: SessionActionMenuDefaults.sessionOptionsTitle,
@@ -888,6 +897,51 @@ extension ProjectSidebarViewController {
                 ? "bell"
                 : "bell.slash"
         ) { [weak self] in self?.toggleMutedClicked() }
+    }
+
+    /// Arms this conversation to pick itself up when its account's usage window resets.
+    ///
+    /// A checkbox rather than a three-way list, even though there are three states to express —
+    /// on, off, and following whoever is above. The third is not a thing the user picks; it is
+    /// what is *stored* when their answer already matches what they would have inherited, which
+    /// is the mute item's rule (`toggleLimitRecoveryClicked`) and keeps a chat following its
+    /// project and Settings. Two states on screen, three in the record.
+    ///
+    /// The check reads the **resolved** answer, so a chat inside an armed checkout shows armed —
+    /// an unchecked box on a session that will in fact continue by itself would be stating the
+    /// opposite of what happens.
+    private func limitRecoveryEntry(for session: AgentSession) -> ThemedMenuEntry {
+        let resolved = LimitRecoveryResolution.answer(forSessionID: session.id, in: projectStore)
+        return .item(ThemedMenuItem(
+            title: SessionActionMenuDefaults.limitRecoveryTitle,
+            image: ThemedMenuIcon.symbol(SessionActionMenuDefaults.limitRecoverySymbol),
+            isSelected: resolved.policy == .waitForReset,
+            onChoose: { [weak self] in self?.toggleLimitRecoveryClicked() }
+        ))
+    }
+
+    @objc private func toggleLimitRecoveryClicked() {
+        guard let sessionID = actionSessionID else { return }
+
+        let wanted: LimitRecoveryPolicy =
+            LimitRecoveryResolution.policy(forSessionID: sessionID, in: projectStore) == .waitForReset
+                ? .flagOnly
+                : .waitForReset
+        let inherited = LimitRecoveryResolution.inherited(beyondSessionID: sessionID, in: projectStore)
+
+        // Nil where the answer already matches what would have been inherited, so a chat keeps
+        // *following* its project and Settings, and a later change there still reaches it. An
+        // explicit value is written only where it actually differs — which is the whole reason
+        // the field is optional rather than a plain flag.
+        guard projectStore.setLimitRecoveryPolicy(
+            wanted == inherited ? nil : wanted,
+            forSessionID: sessionID
+        ).succeeded else {
+            reload()
+            presentProjectNotice(L10n.string("The project data could not be saved."))
+            return
+        }
+        reload()
     }
 
     private func attachmentsEntry() -> ThemedMenuEntry {

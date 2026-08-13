@@ -25,46 +25,68 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
     /// reason the scheduled strip's `Row` is not a `ScheduledMessage`: a view holding the model
     /// would have to decide which of its states are the user's business.
     struct Offer: Equatable {
-        /// The login the button offers, named after the person.
-        let accountName: String
+        /// The login the account button offers, named after the person. **Nil is the ordinary
+        /// case for somebody with one login**, and it is not an empty strip: the wait offer needs
+        /// no second account, so the row still stands and carries that alone.
+        let accountName: String?
 
         /// That login's compact reading — `5h 12% · 7d 40%`. Nil where it reports no windows.
         let reading: String?
+
+        /// Whether waiting for the window to reset is on the table. False only where the
+        /// conversation has already been armed, so the strip does not offer what is already
+        /// filed — the scheduled-message strip names that.
+        let offersWaitForReset: Bool
 
         /// When the refused account comes back, in the provider's own words. Nil where the
         /// provider refused without saying, and then the clause is simply absent.
         let resetHint: String?
 
         /// Why the offer cannot be taken, when it cannot. It replaces the sentence and dims the
-        /// button rather than naming a different login: another account is a *new* suggestion
+        /// buttons rather than naming a different login: another account is a *new* suggestion
         /// the user can press, not something to escalate to on their behalf.
         let problem: String?
 
-        /// Whether the tap is already being carried out.
-        let isBusy: Bool
+        /// Which answer is being carried out, if either. Both controls dim while one runs, but
+        /// only the pressed one reports it — see `LimitEscapeSuggestion.busy`.
+        let busy: LimitEscapeAction?
+
+        /// Whether either answer is in flight.
+        var isBusy: Bool { busy != nil }
 
         init(
-            accountName: String,
+            accountName: String? = nil,
             reading: String? = nil,
+            offersWaitForReset: Bool = false,
             resetHint: String? = nil,
             problem: String? = nil,
-            isBusy: Bool = false
+            busy: LimitEscapeAction? = nil
         ) {
             self.accountName = accountName
             self.reading = reading
+            self.offersWaitForReset = offersWaitForReset
             self.resetHint = resetHint
             self.problem = problem
-            self.isBusy = isBusy
+            self.busy = busy
         }
 
         /// Whether there is anything left to press.
         var offersContinuation: Bool { problem == nil }
+
+        /// Whether a login is named, which is what decides if the account button is on the row
+        /// at all. A refusal with nothing to move to keeps the wait offer and the sentence.
+        var offersAccountEscape: Bool { accountName != nil }
     }
 
     // MARK: - Properties
 
     /// Take the offer: migrate this conversation and carry on under the named login.
     var onContinue: (() -> Void)?
+
+    /// Take the other offer: stay on this login and pick the conversation up when its window
+    /// resets. Reported as an intention like every other gesture here — answering the CLI's
+    /// chooser and filing the continuation is `LimitRecoveryCoordinator`'s.
+    var onWaitForReset: (() -> Void)?
 
     /// Put the offer away until the next refusal.
     var onDismiss: (() -> Void)?
@@ -76,6 +98,9 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
     /// rather than the closure behind it.
     var continueControl: ThemedButton { continueButton }
 
+    /// The button that waits it out, readable for the same reason.
+    var waitControl: ThemedButton { waitButton }
+
     /// The ✕.
     var dismissControl: ThemedIconButton { dismissButton }
 
@@ -86,6 +111,15 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
         target: self,
         action: #selector(continuePressed)
     )
+    private lazy var waitButton = ThemedButton(
+        title: LimitEscapeStripStrings.waitForReset,
+        target: self,
+        action: #selector(waitPressed)
+    )
+    /// Holds whichever of the two answers this refusal actually has. Structural only: it chooses
+    /// no styling, and both of its members are themed controls.
+    private let actions = NSStackView()
+
     private lazy var dismissButton: ThemedIconButton = {
         let button = ThemedIconButton(
             symbolName: DesignSymbols.removeAttachment,
@@ -133,9 +167,23 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
         // dimmed instead of removed: what it would have done is still the clearest statement of
         // what the sentence beside it is about, and a control that leaves the row takes the
         // explanation's subject with it.
-        continueButton.title = Self.actionTitle(for: offer)
-        continueButton.isEnabled = offer.offersContinuation && !offer.isBusy
-        continueButton.toolTip = continueButton.title
+        //
+        // Absence is different from refusal, and the two are drawn differently on purpose: a
+        // login that *cannot be moved to* is dimmed with its reason, while a login that does not
+        // exist is not a dimmed button with nothing behind it — it is simply not on the row.
+        continueButton.isHidden = !offer.offersAccountEscape
+        if offer.offersAccountEscape {
+            continueButton.title = Self.actionTitle(for: offer)
+            continueButton.isEnabled = offer.offersContinuation && !offer.isBusy
+            continueButton.toolTip = continueButton.title
+        }
+
+        waitButton.isHidden = !offer.offersWaitForReset
+        waitButton.isEnabled = offer.offersContinuation && !offer.isBusy
+        waitButton.title = offer.busy == .waitForReset
+            ? LimitEscapeStripStrings.waitingBusy
+            : LimitEscapeStripStrings.waitForReset
+        waitButton.toolTip = LimitEscapeStripStrings.waitToolTip
 
         applyTheme()
     }
@@ -169,17 +217,34 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
             for: .horizontal
         )
 
-        continueButton.emphasis = .secondary
-        continueButton.translatesAutoresizingMaskIntoConstraints = false
-        continueButton.setContentHuggingPriority(.required, for: .horizontal)
-        continueButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for button in [continueButton, waitButton] {
+            button.emphasis = .secondary
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.setContentHuggingPriority(.required, for: .horizontal)
+            button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
         continueButton.setAccessibilityIdentifier(LimitEscapeStripDefaults.continueIdentifier)
+        waitButton.setAccessibilityIdentifier(LimitEscapeStripDefaults.waitIdentifier)
+
+        // A stack rather than a constraint chain because either action can be absent, and a
+        // hidden view in a chain still holds its own gap open. The row carries two answers at
+        // most, a fixed pair, so a retained stack is the right shape here.
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = Design.Spacing.small
+        actions.translatesAutoresizingMaskIntoConstraints = false
+        actions.setContentHuggingPriority(.required, for: .horizontal)
+        actions.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // The immediate answer first and the deferred one after it: moving login carries on now,
+        // while waiting is what is left when nothing can. Reading order is the ranking.
+        actions.addArrangedSubview(continueButton)
+        actions.addArrangedSubview(waitButton)
 
         dismissButton.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(mark)
         addSubview(messageLabel)
-        addSubview(continueButton)
+        addSubview(actions)
         addSubview(dismissButton)
 
         NSLayoutConstraint.activate([
@@ -199,19 +264,19 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
             ),
             messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-            continueButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            continueButton.trailingAnchor.constraint(
+            actions.centerYAnchor.constraint(equalTo: centerYAnchor),
+            actions.trailingAnchor.constraint(
                 equalTo: dismissButton.leadingAnchor,
                 constant: -Design.Spacing.small
             ),
             // The plate grows with its tallest member rather than clipping it: a material that
             // states a taller control height than the row's floor must not push the button
             // through the edge it is centred in.
-            continueButton.topAnchor.constraint(
+            actions.topAnchor.constraint(
                 greaterThanOrEqualTo: topAnchor,
                 constant: Design.Spacing.tight
             ),
-            continueButton.bottomAnchor.constraint(
+            actions.bottomAnchor.constraint(
                 lessThanOrEqualTo: bottomAnchor,
                 constant: -Design.Spacing.tight
             ),
@@ -231,7 +296,7 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
         // ink left to overlap with, and a broken constraint is invisible where a broken layout
         // is not.
         let separation = messageLabel.trailingAnchor.constraint(
-            lessThanOrEqualTo: continueButton.leadingAnchor,
+            lessThanOrEqualTo: actions.leadingAnchor,
             constant: -Design.Spacing.medium
         )
         separation.priority = .defaultHigh
@@ -276,23 +341,32 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
     }
 
     private static func actionTitle(for offer: Offer) -> String {
-        if offer.isBusy { return L10n.string("Continuing…") }
+        guard let accountName = offer.accountName else { return L10n.string("Continue") }
+        // Only when *this* button is what is running: a migration announced because somebody
+        // pressed the one beside it would name a login change that is not happening.
+        if offer.busy == .moveAccount { return L10n.string("Continuing…") }
         guard let reading = offer.reading, !reading.isEmpty else {
-            return L10n.format("Continue as %@", offer.accountName)
+            return L10n.format("Continue as %@", accountName)
         }
-        return L10n.format("Continue as %@ · %@", offer.accountName, reading)
+        return L10n.format("Continue as %@ · %@", accountName, reading)
     }
 
-    /// One sentence for a reader who cannot glance at it, carrying both halves — the state and
-    /// the whole of what pressing would do, login and reading included.
+    /// One sentence for a reader who cannot glance at it, carrying the state and every answer
+    /// on the row — login and reading included, and the wait where it is offered.
     private static func spokenLabel(for offer: Offer) -> String {
         guard offer.offersContinuation else { return sentence(for: offer) }
-        return L10n.format("%@. %@", sentence(for: offer), actionTitle(for: offer))
+
+        var parts = [sentence(for: offer)]
+        if offer.offersAccountEscape { parts.append(actionTitle(for: offer)) }
+        if offer.offersWaitForReset { parts.append(LimitEscapeStripStrings.waitToolTip) }
+        return parts.joined(separator: ". ")
     }
 
     // MARK: - Actions
 
     @objc private func continuePressed() { onContinue?() }
+
+    @objc private func waitPressed() { onWaitForReset?() }
 
     // MARK: - Accessibility
 
@@ -326,5 +400,32 @@ enum LimitEscapeStripDefaults {
 
     static let identifier = "composer.limit-escape"
     static let continueIdentifier = "composer.limit-escape.continue"
+    static let waitIdentifier = "composer.limit-escape.wait"
     static let dismissIdentifier = "composer.limit-escape.dismiss"
+}
+
+// MARK: - Strings
+
+/// The wait offer's words.
+///
+/// **Imperative, and deliberately not the context menu's wording for the same behaviour.** The
+/// two were identical at first, on the reasoning that two names for one behaviour reads as two
+/// behaviours. That was wrong: a checkbox is a standing state and a button is an act performed
+/// now, so the menu's "Continue at Reset" — correct as an option — turned into a mode name when
+/// it appeared on a strip whose first two words are "Limit reached". It read as *switch the
+/// setting on*, over a session where the setting could no longer change anything, rather than as
+/// *do this to the refusal in front of you*.
+///
+/// The reset instant is not repeated on the button: it is already in the sentence beside it, and
+/// two clocks on one row invite a comparison that means nothing. What the wait leads to is in the
+/// tooltip and in the spoken label.
+enum LimitEscapeStripStrings {
+
+    static var waitForReset: String { L10n.string("Wait for Reset") }
+
+    static var waitingBusy: String { L10n.string("Scheduling…") }
+
+    static var waitToolTip: String {
+        L10n.string("Stop here and continue when the usage window resets")
+    }
 }

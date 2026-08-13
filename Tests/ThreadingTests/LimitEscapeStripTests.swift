@@ -124,6 +124,196 @@ final class LimitEscapeStripTests: XCTestCase {
         )
     }
 
+    // MARK: - The Wait Offer
+
+    /// The case the strip was not drawn for at all until this landed: one login, spent, nothing
+    /// to move to. It used to mean no record and therefore no strip, leaving the sidebar's
+    /// triangle as the only thing saying the session had stopped — and no way to arm the wait
+    /// on a refusal that was already standing.
+    func testARefusalWithNoLoginStillDrawsAndOffersTheWait() throws {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(LimitEscapeStripView.Offer(
+            offersWaitForReset: true,
+            resetHint: Fixture.resetHint
+        ))
+        host(strip)
+
+        XCTAssertFalse(strip.isHidden)
+        XCTAssertTrue(
+            strip.continueControl.isHidden,
+            "a login that does not exist is absent from the row, not dimmed on it"
+        )
+        XCTAssertFalse(strip.waitControl.isHidden)
+        XCTAssertTrue(strip.waitControl.isEnabled)
+        XCTAssertTrue(try sentence(in: strip).stringValue.contains(Fixture.resetHint))
+    }
+
+    func testBothAnswersStandTogetherWhenBothAreAvailable() {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(LimitEscapeStripView.Offer(
+            accountName: Fixture.accountName,
+            reading: Fixture.reading,
+            offersWaitForReset: true,
+            resetHint: Fixture.resetHint
+        ))
+        host(strip)
+
+        XCTAssertFalse(strip.continueControl.isHidden)
+        XCTAssertFalse(strip.waitControl.isHidden)
+        XCTAssertTrue(strip.continueControl.title.contains(Fixture.accountName))
+    }
+
+    /// Already armed means already answered: the pending send is the fact from then on, and the
+    /// composer's scheduled-message strip is what names it.
+    func testTheWaitIsNotOfferedOnceItHasBeenTaken() {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(LimitEscapeStripView.Offer(
+            accountName: Fixture.accountName,
+            offersWaitForReset: false,
+            resetHint: Fixture.resetHint
+        ))
+        host(strip)
+
+        XCTAssertTrue(strip.waitControl.isHidden)
+        XCTAssertFalse(strip.continueControl.isHidden)
+    }
+
+    /// **The button and the standing option must not share a name.** They were identical once,
+    /// on the reasoning that one behaviour deserves one name — and the result was a control
+    /// reading as a mode on a row whose first two words are "Limit reached", where switching a
+    /// setting on could no longer change anything. A button instructs; a checkbox states. This
+    /// pins the split so a later tidy-up does not helpfully merge them back.
+    func testTheButtonInstructsWhileTheStandingOptionStates() {
+        XCTAssertEqual(LimitEscapeStripStrings.waitForReset, "Wait for Reset")
+        XCTAssertEqual(SessionActionMenuDefaults.limitRecoveryTitle, "Continue at Reset")
+        XCTAssertNotEqual(
+            LimitEscapeStripStrings.waitForReset,
+            SessionActionMenuDefaults.limitRecoveryTitle
+        )
+    }
+
+    /// The button does not repeat the reset the sentence beside it already quotes: two clocks on
+    /// one row invite a comparison that means nothing.
+    func testTheButtonDoesNotRestateTheResetTheSentenceCarries() {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(LimitEscapeStripView.Offer(
+            offersWaitForReset: true,
+            resetHint: Fixture.resetHint
+        ))
+        host(strip)
+
+        XCTAssertFalse(strip.waitControl.title.contains("9:40"), strip.waitControl.title)
+    }
+
+    func testTheWaitButtonReachesItsAction() {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(LimitEscapeStripView.Offer(offersWaitForReset: true))
+        host(strip)
+
+        var pressed = 0
+        strip.onWaitForReset = { pressed += 1 }
+
+        // Through the control's own semantic action, like the sibling test above: a themed
+        // button answers that rather than `performClick`, and pressing what the user presses is
+        // the whole point of the control being readable from here.
+        XCTAssertTrue(strip.waitControl.performPrimaryAction())
+        XCTAssertEqual(pressed, 1)
+    }
+
+    /// A press in flight dims both answers, not just the one pressed: the second would act on the
+    /// same refusal, and two recoveries for one stop is the thing every guard here is for.
+    func testAPressInFlightDimsBothAnswers() {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(LimitEscapeStripView.Offer(
+            accountName: Fixture.accountName,
+            offersWaitForReset: true,
+            busy: .moveAccount
+        ))
+        host(strip)
+
+        XCTAssertFalse(strip.continueControl.isEnabled)
+        XCTAssertFalse(strip.waitControl.isEnabled)
+    }
+
+    /// **Only the pressed answer reports itself working.** Both dim, but a strip saying
+    /// "Continuing as Daniel Block…" because somebody pressed *Continue at Reset* would name a
+    /// login change that is not happening, to a conversation that has not moved — which is why
+    /// the record names the action instead of counting a Boolean.
+    func testOnlyThePressedAnswerSaysItIsWorking() {
+        let strip = LimitEscapeStripView()
+
+        strip.setOffer(LimitEscapeStripView.Offer(
+            accountName: Fixture.accountName,
+            reading: Fixture.reading,
+            offersWaitForReset: true,
+            busy: .waitForReset
+        ))
+        host(strip)
+
+        XCTAssertEqual(strip.waitControl.title, LimitEscapeStripStrings.waitingBusy)
+        XCTAssertTrue(
+            strip.continueControl.title.contains(Fixture.accountName),
+            "the login button announced a migration nobody asked for: \(strip.continueControl.title)"
+        )
+
+        strip.setOffer(LimitEscapeStripView.Offer(
+            accountName: Fixture.accountName,
+            reading: Fixture.reading,
+            offersWaitForReset: true,
+            busy: .moveAccount
+        ))
+
+        XCTAssertEqual(strip.continueControl.title, L10n.string("Continuing…"))
+        XCTAssertEqual(strip.waitControl.title, LimitEscapeStripStrings.waitForReset)
+    }
+
+    /// A stood-down press is owed an answer where it was made. The sentence replaces the state
+    /// and the controls dim, rather than the strip vanishing and taking the reason with it.
+    func testAStoodDownWaitSaysWhyAndKeepsTheRowStanding() throws {
+        let strip = LimitEscapeStripView()
+        let problem = "There is no usage reading yet to schedule against."
+        strip.setOffer(LimitEscapeStripView.Offer(
+            offersWaitForReset: true,
+            resetHint: Fixture.resetHint,
+            problem: problem
+        ))
+        host(strip)
+
+        XCTAssertFalse(strip.isHidden)
+        XCTAssertEqual(try sentence(in: strip).stringValue, problem)
+        XCTAssertFalse(strip.waitControl.isEnabled)
+    }
+
+    func testTheSpokenLabelNamesBothAnswers() {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(LimitEscapeStripView.Offer(
+            accountName: Fixture.accountName,
+            reading: Fixture.reading,
+            offersWaitForReset: true,
+            resetHint: Fixture.resetHint
+        ))
+        host(strip)
+
+        let spoken = strip.accessibilityLabel() ?? ""
+        XCTAssertTrue(spoken.contains(Fixture.accountName), spoken)
+        XCTAssertTrue(spoken.contains(LimitEscapeStripStrings.waitToolTip), spoken)
+    }
+
+    /// A refusal carrying only the wait still reads as one statement rather than trailing an
+    /// empty clause where the login would have been.
+    func testTheSpokenLabelOmitsTheLoginWhenThereIsNone() {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(LimitEscapeStripView.Offer(
+            offersWaitForReset: true,
+            resetHint: Fixture.resetHint
+        ))
+        host(strip)
+
+        let spoken = strip.accessibilityLabel() ?? ""
+        XCTAssertFalse(spoken.contains("Continue as"), spoken)
+        XCTAssertTrue(spoken.contains(LimitEscapeStripStrings.waitToolTip), spoken)
+    }
+
     func testAStripWithNothingToOfferLeavesRatherThanStandingEmpty() {
         let strip = LimitEscapeStripView()
         strip.setOffer(Fixture.offer)
@@ -167,7 +357,7 @@ final class LimitEscapeStripTests: XCTestCase {
             accountName: Fixture.accountName,
             reading: Fixture.reading,
             resetHint: Fixture.resetHint,
-            isBusy: true
+            busy: .moveAccount
         ))
         host(strip)
 
@@ -261,12 +451,28 @@ final class LimitEscapeStripTests: XCTestCase {
 
     func testEverythingSitsOnOneCentreLine() throws {
         let strip = LimitEscapeStripView()
-        strip.setOffer(Fixture.offer)
+        strip.setOffer(LimitEscapeStripView.Offer(
+            accountName: Fixture.accountName,
+            reading: Fixture.reading,
+            offersWaitForReset: true,
+            resetHint: Fixture.resetHint
+        ))
         host(strip)
 
-        for member in [try mark(in: strip) as NSView, strip.continueControl, strip.dismissControl] {
+        // Measured in the strip's own space rather than off each member's `frame`, because the
+        // two answers are held in a stack and a frame read straight off one is stated in *its*
+        // coordinates. The original form only worked while every member was a direct subview,
+        // which is a fact about the hierarchy rather than about where the ink lands.
+        let members: [NSView] = [
+            try mark(in: strip),
+            strip.continueControl,
+            strip.waitControl,
+            strip.dismissControl
+        ]
+        for member in members {
+            let inStrip = try XCTUnwrap(member.superview).convert(member.frame, to: strip)
             XCTAssertEqual(
-                member.frame.midY, strip.bounds.midY, accuracy: 0.5,
+                inStrip.midY, strip.bounds.midY, accuracy: 0.5,
                 "\(type(of: member)) does not sit on the strip's centre line"
             )
         }
@@ -315,10 +521,21 @@ final class LimitEscapeStripTests: XCTestCase {
 
     /// The rendered check: an offer drawn in both appearances puts ink on the plate. A strip that
     /// laid out correctly and drew nothing passes every assertion above.
+    ///
+    /// Both shapes, because they are different layouts: the account offer fills the row, while a
+    /// wait-only refusal has to stand without the control the sentence was sized against.
     func testItDrawsInBothAppearances() throws {
-        for appearance in [NSAppearance(named: .aqua), NSAppearance(named: .darkAqua)] {
+        let offers = [
+            Fixture.offer,
+            LimitEscapeStripView.Offer(
+                offersWaitForReset: true,
+                resetHint: Fixture.resetHint
+            )
+        ]
+        for (appearance, offer) in [NSAppearance(named: .aqua), NSAppearance(named: .darkAqua)]
+            .flatMap({ appearance in offers.map { (appearance, $0) } }) {
             let strip = LimitEscapeStripView()
-            strip.setOffer(Fixture.offer)
+            strip.setOffer(offer)
             let host = host(strip)
             // Without this, `cacheDisplay` draws a blank image.
             host.appearance = appearance

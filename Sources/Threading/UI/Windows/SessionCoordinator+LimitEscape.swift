@@ -27,23 +27,27 @@ extension SessionCoordinator {
     func performLimitEscape(for sessionID: SessionID) {
         let store = LimitEscapeSuggestionStore.shared
         guard let offer = store.offer(for: sessionID), !offer.isBusy else { return }
-        guard let session = ProjectStore.shared.session(withID: sessionID),
+        // A refusal with no login named is not this button's business at all — the strip does not
+        // draw the account control for one, so reaching here means the offer changed under the
+        // press, and the answer is the same as a login that has since gone.
+        guard let offeredAccountID = offer.accountID,
+              let session = ProjectStore.shared.session(withID: sessionID),
               let account = AgentAccountDiscovery.account(
                 for: session.kind,
-                handle: offer.accountID.handle
-              ), account.id == offer.accountID else {
+                handle: offeredAccountID.handle
+              ), account.id == offeredAccountID else {
             store.note(
                 problem: L10n.string("That login could not be found."),
                 for: sessionID
             )
             EventLog.shared.record(.limitRecovery, "Escape refused, the login is gone", [
                 "session": sessionID.uuidString,
-                "account": offer.accountID.description
+                "account": offer.accountID?.description ?? ""
             ])
             return
         }
 
-        store.setBusy(true, for: sessionID)
+        store.setBusy(.moveAccount, for: sessionID)
         EventLog.shared.record(.limitRecovery, "Escape pressed", [
             "session": sessionID.uuidString,
             "account": account.id.description

@@ -1266,27 +1266,57 @@ scheduled continuation landing. Looking at the row does not clear it: neither of
 options gives the account any allowance back, so a session that still cannot work goes on saying
 so.
 
-**Settings ▸ Usage Windows ▸ Limit recovery** can automate the routine instead: when the
-chooser is up Threading answers it with **Stop and wait** (found by its words, never by its
-number); when the CLI only printed the notice there is nothing to answer and nothing is typed.
-Either way it then schedules a **continue** message for the moment the binding window resets,
-and the session picks its work back up on its own. The continuation rides the ordinary scheduled-messages machinery, so it
+**Continue at Reset** automates the routine instead: when the chooser is up Threading answers it
+with **Stop and wait** (found by its words, never by its number); when the CLI only printed the
+notice there is nothing to answer and nothing is typed. Either way it then schedules a
+**continue** message for the moment the binding window resets, and the session picks its work
+back up on its own. The continuation rides the ordinary scheduled-messages machinery, so it
 shows in the strip above the composer, obeys the has-the-window-really-reset rule above, and
 can be removed there like any other scheduled send. Upgrading your plan is never chosen, under
 any setting. Every step is written to the diagnostics journal (**Help ▸ Reveal Diagnostics
 Log**), so if a recovery ever stands down you can read exactly what it saw and why.
+
+You can turn it on for **one chat**, for **a whole checkout**, or for everything:
+
+| Where | Sets it for |
+|---|---|
+| A session's **Session Options** ▸ **Continue at Reset** — right-click the row, or use its `⋯`, or the pane header's Context button | that conversation |
+| A project row's **Continue at Reset** — right-click the row, or use its `⋯` | every chat in that checkout that has not answered for itself |
+| **Settings ▸ Usage Windows ▸ Limit recovery** | everything that has not answered for itself |
+
+The narrower setting wins, and a chat you have not touched keeps *following* its project and
+Settings — so arming a checkout later still reaches it. A chat inside an armed checkout can still
+opt out, and the checkbox always shows what will actually happen rather than only what that one
+record says.
+
+A row that has been set differently from the ones around it carries a small **slider mark** after
+its name. It appears only for settings that change what Threading does while you are not watching
+— this one and muted notifications — never for a theme or a sound, which announce themselves by
+being seen and heard. Hover the row and the card spells out which ("Continues at reset").
 
 ### Continuing on another login, in one press
 
 When a session stops at its limit and you have another login for the same agent with room left,
 a strip appears at the bottom of that session's pane:
 
-> ⚠ Limit reached · resets 9:40pm (Europe/Rome)  ·  **Continue as Daniel Block · 5h 12% · 7d 40%**  ·  ✕
+> ⚠ Limit reached · resets 9:40pm (Europe/Rome)  ·  **Continue as Daniel Block · 5h 12% · 7d 40%**  ·  **Wait for Reset**  ·  ✕
 
-Pressing the button moves the conversation to that login and sends it a **continue**, so the work
-carries on where it stopped. It is the same move as **Move to Account** above with the follow-up
-message attached, and it asks nothing further: the button already names the login, its current
-usage, and what pressing will do.
+Pressing the first button moves the conversation to that login and sends it a **continue**, so the
+work carries on where it stopped. It is the same move as **Move to Account** above with the
+follow-up message attached, and it asks nothing further: the button already names the login, its
+current usage, and what pressing will do.
+
+**Wait for Reset** is the other answer, and it needs no second login — so the strip appears even
+when you only have one. It does there and then what **Continue at Reset** above would have done
+in advance: answers the CLI's chooser if one is up, and schedules the **continue** for the moment
+the window resets. Use it when a session has already stopped and you did not arm it beforehand;
+ticking the checkbox at that point would only decide what happens the *next* time, since the
+refusal in front of you has already been read.
+
+Once taken, the offer goes away and the pending send shows in the scheduled-messages strip above
+the composer, where you can remove it like any other. If it cannot be scheduled — no usage
+reading yet, or the session is not showing the limit prompt — the strip says so rather than
+failing quietly.
 
 Which login is offered is not simply the emptiest one. Threading ranks your other logins for that
 agent by how far each is *behind its own burn* — an account 40% spent four hours into a five-hour

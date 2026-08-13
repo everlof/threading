@@ -143,8 +143,30 @@ enum LimitEscapeRanking {
 
 // MARK: - Limit Escape Suggestion
 
-/// The offer drawn over a session that was refused for a spent usage limit: one login to carry on
-/// under, and one tap to do it.
+/// What a standing refusal can be answered with.
+///
+/// Two genuinely different acts, which is why they are named rather than counted: one moves the
+/// conversation to another login and carries on now, the other leaves it exactly where it is and
+/// files a message for when the window comes back.
+enum LimitEscapeAction: Equatable, Sendable {
+    case moveAccount
+    case waitForReset
+}
+
+/// A standing usage-limit refusal, and what can be done about it: a login to carry on under, a
+/// wait for the window to reset, or — where neither is available — the fact by itself.
+///
+/// **The account half is optional, and that is the record's whole shape.** It began as "one login
+/// to escape to", which meant a session with no second login carried no record at all: the strip
+/// never appeared, and the only thing left saying the session had stopped was the sidebar's
+/// triangle. But waiting for the reset needs no second account, so the refusal — not the escape —
+/// is what the record is *about*. Three things follow from putting it this way round:
+///
+/// - a single-account session gets a strip, carrying the wait offer alone;
+/// - the dismissal, the busy flag and the problem sentence keep working for it, because they live
+///   on an entry that now always exists;
+/// - `LimitEscapeSuggestionStore.update` can **upgrade** a refusal that had no login into one that
+///   does, the moment a candidate's reading arrives with headroom.
 ///
 /// A value rather than a live object, for `ScheduledMessageStripView.Row`'s reason — the strip
 /// shows what it is handed and reports gestures back, so nothing about a migration in flight is
@@ -155,10 +177,12 @@ struct LimitEscapeSuggestion: Equatable, Sendable {
 
     let sessionID: SessionID
 
-    let accountID: AccountID
+    /// The login worth moving to, when one has headroom. Nil where none does — every other login
+    /// is as spent as this one, or the runtime routes no accounts at all.
+    let accountID: AccountID?
 
     /// The login named the way every other surface names one: after the person, not the alias.
-    let accountName: String
+    let accountName: String?
 
     /// The compact reading, metered by what this session runs — `5h 12% · 7d 40%`. Nil when the
     /// login reports no windows to state, which is a login with nothing to say rather than a
@@ -175,11 +199,22 @@ struct LimitEscapeSuggestion: Equatable, Sendable {
     /// The model the eligibility was decided against, kept so the tap re-checks the same windows.
     let model: String?
 
-    /// The window the choice turned on, for the journal.
-    let decidingWindowName: String
+    /// The window the choice turned on, for the journal. Nil where no login was chosen.
+    let decidingWindowName: String?
 
-    /// Set while the tap is being carried out, so the button cannot be pressed twice.
-    var isBusy = false
+    /// Whether there is a login worth moving to.
+    var offersAccountEscape: Bool { accountID != nil }
+
+    /// Which answer is being carried out, if either. Both controls dim while one runs — the
+    /// second would act on the same refusal — but only the one pressed says it is working.
+    ///
+    /// Named rather than a Boolean because the two answers do very different things: a strip
+    /// that reported "Continuing as Daniel Block…" because somebody pressed *Continue at Reset*
+    /// would be claiming a login change nobody asked for, over a conversation that had not moved.
+    var busy: LimitEscapeAction?
+
+    /// Whether either answer is in flight.
+    var isBusy: Bool { busy != nil }
 
     /// Why the tap did not go through, when it did not. The strip degrades to this rather than
     /// silently naming a different login: another account is a *new* suggestion the user can tap,
@@ -194,12 +229,12 @@ struct LimitEscapeSuggestion: Equatable, Sendable {
 
     init(
         sessionID: SessionID,
-        accountID: AccountID,
-        accountName: String,
-        reading: String?,
+        accountID: AccountID? = nil,
+        accountName: String? = nil,
+        reading: String? = nil,
         resetHint: String?,
         model: String?,
-        decidingWindowName: String
+        decidingWindowName: String? = nil
     ) {
         self.sessionID = sessionID
         self.accountID = accountID
@@ -220,15 +255,26 @@ extension LimitEscapeSuggestion {
     /// The candidates are `SessionMigration.destinations(for:)` — the enabled logins of the same
     /// runtime, minus the one that just refused. That list is already capability-gated, which is
     /// why nothing here names a provider: a runtime that routes no accounts offers none, and the
-    /// offer simply does not appear.
+    /// account half is simply absent.
+    ///
+    /// **No eligible login is not "no record".** It used to be, and that is what left a
+    /// single-account session with nothing on screen but the sidebar's triangle. The refusal is
+    /// the fact; the login is one of the two answers to it. Only a session that has gone missing
+    /// answers nil here.
     @MainActor
     static func compute(for sessionID: SessionID, stop: UsageLimitStop) -> LimitEscapeSuggestion? {
         guard let session = ProjectStore.shared.session(withID: sessionID) else { return nil }
 
-        let destinations = SessionMigration.destinations(for: session)
-        guard !destinations.isEmpty else { return nil }
-
         let model = effectiveModel(for: session)
+        let refusalAlone = LimitEscapeSuggestion(
+            sessionID: sessionID,
+            resetHint: stop.resetHint,
+            model: model
+        )
+
+        let destinations = SessionMigration.destinations(for: session)
+        guard !destinations.isEmpty else { return refusalAlone }
+
         let candidates = destinations.map {
             LimitEscapeRanking.Candidate(
                 accountID: $0.id,
@@ -238,7 +284,7 @@ extension LimitEscapeSuggestion {
 
         guard let best = LimitEscapeRanking.best(among: candidates, metering: model),
               let account = destinations.first(where: { $0.id == best.accountID })
-        else { return nil }
+        else { return refusalAlone }
 
         return LimitEscapeSuggestion(
             sessionID: sessionID,
@@ -296,6 +342,16 @@ struct LimitEscapeSuggestionDidChange: AppEvent {
 /// own pane knows nothing about sidebars, panes or launching.
 struct LimitEscapeRequested: AppEvent {
     static let name = Notification.Name("ThreadingLimitEscapeRequested")
+    let sessionID: SessionID
+}
+
+/// The user pressed the other offer: stay put and continue when the window resets.
+///
+/// A second event rather than a flag on the first, because they end in different places — the
+/// migration is `SessionCoordinator`'s, while answering the CLI's chooser and filing the
+/// continuation is `LimitRecoveryCoordinator`'s, the same routine the automatic policy runs.
+struct LimitWaitForResetRequested: AppEvent {
+    static let name = Notification.Name("ThreadingLimitWaitForResetRequested")
     let sessionID: SessionID
 }
 
@@ -369,21 +425,27 @@ final class LimitEscapeSuggestionStore {
         LimitEscapeSuggestion.warmCandidateReadings(for: sessionID)
 
         guard let suggestion = LimitEscapeSuggestion.compute(for: sessionID, stop: stop) else {
+            // Only a session that is no longer there. A refusal with no login to escape to still
+            // gets a record, because waiting for the reset needs no second account.
             clear(sessionID)
-            EventLog.shared.record(.limitRecovery, "No login with headroom to offer", [
+            EventLog.shared.record(.limitRecovery, "Refusal read for a session that is gone", [
                 "session": sessionID.uuidString
             ])
             return
         }
 
         record(suggestion)
-        EventLog.shared.record(.limitRecovery, "Escape suggested", [
-            "session": sessionID.uuidString,
-            "account": suggestion.accountID.description,
-            "window": suggestion.decidingWindowName,
-            "reading": suggestion.reading ?? "",
-            "model": suggestion.model ?? ""
-        ])
+        EventLog.shared.record(
+            .limitRecovery,
+            suggestion.offersAccountEscape ? "Escape suggested" : "Refusal stands, no login with headroom",
+            [
+                "session": sessionID.uuidString,
+                "account": suggestion.accountID?.description ?? "",
+                "window": suggestion.decidingWindowName ?? "",
+                "reading": suggestion.reading ?? "",
+                "model": suggestion.model ?? ""
+            ]
+        )
     }
 
     /// The refusal is over: the conversation spoke again, or the session stopped being one.
@@ -442,7 +504,7 @@ final class LimitEscapeSuggestionStore {
         entries[sessionID] = suggestion
         EventLog.shared.record(.limitRecovery, "Escape suggestion dismissed", [
             "session": sessionID.uuidString,
-            "account": suggestion.accountID.description
+            "account": suggestion.accountID?.description ?? ""
         ])
         announce(sessionID)
     }
@@ -456,10 +518,10 @@ final class LimitEscapeSuggestionStore {
 
     /// Marks the tap as in flight, so the button states that it is working rather than sitting
     /// pressable while a migration runs.
-    func setBusy(_ isBusy: Bool, for sessionID: SessionID) {
-        guard var suggestion = entries[sessionID], suggestion.isBusy != isBusy else { return }
-        suggestion.isBusy = isBusy
-        if isBusy { suggestion.problem = nil }
+    func setBusy(_ action: LimitEscapeAction?, for sessionID: SessionID) {
+        guard var suggestion = entries[sessionID], suggestion.busy != action else { return }
+        suggestion.busy = action
+        if action != nil { suggestion.problem = nil }
         entries[sessionID] = suggestion
         announce(sessionID)
     }
@@ -472,7 +534,7 @@ final class LimitEscapeSuggestionStore {
     /// button still quoting the cached figure would be arguing with the sentence beside it.
     func note(problem: String, reading: String? = nil, for sessionID: SessionID) {
         guard var suggestion = entries[sessionID] else { return }
-        suggestion.isBusy = false
+        suggestion.busy = nil
         suggestion.problem = problem
         if let reading { suggestion.reading = reading }
         entries[sessionID] = suggestion

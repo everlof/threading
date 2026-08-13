@@ -138,12 +138,12 @@ stale alert and says its piece on the row.
 
 ## The policy
 
-`LimitRecoveryPolicy`, chosen in Settings ▸ Usage Windows, stored through `PreferenceStore` for
-the same reason that page's other settings are: a feature that types into terminals and spends
-rate limit unattended must not fire from a hosted test run (`LimitRecoveryCoordinator.start()`
-also refuses outright under `XCTestCase`, the poker's second lock). **The default is
-`flagOnly`.** Automatic recovery types into the user's session and spends their quota with
-nobody watching; that is opted into, never discovered.
+`LimitRecoveryPolicy`, stored through `PreferenceStore` for the same reason that page's other
+settings are: a feature that types into terminals and spends rate limit unattended must not fire
+from a hosted test run (`LimitRecoveryCoordinator.start()` also refuses outright under
+`XCTestCase`, the poker's second lock). **The default is `flagOnly`.** Automatic recovery types
+into the user's session and spends their quota with nobody watching; that is opted into, never
+discovered.
 
 - **`flagOnly`** — detection still runs (it is what un-strands the tracker), the session reads
   `limitReached` and wears the mark, the user decides. Exactly today, minus the stuck spinner and
@@ -166,6 +166,38 @@ nobody watching; that is opted into, never discovered.
 
 Never, under any policy or parse result: the chooser's "Upgrade your plan" option. No automated
 path may spend money.
+
+### It is chosen at three scopes, and the narrow one is the point
+
+`LimitRecoveryResolution` resolves a chat's answer narrowest-first — the session, its checkout,
+then Settings — and **absent means inherit, not copy**, the rule `ThemeResolution`,
+`AttentionAlertScope` and `SoundResolution` all follow. `LimitRecoveryCoordinator` consults it
+where it used to read `LimitRecoveryPolicy.current`, which is the whole of the change: one line,
+because the policy was only ever read in one place.
+
+The reason it is not a single global switch is the paragraph above, read the other way round. A
+setting that arms unattended typing is opted into — and a switch that can only arm *everything*
+is the broad statement, so it stays off and the feature goes unused. "This long-running chat
+carries on at reset, my other five do not" is the narrow one, and narrow is the safer default
+shape for a permission, not the more dangerous one.
+
+**A checkbox, with three states in the record.** The item in the session menu's Options fold, and
+its twin on the project row, show two states; the third is not something the user picks. The
+writers store **nil where the wanted value already matches what would have been inherited** —
+`toggleLimitRecoveryClicked`, and the mute item's rule before it — so a chat keeps *following* its
+project and Settings, and a later change there still reaches it. The check reads the **resolved**
+answer rather than the record's own field, because an unchecked box on a chat that will in fact
+continue by itself states the opposite of what happens.
+
+**The rows say so.** `RowConductSummary` marks a sidebar row that carries a non-inherited
+*conduct* setting — this policy and `notificationsMuted` — and `SessionInfoPopover` names which.
+The line is deliberate: a theme and a sound announce themselves the moment they act, so marking
+rows for those would light up most of the sidebar and say nothing, while these two act precisely
+when nobody is watching and their surprise is always "why did that happen, or why didn't it?".
+The mark is compared against the **inherited** answer rather than tested for non-nil, so a record
+holding a value that matches what it would have inherited anyway draws nothing — a row claiming
+to differ while behaving identically is worse than no mark. It is materialized on the
+`pinnedIndicator` terms, so the ordinary row pays no image, constraints or stack slot for it.
 
 ## The interactive escape
 
@@ -215,6 +247,56 @@ conversation goes is testable with no home directory to scan and no network to a
   hour. A window whose length the provider did not state contributes a deficit of zero rather than
   a number invented from one side of the subtraction. Ties keep the order the candidates arrived
   in, so an unchanged discovery order cannot make the offer flicker between two logins.
+
+### The strip carries the refusal, not only the escape
+
+`LimitEscapeSuggestion`'s account half is **optional**, and that is the record's whole shape. It
+began as "one login to escape to", which meant `compute` answered nil where nothing had headroom
+and `refusalStands` cleared the entry — so a session with a single login got no strip at all, and
+the sidebar's triangle was the only thing saying it had stopped. Waiting for the reset needs no
+second account, so the *refusal* is what the record is about and the login is one of its two
+answers. Three things follow, and the third is a capability the old shape could not express:
+
+- a single-account session gets a strip, carrying **Wait for Reset** alone;
+- dismissal, the busy state and the problem sentence keep working for it, because they live on an
+  entry that now always exists;
+- `update`'s re-rank **upgrades** a refusal that had no login into one that does, the moment a
+  candidate's reading arrives with headroom. It bailed before, having no entry to update.
+
+`busy` names *which* answer is running (`LimitEscapeAction`) rather than counting a Boolean. Both
+controls dim while either runs — the second would act on the same refusal — but only the pressed
+one says so: a strip reporting "Continuing as Daniel Block…" because somebody pressed the button
+beside it would be naming a login change that is not happening.
+
+**The button and the standing option are worded differently on purpose**, and were not at first.
+Sharing one name looked right — one behaviour, one name — and read wrong: "Continue at Reset" is
+an outcome, which is what an option in a menu should be, and on a strip opening with "Limit
+reached" it turned into a mode the reader was being asked to switch on, over a session where
+switching it on could no longer change anything. The strip instructs (**Wait for Reset**), the
+context-menu checkbox states (**Continue at Reset**), and
+`LimitEscapeStripTests.testTheButtonInstructsWhileTheStandingOptionStates` keeps a later tidy-up
+from merging them back.
+
+### Arming a refusal that already stands
+
+`LimitRecoveryCoordinator.armWaitForReset(for:)` is the policy's own routine reached by hand, and
+deliberately not a second implementation of it. Three things differ, each because a press is
+watched where a policy is not:
+
+- **Failures speak.** `standDown` still leaves the session exactly where `flagOnly` would and still
+  journals the reason, but a press also gets the sentence on the strip it came from. It must not
+  call `offerEscape` there: recomputing the suggestion files a *new* refusal over the standing one,
+  which clears the dismissal and wipes the very sentence being written.
+- **No terminal is not a failure.** A rendered conversation has no chooser to answer, so the
+  keystrokes are skipped and only the schedule is made — the `.noticeOnly` path, which already
+  models "nothing to answer, schedule anyway". The surface is asked of the record
+  (`usesNativeUI`) rather than probed for.
+- **Success clears the offer**, because from then on the pending send is the fact and the
+  composer's scheduled-message strip is what names it.
+
+Whether the wait is on offer at all is `hasOwedContinuation(for:)` — **one predicate, two
+readers**: the arm guards on it and the strip is drawn from it, so the button cannot offer
+something the code behind it would decline.
 
 ### One store, both surfaces
 

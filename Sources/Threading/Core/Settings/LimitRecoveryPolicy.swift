@@ -9,7 +9,13 @@ import Foundation
 /// with nobody watching, so it is opted into, never discovered: `flagOnly` still reads the
 /// refusal (that is what un-strands the spinner — see `limit-recovery.md`) and then leaves the
 /// decision where it is today, in front of the user.
-enum LimitRecoveryPolicy: String, CaseIterable, Sendable {
+///
+/// Chosen at three scopes rather than one — a chat, its checkout, the app — because the opt-in
+/// is the narrow statement. See `LimitRecoveryResolution`.
+///
+/// `Codable` because a chat and a project each store their own answer; the raw values are
+/// therefore persisted names and cannot be renamed without leaving old records unreadable.
+enum LimitRecoveryPolicy: String, CaseIterable, Codable, Sendable {
 
     /// Detect and mark, touch nothing. The session flags as stopped on the user; the CLI's own
     /// chooser stays exactly as the CLI drew it.
@@ -57,17 +63,25 @@ enum LimitRecoveryPolicy: String, CaseIterable, Sendable {
 @MainActor
 enum LimitRecoverySettings {
 
-    private static let key = "limitRecoveryPolicy"
+    /// Not private, so a test can seed the app scope by writing here rather than through
+    /// `policy` below.
+    ///
+    /// The setter posts `AppSettingsDidChange` into whatever observers the test host has live —
+    /// a sidebar controller from an earlier case among them — which is the hazard
+    /// `SidebarTreeBuilderTests` already writes `UserDefaults` directly to avoid. A test that
+    /// only needs the *value* seeded should not be broadcasting a settings change to the whole
+    /// application to get it.
+    static let storageKey = "limitRecoveryPolicy"
 
     static var policy: LimitRecoveryPolicy {
         get {
-            PreferenceStore.shared.string(forKey: key)
+            PreferenceStore.shared.string(forKey: storageKey)
                 .flatMap(LimitRecoveryPolicy.init(rawValue:))
                 ?? .default
         }
         set {
             guard newValue != policy else { return }
-            PreferenceStore.shared.set(newValue.rawValue, forKey: key)
+            PreferenceStore.shared.set(newValue.rawValue, forKey: storageKey)
             NotificationCenter.default.post(AppSettingsDidChange())
         }
     }

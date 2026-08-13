@@ -2570,7 +2570,10 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             cell.configure(
                 with: project,
                 style: isGrouped ? .checkout : .standalone,
-                collapsedSessionCount: hiddenItems
+                collapsedSessionCount: hiddenItems,
+                // Summarised here, from *this* sidebar's store: a row must not reach for the
+                // singleton to answer a question about the records it was handed.
+                conduct: RowConductSummary.forProject(project)
             )
             cell.onHoverAction = { [weak self] anchor in
                 self?.showProjectActions(for: projectNode.projectID, from: anchor)
@@ -2629,7 +2632,8 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             cell.configure(
                 with: session,
                 activity: AgentRuntime.shared.activity(sessionID: sessionNode.sessionID),
-                isLoading: loadingState.isLoading(sessionNode.sessionID)
+                isLoading: loadingState.isLoading(sessionNode.sessionID),
+                conduct: RowConductSummary.forSession(session, in: projectStore)
             )
             cell.onAction = { [weak self] sessionID, anchor in
                 self?.showRowActions(for: sessionID, from: anchor)
@@ -2896,6 +2900,7 @@ extension ProjectSidebarViewController {
             entries.append(projectSoundEntry(for: projectID))
             entries.append(projectChangeRequestEntry(for: projectID))
             entries.append(projectMuteEntry(for: projectID, row: row))
+            entries.append(projectLimitRecoveryEntry(for: projectID, row: row))
         }
         entries.append(.item(ThemedMenuItem(
             title: L10n.string("Reclaim Disk Space…"),
@@ -3001,6 +3006,37 @@ extension ProjectSidebarViewController {
                 : L10n.string("Mute Notifications"),
             onChoose: pinnedAction(row) { $0.toggleProjectMuteClicked() }
         ))
+    }
+
+    /// Arms every chat in this checkout that has not answered for itself. The session item's
+    /// twin — same words, same checkmark-reads-the-resolved-answer rule, same nil-means-follow
+    /// writer one scope out.
+    private func projectLimitRecoveryEntry(for projectID: ProjectID, row: Int) -> ThemedMenuEntry {
+        let resolved = LimitRecoveryResolution.answer(forProjectID: projectID, in: projectStore)
+        return .item(ThemedMenuItem(
+            title: SessionActionMenuDefaults.limitRecoveryTitle,
+            image: ThemedMenuIcon.symbol(SessionActionMenuDefaults.limitRecoverySymbol),
+            isSelected: resolved.policy == .waitForReset,
+            onChoose: pinnedAction(row) { $0.toggleProjectLimitRecoveryClicked() }
+        ))
+    }
+
+    @objc private func toggleProjectLimitRecoveryClicked() {
+        guard let projectID = contextProjectID() else { return }
+
+        let resolved = LimitRecoveryResolution.answer(forProjectID: projectID, in: projectStore)
+        let wanted: LimitRecoveryPolicy = resolved.policy == .waitForReset ? .flagOnly : .waitForReset
+        let inherited = LimitRecoveryResolution.inherited(beyondProjectID: projectID)
+
+        guard projectStore.setLimitRecoveryPolicy(
+            wanted == inherited ? nil : wanted,
+            forProjectID: projectID
+        ).succeeded else {
+            reload()
+            presentProjectNotice(L10n.string("The project data could not be saved."))
+            return
+        }
+        reload()
     }
 
     @objc private func toggleProjectMuteClicked() {

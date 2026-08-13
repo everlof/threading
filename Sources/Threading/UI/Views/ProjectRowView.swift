@@ -23,6 +23,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// three constraints, creating this eagerly pays AppKit's cold monospaced-digit font setup
     /// in the first sidebar layout. Materialize it only when there are digits to show.
     private var countLabel: NSTextField?
+    /// Says this checkout's chats behave differently unless they answered for themselves.
+    /// Materialized only when one does; see `setConductMark`.
+    private var conductIndicator: NSImageView?
     private let nativeContent = NSView()
     private let afterTitleSlot = NSStackView()
     private let trailingSlot = NSView()
@@ -189,7 +192,12 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         case checkout
     }
 
-    func configure(with project: Project, style: Style = .standalone, collapsedSessionCount: Int = 0) {
+    func configure(
+        with project: Project,
+        style: Style = .standalone,
+        collapsedSessionCount: Int = 0,
+        conduct: RowConductSummary? = nil
+    ) {
         isHeading = false
 
         // Read before the record is replaced: the same project named differently is a
@@ -225,15 +233,21 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         }
 
         setCount(collapsedSessionCount)
-        // A sound this checkout does not inherit is named on the line under its path, so an
-        // overridden row is identifiable without opening a menu. Nothing is drawn for the common
-        // case: configuration is not status, and a row acquires no badge for carrying one.
+
+        // Two overrides, told apart by whether they change what the app *does* when nobody is
+        // looking. A sound is presentation: it announces itself by being heard, so it is named
+        // in the tooltip and draws nothing. Conduct — muted, or continuing at its reset — never
+        // announces itself at all, and a checkout whose chats behave differently says so with a
+        // mark. See `RowConductSummary`; this is the one case the old "a row acquires no badge
+        // for carrying configuration" rule was too broad for.
+        setConductMark(conduct)
         nativeToolTip = [
             project.folderPath,
             SoundOverrideAudit.toolTipLine(
                 for: .project(project.id),
                 overrides: project.soundOverrides
-            )
+            ),
+            conduct?.sentence
         ].compactMap { $0 }.joined(separator: "\n")
         animatesNextName = wasShowingThisProject && nameLabel.stringValue != nativeName
         applyTextColors()
@@ -258,6 +272,10 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         nameLabel.applyFont(.caption)
         nativeName = name
         setCount(count)
+        // A heading has no record and therefore no settings of its own. Cleared explicitly
+        // because this view is recycled: a mark left over from the checkout that used the cell
+        // before would be a group claiming a chat's configuration.
+        setConductMark(nil)
         nativeToolTip = nil
         animatesNextName = false
         applyTextColors()
@@ -284,6 +302,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         nameLabel.applyFont(.caption)
         nativeName = branch
         setCount(collapsedSessionCount)
+        setConductMark(nil)
         nativeToolTip = branch
         animatesNextName = hasConfiguredSinceReuse && nameLabel.stringValue != nativeName
         applyTextColors()
@@ -810,6 +829,50 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
     var countLabelIsMaterialized: Bool { countLabel != nil }
 
+    /// Adds the settings mark only once a checkout behaves differently, on the session row's
+    /// terms exactly: materialized on first need, hidden on reuse, and absent entirely from the
+    /// rows — nearly all of them — that carry nothing of their own.
+    ///
+    /// Between the name and the extension slot, so it reads as a footnote to the checkout rather
+    /// than as another icon competing with its own.
+    private func setConductMark(_ summary: RowConductSummary?) {
+        guard let summary else {
+            conductIndicator?.isHidden = true
+            return
+        }
+        if let conductIndicator {
+            conductIndicator.isHidden = false
+            return
+        }
+
+        let indicator = NSImageView()
+        indicator.image = Design.Symbol.image(
+            RowConductDefaults.symbol,
+            slot: Design.Size.inlineButtonGlyph,
+            pointSize: Design.Symbol.control
+        )
+        indicator.imageScaling = .scaleProportionallyDown
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        indicator.setContentHuggingPriority(.required, for: .horizontal)
+        indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
+        indicator.setAccessibilityElement(true)
+        indicator.setAccessibilityRole(.image)
+        indicator.setAccessibilityLabel(RowConductStrings.markLabel)
+        indicator.setAccessibilityIdentifier(RowConductDefaults.projectIdentifier)
+        indicator.contentTintColor = backgroundStyle == .emphasized
+            ? Design.Ink.selection.secondary
+            : Design.Text.secondary
+
+        let insertionIndex = rowContentStack.arrangedSubviews.firstIndex(of: afterTitleSlot)
+            ?? rowContentStack.arrangedSubviews.count
+        rowContentStack.insertArrangedSubview(indicator, at: insertionIndex)
+        NSLayoutConstraint.activate([
+            indicator.widthAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
+            indicator.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph)
+        ])
+        conductIndicator = indicator
+    }
+
     private func updateTrailingSlotVisibility() {
         trailingSlot.isHidden = !showsHoverButton && !hasCount
     }
@@ -832,12 +895,14 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             countLabel?.textColor = Design.Text.selected.withAlphaComponent(
                 SidebarRowDefaults.secondaryTextAlpha
             )
+            conductIndicator?.contentTintColor = Design.Ink.selection.secondary
             iconView.contentTintColor = Design.Text.selected
             nativeIconTint = iconView.contentTintColor
             return
         }
 
         countLabel?.textColor = Design.Text.secondary
+        conductIndicator?.contentTintColor = Design.Text.secondary
         iconView.contentTintColor = Design.Text.secondary
         nativeIconTint = iconView.contentTintColor
     }

@@ -57,6 +57,14 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         appEvents.observe(LimitEscapeRequested.self) { [weak self] event in
             self?.performLimitEscape(for: event.sessionID)
         }
+
+        // The strip's other answer goes straight to the recovery coordinator instead: waiting
+        // for the reset moves no conversation and reopens no pane, and it is the same routine
+        // the automatic policy runs. Observed here only because this is where the pane's
+        // announcements are picked up.
+        appEvents.observe(LimitWaitForResetRequested.self) { event in
+            LimitRecoveryCoordinator.shared.armWaitForReset(for: event.sessionID)
+        }
     }
 
     func takePendingPrompt() -> String? {

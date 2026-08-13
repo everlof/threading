@@ -549,6 +549,12 @@ final class ConversationViewController: NSViewController {
             guard let self else { return }
             NotificationCenter.default.post(LimitEscapeRequested(sessionID: self.sessionID))
         }
+        // Reachable here too, and it does less than it does over a terminal: there is no chooser
+        // to answer on this surface, so the press files the continuation and nothing is typed.
+        limitEscapeStrip.onWaitForReset = { [weak self] in
+            guard let self else { return }
+            NotificationCenter.default.post(LimitWaitForResetRequested(sessionID: self.sessionID))
+        }
         limitEscapeStrip.onDismiss = { [weak self] in
             guard let self else { return }
             LimitEscapeSuggestionStore.shared.dismiss(self.sessionID)
@@ -563,15 +569,8 @@ final class ConversationViewController: NSViewController {
     func refreshLimitEscapeStrip() {
         guard isViewLoaded else { return }
         limitEscapeStrip.setOffer(
-            LimitEscapeSuggestionStore.shared.offer(for: sessionID).map {
-                LimitEscapeStripView.Offer(
-                    accountName: $0.accountName,
-                    reading: $0.reading,
-                    resetHint: $0.resetHint,
-                    problem: $0.problem,
-                    isBusy: $0.isBusy
-                )
-            }
+            LimitEscapeSuggestionStore.shared.offer(for: sessionID)
+                .map(LimitEscapeStripView.Offer.init)
         )
     }
 

@@ -505,6 +505,9 @@ final class SessionRowActionsTests: XCTestCase {
                 "Interface",
                 "Claude Remote Control",
                 L10n.string("Mute Notifications"),
+                // Beside Mute rather than beside Theme: both are conduct — what this chat does
+                // when nobody is watching — while Theme and Sound are presentation.
+                SessionActionMenuDefaults.limitRecoveryTitle,
                 SessionActionMenuDefaults.attachmentsTitle
             ]
         )
@@ -695,6 +698,92 @@ final class SessionRowActionsTests: XCTestCase {
 
     /// Invisible hover actions do not earn permanent title width. The status keeps one inline
     /// target at rest; entering the row makes room for both controls before they can take clicks.
+    // MARK: - The Settings Mark
+
+    /// The mark is asserted on a row inside its host rather than on a bare view, the rule this
+    /// file already follows: a row's content is laid out by the row, and a mark that measures
+    /// correctly detached can still be one an outline view never gives room to.
+    ///
+    /// Absence first, because that is the case that has to stay free — nearly every row carries
+    /// no override, and the indicator must not become part of mounting every one of them.
+    func testAnOrdinaryRowCarriesNoSettingsMark() throws {
+        try withAppLimitRecovery(.flagOnly) {
+            let (host, row) = hostedRow()
+            let plain = session()
+            row.configure(
+                with: plain,
+                activity: .idle,
+                conduct: RowConductSummary.forSession(plain)
+            )
+            host.layoutSubtreeIfNeeded()
+
+            XCTAssertNil(optionalView(named: RowConductDefaults.sessionIdentifier, in: row))
+        }
+    }
+
+    func testAnArmedChatWearsTheSettingsMarkAndNamesIt() throws {
+        try withAppLimitRecovery(.flagOnly) {
+            let (host, row) = hostedRow()
+            var armed = session()
+            armed.limitRecoveryPolicy = .waitForReset
+            row.configure(
+                with: armed,
+                activity: .idle,
+                conduct: RowConductSummary.forSession(armed)
+            )
+            host.layoutSubtreeIfNeeded()
+
+            let mark = try view(named: RowConductDefaults.sessionIdentifier, in: row)
+            XCTAssertFalse(mark.isHidden)
+            XCTAssertGreaterThan(mark.frame.width, 0, "the mark was given no room in the row")
+            XCTAssertEqual(mark.accessibilityLabel(), RowConductStrings.markLabel)
+            XCTAssertEqual(mark.toolTip, RowConductStrings.limitRecovery(.waitForReset))
+        }
+    }
+
+    /// A chat that armed nothing while the app default is already armed is doing what every
+    /// other chat does, and says nothing. The mark is for rows that *differ*.
+    func testAChatFollowingAnArmedSettingCarriesNoMark() throws {
+        try withAppLimitRecovery(.waitForReset) {
+            let (host, row) = hostedRow()
+            let plain = session()
+            row.configure(
+                with: plain,
+                activity: .idle,
+                conduct: RowConductSummary.forSession(plain)
+            )
+            host.layoutSubtreeIfNeeded()
+
+            XCTAssertNil(optionalView(named: RowConductDefaults.sessionIdentifier, in: row))
+        }
+    }
+
+    /// Cells are recycled, so a mark left standing would be one chat claiming another's setting.
+    func testTheSettingsMarkLeavesWhenTheRowIsReusedForAnOrdinaryChat() throws {
+        try withAppLimitRecovery(.flagOnly) {
+            let (host, row) = hostedRow()
+            var armed = session()
+            armed.limitRecoveryPolicy = .waitForReset
+            row.configure(
+                with: armed,
+                activity: .idle,
+                conduct: RowConductSummary.forSession(armed)
+            )
+            host.layoutSubtreeIfNeeded()
+            XCTAssertFalse(try view(named: RowConductDefaults.sessionIdentifier, in: row).isHidden)
+
+            let other = session("Somebody else")
+            row.configure(
+                with: other,
+                activity: .idle,
+                conduct: RowConductSummary.forSession(other)
+            )
+            host.layoutSubtreeIfNeeded()
+
+            XCTAssertTrue(try view(named: RowConductDefaults.sessionIdentifier, in: row).isHidden)
+        }
+    }
+
     func testTheTrailingSlotOnlyPaysForVisibleContent() throws {
         let (host, row) = hostedRow()
         row.configure(
@@ -1008,5 +1097,20 @@ final class SessionRowActionsTests: XCTestCase {
             activity: .idle
         )
         XCTAssertNil(inheriting.soundLine, "a chat that inherits grew a line for it")
+    }
+
+    /// Seeds the app-scope limit-recovery answer without announcing a settings change.
+    ///
+    /// Written straight to the preference rather than through `LimitRecoverySettings.policy`,
+    /// whose setter posts `AppSettingsDidChange` into whatever observers the test host has live.
+    /// `SidebarTreeBuilderTests` writes `UserDefaults` directly for exactly this reason, and a
+    /// sidebar controller an earlier case left alive will act on the broadcast.
+    private func withAppLimitRecovery(
+        _ policy: LimitRecoveryPolicy,
+        run: () throws -> Void
+    ) rethrows {
+        PreferenceStore.shared.set(policy.rawValue, forKey: LimitRecoverySettings.storageKey)
+        defer { PreferenceStore.shared.removeObject(forKey: LimitRecoverySettings.storageKey) }
+        try run()
     }
 }

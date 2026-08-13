@@ -865,6 +865,46 @@ final class ProjectStore {
         return .applied
     }
 
+    /// Records what one conversation does when its account's usage limit refuses it. Nil returns
+    /// it to following its project, and the Settings choice beyond that — the same three scopes
+    /// as the theme and the mute above, and optional for the same reason.
+    ///
+    /// Arming the recovery is all this stores. Acting on a refusal that is *already* standing is
+    /// `LimitRecoveryCoordinator`'s, because it needs a live process to type into.
+    @discardableResult
+    func setLimitRecoveryPolicy(
+        _ policy: LimitRecoveryPolicy?,
+        forSessionID sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        guard projects[location.projectIndex].sessions[location.sessionIndex].limitRecoveryPolicy
+            != policy else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex].limitRecoveryPolicy = policy
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
+        notifyChanged()
+        return .applied
+    }
+
+    /// The same for a whole checkout, which its chats follow unless they answered for themselves.
+    @discardableResult
+    func setLimitRecoveryPolicy(
+        _ policy: LimitRecoveryPolicy?,
+        forProjectID projectID: ProjectID
+    ) -> ProjectMutationResult {
+        guard let index = index(ofProject: projectID) else { return .targetNotFound }
+        guard projects[index].limitRecoveryPolicy != policy else { return .unchanged }
+        projects[index].limitRecoveryPolicy = policy
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
+        notifyChanged()
+        return .applied
+    }
+
     /// Records which sounds one conversation overrides. Nil clears the record's whole say, so it
     /// follows its project — and the app beyond that — again.
     ///

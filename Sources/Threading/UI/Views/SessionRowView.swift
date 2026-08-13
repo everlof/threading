@@ -108,6 +108,11 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// Inserted into the arranged content only for a pinned session. Most rows are unpinned, so
     /// resolving this SF Symbol (and carrying an empty arranged slot) belongs behind that state.
     private var pinnedIndicator: NSImageView?
+    /// Says that this chat behaves differently from the ones around it — it continues at its
+    /// reset, or it says nothing when it finishes. Materialized on the same terms as the pin,
+    /// and for the same reason: nearly every row carries no override, and absent content must
+    /// not become part of mounting and scrolling. See `RowConductSummary`.
+    private var conductIndicator: NSImageView?
     private let nativeIdentityContent = NSView()
     private lazy var afterTitleSlot = NSStackView()
     private lazy var identityContentContainer = ComponentContentContainer(
@@ -514,6 +519,56 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         pinnedIndicator = indicator
     }
 
+    /// Adds the settings mark only once a row behaves differently, on the pin's terms exactly.
+    ///
+    /// Drawn in the secondary ink rather than the accent the pin uses: the pin is a decision the
+    /// user makes about *this list* and should be findable at a glance, while this is a footnote
+    /// about the row's conduct — it should be noticeable when looked for and silent otherwise.
+    private func setConductMark(_ summary: RowConductSummary?) {
+        guard let summary else {
+            conductIndicator?.isHidden = true
+            return
+        }
+        if let conductIndicator {
+            conductIndicator.isHidden = false
+            conductIndicator.toolTip = summary.sentence
+            return
+        }
+
+        let indicator = NSImageView()
+        indicator.image = Design.Symbol.image(
+            RowConductDefaults.symbol,
+            slot: Design.Size.inlineButtonGlyph,
+            pointSize: Design.Symbol.control
+        )
+        indicator.imageScaling = .scaleProportionallyDown
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        indicator.setContentHuggingPriority(.required, for: .horizontal)
+        indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
+        indicator.setAccessibilityElement(true)
+        indicator.setAccessibilityRole(.image)
+        indicator.setAccessibilityLabel(RowConductStrings.markLabel)
+        indicator.setAccessibilityIdentifier(RowConductDefaults.sessionIdentifier)
+        indicator.toolTip = summary.sentence
+        indicator.contentTintColor = backgroundStyle == .emphasized
+            ? Design.Ink.selection.secondary
+            : Design.Text.secondary
+
+        // After the title rather than before it: the pin changes where the row *is* and belongs
+        // in front, while this describes what it does and reads as a trailing footnote. Placed
+        // by the attention overlay's own rule — last, but never past the extension slot, which
+        // owns the end of the row.
+        let insertionIndex = afterTitleSlotIsMaterialized
+            ? max(0, rowContentStack.arrangedSubviews.count - 1)
+            : rowContentStack.arrangedSubviews.count
+        rowContentStack.insertArrangedSubview(indicator, at: insertionIndex)
+        NSLayoutConstraint.activate([
+            indicator.widthAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
+            indicator.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph)
+        ])
+        conductIndicator = indicator
+    }
+
     /// The slot sits at the trailing edge, where it reads as status rather than as another
     /// icon competing with the agent's own.
     private func setupTrailingSlot() {
@@ -826,10 +881,14 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
     // MARK: - Public Methods
 
+    /// `conduct` is handed in rather than looked up: this runs on the viewport path, and a row
+    /// that reaches for `ProjectStore.shared` answers about a different store than the sidebar
+    /// it lives in was built against. See `RowConductSummary`.
     func configure(
         with session: AgentSession,
         activity: SessionActivity,
-        isLoading: Bool = false
+        isLoading: Bool = false,
+        conduct: RowConductSummary? = nil
     ) {
         // Rows reconfigure constantly while an agent works, so an open popover survives a
         // same-session refresh; only reuse for a different session dismisses it.
@@ -850,6 +909,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         nativeTitle = session.displayTitle
         nativeToolTip = nil
         setPinned(session.isPinned)
+        setConductMark(conduct)
         if session.wake != nil {
             let label = attentionLabelForPresentation()
             label.stringValue = L10n.string("Woke")

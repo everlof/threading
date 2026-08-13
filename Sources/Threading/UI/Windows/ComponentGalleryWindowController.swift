@@ -1357,25 +1357,34 @@ final class ComponentGalleryViewController: NSViewController {
             scheduledStrip.setRows(scheduledRows)
         }
 
-        // The three states of one strip, stacked: the offer as it arrives, the same offer while
-        // the migration runs, and the one that was pressed and could not be taken. The last is
-        // the state worth looking at — the button keeps its numbers and dims rather than being
-        // replaced by a different login nobody chose.
+        // The states of one strip, stacked: both answers as they arrive, the wait alone — which
+        // is what somebody with a single login sees, and the shape the row has to hold together
+        // without the control its sentence was sized against — the offer while the migration
+        // runs, and the one that was pressed and could not be taken. The last is the state worth
+        // looking at: the button keeps its numbers and dims rather than being replaced by a
+        // different login nobody chose.
         let limitEscapeOffers: [LimitEscapeStripView.Offer] = [
             LimitEscapeStripView.Offer(
                 accountName: "Daniel Block",
                 reading: "5h 12% · 7d 40%",
+                offersWaitForReset: true,
+                resetHint: "9:40pm (Europe/Rome)"
+            ),
+            LimitEscapeStripView.Offer(
+                offersWaitForReset: true,
                 resetHint: "9:40pm (Europe/Rome)"
             ),
             LimitEscapeStripView.Offer(
                 accountName: "Daniel Block",
                 reading: "5h 12% · 7d 40%",
+                offersWaitForReset: true,
                 resetHint: "9:40pm (Europe/Rome)",
-                isBusy: true
+                busy: .moveAccount
             ),
             LimitEscapeStripView.Offer(
                 accountName: "Daniel Block",
                 reading: "5h 94% · 7d 40%",
+                offersWaitForReset: true,
                 resetHint: "9:40pm (Europe/Rome)",
                 problem: "Daniel Block is close to its own limit now."
             )
@@ -1388,6 +1397,9 @@ final class ComponentGalleryViewController: NSViewController {
             }
             strip.onContinue = { [weak self] in
                 self?.showReceipt(L10n.string("Continuing on the other login."))
+            }
+            strip.onWaitForReset = { [weak self] in
+                self?.showReceipt(L10n.string("Continuing when the window resets."))
             }
             return strip
         })
