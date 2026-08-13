@@ -67,7 +67,11 @@ every chat and standalone terminal standing in that checkout via
 shell drawer, a standalone terminal or a terminal outside Threading.
 A detached reading is never applied on this path: a rebase detaches `HEAD` for seconds at a
 time, and clearing every record for the flicker would regroup the sidebar twice per rebase; a
-genuine detachment still lands per session at its own stopped-working moment. **Settings >
+genuine detachment still lands per session at its own stopped-working moment. That watcher
+coalesces on `GitWatchDefaults.branchCoalesce` rather than the review pane's window: a switch
+writes `HEAD` once, so there is no burst to wait out and the eight-tenths of a second the pane
+spends waiting for an agent to stop editing was, here, the sidebar still naming the branch the
+user had just left. **Settings >
 General > "Follow the checkout's branch"** turns the following off and restores the frozen
 record, for whoever wants the sidebar to say where a conversation *happened* rather than
 where it would resume. The record drives the sidebar's **branch grouping**
@@ -96,6 +100,27 @@ menu bar's only stateful item. Branch headings are not selectable, collapse like
 (state kept in-memory only — the groups themselves are transient), and the hover popover
 prefers the session's recorded branch over the checkout's current one for the same reason the
 record exists.
+
+**A heading whose branch moved is renamed, not replaced.** A branch group is keyed by its name
+(`SidebarNodeKey.branch(projectID, branch)`) because a different name usually means different
+rows — except after a `git checkout`, which moves every chat in the checkout at once and leaves
+the heading with exactly the membership it already had. Keyed by name that read as one group
+leaving and another arriving: the heading and every row under it faded out, a closed heading
+arrived in its place, and the expansion pass reopened it, so the branch visibly disappeared from
+the sidebar for a moment on every switch — collapsed state lost, name morph lost, and the
+selected chat re-selected on a new row. `SidebarOutlineUpdate.branchRenames(from:to:)` finds
+that case by *membership*, which is what a group is: a lone branch key leaving under one parent,
+answered by a lone branch key arriving, with the same children in the same order. Two branches
+merging, or a switch that also gains a chat, is a genuine regrouping and still moves rows.
+`SidebarTreeShape.renamingKeys` folds the rename out of the presented shape before the diff, so
+the update contains nothing for the heading; `adopt(_:reusing:renaming:)` hands the presented
+node the new name; the collapsed-key set is migrated alongside it; and the viewport is
+reconfigured in place, which is also what moves a *grouped checkout's* project row, named by its
+branch for the same reason. That reconfigure is the only reason a rename redraws anything —
+`ProjectRowView` morphs a heading's name exactly when the cell was not just handed out of the
+reuse pool. Pinned by `SidebarOutlineUpdateTests` (the rename is found, and merges and gains are
+not) and by `SidebarRowAnimationTests`, which asserts the heading is the same `NSTableRowView`
+before and after the switch.
 
 Pinning is also a row state, not only an ordering rule. `SessionRowView` keeps a filled pin after
 the title (the same mark the mobile dashboard uses), outside its replaceable content so an

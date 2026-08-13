@@ -6,8 +6,13 @@ import AppKit
 ///
 /// Deliberately carries identities rather than content — a session's title and a project's name
 /// are absent, so a rename compares equal and takes the in-place refresh path. A branch heading's
-/// *name* is part of its identity and is therefore included: renaming a branch regroups the
-/// sessions under it, which is a different tree rather than a differently-labelled one.
+/// *name* is part of its identity and is therefore included: a branch heading gathers the rows
+/// standing on one branch, so a different name usually means different rows.
+///
+/// Usually, not always. When the heading's members are exactly the ones it already had, the
+/// checkout moved and took every row with it, and the group was relabelled rather than replaced —
+/// `SidebarOutlineUpdate.branchRenames(from:to:)` finds that case and `renamingKeys` folds it
+/// out of the comparison, so the diff describes a rename instead of a removal and an arrival.
 ///
 /// This replaced a string signature that could only answer "did anything move?". Answering
 /// *what* moved is what an animated update needs, and the two questions are the same walk.
@@ -110,6 +115,24 @@ struct SidebarTreeShape: Equatable {
         }
         return true
     }
+
+    /// This shape with the given identities substituted, leaving every position untouched.
+    ///
+    /// Used on the *presented* shape before diffing, so a row whose key carries a display value
+    /// that moved — a branch heading, and nothing else today — compares equal to the row that
+    /// replaced it instead of being described as a departure and an arrival at the same index.
+    func renamingKeys(_ renames: [SidebarNodeKey: SidebarNodeKey]) -> SidebarTreeShape {
+        guard !renames.isEmpty else { return self }
+
+        var renamed = SidebarTreeShape()
+        renamed.keys = Set(keys.map { renames[$0] ?? $0 })
+        renamed.childrenByParent.reserveCapacity(childrenByParent.count)
+        for (parent, children) in childrenByParent {
+            renamed.childrenByParent[parent.map { renames[$0] ?? $0 }] =
+                children.map { renames[$0] ?? $0 }
+        }
+        return renamed
+    }
 }
 
 // MARK: - Outline Steps
@@ -134,6 +157,48 @@ enum SidebarOutlineStep: Equatable {
 /// outline is *told* is the part that has to be right, and the part AppKit will throw an
 /// exception over when it is not.
 enum SidebarOutlineUpdate {
+
+    /// The branch headings `new` merely relabelled, as old key → new key.
+    ///
+    /// A checkout switching branch moves every row standing in it at once, so the heading over
+    /// them ends up with a new name and exactly the membership it already had. Keyed by name, that
+    /// reads as a group leaving and another arriving: the outline fades the heading and every row
+    /// under it out, inserts a closed heading, and re-expands it — the branch visibly disappearing
+    /// and coming back, with the group's collapsed state and the name's morph lost on the way.
+    ///
+    /// The test is membership, because membership is what a group *is*. Only a lone departure
+    /// answered by a lone arrival under one parent qualifies; two branches merging into one, or a
+    /// switch that also gains or loses a chat, is a genuine regrouping and still moves rows.
+    static func branchRenames(
+        from old: SidebarTreeShape,
+        to new: SidebarTreeShape
+    ) -> [SidebarNodeKey: SidebarNodeKey] {
+        var renames: [SidebarNodeKey: SidebarNodeKey] = [:]
+
+        for (parent, after) in new.childrenByParent {
+            // Runs on every structural reload, so the parents that did not change — every one of
+            // them, on the pass this exists for — cost a comparison and no allocation, exactly
+            // as they do in `steps`.
+            let before = old.children(of: parent)
+            guard !before.isEmpty, before != after else { continue }
+
+            let beforeSet = Set(before)
+            let afterSet = Set(after)
+            let leaving = before.filter { $0.branchGroup != nil && !afterSet.contains($0) }
+            let arriving = after.filter { $0.branchGroup != nil && !beforeSet.contains($0) }
+            guard leaving.count == 1, arriving.count == 1,
+                  let from = leaving.first, let to = arriving.first else { continue }
+
+            // A heading with no children cannot prove it is the same heading, and the builder
+            // never makes one — so an empty membership is a shape we do not recognise.
+            let members = old.children(of: from)
+            guard !members.isEmpty, members == new.children(of: to) else { continue }
+
+            renames[from] = to
+        }
+
+        return renames
+    }
 
     /// The steps taking `old` to `new`, grouped by phase.
     ///
@@ -212,7 +277,16 @@ enum SidebarOutlineUpdate {
     /// animated, cannot keep a name morphing from the one it is replacing, and cannot keep a
     /// row's expansion. Reusing the object for each surviving identity is what makes the
     /// difference between "these rows moved" and "this list is now a different list".
-    static func adopt(_ rebuilt: [NSObject], reusing presented: [NSObject]) -> [NSObject] {
+    ///
+    /// `renames` maps a presented identity to the rebuilt identity standing for the same row, for
+    /// the one row whose key carries a display value — see `branchRenames(from:to:)`. Without it a
+    /// relabelled branch heading looks like a stranger and is replaced, which discards the row the
+    /// outline is showing along with its expansion and the name it would have morphed from.
+    static func adopt(
+        _ rebuilt: [NSObject],
+        reusing presented: [NSObject],
+        renaming renames: [SidebarNodeKey: SidebarNodeKey] = [:]
+    ) -> [NSObject] {
         // A cold outline has no identities to preserve. Walking every rebuilt node twice to
         // prove that, then asking each node to adopt its own children, made initial mounting pay
         // the full structural-update machinery for a list that had never been presented.
@@ -222,7 +296,8 @@ enum SidebarOutlineUpdate {
         func index(_ nodes: [NSObject]) {
             for node in nodes {
                 guard let node = node as? any SidebarOutlineNode else { continue }
-                presentedByKey[node.sidebarKey] = node
+                let key = node.sidebarKey
+                presentedByKey[renames[key] ?? key] = node
                 index(node.sidebarChildren)
             }
         }

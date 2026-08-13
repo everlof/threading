@@ -336,6 +336,85 @@ final class SidebarRowAnimationTests: XCTestCase {
         XCTAssertEqual(fixture.controller.presentedRowKeys, flat)
     }
 
+    /// A checkout moving between branches takes every chat standing in it at once, so the
+    /// heading over them is relabelled rather than replaced.
+    ///
+    /// Keyed by name it read as one group leaving and another arriving: the heading and every row
+    /// under it faded out, a closed heading arrived, and it re-expanded — the branch visibly
+    /// disappearing from the sidebar for a moment on every `git checkout`. Nothing may move here.
+    func testSwitchingTheCheckoutsBranchRenamesTheHeadingWithoutMovingARow() throws {
+        let defaults = UserDefaults.standard
+        let key = "groupsSessionsByBranch"
+        let previous = defaults.object(forKey: key)
+        defer {
+            if let previous {
+                defaults.set(previous, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+        defaults.set(true, forKey: key)
+
+        let fixture = makeSidebar(projects: 1, sessionsEach: 3)
+        let store = fixture.store
+        let project = try XCTUnwrap(store.projects.first)
+        for session in project.sessions {
+            store.update(sessionID: session.id) { $0.branch = "master" }
+        }
+        fixture.controller.reload()
+        settle()
+
+        let was = SidebarNodeKey.branch(project.id, "master")
+        let now = SidebarNodeKey.branch(project.id, "feature")
+        let keysBefore = fixture.controller.presentedRowKeys
+        XCTAssertTrue(keysBefore.contains(was), "the branch heading never arrived")
+        let viewsBefore = rowViews(fixture.controller)
+        let headingBefore = try XCTUnwrap(fixture.controller.presentedRowView(of: was))
+        XCTAssertEqual(title(in: headingBefore), "master")
+
+        for session in project.sessions {
+            store.update(sessionID: session.id) { $0.branch = "feature" }
+        }
+        fixture.controller.reload()
+
+        // Read before anything settles: an arriving row would still be part-way through its fade
+        // and the rows below it part-way through their slide.
+        let keysAfter = fixture.controller.presentedRowKeys
+        XCTAssertEqual(keysAfter.firstIndex(of: now), keysBefore.firstIndex(of: was))
+        XCTAssertFalse(keysAfter.contains(was))
+        XCTAssertEqual(keysAfter.count, keysBefore.count)
+        XCTAssertEqual(fixture.controller.presentedRowView(of: now)?.alphaValue, 1)
+        XCTAssertFalse(isSliding(fixture.controller.presentedRowView(of: .project(project.id))))
+
+        settle()
+
+        // The row the outline is showing is the row it was already showing, saying the new name.
+        let headingAfter = fixture.controller.presentedRowView(of: now)
+        XCTAssertIdentical(headingAfter, headingBefore, "the heading was replaced, not renamed")
+        XCTAssertEqual(title(in: try XCTUnwrap(headingAfter)), "feature")
+
+        let viewsAfter = rowViews(fixture.controller)
+        for session in project.sessions {
+            XCTAssertEqual(
+                viewsAfter[.session(session.id)],
+                viewsBefore[.session(session.id)],
+                "a chat row was rebuilt by a branch switch"
+            )
+        }
+    }
+
+    /// What a row's name label actually says, found through the identifier the row publishes
+    /// rather than through its private outlets.
+    private func title(in view: NSView) -> String? {
+        if view.accessibilityIdentifier() == "sidebar.project.title" {
+            return (view as? MorphingTitleLabel)?.stringValue
+        }
+        for subview in view.subviews {
+            if let found = title(in: subview) { return found }
+        }
+        return nil
+    }
+
     // MARK: - Not animating
 
     func testReduceMotionPutsTheRowStraightIntoPlace() throws {

@@ -720,12 +720,16 @@ extension ProjectSidebarViewController {
         let selectedTerminalID = selectedTerminalNode()?.terminalID
 
         let previousShape = renderedShape
+        // A checkout that moved between branches relabels the heading over rows that did not
+        // move at all. Resolved before anything else reads the two shapes, so the adoption, the
+        // diff and the collapsed-group state all treat that heading as the row it already is.
+        let renames = SidebarOutlineUpdate.branchRenames(from: previousShape, to: shape)
         // The rebuild's *content*, on the rows already on screen wherever the identity
         // survived — see `SidebarOutlineUpdate.adopt`.
         #if DEBUG
         let adoptionStarted = DispatchTime.now().uptimeNanoseconds
         #endif
-        rootNodes = SidebarOutlineUpdate.adopt(rebuilt, reusing: rootNodes)
+        rootNodes = SidebarOutlineUpdate.adopt(rebuilt, reusing: rootNodes, renaming: renames)
         #if DEBUG
         measuredReload.adoptionNanoseconds = DispatchTime.now().uptimeNanoseconds
             - adoptionStarted
@@ -739,6 +743,7 @@ extension ProjectSidebarViewController {
         measuredReload.indexingNanoseconds = DispatchTime.now().uptimeNanoseconds
             - indexingStarted
         #endif
+        migrateCollapsedBranchKeys(renames)
 
         setEmptyStateVisible(rootNodes.isEmpty)
 
@@ -754,18 +759,26 @@ extension ProjectSidebarViewController {
         // A list nobody has seen yet has nothing to animate *from*: the first tree arrives
         // whole, as does one whose every row was dropped while the outline showed none.
         //
-        // Deliberately not "no steps means reload": a shape that changed always has steps, and
-        // reloading whenever it does not would turn a diff that missed something into a blink
-        // nobody can see instead of a failing test.
+        // Deliberately not "no steps means reload": a shape that changed always has steps —
+        // barring a pure rename, which is a change to what a row *says* — and reloading whenever
+        // it does not would turn a diff that missed something into a blink nobody can see
+        // instead of a failing test.
         let isFirstList = previousShape.isEmpty || outlineView.numberOfRows == 0
         let steps = isFirstList
             ? []
-            : SidebarOutlineUpdate.steps(from: previousShape, to: shape)
+            : SidebarOutlineUpdate.steps(from: previousShape.renamingKeys(renames), to: shape)
         applyStructure(
             steps: steps,
             wholesale: isFirstList,
             recursivelyExpandStandingRows: isFirstList
         )
+
+        // A renamed heading moves no row, so nothing above would have redrawn it. The whole
+        // viewport rather than the heading alone: a grouped checkout's project row is named by
+        // its branch too, and the switch that renamed the heading moved that name as well.
+        if !renames.isEmpty, !isFirstList {
+            refreshRows()
+        }
 
         if let selectedTerminalID {
             select(terminalID: selectedTerminalID, notifyDelegate: false)
@@ -1374,7 +1387,31 @@ extension ProjectSidebarViewController {
     }
 
     private static func branchKey(_ node: BranchGroupNode) -> String {
-        "\(node.projectID):\(node.branch)"
+        branchKey(projectID: node.projectID, branch: node.branch)
+    }
+
+    private static func branchKey(projectID: ProjectID, branch: String) -> String {
+        "\(projectID):\(branch)"
+    }
+
+    /// Carries a hand-collapsed heading across a branch switch.
+    ///
+    /// The collapsed set is keyed by name because that is what a heading is called; a group the
+    /// user shut stays shut when the checkout it gathers moves, which is the whole point of the
+    /// row surviving the switch rather than being replaced by a freshly opened one.
+    private func migrateCollapsedBranchKeys(_ renames: [SidebarNodeKey: SidebarNodeKey]) {
+        guard !collapsedBranchKeys.isEmpty else { return }
+
+        for (from, to) in renames {
+            guard let was = from.branchGroup, let now = to.branchGroup,
+                  collapsedBranchKeys.remove(
+                      Self.branchKey(projectID: was.projectID, branch: was.branch)
+                  ) != nil else { continue }
+
+            collapsedBranchKeys.insert(
+                Self.branchKey(projectID: now.projectID, branch: now.branch)
+            )
+        }
     }
 
     /// Removes a session and its terminal. Shared by the row's context menu and its hover

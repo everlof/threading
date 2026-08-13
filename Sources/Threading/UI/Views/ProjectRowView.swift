@@ -126,9 +126,16 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     private var isHeading = false
 
     /// Whether the name landing on the next content pass renames what this row is already
-    /// showing. Only a project row can say yes: a heading's name *is* its identity, so a
-    /// different name there is a different heading rather than a rename of this one.
+    /// showing, rather than replacing one row's name with another's.
     private var animatesNextName = false
+
+    /// Whether this row has been configured since the pool last handed it out.
+    ///
+    /// A branch heading's name is its identity, so it cannot ask "same heading, new name?" the
+    /// way a project row asks it of its id — but a *reused* cell is the only way a heading's
+    /// label changes without the heading having changed. False means the line on screen belongs
+    /// to whatever row this view was showing before, and a name landing on it is not a rename.
+    private var hasConfiguredSinceReuse = false
 
     /// `textField` is deliberately left unset (see `SessionRowView`); colours are owned by
     /// `applyTextColors` and reapplied when selection changes.
@@ -261,6 +268,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// Shows a branch heading above the sessions that ran on it. Same quiet treatment as a
     /// repository heading — it groups, it is not selectable — sized to sit inside a project,
     /// with the grouping's own gear appearing under the pointer.
+    ///
+    /// A heading whose branch moved keeps its row (see `SidebarOutlineUpdate.branchRenames`), so
+    /// unlike a repository heading this one can be renamed in place and says so by morphing.
     func configureAsBranch(named branch: String, collapsedSessionCount: Int = 0) {
         isHeading = true
         popoverProject = nil
@@ -275,7 +285,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         nativeName = branch
         setCount(collapsedSessionCount)
         nativeToolTip = branch
-        animatesNextName = false
+        animatesNextName = hasConfiguredSinceReuse && nameLabel.stringValue != nativeName
         applyTextColors()
         captureNativePresentation()
         customizationHost.deactivate()
@@ -473,6 +483,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// not applied here: every configure path ends in a content pass, and setting it twice
     /// would morph the row through the native name on its way to a customized one.
     private func captureNativePresentation() {
+        // Every configure path ends here, which makes this where the row stops showing whatever
+        // the pool last had it showing — read by the next pass to tell a rename from a reuse.
+        hasConfiguredSinceReuse = true
         toolTip = nativeToolTip
         nativeIcon = iconView.image
         nativeIconTint = iconView.contentTintColor
@@ -650,6 +663,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        hasConfiguredSinceReuse = false
         dismissPopover()
         customizationHost.deactivate()
     }

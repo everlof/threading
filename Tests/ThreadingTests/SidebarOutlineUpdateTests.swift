@@ -552,4 +552,202 @@ final class SidebarOutlineUpdateTests: XCTestCase {
         XCTAssertIdentical(adoptedProject.childNodes.first, adoptedProject.sessionNodes.first)
         XCTAssertNotIdentical(adoptedProject.childNodes.first, rebuiltSession)
     }
+
+    // MARK: - Branch renames
+
+    /// The update after the rename is folded out, replayed the way AppKit applies it.
+    private func assertRenamedReplayMatches(
+        from old: SidebarTreeShape,
+        to new: SidebarTreeShape,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let renames = SidebarOutlineUpdate.branchRenames(from: old, to: new)
+        let standing = old.renamingKeys(renames)
+        let steps = SidebarOutlineUpdate.steps(from: standing, to: new)
+        XCTAssertEqual(
+            replay(steps, from: standing, to: new),
+            new.childrenByParent,
+            "replaying the update did not reach the new tree",
+            file: file,
+            line: line
+        )
+    }
+
+    /// The bug this exists for: `git checkout` moves every chat in the checkout at once, and
+    /// keyed by name that reads as one group leaving and another arriving — the branch visibly
+    /// disappearing from the sidebar and coming back a moment later with its rows re-expanded.
+    func testACheckoutSwitchingBranchRenamesTheHeadingInsteadOfReplacingIt() {
+        let projectID = ProjectID()
+        let first = SessionID()
+        let second = SessionID()
+
+        let before = SidebarTreeShape(roots: [
+            project(projectID, children: [
+                branch("master", in: projectID, sessions: [session(first), session(second)])
+            ])
+        ])
+        let after = SidebarTreeShape(roots: [
+            project(projectID, children: [
+                branch("feature", in: projectID, sessions: [session(first), session(second)])
+            ])
+        ])
+
+        let renames = SidebarOutlineUpdate.branchRenames(from: before, to: after)
+        XCTAssertEqual(renames, [.branch(projectID, "master"): .branch(projectID, "feature")])
+
+        // Read as a rename, no row moves at all.
+        XCTAssertTrue(
+            SidebarOutlineUpdate.steps(from: before.renamingKeys(renames), to: after).isEmpty
+        )
+        // Read as two different groups, the heading and both chats under it leave and return.
+        XCTAssertFalse(SidebarOutlineUpdate.steps(from: before, to: after).isEmpty)
+    }
+
+    /// The row the outline is showing has to be the row that gets the new name — a replaced node
+    /// is a replaced row, which is what loses the group's collapsed state and the morph.
+    func testARenamedHeadingKeepsTheObjectTheOutlineWasHanded() throws {
+        let projectID = ProjectID()
+        let sessionID = SessionID()
+
+        let presentedHeading = branch("master", in: projectID, sessions: [session(sessionID)])
+        let presented = project(projectID, children: [presentedHeading])
+        let rebuilt = project(projectID, children: [
+            branch("feature", in: projectID, sessions: [session(sessionID)])
+        ])
+
+        let renames = SidebarOutlineUpdate.branchRenames(
+            from: SidebarTreeShape(roots: [presented]),
+            to: SidebarTreeShape(roots: [rebuilt])
+        )
+        let adopted = SidebarOutlineUpdate.adopt(
+            [rebuilt],
+            reusing: [presented],
+            renaming: renames
+        )
+
+        let heading = try XCTUnwrap(
+            (adopted.first as? ProjectNode)?.childNodes.first as? BranchGroupNode
+        )
+        XCTAssertIdentical(heading, presentedHeading)
+        XCTAssertEqual(heading.branch, "feature")
+        XCTAssertEqual(heading.sidebarKey, .branch(projectID, "feature"))
+    }
+
+    /// A rename is a relabelling of the rows a heading already had. Gaining a chat in the same
+    /// pass is a regrouping, and regrouping is what moving rows is for.
+    func testASwitchThatAlsoGainsAChatIsNotARename() {
+        let projectID = ProjectID()
+        let first = SessionID()
+        let arriving = SessionID()
+
+        let before = SidebarTreeShape(roots: [
+            project(projectID, children: [
+                branch("master", in: projectID, sessions: [session(first)])
+            ])
+        ])
+        let after = SidebarTreeShape(roots: [
+            project(projectID, children: [
+                branch("feature", in: projectID, sessions: [session(first), session(arriving)])
+            ])
+        ])
+
+        XCTAssertTrue(SidebarOutlineUpdate.branchRenames(from: before, to: after).isEmpty)
+        assertReplayMatches(from: before, to: after)
+    }
+
+    /// Two branches becoming one is a merge, not a rename: one heading really does leave.
+    func testTwoHeadingsMergingIntoOneIsNotARename() {
+        let projectID = ProjectID()
+        let first = SessionID()
+        let second = SessionID()
+
+        let before = SidebarTreeShape(roots: [
+            project(projectID, children: [
+                branch("master", in: projectID, sessions: [session(first)]),
+                branch("feature", in: projectID, sessions: [session(second)])
+            ])
+        ])
+        let after = SidebarTreeShape(roots: [
+            project(projectID, children: [
+                branch("feature", in: projectID, sessions: [session(first), session(second)])
+            ])
+        ])
+
+        XCTAssertTrue(SidebarOutlineUpdate.branchRenames(from: before, to: after).isEmpty)
+        assertReplayMatches(from: before, to: after)
+    }
+
+    /// Two checkouts of one repository sit on different branches; switching one must not claim
+    /// the other's heading moved.
+    func testARenameIsScopedToTheProjectWhoseCheckoutMoved() {
+        let moved = ProjectID()
+        let stayed = ProjectID()
+        let here = SessionID()
+        let there = SessionID()
+
+        func tree(_ branchName: String) -> SidebarTreeShape {
+            SidebarTreeShape(roots: [
+                project(moved, children: [
+                    branch(branchName, in: moved, sessions: [session(here)])
+                ]),
+                project(stayed, children: [
+                    branch("master", in: stayed, sessions: [session(there)])
+                ])
+            ])
+        }
+
+        let renames = SidebarOutlineUpdate.branchRenames(from: tree("master"), to: tree("feature"))
+        XCTAssertEqual(renames, [.branch(moved, "master"): .branch(moved, "feature")])
+    }
+
+    /// A rename alongside a real change: the heading stays put and only the arriving chat is
+    /// described, which is exactly the update a switch during a new chat should produce.
+    func testARenameAlongsideAnArrivingRowStillLandsTheNewTree() {
+        let projectID = ProjectID()
+        let first = SessionID()
+        let ungrouped = SessionID()
+
+        let before = SidebarTreeShape(roots: [
+            project(projectID, children: [
+                branch("master", in: projectID, sessions: [session(first)])
+            ])
+        ])
+        let after = SidebarTreeShape(roots: [
+            project(projectID, children: [
+                branch("feature", in: projectID, sessions: [session(first)]),
+                session(ungrouped)
+            ])
+        ])
+
+        let renames = SidebarOutlineUpdate.branchRenames(from: before, to: after)
+        XCTAssertEqual(renames, [.branch(projectID, "master"): .branch(projectID, "feature")])
+        XCTAssertEqual(
+            SidebarOutlineUpdate.steps(from: before.renamingKeys(renames), to: after),
+            [.insert(parent: .project(projectID), indexes: IndexSet(integer: 1))]
+        )
+        assertRenamedReplayMatches(from: before, to: after)
+    }
+
+    /// Renaming rewrites both sides of the parent map — a heading whose key moved is still the
+    /// parent of the rows under it, or the diff would describe them as orphans.
+    func testRenamingKeysCarriesTheRowsUnderTheHeading() {
+        let projectID = ProjectID()
+        let sessionID = SessionID()
+
+        let before = SidebarTreeShape(roots: [
+            project(projectID, children: [
+                branch("master", in: projectID, sessions: [session(sessionID)])
+            ])
+        ])
+        let renamed = before.renamingKeys(
+            [.branch(projectID, "master"): .branch(projectID, "feature")]
+        )
+
+        XCTAssertEqual(renamed.children(of: .branch(projectID, "feature")), [.session(sessionID)])
+        XCTAssertTrue(renamed.children(of: .branch(projectID, "master")).isEmpty)
+        XCTAssertEqual(renamed.children(of: .project(projectID)), [.branch(projectID, "feature")])
+        XCTAssertTrue(renamed.keys.contains(.branch(projectID, "feature")))
+        XCTAssertFalse(renamed.keys.contains(.branch(projectID, "master")))
+    }
 }

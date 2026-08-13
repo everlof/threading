@@ -173,6 +173,14 @@ final class GitCheckoutWatcher: @unchecked Sendable {
         }
     }
 
+    /// How long the tree must be quiet before this watcher reports. See `GitWatchDefaults`.
+    private var coalesce: TimeInterval {
+        switch scope {
+        case .checkout: return GitWatchDefaults.coalesce
+        case .branch: return GitWatchDefaults.branchCoalesce
+        }
+    }
+
     /// The trailing edge of a burst. An agent's turn writes a file at a time and git's own
     /// commands rewrite the index repeatedly, so the interesting moment is the quiet after
     /// them, not the first write into them.
@@ -185,7 +193,7 @@ final class GitCheckoutWatcher: @unchecked Sendable {
             MainActor.assumeIsolated { self.onChange() }
         }
         coalesceItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + GitWatchDefaults.coalesce, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + coalesce, execute: item)
     }
 
     private func isRelevant(_ path: String, flags: FSEventStreamEventFlags) -> Bool {
@@ -268,6 +276,15 @@ enum GitWatchDefaults {
     /// How long the tree must be quiet before the pane re-reads. Longer than the latency on
     /// purpose: a `git checkout` or an agent's multi-file edit is many batches.
     static let coalesce: TimeInterval = 0.8
+
+    /// The `.branch` scope's own window, an order of magnitude shorter.
+    ///
+    /// That scope admits one file, and git writes a checkout's `HEAD` once per switch by
+    /// renaming a lock file onto it — so there is no burst to wait out, only the sidebar
+    /// spending most of a second still naming the branch the user just left. What remains
+    /// worth coalescing is a rebase, which rewrites `HEAD` per commit; those readings are
+    /// detached and `ProjectStore.refreshBranches(forCheckoutAt:)` drops them anyway.
+    static let branchCoalesce: TimeInterval = 0.1
 
     static let lockSuffix = ".lock"
 

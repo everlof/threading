@@ -18,6 +18,13 @@ enum SidebarNodeKey: Hashable {
     case branch(ProjectID, String)
     case session(SessionID)
     case terminal(TerminalID)
+
+    /// The project and branch behind a branch heading, or nil for every other row. Lets a
+    /// caller ask what a key *is* without a `switch` whose other four cases say nothing.
+    var branchGroup: (projectID: ProjectID, branch: String)? {
+        guard case .branch(let projectID, let branch) = self else { return nil }
+        return (projectID, branch)
+    }
 }
 
 /// Maps a node from a freshly built tree to the node standing for the same row on screen.
@@ -239,7 +246,10 @@ extension RepoGroupNode: SidebarOutlineNode {
 /// same rule that keeps single-checkout repositories flat, applied one level down. Sessions
 /// with no recorded branch stay directly under the project.
 final class BranchGroupNode: NSObject {
-    let branch: String
+    /// Mutable because a checkout moving between branches renames the heading over the rows
+    /// that were already under it. The identity of a group is the rows it gathers, not the
+    /// label on it — see `SidebarOutlineUpdate.branchRenames(from:to:)`.
+    var branch: String
     let projectID: ProjectID
     var sessionNodes: [SessionNode] = [] {
         didSet { outlineChildren = nil }
@@ -281,6 +291,9 @@ extension BranchGroupNode: SidebarOutlineNode {
         substituting: SidebarNodeSubstitution
     ) {
         guard let rebuilt = rebuilt as? BranchGroupNode else { return }
+        // The name last, so a heading adopted across a rename ends up saying what the
+        // checkout is on now while still being the row the outline already has.
+        branch = rebuilt.branch
         sessionNodes = rebuilt.sessionNodes.map(substituting.callAsFunction)
         terminalNodes = rebuilt.terminalNodes.map(substituting.callAsFunction)
     }
