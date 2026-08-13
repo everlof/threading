@@ -1821,7 +1821,20 @@ enum ThemedMenuMetrics {
     /// them and the pairs did not read as pairs; 46 buys a little over 2:1, which is the point at
     /// which proximity does the grouping on its own — no rules, no alternating fill, both of
     /// which would have fought the hover pill this row draws at full bleed.
-    static var subtitleRowHeight: CGFloat { usesClassicGrammar ? 31 : 46 }
+    /// Raised from 31 for the classic grammars once `subtitleGap` opened the pair: at 31 the two
+    /// lines already filled all but 2.5pt of the slot, so the gap *between* two rows was narrower
+    /// than the gap inside one and the column read as evenly spaced single lines rather than as
+    /// pairs — the same fault 46 was chosen to avoid on the modern side.
+    static var subtitleRowHeight: CGFloat { usesClassicGrammar ? 36 : 46 }
+
+    /// Between a title and the subtitle under it.
+    ///
+    /// It used to be nothing at all, on the argument that a line box already carries the font's
+    /// own leading. That holds for the modern face and fails for the classic ones, whose line
+    /// boxes are drawn tight around the glyphs: the two lines touched, and a name with its
+    /// reading immediately beneath read as one wrapped sentence rather than as a heading and its
+    /// detail. Small enough that the pair still groups by proximity against the row's own margins.
+    static var subtitleGap: CGFloat { Design.Spacing.hairline }
     /// How far a row's fill sits inside its own slot, so two *adjacent* filled rows are parted
     /// by a hairline rather than meeting.
     ///
@@ -1973,7 +1986,14 @@ enum ThemedMenuMetrics {
     /// The bar between a column's name and its value. Wide enough that two readings differing
     /// by ten points differ visibly — the 14pt meter under `AccountMarkImage` could only ever
     /// carry a hue, which the value's own tint already said.
-    static var metricBarWidth: CGFloat { usesClassicGrammar ? 24 : 32 }
+    static var metricBarWidth: CGFloat { usesClassicGrammar ? 22 : 28 }
+
+    /// The air around the rule between the columns and the trailing detail. Wider than the gap
+    /// between two columns, because what it parts is a change of *kind* rather than the next
+    /// window: readings and the countdown are not the same sort of fact, and at an equal gap
+    /// `99%` and `7d · 5d 3h` ran together as one line of numbers.
+    static var metricDividerGap: CGFloat { Design.Spacing.inset }
+    static var metricDividerWidth: CGFloat { Design.Radius.border }
     /// Thick enough to hold a status hue at this size without becoming a second row of content.
     static var metricBarHeight: CGFloat { Design.Spacing.tight - 1 }
     /// Inside a column: name, bar, value.
@@ -2050,9 +2070,27 @@ enum ThemedMenuMetrics {
                 + CGFloat(columns.count - 1) * metricColumnGap
         }
         if detail > 0 {
-            total += (total > 0 ? metricColumnGap : 0) + detail
+            total += (total > 0 ? metricDividerGap * 2 + metricDividerWidth : 0) + detail
         }
         return total > 0 ? total + metricColumnGap : 0
+    }
+
+    /// Where a row's **first line** sits inside a slot of `height`, measured from the slot's
+    /// bottom edge.
+    ///
+    /// Everything on that line is placed against it — the checkmark, the mark, the title and its
+    /// qualifier, the metric columns, the trailing detail, the submenu chevron. Each of those was
+    /// centred on the row instead, which is right for a single-line row and wrong for every row
+    /// beside one: a title with a subtitle is placed as a centred *block*, so its line sits above
+    /// the row's middle while the mark next to it sank to between the two lines, and a
+    /// neighbouring row with no subtitle put its title where this row's ink is not.
+    ///
+    /// `reservesSubtitleLine` is the *run's* answer, not the row's, which is what keeps a row
+    /// without a subtitle on its neighbours' line rather than in the middle of its own slot.
+    static func firstLineCenter(inRowOf height: CGFloat, reservesSubtitleLine: Bool) -> CGFloat {
+        guard reservesSubtitleLine else { return height / 2 }
+        let subtitleHeight = Design.Typography.lineHeight(of: Design.Typography.detail())
+        return height / 2 + (subtitleGap + subtitleHeight) / 2
     }
 
     /// A section head is a *label*, not a quiet row: `caption` is the app's semibold 11pt
@@ -2912,6 +2950,9 @@ private final class ThemedMenuRowView: ThemedControl {
     private let metricColumns: [String]
     private let metricColumnWidth: CGFloat
     private let trailingDetailWidth: CGFloat
+    /// Whether this row's *run* keeps a second line — not whether this row fills it. See
+    /// `firstLineCenterY`.
+    private let reservesSubtitleLine: Bool
     private var pressed = false { didSet { needsDisplay = true } }
     /// The pointer is on a row that cannot be chosen. It answers with a wash far fainter
     /// than the hover fill — feedback that the hover was seen, not an invitation.
@@ -2924,6 +2965,26 @@ private final class ThemedMenuRowView: ThemedControl {
 
     /// A preview in the title's slot is the row's name, so the row draws no text of its own.
     private var drawsTitle: Bool { item.preview?.placement != .title }
+
+    /// The axis **everything on a row's first line** is placed on: the checkmark, the mark, the
+    /// title and its qualifier, the metric columns, the trailing detail, the submenu chevron.
+    ///
+    /// Each of those used to be centred on the row instead, which is right for a single-line row
+    /// and wrong for every row beside one. A title with a subtitle is placed as a centred *block*,
+    /// so its own line sits above the row's middle — while the mark next to it, centred on the
+    /// row, sank to between the two lines, and a neighbouring row with no subtitle put its title
+    /// where this row's ink is not. Down a column of logins that reads as rows nudged out of
+    /// alignment at random, which is exactly what it looked like.
+    ///
+    /// So the line is computed from the slot the *run* reserves rather than from what this row
+    /// happens to carry: a row with no subtitle in a run that has them keeps its title on its
+    /// neighbours' line and leaves the second line empty, the way a table leaves a cell empty.
+    private var firstLineCenterY: CGFloat {
+        ThemedMenuMetrics.firstLineCenter(
+            inRowOf: bounds.height,
+            reservesSubtitleLine: reservesSubtitleLine
+        )
+    }
 
     init(
         entryIndex: Int,
@@ -2953,6 +3014,7 @@ private final class ThemedMenuRowView: ThemedControl {
         self.metricColumnWidth = metricColumnWidth
         self.trailingDetailWidth = trailingDetailWidth
         self.preferredHeight = preferredHeight
+        reservesSubtitleLine = preferredHeight >= ThemedMenuMetrics.subtitleRowHeight
         super.init(frame: .zero)
         // The whole reading, not the subtitle alone: once the numbers are columns and a drawn
         // bar, a tooltip carrying only the leftover line would name less than the row shows.
@@ -3243,11 +3305,13 @@ private final class ThemedMenuRowView: ThemedControl {
         // dimming them would be a modern idea applied to a reconstruction.
         let glyph = ThemedMenuMetrics.usesClassicGrammar ? label : secondary
 
+        let lineY = firstLineCenterY
+
         if selected {
             drawCheckMark(
                 in: NSRect(
                     x: ThemedMenuMetrics.contentInset,
-                    y: bounds.midY - ThemedMenuMetrics.checkSize / 2,
+                    y: lineY - ThemedMenuMetrics.checkSize / 2,
                     width: ThemedMenuMetrics.checkSize,
                     height: ThemedMenuMetrics.checkSize
                 ),
@@ -3258,7 +3322,7 @@ private final class ThemedMenuRowView: ThemedControl {
         if hasImageColumn, let image = item.image {
             let imageRect = NSRect(
                 x: ThemedMenuMetrics.markInset(checkColumn: checkColumn),
-                y: bounds.midY - ThemedMenuMetrics.imageSize / 2
+                y: lineY - ThemedMenuMetrics.imageSize / 2
                     + ThemedMenuMetrics.imageBaselineOffset,
                 width: ThemedMenuMetrics.imageSize,
                 height: ThemedMenuMetrics.imageSize
@@ -3277,7 +3341,7 @@ private final class ThemedMenuRowView: ThemedControl {
                 in: NSRect(
                     x: bounds.maxX - ThemedMenuMetrics.submenuTrailingInset
                         - ThemedMenuMetrics.submenuChevronSize,
-                    y: bounds.midY - ThemedMenuMetrics.submenuChevronSize / 2,
+                    y: lineY - ThemedMenuMetrics.submenuChevronSize / 2,
                     width: ThemedMenuMetrics.submenuChevronSize,
                     height: ThemedMenuMetrics.submenuChevronSize
                 ),
@@ -3311,14 +3375,12 @@ private final class ThemedMenuRowView: ThemedControl {
         // ratio proximity states nothing and the menu reads as one evenly stacked column of
         // alternating weights rather than as pairs.
         //
-        // Stacked flush, because a line box already carries the font's own leading — the gap
-        // between the lines is inside the boxes, and adding another one on top is what re-opens
-        // the problem. Centring the block pools the row's remaining space at its two edges,
-        // where it separates rows, instead of splitting it around the text.
-        let blockBottom = bounds.midY - (titleHeight + subtitleHeight) / 2
-        let titleY = (hasSubtitle
-            ? blockBottom + subtitleHeight
-            : bounds.midY - titleHeight / 2) + ThemedMenuMetrics.titleBaselineOffset
+        // The block's top line is `firstLineCenterY`, which every other part of the row is placed
+        // against too — so the title, the mark beside it and the columns across from it share one
+        // axis, and a row without a subtitle keeps its title on that same axis instead of sliding
+        // down to the middle of its slot.
+        let titleY = lineY - titleHeight / 2 + ThemedMenuMetrics.titleBaselineOffset
+        let subtitleY = titleY - ThemedMenuMetrics.subtitleGap - subtitleHeight
         let chevronColumn = hasSubmenuColumn ? ThemedMenuMetrics.submenuChevronSlot : 0
         let shortcutReservation = shortcutColumnWidth > 0
             ? ThemedMenuMetrics.shortcutGap + shortcutColumnWidth
@@ -3442,7 +3504,7 @@ private final class ThemedMenuRowView: ThemedControl {
             line.draw(
                 in: NSRect(
                     x: x,
-                    y: blockBottom,
+                    y: subtitleY,
                     width: textWidth,
                     height: subtitleHeight
                 )
@@ -3503,7 +3565,32 @@ private final class ThemedMenuRowView: ThemedControl {
                     color: muted
                 )
             }
-            cursor -= trailingDetailWidth + ThemedMenuMetrics.metricColumnGap
+            cursor -= trailingDetailWidth
+            if metricColumns.isEmpty {
+                cursor -= ThemedMenuMetrics.metricColumnGap
+            } else {
+                // A rule, not more air. The countdown is a different kind of fact from the
+                // readings — not the next window — and at the gap that parts two columns it
+                // joined them: `99%` and `7d · 5d 3h` read as one run of numbers.
+                //
+                // The *space* it sits in belongs to the menu's column plan, so the cursor steps
+                // over it on every row and the columns to its left stay aligned. The *ink* is
+                // this row's: a row with nothing on both sides of it — a runtime with no login —
+                // otherwise drew a rule standing alone in an empty row.
+                let x = (cursor - ThemedMenuMetrics.metricDividerGap
+                    - ThemedMenuMetrics.metricDividerWidth).rounded()
+                if !item.metrics.isEmpty, item.trailingDetail?.isEmpty == false {
+                    (banded?.withAlphaComponent(ThemedMenuMetrics.metricTrackOpacity)
+                        ?? ink(Design.Surface.divider, alpha)).setFill()
+                    NSRect(
+                        x: x,
+                        y: centerY - height / 2,
+                        width: ThemedMenuMetrics.metricDividerWidth,
+                        height: height
+                    ).fill()
+                }
+                cursor = x - ThemedMenuMetrics.metricDividerGap
+            }
         }
 
         // Right-to-left over the reversed plan, so column order on screen stays left-to-right.

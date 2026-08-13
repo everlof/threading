@@ -510,7 +510,41 @@ what gives way. `trailingDetail` is the right-aligned column after the metrics, 
 quiet qualifier sharing the title's line, and `spokenSummary` all of it joined for the two
 consumers that see neither a column nor a bar — the tooltip and VoiceOver. A header is not a
 submenu and adds no press, which is what lets grouping pay for itself: the group's name comes off
-every row inside it.
+every row inside it. Between the readings and the countdown there is a **rule**, not more air:
+they are different kinds of fact, and at the gap that parts two columns they joined into one run
+of numbers. Its *space* belongs to the menu's column plan so the cursor steps over it on every
+row; its *ink* is the row's, or a runtime with no login draws a rule standing alone in an empty
+row.
+
+**Three things a row does not decide for itself: its height, its first line, and the gap inside
+it.** All three shipped wrong in the account rows and all three are one mistake — treating a row
+as if it were the only one on screen.
+
+- **Height is the run's**, not the row's (`ThemedMenuMetrics.heights(for:)`). Asked entry by
+  entry, a row with a second line is `subtitleRowHeight` and one without is `rowHeight`, so a
+  group of logins where three carry a scoped window and two do not had two rhythms stacked in
+  direct contact — which reads as a spacing defect, not as rows that happen to differ. The unit
+  is a run of consecutive rows delimited by separators and heads: every row in a run takes the
+  tallest kind in it, and the delimiters are what keep this from flattening every menu in the app
+  into one tall rhythm (the project menu's two actions sit after a rule and stay short while the
+  projects above keep the height their paths need). It is also the **one** source: the same call
+  sizes the panel, positions the rows and lays out the document view, which used to derive heights
+  by view *class* and so laid a 30pt section head out in a 13pt separator's slot.
+- **The first line is an axis, not each element's own centring**
+  (`ThemedMenuMetrics.firstLineCenter(inRowOf:reservesSubtitleLine:)`). The checkmark, the mark,
+  the title and its qualifier, the metric columns, the trailing detail and the submenu chevron all
+  sit on it. Every one of them was centred on the row instead — right for a single-line row, wrong
+  for every row beside one: a title with a subtitle is placed as a centred *block*, so its line
+  sits above the row's middle while the mark next to it sank to between the two lines, and a
+  neighbouring row without a subtitle put its name where that row's ink was not. The axis is
+  computed from what the **run** reserves, so a row with no subtitle keeps its title on its
+  neighbours' line and leaves the second line empty, the way a table leaves a cell empty.
+- **`subtitleGap` is not zero.** Stacking the two lines flush was argued from the line box already
+  carrying the font's own leading; that holds for the modern face and fails for the classic ones,
+  whose boxes are drawn tight around the glyphs — the pair touched and read as one wrapped
+  sentence. The classic `subtitleRowHeight` went 31 → 36 to absorb it, since at 31 the two lines
+  filled all but 2.5pt of the slot and the gap *between* two rows was narrower than the gap
+  inside one.
 
 **A menu subtitle is one ink until its line is a comparison.** `ThemedMenuSubtitleSegment` lets
 a row's subtitle carry toned runs — standard, muted, warning, critical — resolved to colours in

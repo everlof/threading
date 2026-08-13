@@ -2541,7 +2541,10 @@ final class ThemedControlTests: XCTestCase {
         XCTAssertEqual(ThemedMenuLayout.submenuOverlap, 5)
         XCTAssertEqual(ThemedMenuMetrics.outerInset, 2)
         XCTAssertEqual(ThemedMenuMetrics.rowHeight, 21)
-        XCTAssertEqual(ThemedMenuMetrics.subtitleRowHeight, 31)
+        // A single-line row keeps the measured 21px Win32 slot. A two-line one is ours — Win32
+        // has no such row to reconstruct — and 31 left the pair 2.5pt of slack in total, so the
+        // gap between two rows came out narrower than the gap inside one.
+        XCTAssertEqual(ThemedMenuMetrics.subtitleRowHeight, 36)
         XCTAssertEqual(ThemedMenuMetrics.separatorHeight, 9)
         XCTAssertEqual(ThemedMenuMetrics.contentInset, 5)
         XCTAssertEqual(ThemedMenuMetrics.checkSize, 8)
@@ -2770,6 +2773,49 @@ final class ThemedControlTests: XCTestCase {
             ThemedMenuMetrics.height(for: mixedRun),
             ThemedMenuMetrics.heights(for: mixedRun).reduce(0, +)
                 + ThemedMenuMetrics.outerInset * 2
+        )
+    }
+
+    /// Two rows in one run put their first line in the same place, whether or not either fills
+    /// the second one.
+    ///
+    /// This is the axis the checkmark, the mark, the title, the columns and the countdown are
+    /// all placed against. Each was centred on its row instead — right for a single-line row and
+    /// wrong for every row beside one: a title with a subtitle is placed as a centred *block*, so
+    /// its line sits above the row's middle while the mark next to it sank to between the two
+    /// lines, and a neighbouring row with no subtitle put its name where that row's ink was not.
+    @MainActor
+    func testAMenusFirstLineIsOneAxisAcrossItsRun() {
+        AppThemePalette.set(.system)
+        let tall = ThemedMenuMetrics.subtitleRowHeight
+
+        // Same slot, same answer — the row's own content does not enter into it, which is what
+        // keeps a login with no scoped window on its neighbours' line.
+        XCTAssertEqual(
+            ThemedMenuMetrics.firstLineCenter(inRowOf: tall, reservesSubtitleLine: true),
+            ThemedMenuMetrics.firstLineCenter(inRowOf: tall, reservesSubtitleLine: true)
+        )
+        // Above the row's middle by exactly the line it is making room for.
+        let subtitleHeight = Design.Typography.lineHeight(of: Design.Typography.detail())
+        XCTAssertEqual(
+            ThemedMenuMetrics.firstLineCenter(inRowOf: tall, reservesSubtitleLine: true) - tall / 2,
+            (ThemedMenuMetrics.subtitleGap + subtitleHeight) / 2,
+            accuracy: 0.01
+        )
+        // A run with no second line anywhere centres on the row, exactly as it always did.
+        XCTAssertEqual(
+            ThemedMenuMetrics.firstLineCenter(
+                inRowOf: ThemedMenuMetrics.rowHeight, reservesSubtitleLine: false
+            ),
+            ThemedMenuMetrics.rowHeight / 2
+        )
+        // And the pair still clears the slot: two lines and the gap between them fit inside it
+        // with room left over, or the rows stop reading as pairs.
+        let titleHeight = Design.Typography.lineHeight(of: ThemedMenuMetrics.titleFont)
+        XCTAssertGreaterThan(
+            tall - (titleHeight + ThemedMenuMetrics.subtitleGap + subtitleHeight),
+            ThemedMenuMetrics.subtitleGap * 2,
+            "the gap between two rows must beat the gap inside one"
         )
     }
 
@@ -6799,7 +6845,10 @@ final class ThemedControlTests: XCTestCase {
                 "LimitEscapeStripView",
                 "MediaInspectorCanvas",
                 "MediaInspectorDocumentView",
+                "MediaDocumentCanvasView",
+                "MediaDocumentPlayerView",
                 "MediaInspectorView",
+                "MediaTransportView",
                 "MorphingTitleLabel",
                 "NavigatorGridItemView",
                 "PageTitleView",
@@ -6841,6 +6890,7 @@ final class ThemedControlTests: XCTestCase {
                 "ThemedProgressBar",
                 "ThemedScroller",
                 "ThemedScrollView",
+                "ThemedScrubber",
                 "ThemedSegmentedControl",
                 "ThemedSpinner",
                 "ThemedSplitView",
