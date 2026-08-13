@@ -243,7 +243,7 @@ extension MainWindowController: NSToolbarDelegate {
     /// spaced as though unrelated — which is what `ToolbarButtonGroupView` exists to fix. The
     /// session's *menu* is deliberately not among them; see `makePaneHeaderView`.
     private func makeSessionActionsGroup() -> ToolbarButtonGroupView {
-        ToolbarButtonGroupView(buttons: [
+        let group = ToolbarButtonGroupView(buttons: [
             makeSurfaceToggleButton(),
             // Beside the two drawers rather than off on its own: all three answer "is this
             // surface on screen", and the card is the one of the three that floats *over* the
@@ -264,10 +264,11 @@ extension MainWindowController: NSToolbarDelegate {
             ) { [weak self] in
                 self?.toggleShellDrawer()
             },
-            // The panel's toggle is *one* control with two homes: this one, and the panel's own
+            // The panel's toggle is *one* control with two homes: this group, and the panel's own
             // corner while the panel is open — same glyph, same size, same distance from the
-            // window's trailing edge. `updatePaneToggleSelection` stands this copy down for
-            // exactly as long as the other is on screen. See `DisplayPanelToggle`.
+            // window's trailing edge. `updatePaneToggleSelection` moves this very view between
+            // them rather than swapping in a second one, which is what keeps a run of clicks
+            // working. See `DisplayPanelToggle`.
             makePaneToggleButton(
                 symbolName: DisplayPanelToggle.symbolName,
                 label: DisplayPanelToggle.accessibility,
@@ -277,6 +278,8 @@ extension MainWindowController: NSToolbarDelegate {
                 self?.toggleDisplayPane()
             }
         ])
+        sessionActionsGroup = group
+        return group
     }
 
     private func makePaneToggleButton(

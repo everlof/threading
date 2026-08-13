@@ -437,14 +437,17 @@ final class DisplayPaneLayoutTests: XCTestCase {
         XCTAssertTrue(item.isCollapsed, "the corner toggle did not shut the panel")
     }
 
-    /// **One toggle, and it does not move.** The control that opens the panel sits at the
-    /// trailing end of the session header's group; the panel opens *underneath* it and the
-    /// panel's own corner draws it from then on, at the same point in the window. The copy in
-    /// the group stands down for exactly that long, so the switch is never offered twice.
+    /// **One toggle, and it does not move — the same view, in both homes.** The control that
+    /// opens the panel sits at the trailing end of the session header's group; the panel opens
+    /// *underneath* it and the panel's own corner holds it from then on, at the same point in
+    /// the window, so the switch is never offered twice and never leaves the corner.
     ///
-    /// This is what the corner used to get wrong. It held an ✕ — a different control, saying
-    /// "close" where the toolbar said "toggle" — which left the toggle itself a pane's width to
-    /// the left of where the eye had just been.
+    /// This is what the corner used to get wrong twice over. It held an ✕ — a different control,
+    /// saying "close" where the toolbar said "toggle" — which left the toggle itself a pane's
+    /// width to the left of where the eye had just been. Its replacement was a *second* toggle
+    /// that appeared as the group's hid, and that cost the gesture: AppKit sends every click
+    /// after the first of a chain to the view that took the first one, so the toggle answered
+    /// one press and then nothing until the pointer moved. Hence the identity assertions here.
     func testThePanelsToggleKeepsItsPlaceWhenThePanelOpensUnderIt() throws {
         let controller = MainWindowController()
         let window = try XCTUnwrap(controller.window)
@@ -467,16 +470,21 @@ final class DisplayPaneLayoutTests: XCTestCase {
         window.layoutIfNeeded()
         settle()
 
-        XCTAssertTrue(
-            inHeader.isHidden,
-            "the session header kept a second toggle while the panel drew its own"
-        )
         let inCorner = try XCTUnwrap(
             descendant(
                 in: item.viewController.view,
                 accessibilityTitle: DisplayPanelToggle.accessibility
             ),
             "the open panel's corner has no toggle"
+        )
+        XCTAssertTrue(
+            inCorner === inHeader,
+            "the corner drew a second toggle instead of taking the one that was already there"
+        )
+        XCTAssertEqual(
+            descendants(in: content, accessibilityTitle: DisplayPanelToggle.accessibility).count,
+            1,
+            "the window offers the same switch twice"
         )
         let openFrame = inCorner.convert(inCorner.bounds, to: nil)
 
@@ -500,13 +508,23 @@ final class DisplayPaneLayoutTests: XCTestCase {
             inHeader.isHidden,
             "shutting the panel took the toggle away with it"
         )
+        XCTAssertEqual(
+            inHeader.convert(inHeader.bounds, to: nil).origin,
+            shutFrame.origin,
+            "the toggle came home to a different place than it left from"
+        )
     }
 
     /// The tabs are not thrown away with the pane. The toggle hides the panel; reopening it
     /// finds the same surfaces waiting, exactly as a dormant session's scrollback is.
+    ///
+    /// Driven through the window because the corner holds the *window's* one toggle: a pane
+    /// standing on its own has the slot it moves into and nothing in it.
     func testTheCornerToggleKeepsTheTabsItHides() throws {
-        let pane = DisplayPaneController()
-        pane.view.frame = NSRect(x: 0, y: 0, width: 420, height: 700)
+        let controller = MainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1400, height: 800))
+        let pane = controller.displayPaneController
         let sessionID = SessionID()
         pane.showSession(sessionID)
         pane.addContentTab(
@@ -517,17 +535,22 @@ final class DisplayPaneLayoutTests: XCTestCase {
             ),
             for: sessionID
         )
-        pane.view.layoutSubtreeIfNeeded()
+        controller.setDisplayPaneVisible(true)
+        window.layoutIfNeeded()
+        settle()
 
-        var hidden = 0
-        pane.onClose = { hidden += 1 }
-
+        let item = try XCTUnwrap(controller.splitViewController.splitViewItems.last)
         let toggle = try XCTUnwrap(
-            descendant(in: pane.view, accessibilityTitle: DisplayPanelToggle.accessibility)
+            descendant(
+                in: item.viewController.view,
+                accessibilityTitle: DisplayPanelToggle.accessibility
+            ),
+            "the open panel's corner has no toggle"
         )
         XCTAssertTrue(toggle.accessibilityPerformPress())
+        settle()
 
-        XCTAssertEqual(hidden, 1, "the corner toggle did not ask the window to shut the panel")
+        XCTAssertTrue(item.isCollapsed, "the corner toggle did not shut the panel")
         XCTAssertTrue(pane.hasContent(for: sessionID), "hiding the panel discarded its tabs")
     }
 
@@ -544,17 +567,23 @@ final class DisplayPaneLayoutTests: XCTestCase {
         let newTab = try XCTUnwrap(
             descendant(in: pane.view, accessibilityTitle: L10n.string("New tab"))
         )
-        let toggle = try XCTUnwrap(
-            descendant(in: pane.view, accessibilityTitle: DisplayPanelToggle.accessibility)
-        )
+        // The corner itself, since the toggle standing in it belongs to the window: a pane in a
+        // fixture has the slot and no window to have put a toggle in it.
+        let corner = pane.panelToggleSlot
 
         XCTAssertTrue(newTab.isHidden, "the chat-scoped + remained beside Current Theme")
-        XCTAssertFalse(toggle.isHidden, "the way out of the panel went with the chat's controls")
+        XCTAssertFalse(corner.isHidden, "the way out of the panel went with the chat's controls")
+        let taken = corner.convert(corner.bounds, to: pane.view)
 
         pane.showSessionTabs(sessionID)
         pane.view.layoutSubtreeIfNeeded()
         XCTAssertFalse(newTab.isHidden)
-        XCTAssertFalse(toggle.isHidden)
+        XCTAssertFalse(corner.isHidden)
+        XCTAssertEqual(
+            corner.convert(corner.bounds, to: pane.view),
+            taken,
+            "the corner moved as the row changed hands"
+        )
     }
 
     /// The floor is the row's two trailing controls and the margin around them, so at
@@ -576,11 +605,8 @@ final class DisplayPaneLayoutTests: XCTestCase {
         let newTab = try XCTUnwrap(
             descendant(in: pane.view, accessibilityTitle: L10n.string("New tab"))
         )
-        let toggle = try XCTUnwrap(
-            descendant(in: pane.view, accessibilityTitle: DisplayPanelToggle.accessibility)
-        )
 
-        for control in [newTab, toggle] {
+        for control in [newTab, pane.panelToggleSlot] {
             let frame = control.convert(control.bounds, to: pane.view)
             XCTAssertEqual(
                 frame.width, Design.Size.toolbarButtonWidth, accuracy: 0.5,
@@ -715,6 +741,13 @@ final class DisplayPaneLayoutTests: XCTestCase {
         return view.subviews.lazy.compactMap {
             self.descendant(in: $0, accessibilityTitle: accessibilityTitle)
         }.first
+    }
+
+    /// Every one of them, for the questions that are about *how many* — a control the window
+    /// offers twice is the shape of bug this pane has had before.
+    private func descendants(in view: NSView, accessibilityTitle: String) -> [NSView] {
+        (view.accessibilityTitle() == accessibilityTitle ? [view] : [])
+            + view.subviews.flatMap { descendants(in: $0, accessibilityTitle: accessibilityTitle) }
     }
 
     // MARK: - The Compare Tab Follows the Pane

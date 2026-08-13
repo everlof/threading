@@ -318,6 +318,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     var shellDrawerToolbarButton: ThemedIconButton?
     var displayPaneToolbarButton: ThemedIconButton?
     var statusCardToolbarButton: ThemedIconButton?
+    /// The pane's surface group, held because the panel's toggle *leaves* it for the panel's own
+    /// corner and has to be put back — see `updatePaneToggleSelection`.
+    var sessionActionsGroup: ToolbarButtonGroupView?
     /// The `⋯` beside the page's name. Owned by `PageTitleView`; held here because the same
     /// state pass that enables the rest of the header's controls decides whether it has a
     /// session to act on.
@@ -2965,13 +2968,32 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func updatePaneToggleSelection() {
         sidebarToolbarButton?.isSelected = !sidebarItem.isCollapsed
         displayPaneToolbarButton?.isSelected = !displayItem.isCollapsed
-        // **The panel's toggle stands down while the panel draws it.** It is one control, and
-        // the open panel's corner is where it lives — the same glyph the same distance from the
-        // window's trailing edge, so the pane arrives underneath a button that never moved.
-        // Left here as well it would offer the same switch twice, a pane's width apart. Set on
-        // every tick of a divider drag, alongside the fill above, because dragging the panel
-        // shut is one of the ways it comes back. See `DisplayPanelToggle`.
-        displayPaneToolbarButton?.isHidden = !displayItem.isCollapsed
+
+        // **The panel's toggle moves to the open panel's corner — it is one view, not two.**
+        // The corner is where the control lives while the panel is open: the same glyph the same
+        // distance from the window's trailing edge, so the pane arrives underneath a button that
+        // never moved. Left in the header as well it would offer the same switch twice, a pane's
+        // width apart. Run on every tick of a divider drag, alongside the fill above, because
+        // dragging the panel shut is one of the ways it comes back; both moves are no-ops when
+        // the toggle is already home. See `DisplayPanelToggle`.
+        //
+        // **It was two views that hid each other, and that cost the gesture.** AppKit sends every
+        // click after the first of a *chain* — the run of clicks a person makes without moving
+        // the pointer far enough to break it — to the view that took the first one. A control
+        // that removes itself as part of its own press therefore throws away every press that
+        // follows: measured, click 1 arrived and clicks 2…n were delivered to nobody at all, not
+        // even to the view standing in the same place. What the user saw was a toggle that
+        // answered the pointer, worked once, and then did nothing until they moved the pointer
+        // off it — which is all it takes to end a chain. One view that moves keeps taking the
+        // clicks it started, wherever the swap has put it.
+        guard let toggle = displayPaneToolbarButton else { return }
+        if displayItem.isCollapsed {
+            // Back on the header's ground, so it reads the terminal's palette again.
+            toggle.hostGround = nil
+            sessionActionsGroup?.readopt(toggle)
+        } else {
+            displayPaneController.adoptPanelToggle(toggle)
+        }
     }
 
     /// Keeps toolbar controls semantic: a filled pane button means the pane is actually visible,

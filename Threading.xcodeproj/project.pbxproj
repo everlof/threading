@@ -367,6 +367,7 @@
 		7B07247A8E95469841D9B6F9 /* ClaudeSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59A7DDC2406514357B5D9044 /* ClaudeSettingsTests.swift */; };
 		ED5E440630A07CECDFA43090 /* ResolvedPermissionModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A89DEB2CC739D8FFAEF14CA /* ResolvedPermissionModeTests.swift */; };
 		1408626FD21FF8F9F662781D /* CursorACPProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D64BDAAE365F63F42977DB2E /* CursorACPProfileTests.swift */; };
+		24632301EBD6DEDE823DD1E6 /* DisplayPanelTogglePressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CBEE367BF9C1CC82202B235 /* DisplayPanelTogglePressTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -789,6 +790,7 @@
 		59A7DDC2406514357B5D9044 /* ClaudeSettingsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeSettingsTests.swift; sourceTree = "<group>"; };
 		3A89DEB2CC739D8FFAEF14CA /* ResolvedPermissionModeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ResolvedPermissionModeTests.swift; sourceTree = "<group>"; };
 		D64BDAAE365F63F42977DB2E /* CursorACPProfileTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CursorACPProfileTests.swift; sourceTree = "<group>"; };
+		2CBEE367BF9C1CC82202B235 /* DisplayPanelTogglePressTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DisplayPanelTogglePressTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1297,6 +1299,7 @@
 				59A7DDC2406514357B5D9044 /* ClaudeSettingsTests.swift */,
 				3A89DEB2CC739D8FFAEF14CA /* ResolvedPermissionModeTests.swift */,
 				D64BDAAE365F63F42977DB2E /* CursorACPProfileTests.swift */,
+				2CBEE367BF9C1CC82202B235 /* DisplayPanelTogglePressTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -2170,6 +2173,7 @@
 				7B07247A8E95469841D9B6F9 /* ClaudeSettingsTests.swift in Sources */,
 				ED5E440630A07CECDFA43090 /* ResolvedPermissionModeTests.swift in Sources */,
 				1408626FD21FF8F9F662781D /* CursorACPProfileTests.swift in Sources */,
+				24632301EBD6DEDE823DD1E6 /* DisplayPanelTogglePressTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

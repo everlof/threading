@@ -53,6 +53,47 @@ turned it off, where a window that zoomed anyway would be the worse bug. `Titleb
 pins the platform behaviour beside the fix, in the way `PaneHeaderTests` pins its own: if AppKit
 ever hit-tests that strip to the titlebar again, the test says so and the class can go.
 
+### A control may not remove itself as part of its own press
+
+The display panel's toggle is one control with two homes — the session header's group while the
+panel is shut, the panel's own corner while it is open, at the same point of the window either way
+(`DisplayPanelToggle`). It shipped as *two* buttons, each hidden for as long as the other was on
+screen, and the gesture died: the toggle worked once and then ignored every further click until the
+pointer moved off it and back. Hover kept working throughout, which is what made it look like a
+drawing bug rather than an event one.
+
+**AppKit sends every click after the first of a click chain to the view that took the first one.**
+A chain is the run of clicks a person makes without moving the pointer far enough — or waiting long
+enough — to break it, and it is what makes double-clicks reach one view. Measured in an isolated
+150-line harness, with real posted clicks:
+
+| arrangement | who received clicks 1…6 |
+|---|---|
+| the outgoing button `isHidden` (what shipped) | click 1 to the button; **clicks 2–6 to nobody** |
+| the outgoing button left attached | all six to the same button |
+| one button, moved between the two homes | all six to the same button |
+
+The replacement standing at the identical point never sees them: the chain is not re-hit-tested, and
+a chain whose view has left the hierarchy is dropped on the floor. `NSStackView` makes this easy to
+walk into, because `detachesHiddenViews` is true by default — hiding an arranged subview removes it
+from the view hierarchy outright.
+
+So the two homes hold **one view** between them: the group hands it over, the panel's corner keeps a
+same-sized slot for it, and `hostGround` tells it which ground it is standing on so it inks for the
+chrome in the panel and for the terminal's backdrop in the header. `updatePaneToggleSelection` does
+the move on every tick of a divider drag, and both directions are no-ops when the toggle is already
+home.
+
+The rule generalises past this control: **anything whose press changes which views exist under the
+pointer has to leave the pressed view in place.** `ThemedIconButton` already carries the other half
+of that lesson — its `releaseWatch` monitor exists because a row rebuilt between a press and its
+release takes the release with it, which is the `⋯` that "needs three or four presses". Same
+platform rule, one event earlier.
+
+`DisplayPanelTogglePressTests` pins the property rather than the plumbing: pressing the toggle
+leaves the same view under the pointer, at the same point, in both directions, and the window never
+holds two views offering the switch.
+
 ### A pane cannot be taller than its window
 
 **A pane's content states a *required* minimum on the window itself.** A window with a content

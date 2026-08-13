@@ -13,9 +13,14 @@ import ThreadingExtensionKit
 /// corner used to hold an ✕, which said "close" where the toolbar said "toggle" and left the
 /// toggle itself pushed a pane's width to the left of where the eye had just been.
 ///
-/// Stating the symbol and the copy once is what keeps the two drawings from drifting into two
-/// different controls; the geometry is `PaneHeaderDefaults.inset` at both ends, and
-/// `DisplayPaneToggleTests` asserts the two land on the same point.
+/// **One control means one view.** The two homes hold the same `ThemedIconButton` between them —
+/// the window moves it from the group into the panel's corner and back — rather than each keeping
+/// a copy that hides while the other shows. That is not tidiness: AppKit sends every click after
+/// the first of a chain to the view that took the first one, so a control that removes itself as
+/// part of its own press loses every press that follows, and the toggle answered one click and
+/// then nothing at all until the pointer moved far enough to end the chain. See
+/// `MainWindowController.updatePaneToggleSelection`, and `DisplayPanelTogglePressTests` for the
+/// property that keeps it: a press leaves the same view under the pointer, at the same point.
 @MainActor
 enum DisplayPanelToggle {
 
@@ -71,34 +76,50 @@ final class DisplayPaneController: NSViewController {
     return button
   }()
 
-  /// The panel's toggle, in the panel's own corner — see `DisplayPanelToggle`.
+  /// Where the panel's toggle stands while the panel is open — see `DisplayPanelToggle`.
   ///
-  /// The same control the session header's group holds while the panel is shut, drawn here
-  /// while it is open, at the same size and the same margin from the window's trailing edge.
-  /// The window hides the group's copy for exactly as long as this one is on screen, so the
-  /// user is never offered the same switch twice and the switch never leaves the corner.
+  /// **A slot rather than a button, because there is only one toggle and it moves here.** The
+  /// session header's group holds it while the panel is shut and this corner holds it while the
+  /// panel is open, at the same size and the same margin from the window's trailing edge, so the
+  /// pane arrives underneath a control that never moved.
   ///
-  /// Pressing it hides the panel and nothing else: the tabs are untouched and waiting when the
-  /// panel is next opened, as a dormant session's scrollback is. It is the *pane's* control —
-  /// a tab chip's own ✕ closes that tab and is drawn on the chip.
+  /// It used to be a second button that appeared as the group's copy hid, and that cost the
+  /// gesture: AppKit sends every click after the first of a *chain* to the view that took the
+  /// first one, so a control that removes itself as part of its own press throws away every
+  /// press that follows — the toggle answered one click and then nothing until the pointer moved
+  /// far enough to end the chain. See `MainWindowController.updatePaneToggleSelection`.
   ///
-  /// Its ink is the chrome's, not the backdrop's, because that is the ground it stands on: the
-  /// panel paints itself in the app theme's surface, while the toolbar's copy floats over the
-  /// terminal's palette. Same control, same place, each inked for what is behind it.
-  private lazy var panelToggleButton: ThemedIconButton = {
-    let button = ThemedIconButton(
-      symbolName: DisplayPanelToggle.symbolName,
-      accessibility: DisplayPanelToggle.accessibility,
-      inkSource: .chrome
-    )
-    button.toolTip = DisplayPanelToggle.toolTip
-    // Filled for as long as it exists, which is exactly as long as the panel is on screen —
-    // the same "this pane is visible" the session header's group states. Pressing an unfilled
-    // toggle and finding a filled one in the same spot is one button answering, not two.
-    button.isSelected = true
-    button.onPress = { [weak self] in self?.hidePanel() }
-    return button
+  /// The slot keeps the toggle's size whether or not it is holding it, so the `+` measuring from
+  /// it never moves as the panel opens. Exposed so a fixture can measure the corner without a
+  /// whole window to put a toggle in it.
+  private(set) lazy var panelToggleSlot: NSView = {
+    let slot = NSView()
+    slot.translatesAutoresizingMaskIntoConstraints = false
+    let size = ThemedIconButton.Target.toolbar.size
+    NSLayoutConstraint.activate([
+      slot.widthAnchor.constraint(equalToConstant: size.width),
+      slot.heightAnchor.constraint(equalToConstant: size.height)
+    ])
+    return slot
   }()
+
+  /// Takes the window's one panel toggle into the corner, and gives it the ground it now stands
+  /// on: this pane paints itself in the app theme's surface, while the session header it came
+  /// from floats over the terminal's palette. Same control, same place, inked for what is behind
+  /// it — which is what `hostGround` is for.
+  func adoptPanelToggle(_ toggle: ThemedIconButton) {
+    guard toggle.superview !== panelToggleSlot else { return }
+    toggle.translatesAutoresizingMaskIntoConstraints = false
+    panelToggleSlot.addSubview(toggle)
+    NSLayoutConstraint.activate([
+      toggle.leadingAnchor.constraint(equalTo: panelToggleSlot.leadingAnchor),
+      toggle.trailingAnchor.constraint(equalTo: panelToggleSlot.trailingAnchor),
+      toggle.topAnchor.constraint(equalTo: panelToggleSlot.topAnchor),
+      toggle.bottomAnchor.constraint(equalTo: panelToggleSlot.bottomAnchor)
+    ])
+    toggle.hostGround = .chrome
+  }
+
   private lazy var headerCustomizationView = DisplayPaneHeaderCustomizationView(
     lookup: customizationLookup,
     onAction: { [weak self] action in
@@ -352,16 +373,9 @@ final class DisplayPaneController: NSViewController {
   private func setupHeader() {
     headerView.addSubview(headerCustomizationView)
     headerView.addSubview(newTabButton)
-    headerView.addSubview(panelToggleButton)
+    headerView.addSubview(panelToggleSlot)
 
     view.addSubview(headerView)
-  }
-
-  /// Asks the window to collapse the panel. Unset — the pane standing on its own in a fixture
-  /// or a detached host — there is no pane to collapse and the press is a no-op, which is the
-  /// same answer `onClose` already gives when the last tab is closed.
-  private func hidePanel() {
-    onClose?()
   }
 
   private func presentNewTabMenu(from sender: NSView) {
@@ -560,7 +574,7 @@ final class DisplayPaneController: NSViewController {
     )
     regularTabBarTrailingConstraint = regularTabBarTrailing
     globalTabBarTrailingConstraint = tabBar.trailingAnchor.constraint(
-      equalTo: panelToggleButton.leadingAnchor,
+      equalTo: panelToggleSlot.leadingAnchor,
       constant: -gap
     )
 
@@ -603,7 +617,7 @@ final class DisplayPaneController: NSViewController {
         lessThanOrEqualTo: headerView.heightAnchor
       ),
       newTabButton.trailingAnchor.constraint(
-        equalTo: panelToggleButton.leadingAnchor, constant: -gap),
+        equalTo: panelToggleSlot.leadingAnchor, constant: -gap),
       newTabButton.centerYAnchor.constraint(equalTo: headerView.contentCenterYAnchor),
 
       // The toggle in the corner, the margin its own — `+` measures from it, and the strip and
@@ -613,9 +627,9 @@ final class DisplayPaneController: NSViewController {
       // drawn at the trailing end of that header while the panel is shut, pinned there by
       // `PaneHeaderDefaults.inset`; measuring this one from anything else would make the
       // button jump as the pane it opens arrives underneath it.
-      panelToggleButton.trailingAnchor.constraint(
+      panelToggleSlot.trailingAnchor.constraint(
         equalTo: headerView.trailingAnchor, constant: -PaneHeaderDefaults.inset),
-      panelToggleButton.centerYAnchor.constraint(equalTo: headerView.contentCenterYAnchor),
+      panelToggleSlot.centerYAnchor.constraint(equalTo: headerView.contentCenterYAnchor),
 
       // Content anchors under the one header row.
       imageView.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: padding),
