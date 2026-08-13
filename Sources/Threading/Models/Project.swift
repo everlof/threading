@@ -1378,10 +1378,15 @@ struct AgentSession: Codable, Identifiable {
       Bool.self,
       forKey: .remoteControl
     )
+    // Through the raw string, for the reason `limitRecoveryPolicy` states below — and with more
+    // at stake: a mode name a later build invented would otherwise throw away the whole session
+    // record over one setting. It reads as "chose none" instead, which is the conservative
+    // direction here too. Nothing then reaches the launch line, and the runtime's own fallback
+    // asks before it acts rather than a half-understood posture deciding it may not.
     permissionMode = try container.decodeIfPresent(
-      AgentPermissionMode.self,
+      String.self,
       forKey: .permissionMode
-    )
+    ).flatMap(AgentPermissionMode.init(rawValue:))
     branch = try container.decodeIfPresent(String.self, forKey: .branch)
     isArchived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
     lastSynchronizedArchiveState = try container.decodeIfPresent(

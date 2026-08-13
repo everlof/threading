@@ -2983,12 +2983,21 @@ final class ConversationViewController: NSViewController {
     /// only. `refreshConversationControls()` runs on every streamed event, so a scan here would
     /// be a file read per event; the background re-read belongs to the surfaces that already own
     /// one, and this picks up whatever they have found.
+    ///
+    /// Offered only while the agent is *running*, because that is the whole of what
+    /// `observedInThisConversation` claims: the posture in force now. Past the exit the same
+    /// reading describes a process that is gone, and the next launch will take whatever the
+    /// settings say — so a dormant conversation resolves without it rather than showing a mode it
+    /// would not start in. Not `canSend`: mid-turn is still running, and a chip that changed its
+    /// mind for the length of a turn would be reporting the transport, not the posture.
     private func inheritedPermissionMode(for session: AgentSession) -> ResolvedPermissionMode {
         ResolvedPermissionMode.inherited(
             for: session.kind,
             account: account,
             projectDirectory: session.workingDirectory(in: project),
-            observed: ObservedPermissionMode.known(for: session, in: project)
+            observed: stream.isRunning
+                ? ObservedPermissionMode.known(for: session, in: project)
+                : nil
         )
     }
 

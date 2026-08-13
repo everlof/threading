@@ -1087,23 +1087,49 @@ authority:
    present. Grok's `config.toml` states none of the six and OpenCode's policy is per-tool, so both
    answer nothing.
 3. `ObservedPermissionMode` for this conversation, from memory only — `refreshConversationControls`
-   runs per streamed event, so the background re-read stays with the surfaces that own one.
+   runs per streamed event, so the background re-read stays with the surfaces that own one. Passed
+   **only while the agent is running**, because that is the whole of what this source claims: the
+   posture in force now. Past the exit it describes a process that is gone.
 4. `ClaudeAccountLastRunPermissionMode`: the newest `permission-mode` record in this login's newest
    transcript. Evidence, not configuration, and marked `(last used)` rather than `(default)` for
    the same reason `ClaudeAccountLastRunModel`'s answer is.
+
+**The first two state the next launch; the last two only report one, and the difference decides
+what the app may do with the answer.** `Source.governsNextLaunch` is that line — an app-wide
+default *becomes* `--permission-mode`, and the runtime reads its own configuration itself, while
+nothing replays a mode out of a transcript. It shipped without the distinction and the failure was
+the expensive direction: `PermissionModePresentation.rows` marks the inherited mode as the row
+meaning *inherit*, which answers `nil`, and it was marking a **remembered** one. Choosing Auto in
+the composer therefore recorded no choice, the launch line carried no flag, and the session started
+in the CLI's own fallback — `{"permissionMode":"default"}` in its transcript — while the chip above
+it read Auto. Fixed on both halves, and it is the fail-closed reading of each:
+
+- Only a governing answer collapses into the inherit row. A report is an ordinary row that keeps
+  its `(last used)` qualifier and **pins** the mode when chosen, and inherit gets its own
+  "Use Agent's Setting" row beside it.
+- Only a governing answer, or a posture a *running* agent is in, may title a chip
+  (`ResolvedPermissionMode.nameableMode`). Where all that is left is a remembered mode, the chip
+  says the agent decides and the tooltip still names what it last decided on.
+- `AgentSession.permissionMode` decodes through its raw string, so a mode name a later build
+  invents reads as "chose none" instead of throwing away the whole session record. Nothing then
+  reaches the launch line, and the runtime asks before acting.
 
 **One value is source-restricted, and the exception is load-bearing.** `auto` may be granted only
 by a layer a repository cannot write — measured against 2.1.228, which *drops the key* rather than
 falling through, so a project file's `auto` also discards the user's own mode. A reader that fell
 through to the layer below would report a posture the session will not run in.
 
-**The unset case is why step 4 exists.** With no layer stating a mode, the CLI chooses between
-`default` and `auto` on a server-side gate (`tengu_harbor_willow`, plus an interactive-session test
-that `--print` fails). That is not a file, so it is not predicted: on the machine this was written
-against, thirty-eight of forty recent transcripts had resolved to `auto` while every settings file
-was silent and Claude's own settings screen would have said `default`. Naming what the agent last
-ran in is the honest answer there; hard-coding `default` would have been wrong on every one of
-those forty sessions.
+**The unset case is why step 4 exists — as a qualifier, not as a promise.** With no layer stating a
+mode, the CLI chooses between `default` and `auto` on a server-side gate (`tengu_harbor_willow`,
+plus an interactive-session test that `--print` fails). That is not a file, so it is not predicted:
+on the machine this was written against, thirty-eight of forty recent transcripts had resolved to
+`auto` while every settings file was silent and Claude's own settings screen would have said
+`default`. Hard-coding `default` would have been wrong on every one of those forty sessions, so the
+remembered mode stays — it names the row the user most likely wants and says where the name came
+from. What it no longer does is *title* a chip, because the same gate answered `default` for the
+session that found this bug: a thirty-eight-in-forty estimate is a good default to offer and a bad
+posture to assert, and the two readings differ exactly when the app would be promising more access
+than the launch will take.
 
 **Reading the live posture back is a different question, and Claude answers it.** A terminal's own
 Shift+Tab still tells Threading nothing, but Claude writes each assertion of the posture into the

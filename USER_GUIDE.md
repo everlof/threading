@@ -1117,12 +1117,12 @@ Set it in three places:
 
 - The **mode chip** in the composer, on the row inside the prompt box beside the model, when
   starting a chat.
-- A single chat's **⋯** menu has a **Permission Mode** submenu. The mode the chat inherits is
-  marked where it stands in the list rather than repeated above it, and choosing it keeps the
-  chat inheriting. The mark says where that mode came from: *(default)* for a mode set in
-  Settings or in the agent's own configuration, *(last used)* for one read back from what the
-  agent actually ran in. Only when nothing can name a mode does the submenu open with **Use
-  Agent's Setting** instead.
+- A single chat's **⋯** menu has a **Permission Mode** submenu. A mode that comes from a
+  *setting* — Settings ▸ General, or the agent's own configuration — is marked *(default)* where
+  it stands in the list rather than repeated above it, and choosing it keeps the chat inheriting.
+  A mode merely *seen* being used is marked *(last used)* and is an ordinary choice: picking it
+  pins it to this chat, because nothing would apply it on its own. The submenu then opens with
+  **Use Agent's Setting**, which is also what you get when nothing can name a mode at all.
 - **Settings > General > Permission Mode** sets what new chats use. *Agent's Setting* is the
   default and changes nothing — Claude's own `permissions.defaultMode` and Codex's `config.toml`
   still decide. Threading reads both, so the chip and the menu can still name the mode you will
@@ -1568,12 +1568,13 @@ start; the running agent keeps its current speed and the chat says so.
 
 The **permission mode** chip is the same choice as Permission Mode in a session's **…** menu, and
 it shows the mode that will actually apply: the one this chat has chosen, then the app-wide
-default from Settings, then the agent's own configuration, and failing all three the mode this
-agent was last seen running in — its tooltip says which of those you are looking at. **Agent's
-Setting** appears only when none of them can name a mode, which on Claude means a login that has
-never run. With nothing configured anywhere, Claude picks between Manual and Auto itself at
-launch, and no file on your machine states which; what it last chose is the closest true answer,
-so that is what the chip shows. A running Claude chat changes mode there
+default from Settings, then the agent's own configuration, and — while the agent is running — the
+mode it is in this moment. Its tooltip says which of those you are looking at. **Agent's Setting**
+appears when none of them can name a mode: the agent decides at launch and nothing on your machine
+states what it will pick. That includes the case where all Threading knows is what this login last
+ran in, which is a good guess and not a promise — the menu still offers that mode, marked
+*(last used)*, so one click pins it and it is passed on the launch line. A running Claude chat
+changes mode there
 and then. Everywhere else the choice is recorded and the menu says so, with **Applies the next
 time this chat starts.** under the modes. If a mode is one the agent will not accept, such as
 Bypass Permissions on a chat that was not started with permissions skipped, the chat says why

@@ -101,13 +101,19 @@ enum PermissionModePresentation {
     /// Names the mode that will actually apply, not only the one chosen on this surface.
     ///
     /// With no choice of its own the chip shows what the session inherits — the app-wide
-    /// default, the agent's own configuration, or failing both what the agent was last observed
-    /// in — and names where the decision goes only when no source can answer at all.
+    /// default, the agent's own configuration, or the posture a running agent is in this
+    /// moment — and names where the decision goes whenever none of those can answer.
+    ///
+    /// **A remembered mode is not one of them** (`ResolvedPermissionMode.nameableMode`). What
+    /// this login's last conversation ran in says nothing about what this one will start in, and
+    /// a chip reading "Auto" over a session that will launch asking about every tool is the one
+    /// failure this control cannot have. Where that is all there is, the honest answer is that
+    /// the agent decides — and the tooltip still names the mode it last decided on.
     static func chipTitle(
         selected: AgentPermissionMode?,
         inherited: ResolvedPermissionMode
     ) -> String {
-        (selected ?? inherited.mode)?.displayName ?? agentSettingTitle
+        (selected ?? inherited.nameableMode)?.displayName ?? agentSettingTitle
     }
 
     /// What a chip's tooltip adds: the value is in the chip, and this says whose value it is.
@@ -194,7 +200,12 @@ enum PermissionModePresentation {
     ) -> [ThemedMenuEntry] {
         var rows: [ThemedMenuEntry] = []
 
-        if inherited.mode == nil {
+        // The one answer a row may stand in for: a mode something will state again on its own.
+        // Everything else — a report, or no answer at all — leaves inherit as its own row, so
+        // that choosing a posture always records that posture.
+        let inheritable = inherited.governingMode
+
+        if inheritable == nil {
             rows.append(.item(ThemedMenuItem(
                 title: agentSettingRowTitle,
                 representedValue: nil,
@@ -208,7 +219,7 @@ enum PermissionModePresentation {
             // for a session that has chosen nothing as well as for one that chose this mode —
             // both run it, and a menu that marked only one of them would be reporting a
             // difference the session cannot act on.
-            let isDefault = mode == inherited.mode
+            let isDefault = mode == inheritable
             // The description rides as the subtitle rather than a hover tooltip, so what a
             // mode actually permits is read in the same glance that chooses it.
             rows.append(.item(ThemedMenuItem(
@@ -1040,9 +1051,13 @@ extension ProjectSidebarViewController {
                         handle: session.accountHandle
                     ),
                     projectDirectory: project.map { session.workingDirectory(in: $0) },
-                    observed: project.flatMap {
-                        ObservedPermissionMode.known(for: session, in: $0)
-                    }
+                    // Only while it is running: `observedInThisConversation` means the posture in
+                    // force *now*, and this menu states the next launch. A dormant session's last
+                    // reading is a fact about a process that has exited, and marking it here
+                    // would qualify a mode as inherited that nothing is going to state again.
+                    observed: AgentRuntime.shared.isRunning(sessionID: session.id)
+                        ? project.flatMap { ObservedPermissionMode.known(for: session, in: $0) }
+                        : nil
                 ),
                 timing: .whenTheChatRestarts,
                 onChoose: { [weak self] mode in self?.setPermissionMode(mode) }

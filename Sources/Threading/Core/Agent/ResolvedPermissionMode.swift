@@ -33,12 +33,59 @@ struct ResolvedPermissionMode: Equatable {
         /// What this login's newest conversation was in. A report about a *different* session,
         /// used only where nothing else can answer, and qualified hardest on screen.
         case rememberedFromEarlierRun
+
+        // MARK: - Authority
+
+        /// Whether this source will state the mode *again* on the next launch.
+        ///
+        /// The two settings will: Threading's own default becomes `--permission-mode` on the
+        /// launch line, and the runtime reads its own configuration itself. The two reports will
+        /// not — nothing replays a mode a transcript recorded, so a session that inherits one
+        /// starts in the runtime's own fallback instead, which for Claude is `manual`.
+        ///
+        /// This is the difference between offering a posture and promising one, and it shipped
+        /// wrong: the menu marked the *remembered* mode as the row to inherit, so choosing Auto
+        /// recorded "follow the setting", the launch line carried no flag, and the session asked
+        /// before every tool while its chip read Auto. Anything turning this answer into
+        /// behaviour asks here first and pins the mode when it is false.
+        var governsNextLaunch: Bool {
+            switch self {
+            case .appDefault, .agentConfiguration: return true
+            case .observedInThisConversation, .rememberedFromEarlierRun: return false
+            }
+        }
+
+        /// Whether this source describes the posture the agent is in **now**, rather than one it
+        /// would start in. Only observation does, and only because the surfaces that pass it read
+        /// their own *running* conversation — a dormant one passes nothing, since the same
+        /// reading would then be a fact about a process that has exited.
+        var describesTheRunningAgent: Bool {
+            switch self {
+            case .observedInThisConversation: return true
+            case .appDefault, .agentConfiguration, .rememberedFromEarlierRun: return false
+            }
+        }
     }
 
     // MARK: - Properties
 
     var mode: AgentPermissionMode?
     var source: Source
+
+    /// The mode the next launch will genuinely run in, and nil for every answer that only
+    /// reports one. Nil is not "unknown": it means the runtime's own fallback decides, which is
+    /// the closed end of the range, and it is what a surface offering *inherit* must be holding
+    /// before it offers it.
+    var governingMode: AgentPermissionMode? {
+        source.governsNextLaunch ? mode : nil
+    }
+
+    /// The mode a chip may name as the one in force — what a setting states for the next launch,
+    /// or what the agent is running in right now. A mode remembered from a *different* session is
+    /// neither, and naming it is how this app came to promise a posture nothing would apply.
+    var nameableMode: AgentPermissionMode? {
+        source.governsNextLaunch || source.describesTheRunningAgent ? mode : nil
+    }
 
     // MARK: - Public Methods
 

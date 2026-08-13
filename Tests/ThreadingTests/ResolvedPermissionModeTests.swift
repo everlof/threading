@@ -191,6 +191,155 @@ final class ResolvedPermissionModeTests: XCTestCase {
         )
     }
 
+    // MARK: - What a source is allowed to promise
+
+    /// Two of the four states the *next launch*; two only report one. The launch line is what
+    /// makes the difference real: an app-wide default becomes `--permission-mode` and a runtime
+    /// reads its own configuration, while nothing replays a mode out of a transcript.
+    func testOnlyASettingGovernsTheNextLaunch() {
+        XCTAssertTrue(ResolvedPermissionMode.Source.appDefault.governsNextLaunch)
+        XCTAssertTrue(ResolvedPermissionMode.Source.agentConfiguration.governsNextLaunch)
+        XCTAssertFalse(ResolvedPermissionMode.Source.observedInThisConversation.governsNextLaunch)
+        XCTAssertFalse(ResolvedPermissionMode.Source.rememberedFromEarlierRun.governsNextLaunch)
+
+        XCTAssertEqual(
+            ResolvedPermissionMode(mode: .auto, source: .agentConfiguration).governingMode,
+            .auto
+        )
+        XCTAssertNil(
+            ResolvedPermissionMode(mode: .auto, source: .rememberedFromEarlierRun).governingMode,
+            "a mode this login merely ran in last time governs nothing"
+        )
+        XCTAssertNil(
+            ResolvedPermissionMode(mode: .auto, source: .observedInThisConversation).governingMode
+        )
+    }
+
+    /// The bug this pair exists to prevent: the menu marked the *remembered* mode as the row that
+    /// means "inherit", so choosing Auto answered nil, the session recorded no mode, the launch
+    /// line carried no `--permission-mode`, and the chat started asking about every tool while
+    /// the chip above it read Auto. A report is an ordinary row now — it pins.
+    func testAModeNothingWillStateAgainIsPinnedRatherThanInherited() throws {
+        for source in [
+            ResolvedPermissionMode.Source.rememberedFromEarlierRun,
+            .observedInThisConversation
+        ] {
+            let items = menuItems(
+                inherited: ResolvedPermissionMode(mode: .auto, source: source),
+                selected: nil
+            )
+            let auto = try XCTUnwrap(
+                items.first { $0.title.hasPrefix(AgentPermissionMode.auto.displayName) },
+                "\(source) lost its Auto row"
+            )
+            XCTAssertEqual(
+                auto.representedValue as? AgentPermissionMode,
+                .auto,
+                "choosing Auto under \(source) recorded no choice at all"
+            )
+            XCTAssertFalse(
+                auto.isSelected,
+                "a session following nothing is not running \(source)'s remembered mode"
+            )
+
+            let inherit = try XCTUnwrap(
+                items.first { $0.title == PermissionModePresentation.agentSettingRowTitle },
+                "with nothing governing, inherit needs a row of its own"
+            )
+            XCTAssertNil(inherit.representedValue)
+            XCTAssertTrue(inherit.isSelected)
+        }
+    }
+
+    /// And the case that stays as it was: a mode the next launch *will* state again is the
+    /// inherit row, marked where it stands, with no second row repeating it.
+    func testAConfiguredModeIsStillTheRowThatMeansInherit() throws {
+        for source in [ResolvedPermissionMode.Source.appDefault, .agentConfiguration] {
+            let items = menuItems(
+                inherited: ResolvedPermissionMode(mode: .auto, source: source),
+                selected: nil
+            )
+            let auto = try XCTUnwrap(
+                items.first { $0.title.hasPrefix(AgentPermissionMode.auto.displayName) }
+            )
+            XCTAssertNil(
+                auto.representedValue,
+                "\(source) is followed rather than copied onto the session"
+            )
+            XCTAssertTrue(auto.isSelected)
+            XCTAssertFalse(
+                items.contains { $0.title == PermissionModePresentation.agentSettingRowTitle },
+                "\(source) already names the inherited mode; a second row would duplicate it"
+            )
+        }
+    }
+
+    /// Every mode a menu offers can be reached, whatever the inherited answer is: the row's own
+    /// action answers the same value its `representedValue` does, so the two kinds of caller —
+    /// a chip reading the value back, a presented menu running the action — cannot disagree
+    /// about what was chosen.
+    func testChoosingAModeAnswersThatModeThroughBothRoutes() throws {
+        for source in ResolvedPermissionModeTests.everySource {
+            for mode in AgentPermissionMode.allCases {
+                var chosen: AgentPermissionMode??
+                let inherited = ResolvedPermissionMode(mode: .auto, source: source)
+                let items = menuItems(inherited: inherited, selected: nil) { chosen = $0 }
+                let row = try XCTUnwrap(
+                    items.first { $0.title.hasPrefix(mode.displayName) },
+                    "\(mode) is missing from a menu resolved from \(source)"
+                )
+                row.onChoose?()
+
+                let expected = mode == inherited.governingMode ? nil : mode
+                XCTAssertEqual(
+                    row.representedValue as? AgentPermissionMode,
+                    expected
+                )
+                XCTAssertEqual(
+                    try XCTUnwrap(chosen, "\(mode) chose nothing under \(source)"),
+                    expected,
+                    "the row's action and its value disagree for \(mode) under \(source)"
+                )
+            }
+        }
+    }
+
+    /// A chip states what is in force. A setting states the next launch and a running agent
+    /// states itself, so both are named — but a mode read out of a *different* conversation is
+    /// neither, and naming it is how the composer came to promise Auto over a session that
+    /// launched with no `--permission-mode` at all.
+    func testTheChipDoesNotNameAModeNothingWillApply() {
+        XCTAssertEqual(
+            PermissionModePresentation.chipTitle(
+                selected: nil,
+                inherited: ResolvedPermissionMode(mode: .auto, source: .rememberedFromEarlierRun)
+            ),
+            PermissionModePresentation.agentSettingTitle
+        )
+        for source in [
+            ResolvedPermissionMode.Source.appDefault,
+            .agentConfiguration,
+            .observedInThisConversation
+        ] {
+            XCTAssertEqual(
+                PermissionModePresentation.chipTitle(
+                    selected: nil,
+                    inherited: ResolvedPermissionMode(mode: .auto, source: source)
+                ),
+                AgentPermissionMode.auto.displayName,
+                "\(source) names a posture that is in force and should be shown"
+            )
+        }
+        XCTAssertEqual(
+            PermissionModePresentation.chipTitle(
+                selected: .plan,
+                inherited: ResolvedPermissionMode(mode: .auto, source: .rememberedFromEarlierRun)
+            ),
+            AgentPermissionMode.plan.displayName,
+            "the session's own choice outranks every source"
+        )
+    }
+
     /// The chip carries the value; the tooltip carries whose value it is. A mode the user picked
     /// here needs no explaining, so it gets none.
     func testTheChipsTooltipNamesTheSourceAndOnlyWhenInheriting() throws {
@@ -300,6 +449,38 @@ final class ResolvedPermissionModeTests: XCTestCase {
             case false: XCTAssertEqual(title, ConversationSpeedPresentation.standardTitle)
             case nil: XCTFail("a Claude conversation has no unknown speed")
             }
+        }
+    }
+
+    // MARK: - Fixtures
+
+    /// Written out rather than derived: `Source` is not `CaseIterable`, and a fifth source added
+    /// without a line here would quietly go untested by every loop above.
+    private static let everySource: [ResolvedPermissionMode.Source] = [
+        .appDefault,
+        .agentConfiguration,
+        .observedInThisConversation,
+        .rememberedFromEarlierRun
+    ]
+
+    /// The rows one surface would offer, with the separators and the timing note dropped.
+    ///
+    /// `whenTheSessionStarts` because it adds no note — these assert what choosing a row records,
+    /// which is the same on all three surfaces.
+    private func menuItems(
+        inherited: ResolvedPermissionMode,
+        selected: AgentPermissionMode?,
+        onChoose: ((AgentPermissionMode?) -> Void)? = nil
+    ) -> [ThemedMenuItem] {
+        PermissionModePresentation.rows(
+            for: .claude,
+            selected: selected,
+            inherited: inherited,
+            timing: .whenTheSessionStarts,
+            onChoose: onChoose
+        ).compactMap { entry in
+            guard case .item(let item) = entry else { return nil }
+            return item
         }
     }
 }
