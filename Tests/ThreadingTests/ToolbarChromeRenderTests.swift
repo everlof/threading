@@ -208,6 +208,24 @@ final class ToolbarChromeRenderTests: XCTestCase {
                 $0.setNavigationState(canGoBack: true, canGoForward: true, popupDepth: 0)
                 $0.setAnnotating(true)
             },
+            BrowserChromeStory(
+                name: "wide-address-hover",
+                width: 760,
+                context: .shared
+            ) {
+                $0.addressField.stringValue = "https://example.test/clean-address-bar"
+                $0.setNavigationState(canGoBack: true, canGoForward: true, popupDepth: 0)
+                $0.addressField.mouseEntered(with: Self.hoverEvent())
+            },
+            BrowserChromeStory(
+                name: "wide-address-selected",
+                width: 760,
+                context: .shared,
+                focusesAddress: true
+            ) {
+                $0.addressField.stringValue = "https://example.test/selected-address"
+                $0.setNavigationState(canGoBack: true, canGoForward: true, popupDepth: 0)
+            },
             // The hint only earns its place if it reads as quiet beside the address at a width
             // that can hold both. That is a judgement about ink, so it is made in a picture.
             BrowserChromeStory(
@@ -247,7 +265,7 @@ final class ToolbarChromeRenderTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(written, 28)
+        XCTAssertEqual(written, 36)
         print("Rendered browser chrome matrix to \(Render.directory.path)")
     }
 
@@ -297,6 +315,11 @@ final class ToolbarChromeRenderTests: XCTestCase {
 
     func testBrowserChromeProtectsTheAddressAtMinimumWidth() {
         let bar = BrowserChromeBar(contextKind: .shared)
+        XCTAssertEqual(
+            bar.addressField.surfacePresentation,
+            .onInteraction,
+            "the browser should show a URL at rest, not a standing text-field silhouette"
+        )
         bar.frame = NSRect(x: 0, y: 0, width: 260, height: 40)
         bar.setNavigationState(canGoBack: true, canGoForward: false, popupDepth: 0)
         bar.setActiveTestConditionCount(4)
@@ -683,7 +706,22 @@ final class ToolbarChromeRenderTests: XCTestCase {
         let name: String
         let width: CGFloat
         let context: BrowserContextKind
+        let focusesAddress: Bool
         let configure: (BrowserChromeBar) -> Void
+
+        init(
+            name: String,
+            width: CGFloat,
+            context: BrowserContextKind,
+            focusesAddress: Bool = false,
+            configure: @escaping (BrowserChromeBar) -> Void
+        ) {
+            self.name = name
+            self.width = width
+            self.context = context
+            self.focusesAddress = focusesAddress
+            self.configure = configure
+        }
     }
 
     private func browserChromePNG(
@@ -728,6 +766,15 @@ final class ToolbarChromeRenderTests: XCTestCase {
             root.layoutSubtreeIfNeeded()
             chrome.updateResponsiveLayout()
             root.layoutSubtreeIfNeeded()
+
+            if story.focusesAddress {
+                XCTAssertTrue(
+                    window.makeFirstResponder(chrome.addressField),
+                    "The selected-address story could not focus its real field"
+                )
+                chrome.addressField.selectText(nil)
+                root.layoutSubtreeIfNeeded()
+            }
 
             if let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) {
                 root.cacheDisplay(in: root.bounds, to: rep)

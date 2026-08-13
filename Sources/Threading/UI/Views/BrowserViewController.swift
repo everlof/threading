@@ -116,7 +116,7 @@ final class BrowserChromeBar: NSView {
     let backButton = BrowserChromeBar.button("chevron.backward", L10n.string("Back"))
     let forwardButton = BrowserChromeBar.button("chevron.forward", L10n.string("Forward"))
     let reloadButton = BrowserChromeBar.button("arrow.clockwise", L10n.string("Reload"))
-    let addressField = ThemedTextField()
+    let addressField = ThemedTextField(surfacePresentation: .onInteraction)
     let annotationButton = BrowserChromeBar.button(
         DesignSymbols.annotate,
         L10n.string("Annotate Page")

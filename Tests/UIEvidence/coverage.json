@@ -424,7 +424,7 @@
       "priority": "critical",
       "title": "Browser chrome",
       "description": "The live browser's real command and address chrome under width pressure, private context, loading, pop-up, annotation and testing states.",
-      "states": ["Compact", "Loading", "Private", "Pop-up", "Test conditions", "Annotating", "Password guidance"],
+      "states": ["Compact", "Loading", "Private", "Pop-up", "Test conditions", "Annotating", "Address idle", "Address hover", "Address selected", "Password guidance"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],

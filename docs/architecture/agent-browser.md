@@ -215,6 +215,15 @@ shrinks. Closing the toolbar resets the page to the panel, omitting both tool di
 same, and navigation and pop-ups inherit the active size. Presets describe CSS viewport dimensions
 only: they do not imply touch, device scale, mobile identity, or a different browser engine. The
 override is deliberately runtime-only testing state.
+
+The native address field is content before it is an input. At rest the URL draws directly on the
+browser strip with no permanent field silhouette; pointer hover raises a `controlHover` plate over
+the field's unchanged frame, and editing restores the ordinary themed well, focus ring, field editor,
+selection, input methods and undo. Keeping this as `ThemedTextField.SurfacePresentation` data means
+the browser changes only the chrome around AppKit's editor rather than building a second address
+control or shrinking the target when its plate disappears. The responsive strip can move the field
+when controls fold, so its hover is revalidated whenever its tracking area is rebuilt.
+
 `browser_emulate` applies public per-view WebKit conditions to the active tab. `NSAppearance`
 makes `prefers-color-scheme`, matchMedia, rendered pixels, and screenshots agree without changing
 Threading's window or global appearance; `WKWebView.customUserAgent` changes JavaScript identity and

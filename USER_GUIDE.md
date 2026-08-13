@@ -2337,6 +2337,8 @@ zoom, recent downloads, current-site data clearing, and browser settings. The re
 provides editable CSS-pixel dimensions, rotation, and desktop, tablet, foldable, and phone presets;
 hiding it returns the page to the panel's natural size. These are honest viewport presets, not
 claims of touch, device-scale, browser-engine, or complete hardware emulation.
+The current address rests as plain toolbar text. Point at it to reveal the editable field; click it
+to edit. Focus and text selection use the ordinary macOS text editor.
 When the browser tab is visible, Cmd+F opens its native find bar rather than the terminal's.
 
 The agent driving that session sees and acts on this same tab—it can open pages, go back or

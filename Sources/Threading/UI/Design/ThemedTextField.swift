@@ -13,6 +13,18 @@ import AppKit
 /// stop is the bezel, not the type.
 class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
 
+    /// Whether the editable well is permanent or belongs only to interaction.
+    ///
+    /// Most forms need a standing field silhouette: the empty well is part of the question the
+    /// form asks. Chrome such as a browser address bar already has content at rest, and another
+    /// outlined object around that content only competes with the page. It keeps the same frame,
+    /// text inset and hit target, raises a quiet plate under the pointer, and becomes the ordinary
+    /// focused field once editing begins.
+    enum SurfacePresentation: Equatable {
+        case persistent
+        case onInteraction
+    }
+
     // MARK: - Geometry
 
     fileprivate enum Layout {
@@ -25,6 +37,16 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
 
     private var themeRedraw: ThemeRedraw?
     private let placeholderRefresh = AppEventObservations()
+    private var hoverTrackingArea: NSTrackingArea?
+
+    let surfacePresentation: SurfacePresentation
+
+    private(set) var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            needsDisplay = true
+        }
+    }
 
     /// The field editor is what actually becomes first responder, so "focused" is asked of the
     /// editor rather than tracked. Redraws are triggered by the two edges below.
@@ -41,6 +63,13 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
     }
 
     override init(frame frameRect: NSRect) {
+        surfacePresentation = .persistent
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    init(frame frameRect: NSRect, surfacePresentation: SurfacePresentation) {
+        self.surfacePresentation = surfacePresentation
         super.init(frame: frameRect)
         setup()
     }
@@ -56,6 +85,10 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
     convenience init(string: String) {
         self.init(frame: .zero)
         stringValue = string
+    }
+
+    convenience init(surfacePresentation: SurfacePresentation) {
+        self.init(frame: .zero, surfacePresentation: surfacePresentation)
     }
 
     private func setup() {
@@ -117,6 +150,42 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
         return size
     }
 
+    // MARK: - Hover
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+            self.hoverTrackingArea = nil
+        }
+
+        guard surfacePresentation == .onInteraction else { return }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+
+        // A browser strip can move when responsive controls fold. Tracking reports only pointer
+        // movement, so clear a hover that became stale because the field itself moved.
+        if hoverIsStale(isHovered) {
+            isHovered = false
+        }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard surfacePresentation == .onInteraction else { return }
+        isHovered = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard surfacePresentation == .onInteraction else { return }
+        isHovered = false
+    }
+
     // MARK: - Focus
 
     override func becomeFirstResponder() -> Bool {
@@ -144,6 +213,18 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
     }
 
     private func drawSurface() {
+        if surfacePresentation == .onInteraction, !isEditing {
+            guard isHovered else { return }
+            // Hover is an invitation rather than an already active text well. Keeping its bevel
+            // flat lets it rise without changing visual grammar before the field is selected.
+            ThemedSurface.draw(
+                bounds,
+                fill: Design.Surface.controlHover,
+                bevel: .none
+            )
+            return
+        }
+
         // A text well is carved into the surface, not resting on it — the one place a bevel
         // material reads sunken rather than raised.
         let shape = ThemedSurface.draw(

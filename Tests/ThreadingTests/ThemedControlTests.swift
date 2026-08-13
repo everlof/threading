@@ -5507,6 +5507,45 @@ final class ThemedControlTests: XCTestCase {
         )
     }
 
+    /// An address is useful content even when nobody is editing it, so its resting state is the
+    /// URL rather than a permanent input silhouette. The hit target and layout remain present;
+    /// only the plate answers the pointer.
+    func testAnInteractionOnlyFieldRestsClearAndRaisesItsPlateOnHover() throws {
+        let field = ThemedTextField(surfacePresentation: .onInteraction)
+        field.frame = NSRect(x: 0, y: 0, width: 240, height: Design.Size.fieldHeight)
+        let restingSize = field.intrinsicContentSize
+
+        func centreAlpha() throws -> CGFloat {
+            let rep = try XCTUnwrap(field.bitmapImageRepForCachingDisplay(in: field.bounds))
+            field.cacheDisplay(in: field.bounds, to: rep)
+            return try colour(
+                of: rep,
+                at: NSPoint(x: field.bounds.midX, y: field.bounds.midY),
+                in: field
+            ).usingColorSpace(.sRGB)?.alphaComponent ?? 0
+        }
+
+        let restingAlpha = try centreAlpha()
+        XCTAssertEqual(restingAlpha, 0, accuracy: 1.0 / 255.0)
+
+        field.mouseEntered(with: hoverEvent())
+        XCTAssertTrue(field.isHovered)
+        XCTAssertGreaterThan(
+            try centreAlpha(),
+            restingAlpha,
+            "the pointer reached the address field without revealing its editable region"
+        )
+        XCTAssertEqual(
+            field.intrinsicContentSize,
+            restingSize,
+            "revealing the plate moved or resized the address"
+        )
+
+        field.mouseExited(with: hoverEvent())
+        XCTAssertFalse(field.isHovered)
+        XCTAssertEqual(try centreAlpha(), restingAlpha, accuracy: 1.0 / 255.0)
+    }
+
     // MARK: - Secure Field
 
     /// The masking is the *cell*, which is the whole reason `ThemedSecureField` subclasses the
