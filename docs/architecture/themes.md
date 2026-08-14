@@ -1361,9 +1361,9 @@ ids, rule-ink budget, the settings-page renders — picked the five up by their 
 
 ## 2026-08-14 — a period control ends where its own silhouette does
 
-Three reports against Tiger, one shape between them: a drawing that belonged to a control was
-sized from the control's *box* instead of from the control's *outline*, and every one of them was
-plainly visible in a screenshot while every assertion around it passed.
+Four reports against Tiger, one shape between them: a drawing that belonged to a control took the
+control's *box* for its *outline*, and every one of them was plainly visible in a screenshot while
+every assertion around it passed.
 
 **A scrollbar with nothing left to scroll shows an empty trough.** AppKit disables a legacy
 scroller once its scroll view has nowhere to go, but it keeps the `knobProportion` that view last
@@ -1400,8 +1400,20 @@ now state `filled`, which is what those releases shipped; separately, the raised
 the silhouette it frames, so the authored pairing a custom theme can still make — a rounded
 material asking for the classic frame — draws an edge rather than a backing plate.
 
+**And the chooser's own corner is stroked, not applied.** A `CALayer` border follows the
+*continuous* corner this app rounds everything with, and a continuous curve's inner offset is not
+concentric: at the pop-up's five-point radius under a one-point border the stroke thickens through
+the arc and leaves a ledge where it meets the straight run — an extra edge in the corner, on a
+`ChipView` sitting a row above a `ThemedPopUp` that stroked a clean circular one. Both now go
+through `ClassicChoiceDrawing.drawAquaSurface(in:)` and the chip's layer keeps nothing but the
+silhouette, so the two cannot diverge again; `testTheTwoAquaChoosersDrawTheSameCorner` compares the
+drawn corner of one against the other, untitled so the block holds no glyph edges. The artifact is
+general to a layer border on a small continuous corner — it is simply invisible at panel radii,
+which is where the rest of this app's applied borders live.
+
 `AquaChromeTests` holds the geometry, the drawn state (corner pixels of the well and of the
-frame, accent ink anywhere in a spent trough) and one specimen sheet per Aqua material.
+frame, accent ink anywhere in a spent trough, one chooser's corner against the other's) and one
+specimen sheet per Aqua material.
 
 ## 2026-08-14 — a view in the reuse queue misses the sweep
 
