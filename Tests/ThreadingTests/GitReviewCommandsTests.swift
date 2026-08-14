@@ -37,6 +37,30 @@ final class GitReviewCommandsTests: XCTestCase {
         )
     }
 
+    func testExpandedContextReadsStayPathScopedAcrossEveryDiffShape() {
+        let path = "Sources/[Review]*.swift"
+        let literal = ":(literal)\(path)"
+        XCTAssertEqual(
+            GitReviewCommands.diff(
+                against: "HEAD",
+                paths: [path],
+                ignoringWhitespace: true,
+                contextLines: 40
+            ),
+            [
+                "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--find-renames",
+                "-U40", "-w", "HEAD", "--", literal,
+            ]
+        )
+        XCTAssertTrue(GitReviewCommands.diffStaged(paths: [path], contextLines: 40).contains("-U40"))
+        XCTAssertTrue(
+            GitReviewCommands.diff(from: "old", to: "new", paths: [path], contextLines: 40)
+                .contains("-U40")
+        )
+        XCTAssertTrue(GitReviewCommands.show("abc123", paths: [path], contextLines: 40).contains("-U40"))
+        XCTAssertEqual(GitReviewCommands.diff(against: nil, contextLines: -1).last, "-U0")
+    }
+
     func testRecentSubjectsAskForSubjectsAndNothingElse() {
         // The commit draft's voice sample: no numstat, no hundred-commit page — `log()`
         // pays for both, rightly for the history browser and wastefully here.

@@ -489,6 +489,10 @@ enum AppThemeRefresh {
             // role it asked for, so the role is resolved again here. Controls that draw their own
             // text ask `Design.Typography` inside `draw(_:)` and need nothing.
             view.reapplyRecordedFont()
+            // A panel's padding is fitted to the corner the line above just re-applied, so the
+            // two are re-stated together — a constraint's constant freezes exactly the way a
+            // layer's corner does. See `PanelContentInset`.
+            view.reapplyRecordedContentInset()
             // Content baked against a role rather than resolved from one — see
             // `ThemeDerivedContent`. Inside the appearance block, because what it bakes against
             // is a themed colour and the answer differs per appearance.

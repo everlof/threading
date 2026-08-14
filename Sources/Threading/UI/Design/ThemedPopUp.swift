@@ -271,6 +271,7 @@ final class ThemedPopUp: ThemedControl {
                 } else if choiceStyle == .aquaPopup {
                     ClassicChoiceDrawing.drawAquaArrowWell(
                         in: arrow,
+                        face: ClassicChoiceDrawing.aquaFace(in: bounds),
                         pressed: isPresentingMenu
                     )
                 } else {
@@ -279,7 +280,7 @@ final class ThemedPopUp: ThemedControl {
                 ClassicChoiceDrawing.drawIndicator(
                     choiceStyle,
                     in: arrow,
-                    color: Design.Text.label
+                    color: ClassicChoiceDrawing.indicatorInk(for: choiceStyle)
                 )
                 content.size.width = max(0, arrow.minX - content.minX - contentInset)
             } else {
@@ -323,7 +324,7 @@ final class ThemedPopUp: ThemedControl {
                 bounds,
                 fill: Design.Surface.controlResting,
                 border: Design.Surface.border,
-                radius: 5
+                radius: ClassicChoiceDrawing.aquaCornerRadius
             )
         } else if choiceStyle.isClassic {
             shape = ThemedSurface.draw(

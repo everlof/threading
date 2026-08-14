@@ -227,6 +227,11 @@ changes — grouping, sorting, expansion and every row action work the same. Tog
 the arrangement menu, **View ▸ Compact Tree** (rebindable in Settings ▸ Keyboard), or
 **Settings > General > Compact tree**.
 
+Whichever tree you keep, the list tightens as you narrow the column. Drag the divider in from
+the width the app opens at and the step between levels closes along with the space on either
+side of a row, so the space goes to the titles instead of the structure around them. It happens
+by degree rather than at a threshold, and drag back out and the list opens up again.
+
 Rows move rather than blink. A session that starts fades in while the rows below it slide down,
 one that is archived or deleted takes the gap with it, and a row that changes place — a session
 hoisted to the top under Recent Activity, or gathered under a branch heading — travels there.
@@ -2166,6 +2171,7 @@ open Threading's media inspector inside the same window. It starts fitted; pinch
 directly to an item. **Space** or **Escape** closes and returns focus to the image you came from.
 The inspector's **⋯** offers copying, Finder, the default app, and **Open in System Quick Look**
 as the last-resort system viewer. The panel's own **⋯** advertises the same routes.
+
 **Marking up a picture.** The inspector's pin button turns on annotation: click anywhere on the
 image to drop a numbered mark, and a field for it appears in a column beside the picture. Click a
 mark to put the caret in its field; put the caret in a field and its mark lights up, so "which one
@@ -2176,7 +2182,6 @@ When you close the inspector, the marks go to the chat you are looking at: a cop
 with the numbers drawn into it, plus the numbered notes, each carrying its point in the image's
 own pixels. Nothing is sent while you are still marking, and nothing is sent if you made no
 marks. A session with no live chat or terminal receives nothing — there is nowhere to put it.
-
 
 **The panel gives way to the window.** Showing an image opens the panel, and an open panel used
 to put a floor under how narrow the window could be made. It no longer does: drag the window's
@@ -2792,17 +2797,29 @@ token, and does not offer an unauthenticated browser fallback.
 
 ### The status card
 
-Whenever the selected session's project is a git checkout, a small floating card sits at the
+Whenever the selected session's project is a git checkout, a menu-like floating card sits at the
 session pane's top-right corner showing the current branch and the uncommitted totals
 (`+N −M`, untracked files included). It updates live as the agent writes — the same watcher
-the Review tab uses — and **clicking it opens Git Review**, so the diff is one click away
-without asking the agent for it. A clean checkout shows just the branch; a project that is
-not a repository shows no card at all.
+the Review tab uses. A clean checkout shows just the branch; a project that is not a repository
+shows no Git rows at all. The opaque themed surface and its shadow keep the card distinct from
+the terminal or conversation it covers.
 
-The card holds more than one destination, so **the pointer says which part goes where**: the
-branch and the totals each light on their own and both open Git Review, the children row opens
-Subagents, the audience row opens Sharing, and the model line — a reading rather than a
-destination — stays quiet under the pointer and does nothing when clicked.
+When the branch has a connected GitHub pull request or GitLab merge request, the card adds its
+number, title and current checks summary. Either row opens Git Review. It also shows the three
+most recent session attachments below a separator; click one to open it in Attachments, or use
+**View all N attachments** for the complete chronology. The list remains fixed-size even when a
+session has hundreds of attachments.
+
+The card holds more than one destination, so **the pointer says which part goes where**. Every
+interactive hover covers the whole cell: branch, totals and review rows open Git Review; the
+children row opens Subagents; the audience row opens Sharing; attachment rows open Attachments.
+The model line is a reading and remains quiet. Horizontal rules divide built-in sources from one
+another and from extension rows.
+
+Extensions can add up to three semantic rows through `session.corner-card@1`. A row may combine a
+host-rendered icon, compact text and status. When more belongs behind it, the extension supplies a
+disclosure summary and structured detail; Threading owns the menu-like reveal, theme, sizing,
+accessibility and action routing, so extensions never inject AppKit controls into the card.
 
 **You can switch the card off.** The header's `▣` button (View ▸ Status Card, rebindable in
 Settings ▸ Shortcuts) hides and shows it, and the choice sticks across launches. The card fades
@@ -3605,6 +3622,12 @@ requests no camera, microphone, contacts, calendar, location or Full Disk Access
 Remote Access does not need the Local Network permission either: the listener binds to
 `127.0.0.1`, and the selected HTTPS relay or Tailscale Serve publishes only that loopback
 listener. Threading never opens a listener on the physical LAN.
+
+The session status card's connected-review and check readings do reach the repository's code
+host while that card is enabled: GitHub uses the available Threading, `gh`, or Git credential
+(and can read a public repository anonymously), while GitLab delegates to the signed-in `glab`
+CLI. Turning the card off stops those lookups. They carry the repository, branch, and revision
+needed for the reading; they carry no install identifier and are not analytics.
 
 **Stored credentials** live in your login keychain, never in Threading's own database — the GitHub
 connection, paired-owner device credentials, any model API keys you enter, and secrets an

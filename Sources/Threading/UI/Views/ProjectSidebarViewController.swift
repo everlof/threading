@@ -196,6 +196,10 @@ final class ProjectSidebarViewController: NSViewController {
     /// `AppSettings.compactsSidebarTree` for what the compact tree is.
     private var presentedTreeIsCompact = false
 
+    /// The gutters and depth step the presented rows are stamped with, for the width the column
+    /// had at the last layout pass — see `SidebarDensity` and `applyWidthDensity`.
+    private var presentedDensity = SidebarDensity.relaxed
+
     /// The settings section list, shown in place of the projects when settings is open — so
     /// the window never grows a second sidebar.
     private var settingsSidebar: SettingsSidebar?
@@ -360,6 +364,9 @@ final class ProjectSidebarViewController: NSViewController {
         // truncate while empty space remained beside them.
         outlineView.sizeLastColumnToFit()
 
+        // Then the list is fitted to the width it just took — see `applyWidthDensity`. Every
+        // width the divider passes through arrives here, so the tightening rides the drag.
+        applyWidthDensity()
     }
 
     override func viewDidAppear() {
@@ -419,8 +426,10 @@ private extension ProjectSidebarViewController {
         ])
 
         // Before the first `reload()`, so the first tree is drawn at the chosen density
-        // rather than arriving indented and snapping flat.
+        // rather than arriving indented and snapping flat. The width is not known yet — the
+        // first layout pass answers that, and the same call there fits what has been built.
         applyTreeDensity(initial: true)
+        applyWidthDensity(initial: true)
     }
 
     /// Shows the prompt centred in the list area while no project has been added.
@@ -1289,15 +1298,53 @@ extension ProjectSidebarViewController {
         guard initial || compact != presentedTreeIsCompact else { return }
 
         presentedTreeIsCompact = compact
-        outlineView.flattenedIndentation = compact
+        applyOutlineIndentation()
+
+        guard !initial else { return }
+        applyStructure(steps: [], wholesale: true)
+    }
+
+    /// Fits the list to the width the column currently has — see `SidebarDensity`.
+    ///
+    /// Runs from every layout pass, so a divider drag tightens the gutters and the depth step
+    /// continuously rather than at a threshold. The guard is on the *drawn* metrics, not on the
+    /// width: two widths a point apart usually round to the same geometry, and those passes cost
+    /// one comparison.
+    ///
+    /// When they do differ the work is O(rows on screen): a constant on each visible row's two
+    /// gutter constraints, and `refitIndentedRows()` for the halves AppKit owns. Nothing is
+    /// rebuilt and nothing is reloaded — a wholesale pass per drag frame is exactly what this
+    /// route exists to avoid. Rows built later read the new geometry themselves, and are stamped
+    /// with the current density as they are dequeued.
+    func applyWidthDensity(initial: Bool = false) {
+        let width = view.bounds.width
+        guard width > 0 else { return }
+
+        let density = SidebarDensity(width: width)
+        guard initial || density != presentedDensity else { return }
+
+        presentedDensity = density
+        applyOutlineIndentation()
+
+        guard !initial else { return }
+        outlineView.enumerateAvailableRowViews { _, row in
+            let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
+            (cell as? SidebarDensityAdopting)?.applySidebarDensity(density)
+        }
+        outlineView.refitIndentedRows()
+    }
+
+    /// States the outline's own half of the density: the per-level step of the ordinary tree, or
+    /// the single edge the compact one flattens to. Both densities feed it — the setting decides
+    /// *which* geometry, the column's width decides how tight it is drawn.
+    private func applyOutlineIndentation() {
+        outlineView.indentationPerLevel = presentedDensity.indentationPerLevel
+        outlineView.flattenedIndentation = presentedTreeIsCompact
             ? .init(
                 cellLeading: SidebarDefaults.compactCellLeading,
                 markerLeading: SidebarDefaults.compactMarkerLeading
             )
             : nil
-
-        guard !initial else { return }
-        applyStructure(steps: [], wholesale: true)
     }
 
     /// Whether the compact tree draws its rule above this row: a top-level group opening
@@ -2604,16 +2651,21 @@ extension ProjectSidebarViewController: NSOutlineViewDataSource {
 extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
     /// Reuses a cell of the given type, creating it on first use.
+    ///
+    /// Every cell leaves here at the density the column is currently drawn at, whether it was
+    /// just made or has been sitting in the reuse pool since before the last drag — a row that
+    /// scrolls in has no other moment to learn how wide its column is.
     private func dequeueCell<Cell: NSTableCellView>(
         _ identifier: NSUserInterfaceItemIdentifier,
         make: () -> Cell
     ) -> Cell {
-        if let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? Cell {
-            return cell
-        }
-
-        let cell = make()
-        cell.identifier = identifier
+        let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? Cell
+            ?? {
+                let made = make()
+                made.identifier = identifier
+                return made
+            }()
+        (cell as? SidebarDensityAdopting)?.applySidebarDensity(presentedDensity)
         return cell
     }
 

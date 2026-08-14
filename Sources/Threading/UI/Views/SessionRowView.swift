@@ -120,6 +120,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     private lazy var nativeStack = NSStackView(views: [nativeIdentityContent, titleLabel])
     private lazy var contentContainer = ComponentContentContainer(defaultContent: nativeStack)
     private lazy var rowContentStack = NSStackView(views: [nativeStack])
+
+    /// The two gutters the column's width moves — see `SidebarDensity`. Held so a narrower
+    /// column is a constant assignment on the rows already on screen.
+    private var contentLeadingConstraint: NSLayoutConstraint?
+    private var trailingSlotConstraint: NSLayoutConstraint?
+
     private var identityContentContainerIsMaterialized = false
     private var contentContainerIsMaterialized = false
     private var afterTitleSlotIsMaterialized = false
@@ -297,29 +303,42 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // exposed for accessibility directly instead.
         setAccessibilityRole(.staticText)
 
+        // The slot is pulled out by the padding an inline button holds around its glyph, the way
+        // `PaneFooterView` places a trailing button — see `OpticalInsetProviding`. Pinned by
+        // frame instead, the status dot stops short of the margin a project row's count reaches,
+        // and the list's trailing edge reads as two edges.
+        let leading = rowContentStack.leadingAnchor.constraint(
+            equalTo: leadingAnchor,
+            constant: SidebarRowDefaults.leadingInset
+        )
+        let trailing = trailingSlot.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -trailingSlotInset(for: SidebarRowDefaults.trailingInset)
+        )
+        contentLeadingConstraint = leading
+        trailingSlotConstraint = trailing
+
         NSLayoutConstraint.activate([
-            rowContentStack.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
-                constant: SidebarRowDefaults.leadingInset
-            ),
+            leading,
             rowContentStack.trailingAnchor.constraint(
                 lessThanOrEqualTo: trailingSlot.leadingAnchor,
                 constant: -SidebarRowDefaults.horizontalSpacing
             ),
             rowContentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-            // The slot is pulled out by the padding an inline button holds around its glyph,
-            // the way `PaneFooterView` places a trailing button — see `OpticalInsetProviding`.
-            // Pinned by frame instead, the status dot stops short of the margin a project row's
-            // count reaches, and the list's trailing edge reads as two edges.
-            trailingSlot.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -(
-                    SidebarRowDefaults.trailingInset - archiveButton.opticalHorizontalInset
-                )
-            ),
+            trailing,
             trailingSlot.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
+    }
+
+    /// How far inside the row's trailing edge the slot is pinned, for a given gutter.
+    ///
+    /// Never negative. The gutter is measured to the button's *ink*, so the slot is pulled out by
+    /// the padding around the glyph — and a gutter narrower than that padding would push the slot
+    /// past the row it lives in, where it draws perfectly and cannot be clicked at all:
+    /// `NSView.hitTest` stops at the container's bounds. A tight column lends the title the space
+    /// it has, not space the row does not own.
+    private func trailingSlotInset(for gutter: CGFloat) -> CGFloat {
+        max(0, gutter - archiveButton.opticalHorizontalInset)
     }
 
     /// Builds the one visual subtree extensions may customize. The activity/actions slot is a
@@ -1304,6 +1323,18 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         statusIndicator?.hostGround = ground
         actionButton.hostGround = ground
         archiveButton.hostGround = ground
+    }
+}
+
+// MARK: - Sidebar Density
+
+extension SessionRowView: SidebarDensityAdopting {
+
+    /// Restates the row's two gutters at the width the column now has. Both are constraint
+    /// constants, so this is the whole of a row's part in a divider drag.
+    func applySidebarDensity(_ density: SidebarDensity) {
+        contentLeadingConstraint?.constant = density.rowLeadingInset
+        trailingSlotConstraint?.constant = -trailingSlotInset(for: density.rowTrailingInset)
     }
 }
 

@@ -1,5 +1,13 @@
 import AppKit
 
+private enum StatusCardRemoteDefaults {
+    /// Checkout notifications arrive in bursts while an agent writes. Local/provider discovery
+    /// starts only after that burst settles, and the provider read below is cached separately.
+    static let checkoutDebounce: TimeInterval = 0.5
+    static let remoteRefreshInterval: TimeInterval = 15
+    static let pendingChecksPollInterval: TimeInterval = 30
+}
+
 /// Hosts whichever chat or standalone terminal is selected in the sidebar.
 ///
 /// Live chat controllers are retained by `AgentRuntime` and standalone terminals by
@@ -112,6 +120,13 @@ final class TerminalContainerViewController: NSViewController {
     /// `currentSessionID`: it exists only while a session's checkout is on screen.
     private let gitStatusOverlay = GitStatusOverlayView()
     private var gitChangeMonitor: GitChangeMonitor?
+    private lazy var changeRequestProviders = ChangeRequestProviderRegistry.live()
+    private var changeRequestTask: Task<Void, Never>?
+    private var changeRequestGeneration = 0
+    private var changeRequestDebounceWork: DispatchWorkItem?
+    private var changeRequestPollWork: DispatchWorkItem?
+    private var lastChangeRequestRead: (signature: String, date: Date)?
+    private var lastChangeRequestReading: GitStatusOverlayView.ChangeRequestReading?
     /// The session whose row is spinning for the monitor's first read, so tearing the monitor
     /// down can lower a raise whose completion will now never fire.
     private var gitStatusLoadingSessionID: SessionID?
@@ -280,6 +295,10 @@ final class TerminalContainerViewController: NSViewController {
             guard event.sessionID == self?.currentSessionID else { return }
             self?.refreshGitStatusOverlayAudience()
         }
+        appEvents.observe(SessionAttachmentsDidChange.self) { [weak self] event in
+            guard event.sessionID == self?.currentSessionID else { return }
+            self?.refreshGitStatusOverlayAttachments()
+        }
         appEvents.observe(TerminalTextVisibilityIssueDetected.self) { [weak self] event in
             self?.terminalTextVisibilityIssueDetected(event.issue)
         }
@@ -307,6 +326,17 @@ final class TerminalContainerViewController: NSViewController {
     /// to be re-asked together or the card comes back the moment the window is resized.
     func toggleGitStatusOverlay() {
         StatusCardVisibility.isEnabled.toggle()
+        if StatusCardVisibility.isEnabled,
+           let sessionID = currentSessionID,
+           let project = ProjectStore.shared.executionProject(forSessionID: sessionID) {
+            refreshGitStatusOverlayChangeRequest(
+                for: sessionID,
+                root: project.folderURL,
+                forceRemote: false
+            )
+        } else if !StatusCardVisibility.isEnabled {
+            stopGitStatusOverlayChangeRequest()
+        }
         updateGitStatusOverlayVisibility(animated: true)
     }
 
@@ -1631,6 +1661,13 @@ private extension TerminalContainerViewController {
         gitStatusOverlay.onOpenSharing = { [weak self] in
             self?.openSharing()
         }
+        gitStatusOverlay.onOpenAttachment = { [weak self] attachmentID in
+            guard let self else { return }
+            self.delegate?.terminalContainer(
+                self,
+                didRequestAttachments: attachmentID
+            )
+        }
         addOverlay(gitStatusOverlay)
 
         NSLayoutConstraint.activate([
@@ -1693,6 +1730,7 @@ private extension TerminalContainerViewController {
     func updateGitChangeMonitor() {
         gitChangeMonitor?.stop()
         gitChangeMonitor = nil
+        stopGitStatusOverlayChangeRequest()
         if let previous = gitStatusLoadingSessionID {
             gitStatusLoadingSessionID = nil
             delegate?.terminalContainer(self, gitStatusLoadingDidChange: false, for: previous)
@@ -1702,6 +1740,7 @@ private extension TerminalContainerViewController {
         refreshGitStatusOverlaySubagents()
         refreshGitStatusOverlayModel()
         refreshGitStatusOverlayAudience()
+        refreshGitStatusOverlayAttachments()
 
         guard let sessionID = currentSessionID,
               let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else { return }
@@ -1715,6 +1754,10 @@ private extension TerminalContainerViewController {
                 guard let self, self.currentSessionID == sessionID else { return }
                 self.gitStatusOverlay.update(with: reading)
                 self.refreshGitStatusOverlayRunState()
+                self.scheduleGitStatusOverlayChangeRequest(
+                    for: sessionID,
+                    root: project.folderURL
+                )
             },
             onInitialReadComplete: { [weak self] in
                 // Lowered for the session the raise was made for, current or not — the raise
@@ -1742,6 +1785,13 @@ private extension TerminalContainerViewController {
         }
         gitChangeMonitor?.start()
         refreshGitStatusOverlayRunState()
+        if StatusCardVisibility.isEnabled {
+            refreshGitStatusOverlayChangeRequest(
+                for: sessionID,
+                root: project.folderURL,
+                forceRemote: false
+            )
+        }
     }
 
     /// The same live checkout reading has two presentations: branch while idle, turn progress
@@ -1779,6 +1829,151 @@ private extension TerminalContainerViewController {
                 ? inputControl.controllerDisplayName
                 : nil
         ))
+    }
+
+    /// The card shows a fixed-size glimpse of the attachment chronology. The store revalidates
+    /// its references before returning, so a file removed outside the app disappears here and in
+    /// the pane through the same read gate.
+    func refreshGitStatusOverlayAttachments() {
+        guard let sessionID = currentSessionID else {
+            gitStatusOverlay.updateAttachments(.init(attachments: []))
+            return
+        }
+        gitStatusOverlay.updateAttachments(.init(
+            attachments: SessionAttachmentStore.shared.attachments(for: sessionID)
+        ))
+    }
+
+    /// Coalesces checkout bursts before the provider read. This callback is fed by files and
+    /// index changes too, so one operation is still bounded by the remote cache below rather than
+    /// turning a streamed edit into network traffic per filesystem event.
+    func scheduleGitStatusOverlayChangeRequest(for sessionID: SessionID, root: URL) {
+        guard StatusCardVisibility.isEnabled else { return }
+        changeRequestDebounceWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.currentSessionID == sessionID else { return }
+            self.refreshGitStatusOverlayChangeRequest(
+                for: sessionID,
+                root: root,
+                forceRemote: false
+            )
+        }
+        changeRequestDebounceWork = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + StatusCardRemoteDefaults.checkoutDebounce,
+            execute: work
+        )
+    }
+
+    /// Reads local repository state off-main through `ChangeRequestGit`, then performs one
+    /// provider-neutral discovery. Only a connected request reaches the card; publication and
+    /// every other write remain exclusively in Git Review.
+    func refreshGitStatusOverlayChangeRequest(
+        for sessionID: SessionID,
+        root: URL,
+        forceRemote: Bool
+    ) {
+        guard StatusCardVisibility.isEnabled, currentSessionID == sessionID else { return }
+        changeRequestGeneration &+= 1
+        let expected = changeRequestGeneration
+        changeRequestTask?.cancel()
+        changeRequestTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let local = try await ChangeRequestGit.state(in: root)
+                guard !Task.isCancelled,
+                      expected == self.changeRequestGeneration,
+                      self.currentSessionID == sessionID else { return }
+                guard case .supported(let repository) = ChangeRequestRepository.detect(
+                    remote: local.remote
+                ) else {
+                    self.lastChangeRequestReading = nil
+                    self.gitStatusOverlay.updateChangeRequest(nil)
+                    return
+                }
+
+                let signature = "\(local.branch):\(local.headRevision)"
+                if !forceRemote,
+                   let last = self.lastChangeRequestRead,
+                   last.signature == signature,
+                   Date().timeIntervalSince(last.date)
+                    < StatusCardRemoteDefaults.remoteRefreshInterval {
+                    if self.lastChangeRequestReading?.checks.state == .pending {
+                        self.scheduleGitStatusOverlayPendingChecks(
+                            for: sessionID,
+                            root: root
+                        )
+                    }
+                    return
+                }
+
+                let outcome = await self.changeRequestProviders.discover(
+                    repository: repository,
+                    branch: local.branch,
+                    headRevision: local.headRevision
+                )
+                guard !Task.isCancelled,
+                      expected == self.changeRequestGeneration,
+                      self.currentSessionID == sessionID else { return }
+                self.lastChangeRequestRead = (signature, Date())
+                switch outcome {
+                case .loaded(let status):
+                    let reading = GitStatusOverlayView.ChangeRequestReading(status: status)
+                    self.lastChangeRequestReading = reading
+                    self.gitStatusOverlay.updateChangeRequest(reading)
+                    if reading?.checks.state == .pending {
+                        self.scheduleGitStatusOverlayPendingChecks(
+                            for: sessionID,
+                            root: root
+                        )
+                    }
+                case .failed:
+                    self.lastChangeRequestReading = nil
+                    self.gitStatusOverlay.updateChangeRequest(nil)
+                }
+            } catch {
+                guard !Task.isCancelled,
+                      expected == self.changeRequestGeneration,
+                      self.currentSessionID == sessionID else { return }
+                self.lastChangeRequestReading = nil
+                self.gitStatusOverlay.updateChangeRequest(nil)
+            }
+        }
+    }
+
+    /// Pending checks are the one remote fact whose value moves without a local checkout event.
+    /// Poll only while that state is visible, with one replaceable work item per selected session.
+    func scheduleGitStatusOverlayPendingChecks(for sessionID: SessionID, root: URL) {
+        changeRequestPollWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.currentSessionID == sessionID,
+                  StatusCardVisibility.isEnabled else { return }
+            self.refreshGitStatusOverlayChangeRequest(
+                for: sessionID,
+                root: root,
+                forceRemote: true
+            )
+        }
+        changeRequestPollWork = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + StatusCardRemoteDefaults.pendingChecksPollInterval,
+            execute: work
+        )
+    }
+
+    /// Cancels every route by which a remote answer could repaint another session's card.
+    func stopGitStatusOverlayChangeRequest() {
+        changeRequestGeneration &+= 1
+        changeRequestTask?.cancel()
+        changeRequestTask = nil
+        changeRequestDebounceWork?.cancel()
+        changeRequestDebounceWork = nil
+        changeRequestPollWork?.cancel()
+        changeRequestPollWork = nil
+        lastChangeRequestRead = nil
+        lastChangeRequestReading = nil
+        gitStatusOverlay.updateChangeRequest(nil)
     }
 
     /// Projects the provider-neutral hierarchy into the compact receipt beside Git status.
@@ -2190,6 +2385,11 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
     func terminalContainerDidRequestGitReview(_ container: TerminalContainerViewController)
     /// Its audience row was clicked: open who can reach this chat and who is on it.
     func terminalContainerDidRequestSharing(_ container: TerminalContainerViewController)
+    /// One attachment row, or the bounded "View all" row, asked for the Attachments pane.
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didRequestAttachments attachmentID: String?
+    )
     /// A turn's changed-files card asked for its immutable checkpoint diff.
     func terminalContainer(
         _ container: TerminalContainerViewController,

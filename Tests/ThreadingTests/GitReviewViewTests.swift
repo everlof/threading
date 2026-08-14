@@ -101,8 +101,9 @@ final class GitReviewViewTests: XCTestCase {
 
     func testReviewDiffUsesNeutralBodyInkAndSemanticGutterInk() throws {
         let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+        let lines = file.hunks.flatMap(\.lines)
         let view = GitReviewDiffTextView(
-            gitLines: file.hunks.flatMap(\.lines),
+            gitLines: lines,
             displayCap: 100,
             path: "Sources/Foo.swift"
         )
@@ -124,6 +125,53 @@ final class GitReviewViewTests: XCTestCase {
         )
         XCTAssertGreaterThan(colors.removedMarker.oklab.chroma, colors.removedText.oklab.chroma)
         XCTAssertGreaterThan(colors.addedMarker.oklab.chroma, colors.addedText.oklab.chroma)
+
+        let removedIndex = try XCTUnwrap(lines.firstIndex { $0.kind == .removed })
+        let addedIndex = try XCTUnwrap(lines.firstIndex { $0.kind == .added })
+        XCTAssertEqual(
+            view.lineNumberColorForTesting(atDisplayedLine: removedIndex)?.usingColorSpace(.sRGB),
+            colors.removedMarker.usingColorSpace(.sRGB)
+        )
+        XCTAssertEqual(
+            view.lineNumberColorForTesting(atDisplayedLine: addedIndex)?.usingColorSpace(.sRGB),
+            colors.addedMarker.usingColorSpace(.sRGB)
+        )
+        let action = try XCTUnwrap(
+            view.lineActionRectForTesting(atDisplayedLine: addedIndex)
+        )
+        XCTAssertGreaterThanOrEqual(action.minX, 0)
+        XCTAssertLessThanOrEqual(action.maxX, GitReviewDefaults.lineNumberWidth)
+    }
+
+    func testWordDiffsEmphasizeOnlyTheChangedSubstring() throws {
+        let view = GitReviewDiffTextView(
+            gitLines: [
+                GitDiffLine(
+                    kind: .removed,
+                    text: "let animal = cat",
+                    oldNumber: 4,
+                    newNumber: nil
+                ),
+                GitDiffLine(
+                    kind: .added,
+                    text: "let animal = dog",
+                    oldNumber: nil,
+                    newNumber: 4
+                ),
+            ],
+            displayCap: 100,
+            path: "Sources/Animal.swift",
+            showsWordDiffs: true
+        )
+        let storage = try XCTUnwrap(view.textStorage)
+        let text = storage.string as NSString
+        let common = text.range(of: "animal")
+        let removed = text.range(of: "cat")
+        let added = text.range(of: "dog")
+
+        XCTAssertNil(storage.attribute(.backgroundColor, at: common.location, effectiveRange: nil))
+        XCTAssertNotNil(storage.attribute(.backgroundColor, at: removed.location, effectiveRange: nil))
+        XCTAssertNotNil(storage.attribute(.backgroundColor, at: added.location, effectiveRange: nil))
     }
 
     func testReviewHeaderControlsPersistAndRebuildAtTheNextCodeSize() throws {
@@ -319,7 +367,7 @@ final class GitReviewViewTests: XCTestCase {
         )
     }
 
-    /// The header's Copy Path / external-open pair answers the pointer on the whole line, and
+    /// The header's Copy Path / Finder pair answers the pointer on the whole line, and
     /// is hidden rather than merely transparent at rest — `hitTest` reads no alpha, so an
     /// invisible button would swallow the header's own toggle and copy paths nobody asked for.
     func testHeaderHoverRevealsTheFileActionsAndAStaleHoverConcealsThem() throws {
@@ -347,7 +395,7 @@ final class GitReviewViewTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
 
         let buttons = row.subviews.compactMap { $0 as? ThemedIconButton }
-        XCTAssertEqual(buttons.count, 2, "copy path and external open ride the header")
+        XCTAssertEqual(buttons.count, 2, "copy path and Finder ride the header")
         XCTAssertTrue(buttons.allSatisfy(\.isHidden), "at rest the actions take no clicks")
 
         let headerPoint = NSPoint(x: row.bounds.midX, y: row.bounds.maxY - 4)
@@ -374,6 +422,29 @@ final class GitReviewViewTests: XCTestCase {
         // nothing will deliver — the row scrolled or reloaded out from under the pointer.
         row.updateTrackingAreas()
         XCTAssertTrue(buttons.allSatisfy(\.isHidden))
+    }
+
+    func testFileHoverActionsDispatchTheExactWorkingCopyURL() throws {
+        let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+        let url = URL(fileURLWithPath: "/tmp/Sources/Foo.swift")
+        let row = GitReviewFileRow(file: file, expanded: false, fileURL: url)
+        var copied: URL?
+        var revealed: URL?
+        row.copyPathHandler = { copied = $0 }
+        row.revealInFinderHandler = { revealed = $0 }
+
+        let buttons = row.subviews.compactMap { $0 as? ThemedIconButton }
+        let copy = try XCTUnwrap(buttons.first {
+            $0.accessibilityIdentifier() == "git-review.file.copy-path"
+        })
+        let reveal = try XCTUnwrap(buttons.first {
+            $0.accessibilityIdentifier() == "git-review.file.reveal-in-finder"
+        })
+
+        XCTAssertTrue(copy.performPrimaryAction())
+        XCTAssertTrue(reveal.performPrimaryAction())
+        XCTAssertEqual(copied, url)
+        XCTAssertEqual(revealed, url)
     }
 
     /// A click that lands on a revealed hover action belongs to that control; the row folding
@@ -476,14 +547,54 @@ final class GitReviewViewTests: XCTestCase {
     func testFileRowExpandsWithHunkHeaders() {
         let files = GitDiffParser.files(fromUnifiedDiff: fixture)
         let row = GitReviewFileRow(file: files[0], expanded: true)
+        var expansionRequests = 0
+        row.onExpandContext = { expansionRequests += 1 }
 
         // Force layout to surface any conflicting constraints as a crash/log here, not in the app.
         row.layoutSubtreeIfNeeded()
 
         let body = row.subviews.compactMap { $0 as? NSStackView }.first
         XCTAssertNotNil(body)
-        // Two hunks: header + diff, header + diff.
-        XCTAssertEqual(body?.arrangedSubviews.count, 4)
+        // Two hunks: header + diff, the seven omitted lines, then header + diff.
+        XCTAssertEqual(body?.arrangedSubviews.count, 5)
+        let expand = Self.descendants(of: ThemedButton.self, in: row)
+            .first { $0.title.contains("7") }
+        XCTAssertNotNil(expand)
+        XCTAssertTrue(expand?.performPrimaryAction() == true)
+        XCTAssertEqual(expansionRequests, 1)
+    }
+
+    func testDirectDiffLayoutToggleBuildsTwoAlignedTextDocuments() throws {
+        let files = GitDiffParser.files(fromUnifiedDiff: fixture)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 720, height: 700)
+        controller.show(.files(files))
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(controller.diffLayout, .unified)
+        XCTAssertTrue(controller.diffLayoutButton.performPrimaryAction())
+        controller.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(controller.diffLayout, .split)
+
+        let split = try XCTUnwrap(
+            Self.firstDescendant(of: GitReviewSplitDiffView.self, in: controller.view)
+        )
+        let documents = Self.descendants(of: GitReviewDiffTextView.self, in: split)
+        XCTAssertEqual(documents.count, 2)
+        XCTAssertTrue(documents.contains { $0.string.contains("old line") })
+        XCTAssertTrue(documents.contains { $0.string.contains("new line") })
+        let lineCounts = documents.map { $0.string.components(separatedBy: "\n").count }
+        XCTAssertEqual(lineCounts[0], lineCounts[1])
+
+        XCTAssertTrue(controller.diffLayoutButton.performPrimaryAction())
+        controller.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(controller.diffLayout, .unified)
+        XCTAssertNil(Self.firstDescendant(of: GitReviewSplitDiffView.self, in: controller.view))
     }
 
     func testCollapsedFileRowBuildsNoBody() {
@@ -574,6 +685,88 @@ final class GitReviewViewTests: XCTestCase {
         controller.view.layoutSubtreeIfNeeded()
         XCTAssertEqual(controller.fileTableView.numberOfRows, files.count)
         XCTAssertLessThan(controller.instantiatedFileRowCount, files.count)
+    }
+
+    func testChangedFileNavigatorBuildsAFilteredTreeAndSkipsIdenticalRebuilds() {
+        let navigator = GitReviewPathNavigatorViewController(
+            rootURL: URL(fileURLWithPath: NSTemporaryDirectory())
+        )
+        _ = navigator.view
+        let files = [
+            GitFileDiff(path: "Sources/UI/Review.swift", change: .modified, hunks: [], added: 4, removed: 2),
+            GitFileDiff(path: "Sources/Git/Reader.swift", change: .modified, hunks: [], added: 1, removed: 0),
+            GitFileDiff(path: "Tests/ReviewTests.swift", change: .added, hunks: [], added: 20, removed: 0),
+        ]
+
+        navigator.update(files: files)
+        XCTAssertEqual(navigator.rootPathsForTesting, ["Sources", "Tests"])
+        XCTAssertEqual(navigator.modelRebuildCountForTesting, 1)
+        navigator.update(files: files)
+        XCTAssertEqual(navigator.modelRebuildCountForTesting, 1)
+
+        navigator.setFilterForTesting("Reader")
+        XCTAssertEqual(navigator.visibleLeafPathsForTesting, ["Sources/Git/Reader.swift"])
+        navigator.setFilterForTesting("")
+        XCTAssertEqual(Set(navigator.visibleLeafPathsForTesting), Set(files.map(\.path)))
+    }
+
+    func testNavigatorToggleResizesTheDiffAndJumpKeepsTheChosenFileVisible() {
+        let files = Self.stressSmallExpandedFiles(count: 100, linesPerFile: 4)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 720, height: 360)
+        controller.show(.files(files))
+        controller.view.layoutSubtreeIfNeeded()
+        let initialWidth = controller.scrollView.bounds.width
+
+        XCTAssertTrue(controller.canJumpToFile)
+        XCTAssertTrue(controller.fileNavigatorButton.performPrimaryAction())
+        controller.view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(controller.fileNavigatorVisibleForTesting)
+        XCTAssertEqual(controller.fileNavigatorWidthForTesting, 260)
+        XCTAssertLessThan(controller.scrollView.bounds.width, initialWidth)
+
+        let target = 80
+        controller.jumpToFile(files[target].path)
+        controller.view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(
+            controller.scrollView.documentVisibleRect.intersects(
+                controller.fileTableView.rect(ofRow: target)
+            )
+        )
+
+        XCTAssertTrue(controller.fileNavigatorButton.performPrimaryAction())
+        controller.view.layoutSubtreeIfNeeded()
+        XCTAssertFalse(controller.fileNavigatorVisibleForTesting)
+        XCTAssertEqual(controller.fileNavigatorWidthForTesting, 0)
+    }
+
+    func testFileHeadingSticksAfterItsRealHeaderScrollsAway() {
+        let files = Self.stressDenseFiles(count: 2, linesPerFile: 100)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 240)
+        controller.show(.files(files))
+        controller.view.layoutSubtreeIfNeeded()
+
+        controller.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 80))
+        controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+        controller.updateScrollControls()
+        controller.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(controller.stickyFileHeaderPathForTesting, files[0].path)
+
+        controller.scrollView.contentView.scroll(to: .zero)
+        controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+        controller.updateScrollControls()
+        XCTAssertNil(controller.stickyFileHeaderPathForTesting)
     }
 
     func testProgressiveFileIndexReconcilesIntoFullRowsInPlace() {
@@ -1113,13 +1306,87 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertEqual(diff.bounds.width, card.bounds.width, accuracy: 0.5)
         XCTAssertEqual(
             card.bounds.height - diff.bounds.height,
-            78,
+            110,
             accuracy: 4,
-            "resizing should replace both the TextKit and table-row height caches; "
+            "resizing should replace both height caches while retaining the context control; "
                 + "card=\(card.bounds.height) diff=\(diff.bounds.height) "
                 + "row=\(controller.fileTableView.rect(ofRow: 0).height) "
                 + "cache=\(String(describing: controller.measuredFileRowHeights[file.path]))"
         )
+    }
+
+    /// A split divider may advance the pane every display frame. The viewport, virtual table,
+    /// mounted card and TextKit document must advance by the same delta in that one layout pass;
+    /// a fast second pass is still a visible trailing animation.
+    func testVisibleDiffWidthSettlesWithEveryPaneResizeFrame() throws {
+        let file = try XCTUnwrap(Self.stressDenseFiles(count: 1, linesPerFile: 120).first)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 760)
+        controller.show(.files([file]))
+        controller.view.layoutSubtreeIfNeeded()
+
+        let host = try XCTUnwrap(
+            controller.fileTableView.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        )
+        let card = try XCTUnwrap(host.subviews.first as? GitReviewFileRow)
+        let diff = try XCTUnwrap(
+            Self.firstDescendant(of: GitReviewDiffTextView.self, in: card)
+        )
+
+        func widths() -> (
+            clip: CGFloat,
+            table: CGFloat,
+            column: CGFloat,
+            host: CGFloat,
+            card: CGFloat,
+            diff: CGFloat
+        ) {
+            (
+                controller.scrollView.contentView.bounds.width,
+                controller.fileTableView.bounds.width,
+                controller.fileTableView.tableColumns[0].width,
+                host.bounds.width,
+                card.bounds.width,
+                diff.bounds.width
+            )
+        }
+
+        var previous = widths()
+        for width: CGFloat in [680, 760, 540, 700, 460, 620] {
+            controller.view.setFrameSize(NSSize(width: width, height: 760))
+            controller.view.layoutSubtreeIfNeeded()
+
+            let current = widths()
+            let viewportDelta = current.clip - previous.clip
+            for (name, delta) in [
+                ("table", current.table - previous.table),
+                ("column", current.column - previous.column),
+                ("row host", current.host - previous.host),
+                ("file card", current.card - previous.card),
+                ("diff document", current.diff - previous.diff)
+            ] {
+                XCTAssertEqual(
+                    delta,
+                    viewportDelta,
+                    accuracy: 0.5,
+                    "\(name) trailed the viewport at pane width \(width)"
+                )
+            }
+            XCTAssertFalse(
+                controller.fileTableView.needsLayout,
+                "the table left a second visible layout pass pending at pane width \(width)"
+            )
+            XCTAssertFalse(
+                card.needsLayout,
+                "the visible card left its TextKit width for the next frame at pane width \(width)"
+            )
+            previous = current
+        }
     }
 
     /// Offscreen files remain model rows, but their estimates must be close enough that the
@@ -1826,6 +2093,23 @@ final class GitReviewViewTests: XCTestCase {
         var resizeMutationNanoseconds: UInt64 = 0
         var resizeLayoutNanoseconds: UInt64 = 0
         var resizeFrameNanoseconds: [UInt64] = []
+        let resizeHost = try XCTUnwrap(
+            table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        )
+        let resizeCard = try XCTUnwrap(resizeHost.subviews.first as? GitReviewFileRow)
+        let resizeDiff = try XCTUnwrap(
+            Self.firstDescendant(of: GitReviewDiffTextView.self, in: resizeCard)
+        )
+        var previousResizeWidths = [
+            scroll.contentView.bounds.width,
+            table.bounds.width,
+            table.tableColumns[0].width,
+            resizeHost.bounds.width,
+            resizeCard.bounds.width,
+            resizeDiff.bounds.width
+        ]
+        var maximumResizeWidthDeltaDrift: CGFloat = 0
+        var pendingResizeLayoutFrames = 0
         for frame in 0..<resizeFrames {
             let phase = CGFloat(frame) / CGFloat(max(resizeFrames - 1, 1))
             let fraction = phase <= 0.5 ? phase * 2 : (1 - phase) * 2
@@ -1838,6 +2122,27 @@ final class GitReviewViewTests: XCTestCase {
             resizeMutationNanoseconds += mutated - started
             resizeLayoutNanoseconds += laidOut - mutated
             resizeFrameNanoseconds.append(laidOut - started)
+
+            let currentResizeWidths = [
+                scroll.contentView.bounds.width,
+                table.bounds.width,
+                table.tableColumns[0].width,
+                resizeHost.bounds.width,
+                resizeCard.bounds.width,
+                resizeDiff.bounds.width
+            ]
+            let viewportDelta = currentResizeWidths[0] - previousResizeWidths[0]
+            for index in 1..<currentResizeWidths.count {
+                let descendantDelta = currentResizeWidths[index] - previousResizeWidths[index]
+                maximumResizeWidthDeltaDrift = max(
+                    maximumResizeWidthDeltaDrift,
+                    abs(descendantDelta - viewportDelta)
+                )
+            }
+            if table.needsLayout || resizeCard.needsLayout {
+                pendingResizeLayoutFrames += 1
+            }
+            previousResizeWidths = currentResizeWidths
         }
         controller.view.setFrameSize(NSSize(width: 620, height: 760))
         controller.view.layoutSubtreeIfNeeded()
@@ -1848,6 +2153,7 @@ final class GitReviewViewTests: XCTestCase {
                 sortedResizeFrames.count - 1
             )
         ]
+        let resizeWidthDrift = String(format: "%.3f", maximumResizeWidthDeltaDrift)
         func measureSweep(distance: CGFloat) -> (
             scroll: UInt64,
             layout: UInt64,
@@ -1941,7 +2247,9 @@ final class GitReviewViewTests: XCTestCase {
                 + "layout_ms="
                 + "\(Self.milliseconds(resizeLayoutNanoseconds / UInt64(resizeFrames))) "
                 + "p95_frame_ms=\(Self.milliseconds(resizeP95)) "
-                + "max_frame_ms=\(Self.milliseconds(sortedResizeFrames.last ?? 0))"
+                + "max_frame_ms=\(Self.milliseconds(sortedResizeFrames.last ?? 0)) "
+                + "max_width_delta_drift=\(resizeWidthDrift) "
+                + "pending_layout_frames=\(pendingResizeLayoutFrames)"
         )
         for (kind, measurement) in [("continuous", continuous), ("full-index", fullIndex)] {
             print(
@@ -1972,6 +2280,16 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertEqual(table.numberOfRows, fileCount + inserted.count)
         XCTAssertLessThan(controller.instantiatedFileRowCount, fileCount + inserted.count)
         XCTAssertGreaterThan(controller.instantiatedDeferredFileRowCount, 0)
+        XCTAssertLessThanOrEqual(
+            maximumResizeWidthDeltaDrift,
+            0.5,
+            "the visible diff width trailed the viewport during live resize"
+        )
+        XCTAssertEqual(
+            pendingResizeLayoutFrames,
+            0,
+            "a displayed resize frame left the visible diff geometry pending"
+        )
     }
 
     /// Opt-in end-to-end wall-latency sweep against a real, already-present repository. The
@@ -2600,6 +2918,16 @@ final class GitReviewViewTests: XCTestCase {
             if let match = firstDescendant(of: type, in: child) { return match }
         }
         return nil
+    }
+
+    private static func descendants<View: NSView>(
+        of type: View.Type,
+        in root: NSView
+    ) -> [View] {
+        root.subviews.flatMap { child -> [View] in
+            let current = (child as? View).map { [$0] } ?? []
+            return current + descendants(of: type, in: child)
+        }
     }
 
     private func awaitGitValue<Value>(

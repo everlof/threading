@@ -76,7 +76,12 @@ extension AppThemeStyles {
                 popoverStyle: aquaHelpTagPopoverStyle,
                 buttonStyle: AppTheme.Material.ButtonStyle(
                     fontWeight: .regular,
-                    primaryTreatment: .raised,
+                    // Aqua's default button is the blue one. `raised` is the *classic desktop*
+                    // default — the ordinary face plus an extra frame, which is Platinum's
+                    // answer and Win32's, not this release's — and on a material with a corner
+                    // radius it also left a square of frame colour outside each curve. Tiger
+                    // fills the button instead, the way its Save and OK buttons were filled.
+                    primaryTreatment: .filled,
                     primaryRole: .accent
                 ),
                 typeface: .standard,

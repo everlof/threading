@@ -37,6 +37,38 @@ enum Design {
         static let large: CGFloat = 20
         /// Between a view's content and the edge of its pane.
         static let pane: CGFloat = 32
+
+        /// `inset`, **fitted to the corner it sits inside**.
+        ///
+        /// A broad corner eats into the content box. A card's first line of text sits about
+        /// `inset` below the top edge, and at that height a 40pt corner has already curved 11pt
+        /// inwards — so a title held `inset` in from the leading edge stands against the curve
+        /// with half a point to spare, which is what Botanical's and Claymorphism's cards read
+        /// as: overfull, the copy crowding the silhouette that was supposed to hold it.
+        ///
+        /// The rule is stated by the shape rather than chosen: the content's own corner has to
+        /// stay `inset` clear of the arc measured along the diagonal, where the arc comes
+        /// closest — `√2·(radius - i) ≤ radius - inset`. A corner at or under `inset` asks for
+        /// nothing, which is every theme but four: Botanical takes 20, Claymorphism 18, and the
+        /// 14/16pt styles a single point.
+        ///
+        /// A padded panel does not read this once and keep it. The inset is fitted to a corner
+        /// the *theme* states, so it is re-fitted by the same sweep that re-applies the corner —
+        /// see `NSView.holdAtContentInset(_:inside:)`.
+        ///
+        /// `base` is what the surface pads by when its corner asks for nothing — `inset` for a
+        /// card, and a surface that has measured its own tighter padding says so rather than
+        /// being widened to a card's. The corner only ever pushes content further in.
+        static func inset(inside radius: CGFloat, from base: CGFloat = inset) -> CGFloat {
+            guard radius > base else { return base }
+            return (radius - (radius - base) / 2.0.squareRoot()).rounded()
+        }
+
+        /// The same, for a surface stated as a role rather than as a measurement.
+        @MainActor
+        static func inset(inside radius: SurfaceRadius, from base: CGFloat = inset) -> CGFloat {
+            inset(inside: radius.current, from: base)
+        }
     }
 
     // MARK: - Radius
@@ -73,13 +105,36 @@ enum Design {
         /// drew as a disc while the 20pt `+` beside it drew as a rounded square. Same token, two
         /// silhouettes, and no call site said anything about a circle. Anything comfortably
         /// larger than the radius is unaffected, so this changes small controls only.
+        ///
+        /// **How much it may take depends on the shape.** A square has no flat edge to spare, so
+        /// a third is the limit. A row does: at half its height it is a capsule, and a capsule
+        /// still shows a long flat edge, which is why nothing reads it as a disc. That is not a
+        /// nicety — a broad theme's `control` is wider than a row is tall (Botanical's 24 on a
+        /// 26pt menu row), so *something* has to decide, and the two answers already in the app
+        /// disagreed: a layer-backed row clamps to a capsule (`CALayer.cornerRadius` takes half
+        /// the shorter side), while a drawn one was cut to a third. The settings sidebar's
+        /// selected row and the theme menu's highlighted row, one window apart, were the two
+        /// halves of that disagreement.
         static func control(fitting size: CGSize) -> CGFloat {
-            min(control, min(size.width, size.height) * cornerFitFraction)
+            min(control, min(size.width, size.height) * cornerFitFraction(for: size))
         }
 
         /// How much of the shorter side a corner may take before the shape stops reading as a
         /// rounded rect. A third is the point at which a 16pt square still has flat edges.
         static let cornerFitFraction: CGFloat = 1.0 / 3.0
+
+        /// The shape twice as long as it is tall, at which the whole half is available — a
+        /// capsule. Interpolated rather than switched at the threshold, so two rows of similar
+        /// proportion do not come out visibly differently cornered.
+        static let capsuleFitRatio: CGFloat = 2
+
+        private static func cornerFitFraction(for size: CGSize) -> CGFloat {
+            let shorter = min(size.width, size.height)
+            guard shorter > 0 else { return cornerFitFraction }
+            let elongation = max(size.width, size.height) / shorter
+            let travel = min(1, max(0, elongation - 1) / (capsuleFitRatio - 1))
+            return cornerFitFraction + (0.5 - cornerFitFraction) * travel
+        }
 
         /// Fully rounded, for pill-shaped controls of a known height.
         /// Fully rounded — unless a style says otherwise.
@@ -2149,19 +2204,28 @@ private final class ThemeShadowLayer: CALayer {
         let path = makeSurfacePath()
 
         context.saveGState()
+        defer { context.restoreGState() }
+
+        // The caster exists only to manufacture the outside shadow, so it is confined to the
+        // outside by a clip rather than painted across the surface and erased afterwards.
+        //
+        // `.clear` removes the coverage it is given, not the coverage already there: an
+        // antialiased edge pixel that took `α` of the opaque caster gives back `α` of what it
+        // now holds, and keeps `α(1 − α)` — a quarter of a black caster at half coverage, and
+        // half of one where a material states a highlight companion as well, since both
+        // casters stack. On a square material that residue lands under a hairline nobody sees.
+        // Around a pill it is a dark line tracing the whole control, which is what clay showed
+        // as a broken border on every chip, button and card that haloes.
+        let outside = CGMutablePath()
+        outside.addRect(bounds)
+        outside.addPath(path)
+        context.addPath(outside)
+        context.clip(using: .evenOdd)
+
         context.setShadow(offset: haloOffset, blur: haloRadius, color: haloColor)
         context.setFillColor(NSColor.black.cgColor)
-        context.addPath(path)
+        context.addPath(makeCasterPath())
         context.fillPath()
-        context.restoreGState()
-
-        // The caster exists only to manufacture the outside shadow. Removing its exact face
-        // after the blur leaves the host's authored fill and every label above it untouched.
-        context.saveGState()
-        context.setBlendMode(.clear)
-        context.addPath(path)
-        context.fillPath()
-        context.restoreGState()
     }
 
     private var surfaceRect: CGRect {
@@ -2174,8 +2238,25 @@ private final class ThemeShadowLayer: CALayer {
     }
 
     private func makeSurfacePath() -> CGPath {
-        let rect = surfaceRect
-        let radius = min(max(0, surfaceRadius), min(rect.width, rect.height) / 2)
+        roundedPath(in: surfaceRect, radius: surfaceRadius)
+    }
+
+    /// The silhouette pulled one device pixel inside the clip that contains it.
+    ///
+    /// Two antialiased curves on the same line multiply rather than cancel — the clip admits
+    /// `1 − α` of a pixel the caster covers with `α` — so a caster stopping exactly where the
+    /// clip begins reinstates the seam the clip was added to remove. `SoftBevelArtwork` keeps
+    /// its caster one pixel *beyond* its silhouette for the same reason, in the same units.
+    /// Half a point of shape is imperceptible under a blur measured in whole ones.
+    private func makeCasterPath() -> CGPath {
+        let gap = 1 / max(1, contentsScale)
+        let rect = surfaceRect.insetBy(dx: gap, dy: gap)
+        guard rect.width > 0, rect.height > 0 else { return makeSurfacePath() }
+        return roundedPath(in: rect, radius: surfaceRadius - gap)
+    }
+
+    private func roundedPath(in rect: CGRect, radius: CGFloat) -> CGPath {
+        let radius = min(max(0, radius), min(rect.width, rect.height) / 2)
         return CGPath(
             roundedRect: rect,
             cornerWidth: radius,
@@ -2437,22 +2518,38 @@ extension NSView {
         primaryCompanionName: String?,
         highlightName: String
     ) {
+        // Casters are collected by **type**, not only under the names this call happens to pass.
+        // The two entry points name their companions differently, and a control moves between
+        // them: a chip haloes on hover through `applyThemeControlGlow` and is restyled at rest
+        // through `applyThemeGlow`, which looked for `threading.glow.*`, found nothing, and left
+        // the control pair in place. So the pointer leaving a chip took away its plate and left
+        // the halo — and the caster's edge under it — for the rest of the session. Removing what
+        // this call is not about to keep makes "no shadow" mean no shadow whichever way it is
+        // reached.
+        let casters = layer?.sublayers?.compactMap { $0 as? ThemeShadowLayer } ?? []
         let existingPrimary = primaryCompanionName.flatMap { name in
-            layer?.sublayers?.first { $0.name == name }
+            casters.first { $0.name == name }
         }
-        let existingHighlight = layer?.sublayers?.first { $0.name == highlightName }
+        let existingHighlight = casters.first { $0.name == highlightName }
+
+        func discardCasters(keeping kept: ThemeShadowLayer?...) {
+            for caster in casters where !kept.contains(where: { $0 === caster }) {
+                caster.removeFromSuperlayer()
+            }
+        }
+
         guard let spec else {
             // Cleared rather than skipped: switching *away* from a glowing theme has to take
             // the halo with it, and a layer keeps its shadow until told otherwise.
             layer?.shadowOpacity = 0
             layer?.shadowPath = nil
-            existingPrimary?.removeFromSuperlayer()
-            existingHighlight?.removeFromSuperlayer()
+            discardCasters()
             return
         }
 
         guard let layer else { return }
         layer.masksToBounds = false
+        var primary: ThemeShadowLayer?
         if let primaryCompanionName {
             // A drawn control's layer contains its title and glyph. Even with a shadow path,
             // shadowing that layer lets those marks participate in Core Animation's source and
@@ -2462,14 +2559,14 @@ extension NSView {
             layer.shadowPath = nil
 
             let primaryLayer: ThemeShadowLayer
-            if let existing = existingPrimary as? ThemeShadowLayer {
-                primaryLayer = existing
+            if let existingPrimary {
+                primaryLayer = existingPrimary
             } else {
-                existingPrimary?.removeFromSuperlayer()
                 primaryLayer = ThemeShadowLayer()
                 primaryLayer.name = primaryCompanionName
                 layer.insertSublayer(primaryLayer, at: 0)
             }
+            primary = primaryLayer
             primaryLayer.configure(
                 hostBounds: layer.bounds,
                 surfaceRadius: radius,
@@ -2479,7 +2576,6 @@ extension NSView {
                 offset: CGSize(width: spec.offsetX, height: spec.offsetY)
             )
         } else {
-            existingPrimary?.removeFromSuperlayer()
             layer.shadowColor = AppThemePalette.current.resolved(spec.role).cgColor
             layer.shadowRadius = spec.radius
             layer.shadowOpacity = Float(spec.opacity)
@@ -2488,19 +2584,19 @@ extension NSView {
         }
 
         guard let highlight = spec.highlight else {
-            existingHighlight?.removeFromSuperlayer()
+            discardCasters(keeping: primary)
             return
         }
 
         let highlightLayer: ThemeShadowLayer
-        if let existing = existingHighlight as? ThemeShadowLayer {
-            highlightLayer = existing
+        if let existingHighlight {
+            highlightLayer = existingHighlight
         } else {
-            existingHighlight?.removeFromSuperlayer()
             highlightLayer = ThemeShadowLayer()
             highlightLayer.name = highlightName
             layer.insertSublayer(highlightLayer, at: 0)
         }
+        discardCasters(keeping: primary, highlightLayer)
         highlightLayer.configure(
             hostBounds: layer.bounds,
             surfaceRadius: radius,

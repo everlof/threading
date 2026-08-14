@@ -156,22 +156,24 @@ final class SubagentSummaryView: NSView {
 
         addSubview(surface)
         addSubview(content)
-        NSLayoutConstraint.activate([
+        let padding = [
+            content.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.inset),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.inset)
+        ]
+        NSLayoutConstraint.activate(padding + [
             surface.topAnchor.constraint(equalTo: topAnchor),
             surface.leadingAnchor.constraint(equalTo: leadingAnchor),
             surface.trailingAnchor.constraint(equalTo: trailingAnchor),
             surface.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-            content.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.inset),
-            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.inset),
 
             header.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             rows.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             rows.trailingAnchor.constraint(equalTo: content.trailingAnchor)
         ])
+        holdAtContentInset(padding)
     }
 
     @available(*, unavailable)

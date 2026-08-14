@@ -687,9 +687,14 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         // siblings, set apart by one additional dark frame around the bevel. The frame is always
         // present because "default" is the dialog's action hierarchy, while the dotted inset
         // below is keyboard focus and may move independently.
+        //
+        // Filled to the control's *silhouette*, not its box. On the square materials this rule
+        // came from the two are the same rect; on a rounded one a square plate leaves a corner
+        // of frame colour outside every curve, which reads as a hard tab behind the button
+        // rather than as an edge around it.
         if raisedPrimary {
             dimmed(primaryColor).setFill()
-            bounds.fill()
+            ThemedSurface.Shape(rect: bounds, radius: corner).path.fill()
         }
 
         let focusShape: ThemedSurface.Shape

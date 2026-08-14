@@ -301,7 +301,27 @@ enum ThemedSurface {
     /// re-deriving the same three tokens and drifting by half a point.
     struct Shape {
         let rect: NSRect
+        /// Never larger than half the shorter side — see `init(rect:radius:)`.
         let radius: CGFloat
+
+        /// A corner is **fitted to the rect it turns**, because the two ways this app draws one
+        /// rounded surface disagree about what an oversized radius means.
+        ///
+        /// `CALayer.cornerRadius` clamps to half the *shorter* side, so an `applySurface` under a
+        /// broad theme degrades to a capsule. `NSBezierPath(roundedRect:xRadius:yRadius:)` clamps
+        /// each axis on its own, so the same token on the same rect produces a corner as wide as
+        /// the radius and only as tall as the rect allows: two quarter-ellipses meeting in a
+        /// taper. On Botanical, whose control corner is 24, a 26pt-tall menu row came out as a
+        /// pointed lens beside layer-backed surfaces of the same radius drawn as capsules.
+        ///
+        /// Fitted here rather than at the call sites: a radius token is a theme's to state and a
+        /// rect is the caller's, and neither of them is in a position to notice that this
+        /// particular pairing has no round corner left to draw.
+        init(rect: NSRect, radius: CGFloat) {
+            self.rect = rect
+            let shorterSide = max(0, min(rect.width, rect.height))
+            self.radius = min(max(0, radius), shorterSide / 2)
+        }
 
         var path: NSBezierPath {
             NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)

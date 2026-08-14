@@ -112,13 +112,19 @@ enum ConversationRowView {
         label.translatesAutoresizingMaskIntoConstraints = false
         bubble.addSubview(label)
 
+        // A bubble is padded tighter than a card — `medium`, measured against the conversation's
+        // rhythm — and its corner is the panel's, which under a broad theme is 40pt. At that
+        // radius the arc has crossed x=13 by the height of the first line, so a 10pt padding put
+        // the opening word *outside* the shape. The corner pushes it in; nothing pulls it back.
         let pad = Design.Spacing.medium
-        NSLayoutConstraint.activate([
+        let padding = [
             label.topAnchor.constraint(equalTo: bubble.topAnchor, constant: pad),
             label.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -pad),
             label.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: pad),
             label.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -pad)
-        ])
+        ]
+        NSLayoutConstraint.activate(padding)
+        bubble.holdAtContentInset(padding, from: pad)
 
         return rightAligned(bubble)
     }

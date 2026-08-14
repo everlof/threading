@@ -12,6 +12,11 @@ final class ProjectTerminalRowView: NSTableCellView {
         glyphMaterialization: .deferred
     )
 
+    /// The two gutters the column's width moves — see `SidebarDensity`. Held so a narrower
+    /// column is a constant assignment on the rows already on screen.
+    private var contentLeadingConstraint: NSLayoutConstraint?
+    private var trailingSlotConstraint: NSLayoutConstraint?
+
     private var trackingArea: NSTrackingArea?
     private var terminalID: TerminalID?
     private var isRunning = false
@@ -95,11 +100,19 @@ final class ProjectTerminalRowView: NSTableCellView {
         addSubview(titleLabel)
         addSubview(actionButton)
 
+        let leading = iconView.leadingAnchor.constraint(
+            equalTo: leadingAnchor,
+            constant: SidebarRowDefaults.leadingInset
+        )
+        let trailing = actionButton.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -trailingSlotInset(for: SidebarRowDefaults.trailingInset)
+        )
+        contentLeadingConstraint = leading
+        trailingSlotConstraint = trailing
+
         NSLayoutConstraint.activate([
-            iconView.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
-                constant: SidebarRowDefaults.leadingInset
-            ),
+            leading,
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
             iconView.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
@@ -112,16 +125,17 @@ final class ProjectTerminalRowView: NSTableCellView {
                 lessThanOrEqualTo: actionButton.leadingAnchor,
                 constant: -SidebarRowDefaults.horizontalSpacing
             ),
-            actionButton.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -(
-                    SidebarRowDefaults.trailingInset - actionButton.opticalHorizontalInset
-                )
-            ),
+            trailing,
             actionButton.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
 
         setAccessibilityRole(.staticText)
+    }
+
+    /// How far inside the row's trailing edge the `⋯` is pinned, for a given gutter. Never
+    /// negative — see `SessionRowView.trailingSlotInset(for:)` for the hit-testing rule.
+    private func trailingSlotInset(for gutter: CGFloat) -> CGFloat {
+        max(0, gutter - actionButton.opticalHorizontalInset)
     }
 
     override func updateTrackingAreas() {
@@ -178,5 +192,16 @@ final class ProjectTerminalRowView: NSTableCellView {
         // on rather than handed a colour — see `BackdropThemedControl.hostGround`, and the
         // session row beside this one, which states the same thing.
         actionButton.hostGround = backgroundStyle == .emphasized ? .selection : nil
+    }
+}
+
+// MARK: - Sidebar Density
+
+extension ProjectTerminalRowView: SidebarDensityAdopting {
+
+    /// Restates the row's two gutters at the width the column now has.
+    func applySidebarDensity(_ density: SidebarDensity) {
+        contentLeadingConstraint?.constant = density.rowLeadingInset
+        trailingSlotConstraint?.constant = -trailingSlotInset(for: density.rowTrailingInset)
     }
 }

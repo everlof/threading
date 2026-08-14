@@ -187,6 +187,15 @@ final class AppCommandTests: XCTestCase {
         XCTAssertTrue(AppCommands.fixed.allSatisfy { !$0.isEditable })
         XCTAssertTrue(AppCommands.editable.allSatisfy(\.isEditable))
     }
+
+    func testJumpToReviewFileShipsAsAnEditableSessionCommandJ() throws {
+        let command = try XCTUnwrap(
+            AppCommands.all.first { $0.id == AppCommands.ID.jumpToReviewFile }
+        )
+        XCTAssertEqual(command.defaultShortcut, KeyboardShortcut(key: "j", modifiers: .command))
+        XCTAssertEqual(command.scope, .session)
+        XCTAssertTrue(command.isEditable)
+    }
 }
 
 // MARK: - Dynamic Registry

@@ -1850,6 +1850,18 @@ the single baseline sample was 36.554 ms and three retained after samples ranged
 The load-bearing scroll and resize comparisons remained within 10% of the matched baseline, and
 both opt-in Git Review stress tests passed after the final sticky-header implementation.
 
+That pass also exposed a temporal resize defect which elapsed-time-only measurement could not
+describe: the split divider and clip view reached the new width in one display frame, while the
+table column, mounted card and TextKit container sometimes consumed the width invalidation in the
+next layout traversal. `viewDidLayout` now states the clip width on the virtual table synchronously
+and, after invalidating the complete index's cheap height estimates, settles only the mounted
+viewport in a non-animated transaction. Offscreen rows remain model estimates and no debounce is
+introduced. The resize fixture now gates coherence as well as time: every descendant must advance
+by the viewport's exact width delta and leave no second visible layout frame pending. Two retained
+8,985-file runs measured 8.212 and 8.415 ms resize p95, with 12.726 and 11.183 ms maxima, versus the
+pre-fix 8.483 ms p95 / 11.584 ms maximum. Both recorded `max_width_delta_drift=0.000` and
+`pending_layout_frames=0`.
+
 The generated workload is the regression boundary, but it cannot reproduce the object database,
 index and history shape of Linux-scale repositories. `git-repository-stress` accepts an existing
 checkout and runs three complementary layers without modifying it:

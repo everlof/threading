@@ -262,7 +262,8 @@ extension GitReviewViewController {
         findSnapshotCancellation = GitReviewReader.diff(
             request,
             in: root,
-            ignoringWhitespace: ignoresWhitespace
+            ignoringWhitespace: ignoresWhitespace,
+            contextLines: diffContextLines
         ) { [weak self] result in
             guard let self, expectedSource == self.findSourceGeneration else { return }
             self.findSnapshotCancellation = nil
@@ -359,6 +360,12 @@ extension GitReviewViewController {
 /// A changed-path tree shared by the persistent rail and the jump-to-file popover. It receives
 /// the diff's already-bounded value roster and never walks the checkout.
 final class GitReviewPathNavigatorViewController: NSViewController {
+    private struct RosterEntry: Equatable {
+        let path: String
+        let added: Int
+        let removed: Int
+    }
+
     private final class Node: NSObject {
         let name: String
         let path: String
@@ -381,6 +388,8 @@ final class GitReviewPathNavigatorViewController: NSViewController {
     private var roots: [Node] = []
     private var leaves: [Node] = []
     private var filteredLeaves: [Node]?
+    private var roster: [RosterEntry] = []
+    private(set) var modelRebuildCountForTesting = 0
 
     var onChoosePath: ((String) -> Void)?
 
@@ -435,6 +444,13 @@ final class GitReviewPathNavigatorViewController: NSViewController {
     }
 
     func update(files: [GitFileDiff]) {
+        let nextRoster = files.map {
+            RosterEntry(path: $0.path, added: $0.added, removed: $0.removed)
+        }
+        guard nextRoster != roster else { return }
+        roster = nextRoster
+        modelRebuildCountForTesting += 1
+
         var nodesByPath: [String: Node] = [:]
         var rootNodes: [Node] = []
         var leafNodes: [Node] = []
@@ -483,6 +499,15 @@ final class GitReviewPathNavigatorViewController: NSViewController {
 
     func focusSearch() {
         view.window?.makeFirstResponder(searchField)
+    }
+
+    var rootPathsForTesting: [String] { roots.map(\.path) }
+    var visibleLeafPathsForTesting: [String] { (filteredLeaves ?? leaves).map(\.path) }
+
+    func setFilterForTesting(_ query: String) {
+        _ = view
+        searchField.stringValue = query
+        applyFilter()
     }
 
     private var visibleRoots: [Node] { filteredLeaves ?? roots }
@@ -549,7 +574,7 @@ extension GitReviewPathNavigatorViewController: NSOutlineViewDelegate {
     }
 }
 
-extension GitReviewPathNavigatorViewController: NSControlTextEditingDelegate {
+extension GitReviewPathNavigatorViewController: NSTextFieldDelegate {
     func controlTextDidChange(_ obj: Notification) { applyFilter() }
 }
 

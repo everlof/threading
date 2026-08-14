@@ -111,7 +111,7 @@ Components so far:
 | `ThemedSpinner` / `ThemedProgressBar` | `NSProgressIndicator`, in the theme's accent. A spinner nested in a host-painted emphasized selection takes that ground's label ink instead, so the accent does not draw invisibly on the accent. |
 | `DiffSkeletonView` | The ghost of a diff body whose real document is deferred or still loading — Git Review's scroller-thumb seek rows and its pending progressive rows. A repeating hunk-shaped silhouette of quiet context bars whose changed run splits by the file's own +/− counts, tinted at `Opacity.skeletonDiffTint` so it whispers the weight without becoming content; a file lacking a kind ghosts none of it. Drawing visits only the bar rows intersecting `dirtyRect`, so a document-sized body costs the viewport. The pulse is a layer-opacity loop — the spinner's no-redraw-timer discipline — removed rather than slowed under Reduce Motion, the still bars remaining as the status; a rehosted row re-arms it itself, since a virtual table drops layer animations constantly. Decorative by contract: the row's header carries the loading state. |
 | `ThemedChartPlaceholderView` | What a chart says when it has no series: a ghost of the shape that is coming, the status in words, and a `ThemedProgressBar` when the work reports a total. It sits over the *plot rectangle*, so the message lands where the marks would be and the axes keep their gutters. Two states that must not look alike — `.empty` is a finished answer and stands still under a dotted zero baseline, `.loading` is a promise and breathes `DiffSkeletonView`'s pulse over a two-run silhouette at `Opacity.skeletonChartBand`. The status is real labels rather than a centred string in `draw(_:)`: drawn text cannot be reached by VoiceOver, cannot wrap in a narrow pane, and cannot carry a bar beside it. Not a target (`hitTest` returns nil), so the chart underneath keeps its hover and selection; not an accessibility element itself, since the chart's group value already carries the summary. Built lazily — a chart that always had data never constructs it. |
-| `ThemedScroller` | AppKit's live scrollbar value and tracking with two authored presentations. `automatic` draws a modern proportional thumb/track from the correct ink source and owns SwiftTerm's otherwise-missing overlay fade; System delegates to AppKit. A named period family owns persistent legacy geometry, arrow hit regions and placement, track relief or stipple, and the era's thumb/grip — including Aqua gel — while continuing to use the normal `NSScroller` action path. |
+| `ThemedScroller` | AppKit's live scrollbar value and tracking with two authored presentations. `automatic` draws a modern proportional thumb/track from the correct ink source and owns SwiftTerm's otherwise-missing overlay fade; System delegates to AppKit. A named period family owns persistent legacy geometry, arrow hit regions and placement, track relief or stipple, and the era's thumb/grip — including Aqua gel — while continuing to use the normal `NSScroller` action path. A period trough with no range is **empty**, arrows dimmed: AppKit disables a spent scroller but keeps the knob proportion its page last needed, and drawing from that stale figure gave a settled Settings sidebar a two-thirds thumb it could not move (see [`themes.md`](themes.md)). |
 | `ThemedScrollView` | An `NSScrollView` that starts transparent — the stock one paints a system surface — and installs themed vertical and horizontal scrollers without enabling either. A period scroller forces legacy-width space because its arrows are permanent furniture. A material may move the vertical scroller to the leading edge; layout mirrors AppKit's reservation. The project tree opts into `.sidebarNavigator`, which resolves an authored fill/bevel and insets the document inside its edge; every other call site stays transparent. A nested horizontal-only viewport opts into `forwardsVerticalScrollToAncestor`, so code and tables do not trap a conversation's vertical gesture. |
 | `ThemedTextView` | An `NSTextView` in theme colours; `.scrolling()` replaces `scrollableTextView()`. |
 | `ThemedTableRowView` | Every list's row, including the lists that never say so (`ThemedTableRowDefaults`). It draws selection — held back to the ink it contains under a style, handed to AppKit under System — and any *other* plate a row needs, today `isDropTarget`. Such a plate takes **the selection's own silhouette**, which is not always ours: under System an inset-style table pads its selection 10 points in from the row (`systemInsetStylePadding`) while our path stops a hairline in, so a wash drawn from `selectionPath` ran the full width of a list whose selection did not, and one drawn from the *cell* — inset further still — stood as tall as the selection and visibly narrower. Neither number is AppKit's to publish, so the pin is a pixel comparison of the two plates as drawn (`testTheDropWashTakesTheSelectionsOwnShape`). |
@@ -338,7 +338,6 @@ a raw `NSImage(systemSymbolName:)` arrives at whatever size the system hands out
 optical size chose. Six menus were building rows the raw way. `GlyphTests` holds both rules: the
 fit is measured off the rendered pixels, and its fixture asserts that the un-fitted draw it
 replaced still fails, so the test cannot go blind.
-
 
 **A menu opens on the press; an action fires on the release.** Which of the two a button does is
 `ThemedIconButton.presentsMenu`, and the split is not a preference — press-drag-release onto an
@@ -2465,3 +2464,54 @@ rather than over the surface in front of it, or a cursor rectangle on the scrim 
 front-most rectangle is shown to win over one behind it. That precedence is **not** established —
 an attempt to measure it in a scratch app failed to make its window key, and no measurement means
 no rule. Do not extend `CoveredWindowCursor` to the scrim on the assumption either way.
+
+## 2026-08-14 — a corner a theme states is not a corner every shape can turn
+
+Reported from a screenshot of the Component Gallery under Botanical: the theme menu's highlighted
+row "looks pointy", and every card's copy "comes so friggin close" to its rounded edge. Two faults,
+one cause — a theme that states a broad corner, and geometry that assumes a modest one.
+
+**The point.** Botanical's `controlRadius` is 24 and a menu row's fill is 26pt tall. A layer takes
+that pairing to a capsule: `CALayer.cornerRadius` clamps to half the *shorter* side. A path does
+not — `NSBezierPath(roundedRect:xRadius:yRadius:)` clamps each axis separately, so the same token
+on the same rect produced a corner 24 wide and 13 tall: two quarter-ellipses meeting in a taper.
+Measured off the reported screenshot, the cap ran 15pt in along the top edge of a 13pt half-height,
+which is the pointing the eye saw. The same unfitted token reached the sidebar's selected chat,
+where hover and selection are documented to be one silhouette and had quietly become two: the
+selection drew `Design.Radius.control(fitting:)` and the hover under it drew the raw token.
+
+`ThemedSurface.Shape` now fits its radius to its rect, so no drawn surface can be handed a corner
+wider than the shape can turn — the clamp a layer already applies, applied where the path is built
+rather than at twenty call sites. The menu row and the sidebar row additionally ask for
+`Design.Radius.control(fitting:)`, which is what a row-shaped fill takes everywhere else in the
+window; the structural fit is a floor, not a substitute for asking correctly.
+
+**And what "fitted" means now depends on the shape.** The third-of-the-shorter-side rule was
+written for a 16pt square that drew as a disc, and applied to a row it produced the opposite
+mistake: under Botanical the settings sidebar's selected row is layer-backed and clamped itself to
+a capsule, while the theme menu's row was drawn and cut to a third — one window, two silhouettes
+for the same token. A square has no flat edge to spare and a row does, so the fraction runs from a
+third at square to a half at twice as long as tall, interpolated rather than switched so two rows
+of similar proportion do not come out visibly differently cornered. Nothing about System moves:
+its corner is 8, under every cap these produce.
+
+**The crowding.** `Spacing.inset` is 12, and a 40pt corner has already curved 11pt inwards at the
+height of a card's first line of text — so a title held 12pt in stood against the curve with half a
+point to spare. `Design.Spacing.inset(inside:)` states the rule the shape states: content's own
+corner stays `inset` clear of the arc along the diagonal, where the arc comes closest —
+`√2·(radius - i) ≤ radius - inset`. Corners at or under 12 ask for nothing, so only four themes
+move: Botanical to 20, Claymorphism to 18, and the 14/16pt styles by a single point.
+
+A constraint's constant freezes exactly the way a layer's colour and corner do, and nothing was
+re-stating it: a card built under a 10pt theme kept 12pt of padding when Botanical's 40pt corner
+arrived under it. So the padding is recorded beside the surface (`PanelContentInset`) and re-fitted
+by the same sweep that re-applies the corner — `AppThemeRefresh.repaint` owns both, and they cannot
+drift apart. Call sites keep their own constraints and their own signs; only the magnitude is the
+token's.
+
+Adopted by the surfaces that pad a `.panel`: the gallery's story cards, the settings rows and the
+dividers that start on their label column, the usage dashboard's metric and coverage cards, and the
+subagent summary. Chat bubbles were left alone deliberately — they pad by `medium`, are sized to
+their text, and a short one's drawn corner is its own half-height rather than the theme's stated
+40, so the fitted inset would over-pad them. If they need it, they need the fit taken against the
+corner the bubble actually draws.

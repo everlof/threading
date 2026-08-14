@@ -395,6 +395,9 @@
 		919A56E50DEEA8B476D2DB4B /* SessionInfoRowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE56F39C751920328E1559F0 /* SessionInfoRowTests.swift */; };
 		05BFEE4A0C11DF49378E6E7B /* SessionProcessTerminatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D6FA09EFE53491C1A36889 /* SessionProcessTerminatorTests.swift */; };
 		31F0A006746EDD74B68E09F4 /* AgentWorkHydrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B7174E68BCBEBC146A0609 /* AgentWorkHydrationTests.swift */; };
+		484855E1A2E2956788C83F7C /* AquaChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EA8034DA3D02FDE9CA92D28 /* AquaChromeTests.swift */; };
+		13484E568C56C1B0CBA17F1C /* PanelContentInsetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E82844241F22CED920B3927 /* PanelContentInsetTests.swift */; };
+		CBD4029357E1F8CD97AE6862 /* SidebarWidthDensityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46CCD6310B7AC3DE03A3AB5E /* SidebarWidthDensityTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -845,6 +848,9 @@
 		FE56F39C751920328E1559F0 /* SessionInfoRowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionInfoRowTests.swift; sourceTree = "<group>"; };
 		C0D6FA09EFE53491C1A36889 /* SessionProcessTerminatorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionProcessTerminatorTests.swift; sourceTree = "<group>"; };
 		15B7174E68BCBEBC146A0609 /* AgentWorkHydrationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentWorkHydrationTests.swift; sourceTree = "<group>"; };
+		8EA8034DA3D02FDE9CA92D28 /* AquaChromeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AquaChromeTests.swift; sourceTree = "<group>"; };
+		5E82844241F22CED920B3927 /* PanelContentInsetTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PanelContentInsetTests.swift; sourceTree = "<group>"; };
+		46CCD6310B7AC3DE03A3AB5E /* SidebarWidthDensityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarWidthDensityTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1381,6 +1387,9 @@
 				FE56F39C751920328E1559F0 /* SessionInfoRowTests.swift */,
 				C0D6FA09EFE53491C1A36889 /* SessionProcessTerminatorTests.swift */,
 				15B7174E68BCBEBC146A0609 /* AgentWorkHydrationTests.swift */,
+				8EA8034DA3D02FDE9CA92D28 /* AquaChromeTests.swift */,
+				5E82844241F22CED920B3927 /* PanelContentInsetTests.swift */,
+				46CCD6310B7AC3DE03A3AB5E /* SidebarWidthDensityTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -2282,6 +2291,9 @@
 				919A56E50DEEA8B476D2DB4B /* SessionInfoRowTests.swift in Sources */,
 				05BFEE4A0C11DF49378E6E7B /* SessionProcessTerminatorTests.swift in Sources */,
 				31F0A006746EDD74B68E09F4 /* AgentWorkHydrationTests.swift in Sources */,
+				484855E1A2E2956788C83F7C /* AquaChromeTests.swift in Sources */,
+				13484E568C56C1B0CBA17F1C /* PanelContentInsetTests.swift in Sources */,
+				CBD4029357E1F8CD97AE6862 /* SidebarWidthDensityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

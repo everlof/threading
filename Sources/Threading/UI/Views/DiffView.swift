@@ -2,6 +2,11 @@ import AppKit
 import NativeDiffAppKit
 import NativeDiffCore
 
+enum GitReviewDiffLayout: Equatable {
+    case unified
+    case split
+}
+
 /// Threading's theme/default adapter around the package renderer.
 ///
 /// Git loading, staging and app theming stay in the app. The actual line rendering, syntax
@@ -217,6 +222,7 @@ final class GitReviewDiffTextView: ThemedTextView {
     private let path: String?
     private let wraps: Bool
     private let textSize: Design.CodeTextScale
+    private let showsWordDiffs: Bool
     private let appEvents = AppEventObservations()
     private var lineRanges: [NSRange] = []
     private var lineTextRanges: [NSRange] = []
@@ -230,6 +236,13 @@ final class GitReviewDiffTextView: ThemedTextView {
     private var preferredHeightConstraint: NSLayoutConstraint?
     private var heightNotificationPending = false
     private var contextMenuSession: AnyObject?
+    private var lineActionTrackingArea: NSTrackingArea?
+    private var hoveredLineIndex: Int? {
+        didSet {
+            guard hoveredLineIndex != oldValue else { return }
+            needsDisplay = true
+        }
+    }
 
     var onAddContextAttachment: ((ConversationContextAttachment) -> Void)?
     var onRequestComment: ((ConversationContextAttachment, CodeContextPreview?) -> Void)?
@@ -242,7 +255,8 @@ final class GitReviewDiffTextView: ThemedTextView {
         path: String? = nil,
         wraps: Bool = true,
         initialLayoutWidth: CGFloat? = nil,
-        textSize: Design.CodeTextScale = .standard
+        textSize: Design.CodeTextScale = .standard,
+        showsWordDiffs: Bool = false
     ) {
         let shown = Array(gitLines.prefix(max(displayCap, 0)))
         let capped = shown.map { line in
@@ -261,6 +275,7 @@ final class GitReviewDiffTextView: ThemedTextView {
         self.path = path
         self.wraps = wraps
         self.textSize = textSize
+        self.showsWordDiffs = showsWordDiffs
 
         super.init(frame: .zero, textContainer: nil)
         translatesAutoresizingMaskIntoConstraints = false
@@ -347,6 +362,52 @@ final class GitReviewDiffTextView: ThemedTextView {
     override func draw(_ dirtyRect: NSRect) {
         drawChangeBackgrounds(in: dirtyRect)
         super.draw(dirtyRect)
+        drawHoveredLineAction(in: dirtyRect)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let lineActionTrackingArea {
+            removeTrackingArea(lineActionTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        lineActionTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard onAddContextAttachment != nil || onRequestComment != nil else {
+            hoveredLineIndex = nil
+            return
+        }
+        hoveredLineIndex = lineIndex(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoveredLineIndex = nil
+        super.mouseExited(with: event)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let hoveredLineIndex,
+           lineActionRect(for: hoveredLineIndex)?.contains(point) == true,
+           let reference = contextAttachment(atDisplayedLine: hoveredLineIndex),
+           let preview = contextPreview(spanningDisplayedLines: hoveredLineIndex...hoveredLineIndex) {
+            highlightLines(hoveredLineIndex...hoveredLineIndex)
+            presentContextMenu(
+                for: reference,
+                preview: preview,
+                spanning: hoveredLineIndex...hoveredLineIndex,
+                at: event.locationInWindow
+            )
+            return
+        }
+        super.mouseDown(with: event)
     }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -386,6 +447,22 @@ final class GitReviewDiffTextView: ThemedTextView {
                 location: startsAt + prefixLength,
                 length: displayedLength
             ))
+        }
+
+        if showsWordDiffs {
+            for (index, range) in wordDiffRanges() where lineTextRanges.indices.contains(index) {
+                let base = lineTextRanges[index]
+                guard range.location <= base.length,
+                      NSMaxRange(range) <= base.length else { continue }
+                let color = renderedLines[index].source.kind == .added
+                    ? diffInk.added.withAlphaComponent(0.28)
+                    : diffInk.removed.withAlphaComponent(0.28)
+                document.addAttribute(
+                    .backgroundColor,
+                    value: color,
+                    range: NSRange(location: base.location + range.location, length: range.length)
+                )
+            }
         }
 
         if omittedLineCount > 0 {
@@ -453,7 +530,13 @@ final class GitReviewDiffTextView: ThemedTextView {
         let numberRange = NSRange(location: 0, length: paddedNumber.utf16.count)
         // Line numbers are navigation, not decoration. Tertiary ink fell below readable
         // contrast on the dark review wash and made unchanged context look disabled.
-        result.addAttribute(.foregroundColor, value: Design.Text.secondary, range: numberRange)
+        result.addAttribute(
+            .foregroundColor,
+            value: line.source.kind == .context
+                ? Design.Text.secondary
+                : markerForeground(for: line.source.kind),
+            range: numberRange
+        )
         let signLocation = paddedNumber.utf16.count + 1
         result.addAttribute(
             .foregroundColor,
@@ -557,7 +640,76 @@ final class GitReviewDiffTextView: ThemedTextView {
                 width: bounds.width,
                 height: run.maxY - run.minY
             ).intersection(dirtyRect))
+
+            markerForeground(for: run.kind).setFill()
+            NSGraphicsContext.current?.cgContext.fill(NSRect(
+                x: bounds.minX,
+                y: run.minY + originY,
+                width: Self.changedLineMarkerWidth,
+                height: run.maxY - run.minY
+            ).intersection(dirtyRect))
         }
+    }
+
+    /// The line action is drawn, not mounted, so a 400-line file still has one view. It covers
+    /// the hovered line number the same way review tools do: the location stays stable while
+    /// the affordance answers what a click there will do.
+    private func drawHoveredLineAction(in dirtyRect: NSRect) {
+        guard let hoveredLineIndex,
+              let rect = lineActionRect(for: hoveredLineIndex),
+              rect.intersects(dirtyRect) else { return }
+
+        let line = NSBezierPath(rect: NSRect(
+            x: bounds.minX,
+            y: rect.midY - 0.5,
+            width: bounds.width,
+            height: 1
+        ))
+        Design.Surface.divider.setFill()
+        line.fill()
+
+        let plate = NSBezierPath(
+            roundedRect: rect,
+            xRadius: Design.Radius.control,
+            yRadius: Design.Radius.control
+        )
+        Design.Surface.controlHover.setFill()
+        plate.fill()
+        Design.Surface.border.setStroke()
+        plate.lineWidth = Design.Radius.controlBorder
+        plate.stroke()
+
+        Design.Text.label.setStroke()
+        let plus = NSBezierPath()
+        plus.lineWidth = max(Design.Radius.border, 1.5)
+        plus.lineCapStyle = .round
+        let arm: CGFloat = 5
+        plus.move(to: NSPoint(x: rect.midX - arm, y: rect.midY))
+        plus.line(to: NSPoint(x: rect.midX + arm, y: rect.midY))
+        plus.move(to: NSPoint(x: rect.midX, y: rect.midY - arm))
+        plus.line(to: NSPoint(x: rect.midX, y: rect.midY + arm))
+        plus.stroke()
+    }
+
+    private func lineActionRect(for index: Int) -> NSRect? {
+        guard lineRanges.indices.contains(index),
+              let layoutManager else { return nil }
+        let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: lineRanges[index],
+            actualCharacterRange: nil
+        )
+        guard glyphRange.length > 0 else { return nil }
+        let fragment = layoutManager.lineFragmentRect(
+            forGlyphAt: glyphRange.location,
+            effectiveRange: nil
+        )
+        let size = min(max(fragment.height - 2, 18), 24)
+        return NSRect(
+            x: max(GitReviewDefaults.lineNumberWidth - size - 2, 2),
+            y: fragment.midY + textContainerOrigin.y - size / 2,
+            width: size,
+            height: size
+        )
     }
 
     /// Turn the TextKit fragments into a small ordered display list. Adjacent fragments of the
@@ -613,6 +765,20 @@ final class GitReviewDiffTextView: ThemedTextView {
         removedMarker: NSColor
     ) {
         (diffInk.addedText, diffInk.removedText, diffInk.added, diffInk.removed)
+    }
+
+    func lineNumberColorForTesting(atDisplayedLine index: Int) -> NSColor? {
+        guard lineRanges.indices.contains(index),
+              let textStorage else { return nil }
+        return textStorage.attribute(
+            .foregroundColor,
+            at: lineRanges[index].location,
+            effectiveRange: nil
+        ) as? NSColor
+    }
+
+    func lineActionRectForTesting(atDisplayedLine index: Int) -> NSRect? {
+        lineActionRect(for: index)
     }
 
     private func lineIndex(at point: NSPoint) -> Int? {
@@ -781,6 +947,66 @@ final class GitReviewDiffTextView: ThemedTextView {
         }
     }
 
+    private func wordDiffRanges() -> [Int: NSRange] {
+        var result: [Int: NSRange] = [:]
+        var index = 0
+        while index < renderedLines.count {
+            if renderedLines[index].source.kind == .context {
+                index += 1
+                continue
+            }
+            var removed: [Int] = []
+            var added: [Int] = []
+            while index < renderedLines.count,
+                  renderedLines[index].source.kind != .context {
+                if renderedLines[index].source.kind == .removed {
+                    removed.append(index)
+                } else {
+                    added.append(index)
+                }
+                index += 1
+            }
+            for offset in 0..<min(removed.count, added.count) {
+                let oldIndex = removed[offset]
+                let newIndex = added[offset]
+                let ranges = Self.changedRanges(
+                    old: renderedLines[oldIndex].text,
+                    new: renderedLines[newIndex].text
+                )
+                if ranges.old.length > 0 { result[oldIndex] = ranges.old }
+                if ranges.new.length > 0 { result[newIndex] = ranges.new }
+            }
+        }
+        return result
+    }
+
+    private static func changedRanges(old: String, new: String) -> (old: NSRange, new: NSRange) {
+        let oldCharacters = Array(old)
+        let newCharacters = Array(new)
+        var prefix = 0
+        while prefix < min(oldCharacters.count, newCharacters.count),
+              oldCharacters[prefix] == newCharacters[prefix] {
+            prefix += 1
+        }
+        var suffix = 0
+        while suffix < min(oldCharacters.count - prefix, newCharacters.count - prefix),
+              oldCharacters[oldCharacters.count - 1 - suffix]
+                == newCharacters[newCharacters.count - 1 - suffix] {
+            suffix += 1
+        }
+
+        func range(in text: String, count: Int) -> NSRange {
+            let start = text.index(text.startIndex, offsetBy: prefix)
+            let end = text.index(text.endIndex, offsetBy: -suffix)
+            guard start <= end, prefix <= count - suffix else { return NSRange(location: 0, length: 0) }
+            return NSRange(start..<end, in: text)
+        }
+        return (
+            range(in: old, count: oldCharacters.count),
+            range(in: new, count: newCharacters.count)
+        )
+    }
+
     private func syntaxColor(for role: DiffSyntaxRole) -> NSColor {
         switch role {
         case .keyword: Design.Syntax.keyword
@@ -809,6 +1035,192 @@ final class GitReviewDiffTextView: ThemedTextView {
     private static let defaultLayoutWidth: CGFloat = 240
     private static let maximumContinuationIndentColumns = 16
     private static let noWrapContainerWidth: CGFloat = 1_000_000
+    private static let changedLineMarkerWidth: CGFloat = 3
+}
+
+/// A line-aligned old/new presentation. Pairing is value work over one bounded hunk; the two
+/// TextKit documents remain the only mounted content regardless of how many lines they show.
+final class GitReviewSplitDiffView: NSView {
+    private struct Pairing {
+        var old: [GitDiffLine] = []
+        var new: [GitDiffLine] = []
+        var oldIndexBySource: [Int: Int] = [:]
+        var newIndexBySource: [Int: Int] = [:]
+    }
+
+    private let oldView: GitReviewDiffTextView
+    private let newView: GitReviewDiffTextView
+    private let oldIndexBySource: [Int: Int]
+    private let newIndexBySource: [Int: Int]
+
+    var onAddContextAttachment: ((ConversationContextAttachment) -> Void)? {
+        didSet {
+            oldView.onAddContextAttachment = onAddContextAttachment
+            newView.onAddContextAttachment = onAddContextAttachment
+        }
+    }
+    var onRequestComment: ((ConversationContextAttachment, CodeContextPreview?) -> Void)? {
+        didSet {
+            oldView.onRequestComment = onRequestComment
+            newView.onRequestComment = onRequestComment
+        }
+    }
+    var onPreferredHeightChange: (() -> Void)? {
+        didSet {
+            oldView.onPreferredHeightChange = onPreferredHeightChange
+            newView.onPreferredHeightChange = onPreferredHeightChange
+        }
+    }
+
+    init(
+        gitLines: [GitDiffLine],
+        displayCap: Int,
+        path: String?,
+        textSize: Design.CodeTextScale,
+        showsWordDiffs: Bool
+    ) {
+        let shown = Array(gitLines.prefix(max(displayCap, 0)))
+        let pairing = Self.pair(shown)
+        oldIndexBySource = pairing.oldIndexBySource
+        newIndexBySource = pairing.newIndexBySource
+        oldView = GitReviewDiffTextView(
+            gitLines: pairing.old,
+            displayCap: pairing.old.count,
+            path: path,
+            wraps: false,
+            textSize: textSize,
+            showsWordDiffs: showsWordDiffs
+        )
+        newView = GitReviewDiffTextView(
+            gitLines: pairing.new,
+            displayCap: pairing.new.count,
+            path: path,
+            wraps: false,
+            textSize: textSize,
+            showsWordDiffs: showsWordDiffs
+        )
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        oldView.setAccessibilityLabel(L10n.string("Old version"))
+        newView.setAccessibilityLabel(L10n.string("New version"))
+
+        let oldScroll = Self.horizontalScroll(for: oldView)
+        let newScroll = Self.horizontalScroll(for: newView)
+        let divider = SeparatorView()
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        [oldScroll, divider, newScroll].forEach(addSubview)
+        NSLayoutConstraint.activate([
+            oldScroll.topAnchor.constraint(equalTo: topAnchor),
+            oldScroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+            oldScroll.leadingAnchor.constraint(equalTo: leadingAnchor),
+            divider.topAnchor.constraint(equalTo: topAnchor),
+            divider.bottomAnchor.constraint(equalTo: bottomAnchor),
+            divider.leadingAnchor.constraint(equalTo: oldScroll.trailingAnchor),
+            divider.widthAnchor.constraint(equalToConstant: Design.Radius.border),
+            newScroll.topAnchor.constraint(equalTo: topAnchor),
+            newScroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+            newScroll.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+            newScroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            newScroll.widthAnchor.constraint(equalTo: oldScroll.widthAnchor),
+            heightAnchor.constraint(equalTo: oldView.heightAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func revealFindOccurrence(
+        sourceLine index: Int,
+        range: GitReviewFindMatch.TextRange
+    ) {
+        if let paired = newIndexBySource[index] {
+            newView.revealFindOccurrence(line: paired, range: range)
+        } else if let paired = oldIndexBySource[index] {
+            oldView.revealFindOccurrence(line: paired, range: range)
+        }
+    }
+
+    private static func horizontalScroll(for diff: GitReviewDiffTextView) -> ThemedScrollView {
+        let scroll = ThemedScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.hasHorizontalScroller = true
+        scroll.hasVerticalScroller = false
+        scroll.drawsBackground = false
+        scroll.verticalScrollElasticity = .none
+        scroll.documentView = diff
+        NSLayoutConstraint.activate([
+            diff.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            diff.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            scroll.heightAnchor.constraint(equalTo: diff.heightAnchor)
+        ])
+        return scroll
+    }
+
+    private static func pair(_ lines: [GitDiffLine]) -> Pairing {
+        var result = Pairing()
+        var sourceIndex = 0
+
+        func appendContext(_ line: GitDiffLine, source: Int) {
+            let pairIndex = result.old.count
+            result.old.append(GitDiffLine(
+                kind: .context,
+                text: line.text,
+                oldNumber: line.oldNumber,
+                newNumber: line.oldNumber
+            ))
+            result.new.append(GitDiffLine(
+                kind: .context,
+                text: line.text,
+                oldNumber: line.newNumber,
+                newNumber: line.newNumber
+            ))
+            result.oldIndexBySource[source] = pairIndex
+            result.newIndexBySource[source] = pairIndex
+        }
+
+        while sourceIndex < lines.count {
+            if lines[sourceIndex].kind == .context {
+                appendContext(lines[sourceIndex], source: sourceIndex)
+                sourceIndex += 1
+                continue
+            }
+
+            var removed: [(Int, GitDiffLine)] = []
+            var added: [(Int, GitDiffLine)] = []
+            while sourceIndex < lines.count, lines[sourceIndex].kind != .context {
+                let line = lines[sourceIndex]
+                if line.kind == .removed {
+                    removed.append((sourceIndex, line))
+                } else {
+                    added.append((sourceIndex, line))
+                }
+                sourceIndex += 1
+            }
+
+            for offset in 0..<max(removed.count, added.count) {
+                let pairIndex = result.old.count
+                if removed.indices.contains(offset) {
+                    let (source, line) = removed[offset]
+                    result.old.append(line)
+                    result.oldIndexBySource[source] = pairIndex
+                } else {
+                    result.old.append(Self.blankLine)
+                }
+                if added.indices.contains(offset) {
+                    let (source, line) = added[offset]
+                    result.new.append(line)
+                    result.newIndexBySource[source] = pairIndex
+                } else {
+                    result.new.append(Self.blankLine)
+                }
+            }
+        }
+        return result
+    }
+
+    private static var blankLine: GitDiffLine {
+        GitDiffLine(kind: .context, text: "", oldNumber: nil, newNumber: nil)
+    }
 }
 
 private extension GitDiffLine.Kind {

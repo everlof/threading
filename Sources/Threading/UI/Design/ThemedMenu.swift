@@ -3322,7 +3322,11 @@ private final class ThemedMenuRowView: ThemedControl {
             ThemedSurface.draw(
                 fillRect,
                 fill: Design.Surface.controlHover,
-                radius: Design.Radius.control
+                // Fitted, like every other row-shaped fill in the window — a sidebar row's hover
+                // and a list row's selection both take this. The unfitted token is a corner the
+                // theme states for a control of *any* size: Botanical's is 24, which on a 26pt
+                // row is wider than the row is tall, and the fill came out as a taper.
+                radius: Design.Radius.control(fitting: fillRect.size)
             )
         } else if isDisabledHover {
             // Resolve, then multiply — `withAlphaComponent` replaces the alpha outright,
@@ -3334,7 +3338,7 @@ private final class ThemedMenuRowView: ThemedControl {
                 fill: resolved.withAlphaComponent(
                     resolved.alphaComponent * ThemedMenuMetrics.disabledHoverWash
                 ),
-                radius: Design.Radius.control
+                radius: Design.Radius.control(fitting: fillRect.size)
             )
         }
 

@@ -3452,6 +3452,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         return displayPaneController.currentReview?.canShowFind == true
     }
 
+    func showReviewFileJump() {
+        guard !displayItem.isCollapsed else { return }
+        displayPaneController.currentReview?.showJumpToFile()
+    }
+
+    var canJumpToReviewFile: Bool {
+        !displayItem.isCollapsed
+            && displayPaneController.currentReview?.canJumpToFile == true
+    }
+
     // MARK: - Private Methods
 
     private func currentAgentController() -> AgentSessionViewController? {
@@ -3896,6 +3906,29 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
     func terminalContainerDidRequestSharing(_ container: TerminalContainerViewController) {
         showSharing()
+    }
+
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didRequestAttachments attachmentID: String?
+    ) {
+        guard let sessionID = container.currentSessionID else {
+            NSSound.beep()
+            return
+        }
+        guard let controller = displayPaneController.activateAttachments(for: sessionID) else {
+            NSSound.beep()
+            return
+        }
+        if let attachmentID,
+           let attachment = SessionAttachmentStore.shared.attachment(
+            for: sessionID,
+            id: attachmentID
+           ) {
+            controller.showAttachment(at: attachment.url)
+        }
+        displayPaneController.showSessionTabs(sessionID)
+        setDisplayPaneVisible(true)
     }
 
     func terminalContainer(

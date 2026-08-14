@@ -11,6 +11,12 @@ enum ClassicChoiceDrawing {
     static let arrowWidth: CGFloat = 18
     static let textInset: CGFloat = 5
 
+    /// The Aqua chooser's own corner. Tiger draws its small pop-up a step tighter than the push
+    /// button beside it, so this is the chooser's measure rather than the material's control
+    /// radius — and it is one measure for both chooser implementations, which is the point of
+    /// this type.
+    static let aquaCornerRadius: CGFloat = 5
+
     static func arrowRect(
         in bounds: NSRect,
         style: AppTheme.Material.ChoiceStyle
@@ -38,26 +44,65 @@ enum ClassicChoiceDrawing {
         NSRect(x: x + 1, y: 2, width: 1, height: max(0, bounds.height - 4)).fill()
     }
 
-    static func drawAquaArrowWell(in rect: NSRect, pressed: Bool) {
+    /// The face inside an Aqua chooser's border — everything a well drawn to the trailing edge
+    /// is allowed to cover.
+    ///
+    /// Both implementations put a one-point border on the control: `ThemedPopUp` strokes it,
+    /// `ChipView` hands it to the layer, and either way it occupies the outermost point of the
+    /// silhouette. The well belongs *inside* that, with the button's own corner.
+    static func aquaFace(in bounds: NSRect) -> ThemedSurface.Shape {
+        let border = Design.Radius.controlBorder
+        return ThemedSurface.Shape(
+            rect: bounds.insetBy(dx: border, dy: border),
+            radius: max(0, aquaCornerRadius - border)
+        )
+    }
+
+    /// The blue gel plate an Aqua pop-up wears at its trailing end.
+    ///
+    /// Clipped to the button's own face rather than filled square. A pop-up's well reaches the
+    /// trailing edge, and the curve there belongs to the *button*: drawn as a rectangle it
+    /// painted over both right corners and the border joining them, so the control ended in a
+    /// hard blue block and read as cut off at the right. The clip is also what leaves the three
+    /// outer edges to the border already around them; only the seam against the value is the
+    /// well's own to draw.
+    static func drawAquaArrowWell(in rect: NSRect, face: ThemedSurface.Shape, pressed: Bool) {
+        let leading = max(rect.minX, face.rect.minX)
+        let well = NSRect(
+            x: leading,
+            y: face.rect.minY,
+            width: max(0, face.rect.maxX - leading),
+            height: face.rect.height
+        )
+        guard well.width > 0, well.height > 0 else { return }
+
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
-        NSBezierPath(rect: rect).addClip()
+        face.path.addClip()
         let accent = Design.Surface.accent
         let bright = accent.blended(withFraction: pressed ? 0.36 : 0.63, of: .white) ?? accent
         let deep = accent.blended(withFraction: pressed ? 0.36 : 0.18, of: .black) ?? accent
-        let body = rect.insetBy(dx: 0.5, dy: 0.5)
-        NSGradient(colors: [bright, accent, deep])?.draw(in: body, angle: -90)
-        Design.Surface.border.withAlphaComponent(0.70).setStroke()
-        let edge = NSBezierPath(rect: body)
-        edge.lineWidth = 1
-        edge.stroke()
+        NSGradient(colors: [bright, accent, deep])?.draw(in: well, angle: -90)
         NSColor.white.withAlphaComponent(pressed ? 0.24 : 0.58).setFill()
         NSRect(
-            x: body.minX + 1,
-            y: body.maxY - 3,
-            width: max(0, body.width - 2),
+            x: well.minX + 1,
+            y: well.maxY - 2,
+            width: max(0, well.width - 2),
             height: 1
         ).fill()
+        Design.Surface.border.withAlphaComponent(0.70).setFill()
+        NSRect(x: well.minX, y: well.minY, width: 1, height: well.height).fill()
+    }
+
+    /// The ink a chooser's indicator is cut from.
+    ///
+    /// Every classic style but one draws its arrow on the control face, where the label colour is
+    /// the answer. The Aqua pop-up draws it on the blue gel well, so the ink has to be measured
+    /// against the accent instead — `Text.selected`, the tone this app already puts on a selected
+    /// row. On Tiger's blue that measures to the same dark mark it was using; on a theme whose
+    /// authored accent is dark it is the difference between an arrow and a smudge.
+    static func indicatorInk(for style: AppTheme.Material.ChoiceStyle) -> NSColor {
+        style == .aquaPopup ? Design.Text.selected : Design.Text.label
     }
 
     static func drawIndicator(
@@ -699,7 +744,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding {
         case .aquaPopup:
             applySurface(
                 fill: Design.Surface.controlResting,
-                radius: .fixed(5),
+                radius: .fixed(ClassicChoiceDrawing.aquaCornerRadius),
                 border: Design.Surface.border
             )
         }
@@ -804,11 +849,19 @@ final class ChipView: ThemedControl, OpticalInsetProviding {
                 bevel: isPresentingMenu ? .sunken : .automatic
             )
         } else if style == .aquaPopup {
-            ClassicChoiceDrawing.drawAquaArrowWell(in: arrowRect, pressed: isPresentingMenu)
+            ClassicChoiceDrawing.drawAquaArrowWell(
+                in: arrowRect,
+                face: ClassicChoiceDrawing.aquaFace(in: bounds),
+                pressed: isPresentingMenu
+            )
         } else {
             ClassicChoiceDrawing.drawIntegratedSeparator(at: arrowRect.minX, in: bounds)
         }
-        ClassicChoiceDrawing.drawIndicator(style, in: arrowRect, color: Design.Text.label)
+        ClassicChoiceDrawing.drawIndicator(
+            style,
+            in: arrowRect,
+            color: ClassicChoiceDrawing.indicatorInk(for: style)
+        )
 
         guard window?.firstResponder === self else { return }
         let valueRect = NSRect(

@@ -96,6 +96,7 @@ enum GitReviewReader {
         _ request: DiffRequest,
         in root: URL,
         ignoringWhitespace: Bool = false,
+        contextLines: Int = GitReviewDefaults.contextLines,
         completion: @escaping @MainActor @Sendable (Result<[GitFileDiff], Failure>) -> Void
     ) -> GitProcessCancellation {
         let cancellation = GitProcessCancellation()
@@ -108,6 +109,7 @@ enum GitReviewReader {
                 request,
                 in: root,
                 ignoringWhitespace: ignoringWhitespace,
+                contextLines: contextLines,
                 cancellation: cancellation
             )
         }
@@ -189,6 +191,7 @@ enum GitReviewReader {
         using comparison: ProgressiveDiff,
         in root: URL,
         ignoringWhitespace: Bool = false,
+        contextLines: Int = GitReviewDefaults.contextLines,
         completion: @escaping @MainActor @Sendable (Result<[GitFileDiff], Failure>) -> Void
     ) {
         perform(
@@ -213,11 +216,51 @@ enum GitReviewReader {
                         from: comparison.oldTree,
                         to: comparison.newTree,
                         paths: paths,
-                        ignoringWhitespace: ignoringWhitespace
+                        ignoringWhitespace: ignoringWhitespace,
+                        contextLines: contextLines
                     ),
                     in: root
                 )
             ))
+        }
+    }
+
+    /// Re-reads one explicitly expanded file with more context. The path is literal and the
+    /// process stays on the serial hydration queue, so repeated clicks cannot fan out beside
+    /// progressive viewport work.
+    static func diffFile(
+        _ file: GitFileDiff,
+        request: DiffRequest,
+        in root: URL,
+        ignoringWhitespace: Bool = false,
+        contextLines: Int,
+        completion: @escaping @MainActor @Sendable (Result<GitFileDiff, Failure>) -> Void
+    ) {
+        perform(
+            "git.read.diff-file-context",
+            on: diffHydrationQueue,
+            metadata: ["context_lines": String(contextLines)],
+            completion
+        ) {
+            let paths: [String]
+            if case .renamed(let from) = file.change {
+                paths = [from, file.path]
+            } else {
+                paths = [file.path]
+            }
+            let files = GitDiffParser.files(fromUnifiedDiff: GitDiffParser.decode(
+                try trackedDiffData(
+                    request,
+                    in: root,
+                    paths: paths,
+                    contextLines: contextLines,
+                    ignoringWhitespace: ignoringWhitespace
+                )
+            ))
+            guard let expanded = files.first(where: { $0.path == file.path }) ?? files.first else {
+                throw Failure.gitFailed("The file no longer has a diff.")
+            }
+            return expanded
         }
     }
 
@@ -628,12 +671,14 @@ enum GitReviewReader {
         _ request: DiffRequest,
         in root: URL,
         ignoringWhitespace: Bool,
+        contextLines: Int = GitReviewDefaults.contextLines,
         cancellation: GitProcessCancellation? = nil
     ) throws -> [GitFileDiff] {
         let tracked = GitDiffParser.files(fromUnifiedDiff: GitDiffParser.decode(
             try trackedDiffData(
                 request,
                 in: root,
+                contextLines: contextLines,
                 ignoringWhitespace: ignoringWhitespace,
                 cancellation: cancellation
             )
@@ -665,6 +710,8 @@ enum GitReviewReader {
     private static func trackedDiffData(
         _ request: DiffRequest,
         in root: URL,
+        paths: [String] = [],
+        contextLines: Int = GitReviewDefaults.contextLines,
         ignoringWhitespace: Bool,
         cancellation: GitProcessCancellation? = nil
     ) throws -> Data {
@@ -672,14 +719,23 @@ enum GitReviewReader {
         switch request {
         case .staged:
             return try run(
-                GitReviewCommands.diffStaged(ignoringWhitespace: ws),
+                GitReviewCommands.diffStaged(
+                    paths: paths,
+                    ignoringWhitespace: ws,
+                    contextLines: contextLines
+                ),
                 in: root,
                 cancellation: cancellation
             )
 
         case .unstaged:
             return try run(
-                GitReviewCommands.diff(against: nil, ignoringWhitespace: ws),
+                GitReviewCommands.diff(
+                    against: nil,
+                    paths: paths,
+                    ignoringWhitespace: ws,
+                    contextLines: contextLines
+                ),
                 in: root,
                 cancellation: cancellation
             )
@@ -691,7 +747,12 @@ enum GitReviewReader {
                 ? GitReviewCommands.head
                 : try emptyTree(in: root)
             return try run(
-                GitReviewCommands.diff(against: baseline, ignoringWhitespace: ws),
+                GitReviewCommands.diff(
+                    against: baseline,
+                    paths: paths,
+                    ignoringWhitespace: ws,
+                    contextLines: contextLines
+                ),
                 in: root,
                 cancellation: cancellation
             )
@@ -701,7 +762,12 @@ enum GitReviewReader {
             let base = try defaultBranch(in: root)
             let mergeBase = decodeTrimmed(try run(GitReviewCommands.mergeBase(base), in: root))
             return try run(
-                GitReviewCommands.diff(against: mergeBase, ignoringWhitespace: ws),
+                GitReviewCommands.diff(
+                    against: mergeBase,
+                    paths: paths,
+                    ignoringWhitespace: ws,
+                    contextLines: contextLines
+                ),
                 in: root,
                 cancellation: cancellation
             )
@@ -713,7 +779,9 @@ enum GitReviewReader {
                 GitReviewCommands.diff(
                     from: baseline.treeHash,
                     to: currentTree,
-                    ignoringWhitespace: ws
+                    paths: paths,
+                    ignoringWhitespace: ws,
+                    contextLines: contextLines
                 ),
                 in: root,
                 cancellation: cancellation
@@ -725,7 +793,9 @@ enum GitReviewReader {
                 GitReviewCommands.diff(
                     from: trees.before,
                     to: trees.after,
-                    ignoringWhitespace: ws
+                    paths: paths,
+                    ignoringWhitespace: ws,
+                    contextLines: contextLines
                 ),
                 in: root,
                 cancellation: cancellation
@@ -733,7 +803,12 @@ enum GitReviewReader {
 
         case .commit(let hash):
             return try run(
-                GitReviewCommands.show(hash, ignoringWhitespace: ws),
+                GitReviewCommands.show(
+                    hash,
+                    paths: paths,
+                    ignoringWhitespace: ws,
+                    contextLines: contextLines
+                ),
                 in: root,
                 cancellation: cancellation
             )

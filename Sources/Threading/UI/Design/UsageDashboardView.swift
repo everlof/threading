@@ -1158,13 +1158,16 @@ private final class UsageMetricCardView: NSView, ThemedComponent {
         stack.spacing = Design.Spacing.hairline
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: Design.UsageDashboard.metricCardHeight),
+        let sideMargins = [
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset)
+        ]
+        NSLayoutConstraint.activate(sideMargins + [
+            heightAnchor.constraint(equalToConstant: Design.UsageDashboard.metricCardHeight),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
             detailField.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
+        holdAtContentInset(sideMargins)
     }
 
     @available(*, unavailable)
@@ -1804,12 +1807,17 @@ private final class UsageCoverageRowView: NSView, ThemedComponent {
         row.spacing = Design.Spacing.medium
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: Design.UsageDashboard.coverageRowHeight),
+        // Full-bleed inside `UsageCoverageListView`'s card, so the card's corner decides where
+        // this row's column starts — the settings rows are inset for the same reason.
+        let sideMargins = [
             row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset)
+        ]
+        NSLayoutConstraint.activate(sideMargins + [
+            heightAnchor.constraint(equalToConstant: Design.UsageDashboard.coverageRowHeight),
             row.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
+        holdAtContentInset(sideMargins)
         setAccessibilityLabel(source.runtimeName)
         setAccessibilityValue("\(state), \(detail.stringValue)")
     }

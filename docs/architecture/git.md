@@ -846,10 +846,12 @@ leading card — deliberately named after the corner rather than after git, sinc
 carry more than the checkout's reading one day. Extension rows render below the card's own
 rows and it grows downward for them too; with the slot empty the collapsed constraint
 reproduces the native geometry exactly, which is what keeps the render tests honest. Rows ride
-the card's own visibility, share the contents' resting alpha and hover lift, and stay
-display-only. Built-in Git and Subagents segments may have distinct destinations, but an
-extension row still cannot add a competing control. The contract's reasoning lives with the
-extension docs
+the card's own visibility, share the contents' resting alpha and hover lift, and keep their
+compact line display-only. A line may combine a host-rendered icon, text and status. When it is a
+disclosure, Threading owns the menu-like reveal and its bounded detail may group readings and
+standard actions without putting a competing control in the card itself. Built-in Git, checks,
+attachments and Subagents segments may have distinct destinations. The contract's reasoning
+lives with the extension docs
 (`docs/extensions/CUSTOMIZATION_SURFACE_AUDIT.md`).
 
 A **terminal** session never gets that second presentation, though its activity is known: the CLI

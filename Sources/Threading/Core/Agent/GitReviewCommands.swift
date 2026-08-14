@@ -61,8 +61,13 @@ enum GitReviewCommands {
     }
 
     /// The diff flags for one read, with the whitespace-ignore flag folded in only when asked.
-    private static func diffFlags(ignoringWhitespace: Bool) -> [String] {
-        ignoringWhitespace ? diffFlags + [ignoreWhitespaceFlag] : diffFlags
+    private static func diffFlags(
+        ignoringWhitespace: Bool,
+        contextLines: Int = GitReviewDefaults.contextLines
+    ) -> [String] {
+        var flags = Array(diffFlags.dropLast()) + ["-U\(max(contextLines, 0))"]
+        if ignoringWhitespace { flags.append(ignoreWhitespaceFlag) }
+        return flags
     }
 
     /// Paths received from Git are data, not pathspec syntax. A literal magic signature keeps
@@ -72,14 +77,32 @@ enum GitReviewCommands {
     }
 
     /// Index vs worktree when `ref` is nil; `ref` vs worktree otherwise.
-    static func diff(against ref: String?, ignoringWhitespace: Bool = false) -> [String] {
-        var arguments = ["diff"] + diffFlags(ignoringWhitespace: ignoringWhitespace)
+    static func diff(
+        against ref: String?,
+        paths: [String] = [],
+        ignoringWhitespace: Bool = false,
+        contextLines: Int = GitReviewDefaults.contextLines
+    ) -> [String] {
+        var arguments = ["diff"] + diffFlags(
+            ignoringWhitespace: ignoringWhitespace,
+            contextLines: contextLines
+        )
         if let ref { arguments.append(ref) }
+        if !paths.isEmpty { arguments += ["--"] + literalPathspecs(paths) }
         return arguments
     }
 
-    static func diffStaged(ignoringWhitespace: Bool = false) -> [String] {
-        ["diff", "--cached"] + diffFlags(ignoringWhitespace: ignoringWhitespace)
+    static func diffStaged(
+        paths: [String] = [],
+        ignoringWhitespace: Bool = false,
+        contextLines: Int = GitReviewDefaults.contextLines
+    ) -> [String] {
+        var arguments = ["diff", "--cached"] + diffFlags(
+            ignoringWhitespace: ignoringWhitespace,
+            contextLines: contextLines
+        )
+        if !paths.isEmpty { arguments += ["--"] + literalPathspecs(paths) }
+        return arguments
     }
 
     /// Two immutable trees. Last Turn uses this shape so files that were untracked at either
@@ -87,18 +110,28 @@ enum GitReviewCommands {
     static func diff(
         from oldTree: String,
         to newTree: String,
-        ignoringWhitespace: Bool = false
+        ignoringWhitespace: Bool = false,
+        contextLines: Int = GitReviewDefaults.contextLines
     ) -> [String] {
-        ["diff"] + diffFlags(ignoringWhitespace: ignoringWhitespace) + [oldTree, newTree]
+        ["diff"] + diffFlags(
+            ignoringWhitespace: ignoringWhitespace,
+            contextLines: contextLines
+        ) + [oldTree, newTree]
     }
 
     static func diff(
         from oldTree: String,
         to newTree: String,
         paths: [String],
-        ignoringWhitespace: Bool = false
+        ignoringWhitespace: Bool = false,
+        contextLines: Int = GitReviewDefaults.contextLines
     ) -> [String] {
-        diff(from: oldTree, to: newTree, ignoringWhitespace: ignoringWhitespace)
+        diff(
+            from: oldTree,
+            to: newTree,
+            ignoringWhitespace: ignoringWhitespace,
+            contextLines: contextLines
+        )
             + ["--"] + literalPathspecs(paths)
     }
 
@@ -112,8 +145,18 @@ enum GitReviewCommands {
     }
 
     /// `--format=` suppresses the commit header, leaving pure diff on stdout.
-    static func show(_ hash: String, ignoringWhitespace: Bool = false) -> [String] {
-        ["show", hash, "--format="] + diffFlags(ignoringWhitespace: ignoringWhitespace)
+    static func show(
+        _ hash: String,
+        paths: [String] = [],
+        ignoringWhitespace: Bool = false,
+        contextLines: Int = GitReviewDefaults.contextLines
+    ) -> [String] {
+        var arguments = ["show", hash, "--format="] + diffFlags(
+            ignoringWhitespace: ignoringWhitespace,
+            contextLines: contextLines
+        )
+        if !paths.isEmpty { arguments += ["--"] + literalPathspecs(paths) }
+        return arguments
     }
 
     /// Control-character separators (0x01 record, 0x00 field, 0x02 header end) survive any
@@ -271,6 +314,8 @@ enum GitReviewDefaults {
     static let timeout: TimeInterval = 15
     static let refreshDebounce: TimeInterval = 1.5
     static let contextLines = 3
+    static let expandedContextInitial = 20
+    static let maximumExpandedContextLines = 10_000
     static let logPageSize = 100
 
     /// Below this, an extra process costs more than the blank interval it could hide.

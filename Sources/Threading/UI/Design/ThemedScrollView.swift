@@ -221,6 +221,25 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
 
     private var isHorizontalScroller: Bool { bounds.width > bounds.height }
 
+    /// Whether there is any range for a thumb to stand for.
+    ///
+    /// AppKit disables a scroller whose scroll view has nothing left to scroll, but it keeps the
+    /// `knobProportion` that view last needed. A page that shrinks below its own viewport — the
+    /// Settings sidebar once its rows have settled, a conversation whose filter emptied it —
+    /// therefore leaves a thumb sized for content that is no longer there: parked at one end,
+    /// undraggable, and claiming a range the reader cannot reach. That is what a period scrollbar
+    /// looked like here, reported as a thumb that "doesn't move when I scroll" and "shows scroll
+    /// space that isn't there". Every system these appearances come from answers the same way,
+    /// and so does AppKit's own drawing: an empty trough between dimmed arrows.
+    ///
+    /// The proportion is read too, because a scroll view states the empty case that way *before*
+    /// it disables anything, and because the terminal's standalone scroller is driven by hand —
+    /// SwiftTerm sets `isEnabled` from its own `canScroll` and the proportion from the buffer, so
+    /// one rule covers a hosted scroller and that one alike.
+    private var hasScrollableRange: Bool {
+        isEnabled && knobProportion > 0
+    }
+
     override func rect(for part: NSScroller.Part) -> NSRect {
         let appearance = scrollerAppearance
         guard appearance.usesLegacyPresentation else { return super.rect(for: part) }
@@ -378,15 +397,14 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
         case .windows98: floor(thickness / 2)
         default: thickness
         }
-        let hidesEmptyWindowsThumb = appearance == .windows98 && knobProportion <= 0
-        let knobLength = hidesEmptyWindowsThumb ? 0 : min(
-            slotLength,
-            max(minimumKnob, floor(slotLength * max(0, min(1, knobProportion))))
-        )
+        let proportional = floor(slotLength * min(1, knobProportion))
+        let knobLength: CGFloat = hasScrollableRange
+            ? min(slotLength, max(minimumKnob, proportional))
+            : 0
         let travel = max(0, slotLength - knobLength)
         let value = CGFloat(max(0, min(1, doubleValue)))
         let knob: NSRect
-        if hidesEmptyWindowsThumb {
+        if !hasScrollableRange {
             knob = .zero
         } else if isHorizontalScroller {
             knob = NSRect(
@@ -1259,7 +1277,17 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
         "KKKKKKKKKKKKKKKK"
     ]
 
+    /// The plate stays and the glyph goes quiet, which is how every one of these systems said an
+    /// arrow had nowhere to go. Dimming the plate as well would leave the trailing end of the
+    /// trough lighter than the trough, reading as a highlight rather than as an unavailable
+    /// control.
     private func drawArrowGlyph(in rect: NSRect, increment: Bool) {
+        DisabledControlDrawing.draw(isEnabled: hasScrollableRange) {
+            drawActiveArrowGlyph(in: rect, increment: increment)
+        }
+    }
+
+    private func drawActiveArrowGlyph(in rect: NSRect, increment: Bool) {
         if scrollerAppearance != .aqua && scrollerAppearance != .aquaTiger {
             drawPixelArrowGlyph(in: rect, increment: increment)
             return

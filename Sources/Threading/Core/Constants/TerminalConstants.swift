@@ -705,12 +705,32 @@ enum SidebarDefaults {
     static let headingRowHeight: CGFloat = 32
     static let indentationPerLevel: CGFloat = 14
 
+    /// The column width at and above which the list gives nothing up — the width the app opens
+    /// itself to. Below it every gutter in `SidebarDensity` closes in step with the drag.
+    static let relaxedDensityWidth: CGFloat = defaultWidth
+
+    /// The width at which the list has given up everything it will: the narrowest column the
+    /// split view allows. A runtime floor raised for the window controls only means the tightest
+    /// values are approached rather than reached, which is the honest answer to a column that
+    /// cannot actually get that narrow.
+    static let tightDensityWidth: CGFloat = minWidth
+
+    /// `indentationPerLevel` at `tightDensityWidth`. Still a step the eye reads as a level — a
+    /// session under a branch under a project keeps two visible steps — while returning 12pt of
+    /// title to the deepest rows, which are the ones that truncate first.
+    static let tightIndentationPerLevel: CGFloat = 8
+
     /// The compact tree's one content edge, measured from the column's leading side.
     ///
     /// Wide enough that the disclosure chevron — kept, because collapsing a project is the
     /// affordance the indentation was paying for — fits in a fixed gutter before it, and equal
     /// to `SidebarRowDefaults.iconSlotWidth` so the gutter reads as the same column the row
     /// icons align down.
+    ///
+    /// **This one does not narrow with the column** (`SidebarDensity`), and the chevron is why:
+    /// AppKit draws it 13pt wide at `compactMarkerLeading`, so the gutter already ends one point
+    /// after the mark it holds. There is no space here to lend the title — a tighter edge would
+    /// draw the chevron over the icon beside it.
     static let compactCellLeading: CGFloat = SidebarRowDefaults.iconSlotWidth
 
     /// Where the compact tree's disclosure chevrons sit, all depths alike.
@@ -835,6 +855,13 @@ enum SidebarRowDefaults {
     /// gap between them is owned here.
     static let leadingInset: CGFloat = Design.Spacing.tight
     static let trailingInset: CGFloat = Design.Spacing.small
+
+    /// The same two gutters at `SidebarDefaults.tightDensityWidth` — see `SidebarDensity`. One
+    /// step on the scale rather than none: a row still holds its content off both edges, and the
+    /// space between the chevron and the icon, and between the trailing mark and the seam, is
+    /// what a narrow column can most afford to lend the title.
+    static let tightLeadingInset: CGFloat = Design.Spacing.hairline
+    static let tightTrailingInset: CGFloat = Design.Spacing.hairline
     static let iconSize: CGFloat = 13
     /// Wider than `iconSize` so a 12pt emoji, whose glyph outgrows its font size, is not
     /// clipped at the slot's edges.

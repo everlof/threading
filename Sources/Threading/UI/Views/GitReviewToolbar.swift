@@ -89,7 +89,9 @@ extension GitReviewViewController {
     /// Offered only when something can actually open, so a diff of binaries alone does not carry
     /// a control that would do nothing.
     private func collapseEntries() -> [ThemedMenuEntry] {
-        let expandable = renderedFiles.filter(GitReviewFileRow.isExpandable)
+        let expandable = renderedFiles.filter {
+            GitReviewFileRow.isExpandable($0, showsRichPreviews: showsRichPreviews)
+        }
         guard !expandable.isEmpty else { return [] }
 
         return [
@@ -110,7 +112,26 @@ extension GitReviewViewController {
                 title: wrapsDiffLines
                     ? L10n.string("Disable word wrap")
                     : L10n.string("Enable word wrap"),
+                isEnabled: diffLayout == .unified,
                 onChoose: { [weak self] in self?.toggleWordWrap() }
+            )),
+            .item(ThemedMenuItem(
+                title: loadsFullFiles
+                    ? L10n.string("Don’t load full files")
+                    : L10n.string("Load full files"),
+                onChoose: { [weak self] in self?.toggleFullFiles() }
+            )),
+            .item(ThemedMenuItem(
+                title: showsRichPreviews
+                    ? L10n.string("Disable rich preview")
+                    : L10n.string("Enable rich preview"),
+                onChoose: { [weak self] in self?.toggleRichPreviews() }
+            )),
+            .item(ThemedMenuItem(
+                title: showsWordDiffs
+                    ? L10n.string("Disable word diffs")
+                    : L10n.string("Enable word diffs"),
+                onChoose: { [weak self] in self?.toggleWordDiffs() }
             )),
             .item(ThemedMenuItem(
                 title: L10n.string("Hide whitespace"),
@@ -178,7 +199,9 @@ extension GitReviewViewController {
     /// opens everything. Each row reports the change as though it had been clicked, so what the
     /// user chose here survives the next re-read exactly as a hand-collapsed file does.
     @objc private func toggleAllExpansion() {
-        let expandable = renderedFiles.filter(GitReviewFileRow.isExpandable)
+        let expandable = renderedFiles.filter {
+            GitReviewFileRow.isExpandable($0, showsRichPreviews: showsRichPreviews)
+        }
         guard !expandable.isEmpty else { return }
         let expand = !expandable.contains(where: isFileExpanded)
         bulkExpansionOverride = expand
@@ -194,6 +217,25 @@ extension GitReviewViewController {
     @objc private func toggleWordWrap() {
         wrapsDiffLines.toggle()
         show(phase)
+    }
+
+    @objc private func toggleFullFiles() {
+        loadsFullFiles.toggle()
+        contextLinesByPath.removeAll(keepingCapacity: false)
+        contextExpansionExhaustedPaths.removeAll(keepingCapacity: false)
+        refresh(force: true)
+    }
+
+    @objc private func toggleRichPreviews() {
+        showsRichPreviews.toggle()
+        measuredFileRowHeights.removeAll(keepingCapacity: true)
+        show(phase, forceRebuild: true)
+    }
+
+    @objc private func toggleWordDiffs() {
+        showsWordDiffs.toggle()
+        measuredFileRowHeights.removeAll(keepingCapacity: true)
+        show(phase, forceRebuild: true)
     }
 
     /// A re-read, not a display filter: which lines count as changed is git's judgement, and

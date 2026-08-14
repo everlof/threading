@@ -639,13 +639,20 @@ enum SettingsUI {
         content.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(content)
 
-        NSLayoutConstraint.activate([
+        // A row is full-bleed inside its `SettingsCard`, so the card's corner is what decides how
+        // far in this column of labels can start — see `Design.Spacing.inset(inside:)`. Every row
+        // asks the same question, which is what keeps the column straight down a card whose first
+        // and last rows are the only ones the curve actually reaches.
+        let sideMargins = [
+            content.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Design.Spacing.inset),
+            content.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Design.Spacing.inset)
+        ]
+        NSLayoutConstraint.activate(sideMargins + [
             content.topAnchor.constraint(equalTo: container.topAnchor, constant: Design.Spacing.medium),
             content.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Design.Spacing.medium),
-            content.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Design.Spacing.inset),
-            content.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Design.Spacing.inset),
             container.heightAnchor.constraint(greaterThanOrEqualToConstant: SettingsUIDefaults.rowHeight)
         ])
+        container.holdAtContentInset(sideMargins)
 
         return container
     }
@@ -782,12 +789,20 @@ final class SettingsCard: NSView {
         // constraining a view before it is in the hierarchy raises an exception AppKit swallows,
         // leaving the card silently unbuilt.
         addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        // The two ends are where the card's corner is still sweeping, and the row there pads
+        // itself by `medium` — enough under a 10pt corner, and half of what a 40pt one asks. The
+        // card pays the difference, so the first row's title clears the curve by the same margin
+        // as the column beside it, and the rhythm *between* rows is untouched.
+        let endPadding = Design.Spacing.inset - Design.Spacing.medium
+        let ends = [
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: endPadding),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -endPadding)
+        ]
+        NSLayoutConstraint.activate(ends + [
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
+        holdAtContentInset(ends, less: Design.Spacing.medium)
 
         for (index, row) in rows.enumerated() {
             if index > 0 {
@@ -796,11 +811,18 @@ final class SettingsCard: NSView {
                 divider.applyLayerBackground(Design.Surface.border)
                 divider.translatesAutoresizingMaskIntoConstraints = false
                 stack.addArrangedSubview(divider)
+                // Starting on the label column, so it stays there when a broad corner moves the
+                // column in.
+                let start = divider.leadingAnchor.constraint(
+                    equalTo: stack.leadingAnchor,
+                    constant: Design.Spacing.inset
+                )
                 NSLayoutConstraint.activate([
                     divider.heightAnchor.constraint(equalToConstant: 1),
-                    divider.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: Design.Spacing.inset),
+                    start,
                     divider.trailingAnchor.constraint(equalTo: stack.trailingAnchor)
                 ])
+                holdAtContentInset([start])
             }
 
             row.translatesAutoresizingMaskIntoConstraints = false

@@ -1,18 +1,5 @@
 import AppKit
 
-/// A control whose frame carries padding around its visible ink — a plain `ThemedButton` holds
-/// room for its hover surface, a `ThemedIconButton` for its click target. Layout that wants the
-/// *ink* at a stated inset has to know how deep that padding is, or every container repeats the
-/// subtraction with a number it does not own: the sidebar footer read as unevenly inset for as
-/// long as its two buttons were placed by their frames, because equal frame margins are not
-/// equal visual margins. Conforming is what lets `PaneFooterView` put a titled button and a
-/// bare glyph on the same visual margin without knowing either type.
-@MainActor
-protocol OpticalInsetProviding {
-    /// Horizontal distance from the frame's edge to the visible content inside it.
-    var opticalHorizontalInset: CGFloat { get }
-}
-
 /// Where a band measures its margins from.
 ///
 /// The platform's clearance is stated per *edge*, not per point: a view spanning the sidebar's

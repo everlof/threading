@@ -84,6 +84,20 @@ summary; the approvals endpoint supplies approvals and requested reviewers. Beca
 not expose GitHub's per-review changes-requested meaning through this workflow, that capability is
 false and the adapter reports no invented count.
 
+## Read-only status-card projection
+
+Git Review owns the complete provider state and every write. While the user has the session status
+card enabled, `TerminalContainerViewController` makes one provider-neutral discovery for the
+selected checkout and projects only a connected request's number, title and checks. Both rows
+navigate to Git Review; publication, pushing, review details and browser opening stay there.
+
+The filesystem watcher can report a checkout burst for every file an agent writes, so this read
+path is bounded independently: events debounce for 500 ms, an unchanged branch + HEAD signature
+reuses its answer for 15 seconds, and a 30-second poll exists only while visible checks are
+pending. Switching sessions or disabling the card cancels the task, debounce and poll and rejects
+late generations. Unsupported remotes stop before a provider request. These are idempotent reads;
+the explicit-publication rule below is unchanged.
+
 ## Explicit publication and durable safety
 
 The repository-scoped policy is shared across linked worktrees. Every Git Review primary click

@@ -106,6 +106,42 @@ final class GitReviewViewController: NSViewController {
         button.onPress = { [weak self] in self?.stepReviewTextSize(by: 1) }
         return button
     }()
+    private(set) lazy var jumpToFileButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "doc.text.magnifyingglass",
+            accessibility: L10n.string("Jump to file"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Jump to file (⌘J)")
+        button.setAccessibilityIdentifier("git-review.jump-to-file")
+        button.onPress = { [weak self] in self?.showJumpToFile() }
+        return button
+    }()
+    private(set) lazy var fileNavigatorButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "folder",
+            accessibility: L10n.string("Show changed files"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Show changed files")
+        button.setAccessibilityIdentifier("git-review.file-navigator")
+        button.onPress = { [weak self] in self?.toggleFileNavigator() }
+        return button
+    }()
+    private(set) lazy var diffLayoutButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "rectangle.split.2x1",
+            accessibility: L10n.string("Switch to split diff"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Switch to split diff")
+        button.setAccessibilityIdentifier("git-review.diff-layout")
+        button.onPress = { [weak self] in self?.toggleDiffLayout() }
+        return button
+    }()
     private lazy var menuButton: ThemedButton = {
         let button = ThemedButton(
             symbol: "ellipsis",
@@ -120,7 +156,14 @@ final class GitReviewViewController: NSViewController {
     private lazy var headerRow = ControlRowView(
         scale: .compact,
         leading: [backButton, modeChip, turnChip, counterLabel],
-        trailing: [decreaseTextSizeButton, increaseTextSizeButton, menuButton]
+        trailing: [
+            jumpToFileButton,
+            diffLayoutButton,
+            fileNavigatorButton,
+            decreaseTextSizeButton,
+            increaseTextSizeButton,
+            menuButton
+        ]
     )
     lazy var stack: NSStackView = {
         let stack = NSStackView()
@@ -232,6 +275,46 @@ final class GitReviewViewController: NSViewController {
         button.isHidden = true
         return button
     }()
+    private let stickyFileHeaderHost: GitReviewStickyHeaderHost = {
+        let host = GitReviewStickyHeaderHost()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.isHidden = true
+        return host
+    }()
+    private lazy var stickyFileHeaderTop = stickyFileHeaderHost.topAnchor.constraint(
+        equalTo: scrollView.topAnchor
+    )
+    private lazy var stickyFileHeaderHeight: NSLayoutConstraint = {
+        let height = stickyFileHeaderHost.heightAnchor.constraint(equalToConstant: 0)
+        // The retained labels have an intrinsic minimum before any file is sticky. Its hidden
+        // bootstrap height must yield until the first update installs the exact fitted value.
+        height.priority = .init(999)
+        return height
+    }()
+    private var stickyFileHeaderSignature: String?
+    private lazy var fileNavigatorController: GitReviewPathNavigatorViewController = {
+        let controller = GitReviewPathNavigatorViewController(
+            rootURL: URL(fileURLWithPath: folderPath)
+        )
+        controller.onChoosePath = { [weak self] path in self?.jumpToFile(path) }
+        return controller
+    }()
+    private let fileNavigatorHost: ThemedSurfaceView = {
+        let host = ThemedSurfaceView()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.isHidden = true
+        host.applySurface(fill: Design.Surface.panel, radius: .fixed(0))
+        return host
+    }()
+    private lazy var fileNavigatorWidth = fileNavigatorHost.widthAnchor.constraint(
+        equalToConstant: 0
+    )
+    private var showsFileNavigator = false
+    private var jumpToFilePopover: ThemedPopover?
+    private(set) var stickyFileHeaderPathForTesting: String?
+
+    var fileNavigatorVisibleForTesting: Bool { showsFileNavigator }
+    var fileNavigatorWidthForTesting: CGFloat { fileNavigatorWidth.constant }
     lazy var findBar = BrowserFindBar(
         placeholder: L10n.string("Find in diff"),
         closeAccessibility: L10n.string("Close Find in Diff")
@@ -308,6 +391,9 @@ final class GitReviewViewController: NSViewController {
     /// state, so a watched checkout re-reading itself does not undo what the reader chose.
     var expansionOverrides: [String: Bool] = [:]
     var bulkExpansionOverride: Bool?
+    var contextLinesByPath: [String: Int] = [:]
+    var contextExpansionInFlightPaths: Set<String> = []
+    var contextExpansionExhaustedPaths: Set<String> = []
 
     /// File comparisons use a reusable table. `NSStackView` eagerly solves constraints for
     /// every arranged child, which made both the original eager list and progressively appended
@@ -345,6 +431,15 @@ final class GitReviewViewController: NSViewController {
     /// is the default because the pane is often narrow, and hiding half a changed line off the
     /// right edge is worse — but a wide window reading long lines wants the other trade.
     var wrapsDiffLines = true
+    var diffLayout: GitReviewDiffLayout = .unified
+    var showsRichPreviews = true
+    var showsWordDiffs = false
+    var loadsFullFiles = false
+    var diffContextLines: Int {
+        loadsFullFiles
+            ? GitReviewDefaults.maximumExpandedContextLines
+            : GitReviewDefaults.contextLines
+    }
 
     /// Whether git is asked to fold away whitespace-only changes. A re-read rather than a
     /// display filter: what counts as a changed line is git's judgement, not the view's.
@@ -484,9 +579,20 @@ final class GitReviewViewController: NSViewController {
         super.viewDidLayout()
         guard scrollView.documentView === fileTableView else { return }
 
-        // The column follows the table's width in `SoleColumnFitting`, not here. It was here, and
-        // a pane laid out before its diff arrives never calls this method again — see that
-        // protocol for the cards it left 76pt wide.
+        // The clip is the pane width the eye already sees. `NSClipView` normally propagates that
+        // width to its autoresizing document during the same layout traversal, but a nested split
+        // animation can leave the table on the preceding frame until the next traversal. That is
+        // cheap in a timing profile and visibly wrong beside a divider that has already moved.
+        // State the current width synchronously; `ThemedTableView.setFrameSize` also fits its sole
+        // column, so the row host receives the same geometry before this frame is displayed.
+        let viewportWidth = scrollView.contentView.bounds.width
+        if viewportWidth > 1, abs(fileTableView.bounds.width - viewportWidth) > 0.5 {
+            fileTableView.setFrameSize(NSSize(
+                width: viewportWidth,
+                height: fileTableView.frame.height
+            ))
+        }
+
         let cardWidth = max(fileTableView.bounds.width - Design.Spacing.inset * 2, 0)
         guard cardWidth > 1, abs(cardWidth - fileRowHeightWidth) > 0.5 else { return }
         fileRowHeightWidth = cardWidth
@@ -498,6 +604,17 @@ final class GitReviewViewController: NSViewController {
         fileTableView.noteHeightOfRows(
             withIndexesChanged: IndexSet(integersIn: 0..<fileTableView.numberOfRows)
         )
+
+        // `noteHeightOfRows` changes the virtual table's geometry after the ordinary descendant
+        // layout pass has finished. Settle only the mounted viewport now so its cards and TextKit
+        // containers advance with the divider; offscreen rows remain estimates and own no views.
+        // Suppress an inherited split-view animation here: the outer pane may animate, but each
+        // inner width must describe its current frame instead of beginning a second, trailing one.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Design.Motion.immediate
+            context.allowsImplicitAnimation = false
+            fileTableView.layoutSubtreeIfNeeded()
+        }
     }
 
     deinit {
@@ -552,6 +669,31 @@ final class GitReviewViewController: NSViewController {
         }
 
         view.addSubview(scrollView)
+        view.addSubview(fileNavigatorHost)
+        addChild(fileNavigatorController)
+        let navigatorView = fileNavigatorController.view
+        navigatorView.translatesAutoresizingMaskIntoConstraints = false
+        fileNavigatorHost.addSubview(navigatorView)
+        let navigatorRule = SeparatorView()
+        navigatorRule.translatesAutoresizingMaskIntoConstraints = false
+        fileNavigatorHost.addSubview(navigatorRule)
+        let navigatorTrailing = navigatorView.trailingAnchor.constraint(
+            equalTo: fileNavigatorHost.trailingAnchor
+        )
+        // The rail collapses to zero width. Its hidden child may keep the minimum width implied
+        // by the search field without asking AppKit to break required constraints; once the rail
+        // opens to 260pt this edge becomes satisfiable and closes normally.
+        navigatorTrailing.priority = .init(999)
+        NSLayoutConstraint.activate([
+            navigatorRule.topAnchor.constraint(equalTo: fileNavigatorHost.topAnchor),
+            navigatorRule.bottomAnchor.constraint(equalTo: fileNavigatorHost.bottomAnchor),
+            navigatorRule.leadingAnchor.constraint(equalTo: fileNavigatorHost.leadingAnchor),
+            navigatorRule.widthAnchor.constraint(equalToConstant: Design.Radius.border),
+            navigatorView.topAnchor.constraint(equalTo: fileNavigatorHost.topAnchor),
+            navigatorView.bottomAnchor.constraint(equalTo: fileNavigatorHost.bottomAnchor),
+            navigatorView.leadingAnchor.constraint(equalTo: navigatorRule.trailingAnchor),
+            navigatorTrailing
+        ])
         view.addSubview(changeRequestBar)
         findBar.onFind = { [weak self] query, backwards in
             self?.find(query, backwards: backwards)
@@ -563,6 +705,7 @@ final class GitReviewViewController: NSViewController {
         view.addSubview(findBar)
         view.addSubview(findBarSeparator)
         view.addSubview(placeholderLabel)
+        view.addSubview(stickyFileHeaderHost)
         view.addSubview(jumpToEndButton)
     }
 
@@ -642,8 +785,13 @@ final class GitReviewViewController: NSViewController {
 
             scrollViewTop,
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: fileNavigatorHost.leadingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            fileNavigatorHost.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            fileNavigatorHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            fileNavigatorHost.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            fileNavigatorWidth,
 
             // Rows wrap to the pane's width instead of scrolling sideways.
             stack.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
@@ -656,7 +804,18 @@ final class GitReviewViewController: NSViewController {
             jumpToEndButton.bottomAnchor.constraint(
                 equalTo: view.bottomAnchor,
                 constant: -Design.Spacing.inset
-            )
+            ),
+
+            stickyFileHeaderTop,
+            stickyFileHeaderHost.leadingAnchor.constraint(
+                equalTo: scrollView.leadingAnchor,
+                constant: inset
+            ),
+            stickyFileHeaderHost.trailingAnchor.constraint(
+                equalTo: scrollView.trailingAnchor,
+                constant: -inset
+            ),
+            stickyFileHeaderHeight
         ])
     }
 
@@ -671,12 +830,151 @@ final class GitReviewViewController: NSViewController {
         guard isViewLoaded,
               scrollView.documentView === fileTableView,
               !counterLabel.isHidden else {
-            if isViewLoaded { jumpToEndButton.setFloatingPresence(false) }
+            if isViewLoaded {
+                jumpToEndButton.setFloatingPresence(false)
+                hideStickyFileHeader()
+            }
             return
         }
         let overflow = maximumScrollOffsetY()
         let distanceFromEnd = overflow - scrollView.contentView.bounds.origin.y
         jumpToEndButton.setFloatingPresence(overflow > 1 && distanceFromEnd > 4)
+        updateStickyFileHeader()
+    }
+
+    private func updateStickyFileHeader() {
+        // A thumb drag can cross dozens of files per frame. Its lightweight table rows preserve
+        // geometry until the pointer rests; let the sticky header follow the same rule and
+        // materialize the settled file once instead of formatting transient destinations.
+        guard !isFileScrollerSeeking else {
+            hideStickyFileHeader()
+            return
+        }
+        let visibleY = scrollView.documentVisibleRect.minY
+        let tableRow = fileTableView.row(at: NSPoint(x: 1, y: visibleY + 1))
+        guard tableRow >= filePreludeViews.count,
+              tableRow < filePreludeViews.count + renderedFiles.count else {
+            hideStickyFileHeader()
+            return
+        }
+
+        let rowRect = fileTableView.rect(ofRow: tableRow)
+        guard visibleY > rowRect.minY + 1 else {
+            hideStickyFileHeader()
+            return
+        }
+
+        let file = renderedFiles[tableRow - filePreludeViews.count]
+        let expanded = expansionOverrides[file.path]
+            ?? bulkExpansionOverride
+            ?? (pendingDiffIndexPaths.contains(file.path)
+                ? true
+                : GitReviewFileRow.expandsByDefault(file))
+        let isPending = pendingDiffIndexPaths.contains(file.path)
+        let didFail = failedDiffHydrationPaths.contains(file.path)
+        let signature = "\(file.path)\u{0}\(file.added)\u{0}\(file.removed)\u{0}\(expanded)"
+            + "\u{0}\(isPending)\u{0}\(didFail)"
+        if signature != stickyFileHeaderSignature {
+            let verticalLayoutChanged = stickyFileHeaderHost.update(
+                file: file,
+                contentIsPending: isPending,
+                contentLoadFailed: didFail
+            )
+            if stickyFileHeaderHeight.constant <= 0 || verticalLayoutChanged {
+                stickyFileHeaderHost.layoutSubtreeIfNeeded()
+                stickyFileHeaderHeight.constant = max(stickyFileHeaderHost.fittingSize.height, 1)
+            }
+            stickyFileHeaderSignature = signature
+        }
+
+        let distanceToNextFile = rowRect.maxY - visibleY
+        stickyFileHeaderTop.constant = min(0, distanceToNextFile - stickyFileHeaderHeight.constant)
+        stickyFileHeaderHost.isHidden = false
+        stickyFileHeaderPathForTesting = file.path
+    }
+
+    private func hideStickyFileHeader() {
+        stickyFileHeaderHost.isHidden = true
+        stickyFileHeaderTop.constant = 0
+        stickyFileHeaderPathForTesting = nil
+    }
+
+    func syncFileNavigator(with files: [GitFileDiff]) {
+        guard showsFileNavigator else { return }
+        fileNavigatorController.update(files: files)
+    }
+
+    var canJumpToFile: Bool {
+        scrollView.documentView === fileTableView && !renderedFiles.isEmpty
+    }
+
+    func showJumpToFile() {
+        guard canJumpToFile else { return }
+        jumpToFilePopover?.close()
+
+        let navigator = GitReviewPathNavigatorViewController(
+            rootURL: renderedFileRoot ?? URL(fileURLWithPath: folderPath)
+        )
+        navigator.preferredContentSize = NSSize(width: 520, height: 340)
+        let popover = ThemedPopover()
+        popover.behavior = .transient
+        navigator.onChoosePath = { [weak self, weak popover] path in
+            popover?.close()
+            self?.jumpToFile(path)
+        }
+        popover.contentViewController = navigator
+        popover.onClose = { [weak self] in self?.jumpToFilePopover = nil }
+        jumpToFilePopover = popover
+        navigator.update(files: renderedFiles)
+        popover.show(relativeTo: jumpToFileButton.bounds, of: jumpToFileButton, preferredEdge: .maxY)
+        navigator.focusSearch()
+    }
+
+    private func toggleFileNavigator() {
+        showsFileNavigator.toggle()
+        fileNavigatorHost.isHidden = !showsFileNavigator
+        fileNavigatorWidth.constant = showsFileNavigator ? 260 : 0
+        fileNavigatorButton.setSymbol(
+            showsFileNavigator ? "folder.fill" : "folder",
+            accessibility: showsFileNavigator
+                ? L10n.string("Hide changed files")
+                : L10n.string("Show changed files")
+        )
+        fileNavigatorButton.toolTip = showsFileNavigator
+            ? L10n.string("Hide changed files")
+            : L10n.string("Show changed files")
+        if showsFileNavigator {
+            fileNavigatorController.update(files: renderedFiles)
+        }
+        measuredFileRowHeights.removeAll(keepingCapacity: true)
+        fileRowHeightWidth = 0
+        view.needsLayout = true
+    }
+
+    private func toggleDiffLayout() {
+        diffLayout = diffLayout == .unified ? .split : .unified
+        let title = diffLayout == .unified
+            ? L10n.string("Switch to split diff")
+            : L10n.string("Switch to unified diff")
+        diffLayoutButton.setSymbol(
+            diffLayout == .unified ? "rectangle.split.2x1" : "rectangle",
+            accessibility: title
+        )
+        diffLayoutButton.toolTip = title
+        measuredFileRowHeights.removeAll(keepingCapacity: true)
+        fileRowHeightWidth = 0
+        show(phase, forceRebuild: true)
+    }
+
+    func jumpToFile(_ path: String) {
+        guard let fileIndex = renderedFiles.firstIndex(where: { $0.path == path }) else { return }
+        let tableRow = filePreludeViews.count + fileIndex
+        guard tableRow < fileTableView.numberOfRows else { return }
+        view.layoutSubtreeIfNeeded()
+        let targetY = min(fileTableView.rect(ofRow: tableRow).minY, maximumScrollOffsetY())
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(targetY, 0)))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        updateScrollControls()
     }
 
     /// AppKit's actual terminal scroll position. Let the clip view apply the same constraints
@@ -896,7 +1194,8 @@ final class GitReviewViewController: NSViewController {
         activeDiffCancellation = GitReviewReader.diff(
             request,
             in: root,
-            ignoringWhitespace: ignoresWhitespace
+            ignoringWhitespace: ignoresWhitespace,
+            contextLines: diffContextLines
         ) { [weak self] result in
             guard let self else {
                 span.end(metadata: ["result": "controller-released"])
@@ -1024,7 +1323,8 @@ final class GitReviewViewController: NSViewController {
         GitReviewReader.diff(
             .commit(hash: commit.hash),
             in: root,
-            ignoringWhitespace: ignoresWhitespace
+            ignoringWhitespace: ignoresWhitespace,
+            contextLines: diffContextLines
         ) { [weak self] result in
             guard let self else {
                 span.end(metadata: ["result": "controller-released"])
@@ -1125,6 +1425,7 @@ final class GitReviewViewController: NSViewController {
             if mode == .lastTurn, checkpointID != nil {
                 expansionOverrides.removeAll()
                 bulkExpansionOverride = nil
+                resetContextExpansion()
                 refreshModePresentation()
                 refresh(force: true)
             }
@@ -1157,6 +1458,7 @@ final class GitReviewViewController: NSViewController {
         // What was opened by hand described the old comparison; the same path in a new mode is
         // a different diff.
         expansionOverrides.removeAll()
+        resetContextExpansion()
         refreshModePresentation()
         onModeChange?()
         refresh(force: true)
@@ -1170,8 +1472,15 @@ final class GitReviewViewController: NSViewController {
         selectedTurnID = checkpointID
         expansionOverrides.removeAll()
         bulkExpansionOverride = nil
+        resetContextExpansion()
         refreshModePresentation()
         refresh(force: true)
+    }
+
+    private func resetContextExpansion() {
+        contextLinesByPath.removeAll(keepingCapacity: false)
+        contextExpansionInFlightPaths.removeAll(keepingCapacity: false)
+        contextExpansionExhaustedPaths.removeAll(keepingCapacity: false)
     }
 
     // MARK: - Actions
@@ -1191,6 +1500,157 @@ final class GitReviewViewController: NSViewController {
 /// Reports when it lands in, or leaves, a window. The display pane parents a live tab's *view*
 /// without adopting its controller, so `viewDidAppear` never fires for one — this is the signal
 /// that stands in for it.
+final class GitReviewStickyHeaderHost: NSView {
+    private let glyphLabel = NSTextField(labelWithString: "")
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let directoryLabel = NSTextField(labelWithString: "")
+    private let metaLabel = NSTextField.label(attributed: NSAttributedString())
+    private lazy var nameBottom = nameLabel.bottomAnchor.constraint(
+        equalTo: bottomAnchor,
+        constant: -Design.Spacing.small
+    )
+    private lazy var directoryTop = directoryLabel.topAnchor.constraint(
+        equalTo: nameLabel.bottomAnchor,
+        constant: Design.Spacing.hairline
+    )
+    private lazy var directoryBottom = directoryLabel.bottomAnchor.constraint(
+        equalTo: bottomAnchor,
+        constant: -Design.Spacing.small
+    )
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        applySurface(fill: Design.Surface.controlResting, radius: .control)
+
+        glyphLabel.applyFont(.code(weight: .medium))
+        glyphLabel.textColor = Design.Text.secondary
+        glyphLabel.alignment = .center
+
+        nameLabel.applyFont(.control)
+        nameLabel.textColor = Design.Text.label
+        nameLabel.lineBreakMode = .byTruncatingMiddle
+        nameLabel.usesSingleLineMode = true
+        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        directoryLabel.applyFont(.detail())
+        directoryLabel.textColor = Design.Text.tertiary
+        directoryLabel.lineBreakMode = .byTruncatingMiddle
+        directoryLabel.usesSingleLineMode = true
+        directoryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        directoryLabel.isHidden = true
+        metaLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        [glyphLabel, nameLabel, directoryLabel, metaLabel].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            addSubview($0)
+        }
+        let inset = Design.Spacing.small
+        NSLayoutConstraint.activate([
+            glyphLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            glyphLabel.topAnchor.constraint(equalTo: topAnchor, constant: inset),
+            glyphLabel.widthAnchor.constraint(equalToConstant: Design.Chat.toolIconWidth),
+            nameLabel.leadingAnchor.constraint(
+                equalTo: glyphLabel.trailingAnchor,
+                constant: inset
+            ),
+            nameLabel.firstBaselineAnchor.constraint(equalTo: glyphLabel.firstBaselineAnchor),
+            metaLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: nameLabel.trailingAnchor,
+                constant: Design.Spacing.medium
+            ),
+            metaLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            metaLabel.firstBaselineAnchor.constraint(equalTo: glyphLabel.firstBaselineAnchor),
+            directoryLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
+            directoryLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: metaLabel.leadingAnchor,
+                constant: -Design.Spacing.small
+            ),
+            nameBottom
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(
+        file: GitFileDiff,
+        contentIsPending: Bool,
+        contentLoadFailed: Bool
+    ) -> Bool {
+        glyphLabel.stringValue = switch file.change {
+        case .modified, .binary: "±"
+        case .added, .untracked: "+"
+        case .deleted: "−"
+        case .renamed: "→"
+        }
+        let path: String
+        if case .renamed(let from) = file.change {
+            path = "\(from) → \(file.path)"
+            let renamedName = "\((from as NSString).lastPathComponent) → \(file.fileName)"
+            nameLabel.stringValue = renamedName
+        } else {
+            path = file.path
+            nameLabel.stringValue = file.fileName
+        }
+        nameLabel.toolTip = path
+        directoryLabel.stringValue = file.directory
+        directoryLabel.toolTip = path
+
+        let showsDirectory = !file.directory.isEmpty
+        let verticalLayoutChanged = showsDirectory != !directoryLabel.isHidden
+        if verticalLayoutChanged {
+            directoryLabel.isHidden = !showsDirectory
+            nameBottom.isActive = !showsDirectory
+            directoryTop.isActive = showsDirectory
+            directoryBottom.isActive = showsDirectory
+        }
+        metaLabel.attributedStringValue = Self.metaText(
+            for: file,
+            contentIsPending: contentIsPending,
+            contentLoadFailed: contentLoadFailed
+        )
+        return verticalLayoutChanged
+    }
+
+    private static func metaText(
+        for file: GitFileDiff,
+        contentIsPending: Bool,
+        contentLoadFailed: Bool
+    ) -> NSAttributedString {
+        if contentIsPending {
+            return NSAttributedString(string: L10n.string("Loading…"), attributes: [
+                .foregroundColor: Design.Text.quaternary,
+                .font: Design.Typography.caption(),
+            ])
+        }
+        if contentLoadFailed {
+            return NSAttributedString(string: "preview unavailable", attributes: [
+                .foregroundColor: Design.Status.negative,
+                .font: Design.Typography.caption(),
+            ])
+        }
+        if file.change == .binary {
+            return NSAttributedString(string: "binary", attributes: [
+                .foregroundColor: Design.Text.tertiary,
+                .font: Design.Typography.caption(),
+            ])
+        }
+        let result = NSMutableAttributedString(string: "+\(file.added)", attributes: [
+            .foregroundColor: Design.Diff.added,
+            .font: Design.Typography.caption(),
+        ])
+        result.append(NSAttributedString(string: " −\(file.removed)", attributes: [
+            .foregroundColor: Design.Diff.removed,
+            .font: Design.Typography.caption(),
+        ]))
+        return result
+    }
+
+    /// The retained header is visual context. Pointer input continues to the real row below it,
+    /// so scrolling and selection do not acquire a dead strip at the top of the viewport.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 // MARK: - Defaults
 
 enum GitReviewUIDefaults {

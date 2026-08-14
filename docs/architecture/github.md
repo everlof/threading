@@ -105,6 +105,7 @@ rather than `[String: Any]`. The generated API body is capped at 60,000 characte
 fallback at 6,000, and labels have explicit count and length budgets. Truncation includes its
 marker inside the budget. An accepted POST with an unreadable response still counts as created:
 retrying would risk filing a duplicate.
+
 ## The development build's third button: **Send to Chat** (`DeveloperReportChat`)
 
 Debug builds only. The same reviewed report, opened as a chat in the repository the running
@@ -151,15 +152,16 @@ opening prompt. It differs in one respect, and on purpose: this one **selects** 
 schedule firing at 09:00 must not reach across whatever the user is reading; a button pressed a
 moment ago is being waited on, and the chat coming up is the receipt.
 
-
 ## GitHub pull-request adapter (`GitHubPullRequestClient`)
 
-Pull-request state belongs in Git Review rather than in an extension card. The controller joins
-local branch/upstream state with a provider-neutral `ChangeRequestRepositoryStatus`: the open pull
+Git Review remains the authoritative pull-request workflow. Its controller joins local
+branch/upstream state with a provider-neutral `ChangeRequestRepositoryStatus`: the open pull
 request, draft state, latest decision from each reviewer, requested reviewers, and check runs for
-the remote head. GitHub and GitLab now both implement `ChangeRequestProviderClient`; the UI and
-durable policy do not use either provider's wire types. The shared boundary, GitLab adapter,
-capability flags and managed-ref safety are documented in
+the remote head. The session status card may project only the connected request's number, title
+and check summary; both rows navigate back to Git Review and expose no write. GitHub and GitLab
+both implement `ChangeRequestProviderClient`; the UI and durable policy do not use either
+provider's wire types. The shared boundary, GitLab adapter, capability flags and managed-ref
+safety are documented in
 [source-control.md](source-control.md).
 
 The publish policy is **repository scoped** and keyed by `git rev-parse --git-common-dir`, so all

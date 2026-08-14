@@ -219,19 +219,26 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
             dx: SidebarRowDefaults.hoverHighlightInsetX,
             dy: SidebarRowDefaults.hoverHighlightInsetY
         )
-        let radius = highlightRadius
-        return NSBezierPath(roundedRect: shape, xRadius: radius, yRadius: radius)
+        return ThemedSurface.Shape(
+            rect: shape,
+            radius: highlightRadius(fitting: shape.size)
+        ).path
     }
 
     /// The theme's control corner, because that is what the selection above is drawn with and
     /// what every other small surface in the window takes.
     ///
+    /// **Fitted to the row**, which is also what the selection does — `ThemedTableRowView` asks
+    /// for the same token the same way. Unfitted, a theme stating a corner broader than a row is
+    /// tall (Botanical's 24) drew hover as a taper under a selection that stayed a rounded rect:
+    /// the two shapes this comment exists to prevent, arrived at from the opposite direction.
+    ///
     /// Under **System** the selection is AppKit's own and never reaches `highlightPath`, so
     /// there is no theme silhouette for hover to agree with — it keeps the fixed corner that
     /// was measured against the stock source list.
-    private var highlightRadius: CGFloat {
+    private func highlightRadius(fitting size: NSSize) -> CGFloat {
         AppThemeLibrary.current.isSystem
             ? SidebarRowDefaults.systemHoverHighlightRadius
-            : Design.Radius.control
+            : Design.Radius.control(fitting: size)
     }
 }

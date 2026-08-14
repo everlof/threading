@@ -85,13 +85,14 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
         fitSoleColumnToWidth()
     }
 
-    /// See `ThemedTableRowDefaults.rowView(for:from:owner:)` — this is where a list that says
-    /// nothing about selection still gets the theme's row.
+    /// See `ThemedTableRowDefaults.vendedView(for:recycling:)` — this is where a list that says
+    /// nothing about selection still gets the theme's row, and where a view coming back out of
+    /// the reuse queue is brought up to the theme in force.
     override func makeView(
         withIdentifier identifier: NSUserInterfaceItemIdentifier,
         owner: Any?
     ) -> NSView? {
-        ThemedTableRowDefaults.rowView(
+        ThemedTableRowDefaults.vendedView(
             for: identifier,
             recycling: super.makeView(withIdentifier: identifier, owner: owner)
         )
@@ -694,11 +695,35 @@ enum ThemedTableRowDefaults {
     ///
     /// `recycling` is `super`'s answer, taken first so the reuse queue keeps working: after the
     /// first screenful it hands back the rows this list already made, which are these.
-    static func rowView(
+    ///
+    /// **A recycled view is also brought back to the theme in force here**, for the same reason
+    /// the row above is constructed here: the defect has no call site. A view in the reuse queue
+    /// is in no window, and `AppThemeRefresh.repaintEverything` walks windows — so the sweep that
+    /// re-resolves recorded font roles, surfaces and layer colours reaches every row on screen
+    /// and none of the ones waiting behind them. Nothing re-applies any of it afterwards either:
+    /// `applyFont` runs once, where the cell is built. So the pooled view comes back out wearing
+    /// whichever theme was current when it went in, beside neighbours wearing the new one.
+    ///
+    /// That shipped. After a switch to Tiger, a sidebar session row vended from the queue was
+    /// still set in SF 12 while the rows around it had taken Lucida Grande 10.8 — Tiger states
+    /// both a family and a `textScale` of 0.90, so the stale row was a different face *and* a
+    /// tenth larger. Only its font was wrong, which is the clue that names the mechanism: a
+    /// `MorphingTitleLabel` holds its colour as a rule it re-asks from `AppThemeDidChange`, which
+    /// a detached view still receives, and its font as a value the sweep pushes, which a detached
+    /// view does not.
+    ///
+    /// `repaintIfNeeded` is generation-stamped, so a view already current costs one associated
+    /// object read per vend, and the repaint itself runs once per view per theme change.
+    static func vendedView(
         for identifier: NSUserInterfaceItemIdentifier,
         recycling recycled: NSView?
     ) -> NSView? {
-        if let recycled { return recycled }
+        if let recycled {
+            // `assumeIsolated` for the reason `validateProposedFirstResponder` gives: AppKit
+            // calls the override above on the main thread and says so nowhere in its types.
+            MainActor.assumeIsolated { AppThemeRefresh.repaintIfNeeded(recycled) }
+            return recycled
+        }
         guard identifier == rowViewKey else { return nil }
 
         let row = ThemedTableRowView()
@@ -833,6 +858,58 @@ class ThemedOutlineView:
         return frame
     }
 
+    /// Moves the rows the outline already owns to the geometry it would build them at now.
+    ///
+    /// `indentationPerLevel` and `flattenedIndentation` are read when a row is *built*, and
+    /// nothing re-reads them afterwards: measured on macOS 26, a change followed by
+    /// `layoutSubtreeIfNeeded`, `tile()` or `noteHeightOfRows` leaves every mounted cell and
+    /// chevron exactly where it was, while `frameOfCell` already answers the new place. Only
+    /// `reloadData()` re-places them — which discards and rebuilds the whole list, and a
+    /// continuous divider drag cannot pay that per frame. `reloadData(forRowIndexes:…)` is no
+    /// help either: it rebuilds the cell and leaves the chevron behind.
+    ///
+    /// So the placement is applied directly, to both halves of a row, for the rows the table
+    /// currently has views for — `enumerateAvailableRowViews`, which is the viewport plus
+    /// AppKit's own margin, never the whole tree. Rows built later take the same geometry from
+    /// `frameOfCell`/`frameOfOutlineCell` on their own, so scrolling in stays consistent.
+    ///
+    /// The chevron is AppKit's own button, added as a direct subview of the row view and stamped
+    /// with `NSOutlineView.disclosureButtonIdentifier` — the identifier the framework documents
+    /// for exactly this, so the marker is named rather than guessed at by position or class.
+    func refitIndentedRows() {
+        guard let column = outlineTableColumn,
+              let columnIndex = tableColumns.firstIndex(where: { $0 === column })
+        else { return }
+
+        // **Only the horizontal half is taken.** Both `frameOfCell` and `frameOfOutlineCell`
+        // answer in the *table's* coordinates, and a cell and a chevron live in their row
+        // view's — where a row's own content sits at y 0. Assigning either frame whole moves
+        // every row's content down by the row's offset in the list, out of the row it belongs
+        // to: the first render of this showed a column with one clipped project row and nothing
+        // under it. Indentation is horizontal; nothing else here is this method's to move.
+        func slide(_ subview: NSView, toX x: CGFloat, width: CGFloat) {
+            var frame = subview.frame
+            frame.origin.x = x
+            frame.size.width = width
+            subview.frame = frame
+        }
+
+        enumerateAvailableRowViews { rowView, row in
+            if let cell = view(atColumn: columnIndex, row: row, makeIfNecessary: false) {
+                let target = frameOfCell(atColumn: columnIndex, row: row)
+                slide(cell, toX: target.minX, width: target.width)
+            }
+
+            let markerFrame = frameOfOutlineCell(atRow: row)
+            guard !markerFrame.isEmpty,
+                  let marker = rowView.subviews.first(where: {
+                      $0.identifier == NSOutlineView.disclosureButtonIdentifier
+                  })
+            else { return }
+            slide(marker, toX: markerFrame.minX, width: markerFrame.width)
+        }
+    }
+
     private lazy var selectionStrength = ListSelectionStrength(self)
 
     /// See `SoleColumnFitting`.
@@ -879,13 +956,14 @@ class ThemedOutlineView:
         fitSoleColumnToWidth()
     }
 
-    /// See `ThemedTableRowDefaults.rowView(for:from:owner:)` — this is where a list that says
-    /// nothing about selection still gets the theme's row.
+    /// See `ThemedTableRowDefaults.vendedView(for:recycling:)` — this is where a list that says
+    /// nothing about selection still gets the theme's row, and where a view coming back out of
+    /// the reuse queue is brought up to the theme in force.
     override func makeView(
         withIdentifier identifier: NSUserInterfaceItemIdentifier,
         owner: Any?
     ) -> NSView? {
-        ThemedTableRowDefaults.rowView(
+        ThemedTableRowDefaults.vendedView(
             for: identifier,
             recycling: super.makeView(withIdentifier: identifier, owner: owner)
         )

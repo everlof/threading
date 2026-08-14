@@ -33,6 +33,11 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     private lazy var rowContentStack = NSStackView(
         views: [contentContainer, afterTitleSlot]
     )
+
+    /// The two gutters the column's width moves — see `SidebarDensity`. Held so a narrower
+    /// column is a constant assignment on the rows already on screen.
+    private var contentLeadingConstraint: NSLayoutConstraint?
+    private var trailingSlotConstraint: NSLayoutConstraint?
     private lazy var customizationHost = ComponentCustomizationHost(
         target: .init(
             component: HostComponentContracts.sidebarProjectRow.id,
@@ -370,30 +375,40 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         setupCustomizableContent()
         setAccessibilityRole(.staticText)
 
+        // Pulled out by the padding the hover button holds around its glyph, the way
+        // `PaneFooterView` places a trailing control — see `OpticalInsetProviding`. The count
+        // inside the slot is pulled back in by the same amount, so the two land on one line
+        // instead of the edge stepping inboard when the pointer arrives.
+        let leading = rowContentStack.leadingAnchor.constraint(
+            equalTo: leadingAnchor,
+            constant: SidebarRowDefaults.leadingInset
+        )
+        let trailing = trailingSlot.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -trailingSlotInset(for: SidebarRowDefaults.trailingInset)
+        )
+        contentLeadingConstraint = leading
+        trailingSlotConstraint = trailing
+
         NSLayoutConstraint.activate([
-            rowContentStack.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
-                constant: SidebarRowDefaults.leadingInset
-            ),
+            leading,
             rowContentStack.trailingAnchor.constraint(
                 lessThanOrEqualTo: trailingSlot.leadingAnchor,
                 constant: -SidebarRowDefaults.horizontalSpacing
             ),
             rowContentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            // Pulled out by the padding the hover button holds around its glyph, the way
-            // `PaneFooterView` places a trailing control — see `OpticalInsetProviding`. The
-            // count inside the slot is pulled back in by the same amount, so the two land on
-            // one line instead of the edge stepping inboard when the pointer arrives.
-            trailingSlot.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -(
-                    SidebarRowDefaults.trailingInset - hoverButton.opticalHorizontalInset
-                )
-            ),
+            trailing,
             trailingSlot.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth),
             iconView.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth)
         ])
+    }
+
+    /// How far inside the row's trailing edge the slot is pinned, for a given gutter. Never
+    /// negative — see `SessionRowView.trailingSlotInset(for:)` for the hit-testing rule this
+    /// keeps, which both rows answer the same way.
+    private func trailingSlotInset(for gutter: CGFloat) -> CGFloat {
+        max(0, gutter - hoverButton.opticalHorizontalInset)
     }
 
     /// Builds the visual subtree extensions may replace. Count and hover actions remain in the
@@ -905,5 +920,17 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         conductIndicator?.contentTintColor = Design.Text.secondary
         iconView.contentTintColor = Design.Text.secondary
         nativeIconTint = iconView.contentTintColor
+    }
+}
+
+// MARK: - Sidebar Density
+
+extension ProjectRowView: SidebarDensityAdopting {
+
+    /// Restates the row's two gutters at the width the column now has. Project rows and branch
+    /// headings are the same view, so both follow the density their sessions do.
+    func applySidebarDensity(_ density: SidebarDensity) {
+        contentLeadingConstraint?.constant = density.rowLeadingInset
+        trailingSlotConstraint?.constant = -trailingSlotInset(for: density.rowTrailingInset)
     }
 }

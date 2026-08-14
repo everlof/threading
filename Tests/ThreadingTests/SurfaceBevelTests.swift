@@ -73,6 +73,18 @@ final class SurfaceBevelTests: XCTestCase {
         view.layer?.sublayers?.first { $0.name == "threading.bevel" }
     }
 
+    /// Every name a halo caster can be installed under. Stated here rather than per test so a
+    /// third naming scheme cannot be added and quietly go unswept.
+    private static let casterNames: Set<String> = [
+        "threading.controlGlow.primary",
+        "threading.controlGlow.highlight",
+        "threading.glow.highlight"
+    ]
+
+    private func casterNames(on view: NSView) -> Set<String> {
+        Set((view.layer?.sublayers ?? []).compactMap(\.name).filter(Self.casterNames.contains))
+    }
+
     // MARK: - Applied Surfaces
 
     /// A stock theme without a bevel material draws exactly what it always drew — no edge
@@ -285,6 +297,122 @@ final class SurfaceBevelTests: XCTestCase {
             XCTAssertEqual(actual.blueComponent, expected.blueComponent, accuracy: 0.02,
                            "Cyberpunk's \(fixture.name) glow painted inside the face")
         }
+    }
+
+    /// A halo that arrives with the pointer leaves with it, whichever call takes it away.
+    ///
+    /// The two entry points name their casters differently — `threading.controlGlow.*` for the
+    /// tight depth a material states for controls, `threading.glow.*` for the broad panel one —
+    /// and a chip crosses between them: raised under the pointer it asks for the control pair,
+    /// at rest it is restyled through the panel path with no halo at all. Clearing by the names
+    /// *this* call happens to use meant that second call looked for casters that had never been
+    /// installed, found none, and left the pair in place. One pass of the pointer put a violet
+    /// halo on a chip for the rest of the session, with the caster's own edge reading as a ring
+    /// around a plate that was no longer being drawn.
+    func testAHaloLeavesWithThePointerHoweverItIsCleared() throws {
+        AppThemePalette.set(AppThemeStyles.claymorphism)
+        defer { AppThemePalette.set(.system) }
+
+        let chip = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 26))
+        chip.applySurface(
+            fill: Design.Surface.controlHover,
+            radius: .pill(height: 26),
+            controlGlow: true
+        )
+        XCTAssertEqual(
+            casterNames(on: chip),
+            ["threading.controlGlow.primary", "threading.controlGlow.highlight"]
+        )
+
+        chip.applySurface(fill: .clear, radius: .pill(height: 26))
+        XCTAssertEqual(casterNames(on: chip), [],
+                       "a chip kept its hover halo after the pointer left")
+        XCTAssertEqual(chip.layer?.shadowOpacity, 0)
+
+        // And the way back: a surface that stops being a panel and becomes a glowing control
+        // must not keep the panel's caster underneath the control's.
+        let card = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 60))
+        card.applySurface(fill: Design.Surface.panel, radius: .panel, glow: true)
+        XCTAssertEqual(casterNames(on: card), ["threading.glow.highlight"])
+
+        card.applySurface(
+            fill: Design.Surface.controlResting,
+            radius: .control,
+            controlGlow: true
+        )
+        XCTAssertEqual(
+            casterNames(on: card),
+            ["threading.controlGlow.primary", "threading.controlGlow.highlight"],
+            "the panel halo's caster outlived the control halo that replaced it"
+        )
+    }
+
+    /// A halo is a wash, and a wash cannot draw a line.
+    ///
+    /// The caster is an opaque black shape that exists only to manufacture the blur; it used to
+    /// be painted across the whole silhouette and erased afterwards with `.clear`. That erases
+    /// the coverage it is given, not the coverage already there, so an antialiased edge pixel
+    /// that took `α` of the caster gave back `α` of what it then held and kept `α(1 − α)` — a
+    /// quarter of a black shape at half coverage, doubled where a material states a highlight
+    /// companion as well. Square materials hid it under a hairline border; clay's pill and
+    /// 32-point cards wear it as a dark line tracing every chip, button and panel that haloes.
+    ///
+    /// Asserted against the halo's own colour rather than a measured constant: a halo may darken
+    /// what is under it as far as its authored role goes and no further.
+    func testAHaloNeverPaintsDarkerThanItsOwnColour() throws {
+        AppThemePalette.set(AppThemeStyles.claymorphism)
+        defer { AppThemePalette.set(.system) }
+
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 160))
+        // Without it `cacheDisplay` resolves every role against whatever appearance the thread
+        // last had in hand, and draws a blank or inverted page.
+        host.appearance = NSAppearance(named: .aqua)
+        host.wantsLayer = true
+
+        let card = NSView(frame: NSRect(x: 50, y: 50, width: 160, height: 60))
+        host.addSubview(card)
+
+        var floor = 0.0
+        host.effectiveAppearance.performAsCurrentDrawingAppearance {
+            let ground = Design.Surface.ground
+            host.layer?.backgroundColor = ground.cgColor
+            card.applySurface(fill: Design.Surface.panel, radius: .panel, glow: true)
+
+            guard let glow = AppThemePalette.current.material.glow else { return }
+            floor = luminance(of: AppThemePalette.color(glow.role), over: ground)
+        }
+        XCTAssertGreaterThan(floor, 0, "clay stated no panel halo for the fixture to measure")
+
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+
+        var darkest = (value: 1.0, x: 0, y: 0)
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide {
+                guard let pixel = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                let value = luminance(of: pixel)
+                if value < darkest.value { darkest = (value, x, y) }
+            }
+        }
+        XCTAssertGreaterThan(
+            darkest.value, floor - 0.02,
+            """
+            the panel halo drew an edge at (\(darkest.x), \(darkest.y)) darker than its own \
+            role — the caster's antialiased rim survived
+            """
+        )
+    }
+
+    private func luminance(of color: NSColor) -> Double {
+        0.3 * color.redComponent + 0.59 * color.greenComponent + 0.11 * color.blueComponent
+    }
+
+    /// The darkest a colour can make the surface behind it: its own value at full coverage.
+    private func luminance(of color: NSColor, over ground: NSColor) -> Double {
+        let color = color.usingColorSpace(.sRGB) ?? color
+        let ground = ground.usingColorSpace(.sRGB) ?? ground
+        let alpha = color.alphaComponent
+        return alpha * luminance(of: color) + (1 - alpha) * luminance(of: ground)
     }
 
     func testClayControlsUseTheirOwnTighterPairedShadow() throws {

@@ -12,11 +12,15 @@ import XCTest
 /// row view is structure, not chrome. The wrong pixels came out of a permitted class through a
 /// path no line of code mentions.
 ///
-/// So this file asserts against the two things that remain when neither code nor class is wrong:
+/// So this file asserts against the three things that remain when neither code nor class is wrong:
 ///
 /// - **What each screen renders.** Lists here are asked to materialise and select a row first,
 ///   because an audit of a list with no rows in it is an audit of nothing — the reason the
 ///   existing per-controller audits could not have caught this either.
+/// - **What the reuse queue hands back.** A pooled view is in no window, so the sweep that walks
+///   windows on a live switch cannot reach it, and it returns wearing the theme it went in with.
+///   Settled where it is vended — `ThemedTableRowDefaults.vendedView(for:recycling:)` — for the
+///   same reason as the row above, and asserted there rather than per list.
 /// - **Which colours reach the glass.** Under a theme whose accent is nowhere near the system's,
 ///   a run of system accent in a screen is a framework default drawing itself, whatever the
 ///   mechanism. This is the net that does not need to know what the next one will be.
@@ -95,6 +99,137 @@ final class ThemeLeakSweepTests: XCTestCase {
             list.rowView(atRow: 0, makeIfNecessary: true) is SidebarHoverRowView,
             "the list's own row view should win over the default"
         )
+    }
+
+    // MARK: - The reuse queue
+
+    /// **A view waiting in the reuse queue is the one view of a themed screen a live switch
+    /// cannot reach**, because `AppThemeRefresh.repaintEverything` walks windows and a pooled
+    /// view is in none. Nothing re-applies its font when it comes back either: `applyFont` runs
+    /// once, where the cell is built.
+    ///
+    /// Same species as the row above, and it shipped the same way — no line of code to review,
+    /// because the defect is the absence of one. After a switch to Tiger a sidebar row vended
+    /// from the queue was still set in SF 12 beside neighbours in Lucida Grande 10.8.
+    ///
+    /// Driven through the seam directly, since AppKit decides when a queue is used and this has
+    /// to hold whenever it does. The test below drives a real table through a real queue.
+    func testTheVendingSeamBringsARecycledViewUpToTheThemeInForce() throws {
+        let original = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(original) }
+
+        AppThemeLibrary.apply(.system)
+        let cell = NSTextField(labelWithString: "Fix dropdown issues on macOS Tiger")
+        cell.applyFont(.controlRegular)
+        let pooled = try XCTUnwrap(cell.font)
+
+        AppThemeLibrary.apply(AppThemeStyles.aquaTiger)
+        let inForce = Design.Typography.controlRegular()
+        XCTAssertNotEqual(
+            inForce, pooled,
+            "the two themes state the same control font, so this test could not tell them apart"
+        )
+        XCTAssertEqual(
+            cell.font, pooled,
+            "a detached view followed the switch by itself — the seam is no longer what fixes this"
+        )
+
+        let vended = try XCTUnwrap(
+            ThemedTableRowDefaults.vendedView(
+                for: NSUserInterfaceItemIdentifier("cell"),
+                recycling: cell
+            ) as? NSTextField,
+            "the seam should hand back the view it was given"
+        )
+        XCTAssertTrue(vended === cell, "the seam replaced a recycled view instead of reusing it")
+        XCTAssertEqual(
+            vended.font, inForce,
+            "the view came back out of the queue in the theme it went in wearing"
+        )
+    }
+
+    /// The same thing end to end, because the seam is only worth anything if AppKit's own queue
+    /// reaches it. Both classes, since `NSOutlineView` overrides `makeView` separately.
+    func testACellRecycledAcrossAThemeSwitchComesBackInTheNewFace() throws {
+        let original = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(original) }
+
+        for list in [ThemedTableView(), ThemedOutlineView()] as [NSTableView] {
+            let name = String(describing: type(of: list))
+            AppThemeLibrary.apply(.system)
+
+            let source = RecycledCellSource()
+            source.rows = 40
+            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("only"))
+            list.addTableColumn(column)
+            (list as? NSOutlineView)?.outlineTableColumn = column
+            list.dataSource = source
+            list.delegate = source
+
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 260, height: 100))
+            scroll.documentView = list
+
+            // In a window, never on screen: the whole point is that the *pooled* cell is the one
+            // view of this list the sweep cannot walk to.
+            let window = NSWindow(
+                contentRect: scroll.frame,
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView?.addSubview(scroll)
+            list.reloadData()
+            try draw(scroll)
+
+            let total = list.numberOfRows
+            let parked = try XCTUnwrap(
+                list.view(atColumn: 0, row: 1, makeIfNecessary: true) as? NSTextField,
+                "\(name) built no cell"
+            )
+            let wornIn = try XCTUnwrap(parked.font)
+
+            // **Rows leaving the list is what parks a cell.** Two ways that look like they should
+            // and do not: scrolling hands each cell straight to a row arriving at the other end,
+            // and `reloadData` over an emptied source releases them outright. `removeItems` is the
+            // sidebar's own incremental update — where a collapsed project's rows go — and it
+            // leaves them in the queue with nothing to take them.
+            source.rows = 1
+            if let outline = list as? NSOutlineView {
+                outline.removeItems(at: IndexSet(1..<total), inParent: nil, withAnimation: [])
+            } else {
+                list.removeRows(at: IndexSet(1..<total), withAnimation: [])
+            }
+            try draw(scroll)
+            let built = source.builds
+            XCTAssertNil(
+                parked.window,
+                "\(name) kept the removed cell in the window, so the sweep can still reach it and "
+                    + "this test is not standing where the defect is"
+            )
+
+            AppThemeLibrary.apply(AppThemeStyles.aquaTiger)
+            let inForce = Design.Typography.controlRegular()
+            XCTAssertNotEqual(inForce, wornIn, "\(name): the two themes state the same font")
+
+            source.rows = total
+            if let outline = list as? NSOutlineView {
+                outline.insertItems(at: IndexSet(1..<total), inParent: nil, withAnimation: [])
+            } else {
+                list.insertRows(at: IndexSet(1..<total), withAnimation: [])
+            }
+            try draw(scroll)
+
+            XCTAssertEqual(
+                source.builds, built,
+                "\(name) built fresh cells rather than reusing the queue, so this test no longer "
+                    + "covers the queue it was written for"
+            )
+            XCTAssertNotNil(parked.window, "\(name) never vended the pooled cell back")
+            XCTAssertEqual(
+                parked.font, inForce,
+                "\(name) vended a cell still set in the theme it was pooled under"
+            )
+        }
     }
 
     // MARK: - The same shape, one control over
@@ -364,6 +499,18 @@ final class ThemeLeakSweepTests: XCTestCase {
         return rep
     }
 
+    /// Lays a view out **and draws it**, because a list reclaims cells while it draws: after a
+    /// layout pass alone the rows it no longer has are still in the window, and a queue with
+    /// nothing in it cannot demonstrate anything about a queue.
+    private func draw(_ view: NSView) throws {
+        view.layoutSubtreeIfNeeded()
+        let rep = try XCTUnwrap(
+            view.bitmapImageRepForCachingDisplay(in: view.bounds),
+            "Failed to build a bitmap for \(type(of: view))"
+        )
+        view.cacheDisplay(in: view.bounds, to: rep)
+    }
+
     private func lists(in view: NSView) -> [NSTableView] {
         var found: [NSTableView] = []
         if let list = view as? NSTableView { found.append(list) }
@@ -487,6 +634,60 @@ private final class SilentListSource: NSObject,
         item: Any
     ) -> NSView? {
         NSTextField(labelWithString: item as? String ?? "")
+    }
+}
+
+/// A source that vends through `makeView(withIdentifier:owner:)`, the way every list in this app
+/// does, with a recorded role on the label so a theme switch has something to move.
+private final class RecycledCellSource: NSObject,
+    NSTableViewDataSource,
+    NSTableViewDelegate,
+    NSOutlineViewDataSource,
+    NSOutlineViewDelegate {
+
+    var rows = 3
+
+    /// How many cells this source has had to build, so a test can tell a vend from the queue
+    /// from a fresh cell that would have been correct however the seam behaved.
+    private(set) var builds = 0
+
+    private static let identifier = NSUserInterfaceItemIdentifier("RecycledCell")
+
+    private func cell(from list: NSTableView, titled title: String) -> NSView {
+        if let reused = list.makeView(withIdentifier: Self.identifier, owner: self) as? NSTextField {
+            reused.stringValue = title
+            return reused
+        }
+
+        builds += 1
+        let field = NSTextField(labelWithString: title)
+        field.identifier = Self.identifier
+        MainActor.assumeIsolated { field.applyFont(.controlRegular) }
+        return field
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { rows }
+
+    func tableView(_ tableView: NSTableView, viewFor column: NSTableColumn?, row: Int) -> NSView? {
+        cell(from: tableView, titled: "row \(row)")
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
+        item == nil ? rows : 0
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
+        "row \(index)"
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool { false }
+
+    func outlineView(
+        _ outlineView: NSOutlineView,
+        viewFor column: NSTableColumn?,
+        item: Any
+    ) -> NSView? {
+        cell(from: outlineView, titled: item as? String ?? "")
     }
 }
 

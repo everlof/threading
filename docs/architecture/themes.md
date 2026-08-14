@@ -479,12 +479,36 @@ first. It has its own role, radius, opacity and offset, is subject to the same g
 is drawn by an expanded exterior-only companion layer. A transparent Core Animation layer with
 only a `shadowPath` is not exterior-only: as a sublayer its shadow composites above the parent's
 background, so Cyberpunk's centred opaque highlight painted its entire dark card lime. The
-companion now draws into a canvas large enough for the blur and offset, then clears the caster's
-exact rounded face; the authored fill and its text remain untouched while both shadows survive
-outside it. This keeps the primary lower-right shade diffuse while the upper-left light travels
-the other way — the paired construction the Claymorphism source actually uses. Documents
+companion now draws into a canvas large enough for the blur and offset, with the caster's exact
+rounded face clipped away; the authored fill and its text remain untouched while both shadows
+survive outside it. This keeps the primary lower-right shade diffuse while the upper-left light
+travels the other way — the paired construction the Claymorphism source actually uses. Documents
 without it decode exactly as before; theme tools can set it, remove it independently, and read
 it back.
+
+**The face is removed by a clip, not by a `.clear` pass over it.** Erasing the opaque caster
+afterwards looks equivalent and is not: `.clear` removes the coverage it is *given*, so an
+antialiased edge pixel that took `α` of the caster gives back `α` of what it then holds and
+keeps `α(1 − α)` — a quarter of a black shape at half coverage, and half of one where a material
+states a highlight companion too, since both casters stack. A square material hid that residue
+under its hairline border. Clay wore it as a dark line tracing the corner of every chip, button
+and card that haloes, most visible on a pill's long arcs and on the composer card's 32-point
+corners; it read as a broken border, and on a chip whose resting fill is clear there was nothing
+drawn over it at all. The caster is now confined to the outside by an even-odd clip and stops one
+device pixel short of it, for the same reason `SoftBevelArtwork` keeps its own caster one pixel
+*beyond* its silhouette: two antialiased curves on the same line multiply instead of cancelling.
+`SurfaceBevelTests` holds a halo to its own role — it may darken what is under it as far as the
+authored colour goes and no further.
+
+**Clearing a halo removes every caster on the view, not the ones the clearing call can name.**
+The two entry points name their companions differently (`threading.controlGlow.*` for the tight
+control depth, `threading.glow.*` for the broad panel one) and a control crosses between them:
+`ChipView` raised under the pointer asks for the control pair, and at rest is restyled through
+the panel path with no halo at all. Clearing by name meant that second call looked for casters
+that had never been installed, found none, and left the pair in place — so one pass of the
+pointer put a violet halo on a chip for the rest of the session, with the caster's edge showing
+as a ring around a plate that was no longer drawn. Casters are collected by type instead, and
+anything the call is not about to keep is discarded.
 
 `material.controlGlow` is the same paired vocabulary at control scale. It is separate rather
 than an automatic fraction of `glow` because the live Clay source makes a semantic distinction:
@@ -1299,3 +1323,47 @@ The catalogue count pinned in `testStockThemesHaveUniqueStableIdentifiers` moved
 existing sweep — contrast on own surfaces, the agent-theme validation contract, unique palette
 ids, rule-ink budget, the settings-page renders — picked the five up by their membership in
 `AppThemeStyles.all`; nothing needed a per-theme carve-out.
+
+## 2026-08-14 — a period control ends where its own silhouette does
+
+Three reports against Tiger, one shape between them: a drawing that belonged to a control was
+sized from the control's *box* instead of from the control's *outline*, and every one of them was
+plainly visible in a screenshot while every assertion around it passed.
+
+**A scrollbar with nothing left to scroll shows an empty trough.** AppKit disables a legacy
+scroller once its scroll view has nowhere to go, but it keeps the `knobProportion` that view last
+needed. `rect(for: .knob)` read that stale proportion and produced a thumb for content that is no
+longer there — in the Settings sidebar, two-thirds of the trough, parked at the top, immovable.
+Reported as a scrollbar that "doesn't move when I scroll" and "shows scroll space that isn't
+there", and it was never Tiger's: the drawing is shared, so Platinum, OPENSTEP, BeOS, Workbench,
+IRIX, Windows 98 and Cheetah all had it. `ThemedScroller.hasScrollableRange` — `isEnabled &&
+knobProportion > 0` — is now the single gate on the thumb, replacing the Windows-only
+`knobProportion <= 0` special case that had been the one appearance to get this right. The
+proportion is read alongside `isEnabled` because a scroll view states the empty case that way
+first, and because the terminal's standalone scroller is driven by hand: SwiftTerm sets
+`isEnabled` from its own `canScroll`, so one rule covers both. The arrows stay and their glyphs
+go through `DisabledControlDrawing` — the plate is period furniture and stays lit, since dimming
+it would leave the trough's end brighter than the trough.
+
+**The Aqua pop-up's gel well is clipped to the button's face.** `drawAquaArrowWell` filled a
+rectangle from the arrow rect to `bounds.maxX`, which painted over both trailing corners and the
+border joining them: the control ended in a hard blue block and read as *cut off* at the right
+edge. It now clips to `ClassicChoiceDrawing.aquaFace(in:)` — the silhouette inside the border,
+one measure (`aquaCornerRadius`) shared by `ChipView` and `ThemedPopUp` rather than a `5` written
+in each — so the curve at that end belongs to the button, the border survives, and the only edge
+the well draws for itself is the seam against the value. `indicatorInk(for:)` came out of the
+same pass: the arrows sit on an accent plate, so they take `Text.selected`, the ink this app
+already measures against its own accent, instead of the label colour that a dark authored accent
+would have swallowed.
+
+**Aqua's default button is the blue one.** Both Aqua materials asked for `primary_treatment:
+raised`, which is the *classic desktop* default — the ordinary control face plus an extra outer
+frame — and is right for Platinum, Workbench and Win32, all of which square their corners. On a
+material with a control radius that frame was `bounds.fill()` behind a rounded face, so a blue
+square showed at each corner of "Start session" like a tab behind the button. Cheetah and Tiger
+now state `filled`, which is what those releases shipped; separately, the raised frame follows
+the silhouette it frames, so the authored pairing a custom theme can still make — a rounded
+material asking for the classic frame — draws an edge rather than a backing plate.
+
+`AquaChromeTests` holds the geometry, the drawn state (corner pixels of the well and of the
+frame, accent ink anywhere in a spent trough) and one specimen sheet per Aqua material.

@@ -75,17 +75,23 @@ final class UserMessageBubbleView: NSView {
         addSubview(label)
         addSubview(footer)
 
+        // `ConversationRowView.userBubble`'s rule, on the collapsing half of the same shape: the
+        // bubble's own padding is `medium`, and a broad theme's corner pushes it in far enough
+        // that the first line clears the arc.
         let pad = Design.Spacing.medium
-        NSLayoutConstraint.activate([
+        let padding = [
             label.topAnchor.constraint(equalTo: topAnchor, constant: pad),
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: pad),
             label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -pad),
 
-            footer.topAnchor.constraint(equalTo: label.bottomAnchor, constant: Design.Spacing.tight),
             footer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: pad),
-            footer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -pad),
+            footer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -pad)
+        ]
+        NSLayoutConstraint.activate(padding + [
+            footer.topAnchor.constraint(equalTo: label.bottomAnchor, constant: Design.Spacing.tight),
             footer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.small)
         ])
+        holdAtContentInset(padding, from: pad)
 
         installFade()
         setAccessibilityLabel(L10n.string("Long message, collapsed"))

@@ -668,6 +668,58 @@ gutter, the heights, the rules, the live flip in both directions — plus light/
 of the whole column at both densities, which is where the spacing and the rule are actually
 reviewed, and the record of the trade the option makes.
 
+### The list is fitted to the column it has
+
+The compact tree is a *choice*; this is what happens without one. The list's geometry was
+measured against the width the app opens to, and the divider goes considerably narrower — where
+the same points are still spent on gutters and depth steps while the title, the only thing anyone
+reads in a sidebar, is what gives way. A session two levels deep truncated to a few characters
+with 30pt of structure beside it.
+
+`SidebarDensity` closes that with a fraction rather than a second layout. Nothing switches at a
+threshold: 0 at `SidebarDefaults.relaxedDensityWidth` (the width the app opens itself to), 1 at
+`tightDensityWidth` (the narrowest the split view allows), and each metric that far from its
+relaxed value to its tight one — the outline's per-level step 14 → 8, and a row's leading and
+trailing gutters 4 → 2 and 6 → 2. At the floor that is 18pt back for a session under a branch
+heading, on a column 180pt wide.
+
+Four things are load-bearing:
+
+- **The value is what it draws.** Everything is rounded to whole points and the raw fraction is
+  *not* stored, so two widths that draw identically compare equal. The first version kept the
+  fraction as a stored property; 209pt and 209.4pt were then different densities with identical
+  geometry, and every layout pass in a drag restamped every row on screen for no visible change.
+- **A width change is O(rows on screen), never a reload.** `indentationPerLevel` and
+  `flattenedIndentation` are read when a row is *built* and never re-read: measured on macOS 26, a
+  change followed by `layoutSubtreeIfNeeded`, `tile()` or `noteHeightOfRows` leaves every mounted
+  cell and chevron where it was, while `frameOfCell` already answers the new place.
+  `reloadData(forRowIndexes:)` moves the cell and leaves the chevron behind. Only full
+  `reloadData()` does both — and a wholesale rebuild per frame of a drag is not payable. So
+  `ThemedOutlineView.refitIndentedRows()` applies the placement itself, over
+  `enumerateAvailableRowViews`, and the rows' own gutters are constraint constants restated
+  through `SidebarDensityAdopting`. Rows built later read the same geometry themselves, and the
+  dequeue stamps every cell leaving the reuse pool with the current density.
+- **Only the horizontal half is taken.** `frameOfCell`/`frameOfOutlineCell` answer in the
+  *table's* coordinates; a cell and a chevron live in their row view's, where content sits at
+  y 0. Assigning either frame whole drops every row's content by its own offset down the list —
+  the render showed one clipped project row and nothing beneath it. Indentation is horizontal.
+- **The trailing gutter stops at the row's own edge.** It is measured to the button's ink, so the
+  slot is pulled out by the padding around the glyph; a gutter narrower than that padding would
+  push the slot past the row, where it draws perfectly and cannot be clicked at all (`hitTest`
+  stops at the bounds). Each row clamps at zero rather than letting the tight end overhang.
+
+The compact tree's own edge does **not** narrow. `compactCellLeading` is already the chevron's
+width — AppKit draws that mark 13pt at `compactMarkerLeading`, so the gutter ends one point after
+the mark it holds. A tighter edge drew the chevron over the icon beside it; the two densities
+compose by the compact tree taking only the row gutters.
+
+`SidebarWidthDensityTests` holds the arithmetic and the built rows: the band's two ends and the
+fraction between them, the depth and gutter a narrow column gives back, that the rows already on
+screen are moved rather than rebuilt, that a row arriving after the drag is drawn for the column
+that exists, that the whole band walked down and back lands exactly where it started, and
+light/dark renders of the column at both ends — which is where how much a narrow sidebar actually
+wins is reviewed.
+
 ## The takeover: a theme that draws the frame
 
 A theme stating a `WindowChromeStyle` (a `chrome:` block on its variant — the second and last

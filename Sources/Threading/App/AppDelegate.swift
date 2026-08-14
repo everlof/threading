@@ -612,6 +612,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // Remote access is a separate loopback server behind a tunnel, independent of the MCP
         // listener — no ordering dependency, and it starts only if the user has turned it on.
         RemoteAccessCoordinator.shared.startIfEnabled()
+
         // Who takes the marks made on an image nobody else claimed. Installed here rather than
         // reached for from the design system: `MediaInspector` draws pictures and knows nothing
         // about sessions or composers, and this is the one place that knows both. A test host
@@ -626,7 +627,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             })
             return host.canHandOff ? host : nil
         }
-
 
         // The disk survey runs itself from here on, at background priority and on its own
         // delay — it is the least urgent thing the app does, and the Storage page is only ever
@@ -1753,6 +1753,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menu.addItem(commandItem(AppCommands.ID.browser, action: #selector(openBrowser)))
         menu.addItem(commandItem(AppCommands.ID.files, action: #selector(openFilesTab)))
         menu.addItem(commandItem(AppCommands.ID.review, action: #selector(openReview)))
+        menu.addItem(commandItem(
+            AppCommands.ID.jumpToReviewFile,
+            action: #selector(jumpToReviewFile)
+        ))
         menu.addItem(commandItem(AppCommands.ID.saveBaseline, action: #selector(saveBrowserBaseline)))
         menu.addItem(commandItem(AppCommands.ID.sessionInfo, action: #selector(openInfo)))
         menu.addItem(commandItem(AppCommands.ID.shell, action: #selector(toggleShell)))
@@ -2102,6 +2106,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard mainWindowController?.canShowFind == true else {
                 return .unavailable(reason: L10n.string("Find is unavailable on the active surface."))
             }
+        case AppCommands.ID.jumpToReviewFile:
+            guard mainWindowController?.canJumpToReviewFile == true else {
+                return .unavailable(reason: L10n.string("Show a Git Review with changed files first."))
+            }
         case AppCommands.ID.openIn:
             guard mainWindowController?.currentFolderURL != nil else {
                 return .unavailable(reason: L10n.string("The current surface has no checkout."))
@@ -2211,6 +2219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.browser: mainWindowController?.showBrowser()
         case AppCommands.ID.files: mainWindowController?.showFilesTab()
         case AppCommands.ID.review: mainWindowController?.showReview()
+        case AppCommands.ID.jumpToReviewFile: mainWindowController?.showReviewFileJump()
         case AppCommands.ID.saveBaseline: mainWindowController?.saveVisibleBrowserBaseline()
         case AppCommands.ID.sessionInfo: mainWindowController?.showInfo()
         case AppCommands.ID.shell: mainWindowController?.toggleShellDrawer()
@@ -2544,6 +2553,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc private func showFind() {
         _ = hostCommandPlane.invoke(commandID: AppCommands.ID.find)
+    }
+
+    @objc private func jumpToReviewFile() {
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.jumpToReviewFile)
     }
 
     @objc private func inspectElement() {

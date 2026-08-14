@@ -427,6 +427,9 @@ extension GitReviewViewController {
 
         renderedFiles = files
         filePreludeViews = prelude
+        jumpToFileButton.isEnabled = !files.isEmpty
+        fileNavigatorButton.isEnabled = !files.isEmpty
+        syncFileNavigator(with: files)
 
         // Once for the whole diff: `repositoryRoot` walks the tree looking for `.git`, and a
         // branch comparison can list hundreds of files.
@@ -436,7 +439,10 @@ extension GitReviewViewController {
         // pane's current frame first, otherwise those expanded rows still see the 240pt
         // bootstrap width left from `loadView` and AppKit caches that much taller answer.
         view.layoutSubtreeIfNeeded()
-        fileRowHeightWidth = max(view.bounds.width - Design.Spacing.inset * 2, 0)
+        let resolvedWidth = scrollView.contentView.bounds.width > 1
+            ? scrollView.contentView.bounds.width
+            : view.bounds.width
+        fileRowHeightWidth = max(resolvedWidth - Design.Spacing.inset * 2, 0)
         fileTableView.reloadData()
         scrollView.documentView = fileTableView
     }
@@ -452,6 +458,7 @@ extension GitReviewViewController {
             metadata: ["old_files": String(renderedFiles.count), "files": String(files.count)]
         )
         let oldFiles = renderedFiles
+        syncFileNavigator(with: files)
         let oldIndexByPath = Dictionary(
             oldFiles.indices.map { (oldFiles[$0].path, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -544,6 +551,8 @@ extension GitReviewViewController {
 
     private func resetRenderedFiles() {
         renderedFiles = []
+        jumpToFileButton.isEnabled = false
+        fileNavigatorButton.isEnabled = false
         pendingDiffIndexPaths.removeAll()
         failedDiffHydrationPaths.removeAll()
         deferredHydratedFiles.removeAll()
@@ -657,7 +666,8 @@ extension GitReviewViewController {
             requested,
             using: comparison,
             in: root,
-            ignoringWhitespace: ignoresWhitespace
+            ignoringWhitespace: ignoresWhitespace,
+            contextLines: diffContextLines
         ) { [weak self] result in
             guard let self else { return }
             self.progressiveHydrationInFlight = false
@@ -973,11 +983,14 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         // own width is still zero. The clip/root already state the pane's final width; using
         // zero here makes every character look wrapped onto its own line and invents an enormous
         // offscreen document tail before the first row is even materialized.
-        let paneWidth = max(
-            tableView.bounds.width,
-            scrollView.contentView.bounds.width,
-            view.bounds.width
-        )
+        let paneWidth: CGFloat
+        if scrollView.contentView.bounds.width > 1 {
+            paneWidth = scrollView.contentView.bounds.width
+        } else if tableView.bounds.width > 1 {
+            paneWidth = tableView.bounds.width
+        } else {
+            paneWidth = view.bounds.width
+        }
         let cardWidth = max(paneWidth - Design.Spacing.inset * 2, 0)
         if filePreludeViews.indices.contains(tableRow) {
             guard let measured = measuredPreludeRowHeights[tableRow],
@@ -1011,9 +1024,11 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             return GitReviewFileRow.estimatedTableHeight(
                 for: file,
                 expanded: expanded,
-                wraps: wrapsDiffLines,
+                wraps: diffLayout == .unified && wrapsDiffLines,
                 width: cardWidth,
-                textSize: reviewTextSize
+                textSize: reviewTextSize,
+                contextLines: contextLinesByPath[file.path] ?? GitReviewDefaults.contextLines,
+                contextExpansionIsExhausted: contextExpansionExhaustedPaths.contains(file.path)
             )
         }
         guard abs(measured.width - cardWidth) <= 0.5 else {
@@ -1032,9 +1047,11 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             return GitReviewFileRow.estimatedTableHeight(
                 for: file,
                 expanded: expanded,
-                wraps: wrapsDiffLines,
+                wraps: diffLayout == .unified && wrapsDiffLines,
                 width: cardWidth,
-                textSize: reviewTextSize
+                textSize: reviewTextSize,
+                contextLines: contextLinesByPath[file.path] ?? GitReviewDefaults.contextLines,
+                contextExpansionIsExhausted: contextExpansionExhaustedPaths.contains(file.path)
             )
         }
         return measured.height
@@ -1165,17 +1182,26 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             attribution: turnAttribution?.mark(for: file.path) ?? .none,
             staging: contentIsPending ? nil : staging,
             wraps: wrapsDiffLines,
+            diffLayout: diffLayout,
+            showsRichPreviews: showsRichPreviews,
+            showsWordDiffs: showsWordDiffs,
             textSize: reviewTextSize,
             initialDiffWidth: {
                 // `reloadData()` asks for the first views before this table becomes the scroll
                 // view's document, so its own frame is still zero. A controller can also receive
                 // its final frame before its unattached clip adopts it. The scroll view spans the
-                // root edge-to-edge, so whichever has resolved first is the eventual width.
-                let paneWidth = max(scrollView.contentView.bounds.width, view.bounds.width)
+                // root edge-to-edge until the optional file navigator opens. Prefer the clip's
+                // resolved width so an open navigator never leaves rows measured for the full pane.
+                let paneWidth = scrollView.contentView.bounds.width > 1
+                    ? scrollView.contentView.bounds.width
+                    : view.bounds.width
                 let width = paneWidth - Design.Spacing.inset * 2
                 return width > 1 ? width : nil
             }(),
-            fileURL: renderedFileRoot?.appendingPathComponent(file.path)
+            fileURL: renderedFileRoot?.appendingPathComponent(file.path),
+            contextLines: contextLinesByPath[file.path] ?? GitReviewDefaults.contextLines,
+            contextExpansionIsPending: contextExpansionInFlightPaths.contains(file.path),
+            contextExpansionIsExhausted: contextExpansionExhaustedPaths.contains(file.path)
         )
         row.onToggle = { [weak self] expanded in
             self?.expansionOverrides[file.path] = expanded
@@ -1196,6 +1222,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
         row.onStageFile = { [weak self] in self?.stageFile(file) }
         row.onStageHunk = { [weak self] index in self?.stageHunk(at: index, of: file) }
+        row.onExpandContext = { [weak self] in self?.expandContext(for: file) }
         // Asked of the handoff rather than of the runtime's conversation cache: Git Review is a
         // pane, and a pane is open beside terminal sessions too. Resolved per row build so a
         // session that launches while the pane is up gains the actions on its next refresh.
@@ -1239,6 +1266,93 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
         scheduleFileHeightMeasurement(file, row: row)
         return row
+    }
+
+    private func expandContext(for file: GitFileDiff) {
+        guard !contextExpansionInFlightPaths.contains(file.path),
+              !contextExpansionExhaustedPaths.contains(file.path),
+              let root = loadedDiffRoot ?? repositoryRoot else { return }
+        let current = contextLinesByPath[file.path] ?? GitReviewDefaults.contextLines
+        let requested = min(
+            current < GitReviewDefaults.expandedContextInitial
+                ? GitReviewDefaults.expandedContextInitial
+                : current * 2,
+            GitReviewDefaults.maximumExpandedContextLines
+        )
+        guard requested > current else {
+            contextExpansionExhaustedPaths.insert(file.path)
+            reloadContextExpansionRow(path: file.path)
+            return
+        }
+
+        let expectedGeneration = generation
+        contextExpansionInFlightPaths.insert(file.path)
+        reloadContextExpansionRow(path: file.path)
+
+        let completion: @MainActor @Sendable (Result<[GitFileDiff], GitFailure>) -> Void = {
+            [weak self] result in
+            guard let self, self.generation == expectedGeneration else { return }
+            self.contextExpansionInFlightPaths.remove(file.path)
+            switch result {
+            case .success(let files):
+                guard let expanded = files.first(where: { $0.path == file.path }) ?? files.first,
+                      let index = self.renderedFiles.firstIndex(where: { $0.path == file.path }) else {
+                    self.contextExpansionExhaustedPaths.insert(file.path)
+                    self.reloadContextExpansionRow(path: file.path)
+                    return
+                }
+                self.contextLinesByPath[file.path] = requested
+                if expanded == self.renderedFiles[index] {
+                    self.contextExpansionExhaustedPaths.insert(file.path)
+                } else {
+                    self.renderedFiles[index] = expanded
+                }
+                self.reloadContextExpansionRow(path: file.path)
+            case .failure(let failure):
+                self.notice = (failure.localizedDescription, true)
+                self.show(self.phase, forceRebuild: true)
+            }
+        }
+
+        if let comparison = progressiveDiff,
+           progressiveDiffGeneration == generation {
+            GitReviewReader.diffFiles(
+                [file],
+                using: comparison,
+                in: root,
+                ignoringWhitespace: ignoresWhitespace,
+                contextLines: requested,
+                completion: completion
+            )
+            return
+        }
+        guard let request = currentDiffRequest else {
+            contextExpansionInFlightPaths.remove(file.path)
+            reloadContextExpansionRow(path: file.path)
+            return
+        }
+        GitReviewReader.diffFile(
+            file,
+            request: request,
+            in: root,
+            ignoringWhitespace: ignoresWhitespace,
+            contextLines: requested
+        ) { result in
+            completion(result.map { [$0] })
+        }
+    }
+
+    private func reloadContextExpansionRow(path: String) {
+        guard let index = renderedFiles.firstIndex(where: { $0.path == path }) else { return }
+        measuredFileRowHeights[path] = nil
+        let tableRow = filePreludeViews.count + index
+        guard tableRow < fileTableView.numberOfRows else { return }
+        let rows = IndexSet(integer: tableRow)
+        fileTableView.noteHeightOfRows(withIndexesChanged: rows)
+        fileTableView.reloadData(
+            forRowIndexes: rows,
+            columnIndexes: IndexSet(integer: 0)
+        )
     }
 
     /// Hydrates and materializes only the destination selected by Find. The background index

@@ -2,16 +2,84 @@
   "sourceLanguage": "en",
   "strings": {
     "%lld of %lld+": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld av %lld+"}}}},
-    "Chats that are about no project live here. The folder is made the first time you start a scratchpad, and it is an ordinary git repository, so Git Review works on it and nothing you write is lost. It sits outside Threading's own storage on purpose — Reset Everything does not touch it.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Konversationer som inte handlar om något projekt bor här. Mappen skapas första gången du startar ett kladdblock, och den är ett vanligt git-arkiv, så Git Review fungerar på den och inget du skriver går förlorat. Den ligger med avsikt utanför Threadings egen lagring — Återställ allt rör den inte."}}}},
-    "Choose the folder to keep the scratchpad in.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj mappen som kladdblocket ska ligga i."}}}},
+    "Chats that are about no project live here. The folder is made the first time you start a scratchpad, and it is an ordinary git repository, so Git Review works on it and nothing you write is lost. It sits outside Threading's own storage on purpose — Reset Everything does not touch it.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Konversationer som inte handlar om något projekt bor här. Mappen skapas första gången du startar ett kladdblock, och den är ett vanligt git-arkiv, så Git Review fungerar på den och inget du skriver går förlorat. Den ligger med avsikt utanför Threadings egen lagring — Återställ allt rör den inte."
+          }
+        }
+      }
+    },
+    "Choose the folder to keep the scratchpad in.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Välj mappen som kladdblocket ska ligga i."
+          }
+        }
+      }
+    },
     "Create the scratchpad": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skapa kladdblocket"}}}},
+    "Folder": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mapp"
+          }
+        }
+      }
+    },
+    "New Scratchpad": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Nytt kladdblock"}}}},
+    "Scratchpad": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kladdblock"}}}},
+    "Something is already at %@.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det finns redan något på %@."}}}},
+    "Something that is not a folder is already at %@.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det finns redan något som inte är en mapp på %@."}}}},
+    "Start New Project…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Starta nytt projekt…"}}}},
+    "The scratchpad could not be moved": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kladdblocket kunde inte flyttas"
+          }
+        }
+      }
+    },
+    "The scratchpad could not be saved.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kladdblocket kunde inte sparas."}}}},
+    "The scratchpad folder could not be created: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kladdblocksmappen kunde inte skapas: %@"}}}},
+    "The scratchpad folder could not be moved: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kladdblocksmappen kunde inte flyttas: %@"}}}},
+    "Threading created this folder to hold chats that are not about any project. It is an ordinary git repository, so nothing you write here is lost — and nothing outside it belongs to Threading. You can move it, or point Threading somewhere else, in Settings.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading skapade den här mappen för chattar som inte handlar om något projekt. Det är ett vanligt git-arkiv, så inget du skriver här går förlorat — och inget utanför den hör till Threading. Du kan flytta den, eller ange en annan plats för Threading, i Inställningar."}}}},
+    "Changed files": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ändrade filer"}}}},
+    "Disable rich preview": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inaktivera utökad förhandsvisning"}}}},
+    "Disable word diffs": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inaktivera ordskillnader"}}}},
+    "Don’t load full files": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Läs inte in hela filer"}}}},
+    "Enable rich preview": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Aktivera utökad förhandsvisning"}}}},
+    "Enable word diffs": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Aktivera ordskillnader"}}}},
+    "Expand %lld unmodified lines": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Expandera %lld oförändrade rader"}}}},
+    "Expanding…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Expanderar…"}}}},
+    "Filter changed files": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Filtrera ändrade filer"}}}},
+    "Filter files…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Filtrera filer…"}}}},
+    "Hide changed files": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dölj ändrade filer"}}}},
+    "Jump to Review File…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hoppa till granskningsfil…"}}}},
+    "Jump to file (⌘J)": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hoppa till fil (⌘J)"}}}},
+    "Jump to file": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hoppa till fil"}}}},
+    "Load full files": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Läs in hela filer"}}}},
+    "New version": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ny version"}}}},
+    "Old version": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tidigare version"}}}},
+    "Searches the files changed in the active Git Review.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Söker bland filerna som ändrats i den aktiva Git-granskningen."}}}},
+    "Show a Git Review with changed files first.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa först en Git-granskning med ändrade filer."}}}},
+    "Show changed files": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa ändrade filer"}}}},
+    "Show earlier unmodified lines": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa tidigare oförändrade rader"}}}},
+    "Show later unmodified lines": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa senare oförändrade rader"}}}},
+    "Switch to split diff": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Växla till delad diff"}}}},
+    "Switch to unified diff": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Växla till enhetlig diff"}}}},
     "Decrease diff text size": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Minska textstorleken i diffen"}}}},
     "Close Find in Diff": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Stäng sökningen i diffen"}}}},
     "Find in diff": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sök i diffen"}}}},
-    "Folder": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Mapp"}}}},
     "Increase diff text size": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öka textstorleken i diffen"}}}},
-    "Scratchpad": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kladdblock"}}}},
-    "New Scratchpad": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Nytt kladdblock"}}}},
     "Search unavailable": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sökning är inte tillgänglig"}}}},
     "Checks unavailable": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kontroller är inte tillgängliga"}}}},
     "Open %@ in Git Review": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna %@ i Git-granskning"}}}},
@@ -21,15 +89,16 @@
     "Open change request in Git Review": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna ändringsförfrågan i Git-granskning"}}}},
     "Open checks in Git Review": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna kontroller i Git-granskning"}}}},
     "Open the Attachments pane": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna Bilagor-rutan"}}}},
-    "Threading created this folder to hold chats that are not about any project. It is an ordinary git repository, so nothing you write here is lost — and nothing outside it belongs to Threading. You can move it, or point Threading somewhere else, in Settings.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading skapade den här mappen för chattar som inte handlar om något projekt. Det är ett vanligt git-arkiv, så inget du skriver här går förlorat — och inget utanför den hör till Threading. Du kan flytta den, eller ange en annan plats för Threading, i Inställningar."}}}},
-    "The scratchpad folder could not be moved: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kladdblocksmappen kunde inte flyttas: %@"}}}},
-    "Something is already at %@.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det finns redan något på %@."}}}},
-    "The scratchpad folder could not be created: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kladdblocksmappen kunde inte skapas: %@"}}}},
-    "Something that is not a folder is already at %@.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det finns redan något som inte är en mapp på %@."}}}},
-    "The scratchpad could not be moved": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kladdblocket kunde inte flyttas"}}}},
-    "Use Default": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Använd standard"}}}},
-    "The scratchpad could not be saved.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kladdblocket kunde inte sparas."}}}},
-    "Start New Project…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Starta nytt projekt…"}}}},
+    "Use Default": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Använd standard"
+          }
+        }
+      }
+    },
     "View all %lld attachments": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa alla %lld bilagor"}}}},
     "View all attachments": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa alla bilagor"}}}},
     "Status card checks reach your code host": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Statuskortets kontroller når din kodvärd"}}}},

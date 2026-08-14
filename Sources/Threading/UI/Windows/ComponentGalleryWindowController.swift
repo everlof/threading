@@ -5070,13 +5070,16 @@ final class ComponentGalleryViewController: NSViewController {
         )
         card.addSubview(stack)
 
-        NSLayoutConstraint.activate([
+        let padding = [
             stack.topAnchor.constraint(equalTo: card.topAnchor, constant: Design.Spacing.inset),
             stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -Design.Spacing.inset),
             stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Design.Spacing.inset),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Design.Spacing.inset),
-            sample.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor)
-        ])
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Design.Spacing.inset)
+        ]
+        NSLayoutConstraint.activate(
+            padding + [sample.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor)]
+        )
+        card.holdAtContentInset(padding)
         return card
     }
 

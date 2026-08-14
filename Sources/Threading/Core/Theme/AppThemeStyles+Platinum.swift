@@ -195,7 +195,9 @@ extension AppThemeStyles {
                 popoverStyle: aquaHelpTagPopoverStyle,
                 buttonStyle: AppTheme.Material.ButtonStyle(
                     fontWeight: .regular,
-                    primaryTreatment: .raised,
+                    // The same blue default button Tiger keeps — see `aquaTiger`. Cheetah is
+                    // where it arrived, and it is the one control Aqua is remembered for.
+                    primaryTreatment: .filled,
                     primaryRole: .accent
                 ),
                 typeface: .standard,
