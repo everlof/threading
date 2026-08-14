@@ -2401,10 +2401,10 @@ final class AppThemeTests: XCTestCase {
         let ids = AppThemeLibrary.stock.map(\.id.rawValue)
         XCTAssertEqual(Set(ids).count, ids.count, "two stock themes share an id")
         XCTAssertTrue(ids.contains(AppThemeID.system.rawValue))
-        // 24 = System + Threading + eleven design movements + Christmas + ten period and
-        // authored chrome themes. Threading now belongs to the takeover set too, without
-        // adding another catalogue entry.
-        XCTAssertEqual(ids.count, 24, "the curated stock catalogue unexpectedly changed size")
+        // 29 = System + Threading + eleven design movements + five palette-first styles +
+        // Christmas + ten period and authored chrome themes. Threading now belongs to the
+        // takeover set too, without adding another catalogue entry.
+        XCTAssertEqual(ids.count, 29, "the curated stock catalogue unexpectedly changed size")
     }
 
     /// A takeover chrome is not complete merely because its Swift document exists. Every stock

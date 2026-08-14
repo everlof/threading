@@ -4,6 +4,9 @@ import AppKit
 ///
 /// Named after public design movements and broad visual genres. The palettes here are our own
 /// values, authored against those aesthetics; nothing is copied from a style guide or site.
+/// The one carve-out is the palette-first family in `AppThemeStyles+Palettes.swift`: Solarized,
+/// Nord, and Dracula are community schemes whose identity is their exact published values, so
+/// those are reproduced from their MIT-licensed definitions and credited there.
 ///
 /// **What a style can and cannot carry here.** A design style is roughly four layers: palette,
 /// material, type, and layout with motion. Threading's layout *is* the product, so no theme moves
@@ -28,6 +31,11 @@ enum AppThemeStyles {
         newsprint,
         botanical,
         industrial,
+        pureBlack,
+        cappuccino,
+        solarized,
+        nord,
+        dracula,
         platinum,
         aqua,
         aquaTiger,

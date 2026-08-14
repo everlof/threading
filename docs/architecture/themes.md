@@ -1234,3 +1234,68 @@ the shared chrome sweeps plus whole-window render hold the implementation.
 
 System and other stock themes remain available, but ordinary product evidence uses Threading.
 Other themes appear only when a page is explicitly comparing themes.
+
+## 2026-08-14 — the palette-first family
+
+Five stock styles — **Pure Black**, **Cappuccino**, **Solarized**, **Nord**, **Dracula**
+(`AppThemeStyles+Palettes.swift`) — are themes in the sense most terminal users mean the word: a
+colour language, not a chrome. Everything before them changes the window's material somewhere —
+a takeover frame, a printed rule system, a glow, a typeface. These keep the app's modern
+silhouette and spend their whole identity on the ground, the ink, one accent, and the sixteen
+ANSI colours that agree with them.
+
+They still author geometry, because the silhouette gate
+(`testEveryStyleHasItsOwnSilhouette`) refuses a material equal to System's — a theme that is
+only a tint is the failure the first design-movement pass already made once. The differences are
+deliberately small: a few points of panel radius (Cappuccino rounder than the default, Solarized
+squarer), never new furniture, no glow, no backdrop pattern, no chrome takeover.
+
+**Provenance is split, and the split is stated where the styles live.** The catalogue's standing
+rule — palettes are our own values, authored against public aesthetics — gained its one
+carve-out here: Solarized, Nord, and Dracula are community schemes whose identity *is* their
+exact published values, so approximating them would ship a theme wearing a name it does not
+match. Their values are reproduced from the MIT-licensed definitions and credited in the file
+(Schoonover, Greb, the Dracula contributors). Pure Black and Cappuccino are ours, authored like
+every other style. Where a scheme states fewer surfaces than the app has roles — none of the
+three defines a third panel tone — the missing steps are interpolated inside the scheme's own
+ramp and commented as ours at the definition.
+
+Decisions worth knowing before touching one:
+
+- **Pure Black's chrome is achromatic on purpose**, down to a white accent and a grey syntax
+  ramp: the style is absence, and colour belongs to the programs in the terminal. Its ANSI hues
+  are slightly muted because saturated primaries bloom against a true `#000000` ground. This is
+  the theme for the "not the system grey" ask — the ground is the one macOS's elevated dark
+  surfaces never give you.
+- **Pure Black's `selection` is stated opaque (`#292929`)** — the colour its natural
+  white-at-16% wash renders to over this chrome. The wash form failed
+  `ThemedTableRowSelectionTests` by painting literally nothing on that fixture's white ground,
+  which is the honest reading of a translucent *white* selection: it only exists over dark
+  pixels. Stating the rendered value keeps the appearance and makes it true everywhere.
+- **Cappuccino and Solarized are adaptive**, the second and third stock styles after Christmas
+  to author both appearances — for Christmas's reason: the identity is a pairing (milk and
+  espresso; one hue set over two grounds), and pinning either appearance would make half the
+  users wrong. Cappuccino's light terminal follows the Swiss monotone-neutral-ramp rule; its
+  palette is ours, so it obeys the house rules.
+- **Solarized ships one ANSI table for both variants, exactly as published.** The bright slots
+  carry the base tones — `brightBlack` *is* the dark variant's ground — so sharing the table is
+  the scheme's design, not a shortcut, and the light variant's near-invisible index 7 on paper
+  is canon this theme deliberately does not "fix". The 3:1 contrast floor was chosen, back when
+  the gate was designed, precisely so this palette passes as authored.
+- **Solarized's chrome label is the palette's own ANSI ink, not its body tone.** The first pass
+  used the published base00/base0 body text for `label`, and two sweeps refused it:
+  `SelectionSurface` holds the app's own chrome to AA on selected rows, which base0 over a
+  selection wash on base02 cannot reach (3.11:1), and the sidebar's 6% hover wash of the label
+  vanished on the hover fixture's mid-grey — Solarized's base tones *are* mid-grey, the one lean
+  that fixture's "works whichever way the label leans" premise never met. The latitude the 3:1
+  floor extends to Solarized is for the *terminal*, where the canonical base00/base0 foregrounds
+  stay exactly as published; the chrome label is base02 on light and base2 on dark — the tones
+  the scheme itself uses as ANSI black and white, i.e. its own inks.
+- **Dracula's `selection` is opaque `#44475A`**, the one departure from this family's
+  translucent accent washes: "current line" is how Dracula marks the selected thing, and a
+  purple wash would be a different theme wearing the name.
+
+The catalogue count pinned in `testStockThemesHaveUniqueStableIdentifiers` moved 24 → 29. Every
+existing sweep — contrast on own surfaces, the agent-theme validation contract, unique palette
+ids, rule-ink budget, the settings-page renders — picked the five up by their membership in
+`AppThemeStyles.all`; nothing needed a per-theme carve-out.

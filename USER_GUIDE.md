@@ -3108,6 +3108,13 @@ does not ask again in every tab — while a different theme, or a different pair
 Sessions shown as a conversation rather than a terminal are drawn in the system's own colours;
 a theme sets only the backdrop behind them.
 
+**Some themes are a palette rather than a look.** Pure Black, Cappuccino, Solarized, Nord, and
+Dracula keep the app's modern shape and spend their identity on colour: Pure Black is a true
+`#000000` ground rather than the system's elevated grey, with colour reserved for the terminal;
+Cappuccino and Solarized adapt with macOS light and dark; Solarized, Nord, and Dracula ship the
+community schemes' exact published values, chrome and terminal palette alike, so a terminal set
+to **Follow App Theme** gets the real sixteen colours.
+
 **Some themes take over the whole window frame.** Windows 98, Mac OS 9 Platinum, Mac OS X
 10.0 Aqua, Mac OS X 10.4 Tiger, BeOS R5, OPENSTEP 4.2, IRIX Indigo Magic, Amiga Workbench 3.1,
 Classic Player, and TUI replace the
