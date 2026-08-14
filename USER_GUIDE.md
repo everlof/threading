@@ -2721,6 +2721,14 @@ trip to Settings.
 - **"Make me something warmer, like solarized but darker"** creates a new theme. Colours you
   do not mention are kept from whatever the session is using now.
 
+The terminal changes at once either way. Whether the *agent's own interface* follows depends on
+the runtime, because an agent draws its composer and its diff backgrounds itself and has to
+re-read the terminal's colours to know they moved. Claude Code does, on the spot. Codex reads
+them once when it starts and keeps that answer, so on a switch between a dark scheme and a light
+one its composer plate and diff washes stay in the old scheme until that session is resumed.
+Threading prompts it in both of the ways the runtime offers, so this should sort itself out as
+Codex changes.
+
 Two guards, both because a terminal is where you would have to type to undo a mistake: an
 existing theme is never overwritten (the agent is told to pick another name), and a palette
 whose text cannot be read against its own background is refused outright.

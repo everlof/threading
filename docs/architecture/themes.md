@@ -264,6 +264,39 @@ applied profile actually changes the emulator's background — palette first, re
 the re-ask hears the new page; font tweaks and re-applies of the same palette stay silent.
 Driven against Claude Code 2.1.220 in a PTY: dark ink, report, re-ask, light ink, live.
 
+**A runtime that does not subscribe hears none of that, and Codex is one.** `strings` on the
+0.147.0 binary contains no 2031 anywhere, so the announcement above is sent into a program with
+nothing to receive it. What it does have is a re-read hung off *focus*, which makes a focus
+report the only prompt it can hear. Measured in a bare PTY that answers `OSC 10/11` in
+microseconds, so none of the timeout stories apply: told the background is `#101060` it derives
+a `#2C2C73` composer plate, so the startup probe succeeds and the cached palette is correct. It
+then never asks again. 0.146.0 answers a synthetic focus report with a fresh `OSC 10 ; ?` /
+`OSC 11 ; ?` pair and repaints to `#F4F4F4` when the answer becomes white; 0.147.0 removed that
+path and ignores it, while still enabling `DECSET 1004` and still parsing the event (a control
+keystroke written straight after the `CSI I` comes back echoed). This is what a user sees as a
+`#393939` composer plate with `#CFCFCF` ink sitting inside a white Tiger terminal, with quitting
+and resuming the session the only recovery.
+
+So `applyProfile` sends a second prompt in the only dialect that runtime speaks:
+`promptColorRereadThroughFocus` re-states this terminal's focus after the palette lands.
+`setTerminalFocus` emits nothing unless the program asked for focus reports, so a program that
+never opted in is sent no stray input — the guard that makes this safe to do for every session
+rather than for a named runtime. It is only sent while the terminal really *is* focused, because
+a focus report is a statement about where the user is looking and this one has to stay true; a
+theme that moves behind the app's back, macOS going dark at sunset under an adaptive theme, is
+carried on a one-shot key-window observer and delivered when the user is looking again. SwiftTerm
+reports focus from the responder hooks alone, so a window merely becoming key emits nothing by
+itself and the carried prompt is the only thing that covers that case.
+
+**This is a workaround with an expiry date.** It is inert on current Codex, works on older ones,
+and starts working again if the re-query returns. Filed both halves upstream:
+[openai/codex#18942](https://github.com/openai/codex/issues/18942) for the removed re-query, with
+the measurement and a standalone repro harness, and
+[openai/codex#38575](https://github.com/openai/codex/issues/38575) asking for 2031, which is the
+only mechanism that covers a theme changing in a window that never loses focus. **Delete
+`promptColorRereadThroughFocus` when those are answered** rather than leaving a synthetic focus
+report in the stream forever.
+
 **The fourth leg is a claim the app has to *stop* passing on.** `NO_COLOR` describes a stream,
 and the stream a session hands its child is a PTY that Threading paints — so an inherited one is
 always a statement about somewhere else. It arrives whenever the app is opened from a pipe, a CI
@@ -296,7 +329,9 @@ identity families it travels with — is not about the stream and is filtered a 
 
 `TerminalColorQueryTests` pins all four — the bytes on the wire, the environment the child is
 launched into, the announce → re-ask → new-answer exchange, and what the environment must not
-carry.
+carry — plus the focus prompt: sent to a program that asked for focus reports, withheld from one
+that did not, withheld on a font tweak, carried across an unfocused switch, and sent once rather
+than on every window activation.
 
 ## A theme states a typeface
 

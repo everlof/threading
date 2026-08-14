@@ -246,7 +246,66 @@ final class TerminalSession: NSObject {
         let terminal = terminalView.getTerminal()
         if terminal.backgroundColor != previousBackground {
             terminal.reportColorSchemeChange(dark: profile.theme.hasDarkBackground)
+            promptColorRereadThroughFocus()
         }
+    }
+
+    // MARK: - Prompting a Program That Only Re-Reads on Focus
+
+    /// A theme change waiting for the terminal to be looked at again.
+    ///
+    /// Set when the palette moved while this terminal was not the focused one, because the
+    /// prompt below is only truthful when it is. The observer is registered on demand and torn
+    /// down on delivery, so a session that never changes theme observes nothing.
+    private var isAwaitingFocusForColorPrompt = false
+    private let focusColorPromptObservations = AppEventObservations()
+
+    /// Re-sends this terminal's focus state as a second prompt to re-read the palette.
+    ///
+    /// `DECSET 2031` is the mechanism designed for this and is what `reportColorSchemeChange`
+    /// above sends. Codex does not implement it (filed as openai/codex#38575) and instead
+    /// re-reads `OSC 10/11` when it is told focus was gained, so a focus report is the only
+    /// prompt it can hear. Measured against a bare PTY: 0.146.0 answers a synthetic focus
+    /// report with a fresh `OSC 10 ; ?` / `OSC 11 ; ?` pair and repaints its composer, while
+    /// 0.147.0 removed that path and ignores it (openai/codex#18942). So this is inert on
+    /// current Codex, works on older ones, and starts working again when that issue is fixed.
+    /// **Delete it once both are answered** rather than leaving a synthetic focus report in the
+    /// stream forever.
+    ///
+    /// Two things keep it safe. `setTerminalFocus` sends nothing unless the program asked for
+    /// focus reports (`DECSET 1004`), so a program that never opted in sees no stray bytes. And
+    /// it is only sent while this terminal really is focused, so the report stays a true
+    /// statement — a prompt to re-ask, never a claim about where the user is looking.
+    private func promptColorRereadThroughFocus() {
+        // `applyProfile` also runs once from `init`, where the background moves from SwiftTerm's
+        // own default to this theme's and there is no program yet to prompt. Without this every
+        // session would arm the carried prompt below at construction and spend it on a stray
+        // focus report the first time the user looked at the terminal.
+        guard profileApplicationGeneration > 1 else { return }
+
+        if terminalView.hasFocus {
+            deliverFocusColorPrompt()
+            return
+        }
+        // Not focused, so there is nothing truthful to send yet. A theme can perfectly well move
+        // behind the app's back: macOS going dark at sunset under an adaptive theme is the
+        // ordinary case. SwiftTerm reports focus from the responder hooks alone, so a window
+        // merely becoming key again emits nothing on its own and a terminal that stayed first
+        // responder would never be prompted. Carry it to the moment the user is looking.
+        guard !isAwaitingFocusForColorPrompt else { return }
+        isAwaitingFocusForColorPrompt = true
+        focusColorPromptObservations.observe(NSWindow.didBecomeKeyNotification) { [weak self] in
+            guard let self, self.isAwaitingFocusForColorPrompt, self.terminalView.hasFocus else {
+                return
+            }
+            self.isAwaitingFocusForColorPrompt = false
+            self.focusColorPromptObservations.removeAll()
+            self.deliverFocusColorPrompt()
+        }
+    }
+
+    private func deliverFocusColorPrompt() {
+        terminalView.getTerminal().setTerminalFocus(true)
     }
 
     private func swiftTermCursorStyle(from style: TerminalProfile.CursorStyle, blink: Bool) -> CursorStyle {

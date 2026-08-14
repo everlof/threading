@@ -687,6 +687,144 @@ final class TerminalColorQueryTests: XCTestCase {
         XCTAssertEqual(sent.text, "")
     }
 
+    // MARK: - The Program That Only Re-Reads on Focus
+
+    /// Codex does not implement `DECSET 2031`, so the announcement above reaches it not at all.
+    /// It re-reads `OSC 10/11` when it is told focus was gained instead, which makes a focus
+    /// report the only prompt it can hear. Measured in a bare PTY: 0.146.0 answers one with a
+    /// fresh colour query and repaints; 0.147.0 removed that path. Filed as openai/codex#18942
+    /// and openai/codex#38575, and **this whole section goes away when they are answered.**
+    func testAProgramThatOnlyRereadsOnFocusIsPromptedByASwitch() {
+        let (session, sent) = makeSession(theme: AppThemeStyles.bauhaus.terminalPalette)
+        // Focus reports the way Codex asks for them, and no 2031 subscription at all.
+        session.terminalView.getTerminal().feed(text: "\u{1b}[?1004h")
+        session.terminalView.hasFocus = true
+
+        var profile = TerminalProfile.default
+        profile.theme = AppThemeStyles.artDeco.terminalPalette
+        session.updateProfile(profile)
+
+        XCTAssertEqual(
+            sent.text,
+            "\u{1b}[I",
+            "the one prompt this program can hear was not sent"
+        )
+    }
+
+    /// The prompt is a focus report, so it must not reach a program that never asked for focus
+    /// reports: to that one the same bytes are keystrokes.
+    func testAProgramThatNeverAskedForFocusReportsIsNotPrompted() {
+        let (session, sent) = makeSession(theme: AppThemeStyles.bauhaus.terminalPalette)
+        session.terminalView.hasFocus = true
+
+        var profile = TerminalProfile.default
+        profile.theme = AppThemeStyles.artDeco.terminalPalette
+        session.updateProfile(profile)
+
+        XCTAssertEqual(sent.text, "", "a program that never opted in was sent input")
+    }
+
+    func testAReapplyOfTheSamePagePromptsNoReread() {
+        let (session, sent) = makeSession(theme: AppThemeStyles.bauhaus.terminalPalette)
+        session.terminalView.getTerminal().feed(text: "\u{1b}[?1004h")
+        session.terminalView.hasFocus = true
+
+        var profile = TerminalProfile.default
+        profile.theme = AppThemeStyles.bauhaus.terminalPalette
+        profile.fontSize += 1
+        session.updateProfile(profile)
+
+        XCTAssertEqual(sent.text, "", "a font tweak read as the page turning")
+    }
+
+    /// A focus report is a statement about where the user is looking, so it may only be sent
+    /// when it is true. A theme that moves behind the app — macOS going dark at sunset under an
+    /// adaptive theme — must therefore wait rather than lie, and SwiftTerm reports focus from
+    /// the responder hooks alone, so a window becoming key again emits nothing by itself.
+    func testTheFocusPromptWaitsForTheTerminalToBeLookedAtAgain() async {
+        let (session, sent) = makeSession(theme: AppThemeStyles.bauhaus.terminalPalette)
+        session.terminalView.getTerminal().feed(text: "\u{1b}[?1004h")
+        session.terminalView.hasFocus = false
+
+        var profile = TerminalProfile.default
+        profile.theme = AppThemeStyles.artDeco.terminalPalette
+        session.updateProfile(profile)
+
+        XCTAssertEqual(sent.text, "", "an unfocused terminal claimed the user was looking at it")
+
+        session.terminalView.hasFocus = true
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: nil)
+
+        let delivered = await promptDelivered(to: sent)
+        XCTAssertEqual(
+            delivered,
+            "\u{1b}[I",
+            "the carried prompt never arrived, so the palette stayed stale"
+        )
+    }
+
+    /// One switch is one prompt. Coming back to the window later is not itself news.
+    func testTheCarriedPromptIsSentOnceAndNotOnEveryReturn() async {
+        let (session, sent) = makeSession(theme: AppThemeStyles.bauhaus.terminalPalette)
+        session.terminalView.getTerminal().feed(text: "\u{1b}[?1004h")
+        session.terminalView.hasFocus = false
+
+        var profile = TerminalProfile.default
+        profile.theme = AppThemeStyles.artDeco.terminalPalette
+        session.updateProfile(profile)
+
+        session.terminalView.hasFocus = true
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: nil)
+
+        let delivered = await promptDelivered(to: sent)
+        XCTAssertEqual(delivered, "\u{1b}[I", "nothing was carried, so this proves nothing below")
+        sent.bytes.removeAll()
+
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: nil)
+        await settleMainQueue()
+
+        XCTAssertEqual(sent.text, "", "every window activation turned into a synthetic focus")
+    }
+
+    /// A session applies its palette once on the way up, where the background moves off
+    /// SwiftTerm's own default and there is no program yet to prompt. Arming there would leave
+    /// every session holding a prompt it spends on the first window activation, for a switch
+    /// that never happened.
+    func testAFreshSessionCarriesNoPromptForItsOwnFirstPalette() async {
+        let (session, sent) = makeSession(theme: AppThemeStyles.bauhaus.terminalPalette)
+        session.terminalView.getTerminal().feed(text: "\u{1b}[?1004h")
+        session.terminalView.hasFocus = true
+
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: nil)
+        await settleMainQueue()
+
+        XCTAssertEqual(sent.text, "", "a session prompted a re-read of the palette it started on")
+    }
+
+    /// The observer runs on the main queue, so a post is not yet a delivery — and under a full
+    /// run that queue has other work in front of it, which is what made waiting exactly one turn
+    /// pass alone and fail in the suite. Waits for the prompt itself rather than for a turn.
+    private func promptDelivered(to sent: SentBytes) async -> String {
+        for _ in 0..<20 {
+            if !sent.bytes.isEmpty { break }
+            await drainMainQueue()
+        }
+        return sent.text
+    }
+
+    /// Absence cannot be waited for, so give the queue several turns before believing it.
+    private func settleMainQueue() async {
+        for _ in 0..<3 {
+            await drainMainQueue()
+        }
+    }
+
+    private func drainMainQueue() async {
+        let drained = expectation(description: "main queue drained")
+        OperationQueue.main.addOperation { drained.fulfill() }
+        await fulfillment(of: [drained], timeout: 1)
+    }
+
     /// Collects what the session sends upstream, where both reports and replies go.
     private final class SentBytes {
         var bytes: [UInt8] = []
