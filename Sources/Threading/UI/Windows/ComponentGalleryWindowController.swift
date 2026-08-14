@@ -108,6 +108,7 @@ final class ComponentGalleryViewController: NSViewController {
         "GlyphView",
         "HostedServiceSignInButton",
         "HoverPopoverScheduler",
+        "HoverTrackingView",
         "ImageCompareCanvas",
         "ImageCompareView",
         "LimitEscapeStripView",
@@ -142,6 +143,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThreadingMarkView",
         "ThemeSwatchImage",
         "ThemeSwatchView",
+        "ThemedActionPopoverViewController",
         "ThemedButton",
         "ThemedAlert",
         "ThemedChartPlaceholderView",
@@ -218,6 +220,7 @@ final class ComponentGalleryViewController: NSViewController {
     private var galleryPopover: ThemedPopover?
     private let galleryCompletionPresenter = PromptCompletionPresenter()
     private var galleryCommandPalette: CommandPaletteViewController?
+    private var galleryActionPopover: ThemedActionPopoverViewController?
 
     /// The hover-policy story's demos, retained so their schedulers and popovers outlive the
     /// pass that built the section.
@@ -2531,9 +2534,98 @@ final class ComponentGalleryViewController: NSViewController {
                     "HoverPopoverScheduler",
                     "Hover timing as configured policy: instant, dwell, and dwell with a grace that holds.",
                     hoverPolicies
+                ),
+                story(
+                    "ThemedActionPopoverViewController",
+                    "The anatomy inside a hover popover: a bounded preview, one group rule, and full-cell action rows.",
+                    makeActionPopoverSample()
+                ),
+                story(
+                    "HoverTrackingView",
+                    "Reports the pointer arriving and leaving without drawing anything, so a surface can count the crossing onto it as staying.",
+                    makeHoverTrackingSample()
                 )
             ]
         )
+    }
+
+    private func makeActionPopoverSample() -> NSView {
+        let preview = ThemedSurfaceView()
+        preview.translatesAutoresizingMaskIntoConstraints = false
+        preview.applySurface(
+            fill: Design.Surface.panel,
+            radius: .control,
+            border: Design.Surface.border
+        )
+
+        let controller = ThemedActionPopoverViewController(
+            preview: preview,
+            previewHeight: 88,
+            entries: [
+                .action(ThemedActionPopoverAction(
+                    title: L10n.string("Open in Finder"),
+                    systemSymbolName: "folder"
+                ) {}),
+                .action(ThemedActionPopoverAction(
+                    title: L10n.string("Copy image"),
+                    systemSymbolName: "doc.on.doc"
+                ) {}),
+                .separator,
+                .action(ThemedActionPopoverAction(
+                    title: L10n.string("Remove attachment"),
+                    systemSymbolName: "trash",
+                    isEnabled: false
+                ) {})
+            ],
+            contentWidth: 260,
+            onHoverChange: { _ in }
+        )
+        // The view outlives its controller otherwise: a superview retains the view, nothing
+        // retains the controller, and the rows stop answering once it goes.
+        galleryActionPopover = controller
+        let content = controller.view
+        content.setAccessibilityIdentifier("gallery.presentation.actionPopover")
+        content.layoutSubtreeIfNeeded()
+        return content
+    }
+
+    private func makeHoverTrackingSample() -> NSView {
+        let label = NSTextField(labelWithString: L10n.string("The pointer is elsewhere"))
+        label.applyFont(.control)
+        label.textColor = Design.Text.secondary
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let surface = ThemedSurfaceView()
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        surface.applySurface(
+            fill: Design.Surface.panel,
+            radius: .panel,
+            border: Design.Surface.border
+        )
+        surface.addSubview(label)
+
+        let tracker = HoverTrackingView()
+        tracker.translatesAutoresizingMaskIntoConstraints = false
+        tracker.setAccessibilityIdentifier("gallery.presentation.hoverTracking")
+        tracker.addSubview(surface)
+        tracker.onHoverChange = { [weak label] isInside in
+            label?.stringValue = isInside
+                ? L10n.string("The pointer is on this surface")
+                : L10n.string("The pointer is elsewhere")
+            label?.textColor = isInside ? Design.Text.label : Design.Text.secondary
+        }
+
+        NSLayoutConstraint.activate([
+            tracker.widthAnchor.constraint(equalToConstant: 320),
+            tracker.heightAnchor.constraint(equalToConstant: 72),
+            surface.leadingAnchor.constraint(equalTo: tracker.leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: tracker.trailingAnchor),
+            surface.topAnchor.constraint(equalTo: tracker.topAnchor),
+            surface.bottomAnchor.constraint(equalTo: tracker.bottomAnchor),
+            label.centerXAnchor.constraint(equalTo: surface.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: surface.centerYAnchor)
+        ])
+        return tracker
     }
 
     private func previewWithLauncher(_ preview: NSView, launcher: NSView) -> NSView {

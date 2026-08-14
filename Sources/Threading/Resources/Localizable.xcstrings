@@ -28155,7 +28155,16 @@
     "PanelListView": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "PanelListView"}}}},
     "CompoundValueLabel": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "CompoundValueLabel"}}}},
     "The display panel's list vocabulary — sections, notes and full-width rows on one ink column, the geometry the Info and Sharing panes share instead of each stating their own insets.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visningspanelens listvokabulär — sektioner, noteringar och rader i full bredd på en gemensam bläckkolumn; geometrin som Info- och Delningspanelerna delar i stället för att var och en anger sina egna indrag."}}}},
-    "The same rule for plain segments — the info panel's CPU · memory reading: both parts, then one complete part, then nothing, never a number whose unit went missing.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Samma regel för enkla segment — infopanelens CPU · minnes-avläsning: båda delarna, sedan en komplett del, sedan ingenting, aldrig ett tal vars enhet försvunnit."}}}}
+    "The same rule for plain segments — the info panel's CPU · memory reading: both parts, then one complete part, then nothing, never a number whose unit went missing.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Samma regel för enkla segment — infopanelens CPU · minnes-avläsning: båda delarna, sedan en komplett del, sedan ingenting, aldrig ett tal vars enhet försvunnit."}}}},
+    "ThemedActionPopoverViewController": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ThemedActionPopoverViewController"}}}},
+    "The anatomy inside a hover popover: a bounded preview, one group rule, and full-cell action rows.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Anatomin inuti en hovringspopover: en avgränsad förhandsvisning, en gruppregel och åtgärdsrader i full bredd."}}}},
+    "HoverTrackingView": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "HoverTrackingView"}}}},
+    "Reports the pointer arriving and leaving without drawing anything, so a surface can count the crossing onto it as staying.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rapporterar när pekaren kommer och lämnar utan att rita något, så att en yta kan räkna övergången till den som att pekaren stannar."}}}},
+    "Open in Finder": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa i Finder"}}}},
+    "Copy image": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kopiera bild"}}}},
+    "Remove attachment": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ta bort bilaga"}}}},
+    "The pointer is elsewhere": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Pekaren är någon annanstans"}}}},
+    "The pointer is on this surface": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Pekaren är på den här ytan"}}}}
   },
   "version": "1.0"
 }
