@@ -398,7 +398,8 @@ it says what the message will be sent with, and the message is the point. Nothin
 plate comes and goes.
 
 Every chip's dropdown is Threading's own menu, and it tracks like a menu should: click to open
-and browse, or **press, drag onto a row, and release** to choose in one motion. Arrow keys
+and browse, or **press, drag onto a row, and release** to choose in one motion — either the
+press that opened it or a fresh press anywhere on the open panel. Arrow keys
 move the highlight, **Return** chooses, **Escape** lets the menu go. **Typing while it is
 open filters it** — what you type echoes across the menu's top, rows that match keep their
 ink while the rest dim, and the highlight lands on the first match, so a long account or

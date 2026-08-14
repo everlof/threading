@@ -1966,6 +1966,130 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertFalse(dismissed)
     }
 
+    /// The second way a platform menu is browsed: the click that opened it was let go, and a
+    /// *new* press goes down on the panel and sweeps.
+    ///
+    /// Tracking used to begin and end with the opening press, so after a plain click-to-open the
+    /// menu was inert under a held button — nothing lit on the way down, which is what "the
+    /// dropdown doesn't follow the cursor" is. The row that took the press owned the gesture
+    /// alone, and its own `mouseUp` fires only inside its own bounds.
+    ///
+    /// Driven through `NSApp.sendEvent`, which is what reaches the session's event monitor; the
+    /// press itself is handed to the row the way AppKit hands it over.
+    func testAPressBegunOnTheOpenMenuSweepsTheHighlightAndChoosesOnRelease() throws {
+        let (window, root, source) = try menuHarness()
+        defer { window.close() }
+
+        var lit: [String] = []
+        let entries = ["First", "Second"].map { title in
+            ThemedMenuEntry.item(ThemedMenuItem(
+                title: title,
+                preview: ThemedMenuPreview(
+                    placement: .leading,
+                    view: NSView(frame: NSRect(x: 0, y: 0, width: 8, height: 8)),
+                    highlightChanged: { isLit in if isLit { lit.append(title) } }
+                )
+            ))
+        }
+        var chosen: String?
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: source.bounds.width),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in chosen = item.title },
+            onDismiss: {}
+        ))
+        defer { ThemedMenuPresenter.dismiss(token) }
+        layOutMenu(in: root)
+        lit.removeAll()
+
+        let first = try row(titled: "First", in: root)
+        let second = try row(titled: "Second", in: root)
+        first.mouseDown(with: try mouseEvent(
+            .leftMouseDown,
+            at: windowCentre(of: first),
+            in: window
+        ))
+        NSApp.sendEvent(try mouseEvent(
+            .leftMouseDragged,
+            at: windowCentre(of: second),
+            in: window
+        ))
+
+        XCTAssertEqual(lit, ["Second"], "the highlight did not follow a press begun on the menu")
+
+        NSApp.sendEvent(try mouseEvent(.leftMouseUp, at: windowCentre(of: second), in: window))
+
+        XCTAssertEqual(chosen, "Second", "the release over a row chose nothing")
+        XCTAssertFalse(
+            descendants(in: root).contains { $0.accessibilityRole() == .menu },
+            "the release chose a row, so the menu should have closed"
+        )
+    }
+
+    /// The same press, let go where it went down: the ordinary click on a row. The sweep's
+    /// tracking must not consume it, and must not choose a second time beside the row's own
+    /// release — a menu that fires its action twice is worse than one that never sweeps.
+    func testAPressReleasedOnTheRowItBeganOnChoosesItExactlyOnce() throws {
+        let (window, root, source) = try menuHarness()
+        defer { window.close() }
+
+        var chosen: [String] = []
+        let token = try XCTUnwrap(present(from: source, onChoose: { chosen.append($0) }))
+        defer { ThemedMenuPresenter.dismiss(token) }
+        layOutMenu(in: root)
+
+        let second = try row(titled: "Second", in: root)
+        let point = windowCentre(of: second)
+        second.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: window))
+        let release = try mouseEvent(.leftMouseUp, at: point, in: window)
+        NSApp.sendEvent(release)
+        second.mouseUp(with: release)
+
+        XCTAssertEqual(chosen, ["Second"])
+    }
+
+    /// A press on the panel's own ground — the inset around its rows — is a press on the menu.
+    /// Unhandled it walked the responder chain up to the overlay, whose `mouseDown` is the click
+    /// *outside* a menu, and let the menu go from inside it.
+    func testAPressOnThePanelGroundKeepsTheMenuOpen() throws {
+        let (window, root, source) = try menuHarness()
+        defer { window.close() }
+
+        var dismissed = false
+        let token = try XCTUnwrap(present(from: source, onDismiss: { dismissed = true }))
+        defer { ThemedMenuPresenter.dismiss(token) }
+        layOutMenu(in: root)
+
+        let panel = try XCTUnwrap(
+            descendants(in: root).first { $0.accessibilityRole() == .menu },
+            "no open menu panel"
+        )
+        let rows = descendants(in: panel).filter { $0.accessibilityRole() == .menuItem }
+        let lowest = try XCTUnwrap(
+            rows.map { $0.convert($0.bounds, to: nil).minY }.min(),
+            "the panel has no rows"
+        )
+        let ground = NSPoint(
+            x: panel.convert(NSPoint(x: panel.bounds.midX, y: 0), to: nil).x,
+            y: (panel.convert(NSPoint(x: 0, y: panel.bounds.minY), to: nil).y + lowest) / 2
+        )
+        let hit = try XCTUnwrap(root.hitTest(ground), "the panel's ground hit nothing")
+        XCTAssertNotEqual(
+            hit.accessibilityRole(),
+            .menuItem,
+            "the point picked for the panel's ground landed on a row"
+        )
+
+        hit.mouseDown(with: try mouseEvent(.leftMouseDown, at: ground, in: window))
+
+        XCTAssertFalse(dismissed, "a press inside the panel dismissed the menu")
+        XCTAssertTrue(
+            descendants(in: root).contains { $0.accessibilityRole() == .menu },
+            "a press on the panel's ground closed the menu it landed in"
+        )
+    }
+
     /// A menu presented from the view it was invoked *on* — every secondary-click menu, whose
     /// source is a whole terminal, file tree or diff — opens over that source. The menu is
     /// therefore asked first: reading the release as "back on the control" because the panel

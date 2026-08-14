@@ -732,6 +732,7 @@ private final class ThemedMenuSession: NSObject {
         overlay.menuSource = source
         overlay.onDismiss = { [weak self] in self?.closeFromUser() }
         overlay.onChoose = { [weak self] index, item in self?.choose(index: index, item: item) }
+        overlay.onPressBegan = { [weak self] event in self?.pressBeganOnMenu(event) }
         overlay.autoresizingMask = [.width, .height]
         root.addSubview(overlay, positioned: .above, relativeTo: nil)
         // The overlay covers the window's content, so every cursor rectangle under it belongs to
@@ -752,7 +753,7 @@ private final class ThemedMenuSession: NSObject {
         overlay.animateIn()
         installFocusRunLoopObserver()
         installKeyEventMonitor()
-        installHeldPressMonitor()
+        installHeldPressMonitor(opening: NSApp.currentEvent)
 
         // `willClose` joined the list when the roster became the session's owner: a session
         // that outlived a closing window would otherwise sit in the roster holding its dead
@@ -840,8 +841,9 @@ private final class ThemedMenuSession: NSObject {
     /// The monitor watches only the button already down when the menu opened, so a menu opened
     /// from the keyboard, from accessibility, or on a click's *release* tracks nothing; it passes
     /// every event on, because the press still belongs to the control underneath as well.
-    private func installHeldPressMonitor() {
-        let opening = NSApp.currentEvent
+    ///
+    /// `opening` is also how a *later* press joins: see `pressBeganOnMenu`.
+    private func installHeldPressMonitor(opening: NSEvent?) {
         guard let matching = ThemedMenuPresenter.heldPressMask(
             opening: opening,
             pressedButtons: NSEvent.pressedMouseButtons
@@ -864,6 +866,23 @@ private final class ThemedMenuSession: NSObject {
         guard let heldPressMonitor else { return }
         NSEvent.removeMonitor(heldPressMonitor)
         self.heldPressMonitor = nil
+    }
+
+    /// A press that goes down **on the open menu** is the same gesture, started later.
+    ///
+    /// A menu is browsed two ways and a platform menu answers both: hold the press that opened it
+    /// and sweep, or let that click go and press again anywhere on the panel. Only the first was
+    /// tracked here, because tracking began from the opening event and ended at its release — so
+    /// after a plain click-to-open, a press on a row lit nothing as it swept and chose nothing
+    /// where it was let go. The row that took the press owned the whole gesture: its own
+    /// `mouseUp` fires only inside its own bounds, so a release one row further down was silently
+    /// nothing at all.
+    ///
+    /// Tracking is per gesture, not per menu: an existing held press keeps its own origin, so the
+    /// row press AppKit reports *inside* a sweep that is already being tracked changes nothing.
+    private func pressBeganOnMenu(_ event: NSEvent) {
+        guard !isClosed, heldPressMonitor == nil else { return }
+        installHeldPressMonitor(opening: event)
     }
 
     /// An event's location in the menu's own window.
@@ -991,6 +1010,9 @@ private final class ThemedMenuOverlayView: ThemedControl {
 
     var onChoose: ((Int, ThemedMenuItem) -> Void)?
     var onDismiss: (() -> Void)?
+    /// A press went down on a panel — a row, or the panel's own ground between them. The session
+    /// tracks it as the gesture it is, rather than leaving the pressed row to answer alone.
+    var onPressBegan: ((NSEvent) -> Void)?
 
     /// The control whose menu this overlay carries, so the dismissing-click handoff can tell a
     /// sibling (open its menu) from the source itself (a toggle, which only closes).
@@ -1133,6 +1155,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
         surface.onHighlight = { [weak self] entryIndex in
             self?.pointerHighlighted(columnIndex: index, entryIndex: entryIndex)
         }
+        surface.onPressBegan = { [weak self] event in self?.onPressBegan?(event) }
         // A submenu is anchored to where its parent row was at open; a parent that scrolls
         // under it would leave the panel beside the wrong row, so scrolling closes deeper.
         surface.onScrolled = { [weak self] in
@@ -1212,6 +1235,17 @@ private final class ThemedMenuOverlayView: ThemedControl {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // A press that landed on a panel is a press on the *menu*: its inset, a separator, the
+        // strip the filter opens. Only a press that missed every panel is the click outside one
+        // that lets it go. Rows answer their own press and report it themselves; everything else
+        // inside a panel reaches here through the responder chain, and used to be read as the
+        // dismissing click — a menu closing from a point the pointer was inside.
+        let point = convert(event.locationInWindow, from: nil)
+        if columns.contains(where: { $0.host.frame.contains(point) }) {
+            onPressBegan?(event)
+            return
+        }
+
         let window = self.window
         let source = menuSource
         onDismiss?()
@@ -2405,6 +2439,8 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
     var onHighlight: ((Int) -> Void)?
     /// The panel scrolled under its rows — what tells an open submenu its anchor moved.
     var onScrolled: (() -> Void)?
+    /// A press landed on this panel, on a row or on the ground between them.
+    var onPressBegan: ((NSEvent) -> Void)?
 
     let selectableIndices: [Int]
 
@@ -2500,6 +2536,7 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         for row in rows.values {
             row.onChoose = { [weak self] index, item in self?.onChoose?(index, item) }
             row.onHighlight = { [weak self] index in self?.onHighlight?(index) }
+            row.onPressBegan = { [weak self] event in self?.onPressBegan?(event) }
         }
         // Scrolling moves every row under any submenu anchored to one of them; the overlay
         // listens and closes what no longer lines up.
@@ -2929,6 +2966,9 @@ private final class ThemedMenuRowView: ThemedControl {
 
     var onChoose: ((Int, ThemedMenuItem) -> Void)?
     var onHighlight: ((Int) -> Void)?
+    /// Reported before the row decides anything of its own, and reported by a disabled row too:
+    /// a sweep that begins on an unavailable row still chooses the enabled one it ends on.
+    var onPressBegan: ((NSEvent) -> Void)?
     var isKeyboardHighlighted = false {
         didSet {
             guard isKeyboardHighlighted != oldValue else { return }
@@ -3157,6 +3197,7 @@ private final class ThemedMenuRowView: ThemedControl {
     }
 
     override func mouseDown(with event: NSEvent) {
+        onPressBegan?(event)
         guard item.isEnabled else { return }
         pressed = true
     }

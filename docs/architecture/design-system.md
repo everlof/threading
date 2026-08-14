@@ -412,6 +412,25 @@ AppKit's own routing was ruled out as the cause first: a full-window overlay add
 and release back to the source view. The forwarding was sound; there was simply only ever two of
 it.
 
+**A press that goes down on the open menu is the same gesture, started later.** A menu is browsed
+two ways and a platform menu answers both: hold the opening press and sweep, or let that click go
+and press again anywhere on the panel. Only the first was tracked, because tracking began at the
+opening event and ended at its release — so after a plain click-to-open the panel was inert under
+a held button. Nothing lit on the way down, and the release chose nothing, which is what "the
+dropdown doesn't follow the cursor" means from the outside. The row that took the press owned the
+whole gesture on its own, and a row's `mouseUp` fires only inside its own bounds, so letting go
+one row further down was silently nothing at all. Rows now report their press, and the overlay
+reports a press that landed on a panel's own ground; the session adopts it exactly as it adopts
+the press that opened the menu, so the *rest* of the machinery above — sticky distance, rows
+before source, screen-coordinate releases — is the same code and the same rules. Tracking is per
+gesture, not per menu: a press reported while a sweep is already tracked keeps the origin it
+started with, so nothing restarts mid-drag.
+
+That overlay half fixed a second thing on the way. A press on the panel's inset, on a separator,
+or on the strip the filter opens is not handled by any row, so it walked the responder chain up
+to the overlay — whose `mouseDown` is the click *outside* a menu — and closed the menu from a
+point the pointer was inside.
+
 **The click that dismisses a menu lands on a sibling that opens one.** The dropdown's overlay
 swallows its dismissing click the way `NSMenu` does — a click on the terminal to let a menu go
 must not also type into it — with one exception it owes to hover. Hit testing is what the overlay
