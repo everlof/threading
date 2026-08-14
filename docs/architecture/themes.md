@@ -1402,3 +1402,39 @@ material asking for the classic frame — draws an edge rather than a backing pl
 
 `AquaChromeTests` holds the geometry, the drawn state (corner pixels of the well and of the
 frame, accent ink anywhere in a spent trough) and one specimen sheet per Aqua material.
+
+## 2026-08-14 — a view in the reuse queue misses the sweep
+
+Reported as two sidebar rows in different fonts under Tiger, and the screenshot named the bug
+without any instrumentation: the ink extents measure Lucida Grande 10.8 on one row and SF Pro 12
+on the other, which are `.controlRegular` under Tiger (`fontFamily: "Lucida Grande"`,
+`textScale: 0.90`) and under System. One row was a theme behind.
+
+**A live switch reaches views through two different mechanisms, and only one of them survives
+being detached.** A colour is held as a *rule*: `MorphingTitleLabel` keeps an `inkProvider` and
+re-asks it from its own `AppThemeDidChange` observer, which a view receives whether or not it is
+in a window. A font is pushed as a *value*: `applyFont` records the role, and
+`AppThemeRefresh.repaintEverything` re-resolves it by walking `NSApp.windows`. A view in an
+`NSTableView` reuse queue is in no window, so the sweep never reaches it, and nothing re-applies
+the role afterwards — `applyFont` runs once, where the cell is built. The row therefore came back
+out of the queue with the previous theme's typeface and the current theme's ink, which is exactly
+what the pixels showed.
+
+Settled in `ThemedTableRowDefaults.vendedView(for:recycling:)`, which both `ThemedTableView` and
+`ThemedOutlineView` already funnelled `makeView(withIdentifier:owner:)` through to default a row
+view. A recycled view now goes through `AppThemeRefresh.repaintIfNeeded` on its way out. That is
+generation-stamped, so a view already current costs one associated-object read per vend and the
+repaint runs once per view per theme change; and it covers surfaces and layer colours as well as
+fonts, which a pooled view had been holding stale for the same reason. Taking the answer away
+from the call sites is the same move the row-view default made, for the same reason: no list can
+forget, and `scripts/config/theme-boundary.json` maps `NSTableView`/`NSOutlineView` to these two
+classes, so there is nowhere else for a list to be.
+
+Two ways to park a cell that look like they should work and do not, recorded because both were
+written and watched to prove nothing: **scrolling** hands each departing cell straight to a row
+arriving at the other end, so the queue is empty again by the time you look, and **`reloadData`
+over an emptied source** releases the cells outright rather than queueing them. `removeItems` /
+`removeRows` — the sidebar's own incremental update, and where a collapsed project's rows go — is
+what leaves a cell in the queue with nothing to take it. `ThemeLeakSweepTests` covers the seam
+directly and both list classes end to end; the end-to-end case asserts the parked cell really
+left the window and that no fresh cell was built, since either would make it pass for free.

@@ -76,7 +76,11 @@ Four consequences worth knowing before adding UI:
   reached, so a tree that actually missed a theme/accessibility/font change is repaired on
   return while an ordinary hot session switch does not recursively repaint hundreds of rows.
   The same invalidation rule applies to any surface the app keeps alive off-screen, and it covers
-  stale layer colours as well as stale fonts.
+  stale layer colours as well as stale fonts. **A list's reuse queue is the third such surface
+  and the least visible**, because nothing in a list's code says a view is being kept: it is
+  handled once, in `ThemedTableRowDefaults.vendedView(for:recycling:)`, so no list has to know.
+  See [`themes.md`](themes.md#2026-08-14--a-view-in-the-reuse-queue-misses-the-sweep) for the
+  Tiger sidebar row this shipped as.
 
 Components so far:
 

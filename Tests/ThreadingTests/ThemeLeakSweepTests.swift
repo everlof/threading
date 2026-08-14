@@ -334,6 +334,55 @@ final class ThemeLeakSweepTests: XCTestCase {
         }
     }
 
+    /// **The net under both rules above, and under whatever the next one turns out to be.** After
+    /// a live switch, no view on any screen may still be wearing a font its recorded role no
+    /// longer resolves to.
+    ///
+    /// A colour is a rule the view re-asks and a role is a value the sweep pushes, so *anything*
+    /// the sweep cannot walk to fails this — a reuse queue, a cached page, a tree built while
+    /// detached — without the test having to know which. The screens are built under System and
+    /// switched afterwards, because a screen built under the theme it is asked about proves only
+    /// that construction works.
+    func testNoScreenKeepsAStaleFontRoleAfterALiveSwitch() throws {
+        let original = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(original) }
+        let theme = try canaryTheme()
+
+        for screen in try screens() {
+            AppThemeLibrary.apply(.system)
+            let view = try screen.build()
+            try present(view)
+
+            AppThemeLibrary.apply(theme)
+            let stale = staleRoles(in: view)
+            XCTAssertEqual(
+                stale,
+                [],
+                "\(screen.name) under \(theme.name) kept \(stale.count) label(s) in the previous "
+                    + "typeface: \(stale.joined(separator: "; "))"
+            )
+        }
+    }
+
+    /// Views wearing a font their recorded role no longer resolves to, named rather than counted
+    /// so a failure says which label and by how much.
+    private func staleRoles(in view: NSView) -> [String] {
+        var found: [String] = []
+        if let role = view.recordedFontRoleForTesting,
+           let surface = view.recordedFontSurfaceForTesting,
+           let applied = (view as? FontRoleApplying)?.appliedRoleFont {
+            let expected = role.resolved(in: surface)
+            if applied != expected {
+                found.append(
+                    "\(type(of: view)) \(role) is \(applied.fontName) \(applied.pointSize)pt, "
+                        + "should be \(expected.fontName) \(expected.pointSize)pt"
+                )
+            }
+        }
+        for subview in view.subviews { found += staleRoles(in: subview) }
+        return found
+    }
+
     /// **The detector, proven against a leak it is allowed to see.**
     ///
     /// Written because the sweep above spent its first afternoon passing for the wrong reason: an
