@@ -1,5 +1,28 @@
 import AppKit
 
+// MARK: - Review Text Size
+
+/// The durable, pane-scoped code-size choice. It is global rather than session-scoped because
+/// this is a reading preference: opening another checkout should not make the type jump back.
+enum GitReviewTextSizePreference {
+    static let key = "ThreadingGitReviewCodeTextScale"
+
+    static var current: Design.CodeTextScale {
+        PreferenceStore.shared.string(forKey: key)
+            .flatMap(Design.CodeTextScale.init(rawValue:))
+            ?? .standard
+    }
+
+    static func set(_ size: Design.CodeTextScale) {
+        PreferenceStore.shared.set(size.rawValue, forKey: key)
+    }
+}
+
+struct GitReviewTextSizeDidChange: AppEvent {
+    static let name = Notification.Name("GitReviewTextSizeDidChange")
+    let size: Design.CodeTextScale
+}
+
 // MARK: - Diff Options Menu
 
 /// The `···` overflow behind the Review header: the handful of things asked of a diff
@@ -13,6 +36,20 @@ import AppKit
 /// state: the collapse item names the direction it would move, the wrap item names what it
 /// would switch to, and the whitespace item carries a checkmark.
 extension GitReviewViewController {
+
+    // MARK: - Text Size
+
+    /// Moves one bounded step and tells every retained Review pane about the reading choice.
+    /// The receiver decides whether to rebuild now or when its tab next reaches a window.
+    func stepReviewTextSize(by offset: Int) {
+        let sizes = Design.CodeTextScale.allCases
+        guard let current = sizes.firstIndex(of: reviewTextSize) else { return }
+        let target = min(max(current + offset, sizes.startIndex), sizes.index(before: sizes.endIndex))
+        guard target != current else { return }
+        let size = sizes[target]
+        GitReviewTextSizePreference.set(size)
+        NotificationCenter.default.post(GitReviewTextSizeDidChange(size: size))
+    }
 
     // MARK: - Menu
 

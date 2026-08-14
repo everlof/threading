@@ -40,6 +40,24 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertEqual(view.arrangedSubviews.count, 3)
     }
 
+    func testCompactDiffUsesNeutralChangedCodeInk() throws {
+        let files = GitDiffParser.files(fromUnifiedDiff: fixture)
+        let lines = files[0].hunks.flatMap(\.lines)
+        let addedIndex = try XCTUnwrap(lines.firstIndex { $0.kind == .added })
+        let view = DiffView(gitLines: lines, displayCap: 100)
+        let code = try XCTUnwrap(
+            view.arrangedSubviews[addedIndex].subviews
+                .compactMap { $0 as? NSTextField }
+                .first { $0.stringValue == lines[addedIndex].text }
+        )
+        let expected = Design.Diff.on(Design.Surface.ground).addedText
+
+        XCTAssertEqual(
+            code.textColor?.usingColorSpace(.sRGB),
+            expected.usingColorSpace(.sRGB)
+        )
+    }
+
     func testDiffLineContextKeepsProjectPathNumberAndExcerpt() throws {
         let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
         let lines = file.hunks.flatMap(\.lines)
@@ -79,6 +97,87 @@ final class GitReviewViewTests: XCTestCase {
             lines.count,
             "the review renderer regressed to an AppKit view per diff line"
         )
+    }
+
+    func testReviewDiffUsesNeutralBodyInkAndSemanticGutterInk() throws {
+        let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+        let view = GitReviewDiffTextView(
+            gitLines: file.hunks.flatMap(\.lines),
+            displayCap: 100,
+            path: "Sources/Foo.swift"
+        )
+        let storage = try XCTUnwrap(view.textStorage)
+        let text = storage.string as NSString
+        let removed = text.range(of: "old line")
+        let added = text.range(of: "new line")
+        let colors = view.inkColorsForTesting
+
+        XCTAssertEqual(
+            (storage.attribute(.foregroundColor, at: removed.location, effectiveRange: nil) as? NSColor)?
+                .usingColorSpace(.sRGB),
+            colors.removedText.usingColorSpace(.sRGB)
+        )
+        XCTAssertEqual(
+            (storage.attribute(.foregroundColor, at: added.location, effectiveRange: nil) as? NSColor)?
+                .usingColorSpace(.sRGB),
+            colors.addedText.usingColorSpace(.sRGB)
+        )
+        XCTAssertGreaterThan(colors.removedMarker.oklab.chroma, colors.removedText.oklab.chroma)
+        XCTAssertGreaterThan(colors.addedMarker.oklab.chroma, colors.addedText.oklab.chroma)
+    }
+
+    func testReviewHeaderControlsPersistAndRebuildAtTheNextCodeSize() throws {
+        let defaults = PreferenceStore.shared
+        let previous = defaults.object(forKey: GitReviewTextSizePreference.key)
+        defer {
+            if let previous {
+                defaults.set(previous, forKey: GitReviewTextSizePreference.key)
+            } else {
+                defaults.removeObject(forKey: GitReviewTextSizePreference.key)
+            }
+        }
+        defaults.removeObject(forKey: GitReviewTextSizePreference.key)
+
+        let files = GitDiffParser.files(fromUnifiedDiff: fixture)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 520, height: 700)
+        controller.show(.files(files))
+        controller.view.layoutSubtreeIfNeeded()
+
+        let initial = try XCTUnwrap(
+            Self.firstDescendant(of: GitReviewDiffTextView.self, in: controller.view)
+        )
+        let initialFont = try XCTUnwrap(
+            initial.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        )
+
+        XCTAssertEqual(controller.reviewTextSize, .standard)
+        XCTAssertTrue(controller.decreaseTextSizeButton.isEnabled)
+        XCTAssertTrue(controller.increaseTextSizeButton.isEnabled)
+        XCTAssertEqual(
+            controller.decreaseTextSizeButton.accessibilityIdentifier(),
+            "git-review.text-size.decrease"
+        )
+
+        XCTAssertTrue(controller.increaseTextSizeButton.performPrimaryAction())
+        controller.applyPendingReviewTextSizeIfNeeded()
+        controller.view.layoutSubtreeIfNeeded()
+
+        let enlarged = try XCTUnwrap(
+            Self.firstDescendant(of: GitReviewDiffTextView.self, in: controller.view)
+        )
+        let enlargedFont = try XCTUnwrap(
+            enlarged.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        )
+        XCTAssertEqual(controller.reviewTextSize, .large)
+        XCTAssertEqual(GitReviewTextSizePreference.current, .large)
+        XCTAssertGreaterThan(enlargedFont.pointSize, initialFont.pointSize)
+        XCTAssertFalse(initial === enlarged, "the visible TextKit document was not rebuilt")
     }
 
     /// A right-click inside a selection speaks about the whole selection — that is how more
@@ -631,11 +730,15 @@ final class GitReviewViewTests: XCTestCase {
         let chipFrame = chip.convert(chip.bounds, to: controller.view)
 
         XCTAssertEqual(
-            cardFrame.minX, chipFrame.minX, accuracy: 0.5,
-            "a file card should start where the mode chip does"
+            cardFrame.minX,
+            chipFrame.minX + chip.opticalHorizontalInset,
+            accuracy: 0.5,
+            "a file card should start where the mode chip's ink does"
         )
         XCTAssertEqual(
-            controller.view.bounds.maxX - cardFrame.maxX, chipFrame.minX, accuracy: 0.5,
+            controller.view.bounds.maxX - cardFrame.maxX,
+            chipFrame.minX + chip.opticalHorizontalInset,
+            accuracy: 0.5,
             "a file card's margins should be equal on both sides"
         )
         let diff = try XCTUnwrap(
@@ -653,20 +756,26 @@ final class GitReviewViewTests: XCTestCase {
 
         // Aligned by ink: the button's frame carries the hover surface, its stated inset is how
         // deep, and what has to land on the margin is what the eye sees.
+        let header = try XCTUnwrap(
+            Self.firstDescendant(of: ControlRowView.self, in: controller.view)
+        )
         let overflow = try XCTUnwrap(
-            controller.view.subviews
+            header.trailingViews
                 .compactMap { $0 as? ThemedButton }
                 .first { $0.toolTip == L10n.string("Diff options") }
         )
+        let overflowFrame = overflow.convert(overflow.bounds, to: controller.view)
         XCTAssertEqual(
-            overflow.frame.maxX - overflow.opticalHorizontalInset, cardFrame.maxX, accuracy: 0.5,
+            overflowFrame.maxX - overflow.opticalHorizontalInset,
+            cardFrame.maxX,
+            accuracy: 0.5,
             "the overflow's glyph should end where a file card does"
         )
 
         // And the same margin vertically, so the header reads as the top of the list rather
         // than as a band above it: the row sat 6pt below the tab strip and 12pt above the
         // first card, which showed as the chip hugging the strip.
-        let sideMargin = chipFrame.minX
+        let sideMargin = Design.Spacing.inset
         XCTAssertEqual(
             controller.view.bounds.maxY - chipFrame.maxY, sideMargin, accuracy: 0.5,
             "the header should sit the pane's own margin below the tab strip"

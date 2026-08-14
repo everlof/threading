@@ -216,11 +216,13 @@ final class GitReviewDiffTextView: ThemedTextView {
     private let omittedLineCount: Int
     private let path: String?
     private let wraps: Bool
+    private let textSize: Design.CodeTextScale
     private let appEvents = AppEventObservations()
     private var lineRanges: [NSRange] = []
     private var washRuns: [WashRun] = []
     private var addedWash = NSColor.clear
     private var removedWash = NSColor.clear
+    private var diffInk = Design.Diff.on(Design.Surface.ground)
     private var fittedWidth: CGFloat = 0
     private var measuredContentWidth: CGFloat = 1
     private var measuredHeight: CGFloat = 1
@@ -238,7 +240,8 @@ final class GitReviewDiffTextView: ThemedTextView {
         displayCap: Int,
         path: String? = nil,
         wraps: Bool = true,
-        initialLayoutWidth: CGFloat? = nil
+        initialLayoutWidth: CGFloat? = nil,
+        textSize: Design.CodeTextScale = .standard
     ) {
         let shown = Array(gitLines.prefix(max(displayCap, 0)))
         let capped = shown.map { line in
@@ -256,6 +259,7 @@ final class GitReviewDiffTextView: ThemedTextView {
         omittedLineCount = max(gitLines.count - shown.count, 0)
         self.path = path
         self.wraps = wraps
+        self.textSize = textSize
 
         super.init(frame: .zero, textContainer: nil)
         translatesAutoresizingMaskIntoConstraints = false
@@ -297,7 +301,7 @@ final class GitReviewDiffTextView: ThemedTextView {
         preferredHeightConstraint = height
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.applyCurrentTheme() }
         appEvents.observe(WindowBackdropDidChange.self) { [weak self] _ in
-            self?.refreshWashColorsForCurrentAppearance()
+            self?.applyCurrentTheme()
         }
     }
 
@@ -326,20 +330,12 @@ final class GitReviewDiffTextView: ThemedTextView {
         }
     }
 
-    /// Attachment makes the real recorded ground available, but it does not change the document.
-    /// Keep that hot virtual-table seam to two colour derivations rather than rebuilding and
-    /// remeasuring as many as 400 TextKit paragraphs.
-    private func refreshWashColorsForCurrentAppearance() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            refreshWashColors()
-        }
-        needsDisplay = true
-    }
-
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard window != nil else { return }
-        refreshWashColorsForCurrentAppearance()
+        // Attachment makes the real recorded ground available. Both the wash and the neutral
+        // body ink are measured against it, so the attributed document must follow the wash.
+        applyCurrentTheme()
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -371,6 +367,7 @@ final class GitReviewDiffTextView: ThemedTextView {
     }
 
     private func rebuildDocument() {
+        refreshDiffInk()
         let document = NSMutableAttributedString()
         lineRanges.removeAll(keepingCapacity: true)
         lineRanges.reserveCapacity(renderedLines.count)
@@ -386,7 +383,7 @@ final class GitReviewDiffTextView: ThemedTextView {
             let note = NSMutableAttributedString(
                 string: "… \(omittedLineCount) more lines",
                 attributes: [
-                    .font: Design.Typography.code(),
+                    .font: Design.Typography.code(size: textSize),
                     .foregroundColor: Design.Text.tertiary,
                 ]
             )
@@ -401,7 +398,6 @@ final class GitReviewDiffTextView: ThemedTextView {
         }
 
         textStorage?.setAttributedString(document)
-        refreshWashColors()
         needsDisplay = true
         fittedWidth = 0
         if preferredHeightConstraint != nil {
@@ -414,7 +410,7 @@ final class GitReviewDiffTextView: ThemedTextView {
         for line: RenderedLine,
         includesTrailingNewline: Bool
     ) -> NSAttributedString {
-        let font = Design.Typography.code()
+        let font = Design.Typography.code(size: textSize)
         let number = line.source.displayNumber.map(String.init) ?? ""
         let numberColumns = max(1, Int((GitReviewDefaults.lineNumberWidth / max(font.maximumAdvancement.width, 1)).rounded(.down)))
         let paddedNumber = String(repeating: " ", count: max(numberColumns - number.count, 0)) + number
@@ -438,10 +434,7 @@ final class GitReviewDiffTextView: ThemedTextView {
             * font.maximumAdvancement.width
         style.lineSpacing = 2
 
-        let highlighted = path.flatMap(DiffSyntax.language(forPath:)) != nil
-        let base = highlighted && line.source.kind != .context
-            ? Design.Text.label
-            : foreground(for: line.source.kind)
+        let base = textForeground(for: line.source.kind)
         let result = NSMutableAttributedString(string: value, attributes: [
             .font: font,
             .foregroundColor: base,
@@ -455,7 +448,7 @@ final class GitReviewDiffTextView: ThemedTextView {
         let signLocation = paddedNumber.utf16.count + 1
         result.addAttribute(
             .foregroundColor,
-            value: foreground(for: line.source.kind),
+            value: markerForeground(for: line.source.kind),
             range: NSRange(location: signLocation, length: 1)
         )
 
@@ -594,14 +587,23 @@ final class GitReviewDiffTextView: ThemedTextView {
         }
     }
 
-    private func refreshWashColors() {
-        let diff = Design.Diff.on(resolvedGround())
-        addedWash = diff.addedWash
-        removedWash = diff.removedWash
+    private func refreshDiffInk() {
+        diffInk = Design.Diff.on(resolvedGround())
+        addedWash = diffInk.addedWash
+        removedWash = diffInk.removedWash
     }
 
     var washColorsForTesting: (added: NSColor, removed: NSColor) {
         (addedWash, removedWash)
+    }
+
+    var inkColorsForTesting: (
+        addedText: NSColor,
+        removedText: NSColor,
+        addedMarker: NSColor,
+        removedMarker: NSColor
+    ) {
+        (diffInk.addedText, diffInk.removedText, diffInk.added, diffInk.removed)
     }
 
     private func lineIndex(at point: NSPoint) -> Int? {
@@ -737,10 +739,18 @@ final class GitReviewDiffTextView: ThemedTextView {
         )
     }
 
-    private func foreground(for kind: GitDiffLine.Kind) -> NSColor {
+    private func textForeground(for kind: GitDiffLine.Kind) -> NSColor {
         switch kind {
-        case .added: Design.Diff.added
-        case .removed: Design.Diff.removed
+        case .added: diffInk.addedText
+        case .removed: diffInk.removedText
+        case .context: Design.Text.secondary
+        }
+    }
+
+    private func markerForeground(for kind: GitDiffLine.Kind) -> NSColor {
+        switch kind {
+        case .added: diffInk.added
+        case .removed: diffInk.removed
         case .context: Design.Text.secondary
         }
     }
@@ -803,8 +813,10 @@ private extension DiffAppKitTheme {
             label: Design.Text.label,
             secondaryLabel: Design.Text.secondary,
             tertiaryLabel: Design.Text.tertiary,
-            added: diff.added,
-            removed: diff.removed,
+            // NativeDiffKit v0.1 has one changed-line colour for both the sign and the body.
+            // Prefer the body — the semantic wash and the +/− shape still carry the change.
+            added: diff.addedText,
+            removed: diff.removedText,
             addedBackground: diff.addedWash,
             removedBackground: diff.removedWash,
             syntaxKeyword: Design.Syntax.keyword,

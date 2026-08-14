@@ -33,6 +33,13 @@ terminal sizing remains useful independently of the surrounding interface. A tex
 joins the same `AppThemeRefresh` sweep as a family override, which re-resolves roles already
 recorded on live views and rebuilds attributed surfaces through `AppThemeDidChange`.
 
+Git Review adds a second, deliberately local scale on top of that global choice.
+`Design.CodeTextScale` is the bounded compact/standard/large/extra-large/maximum ladder used by
+the review header's smaller/larger controls. `Typography.code` composes it after the app and
+theme scale, so making a diff easier to read neither changes prose throughout the app nor loses
+the user's global accessibility choice. This is a reader preference, not arbitrary point-size
+state: persist the named step and disable the controls at the ends of the ladder.
+
 **The app and an extension have separate localization domains.** Built-in presentation copy
 resolves through `L10n` and `Localizable.xcstrings`; shared `SettingsUI` builders localize their
 built-in titles and descriptions by default. Extension Settings renderers explicitly disable

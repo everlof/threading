@@ -16,7 +16,7 @@ private struct GitReviewFileScrollAnchor {
 /// offset and honours what the user opened by hand.
 extension GitReviewViewController {
 
-    func show(_ phase: Phase) {
+    func show(_ phase: Phase, forceRebuild: Bool = false) {
         if !isViewLoaded { loadView() }
 
         // A local re-render (word wrap or an inline notice) must not turn already hydrated rows
@@ -92,6 +92,7 @@ extension GitReviewViewController {
         // trace measured 45–295 ms on main for each refresh. Keep the table and its unchanged
         // viewport rows alive, and mutate only the stable file identities that differ.
         if keepsPlace,
+           !forceRebuild,
            pendingNotice == nil,
            mode != .staged,
            scrollView.documentView === fileTableView,
@@ -260,6 +261,8 @@ extension GitReviewViewController {
             self.deferredPhaseDuringLiveScroll = nil
             show(deferredPhaseDuringLiveScroll)
         }
+
+        applyPendingReviewTextSizeIfNeeded()
 
         if wasScrollerSeeking {
             rematerializeVisibleFilesAfterScrollerSeek()
@@ -999,14 +1002,16 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             if pendingDiffIndexPaths.contains(file.path) {
                 return GitReviewFileRow.estimatedPendingTableHeight(
                     for: file,
-                    expanded: expanded
+                    expanded: expanded,
+                    textSize: reviewTextSize
                 )
             }
             return GitReviewFileRow.estimatedTableHeight(
                 for: file,
                 expanded: expanded,
                 wraps: wrapsDiffLines,
-                width: cardWidth
+                width: cardWidth,
+                textSize: reviewTextSize
             )
         }
         guard abs(measured.width - cardWidth) <= 0.5 else {
@@ -1018,14 +1023,16 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             if pendingDiffIndexPaths.contains(file.path) {
                 return GitReviewFileRow.estimatedPendingTableHeight(
                     for: file,
-                    expanded: expanded
+                    expanded: expanded,
+                    textSize: reviewTextSize
                 )
             }
             return GitReviewFileRow.estimatedTableHeight(
                 for: file,
                 expanded: expanded,
                 wraps: wrapsDiffLines,
-                width: cardWidth
+                width: cardWidth,
+                textSize: reviewTextSize
             )
         }
         return measured.height
@@ -1153,6 +1160,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             contentLoadFailed: contentLoadFailed,
             staging: contentIsPending ? nil : staging,
             wraps: wrapsDiffLines,
+            textSize: reviewTextSize,
             initialDiffWidth: {
                 // `reloadData()` asks for the first views before this table becomes the scroll
                 // view's document, so its own frame is still zero. A controller can also receive

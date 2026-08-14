@@ -20,6 +20,7 @@ final class GitReviewFileRow: NSView {
 
     /// Whether the diff wraps to the pane or runs off it into a horizontal scroller.
     private let wraps: Bool
+    private let textSize: Design.CodeTextScale
     private let initialDiffWidth: CGFloat?
     private let defersExpandedBody: Bool
     private let contentIsPending: Bool
@@ -151,12 +152,13 @@ final class GitReviewFileRow: NSView {
         for file: GitFileDiff,
         expanded: Bool,
         wraps: Bool,
-        width: CGFloat
+        width: CGFloat,
+        textSize: Design.CodeTextScale = .standard
     ) -> CGFloat {
         guard expanded, isExpandable(file) else { return 48 }
         guard !isImageComparison(file) else { return 96 }
 
-        let font = Design.Typography.code()
+        let font = Design.Typography.code(size: textSize)
         let advance = max(font.maximumAdvancement.width, 1)
         let lineHeight = ceil(font.ascender - font.descender + font.leading) + 2
         let numberColumns = max(
@@ -219,11 +221,15 @@ final class GitReviewFileRow: NSView {
     /// A patchless row still knows its exact numstat weight. One visual line per changed line is
     /// intentionally conservative about wrapping but establishes the right order of magnitude
     /// for the document extent; TextKit replaces the visible row with exact geometry later.
-    static func estimatedPendingTableHeight(for file: GitFileDiff, expanded: Bool) -> CGFloat {
+    static func estimatedPendingTableHeight(
+        for file: GitFileDiff,
+        expanded: Bool,
+        textSize: Design.CodeTextScale = .standard
+    ) -> CGFloat {
         guard expanded else { return 48 }
         let totalLines = file.added + file.removed
         guard totalLines > 0 else { return 48 }
-        let font = Design.Typography.code()
+        let font = Design.Typography.code(size: textSize)
         let lineHeight = ceil(font.ascender - font.descender + font.leading) + 2
         let shown = min(totalLines, GitReviewDefaults.fileDisplayCap)
         let omittedHeight: CGFloat = totalLines > shown ? lineHeight + Design.Spacing.tight : 0
@@ -274,12 +280,14 @@ final class GitReviewFileRow: NSView {
         contentLoadFailed: Bool = false,
         staging: GitStaging? = nil,
         wraps: Bool = true,
+        textSize: Design.CodeTextScale = .standard,
         initialDiffWidth: CGFloat? = nil,
         fileURL: URL? = nil
     ) {
         self.file = file
         self.staging = staging
         self.wraps = wraps
+        self.textSize = textSize
         self.initialDiffWidth = initialDiffWidth
         self.defersExpandedBody = defersExpandedBody
         self.contentIsPending = contentIsPending
@@ -939,7 +947,8 @@ final class GitReviewFileRow: NSView {
                 displayCap: remaining,
                 path: file.path,
                 wraps: wraps,
-                initialLayoutWidth: initialDiffWidth
+                initialLayoutWidth: initialDiffWidth,
+                textSize: textSize
             )
             contextDiffs.append(diff)
             wireContextDiff(diff)

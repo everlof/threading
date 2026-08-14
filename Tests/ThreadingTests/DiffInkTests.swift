@@ -89,6 +89,28 @@ final class DiffInkTests: XCTestCase {
         }
     }
 
+    /// Changed code is neutral ink, not a second application of the line's red/green meaning.
+    /// It still has to clear the same contrast floor on every theme and every host ground.
+    func testBodyInkIsNeutralAndLegibleOnItsOwnWash() {
+        forEachGroundAndTheme { label, _, ink in
+            for (name, text, wash) in [
+                ("added", ink.addedText, ink.addedWash),
+                ("removed", ink.removedText, ink.removedWash),
+            ] {
+                XCTAssertLessThan(
+                    text.oklab.chroma,
+                    0.001,
+                    "\(label): \(name) code ink picked up the wash's hue"
+                )
+                XCTAssertGreaterThanOrEqual(
+                    ThemeContrast.ratio(text, wash),
+                    ThemeContrast.minimumRatio,
+                    "\(label): \(name) code ink is illegible on its wash"
+                )
+            }
+        }
+    }
+
     /// The same ink is also used for the `+27 −8` counters, which sit on the ground rather than
     /// on a wash.
     func testInkClearsTheContrastFloorOnTheBareGround() {

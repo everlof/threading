@@ -19,6 +19,7 @@ final class GitReviewViewController: NSViewController {
 
     private(set) var mode: GitReviewMode
     private(set) var selectedTurnID: GitTurnCheckpointID?
+    private(set) var reviewTextSize = GitReviewTextSizePreference.current
 
     private var isTurnInFlight: Bool {
         guard mode == .lastTurn else {
@@ -73,25 +74,37 @@ final class GitReviewViewController: NSViewController {
         }
         return chip
     }()
-    private lazy var headerCluster: NSStackView = {
-        let cluster = NSStackView(views: [backButton, modeChip, turnChip])
-        cluster.orientation = .horizontal
-        cluster.alignment = .centerY
-        cluster.spacing = Design.Spacing.tight
-        cluster.translatesAutoresizingMaskIntoConstraints = false
-        return cluster
-    }()
-    /// The header's margin, held because which view starts the row changes: the chip is a pill
-    /// whose frame is its ink, and Back is a plain button carrying its hover surface around a
-    /// chevron. Pinned alike they would start 4pt apart, which is visible against a column of
-    /// cards on one straight edge.
-    private lazy var headerClusterLeading: NSLayoutConstraint = headerCluster.leadingAnchor
-        .constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.inset)
     lazy var counterLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
         label.applyFont(.caption)
-        label.setContentHuggingPriority(.required, for: .horizontal)
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return label
+    }()
+    private(set) lazy var decreaseTextSizeButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "textformat.size.smaller",
+            accessibility: L10n.string("Decrease diff text size"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Decrease diff text size")
+        button.setAccessibilityIdentifier("git-review.text-size.decrease")
+        button.onPress = { [weak self] in self?.stepReviewTextSize(by: -1) }
+        return button
+    }()
+    private(set) lazy var increaseTextSizeButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "textformat.size.larger",
+            accessibility: L10n.string("Increase diff text size"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Increase diff text size")
+        button.setAccessibilityIdentifier("git-review.text-size.increase")
+        button.onPress = { [weak self] in self?.stepReviewTextSize(by: 1) }
+        return button
     }()
     private lazy var menuButton: ThemedButton = {
         let button = ThemedButton(
@@ -104,6 +117,11 @@ final class GitReviewViewController: NSViewController {
         button.toolTip = L10n.string("Diff options")
         return button
     }()
+    private lazy var headerRow = ControlRowView(
+        scale: .compact,
+        leading: [backButton, modeChip, turnChip, counterLabel],
+        trailing: [decreaseTextSizeButton, increaseTextSizeButton, menuButton]
+    )
     lazy var stack: NSStackView = {
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -315,6 +333,7 @@ final class GitReviewViewController: NSViewController {
     var isFileLiveScrolling = false
     var isFileScrollerSeeking = false
     var deferredPhaseDuringLiveScroll: Phase?
+    var pendingReviewTextSizeRefresh = false
 
     /// The clock that turns a held-still scroller thumb into real content: every knob action
     /// pushes it back, so it fires only once the thumb has genuinely paused.
@@ -387,7 +406,13 @@ final class GitReviewViewController: NSViewController {
         // for "this tab is on screen", which is when watching earns its keep.
         let root = WindowAwareView()
         root.onWindowChange = { [weak self] window in
-            window == nil ? self?.stopWatching() : self?.startWatching()
+            guard let self else { return }
+            if window == nil {
+                self.stopWatching()
+            } else {
+                self.startWatching()
+                self.applyPendingReviewTextSizeIfNeeded()
+            }
         }
         root.wantsLayer = true
         view = root
@@ -398,6 +423,7 @@ final class GitReviewViewController: NSViewController {
         setupHeader()
         setupBody()
         setupConstraints()
+        updateReviewTextSizeButtons()
 
         // The pane's counters and file headers are *built* attributed strings — `+362 −26` is
         // one string carrying two colours — so their font and their ink both freeze at build
@@ -407,6 +433,9 @@ final class GitReviewViewController: NSViewController {
         // the user can see move.
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             self?.refresh(force: true)
+        }
+        appEvents.observe(GitReviewTextSizeDidChange.self) { [weak self] event in
+            self?.receiveReviewTextSize(event.size)
         }
         appEvents.observe(ChangeRequestConfigurationDidChange.self) { [weak self] event in
             guard let self,
@@ -460,17 +489,9 @@ final class GitReviewViewController: NSViewController {
         // One overflow rather than a row of icons: refreshing, collapsing, wrapping and the
         // whitespace fold are all things asked of the diff occasionally, and a header of five
         // glyphs would compete with the mode chip, which is the control that matters here.
-        // A stack rather than individual constraints, because the back button is usually
-        // hidden: a hidden view keeps the frame its constraints give it, so the chip sat
-        // indented past a ghost button and read as floating in the pane rather than starting
-        // where the row does. A stack detaches hidden views, so the chip's leading is the
-        // row's inset whenever there is nothing to go back to.
-        view.addSubview(headerCluster)
-
-        [counterLabel, menuButton].forEach {
-            $0.translatesAutoresizingMaskIntoConstraints = false
-            view.addSubview($0)
-        }
+        // `ControlRowView` owns the theme-authored height, hidden Back detachment, the spring
+        // between the counter and actions, and optical alignment at both content edges.
+        view.addSubview(headerRow)
     }
 
     private func setupBody() {
@@ -504,12 +525,47 @@ final class GitReviewViewController: NSViewController {
         view.addSubview(jumpToEndButton)
     }
 
-    /// Shows or hides Back, moving the row's margin onto whichever view now starts it.
+    /// Hidden members are detached by `ControlRowView`, so the chip becomes the leading edge.
     func setBackVisible(_ visible: Bool) {
         backButton.isHidden = !visible
-        headerClusterLeading.constant = visible
-            ? Design.Spacing.inset - backButton.opticalHorizontalInset
-            : Design.Spacing.inset
+    }
+
+    private func receiveReviewTextSize(_ size: Design.CodeTextScale) {
+        reviewTextSize = size
+        updateReviewTextSizeButtons()
+
+        switch phase {
+        case .fileIndex, .files, .commitDetail:
+            guard view.window != nil,
+                  !view.isHiddenOrHasHiddenAncestor,
+                  !isFileLiveScrolling else {
+                pendingReviewTextSizeRefresh = true
+                return
+            }
+            rebuildForReviewTextSize()
+        case .message, .commits:
+            pendingReviewTextSizeRefresh = false
+        }
+    }
+
+    private func updateReviewTextSizeButtons() {
+        let sizes = Design.CodeTextScale.allCases
+        decreaseTextSizeButton.isEnabled = reviewTextSize != sizes.first
+        increaseTextSizeButton.isEnabled = reviewTextSize != sizes.last
+    }
+
+    /// Called after momentum ends and when a retained Review tab reaches a window again.
+    func applyPendingReviewTextSizeIfNeeded() {
+        guard pendingReviewTextSizeRefresh, !isFileLiveScrolling else { return }
+        rebuildForReviewTextSize()
+    }
+
+    private func rebuildForReviewTextSize() {
+        pendingReviewTextSizeRefresh = false
+        measuredFileRowHeights.removeAll(keepingCapacity: true)
+        measuredPreludeRowHeights.removeAll(keepingCapacity: true)
+        fileRowHeightWidth = 0
+        show(phase, forceRebuild: true)
     }
 
     private func setupConstraints() {
@@ -521,32 +577,17 @@ final class GitReviewViewController: NSViewController {
             // the file cards do, sits `inset` below the tab strip and leaves `inset` above the
             // first card, so the header reads as the top of the list rather than as chrome
             // floating over it.
-            headerCluster.topAnchor.constraint(
+            headerRow.topAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.topAnchor,
                 constant: inset
             ),
-            headerClusterLeading,
+            headerRow.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
+            headerRow.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
 
-            counterLabel.leadingAnchor.constraint(
-                equalTo: headerCluster.trailingAnchor,
-                constant: Design.Spacing.medium
+            changeRequestBar.topAnchor.constraint(
+                equalTo: headerRow.bottomAnchor,
+                constant: inset
             ),
-            counterLabel.firstBaselineAnchor.constraint(equalTo: modeChip.contentFirstBaselineAnchor),
-            counterLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: menuButton.leadingAnchor,
-                constant: -Design.Spacing.small
-            ),
-
-            // Aligned by ink: a plain button's frame carries its hover surface, so pinning the
-            // frame to the margin lands the glyph short of it. Pulled out by the padding the
-            // button states, the `···` sits on the same line as the cards' trailing edge.
-            menuButton.trailingAnchor.constraint(
-                equalTo: view.trailingAnchor,
-                constant: -(inset - menuButton.opticalHorizontalInset)
-            ),
-            menuButton.centerYAnchor.constraint(equalTo: modeChip.centerYAnchor),
-
-            changeRequestBar.topAnchor.constraint(equalTo: modeChip.bottomAnchor, constant: inset),
             changeRequestBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
             changeRequestBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
             changeRequestBarHeight,

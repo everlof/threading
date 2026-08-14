@@ -16,6 +16,13 @@ extension Design {
         /// The same for a removal.
         let removed: NSColor
 
+        /// Neutral code ink measured against the added wash. The wash and gutter already carry
+        /// the semantic green; tinting the code as well spends contrast without adding meaning.
+        let addedText: NSColor
+
+        /// Neutral code ink measured against the removed wash.
+        let removedText: NSColor
+
         /// The full-width fill behind an added line. Opaque: it was computed *for* this ground,
         /// so letting anything else show through would undo the measurement.
         let addedWash: NSColor
@@ -103,6 +110,8 @@ extension Design.Diff {
             // The two are a lightness step apart, so the second call almost never moves it.
             added: Design.Diff.added.legible(on: base).legible(on: addedWash),
             removed: Design.Diff.removed.legible(on: base).legible(on: removedWash),
+            addedText: Design.Text.on(addedWash).label,
+            removedText: Design.Text.on(removedWash).label,
             addedWash: addedWash,
             removedWash: removedWash
         )

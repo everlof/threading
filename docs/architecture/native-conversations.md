@@ -1383,11 +1383,14 @@ own arguments — `Edit` gives old/new text, `Write` a whole new file (all added
 list of hunks — so the diff is known *before the tool runs* and the result only confirms it
 landed. The alignment is a line-level LCS walk, skipped past `alignmentCap` lines for a plain
 removed-then-added rendering rather than paying for a huge table. `DiffView` draws one
-full-width coloured row per line (the width is what reads as a diff, so it is rows, not an
-attributed string) with a `+`/`−` gutter; long lines wrap because the pane is narrow and hiding
-half a change off the right edge is worse. The same `DiffView` is the approval sheet's
+full-width semantic wash per line (the width is what reads as a diff, so it is rows, not an
+attributed string) with a `+`/`−` gutter. Changed code uses neutral label ink measured against
+that wash rather than repeating the change in low-contrast red or green; this is intentionally
+theme-derived rather than hard-coded white, because a light theme needs dark ink for the same
+result. Long lines wrap because the pane is narrow and hiding half a change off the right edge
+is worse. The same `DiffView` is the approval sheet's
 accessory: an edit is approved on *what* it changes, which the sheet now shows, not merely which
-file. This is opencode's diff-viewer idea in AppKit and system colours.
+file. This is opencode's diff-viewer idea in AppKit and theme semantic colours.
 
 `JSONLReader` and `ClaudeTranscript` were extracted rather than copied: `SessionImporter`
 already read these files, and the transcript path was already derived in two places. The

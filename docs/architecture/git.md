@@ -268,11 +268,24 @@ Rendering shares the `NativeDiffCore` model with edit tools, but not their view-
 wrapping and exact per-line context anchors. Change washes are a cached vertical display list:
 TextKit fragments are merged into contiguous added/removed runs when width changes, and drawing
 binary-searches to the visible runs. Per-paragraph backgrounds made TextKit recompute wash geometry
-while scrolling. The washes are also frozen colours derived from the surface underneath, so a
-virtual row resolves them inside its own effective appearance and resolves them again when it joins
-a window or that appearance changes; ambient drawing state during row construction must never be
-cached into the document. This distinction is load-bearing — 400 line views are acceptable nowhere
-in a disclosure that must change height synchronously.
+while scrolling. The wash says *added or removed*; the code does not repeat that meaning in low-
+contrast green or red. Changed-row base text is neutral label ink resolved against its actual wash
+(`Design.Text.on(wash).label`), which is near-white on a dark wash and near-black on a light one,
+while the gutter marker keeps the theme's semantic added/removed ink. It must not be hard-coded
+white: stock light themes and imported themes need the same contrast decision. Syntax roles may
+then override that neutral base without borrowing either semantic hue. NativeDiffKit 0.1 exposes
+one changed-line ink for both sign and body, so the compact `DiffView` gives both the neutral body
+ink; its semantic wash and the `+`/`−` shape still carry the change until that renderer gains
+separate fields.
+
+Both wash and base ink are frozen colours derived from the surface underneath, so a virtual row
+resolves them inside its own effective appearance and rebuilds the attributed document when it
+joins a window or that appearance changes; ambient drawing state during row construction must
+never be cached into the document. The review header exposes smaller/larger controls backed by the
+bounded `Design.CodeTextScale` reader preference. A size step rebuilds only loaded diff surfaces
+and their height estimates, defers while momentum scrolling, and leaves offscreen file bodies
+unbuilt. This distinction is load-bearing — 400 line views are acceptable nowhere in a disclosure
+that must change height synchronously.
 
 `GitReviewFileRow` is `ToolCallView`'s collapse pattern per file, and **bodies build only when a
 virtual table row is materialized**. In both views **the open body is excluded from the

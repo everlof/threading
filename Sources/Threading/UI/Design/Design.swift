@@ -234,6 +234,29 @@ enum Design {
 
     // MARK: - Typography
 
+    /// A reader-controlled step within code-shaped native surfaces.
+    ///
+    /// App text size and a theme's text scale still apply first. This is the smaller, scoped
+    /// adjustment a dense code reader such as Git Review may expose beside the document itself;
+    /// cases rather than an arbitrary multiplier keep that control on the design-system scale.
+    enum CodeTextScale: String, CaseIterable, Sendable {
+        case compact
+        case standard
+        case large
+        case extraLarge
+        case maximum
+
+        fileprivate var factor: CGFloat {
+            switch self {
+            case .compact: 0.9
+            case .standard: 1
+            case .large: 1.15
+            case .extraLarge: 1.3
+            case .maximum: 1.45
+            }
+        }
+    }
+
     /// A small semantic scale. Feature code chooses what text *does*, never an AppKit point
     /// size. Keeping even code, counters, placeholders, and decorative emoji here prevents a
     /// screen assembled from individually reasonable but mutually inconsistent 10/11/12/13pt
@@ -520,9 +543,13 @@ enum Design {
             return prose(base)
         }
 
-        /// Tool subjects, paths, diffs, and other code-shaped content.
-        static func code(weight: NSFont.Weight = .regular) -> NSFont {
-            .monospacedSystemFont(ofSize: scaled(11), weight: weight)
+        /// Tool subjects, paths, diffs, and other code-shaped content. A dense code reader may
+        /// choose one bounded, reader-controlled step without inventing a point size of its own.
+        static func code(
+            weight: NSFont.Weight = .regular,
+            size: Design.CodeTextScale = .standard
+        ) -> NSFont {
+            .monospacedSystemFont(ofSize: scaled(11) * size.factor, weight: weight)
         }
 
         /// Inline code that must share the body's line box.
