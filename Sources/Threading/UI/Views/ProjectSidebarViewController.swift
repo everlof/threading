@@ -1334,11 +1334,18 @@ extension ProjectSidebarViewController {
         outlineView.refitIndentedRows()
     }
 
-    /// States the outline's own half of the density: the per-level step of the ordinary tree, or
-    /// the single edge the compact one flattens to. Both densities feed it — the setting decides
-    /// *which* geometry, the column's width decides how tight it is drawn.
+    /// States the outline's own half of the density: the per-level step of the ordinary tree or
+    /// the single edge the compact one flattens to, and how much of the style's trailing padding
+    /// the cells take back. Both densities feed it — the setting decides *which* geometry, the
+    /// column's width decides how tight it is drawn.
+    ///
+    /// The reclaim is bounded by this list's own selection capsule: content may move out into the
+    /// band the `.inset` style keeps, but not past the shape a selected row fills
+    /// (`SidebarRowDefaults.hoverHighlightInsetX`, which `SidebarHoverRowView.highlightPath`
+    /// draws to). `SidebarDefaults.tightTrailingCellReclaim` is measured against that.
     private func applyOutlineIndentation() {
         outlineView.indentationPerLevel = presentedDensity.indentationPerLevel
+        outlineView.trailingCellReclaim = presentedDensity.trailingCellReclaim
         outlineView.flattenedIndentation = presentedTreeIsCompact
             ? .init(
                 cellLeading: SidebarDefaults.compactCellLeading,

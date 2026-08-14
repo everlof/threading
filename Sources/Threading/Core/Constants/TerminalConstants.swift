@@ -720,6 +720,18 @@ enum SidebarDefaults {
     /// title to the deepest rows, which are the ones that truncate first.
     static let tightIndentationPerLevel: CGFloat = 8
 
+    /// How much of the padding the `.inset` style keeps *outside* the cells goes back to the
+    /// content at `tightDensityWidth` — see `ThemedOutlineView.trailingCellReclaim`.
+    ///
+    /// Measured, and bounded by the selection capsule rather than chosen: the style holds 16pt
+    /// past every cell's trailing edge while the capsule this list draws is inset
+    /// `SidebarRowDefaults.hoverHighlightInsetX` (10). Content may move out into that band but
+    /// must stay inside the shape a selected row fills, so 4pt is what there is to take — it
+    /// leaves the cell ending 12pt from the column's edge, two points clear of the capsule.
+    /// `SidebarWidthDensityTests` holds that margin, because the number above is only safe as
+    /// long as it does.
+    static let tightTrailingCellReclaim: CGFloat = 4
+
     /// The compact tree's one content edge, measured from the column's leading side.
     ///
     /// Wide enough that the disclosure chevron — kept, because collapsing a project is the

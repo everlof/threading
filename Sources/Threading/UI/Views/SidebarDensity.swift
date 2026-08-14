@@ -42,6 +42,10 @@ struct SidebarDensity: Equatable {
     /// the sidebar ends at.
     let rowTrailingInset: CGFloat
 
+    /// How much of the `.inset` style's own trailing padding the cells take back — the larger
+    /// half of that gap, and not the row's to give: see `SidebarDefaults.tightTrailingCellReclaim`.
+    let trailingCellReclaim: CGFloat
+
     // MARK: - Initialization
 
     /// The list at the width it opens to: every metric at its measured value.
@@ -68,6 +72,7 @@ struct SidebarDensity: Equatable {
             SidebarRowDefaults.trailingInset,
             SidebarRowDefaults.tightTrailingInset
         )
+        trailingCellReclaim = fitted(0, SidebarDefaults.tightTrailingCellReclaim)
     }
 
     /// The density a column of this width draws at.

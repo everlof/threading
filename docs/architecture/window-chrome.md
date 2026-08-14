@@ -679,11 +679,23 @@ with 30pt of structure beside it.
 `SidebarDensity` closes that with a fraction rather than a second layout. Nothing switches at a
 threshold: 0 at `SidebarDefaults.relaxedDensityWidth` (the width the app opens itself to), 1 at
 `tightDensityWidth` (the narrowest the split view allows), and each metric that far from its
-relaxed value to its tight one — the outline's per-level step 14 → 8, and a row's leading and
-trailing gutters 4 → 2 and 6 → 2. At the floor that is 18pt back for a session under a branch
-heading, on a column 180pt wide.
+relaxed value to its tight one — the outline's per-level step 14 → 8, a row's leading and trailing
+gutters 4 → 2 and 6 → 2, and 4pt of the `.inset` style's own trailing padding handed back to the
+cells. At the floor that is 22pt back for a session under a branch heading, on a column 180pt wide.
 
-Four things are load-bearing:
+**The trailing side is mostly not the row's.** Measured at every width on macOS 26: the chevron
+starts 12pt in and the cell follows it, so the leading side wastes nothing — but the style keeps
+**16pt past every cell's trailing edge**, against a row gutter of six. That band is where the
+space is, and what bounds it is the shape this list draws over it: the selection capsule is inset
+`SidebarRowDefaults.hoverHighlightInsetX` (10), and a pin or `⋯` moved out past that would ride
+the edge of its own accent fill. So `ThemedOutlineView.trailingCellReclaim` widens the cells by a
+stated number of points and never past the row's edge, the sidebar states 4 (cell ending 12pt in,
+two points clear of the capsule), and `SidebarWidthDensityTests` asserts the margin — the number
+is only safe while that holds. The mark itself moves out by the reclaim plus what the row's own
+gutter can give: that gutter is measured to the button's ink and clamped so the slot never
+overhangs the cell that hit-tests it, so the two do not simply add.
+
+Five things are load-bearing:
 
 - **The value is what it draws.** Everything is rounded to whole points and the raw fraction is
   *not* stored, so two widths that draw identically compare equal. The first version kept the
@@ -707,6 +719,10 @@ Four things are load-bearing:
   slot is pulled out by the padding around the glyph; a gutter narrower than that padding would
   push the slot past the row, where it draws perfectly and cannot be clicked at all (`hitTest`
   stops at the bounds). Each row clamps at zero rather than letting the tight end overhang.
+- **How far the style's band may be spent is the host's to say, not the outline's.** What bounds
+  it is the silhouette the host draws over that band, so `trailingCellReclaim` takes a stated
+  number of points and only ever widens; the sidebar picks 4 against its own capsule inset, and a
+  list that drew a different selection would answer differently.
 
 The compact tree's own edge does **not** narrow. `compactCellLeading` is already the chevron's
 width — AppKit draws that mark 13pt at `compactMarkerLeading`, so the gutter ends one point after
@@ -714,11 +730,12 @@ the mark it holds. A tighter edge drew the chevron over the icon beside it; the 
 compose by the compact tree taking only the row gutters.
 
 `SidebarWidthDensityTests` holds the arithmetic and the built rows: the band's two ends and the
-fraction between them, the depth and gutter a narrow column gives back, that the rows already on
-screen are moved rather than rebuilt, that a row arriving after the drag is drawn for the column
-that exists, that the whole band walked down and back lands exactly where it started, and
-light/dark renders of the column at both ends — which is where how much a narrow sidebar actually
-wins is reviewed.
+fraction between them, the depth and gutter a narrow column gives back, the style's padding it
+takes and the capsule that bounds it, that the rows already on screen are moved rather than
+rebuilt, that a row arriving after the drag is drawn for the column that exists, that the whole
+band walked down and back lands exactly where it started, and light/dark renders of the column at
+both ends with a pinned session selected — which is where how much a narrow sidebar actually wins,
+and how the mark sits inside its own capsule, are reviewed.
 
 ## The takeover: a theme that draws the frame
 

@@ -836,16 +836,36 @@ class ThemedOutlineView:
     /// Nil draws the ordinary indented tree.
     var flattenedIndentation: FlattenedIndentation?
 
+    /// Points of the style's own trailing padding handed back to the cells.
+    ///
+    /// `.inset` — what `.automatic` resolves to — keeps 16pt past every cell's trailing edge, and
+    /// that band is where a narrow list's last reclaimable space is: the row's own gutter is a
+    /// couple of points, while this is sixteen. Measured on macOS 26 at every width; the same
+    /// number appears in `SoleColumnFitting`, which meets it from the column's side.
+    ///
+    /// Widening only, and never past the row's trailing edge. **How far is the host's to say**,
+    /// because what bounds it is the shape that host draws: content moving out into this band has
+    /// to stay inside the silhouette a selected row fills, and only the host knows where that is.
+    /// See `SidebarDefaults.tightTrailingCellReclaim`.
+    var trailingCellReclaim: CGFloat = 0
+
     /// Only the outline column indents, and this list has only that column — so the override
     /// applies wherever the frame came back indented rather than guessing at column indexes.
     override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
         var frame = super.frameOfCell(atColumn: column, row: row)
-        guard let flattened = flattenedIndentation, tableColumns.indices.contains(column),
+        guard tableColumns.indices.contains(column),
               tableColumns[column] === outlineTableColumn, !frame.isEmpty else { return frame }
 
-        let trailingEdge = frame.maxX
-        frame.origin.x = flattened.cellLeading
-        frame.size.width = max(0, trailingEdge - flattened.cellLeading)
+        if let flattened = flattenedIndentation {
+            let trailingEdge = frame.maxX
+            frame.origin.x = flattened.cellLeading
+            frame.size.width = max(0, trailingEdge - flattened.cellLeading)
+        }
+
+        if trailingCellReclaim > 0 {
+            let reclaimed = min(trailingCellReclaim, max(0, bounds.width - frame.maxX))
+            frame.size.width += reclaimed
+        }
         return frame
     }
 

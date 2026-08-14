@@ -63,8 +63,10 @@ final class SidebarWidthDensityTests: XCTestCase {
             name: "Threading",
             folderURL: directory.appendingPathComponent("threading")
         )
+        // One session is pinned, so every measurement and every render has the trailing mark the
+        // reclaimed band is judged against — the thing that ends up nearest the seam.
         project.sessions = [
-            session("Fit the sidebar to its column", branch: "main"),
+            session("Fit the sidebar to its column", branch: "main", pinned: true),
             session("Compact the gutters", branch: "fix/density"),
             session("Lower the depth step", branch: "fix/density")
         ]
@@ -89,9 +91,14 @@ final class SidebarWidthDensityTests: XCTestCase {
         return (controller, store)
     }
 
-    private func session(_ title: String, branch: String? = nil) -> AgentSession {
+    private func session(
+        _ title: String,
+        branch: String? = nil,
+        pinned: Bool = false
+    ) -> AgentSession {
         var session = AgentSession(kind: .claude, title: title)
         session.branch = branch
+        session.isPinned = pinned
         return session
     }
 
@@ -168,6 +175,18 @@ final class SidebarWidthDensityTests: XCTestCase {
             if let found = descendant(of: subview, matching: matching) { return found }
         }
         return nil
+    }
+
+    /// Where a row's trailing mark ends, in the row's coordinates: a session's status indicator
+    /// and its hover buttons share one slot, and the slot's edge is what a reader sees against
+    /// the seam.
+    private func trailingMarkEdge(of cell: NSTableCellView?) -> CGFloat? {
+        guard let cell else { return nil }
+        let slot = cell.subviews
+            .filter { !$0.isHidden }
+            .max { $0.frame.maxX < $1.frame.maxX }
+        guard let slot else { return nil }
+        return cell.frame.minX + slot.frame.maxX
     }
 
     private func disclosureButton(in rowView: NSTableRowView) -> NSView? {
@@ -316,6 +335,59 @@ final class SidebarWidthDensityTests: XCTestCase {
         }
     }
 
+    /// The larger half of the trailing gap is not the row's at all: the `.inset` style keeps 16pt
+    /// past every cell, and a narrow column takes some of it back. The mark ends up nearer the
+    /// seam than the row's own gutter could ever bring it.
+    func testANarrowColumnTakesBackTheStylesTrailingPadding() throws {
+        let (controller, _) = makeSidebar(width: 320)
+
+        let wideRows = builtRows(controller)
+        let wideEdge = try XCTUnwrap(sessionCells(wideRows).first).cell.frame.maxX
+        let wideMark = try XCTUnwrap(trailingMarkEdge(of: sessionCells(wideRows).first?.cell))
+
+        resize(to: SidebarDefaults.tightDensityWidth)
+
+        let tightRows = builtRows(controller)
+        let session = try XCTUnwrap(sessionCells(tightRows).first)
+        let rowWidth = session.row.frame.width
+
+        XCTAssertEqual(
+            rowWidth - session.cell.frame.maxX,
+            (320 - wideEdge) - SidebarDefaults.tightTrailingCellReclaim,
+            accuracy: 0.5,
+            "the cell reaches further out than the style would have left it"
+        )
+
+        // And the mark inside it follows. It moves out by the whole reclaim, plus as much of the
+        // row's own gutter as the row can actually give: that gutter is measured to the button's
+        // ink and clamped so the slot never overhangs the cell that hit-tests it, so the two
+        // reductions do not simply add.
+        let relaxed = SidebarDensity.relaxed
+        let tight = SidebarDensity(width: SidebarDefaults.tightDensityWidth)
+        let tightMark = try XCTUnwrap(trailingMarkEdge(of: session.cell))
+        let moved = (320 - wideMark) - (rowWidth - tightMark)
+        XCTAssertGreaterThanOrEqual(moved, tight.trailingCellReclaim)
+        XCTAssertLessThanOrEqual(
+            moved,
+            tight.trailingCellReclaim + (relaxed.rowTrailingInset - tight.rowTrailingInset)
+        )
+    }
+
+    /// What bounds that reclaim: the selection capsule this list draws itself. Content may move
+    /// out into the band the style keeps, and must stop inside the shape a selected row fills —
+    /// a pin drawn over the edge of its own accent capsule is the failure this prevents.
+    func testReclaimedContentStaysInsideTheSelectionCapsule() {
+        let (controller, _) = makeSidebar(width: SidebarDefaults.tightDensityWidth)
+
+        for (rowView, cell) in builtRows(controller) {
+            XCTAssertLessThanOrEqual(
+                cell.frame.maxX,
+                rowView.frame.width - SidebarRowDefaults.hoverHighlightInsetX,
+                "\(type(of: cell)) reaches past the capsule a selected row is filled with"
+            )
+        }
+    }
+
     /// A drag is not one resize but a hundred, and the re-placement is applied on top of frames
     /// AppKit will not restate. So the whole band is walked a point at a time, down and back, and
     /// the list has to land exactly where it started — nothing accumulated, nothing drifted.
@@ -433,8 +505,12 @@ final class SidebarWidthDensityTests: XCTestCase {
     /// narrow sidebar actually wins, which no frame assertion can judge the look of. One fixture,
     /// resized between the renders, which is the path a divider drag takes in the app.
     func testRendersTheColumnAtBothEndsOfTheBand() throws {
-        let (controller, _) = makeSidebar(width: SidebarDefaults.relaxedDensityWidth)
-        _ = controller
+        let (controller, store) = makeSidebar(width: SidebarDefaults.relaxedDensityWidth)
+        // With the pinned session selected: the capsule is what bounds how far the reclaimed
+        // band may be spent, and a mark riding its edge is only visible in a picture.
+        if let pinned = store.projects.first?.sessions.first(where: \.isPinned) {
+            controller.select(sessionID: pinned.id, notifyDelegate: false)
+        }
         let window = try XCTUnwrap(windows.last)
 
         let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
@@ -472,3 +548,4 @@ final class SidebarWidthDensityTests: XCTestCase {
         try render(as: "narrow")
     }
 }
+
