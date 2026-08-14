@@ -193,10 +193,10 @@ Sources/Threading/UI/Views/DisplayPaneStore.swift
 Sources/Threading/UI/Views/DisplayTabBar.swift
 Sources/Threading/UI/Views/EditDiff.swift
 Sources/Threading/UI/Views/EmojiFixedTerminalView.swift
-Sources/Threading/UI/Views/FindBarView.swift
 Sources/Threading/UI/Views/GitGraphRailView.swift
 Sources/Threading/UI/Views/GitReviewCommitRow.swift
 Sources/Threading/UI/Views/GitReviewFileRow.swift
+Sources/Threading/UI/Views/GitReviewFind.swift
 Sources/Threading/UI/Views/GitReviewRendering.swift
 Sources/Threading/UI/Views/GitReviewStaging.swift
 Sources/Threading/UI/Views/GitReviewViewController.swift

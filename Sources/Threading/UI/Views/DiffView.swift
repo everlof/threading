@@ -219,6 +219,7 @@ final class GitReviewDiffTextView: ThemedTextView {
     private let textSize: Design.CodeTextScale
     private let appEvents = AppEventObservations()
     private var lineRanges: [NSRange] = []
+    private var lineTextRanges: [NSRange] = []
     private var washRuns: [WashRun] = []
     private var addedWash = NSColor.clear
     private var removedWash = NSColor.clear
@@ -247,7 +248,7 @@ final class GitReviewDiffTextView: ThemedTextView {
         let capped = shown.map { line in
             GitDiffLine(
                 kind: line.kind,
-                text: Self.cap(line.text, at: GitReviewDefaults.lineCharacterCap),
+                text: GitReviewDiffPresentationText.displayed(line.text),
                 oldNumber: line.oldNumber,
                 newNumber: line.newNumber
             )
@@ -371,12 +372,20 @@ final class GitReviewDiffTextView: ThemedTextView {
         let document = NSMutableAttributedString()
         lineRanges.removeAll(keepingCapacity: true)
         lineRanges.reserveCapacity(renderedLines.count)
+        lineTextRanges.removeAll(keepingCapacity: true)
+        lineTextRanges.reserveCapacity(renderedLines.count)
 
         for line in renderedLines {
             let startsAt = document.length
             let paragraph = paragraph(for: line, includesTrailingNewline: true)
             document.append(paragraph)
             lineRanges.append(NSRange(location: startsAt, length: paragraph.length))
+            let displayedLength = line.text.utf16.count
+            let prefixLength = paragraph.length - max(displayedLength, 1) - 1
+            lineTextRanges.append(NSRange(
+                location: startsAt + prefixLength,
+                length: displayedLength
+            ))
         }
 
         if omittedLineCount > 0 {
@@ -704,6 +713,23 @@ final class GitReviewDiffTextView: ThemedTextView {
         setSelectedRange(NSRange(location: start, length: end - start))
     }
 
+    /// Reveals one indexed occurrence without taking first responder from the find field. The
+    /// offset is into the displayed source text, after the line-number and gutter prefix.
+    func revealFindOccurrence(
+        line index: Int,
+        range occurrence: GitReviewFindMatch.TextRange
+    ) {
+        guard lineTextRanges.indices.contains(index) else { return }
+        let content = lineTextRanges[index]
+        let location = min(max(occurrence.location, 0), content.length)
+        let length = min(max(occurrence.length, 0), content.length - location)
+        let selection = length > 0
+            ? NSRange(location: content.location + location, length: length)
+            : lineRanges[index]
+        setSelectedRange(selection)
+        scrollRangeToVisible(selection)
+    }
+
     private func presentContextMenu(
         for reference: ConversationContextAttachment,
         preview: CodeContextPreview,
@@ -766,11 +792,6 @@ final class GitReviewDiffTextView: ThemedTextView {
         // semantic secondary ink keeps the annotation quiet without making it disappear.
         case .comment: Design.Text.secondary
         }
-    }
-
-    private static func cap(_ text: String, at limit: Int) -> String {
-        guard text.count > limit else { return text }
-        return String(text.prefix(limit)) + "…"
     }
 
     private static func leadingIndentColumns(in text: String) -> Int {

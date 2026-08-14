@@ -102,6 +102,7 @@ extension GitReviewViewController {
             renderCounter(files)
             refreshFilesInPlace(files)
             restoreScroll(to: fileAnchor, fallbackY: offset.y)
+            findPhaseDidChange()
             DispatchQueue.main.async { [weak self] in self?.updateScrollControls() }
             return
         }
@@ -174,6 +175,7 @@ extension GitReviewViewController {
         } else {
             restoreScroll(to: 0)
         }
+        findPhaseDidChange()
         DispatchQueue.main.async { [weak self] in
             self?.updateScrollControls()
         }
@@ -1234,6 +1236,64 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
         scheduleFileHeightMeasurement(file, row: row)
         return row
+    }
+
+    /// Hydrates and materializes only the destination selected by Find. The background index
+    /// may hold a complete comparison while the table still holds a compact progressive roster;
+    /// replacing one stable path preserves the table's virtualization boundary.
+    func revealFindMatch(
+        _ match: GitReviewFindMatch,
+        snapshotFile: GitFileDiff?
+    ) {
+        guard scrollView.documentView === fileTableView else { return }
+        let directIndex = renderedFiles.indices.contains(match.fileIndex)
+            && renderedFiles[match.fileIndex].path == match.path
+            ? match.fileIndex
+            : nil
+        guard let fileIndex = directIndex
+            ?? renderedFiles.firstIndex(where: { $0.path == match.path }) else { return }
+
+        let needsBody = switch match.location {
+        case .path: false
+        case .hunk, .line: true
+        }
+
+        if needsBody,
+           pendingDiffIndexPaths.contains(match.path),
+           let snapshotFile,
+           snapshotFile.path == match.path {
+            renderedFiles[fileIndex] = snapshotFile
+            pendingDiffIndexPaths.remove(match.path)
+            failedDiffHydrationPaths.remove(match.path)
+        }
+
+        let tableRow = filePreludeViews.count + fileIndex
+        guard tableRow < fileTableView.numberOfRows else { return }
+        if needsBody {
+            expansionOverrides[match.path] = true
+            measuredFileRowHeights[match.path] = nil
+            let rows = IndexSet(integer: tableRow)
+            fileTableView.noteHeightOfRows(withIndexesChanged: rows)
+            fileTableView.reloadData(
+                forRowIndexes: rows,
+                columnIndexes: IndexSet(integer: 0)
+            )
+        }
+        fileTableView.scrollRowToVisible(tableRow)
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.view.layoutSubtreeIfNeeded()
+            self.fileTableView.scrollRowToVisible(tableRow)
+            guard let host = self.fileTableView.view(
+                atColumn: 0,
+                row: tableRow,
+                makeIfNecessary: true
+            ) as? GitReviewVirtualRowHost,
+                  let row = host.installedContent as? GitReviewFileRow else { return }
+            row.revealFindMatch(match)
+            self.findBar.focus()
+        }
     }
 
     private func scheduleFileHeightMeasurement(

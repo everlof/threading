@@ -400,6 +400,18 @@ only the shared down-arrow appears while the reader is away from its end.
 The fixture and the `git.read.*`, `git.process`, `git.review.render`, and
 `git.review.render-files` spans are documented in [`performance.md`](performance.md).
 
+**Find is owned by this surface.** ⌘F routes to the active Review tab and inserts the shared
+theme-owned find chrome between its mode header and body; it never adds a view to the window's
+full-size content root. File paths, visible hunk headings, and only the line text Review can
+actually present are indexed. Exact file phases hand their immutable model to a cancellable
+background scan. A progressive file index does not discard virtualization or hydrate every row:
+the first non-empty query earns one complete comparison read through the existing 8 MiB process
+guard, the scan stays off-main, and navigation replaces and materializes only the selected path.
+Per-file line indexing stops at `fileDisplayCap`, line text uses the renderer's character cap,
+and the navigation list itself stops at 10,000 entries with an honest `+` counter. A checkout or
+mode refresh invalidates the snapshot and all result identities. This makes every reported match
+revealable without making typing or Return proportional to repository size on AppKit's thread.
+
 The publish strip follows the same ownership rule one level down: its repository copy is the
 leading run and its policy chooser, open action, and next transition are the trailing run of one
 `ControlRowView`. The row owns their height and optical centreline across themes. A repository

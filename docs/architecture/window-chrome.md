@@ -260,6 +260,13 @@ weight *after* the tab's equal top and bottom margins; the row centres in the ar
 and the component remeasures a live theme switch. A heavy rule is a boundary, not four points
 taken from the lower margin.
 
+The same boundary applies to Find. The old terminal placeholder attached a full-width bar to
+`window.contentView.topAnchor`; in a `.fullSizeContentView` window that anchor is the titlebar,
+so ⌘F covered traffic lights and window-owned controls while still being unable to search the
+terminal buffer. Find now routes only to a visible surface with a real implementation: Browser
+or Git Review. Each inserts the shared themed bar inside its own safe-area layout and moves its
+own body below it. A surface with no search implementation does not enable the command.
+
 **A surface that covers the window has the same rule, and learned it the same way.** The media
 inspector and the expanded comparison pinned themselves to `contentView`'s own top, which under
 a full-size content view is the top of the *window*: their headers opened beneath the traffic

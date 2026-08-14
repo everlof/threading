@@ -232,6 +232,27 @@ final class GitReviewViewController: NSViewController {
         button.isHidden = true
         return button
     }()
+    lazy var findBar = BrowserFindBar(
+        placeholder: L10n.string("Find in diff"),
+        closeAccessibility: L10n.string("Close Find in Diff")
+    )
+    let findBarSeparator = SeparatorView()
+    lazy var findBarHeight = findBar.heightAnchor.constraint(equalToConstant: 0)
+    lazy var findBarSeparatorHeight = findBarSeparator.heightAnchor.constraint(equalToConstant: 0)
+
+    /// Find retains at most one immutable full comparison while its bar is open. Exact file
+    /// phases already own that value; a progressive index earns the extra bounded read only
+    /// after the user types a query.
+    var findSnapshot: [GitFileDiff]?
+    var findSnapshotCancellation: GitProcessCancellation?
+    var findSearchTask: Task<Void, Never>?
+    var findSourceGeneration = 0
+    var findQuery = ""
+    var findMatches: [GitReviewFindMatch] = []
+    var findMatchIndex: Int?
+    var findResultsAreTruncated = false
+    var findPendingBackwards = false
+    var isFindBarVisible = false
     private let scrollEvents = AppEventObservations()
     private let appEvents = AppEventObservations()
 
@@ -432,7 +453,11 @@ final class GitReviewViewController: NSViewController {
         // was expanded by hand across a reload, so a theme switch costs a git read and nothing
         // the user can see move.
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.applyFindBarRuleWeight()
             self?.refresh(force: true)
+        }
+        appEvents.observe(AccessibilityDisplayOptionsDidChange.self) { [weak self] _ in
+            self?.applyFindBarRuleWeight()
         }
         appEvents.observe(GitReviewTextSizeDidChange.self) { [weak self] event in
             self?.receiveReviewTextSize(event.size)
@@ -481,6 +506,8 @@ final class GitReviewViewController: NSViewController {
         changeRequestTask?.cancel()
         activeDiffCancellation?.cancel()
         progressiveStatsCancellation?.cancel()
+        findSnapshotCancellation?.cancel()
+        findSearchTask?.cancel()
     }
 
     // MARK: - Setup
@@ -521,6 +548,15 @@ final class GitReviewViewController: NSViewController {
 
         view.addSubview(scrollView)
         view.addSubview(changeRequestBar)
+        findBar.onFind = { [weak self] query, backwards in
+            self?.find(query, backwards: backwards)
+        }
+        findBar.onDismiss = { [weak self] in self?.hideFind() }
+        findBar.setAccessibilityIdentifier("git-review.find-bar")
+        findBar.isHidden = true
+        findBarSeparator.isHidden = true
+        view.addSubview(findBar)
+        view.addSubview(findBarSeparator)
         view.addSubview(placeholderLabel)
         view.addSubview(jumpToEndButton)
     }
@@ -584,10 +620,17 @@ final class GitReviewViewController: NSViewController {
             headerRow.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
             headerRow.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
 
-            changeRequestBar.topAnchor.constraint(
-                equalTo: headerRow.bottomAnchor,
-                constant: inset
-            ),
+            findBar.topAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: inset),
+            findBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            findBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            findBarHeight,
+
+            findBarSeparator.topAnchor.constraint(equalTo: findBar.bottomAnchor),
+            findBarSeparator.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            findBarSeparator.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            findBarSeparatorHeight,
+
+            changeRequestBar.topAnchor.constraint(equalTo: findBarSeparator.bottomAnchor),
             changeRequestBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
             changeRequestBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
             changeRequestBarHeight,

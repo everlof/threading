@@ -98,7 +98,7 @@
       "priority": "critical",
       "title": "Git Review pane",
       "description": "The real virtualized Git Review pane after a diff arrives, proving file cards fill the pane rather than rendering only isolated row fixtures.",
-      "states": ["Changed files loaded"],
+      "states": ["Changed files loaded", "Find in diff open"],
       "matrix": {
         "themes": ["System"],
         "appearances": ["Light", "Dark"],

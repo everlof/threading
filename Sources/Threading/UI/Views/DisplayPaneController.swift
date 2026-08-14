@@ -271,6 +271,13 @@ final class DisplayPaneController: NSViewController {
     return activeTab(for: currentSessionID)?.browser
   }
 
+  /// The Git Review surface actually visible in the selected session. Window commands route to
+  /// this owner rather than adding chrome over the full-size window content view.
+  var currentReview: GitReviewViewController? {
+    guard !isShowingCurrentTheme else { return nil }
+    return activeTab(for: currentSessionID)?.review
+  }
+
   /// Called when the panel should shut: the corner's ✕, or the user closing the pane's last
   /// content tab. One way out for both, because collapsing the split item is the window's to do
   /// and neither caller wants anything else done differently.

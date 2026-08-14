@@ -2405,7 +2405,7 @@ hiding it returns the page to the panel's natural size. These are honest viewpor
 claims of touch, device-scale, browser-engine, or complete hardware emulation.
 The current address rests as plain toolbar text. Point at it to reveal the editable field; click it
 to edit. Focus and text selection use the ordinary macOS text editor.
-When the browser tab is visible, Cmd+F opens its native find bar rather than the terminal's.
+When the browser tab is visible, Cmd+F opens its native find bar inside that tab.
 
 The agent driving that session sees and acts on this same tab—it can open pages, go back or
 forward, reload, read a semantic page outline, click, hover, drag between page elements, type, and
@@ -2858,10 +2858,15 @@ it — which is the one case that can report "the index is in use".
 
 ## Find
 
-- **Cmd+F**: open find bar
-- **Enter**: find next match
-- **Esc**: close find bar
-- Results counter shows "N of M"
+Find belongs to the visible surface. It is available when a Browser or Git Review tab is on
+screen; it does not place a bar over the terminal or the window chrome.
+
+- **Cmd+F**: open Find in the visible Browser or Git Review tab
+- **Enter / Shift+Enter**: next / previous match
+- **Esc**: close Find
+- Git Review searches file paths, displayed hunk headings, and the diff lines the pane can reveal
+- The counter shows "N of M"; an exceptionally large result set shows `M+` after the first
+  10,000 navigable matches
 
 ## Inspect Mode
 
@@ -3830,7 +3835,7 @@ screen says so and leads with the offers further down the list instead.
 | Select All | Cmd+A |
 | Undo | Cmd+Z |
 | Redo | Cmd+Shift+Z |
-| Find | Cmd+F |
+| Find in the visible Browser or Git Review tab | Cmd+F |
 
 ### View
 | Action | Shortcut |

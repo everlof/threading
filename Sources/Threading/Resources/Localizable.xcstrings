@@ -1,8 +1,12 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%lld of %lld+": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld av %lld+"}}}},
     "Decrease diff text size": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Minska textstorleken i diffen"}}}},
+    "Close Find in Diff": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Stäng sökningen i diffen"}}}},
+    "Find in diff": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sök i diffen"}}}},
     "Increase diff text size": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öka textstorleken i diffen"}}}},
+    "Search unavailable": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sökning är inte tillgänglig"}}}},
     "%@ — the default for new chats in Settings.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ — standardvalet för nya chattar i Inställningar."}}}},
     "%@ — this agent's own setting.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ — den här agentens egen inställning."}}}},
     "%@ — what this agent last ran in. It decides again each launch.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ — det som den här agenten kördes med senast. Den väljer på nytt vid varje start."}}}},

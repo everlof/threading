@@ -291,6 +291,9 @@ enum GitReviewDefaults {
 
     /// Lines one file's diff draws before truncating with a note.
     static let fileDisplayCap = 400
+    /// A one-character query in a large patch must not turn into an unbounded navigation
+    /// array. The status reports a trailing `+` when this presentation cap is reached.
+    static let findMatchCap = 10_000
 
     /// Untracked files larger than this get a row but no synthesized preview.
     static let untrackedByteCap = 256 * 1024

@@ -1,6 +1,9 @@
 import AppKit
 
-/// Theme-owned find-in-page chrome for a live WebKit surface.
+/// Theme-owned find chrome for a surface that supplies its own search implementation.
+///
+/// The historical name reflects its first caller. Git Review uses the same chrome while
+/// keeping the search data, navigation and reveal behavior inside the Review surface.
 final class BrowserFindBar: NSView, ThemedComponent, NSTextFieldDelegate {
 
     private enum Layout {
@@ -33,21 +36,25 @@ final class BrowserFindBar: NSView, ThemedComponent, NSTextFieldDelegate {
     var onDismiss: (() -> Void)?
 
     private let statusLabel = NSTextField(labelWithString: "")
-    private let stack: NSStackView
+    private lazy var stack = NSStackView(views: [
+        queryField,
+        statusLabel,
+        previousButton,
+        nextButton,
+        closeButton
+    ])
     private var themeRedraw: ThemeRedraw?
 
-    override init(frame frameRect: NSRect) {
-        stack = NSStackView(views: [
-            queryField,
-            statusLabel,
-            previousButton,
-            nextButton,
-            closeButton
-        ])
+    init(
+        frame frameRect: NSRect = .zero,
+        placeholder: String = L10n.string("Find in page"),
+        closeAccessibility: String = L10n.string("Close Find in Page")
+    ) {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
         themeRedraw = ThemeRedraw(self)
-        setup()
+        closeButton.setAccessibilityLabel(closeAccessibility)
+        setup(placeholder: placeholder)
     }
 
     @available(*, unavailable)
@@ -59,8 +66,8 @@ final class BrowserFindBar: NSView, ThemedComponent, NSTextFieldDelegate {
         NSSize(width: NSView.noIntrinsicMetric, height: Layout.height)
     }
 
-    private func setup() {
-        queryField.placeholderString = L10n.string("Find in page")
+    private func setup(placeholder: String) {
+        queryField.placeholderString = placeholder
         queryField.delegate = self
         queryField.target = self
         queryField.action = #selector(findNext)
@@ -131,12 +138,42 @@ final class BrowserFindBar: NSView, ThemedComponent, NSTextFieldDelegate {
         nextButton.isEnabled = found == true || !queryField.stringValue.isEmpty
     }
 
+    /// Exact status for a surface that owns its result index, rather than WebKit's Boolean
+    /// match answer. Navigation is enabled only once that index is ready.
+    func setStatus(_ status: String, canNavigate: Bool) {
+        statusLabel.stringValue = status
+        previousButton.isEnabled = canNavigate
+        nextButton.isEnabled = canNavigate
+    }
+
+    var statusTextForTesting: String { statusLabel.stringValue }
+
     func controlTextDidChange(_ notification: Notification) {
         let query = queryField.stringValue
         if query.isEmpty {
             setMatchFound(nil)
         }
         onFind?(query, false)
+    }
+
+    func control(
+        _ control: NSControl,
+        textView: NSTextView,
+        doCommandBy commandSelector: Selector
+    ) -> Bool {
+        if commandSelector == #selector(cancelOperation(_:)) {
+            dismiss()
+            return true
+        }
+        if commandSelector == #selector(insertNewline(_:)) {
+            if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+                findPrevious()
+            } else {
+                findNext()
+            }
+            return true
+        }
+        return false
     }
 
     @objc private func findPrevious() {

@@ -2382,6 +2382,117 @@ final class GitReviewViewTests: XCTestCase {
         )
     }
 
+    // MARK: - Find
+
+    func testFindIndexSearchesOnlyDestinationsThePaneCanReveal() throws {
+        let files = GitDiffParser.files(fromUnifiedDiff: fixture)
+
+        let path = GitReviewFindIndex.results(in: files, matching: "foo.swift")
+        XCTAssertEqual(path.matches.count, 1)
+        XCTAssertEqual(path.matches.first?.location, .path)
+
+        let hunk = GitReviewFindIndex.results(in: files, matching: "-10,2")
+        XCTAssertEqual(hunk.matches.count, 1)
+        XCTAssertEqual(hunk.matches.first?.location, .hunk(1))
+
+        let lines = GitReviewFindIndex.results(in: files, matching: "new")
+        XCTAssertEqual(lines.matches.map(\.text), ["new line", "newer"])
+        XCTAssertEqual(
+            lines.matches.map(\.location),
+            [
+                .line(
+                    hunk: 0,
+                    line: 2,
+                    range: GitReviewFindMatch.TextRange(location: 0, length: 3)
+                ),
+                .line(
+                    hunk: 1,
+                    line: 1,
+                    range: GitReviewFindMatch.TextRange(location: 0, length: 3)
+                )
+            ]
+        )
+    }
+
+    func testFindIndexDoesNotReturnTextPastTheFileDisplayCap() {
+        let lines = (0...GitReviewDefaults.fileDisplayCap).map { index in
+            GitDiffLine(
+                kind: .added,
+                text: index == GitReviewDefaults.fileDisplayCap
+                    ? "hidden destination"
+                    : "visible line \(index)",
+                oldNumber: nil,
+                newNumber: index + 1
+            )
+        }
+        let file = GitFileDiff(
+            path: "Large.swift",
+            change: .modified,
+            hunks: [GitHunk(header: "@@ -0,0 +1,401 @@", lines: lines)],
+            added: lines.count,
+            removed: 0
+        )
+
+        XCTAssertTrue(
+            GitReviewFindIndex.results(in: [file], matching: "hidden destination")
+                .matches.isEmpty
+        )
+    }
+
+    func testFindIndexStatesWhenItsNavigationListWasCapped() {
+        let results = GitReviewFindIndex.results(
+            in: Self.stressExpandableFiles(count: 4),
+            matching: "newValue",
+            limit: 2
+        )
+
+        XCTAssertEqual(results.matches.count, 2)
+        XCTAssertTrue(results.isTruncated)
+    }
+
+    func testFindBarBelongsToTheReviewPaneBelowItsSafeArea() {
+        let files = GitDiffParser.files(fromUnifiedDiff: fixture)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
+            styleMask: [.titled, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        let host = NSView()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        window.contentView?.addSubview(host)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(controller.view)
+        NSLayoutConstraint.activate([
+            host.topAnchor.constraint(equalTo: window.contentView!.topAnchor),
+            host.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor),
+            host.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor),
+            controller.view.topAnchor.constraint(equalTo: host.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            controller.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+
+        controller.show(.files(files))
+        controller.showFind()
+        window.layoutIfNeeded()
+
+        XCTAssertTrue(controller.isFindBarVisible)
+        XCTAssertTrue(controller.findBar.superview === controller.view)
+        let barFrame = controller.findBar.convert(controller.findBar.bounds, to: controller.view)
+        XCTAssertLessThanOrEqual(
+            barFrame.maxY,
+            controller.view.safeAreaRect.maxY,
+            "Review Find must not enter the full-size window's titlebar strip"
+        )
+    }
+
     // MARK: - Stress Fixtures
 
     private static func stressFiles(count: Int) -> [GitFileDiff] {

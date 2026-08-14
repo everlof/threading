@@ -57,6 +57,7 @@ final class GitReviewFileRow: NSView {
         didSet { wireContextDiffs() }
     }
     private var contextDiffs: [GitReviewDiffTextView] = []
+    private var findHunkHeaders: [Int: NSView] = [:]
 
     /// Fetches the file's bytes at the mode's two endpoints, for an image row's body. Wired by
     /// the pane, which knows the mode and the checkout; the row only knows it has a picture.
@@ -884,6 +885,47 @@ final class GitReviewFileRow: NSView {
         onToggle?(isExpanded)
     }
 
+    /// Opens and reveals one destination from the pane's background search index. The body is
+    /// still built only for this one navigated-to row; searching never materializes the table.
+    func revealFindMatch(_ match: GitReviewFindMatch) {
+        switch match.location {
+        case .path:
+            _ = scrollToVisible(headerRegion)
+            flashFindReveal(in: nil)
+
+        case .hunk(let hunkIndex):
+            setExpanded(true)
+            layoutSubtreeIfNeeded()
+            guard let header = findHunkHeaders[hunkIndex] else { return }
+            _ = header.scrollToVisible(header.bounds)
+            flashFindReveal(in: header)
+
+        case .line(let hunkIndex, let lineIndex, let range):
+            setExpanded(true)
+            layoutSubtreeIfNeeded()
+            guard contextDiffs.indices.contains(hunkIndex) else { return }
+            contextDiffs[hunkIndex].revealFindOccurrence(line: lineIndex, range: range)
+        }
+
+        NSAccessibility.post(
+            element: self,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: L10n.format("Showing “%@”", file.path),
+                .priority: NSAccessibilityPriorityLevel.high.rawValue
+            ]
+        )
+    }
+
+    private func flashFindReveal(in target: NSView?) {
+        let host = target ?? self
+        let frame = target == nil ? headerRegion : host.bounds
+        let wash = RevealHighlightView(frame: frame)
+        wash.autoresizingMask = target == nil ? [.width] : [.width, .height]
+        host.addSubview(wash, positioned: .above, relativeTo: nil)
+        wash.flash { [weak wash] in wash?.removeFromSuperview() }
+    }
+
     @objc private func headerClicked() {
         guard canExpand else { return }
         toggle()
@@ -940,7 +982,9 @@ final class GitReviewFileRow: NSView {
             }
 
             if file.hunks.count > 1 || file.change != .untracked {
-                addBodyRow(makeHunkHeader(hunk, index: index))
+                let header = makeHunkHeader(hunk, index: index)
+                findHunkHeaders[index] = header
+                addBodyRow(header)
             }
             let diff = GitReviewDiffTextView(
                 gitLines: hunk.lines,

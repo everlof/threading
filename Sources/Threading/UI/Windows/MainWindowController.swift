@@ -352,10 +352,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         sidebarViewController.initialTreeIsMounted
     }
 
-
-    private var findBar: FindBarView?
-    private var findBarTopConstraint: NSLayoutConstraint?
-
     /// The inspect mode, kept here because extensions cannot store it. See `MainWindowInspector`.
     let elementInspector = ElementInspector()
 
@@ -3442,73 +3438,18 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     // MARK: - Find
 
     func showFind() {
-        if !displayItem.isCollapsed,
-           let browser = displayPaneController.currentBrowser {
+        guard !displayItem.isCollapsed else { return }
+        if let browser = displayPaneController.currentBrowser {
             browser.showFind()
-            return
+        } else if let review = displayPaneController.currentReview, review.canShowFind {
+            review.showFind()
         }
-
-        guard let contentView = window?.contentView,
-              let terminalView = containerViewController.activeTerminalSession?.terminalView
-        else { return }
-
-        if findBar == nil {
-            let bar = FindBarView()
-            bar.translatesAutoresizingMaskIntoConstraints = false
-            bar.onClose = { [weak self] in self?.hideFindBar() }
-
-            contentView.addSubview(bar)
-
-            let topConstraint = bar.topAnchor.constraint(
-                equalTo: contentView.topAnchor,
-                constant: -FindBarDefaults.height
-            )
-            findBarTopConstraint = topConstraint
-
-            NSLayoutConstraint.activate([
-                topConstraint,
-                bar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-                bar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
-            ])
-
-            findBar = bar
-        }
-
-        findBar?.terminalView = terminalView
-
-        findBarTopConstraint?.constant = 0
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Design.Motion.standard
-            contentView.layoutSubtreeIfNeeded()
-        }
-
-        findBar?.focus()
     }
 
     var canShowFind: Bool {
-        (!displayItem.isCollapsed && displayPaneController.currentBrowser != nil)
-            || containerViewController.activeTerminalSession != nil
-    }
-
-    func hideFindBar() {
-        guard let contentView = window?.contentView, findBar != nil else { return }
-
-        findBarTopConstraint?.constant = -FindBarDefaults.height
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = Design.Motion.standard
-            contentView.layoutSubtreeIfNeeded()
-        }, completionHandler: { [weak self] in
-            Task { @MainActor [weak self] in
-                self?.findBar?.removeFromSuperview()
-                self?.findBar = nil
-                if let terminalID = self?.containerViewController.currentTerminalID,
-                   let controller = ProjectTerminalRuntime.shared.controller(for: terminalID) {
-                    controller.focus()
-                } else {
-                    self?.currentAgentController()?.focusTerminal()
-                }
-            }
-        })
+        guard !displayItem.isCollapsed else { return false }
+        if displayPaneController.currentBrowser != nil { return true }
+        return displayPaneController.currentReview?.canShowFind == true
     }
 
     // MARK: - Private Methods
@@ -4244,10 +4185,4 @@ enum DisplayPaneWidth {
             DisplayPaneDefaults.widestOpening
         )
     }
-}
-
-// MARK: - Find Bar Defaults
-
-enum FindBarDefaults {
-    static let height: CGFloat = 32
 }

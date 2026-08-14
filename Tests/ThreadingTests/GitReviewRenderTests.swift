@@ -585,6 +585,24 @@ final class GitReviewRenderTests: XCTestCase {
             )
         }
 
+        AppThemePalette.set(.system)
+        for (name, appearanceName) in [
+            ("find-light", NSAppearance.Name.aqua),
+            ("find-dark", NSAppearance.Name.darkAqua)
+        ] {
+            let appearance = NSAppearance(named: appearanceName)
+            var data: Data?
+            let render = {
+                let pane = self.laidOutPane(files, appearance: appearance)
+                pane.controller.showFind()
+                pane.view.layoutSubtreeIfNeeded()
+                data = self.png(of: pane.view)
+            }
+            appearance?.performAsCurrentDrawingAppearance(render)
+            try XCTUnwrap(data, "failed to render \(name)")
+                .write(to: directory.appendingPathComponent("git-review-pane-\(name).png"))
+        }
+
         print("Rendered the review pane to \(directory.path)")
     }
 
@@ -802,7 +820,7 @@ final class GitReviewRenderTests: XCTestCase {
     private func laidOutPane(
         _ files: [GitFileDiff],
         appearance: NSAppearance?
-    ) -> (view: NSView, cardWidth: CGFloat) {
+    ) -> (view: NSView, cardWidth: CGFloat, controller: GitReviewViewController) {
         let controller = GitReviewViewController(
             sessionID: SessionID(),
             folderPath: NSTemporaryDirectory(),
@@ -835,7 +853,7 @@ final class GitReviewRenderTests: XCTestCase {
         let card = controller.fileTableView
             .view(atColumn: 0, row: 0, makeIfNecessary: true)?
             .subviews.first
-        return (controller.view, card?.bounds.width ?? 0)
+        return (controller.view, card?.bounds.width ?? 0, controller)
     }
 
     private func png(of host: NSView) -> Data? {

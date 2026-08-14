@@ -2017,6 +2017,14 @@ expensive rich body have different cost curves, present the index after a short 
 enrich retained identities in place. Do not make every small request pay the progressive path, and
 do not represent unknown statistics as zero or enable actions against placeholder content.
 
+Review Find keeps that split. Typing against an exact file phase scans its immutable models in a
+cancellable detached task. Typing against a progressive roster earns one complete comparison read
+through the existing 8 MiB guard, then searches that value off-main; it neither hydrates every
+path nor creates any row. Navigation hydrates and materializes one selected identity. The index
+includes at most the 400 presentable lines per file, uses the renderer's character cap, and bounds
+its retained destinations at 10,000. Source generations discard stale reads and scans after a
+checkout or mode change. Opening the bar with no query performs no repository-wide work.
+
 Height discovery is split at that boundary. AppKit automatic row height initially retained roughly
 twice the actual height for a 400-line body, creating blank content after the last glyph; and a
 height query before the table became the scroll document saw width zero, making the offscreen wrap
