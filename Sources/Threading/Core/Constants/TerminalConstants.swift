@@ -738,6 +738,10 @@ enum SidebarDefaults {
     /// closest thing the menu behind it (grouping, then sorting) has to one name.
     static let arrangementSymbol = "square.grid.3x1.below.line.grid.1x2"
 
+    /// The scratchpad. A notepad rather than a folder glyph, because the row it stands for is
+    /// deliberately the one thing in the list that is not a checkout.
+    static let scratchpadSymbol = "note.text"
+
     /// The footer's silence gate. One glyph in both states rather than a speaker/speaker-slash
     /// pair: a control whose mark changes reads as two different buttons in a band this small,
     /// and the state is already worn by the button's own filled on-state.

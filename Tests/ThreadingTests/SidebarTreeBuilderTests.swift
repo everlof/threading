@@ -813,6 +813,88 @@ final class SidebarTreeBuilderTests: XCTestCase {
         XCTAssertEqual(node.sessionNodes.map(\.sessionID), [live.id])
     }
 
+    // MARK: - Scratchpad
+
+    /// It is the row you reach for without having decided anything, so it is the row that is
+    /// always in the same place.
+    func testScratchpadIsPinnedAboveTheCheckouts() throws {
+        var scratchpad = project("scratch", sessions: [])
+        scratchpad.isScratchpad = true
+
+        let roots = SidebarTreeBuilder.rootNodes(
+            from: [project("a", sessions: []), project("b", sessions: []), scratchpad]
+        )
+
+        let first = try XCTUnwrap(roots.first as? ProjectNode)
+        XCTAssertEqual(first.projectID, scratchpad.id)
+        XCTAssertEqual(roots.count, 3)
+    }
+
+    /// Pinning must not become a re-sort. The order of the checkouts is the user's own
+    /// arrangement, and a comparator that only knows "scratchpad first" is free to shuffle
+    /// everything it considers equal — which is what a `sorted(by:)` here would have done.
+    func testPinningTheScratchpadKeepsTheOtherProjectsInOrder() throws {
+        let first = project("a", sessions: [])
+        let second = project("b", sessions: [])
+        let third = project("c", sessions: [])
+        var scratchpad = project("scratch", sessions: [])
+        scratchpad.isScratchpad = true
+
+        let arranged = SidebarTreeBuilder.pinningScratchpad([first, second, scratchpad, third])
+
+        XCTAssertEqual(
+            arranged.map(\.id),
+            [scratchpad.id, first.id, second.id, third.id]
+        )
+    }
+
+    /// A list with no scratchpad in it comes back untouched.
+    func testPinningLeavesAListWithoutAScratchpadAlone() {
+        let projects = [project("a", sessions: []), project("b", sessions: [])]
+
+        XCTAssertEqual(
+            SidebarTreeBuilder.pinningScratchpad(projects).map(\.id),
+            projects.map(\.id)
+        )
+    }
+
+    /// The scratchpad is a git repository, so left to the ordinary rule it would both *join* a
+    /// repository heading and *create* one: a project the user added inside it shares its
+    /// identity, and two checkouts of one repository is exactly what earns a heading. Neither
+    /// row may be moved by the other's existence.
+    func testScratchpadNeitherJoinsNorCausesARepositoryHeading() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-scratchpad-group-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try GitProcess.run(["init"], in: root)
+
+        let inside = root.appendingPathComponent("inside", isDirectory: true)
+        try FileManager.default.createDirectory(at: inside, withIntermediateDirectories: true)
+
+        // Same repository as far as git is concerned — the guard is the only thing separating
+        // them.
+        XCTAssertEqual(
+            GitInfo.repositoryIdentity(for: root.path),
+            GitInfo.repositoryIdentity(for: inside.path)
+        )
+
+        var scratchpad = project("scratch", sessions: [])
+        scratchpad.folderPath = root.path
+        scratchpad.isScratchpad = true
+
+        var nested = project("nested", sessions: [])
+        nested.folderPath = inside.path
+
+        let roots = SidebarTreeBuilder.rootNodes(from: [nested, scratchpad])
+
+        XCTAssertNil(roots.first { $0 is RepoGroupNode }, "no heading should have appeared")
+        XCTAssertEqual(
+            roots.compactMap { ($0 as? ProjectNode)?.projectID },
+            [scratchpad.id, nested.id]
+        )
+    }
+
     // MARK: - Stress profiling
 
     /// Opt-in because this loads a real `NSOutlineView` with thousands of production nodes.

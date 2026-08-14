@@ -62,15 +62,35 @@ when creating a session. See [Accounts](#accounts).
 ## Projects
 
 ### Adding
-- The **+** at the top of the sidebar, beside the arrangement control — offers **Start from
-  Scratch…** (name a new folder and Threading creates it) and **Use an Existing Folder…**
+- The **+** at the top of the sidebar, beside the arrangement control — offers **Start New
+  Project…** (name a new folder and Threading creates it), **Use an Existing Folder…**, and,
+  below the separator, **New Scratchpad**
 - **Project > New Project…** — create the folder from scratch
 - **Project > Add Existing Project…** (Cmd+Shift+N) — choose a folder that already exists
 - Drag a folder onto the sidebar, or onto the app icon
 
 Adding a project selects it, opening its composer so the first session is configured like
-every other one. Starting from scratch never replaces anything: if a folder with the chosen
+every other one. Starting a new project never replaces anything: if a folder with the chosen
 name already exists, it is adopted as-is.
+
+### The scratchpad
+Somewhere to start typing before you know where the thought belongs. **+ ▸ New Scratchpad**
+opens a chat that is not about any project — no folder prompt, no naming step — and its row is
+pinned to the top of the sidebar, above your checkouts.
+
+It is backed by a real folder, because an agent has to run somewhere: `~/Threading/Scratchpad`,
+made the first time you start a scratchpad and not before. Threading runs `git init` in it and
+seeds a README, so Git Review, the diff view and the commit graph all work on your notes, and
+nothing you write there is lost track of. Files an agent writes land in a folder you can find in
+Finder rather than inside the app's storage.
+
+The folder is deliberately **outside** Threading's own storage: Reset Everything does not touch
+it. Move it under **Settings ▸ General ▸ Scratchpad** — *Choose…* picks the folder to keep it in
+(the scratchpad itself is always named `Scratchpad` inside your choice) and *Use Default* puts it
+back. Moving it takes your chats with it; the sidebar row is the same row afterwards.
+
+There is one scratchpad. To keep separate running threads, start several chats in it — they sit
+under the pinned row like sessions under any project.
 
 ### Repositories, worktrees and monorepos
 A project is a **folder**, not a repository — because a repository can have several checkouts

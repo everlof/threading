@@ -387,6 +387,7 @@
 		39AE379A652DA7220789E2F0 /* HostedStoreIsolationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA52E9B62F293F037D2CE0EB /* HostedStoreIsolationTests.swift */; };
 		4756835B9D4657C4B38B2D67 /* DeveloperReportChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 521725A989370F7B1857A7CB /* DeveloperReportChatTests.swift */; };
 		038A7049F80DDF77A21C8B8D /* ImageAnnotationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 704F514AF69C00BF1ACBDB9D /* ImageAnnotationTests.swift */; };
+		25DA169FF0FB6A2E2186E790 /* ScratchpadWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74C7CB7D3809605F70BF1A63 /* ScratchpadWorkspaceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -829,6 +830,7 @@
 		CA52E9B62F293F037D2CE0EB /* HostedStoreIsolationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HostedStoreIsolationTests.swift; sourceTree = "<group>"; };
 		521725A989370F7B1857A7CB /* DeveloperReportChatTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DeveloperReportChatTests.swift; sourceTree = "<group>"; };
 		704F514AF69C00BF1ACBDB9D /* ImageAnnotationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ImageAnnotationTests.swift; sourceTree = "<group>"; };
+		74C7CB7D3809605F70BF1A63 /* ScratchpadWorkspaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScratchpadWorkspaceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1357,6 +1359,7 @@
 				CA52E9B62F293F037D2CE0EB /* HostedStoreIsolationTests.swift */,
 				521725A989370F7B1857A7CB /* DeveloperReportChatTests.swift */,
 				704F514AF69C00BF1ACBDB9D /* ImageAnnotationTests.swift */,
+				74C7CB7D3809605F70BF1A63 /* ScratchpadWorkspaceTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -2250,6 +2253,7 @@
 				39AE379A652DA7220789E2F0 /* HostedStoreIsolationTests.swift in Sources */,
 				4756835B9D4657C4B38B2D67 /* DeveloperReportChatTests.swift in Sources */,
 				038A7049F80DDF77A21C8B8D /* ImageAnnotationTests.swift in Sources */,
+				25DA169FF0FB6A2E2186E790 /* ScratchpadWorkspaceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

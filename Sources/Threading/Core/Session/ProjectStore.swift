@@ -175,6 +175,58 @@ final class ProjectStore {
         return project
     }
 
+    // MARK: - Scratchpad
+
+    /// The scratchpad, or nil when this user has never started one — which is also what makes
+    /// the folder lazy: no row, no directory.
+    var scratchpadProject: Project? {
+        projects.first(where: \.isTheScratchpad)
+    }
+
+    /// Find-or-create, and re-point when the folder moved.
+    ///
+    /// Three cases, in the order they have to be checked:
+    ///
+    /// 1. **A scratchpad already exists.** It keeps its identity — and therefore its chats —
+    ///    across a move, so a changed path updates the row rather than making a second one.
+    /// 2. **The folder was already added as an ordinary project.** Adopting it beats adding a
+    ///    duplicate row for the same path, which is the same call `addProject` makes.
+    /// 3. **Neither.** Add it, flagged.
+    @discardableResult
+    func ensureScratchpadProject(at folderURL: URL) -> Project? {
+        let normalizedPath = folderURL.standardizedFileURL.resolvingSymlinksInPath().path
+
+        if let index = projects.firstIndex(where: \.isTheScratchpad) {
+            guard projects[index].folderPath != normalizedPath else { return projects[index] }
+            projects[index].folderPath = normalizedPath
+            return commitScratchpadChange(at: index)
+        }
+
+        if let index = projects.firstIndex(where: { $0.folderPath == normalizedPath }) {
+            projects[index].isScratchpad = true
+            return commitScratchpadChange(at: index)
+        }
+
+        var project = Project(name: L10n.string("Scratchpad"), folderURL: folderURL)
+        project.folderPath = normalizedPath
+        project.isScratchpad = true
+        projects.append(project)
+        return commitScratchpadChange(at: projects.count - 1)
+    }
+
+    /// Saves an edit to the scratchpad row and hands it back, or nil when the store refused the
+    /// write — the same contract `addProject` has, so a caller cannot mistake a refused save for
+    /// a successful one and go on to select a row that was not persisted.
+    private func commitScratchpadChange(at index: Int) -> Project? {
+        rebuildLookupIndexes()
+        guard save() else {
+            notifyChanged()
+            return nil
+        }
+        notifyChanged()
+        return projects[index]
+    }
+
     @discardableResult
     func removeProject(id: ProjectID) -> ProjectMutationResult {
         guard let removedProject = project(withID: id) else { return .targetNotFound }

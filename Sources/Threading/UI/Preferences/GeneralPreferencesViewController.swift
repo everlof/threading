@@ -69,6 +69,17 @@ final class GeneralPreferencesViewController: NSViewController {
     private let shellField = ThemedTextField()
     private let newChatOpeningMessageField = ThemedTextField()
 
+    /// The scratchpad's folder, **shown rather than typed.** A path with a typo in it is a
+    /// scratchpad nobody can find and an agent launching into nothing; the picker cannot
+    /// produce one, and a read-only field would offer an affordance it does not honour.
+    private let scratchpadFolderLabel = NSTextField(labelWithString: "")
+
+    private lazy var scratchpadDefaultButton = SettingsUI.button(
+        "Use Default",
+        target: self,
+        action: #selector(useDefaultScratchpadFolder)
+    )
+
     // MARK: - Lifecycle
 
     override func loadView() {
@@ -445,11 +456,20 @@ final class GeneralPreferencesViewController: NSViewController {
             SettingsUI.fullRow(shellRow())
         ])
 
+        let scratchpad = SettingsCard(rows: [
+            SettingsUI.fullRow(scratchpadRow())
+        ])
+
         let page = SettingsUI.page(title: "General", sections: [
             SettingsUI.section("Sessions", sessions),
             SettingsUI.section("Conversation Speed", conversationSpeedCard()),
             SettingsUI.section("Opening Message", openingMessageCard()),
             SettingsUI.section("Attachments", attachmentDetectionCard()),
+            SettingsUI.section("Scratchpad", scratchpad),
+            SettingsUI.note("Chats that are about no project live here. The folder is made the "
+                + "first time you start a scratchpad, and it is an ordinary git repository, so "
+                + "Git Review works on it and nothing you write is lost. It sits outside "
+                + "Threading's own storage on purpose — Reset Everything does not touch it."),
             SettingsUI.section("Startup", startup),
             SettingsUI.section("Confirmations", confirmations),
             SettingsUI.note("Only interruptions you can safely stop are listed. Anything that deletes something "
@@ -1068,6 +1088,41 @@ final class GeneralPreferencesViewController: NSViewController {
         ])
     }
 
+    /// Where the scratchpad's folder is, and the two ways to move it.
+    private func scratchpadRow() -> NSView {
+        let label = NSTextField(labelWithString: L10n.string("Folder"))
+        label.applyFont(.body)
+        label.textColor = Design.Text.label
+        label.setContentHuggingPriority(.required, for: .horizontal)
+
+        scratchpadFolderLabel.applyFont(.body)
+        scratchpadFolderLabel.textColor = Design.Text.secondary
+        scratchpadFolderLabel.lineBreakMode = .byTruncatingMiddle
+        scratchpadFolderLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        scratchpadFolderLabel.setContentCompressionResistancePriority(
+            .defaultLow,
+            for: .horizontal
+        )
+
+        let choose = SettingsUI.button(
+            "Choose…",
+            target: self,
+            action: #selector(browseForScratchpadFolder)
+        )
+
+        let row = NSStackView(views: [
+            label,
+            scratchpadFolderLabel,
+            choose,
+            scratchpadDefaultButton
+        ])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Design.Spacing.medium
+        updateScratchpadFolder()
+        return row
+    }
+
     /// The shell field with its Choose button, filling the row.
     private func shellRow() -> NSView {
         let label = NSTextField(labelWithString: L10n.string("Shell path"))
@@ -1315,6 +1370,70 @@ final class GeneralPreferencesViewController: NSViewController {
         var profile = ProfileStorage.shared.defaultProfile
         profile.shellPath = shellField.stringValue
         ProfileStorage.shared.defaultProfile = profile
+    }
+
+    /// Restates the path and whether there is anything to reset to.
+    private func updateScratchpadFolder() {
+        scratchpadFolderLabel.stringValue =
+            (ScratchpadWorkspace.folderURL.path as NSString).abbreviatingWithTildeInPath
+        scratchpadDefaultButton.isEnabled = ScratchpadWorkspace.configuredFolderURL != nil
+    }
+
+    /// Picks the folder the scratchpad should sit **in**, not the scratchpad itself.
+    ///
+    /// The distinction is load-bearing: an open panel returns the directory the user selected,
+    /// so choosing their home folder would make the home folder the scratchpad — and the first
+    /// thing this feature does to a scratchpad is `git init` it. Appending the name keeps the
+    /// result the same shape as the default, and keeps the worst outcome unreachable.
+    @objc private func browseForScratchpadFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = ScratchpadWorkspace.folderURL.deletingLastPathComponent()
+        panel.message = L10n.string("Choose the folder to keep the scratchpad in.")
+        panel.prompt = L10n.string("Choose")
+
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url, let self else { return }
+            self.moveScratchpad(
+                to: url.appendingPathComponent(
+                    ScratchpadDefaults.folderName,
+                    isDirectory: true
+                )
+            )
+        }
+    }
+
+    @objc private func useDefaultScratchpadFolder() {
+        moveScratchpad(to: nil)
+    }
+
+    /// Moves the folder and re-points the row at it. Nil means back to the default.
+    ///
+    /// The sidebar row keeps its identity across the move — it is flagged, not matched by
+    /// path — so the chats in it survive being relocated, which is the whole reason the flag
+    /// is stored rather than derived.
+    private func moveScratchpad(to destination: URL?) {
+        do {
+            let folderURL = try ScratchpadWorkspace.relocate(to: destination)
+            if ProjectStore.shared.scratchpadProject != nil {
+                ProjectStore.shared.ensureScratchpadProject(at: folderURL)
+            }
+            updateScratchpadFolder()
+        } catch {
+            let alert = ThemedAlert()
+            alert.alertStyle = .warning
+            alert.messageText = L10n.string("The scratchpad could not be moved")
+            alert.informativeText =
+                (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            if let window = view.window {
+                alert.beginSheetModal(for: window)
+            } else {
+                alert.runModal()
+            }
+        }
     }
 
     @objc private func browseForShell() {

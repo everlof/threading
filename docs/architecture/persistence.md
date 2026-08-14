@@ -669,6 +669,72 @@ plain files would turn the reset folder into a credential export. A settings-onl
 pairings; a full reset is explicit authority to delete even a corrupt Keychain item that normal
 fail-closed revocation refuses to overwrite.
 
+## 2026-08-14 — The scratchpad lives outside both, on purpose
+
+A scratchpad chat belongs to no project, but an agent still has to be launched *somewhere*, and
+`Project` is validated at decode as an absolute folder path with a non-empty name. So the
+scratchpad is a real folder and a real `Project` row; what is decided here is which folder.
+
+**Not Application Support**, which is the answer the rest of this file would predict and the one
+that is wrong. A managed worktree lives there (`ManagedWorkspaces/<session-uuid>`) and is right to,
+because it is reproducible from a real checkout: Reset Everything moving it aside costs nothing but
+disk. A scratchpad is reproducible from nothing — it is the only copy of prose the user wrote. The
+reset does not delete, but the app comes back "as if newly installed" with those notes sitting in
+`Threading Resets/<timestamp>/`, which nobody looking for their notes will ever open. Application
+Support is also hidden in Finder, excluded from Spotlight, and an awkward path to `cd` into, and
+this is a folder whose whole point is that you can also reach it from outside the app.
+
+**Not `~/Documents` or `~/Desktop`.** TCC attributes a supervised child's file access to the app
+that spawned it (see [`permissions.md`](permissions.md)), so the agent's first write would raise
+*Threading's* Documents prompt — spending a permission dialog on a user's first scratchpad message,
+before they have any idea what the feature is. Those are also the two folders iCloud's "Desktop &
+Documents" syncs, and `git init` inside a synced folder is a known corruption and performance
+hazard.
+
+**`~/Threading/Scratchpad`**, therefore: not TCC-protected, not iCloud-synced, Spotlight-indexed,
+Time Machine'd, and reachable from a terminal. The property that earns it over an exclusion list is
+that it takes the scratchpad out of the reset's blast radius **by construction** — there is no
+"except this directory" line in `AppDataReset` for someone to delete in two years, because the
+directory was never inside it. A container (`~/Threading/`) rather than `~/Threading Scratchpad/`
+so the path has no space in it and anything else the app ever has to keep somewhere reachable has a
+name already.
+
+`ScratchpadWorkspace` owns all of it. Three things it does that are decisions rather than detail:
+
+- **The override goes through `PreferenceStore`, not `AppSettings`.** It records a *choice*, and
+  the hosted test bundle is the app: a test writing it to `.standard` would repoint the developer's
+  real scratchpad at a fixture directory that teardown then deletes. This is the same rule the
+  theme selection is under.
+- **The directory is required; the repository is not.** `/usr/bin/git` is the Command Line Tools
+  shim, so on a Mac without them every git call fails and pops Apple's installer. Provisioning
+  therefore throws only when the *folder* cannot be made, and logs-and-continues on git. A
+  scratchpad without history is still a scratchpad. The same tolerance covers a missing
+  `user.email`: the seeded README and `.gitignore` simply stay untracked, where Git Review shows
+  them, which is the honest picture. Nothing here passes `-c user.name` — a commit in the user's
+  own repository is made as the user or not at all.
+- **`git init` names no branch.** `--initial-branch` would override whatever the user set
+  `init.defaultBranch` to, in the one repository that is entirely theirs.
+
+Only the first provisioning commits. After that the working tree is the user's business, and an app
+committing on their behalf would be rewriting a history it does not own. Seeding never overwrites:
+a README the user edited is theirs.
+
+The row is marked with `Project.isScratchpad` — **stored, not derived from the path** — because the
+folder can move and the chats inside it have to survive that. `ProjectStore.ensureScratchpadProject`
+is the only way in: it re-points an existing row when the path changed, adopts a folder the user had
+already added by hand rather than making a duplicate row for the same path, and otherwise adds one.
+There is at most one. `SidebarTreeBuilder` pins it above the checkouts and answers "no repository"
+for it when grouping — not only so it never joins a repository heading, but so it never *causes*
+one: a project added inside it shares its git identity, and two checkouts of one repository is
+exactly what earns a heading. The pin is a partition rather than a `sorted(by:)`, because Swift's
+sort is not stable and the order of the rows under it is the user's own arrangement.
+
+The Settings row picks the folder to keep the scratchpad **in**, appending `Scratchpad` to it. An
+open panel returns the directory the user selected, so choosing the home folder would otherwise make
+the home folder the scratchpad — and the first thing this feature does to a scratchpad is `git init`
+it. Relocation is a rename, never a copy-and-delete, and refuses an occupied destination rather than
+merging into it.
+
 ## Custom theme assets
 
 `AppThemeStore` keeps the small Codable theme document in `PreferenceStore`; image bytes live in

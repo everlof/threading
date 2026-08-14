@@ -320,12 +320,21 @@ enum SidebarTreeBuilder {
     /// Arranges projects into the tree, grouping only where a repository has more than one
     /// checkout added. A single-checkout repository stays a plain project row, so the extra
     /// level never appears without cause.
+    ///
+    /// The scratchpad is pinned to the top and never grouped — see `pinningScratchpad`.
     static func rootNodes(
         from projects: [Project],
         visibility: SidebarSessionVisibility = .attention,
         at date: Date = Date()
     ) -> [NSObject] {
-        let identities = projects.map { GitInfo.repositoryIdentity(for: $0.folderPath) }
+        let arranged = pinningScratchpad(projects)
+        // The scratchpad answers "no repository" for grouping even though it is one, which is
+        // what keeps it out of a repository heading — and, just as importantly, keeps it from
+        // *causing* one: counted as a checkout, it would drag a project the user added inside it
+        // under a heading that exists only because the scratchpad is there.
+        let identities = arranged.map { project in
+            project.isTheScratchpad ? nil : GitInfo.repositoryIdentity(for: project.folderPath)
+        }
         let order = AppSettings.sidebarSessionOrder
         let isReversed = AppSettings.sidebarSessionOrderIsReversed
 
@@ -337,9 +346,9 @@ enum SidebarTreeBuilder {
         var roots: [NSObject] = []
         var groupsByIdentity: [String: RepoGroupNode] = [:]
 
-        let terminalsByDisplayProject = terminalsByDisplayProject(from: projects)
+        let terminalsByDisplayProject = terminalsByDisplayProject(from: arranged)
 
-        for (project, identity) in zip(projects, identities) {
+        for (project, identity) in zip(arranged, identities) {
             // Standalone terminals are not sessions and cannot be snoozed, so they stay in the
             // ordinary attention view and never leak into the dedicated Snoozed scope.
             let node = makeProjectNode(
@@ -375,6 +384,16 @@ enum SidebarTreeBuilder {
         // Archived sessions are not shown here at all — they live in Settings, so the sidebar
         // stays a list of what is active.
         return roots
+    }
+
+    /// The scratchpad first, everything else in the order the user arranged it.
+    ///
+    /// A partition rather than a `sorted(by:)`: Swift's sort is not stable, so a comparator
+    /// that only knows "scratchpad before anything else" is free to reshuffle the checkouts
+    /// underneath it — and the order of those rows is the user's own arrangement.
+    static func pinningScratchpad(_ projects: [Project]) -> [Project] {
+        guard projects.contains(where: \.isTheScratchpad) else { return projects }
+        return projects.filter(\.isTheScratchpad) + projects.filter { !$0.isTheScratchpad }
     }
 
     /// Rebuilds only one project's descendants for a content change that can alter their

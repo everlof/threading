@@ -1989,6 +1989,17 @@ struct Project: Codable, Identifiable {
   /// See `LimitRecoveryResolution`.
   var limitRecoveryPolicy: LimitRecoveryPolicy?
 
+  /// Whether this is the scratchpad — the one folder Threading owns itself, for chats that are
+  /// about no project. There is at most one, and it is the store's business to keep it that
+  /// way; see `ProjectStore.scratchpadProject`.
+  ///
+  /// A stored flag rather than "the project whose path matches the setting", because the user
+  /// can move the folder: identity has to survive the path changing under it.
+  ///
+  /// Optional and absent-when-false, so state written before the scratchpad existed decodes
+  /// unchanged and every ordinary checkout keeps encoding exactly what it did before.
+  var isScratchpad: Bool?
+
   init(name: String, folderURL: URL, id: ProjectID = ProjectID()) {
     self.id = id
     self.name = name
@@ -2002,11 +2013,12 @@ struct Project: Codable, Identifiable {
     self.notificationsMuted = nil
     self.soundOverrides = nil
     self.limitRecoveryPolicy = nil
+    self.isScratchpad = nil
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, name, folderPath, sessions, terminals, isExpanded, createdAt, icon, themeID, themeName
-    case notificationsMuted, soundOverrides, limitRecoveryPolicy
+    case notificationsMuted, soundOverrides, limitRecoveryPolicy, isScratchpad
   }
 
   init(from decoder: Decoder) throws {
@@ -2051,6 +2063,11 @@ struct Project: Codable, Identifiable {
       String.self,
       forKey: .limitRecoveryPolicy
     ).flatMap(LimitRecoveryPolicy.init(rawValue:))
+    // Normalised on the way in: a stored `false` and an absent key mean the same thing, and
+    // letting both exist would give the sidebar two encodings of "ordinary checkout" to match.
+    isScratchpad = try container.decodeIfPresent(Bool.self, forKey: .isScratchpad) == true
+      ? true
+      : nil
   }
 
   func encode(to encoder: Encoder) throws {
@@ -2067,11 +2084,15 @@ struct Project: Codable, Identifiable {
     try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
     try container.encodeIfPresent(soundOverrides, forKey: .soundOverrides)
     try container.encodeIfPresent(limitRecoveryPolicy, forKey: .limitRecoveryPolicy)
+    try container.encodeIfPresent(isScratchpad, forKey: .isScratchpad)
   }
 
   var folderURL: URL {
     URL(fileURLWithPath: folderPath)
   }
+
+  /// Reads the flag without every call site having to spell the optional out.
+  var isTheScratchpad: Bool { isScratchpad == true }
 
   /// Looks up a session by identifier.
   func session(withID sessionID: SessionID) -> AgentSession? {

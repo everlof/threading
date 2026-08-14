@@ -166,7 +166,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | The source-control provider boundary, GitHub pull requests, GitLab merge requests, remote detection, forge capabilities and managed publication safety | [`source-control.md`](docs/architecture/source-control.md) |
 | Repository-root `.threading.json`, bounded project-script discovery, active-checkout routing, registry/palette refresh and explicit visible-terminal execution | [`project-scripts.md`](docs/architecture/project-scripts.md) |
 | The GitHub credential chain (app connection, `gh`, credential helper), the device-flow sign-in, filing issues from the inspector and Help ▸ Report a Problem, the `network.brokered` extension fetch and its grant rules | [`github.md`](docs/architecture/github.md) |
-| The SQLite store, quarantine, `EventLog`/`ThreadingLogger`, composer drafts, where state lives on disk and the Advanced page's resets | [`persistence.md`](docs/architecture/persistence.md) |
+| The SQLite store, quarantine, `EventLog`/`ThreadingLogger`, composer drafts, the scratchpad's folder, where state lives on disk and the Advanced page's resets | [`persistence.md`](docs/architecture/persistence.md) |
 | A launch that did not come back: the marker, the launch ledger and its two-step open, the crash-loop policy, held-back restoration, Recovery Mode and its one-shot launch flags | [`crash-recovery.md`](docs/architecture/crash-recovery.md) |
 | Performance spans, main-thread stalls, MetricKit payloads, `sample`/`xctrace`, and the full/full+ sweep | [`performance.md`](docs/architecture/performance.md) |
 | Entitlements, the TCC grants and who inherits them, the Privacy settings page, Info.plist usage strings | [`permissions.md`](docs/architecture/permissions.md) |

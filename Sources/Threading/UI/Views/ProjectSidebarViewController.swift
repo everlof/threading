@@ -2031,29 +2031,72 @@ extension ProjectSidebarViewController {
 /// menu commands, and the per-row hover menu. Split from the class body purely for size.
 private extension ProjectSidebarViewController {
 
-    /// The `+` button offers both ways in: a folder that exists, or one made on the spot.
+    /// The `+` button offers both ways into a project — a folder that exists, or one made on
+    /// the spot — and, below the rule, the one place that is not a project at all.
+    ///
+    /// The separator is doing work: the first two items add a checkout and ask for a folder,
+    /// the third adds neither and asks for nothing.
     private func presentAddProjectMenu() {
         presentSidebarMenu(
             [
                 .item(ThemedMenuItem(
-                    title: L10n.string("Start from Scratch…"),
+                    title: L10n.string("Start New Project…"),
                     image: ThemedMenuIcon.symbol("plus"),
-                    onChoose: { [weak self] in self?.startFromScratchClicked() }
+                    onChoose: { [weak self] in self?.startNewProjectClicked() }
                 )),
                 .item(ThemedMenuItem(
                     title: L10n.string("Use an Existing Folder…"),
                     image: ThemedMenuIcon.symbol("folder"),
                     onChoose: { [weak self] in self?.useExistingFolderClicked() }
+                )),
+                .separator,
+                .item(ThemedMenuItem(
+                    title: L10n.string("New Scratchpad"),
+                    image: ThemedMenuIcon.symbol(SidebarDefaults.scratchpadSymbol),
+                    onChoose: { [weak self] in self?.newScratchpadClicked() }
                 ))
             ],
             from: addButton
         )
     }
 
-    @objc private func startFromScratchClicked() {
+    @objc private func startNewProjectClicked() {
         ProjectFolderPrompt.createNewFolder { [weak self] url in
             self?.addProject(folderURL: url)
         }
+    }
+
+    /// Opens the scratchpad, making it on the way if this is the first one.
+    ///
+    /// No folder prompt and no naming step is the entire point — the scratchpad is where a
+    /// thought goes *before* it has somewhere to belong, and a dialog in front of it would put
+    /// the ceremony back.
+    ///
+    /// The provisioning runs here on the main actor, as `ManagedGitWorkspace.provision` does
+    /// from the composer: it is a handful of git calls behind an explicit click, and the
+    /// alternative is a progress affordance in front of a folder that is usually already there.
+    @objc private func newScratchpadClicked() {
+        let scratchpad = L10n.string("Scratchpad")
+        let folderURL: URL
+        do {
+            folderURL = try ScratchpadWorkspace.prepare()
+        } catch {
+            presentProjectNotice(
+                (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
+                title: scratchpad
+            )
+            return
+        }
+
+        guard let project = projectStore.ensureScratchpadProject(at: folderURL) else {
+            presentProjectNotice(
+                L10n.string("The scratchpad could not be saved."),
+                title: scratchpad
+            )
+            return
+        }
+        reload()
+        delegate?.projectSidebar(self, didAddProject: project)
     }
 
     @objc private func useExistingFolderClicked() {
@@ -3220,9 +3263,11 @@ extension ProjectSidebarViewController {
         alert.runModal()
     }
 
-    func presentProjectNotice(_ message: String) {
+    /// The title is a parameter because the `+` menu no longer only adds projects: heading a
+    /// failed scratchpad with "Project" names the wrong thing.
+    func presentProjectNotice(_ message: String, title: String? = nil) {
         let alert = ThemedAlert()
-        alert.messageText = L10n.string("Project")
+        alert.messageText = title ?? L10n.string("Project")
         alert.informativeText = message
         alert.alertStyle = .informational
         alert.runModal()
