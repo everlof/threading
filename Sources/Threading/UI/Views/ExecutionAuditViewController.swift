@@ -520,7 +520,7 @@ final class ExecutionAuditViewController: NSViewController {
     private func categoryItems() -> [ThemedMenuEntry] {
         let all = ThemedMenuItem(
             title: L10n.string("All categories"),
-            image: NSImage(systemSymbolName: "line.3.horizontal.decrease.circle", accessibilityDescription: nil),
+            image: ThemedMenuIcon.symbol("line.3.horizontal.decrease.circle"),
             isSelected: selectedCategory == nil,
             onChoose: { [weak self] in
                 self?.selectedCategory = nil
@@ -531,7 +531,7 @@ final class ExecutionAuditViewController: NSViewController {
         return [.item(all)] + ExecutionAuditRecord.Category.allCases.map { category in
             .item(ThemedMenuItem(
                 title: category.displayName,
-                image: NSImage(systemSymbolName: category.symbolName, accessibilityDescription: nil),
+                image: ThemedMenuIcon.symbol(category.symbolName),
                 isSelected: selectedCategory == category,
                 onChoose: { [weak self] in
                     self?.selectedCategory = category

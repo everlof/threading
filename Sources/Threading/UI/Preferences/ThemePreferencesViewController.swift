@@ -101,14 +101,14 @@ final class ThemePreferencesViewController: NSViewController {
         let button = ThemedPopUp()
         button.pullsDown = true
         button.isBordered = false
+        // The head of a pull-down is a gear and no title, so the name has to be stated here:
+        // `accessibilityTitle()` falls back to the displayed item's title, which is empty.
+        button.setAccessibilityLabel(L10n.string("Actions"))
 
         button.addItem(
             ThemedMenuItem(
                 title: "",
-                image: NSImage(
-                    systemSymbolName: "gearshape",
-                    accessibilityDescription: L10n.string("Actions")
-                )
+                image: ThemedMenuIcon.symbol("gearshape")
             )
         )
         button.addItem(ThemedMenuItem(title: L10n.string("Duplicate"), onChoose: { [weak self] in

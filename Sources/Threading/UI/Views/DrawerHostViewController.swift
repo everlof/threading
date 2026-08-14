@@ -396,20 +396,17 @@ final class DrawerHostViewController: NSViewController {
         let entries: [ThemedMenuEntry] = [
             .item(ThemedMenuItem(
                 title: L10n.string("Terminal"),
-                image: NSImage(systemSymbolName: "terminal", accessibilityDescription: nil),
+                image: ThemedMenuIcon.symbol("terminal"),
                 onChoose: { [weak self] in _ = self?.addTerminalTab(for: sessionID) }
             )),
             .item(ThemedMenuItem(
                 title: L10n.string("Browser"),
-                image: NSImage(systemSymbolName: "globe", accessibilityDescription: nil),
+                image: ThemedMenuIcon.symbol("globe"),
                 onChoose: { [weak self] in _ = self?.addBrowserTab(for: sessionID) }
             )),
             .item(ThemedMenuItem(
                 title: L10n.string("Private Browser"),
-                image: NSImage(
-                    systemSymbolName: "hand.raised.fill",
-                    accessibilityDescription: nil
-                ),
+                image: ThemedMenuIcon.symbol("hand.raised.fill"),
                 onChoose: { [weak self] in
                     _ = self?.addBrowserTab(for: sessionID, contextKind: .private)
                 }

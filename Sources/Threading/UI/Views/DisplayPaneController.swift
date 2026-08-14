@@ -474,7 +474,7 @@ final class DisplayPaneController: NSViewController {
       ThemedMenuEntry.item(
         ThemedMenuItem(
           title: title,
-          image: NSImage(systemSymbolName: symbol, accessibilityDescription: title),
+          image: ThemedMenuIcon.symbol(symbol),
           isEnabled: isEnabled,
           onChoose: action
         ))
@@ -485,10 +485,7 @@ final class DisplayPaneController: NSViewController {
         .item(
           ThemedMenuItem(
             title: L10n.string("Current Theme"),
-            image: NSImage(
-              systemSymbolName: "paintbrush.pointed",
-              accessibilityDescription: L10n.string("Current Theme")
-            ),
+            image: ThemedMenuIcon.symbol("paintbrush.pointed"),
             onChoose: { [weak self] in
               guard let self else { return }
               // The window's route also uncollapses the panel and leaves Settings, neither of
@@ -511,10 +508,7 @@ final class DisplayPaneController: NSViewController {
             ThemedMenuItem(
               title: item.panel.title,
               subtitle: item.extensionName,
-              image: NSImage(
-                systemSymbolName: "puzzlepiece.extension",
-                accessibilityDescription: L10n.string("Extension panel")
-              ),
+              image: ThemedMenuIcon.symbol("puzzlepiece.extension"),
               onChoose: { [weak self] in
                 _ = self?.activateExtensionPanel(
                   extensionIdentifier: item.extensionIdentifier,

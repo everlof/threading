@@ -316,6 +316,29 @@ asked for — white at 70% came out an opaque 70% grey whatever it stood on. Eve
 keeps the silhouette and replaces its colour, alpha included, leaving the layer to composite it
 over the ground the ink was measured against.
 
+**A slot is a box a mark sits in, never a shape it is stretched into.** `NSImage.draw(in:)` scales
+to the rect it is handed on each axis independently, and an SF Symbol is square only by
+coincidence: `folder` renders 18×14, `trash` 15×17, `ellipsis` about four times wider than it is
+tall. Every component here hands `TemplateImageDrawing` a *square* slot, so each was quietly
+deforming its glyph — the sidebar's add-project menu drew a folder squeezed a ninth narrow and
+pulled a seventh tall, checkbox marks were widened into their box, and `ellipsis` overflow buttons
+drew three vertical bars. `ThemedButton` had already fixed it for itself; the fit now lives in
+`TemplateImageDrawing.fitted(_:in:)` where the whole system inherits it, and the button's own
+copy delegates to it because it *lays out* around that rect rather than only drawing into it.
+Fitted rather than capped: the mark still fills the axis that constrains it, so correcting the
+proportions never also shrinks a glyph the caller measured a layout around. `GlyphView` and
+`ThemedFileIconView` keep their own `min(1, …)` cap on top — for artwork that is not ours a slot
+is a ceiling, not a target — and the shared fit is a no-op over an already-fitted rect.
+
+The other half of that bug is *where the mark comes from*. A menu row resolves its symbol through
+`ThemedMenuIcon.symbol(_:)`, the one place that states how large and how heavy a menu's marks are;
+a raw `NSImage(systemSymbolName:)` arrives at whatever size the system hands out — larger than the
+16pt slot — and is then rescaled from a finished render, which thins the stroke off the weight the
+optical size chose. Six menus were building rows the raw way. `GlyphTests` holds both rules: the
+fit is measured off the rendered pixels, and its fixture asserts that the un-fitted draw it
+replaced still fails, so the test cannot go blind.
+
+
 **A menu opens on the press; an action fires on the release.** Which of the two a button does is
 `ThemedIconButton.presentsMenu`, and the split is not a preference — press-drag-release onto an
 item is the platform's menu gesture, and the open menu tracks the press for exactly as long as it

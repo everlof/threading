@@ -4,10 +4,11 @@ import XCTest
 
 /// The chrome's glyphs, checked the way the rules are: against what is actually put on screen.
 ///
-/// Two invariants. A glyph is *configured* to fit its slot, never rendered and then shrunk —
+/// Three invariants. A glyph is *configured* to fit its slot, never rendered and then shrunk —
 /// the shrink thins the stroke below what the configuration chose and drops it off the pixel
-/// grid. And a glyph's stroke weighs what the text beside it weighs: the anchor is the body
-/// face's stem, measured off a raster rather than assumed, because "looks light" is a number.
+/// grid. A glyph's stroke weighs what the text beside it weighs: the anchor is the body face's
+/// stem, measured off a raster rather than assumed, because "looks light" is a number. And a
+/// slot is a box a mark sits in, never a shape it is stretched into.
 @MainActor
 final class GlyphTests: XCTestCase {
 
@@ -66,6 +67,53 @@ final class GlyphTests: XCTestCase {
         return try inkRunWidth { origin in
             image.draw(in: NSRect(origin: origin.origin, size: image.size))
         }
+    }
+
+    /// The bounding box of everything a drawing inks, in points, in the drawing's own space.
+    private func inkBounds(canvas: NSSize, _ draw: (NSRect) -> Void) throws -> NSRect {
+        let scale: CGFloat = 8
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(canvas.width * scale),
+            pixelsHigh: Int(canvas.height * scale),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        rep.size = canvas
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSColor.white.setFill()
+        NSRect(origin: .zero, size: canvas).fill()
+        draw(NSRect(origin: .zero, size: canvas))
+        NSGraphicsContext.restoreGraphicsState()
+
+        var minX = rep.pixelsWide, maxX = -1
+        var minY = rep.pixelsHigh, maxY = -1
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide
+            where (rep.colorAt(x: x, y: y)?.brightnessComponent ?? 1) < 0.5 {
+                minX = min(minX, x)
+                maxX = max(maxX, x)
+                minY = min(minY, y)
+                maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return .zero }
+
+        // The rep's rows run top-down and the drawing's do not, so the box is flipped back into
+        // the space of the slot it will be compared against.
+        return NSRect(
+            x: CGFloat(minX) / scale,
+            y: CGFloat(rep.pixelsHigh - 1 - maxY) / scale,
+            width: CGFloat(maxX - minX + 1) / scale,
+            height: CGFloat(maxY - minY + 1) / scale
+        )
     }
 
     private func stemOfBody() throws -> CGFloat {
@@ -133,6 +181,95 @@ final class GlyphTests: XCTestCase {
             Design.Symbol.image("plus", slot: 40, pointSize: Design.Symbol.control)
         )
         XCTAssertEqual(fitted.size, nominal.size, "a roomy slot inflated the glyph")
+    }
+
+    // MARK: - Slot Proportions
+
+    /// A slot is a box to sit in, not a shape to become. `folder` renders 18×14, so a square slot
+    /// that scales each axis independently squeezes it a ninth narrow and pulls it a seventh
+    /// tall — which is what the sidebar's add-project menu was drawing.
+    func testAWideMarkIsFittedIntoASquareSlotRatherThanStretchedToIt() {
+        let wide = NSImage(size: NSSize(width: 18, height: 14))
+        let slot = NSRect(x: 10, y: 20, width: 16, height: 16)
+        let rect = TemplateImageDrawing.fitted(wide, in: slot)
+
+        XCTAssertEqual(rect.width, slot.width, accuracy: 0.001, "the fit did not use the slot")
+        XCTAssertEqual(
+            rect.height, slot.width * 14 / 18, accuracy: 0.001,
+            "the mark's proportions did not survive its slot"
+        )
+        XCTAssertEqual(rect.midX, slot.midX, accuracy: 0.001)
+        XCTAssertEqual(
+            rect.midY, slot.midY, accuracy: 0.001,
+            "a short glyph settled off the centre of the slot it was allotted"
+        )
+    }
+
+    /// Fitted, not capped: correcting the aspect ratio never also shrinks a mark below the
+    /// footprint its caller measured a layout around.
+    func testFittingFillsTheSlotOnTheAxisThatConstrainsIt() {
+        let small = NSImage(size: NSSize(width: 4, height: 8))
+        let rect = TemplateImageDrawing.fitted(
+            small,
+            in: NSRect(x: 0, y: 0, width: 16, height: 16)
+        )
+        XCTAssertEqual(rect.height, 16, accuracy: 0.001)
+        XCTAssertEqual(rect.width, 8, accuracy: 0.001)
+    }
+
+    /// Measured off the pixels rather than the geometry, because the stretch happened inside
+    /// `NSImage.draw(in:)` — which is where every component in the design system ends up.
+    func testADrawnGlyphScalesBothItsAxesByTheSameAmount() throws {
+        let canvas = NSSize(width: 40, height: 40)
+        // `ellipsis` is three dots on one line, about four times wider than it is tall, so a
+        // square slot deforms it further than any measurement error could account for.
+        let image = try XCTUnwrap(
+            NSImage(systemSymbolName: "ellipsis", accessibilityDescription: nil)?
+                .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.toolbar))
+        )
+
+        let natural = try inkBounds(canvas: canvas) { _ in
+            image.draw(in: NSRect(origin: .zero, size: image.size))
+        }
+        let fitted = try inkBounds(canvas: canvas) { slot in
+            TemplateImageDrawing.draw(image, in: slot, tint: .black)
+        }
+        XCTAssertGreaterThan(natural.width, 0)
+        XCTAssertGreaterThan(natural.height, 0)
+
+        XCTAssertEqual(
+            fitted.width / natural.width,
+            fitted.height / natural.height,
+            accuracy: 0.1,
+            "the slot scaled the glyph's axes by different amounts — it stretched it"
+        )
+
+        // The fixture proves something only if the un-fitted draw it replaced fails it.
+        let stretched = try inkBounds(canvas: canvas) { slot in image.draw(in: slot) }
+        XCTAssertGreaterThan(
+            abs(stretched.width / natural.width - stretched.height / natural.height), 1,
+            "drawing straight into the slot no longer deforms the glyph, so this test is blind"
+        )
+    }
+
+    /// A menu row's mark goes through `ThemedMenuIcon`, which resolves it at the menu's own size
+    /// and weight. A raw `NSImage(systemSymbolName:)` arrives at whatever size the system hands
+    /// out — larger than the slot — and is then scaled down from a finished render.
+    func testAMenuRowsMarkIsResolvedAtTheMenusOwnSize() throws {
+        let slot = ThemedMenuMetrics.imageSize
+        for symbol in ["plus", "folder", "terminal", "globe", "paperclip", "puzzlepiece.extension"] {
+            let mark = try XCTUnwrap(ThemedMenuIcon.symbol(symbol), "\(symbol) did not resolve")
+            XCTAssertLessThanOrEqual(
+                max(mark.size.width, mark.size.height), slot + 0.01,
+                "\(symbol) overflows the menu's \(slot)pt slot — it will be rescaled after render"
+            )
+        }
+
+        let raw = try XCTUnwrap(NSImage(systemSymbolName: "folder", accessibilityDescription: nil))
+        XCTAssertGreaterThan(
+            max(raw.size.width, raw.size.height), slot,
+            "an unconfigured system symbol already fits the menu's slot — this test proves nothing"
+        )
     }
 
     // MARK: - GlyphView

@@ -2037,12 +2037,12 @@ private extension ProjectSidebarViewController {
             [
                 .item(ThemedMenuItem(
                     title: L10n.string("Start from Scratch…"),
-                    image: NSImage(systemSymbolName: "plus", accessibilityDescription: nil),
+                    image: ThemedMenuIcon.symbol("plus"),
                     onChoose: { [weak self] in self?.startFromScratchClicked() }
                 )),
                 .item(ThemedMenuItem(
                     title: L10n.string("Use an Existing Folder…"),
-                    image: NSImage(systemSymbolName: "folder", accessibilityDescription: nil),
+                    image: ThemedMenuIcon.symbol("folder"),
                     onChoose: { [weak self] in self?.useExistingFolderClicked() }
                 ))
             ],
