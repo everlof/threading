@@ -138,6 +138,24 @@ Activating a mark raises its `actionID` with the mark ID as the correlated strin
 without an action remains an informative accessibility element. Array order is paint order, so
 overlapping marks can express scatter and bubble plots as well as non-overlapping treemaps.
 
+## A document that varies over time
+
+Every node above is a still. `.media` is the exception, and the exception is drawn entirely by the
+host: the extension supplies a document handle and a playback intent — playing or not, loop mode,
+speed, canvas background — and Threading carries the decoder, the clock, the transport, the
+ceilings, the theme, the accessibility and the pasteboard.
+
+That split is not caution, it is the same altitude the scene picked. An extension-drawn scrubber
+would be a callback whose frequency is the display's, over a JSONL round trip; an extension-drawn
+canvas would mean shipping a signed helper application to play a vector animation, and losing the
+iPhone mirror with it. What comes back is one coalesced `ExtensionMediaStateReport` on `ready`,
+`completed`, `failed`, play/pause and scrub end — never per frame.
+
+`ExtensionMediaFormat` is a raw-value type rather than an enum, so a newer manifest stays
+inspectable on an older host: Threading reports the format as uncarried instead of failing to
+decode the panel around it. See
+[`media-documents.md`](../architecture/media-documents.md).
+
 The scene intentionally has no axes, legend, tooltip-placement, or file-tree semantics. Those can
 be composed from text, stacks, status values, pickers, and marks. Add a semantic primitive only
 when several extensions cannot state an important meaning with this vocabulary; do not add a new
@@ -152,7 +170,10 @@ disallow these nodes unless their published constraints opt in:
 
 - `allowsTextInput` gates editable fields;
 - `maximumPickerOptions == 0` disallows pickers;
-- `maximumSceneItems == 0` disallows scenes.
+- `maximumSceneItems == 0` disallows scenes;
+- `allowsMedia == false` disallows a host-played media document, and it is false in every
+  published contract — no existing surface gained a canvas with a clock when the node shipped.
+  The manifest capability `ui.media-documents` gates it a second time.
 
 The host validates that complete tree before showing any part of it, then virtualizes the direct
 and nested children of vertical stacks as reusable viewport rows. Express a long linear document

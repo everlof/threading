@@ -512,6 +512,135 @@ final class ChipViewTests: XCTestCase {
         XCTAssertEqual(resting, restored, "the fill did not return on exit")
     }
 
+    /// **The pill is the hover.** At rest a chip is its answer set in text: no plate, so a row
+    /// of six reads as six phrases rather than six objects. The plate is what says "you are on
+    /// this one", and it belongs to the pointer.
+    func testAChipDrawsNoPlateUntilThePointerIsOnIt() throws {
+        let (chip, _) = hostedChip()
+
+        XCTAssertEqual(
+            try fill(of: chip).alphaComponent,
+            0,
+            accuracy: 0.001,
+            "the chip drew a plate with nothing on it"
+        )
+
+        chip.mouseEntered(with: .init())
+        XCTAssertGreaterThan(
+            try fill(of: chip).alphaComponent,
+            0,
+            "hover did not raise the plate"
+        )
+    }
+
+    /// The plate appears for the keyboard too. A chip reached by Tab draws the accent ring on a
+    /// silhouette, and a ring around ink with no shape behind it is not the same affordance.
+    func testKeyboardFocusRaisesThePlateTheHoverWouldHave() throws {
+        let chip = ChipView(frame: NSRect(x: 10, y: 10, width: 120, height: 26))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(chip)
+
+        XCTAssertTrue(window.makeFirstResponder(chip))
+        XCTAssertGreaterThan(try fill(of: chip).alphaComponent, 0, "focus left the chip flat")
+
+        XCTAssertTrue(window.makeFirstResponder(nil))
+        XCTAssertEqual(
+            try fill(of: chip).alphaComponent,
+            0,
+            accuracy: 0.001,
+            "the plate outlived the focus that raised it"
+        )
+    }
+
+    /// A chip given exactly the width it asked for draws its whole title.
+    ///
+    /// A text cell's natural width is fractional and stack layout rounds the arranged frame
+    /// down, so a chip measured to the point can be handed a frame a fraction short of drawing
+    /// what it measured — and an ellipsis inside a control at its own full intrinsic width is
+    /// the one truncation nothing in the row asked for. `Claude Code · Everlof` was the case:
+    /// visible only once the title dropped from the control face's medium weight to regular,
+    /// which took away the point of slack the heavier measurement happened to carry.
+    func testAChipAtItsOwnIntrinsicWidthDrawsTheWholeTitle() throws {
+        for title in ["Claude Code · Everlof", "Opus · 1M", "Agent's Setting", "Extra High"] {
+            let chip = ChipView()
+            chip.configure(symbolName: "cpu", title: title)
+            chip.translatesAutoresizingMaskIntoConstraints = true
+            chip.frame = NSRect(origin: .zero, size: chip.intrinsicContentSize)
+            chip.layoutSubtreeIfNeeded()
+
+            let label = try XCTUnwrap(
+                chip.subviews.flatMap(\.subviews).compactMap { $0 as? NSTextField }.first
+            )
+            let cell = try XCTUnwrap(label.cell)
+            XCTAssertTrue(
+                cell.expansionFrame(withFrame: label.bounds, in: label).isEmpty,
+                "\"\(title)\" drew truncated at the chip's own intrinsic width "
+                    + "(chip=\(chip.frame.width), label=\(label.frame.width), "
+                    + "cell=\(cell.cellSize.width))"
+            )
+        }
+    }
+
+    /// The ink moves with the plate, on one ramp: the title a tier below `label` at rest, the
+    /// mark and the chevron a tier below that, and each one step brighter under the pointer.
+    ///
+    /// A row of settings is not the content of the screen it sits under, and at full strength it
+    /// read as the brightest thing in the composer — brighter than the brief being typed above
+    /// it. Pinned because it is one assignment away from silently reverting to `label`, and a
+    /// screenshot is the only other place it shows.
+    func testTheInkStepsATierWithThePlate() throws {
+        let (chip, _) = hostedChip()
+        chip.configure(symbolName: "cpu", title: "Opus · 1M")
+
+        let title = try XCTUnwrap(
+            chip.subviews.flatMap(\.subviews).compactMap { $0 as? NSTextField }.first,
+            "the chip has no label"
+        )
+        let marks = chip.subviews.flatMap(\.subviews).compactMap { $0 as? NSImageView }
+        XCTAssertEqual(marks.count, 2, "expected the chip's mark and its chevron")
+
+        XCTAssertEqual(title.textColor?.hexString, Design.Text.secondary.hexString,
+                       "a resting chip stated its answer at full strength")
+        for mark in marks {
+            XCTAssertEqual(mark.contentTintColor?.hexString, Design.Text.tertiary.hexString)
+        }
+
+        chip.mouseEntered(with: .init())
+        XCTAssertEqual(title.textColor?.hexString, Design.Text.label.hexString,
+                       "the pointer did not bring the title up a tier")
+        for mark in marks {
+            XCTAssertEqual(mark.contentTintColor?.hexString, Design.Text.secondary.hexString)
+        }
+
+        chip.mouseExited(with: .init())
+        XCTAssertEqual(title.textColor?.hexString, Design.Text.secondary.hexString,
+                       "the title kept the tier the pointer lent it")
+    }
+
+    /// Nothing moves when the plate appears. The frame carries the padding at rest as well, so
+    /// a run of chips does not shuffle sideways as the pointer crosses it — and a row aligning
+    /// by ink is told what that padding is rather than measuring the plate that is not drawn.
+    func testTheFrameCarriesThePlatesPaddingEvenWithNoPlateDrawn() {
+        let chip = ChipView()
+        chip.configure(symbolName: nil, title: "Opus · 1M")
+        let resting = chip.intrinsicContentSize.width
+
+        chip.mouseEntered(with: .init())
+        XCTAssertEqual(
+            chip.intrinsicContentSize.width,
+            resting,
+            accuracy: 0.5,
+            "the chip changed size when its plate appeared"
+        )
+        XCTAssertEqual(chip.opticalHorizontalInset, ChipView.horizontalPadding)
+    }
+
     /// The truncation-recovery rule: a chip squeezed narrower than its label widens to its full
     /// contents while hovered, and gives that width back on exit.
     func testHoverWidensAChipToItsFullLabelAndGivesItBack() {
@@ -549,29 +678,106 @@ final class ChipViewTests: XCTestCase {
         XCTAssertLessThan(hoverConstraint.priority, .required)
     }
 
+    // MARK: - Rendered State
+
+    /// The change is a *look*, so it is reviewed as one: a row at rest beside the same row with
+    /// the pointer on its third chip, in both appearances.
+    func testRendersTheRowAtRestAndUnderThePointer() throws {
+        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .map { URL(fileURLWithPath: $0) }
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("ThreadingRenders", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let titles = [
+            ("cpu", "Opus · 1M"),
+            ("hand.raised", "Manual"),
+            ("brain", "Extra High"),
+            ("bolt.fill", "Standard")
+        ]
+
+        for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let appearance = NSAppearance(named: appearanceName)
+            var data: Data?
+
+            let render = {
+                let column = NSStackView()
+                column.orientation = .vertical
+                column.alignment = .leading
+                column.spacing = Design.Spacing.large
+                column.translatesAutoresizingMaskIntoConstraints = false
+
+                var hovered: [ChipView] = []
+                for hoveredIndex in [nil, 2] as [Int?] {
+                    let row = NSStackView()
+                    row.orientation = .horizontal
+                    row.alignment = .centerY
+                    row.spacing = Design.Spacing.small
+                    for (index, entry) in titles.enumerated() {
+                        let chip = ChipView()
+                        chip.configure(symbolName: entry.0, title: entry.1)
+                        row.addArrangedSubview(chip)
+                        if index == hoveredIndex { hovered.append(chip) }
+                    }
+                    column.addArrangedSubview(row)
+                }
+
+                let host = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 120))
+                host.wantsLayer = true
+                host.appearance = appearance
+                column.appearance = appearance
+                host.addSubview(column)
+                NSLayoutConstraint.activate([
+                    column.leadingAnchor.constraint(
+                        equalTo: host.leadingAnchor,
+                        constant: Design.Spacing.inset
+                    ),
+                    column.centerYAnchor.constraint(equalTo: host.centerYAnchor)
+                ])
+                host.layer?.backgroundColor = Design.Surface.ground.cgColor
+                host.layoutSubtreeIfNeeded()
+
+                // Only now: an applied surface freezes the appearance the view had when it was
+                // applied, and a chip hovered before it was in this hierarchy would wear the
+                // *other* appearance's plate for the whole picture.
+                for chip in hovered { chip.mouseEntered(with: .init()) }
+
+                guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+                    return
+                }
+                host.cacheDisplay(in: host.bounds, to: rep)
+                data = rep.representation(using: .png, properties: [:])
+            }
+            appearance?.performAsCurrentDrawingAppearance(render)
+
+            try XCTUnwrap(data, "Failed to render the chip row in \(name)")
+                .write(to: directory.appendingPathComponent("chip-row-\(name).png"))
+        }
+    }
+
     // MARK: - Theming
 
-    /// A chip is not rebuilt on a theme change — the composer holds its six as stored properties
-    /// for the life of the controller — so it survives a live switch only by being enrolled in
-    /// `AppThemeRefresh`'s sweep, which `applySurface` does by recording what it was given. A
-    /// chip that set `layer.backgroundColor` directly instead would look identical here and
-    /// keep the old theme's fill forever, so what is pinned is the enrolment.
-    func testTheFillIsResolvedAgainWhenTheThemeChanges() throws {
+    /// The sweep replays what was **recorded**, so a chip resting flat has to be recorded flat.
+    ///
+    /// This used to pin the opposite — that a resting chip took the new theme's `controlResting`
+    /// — which was the enrolment test back when a chip wore a plate at rest. The enrolment is
+    /// still what matters and is now pinned by the hovered case below; what this holds is that a
+    /// theme change cannot hand a flat row of chips six plates it never drew.
+    func testTheThemeSweepDoesNotPutAPlateBackUnderARestingChip() throws {
         AppThemePalette.set(AppThemeStyles.cyberpunk)
         let (chip, _) = hostedChip()
-        let underCyberpunk = try fill(of: chip)
 
         AppThemePalette.set(AppThemeStyles.swissMinimalist)
         // The sweep is what repaints; setting the palette alone deliberately does not, which is
         // the stale state `AppThemeRefresh` exists to fix.
         chip.reapplyRecordedSurfaceForTesting()
-        let underSwiss = try fill(of: chip)
 
-        XCTAssertNotEqual(underCyberpunk, underSwiss,
-                          "the chip is not enrolled in the theme sweep")
-        XCTAssertEqual(underSwiss.hexString,
-                       AppThemeStyles.swissMinimalist.resolved(.controlResting).hexString,
-                       "the chip did not take the new theme's control fill")
+        XCTAssertEqual(
+            try fill(of: chip).alphaComponent,
+            0,
+            accuracy: 0.001,
+            "the sweep drew a plate under a chip nobody was pointing at"
+        )
     }
 
     /// The hover fill has to be recorded too, or a chip hovered *while* the theme changes is

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ThreadingExtensionKit
 
 // MARK: - Attachment
 
@@ -21,6 +22,14 @@ struct SessionAttachment: Equatable, Identifiable {
         /// Diagram *source* — Graphviz dot, Mermaid. Text, not pixels: the pane previews the
         /// source itself, since rendering would take a diagram engine the app does not carry.
         case diagram
+        /// A document Threading has no *native* preview for: a format an extension registered, or
+        /// an ambiguous one the host's own probe recognized — a bare JSON Lottie is both a `.json`
+        /// and an animation, and only the bytes can say which.
+        ///
+        /// Its native body is a bounded fallback rather than a renderer: UTF-8 source under the
+        /// source-preview ceiling, or an explicit "no preview extension is available". Removing
+        /// the last contribution never closes the built-in surface or leaves blank chrome.
+        case media
     }
 
     /// Which side of the conversation put the file in front of the other.
@@ -1612,10 +1621,19 @@ enum AttachmentReferenceDetector {
     private static let diagramExtensions: Set<String> = [
         "dot", "gv", "mmd", "mermaid"
     ]
+    /// Extensions a *registration* may claim, plus the ambiguous ones the host probes itself.
+    ///
+    /// Both are in the scan's alternation unconditionally, because the alternation is a compiled
+    /// regular expression and the registered set changes when an extension is enabled. Matching a
+    /// path is cheap; admission is where the real decision happens, and both routes are refused
+    /// there unless the registry or the probe says otherwise.
+    static let registrableExtensions: Set<String> = ["lottie"]
     private static let extensions =
         imageExtensions.sorted() + ["pdf", "html", "htm"]
             + archiveExtensions.sorted() + documentExtensions.sorted()
             + diagramExtensions.sorted()
+            + registrableExtensions.sorted()
+            + MediaContentProbe.ambiguousExtensions.sorted()
     /// Longest first, because the alternation is ordered and nothing after it requires a word
     /// boundary: with `tif` offered before `tiff`, `shot.tiff` matched as `shot.tif`, a file
     /// that does not exist, and the real one was never recorded.
@@ -1649,6 +1667,10 @@ enum AttachmentReferenceDetector {
         let root = projectRoot.standardizedFileURL.resolvingSymlinksInPath()
         var seen: Set<String> = []
         var result = Resolution(resolvedProjectRoot: root)
+        // The probe's own ceiling, spent per scan rather than per file: a buffer naming three
+        // hundred `.json` paths is a normal afternoon, and the work a scan may do on them is
+        // ours to bound even though their number is not.
+        var probedCandidates = 0
 
         for candidate in candidates(in: text) {
             // A relative candidate is proposed against the working directory before the checkout,
@@ -1665,6 +1687,19 @@ enum AttachmentReferenceDetector {
             ) {
                 let file = proposed.standardizedFileURL.resolvingSymlinksInPath()
                 var isDirectory: ObjCBool = false
+                // Existence first for an ambiguous candidate, so a path in prose that names no
+                // file cannot spend the probe budget a real one needs.
+                let isAmbiguous = MediaContentProbe.ambiguousExtensions.contains(
+                    file.pathExtension.lowercased()
+                )
+                if isAmbiguous {
+                    guard fileManager.fileExists(atPath: file.path, isDirectory: &isDirectory),
+                          !isDirectory.boolValue,
+                          probedCandidates < MediaContentProbe.maximumCandidatesPerScan else {
+                        continue
+                    }
+                    probedCandidates += 1
+                }
                 guard kind(for: file) != nil,
                       fileManager.fileExists(atPath: file.path, isDirectory: &isDirectory),
                       !isDirectory.boolValue else {
@@ -1693,6 +1728,14 @@ enum AttachmentReferenceDetector {
     /// a buffer whose size is decided by whatever an agent last printed.
     static let maximumCandidatesPerScan = 512
 
+    /// The kind a file is recorded as, or nil for one the pane has nothing to say about.
+    ///
+    /// Two routes reach `.media`, and the order matters. A **registered** extension is decided by
+    /// its name alone, which is why registrations may not claim a reserved one. An **ambiguous**
+    /// extension is decided by the bytes: a bare Lottie is a `.json`, and admitting `.json` on its
+    /// name would fill the pane with `package.json`. The probe reads a bounded prefix and declines
+    /// when the structure is not inside it, so the answer costs one short read of a file the
+    /// caller was about to `stat` anyway.
     static func kind(for url: URL) -> SessionAttachment.Kind? {
         let ext = url.pathExtension.lowercased()
         if imageExtensions.contains(ext) { return .image }
@@ -1701,7 +1744,21 @@ enum AttachmentReferenceDetector {
         if archiveExtensions.contains(ext) { return .archive }
         if documentExtensions.contains(ext) { return .document }
         if diagramExtensions.contains(ext) { return .diagram }
+        if AttachmentMediaTypeRegistry.shared.isRegistered(ext) { return .media }
+        if MediaContentProbe.ambiguousExtensions.contains(ext) {
+            return admissionHint(for: url) != nil ? .media : nil
+        }
         return nil
+    }
+
+    /// The host-owned hint that admits an otherwise ambiguous file, or nil.
+    ///
+    /// Only a hint on the host's small admission list gets a row of its own. Other hints may
+    /// enrich a kind that was already admitted without becoming admission rules themselves.
+    static func admissionHint(for url: URL) -> ExtensionFileContentHint? {
+        guard let hint = MediaContentProbe.hint(for: url),
+              MediaContentProbe.admissionHints.contains(hint) else { return nil }
+        return hint
     }
 
     static func contains(_ file: URL, inside root: URL) -> Bool {

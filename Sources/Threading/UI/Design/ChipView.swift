@@ -136,8 +136,21 @@ enum ClassicChoiceDrawing {
 /// looks wrong beside this design: its bezel and full-size chevron read as a form field,
 /// where a chip is meant to sit quietly next to the content it modifies.
 ///
+/// **The pill is the hover, not the chip.** At rest a chip draws no plate at all: the answer it
+/// is showing is content, and content on this surface is set in text — the rule `PageTitleView`
+/// and every plain `ThemedButton` already keep, and the one a row of chips broke. Six filled
+/// pills along the composer's footer read as six objects competing with the words above them,
+/// and each one spent the contrast of a *surface* saying something a chevron already says. Under
+/// the pointer — or while its menu is open, or while it holds the keyboard focus — the plate
+/// rises, which is the moment "this is pressable" is the thing worth saying.
+///
+/// The frame keeps the padding the plate needs either way, so nothing moves when it appears and
+/// a run of chips does not reflow under the pointer. That padding is what
+/// `OpticalInsetProviding` reports: a row aligning by ink puts the chip's *text* on the margin
+/// rather than the edge of a plate that is not drawn.
+///
 /// See `Design` for the vocabulary this belongs to.
-final class ChipView: ThemedControl {
+final class ChipView: ThemedControl, OpticalInsetProviding {
 
     enum HeightStyle {
         /// A compact chooser among other compact controls.
@@ -161,10 +174,24 @@ final class ChipView: ThemedControl {
     private let contentStack = NSStackView()
     private var contentLeadingConstraint: NSLayoutConstraint?
     private var contentTrailingConstraint: NSLayoutConstraint?
-    private var classicTitleWidthConstraint: NSLayoutConstraint?
+    private var titleWidthConstraint: NSLayoutConstraint?
     private var configuredIcon: NSImage?
     private var appliedChoiceStyle: AppTheme.Material.ChoiceStyle?
     private var appliedChoiceHeight: CGFloat?
+
+    /// The room between the chip's edge and its content, at rest and under the plate alike.
+    ///
+    /// A step tighter than the `Spacing.medium` a filled pill was built with. Ten points is what
+    /// a *drawn* pill needs to hold its text clear of the curve at each end — and at rest there
+    /// is no curve any more, so on a run of six chips it was eighty points of invisible air in
+    /// the one row that had none to spare: the composer's footer overflowed a 720-point column
+    /// and crushed the usage reading beside the send. The plate still reads at six, because it
+    /// only ever appears under one chip at a time and the eye is already on it.
+    static let horizontalPadding = Design.Spacing.small
+
+    /// One point, for the fraction AppKit's text cell needs and Auto Layout rounds away. See
+    /// `intrinsicContentSize`.
+    private static let titleRoundingAllowance: CGFloat = 1
 
     private var isPresentingMenu = false {
         didSet {
@@ -207,9 +234,9 @@ final class ChipView: ThemedControl {
     /// The integral frame width AppKit needs to draw the complete title. Text cells report
     /// fractional natural widths (`27.49` for “Auto” in OpenStep, for example), while stack
     /// layout may round the arranged frame down. The control's outer intrinsic width cannot
-    /// repair that inner rounding after the fact, so classic choosers state this minimum on
-    /// the label itself. Its high (rather than required) priority still permits genuine row
-    /// compression in a narrow window.
+    /// repair that inner rounding after the fact, so a chooser states this minimum on the label
+    /// itself. Its high (rather than required) priority still permits genuine row compression in
+    /// a narrow window — the chip's own edge pins are required, so a real squeeze still wins.
     private var naturalTitleCellWidth: CGFloat {
         let font = titleLabel.font ?? Design.Typography.controlRegular()
         let stringWidth = titleLabel.stringValue.size(withAttributes: [.font: font]).width
@@ -241,9 +268,18 @@ final class ChipView: ThemedControl {
         ))
     }
 
-    private func updateClassicTitleWidthConstraint(for style: AppTheme.Material.ChoiceStyle) {
-        classicTitleWidthConstraint?.isActive = false
-        classicTitleWidthConstraint = nil
+    /// **Classic anatomies only**, and that restriction is load-bearing.
+    ///
+    /// A minimum on the label is a minimum the label keeps whatever the row wants: it is stated
+    /// at `defaultHigh`, and every compression priority the composer hands its chips is in the
+    /// 239–263 band, so on a modern chip it silently outranks all of them. Tried there once and
+    /// the composer's column came out 626 points wide in a 496-point pane — the exact shape of
+    /// the bug the label's own `defaultLow` resistance exists to prevent, arriving from the
+    /// inside. The modern anatomy answers its rounding in `intrinsicContentSize` instead, where
+    /// a row may still compress what it asked for.
+    private func updateTitleWidthConstraint(for style: AppTheme.Material.ChoiceStyle) {
+        titleWidthConstraint?.isActive = false
+        titleWidthConstraint = nil
         guard style.isClassic else { return }
 
         let constraint = titleLabel.widthAnchor.constraint(
@@ -251,7 +287,7 @@ final class ChipView: ThemedControl {
         )
         constraint.priority = .defaultHigh
         constraint.isActive = true
-        classicTitleWidthConstraint = constraint
+        titleWidthConstraint = constraint
     }
 
     /// Restates the height wherever it is held: the constraint, the intrinsic size, and the
@@ -333,7 +369,17 @@ final class ChipView: ThemedControl {
             return result + spacing + width
         }
         let outerWidth: CGFloat = if choiceStyle == .chip {
-            Design.Spacing.medium * 2
+            // The `+1` is the same allowance the classic anatomy makes through
+            // `classicTitleTrailingOverhang`, for the same reason: a text cell's natural width is
+            // fractional and stack layout rounds the arranged frame down, so a title measured to
+            // the point can still be handed a frame a fraction short of drawing it. At the
+            // control face's medium weight the measurement happened to carry that point already;
+            // dropping to regular took it away and `Claude Code · Everlof` started drawing as
+            // `Claude Code · Everl…` inside a chip at its own full intrinsic width. Stated here
+            // rather than as a minimum on the label, because an intrinsic width is something a
+            // row may still compress and a `defaultHigh` minimum is not — see
+            // `updateTitleWidthConstraint`.
+            Self.horizontalPadding * 2 + Self.titleRoundingAllowance
         } else {
             ClassicChoiceDrawing.textInset * 2
                 + ClassicChoiceDrawing.arrowWidth
@@ -394,18 +440,13 @@ final class ChipView: ThemedControl {
     // MARK: - Setup
 
     private func setupViews() {
-        applySurface(
-            fill: Design.Surface.controlResting,
-            radius: .pill(height: controlHeight),
-            controlGlow: true
-        )
-
         iconView.imageScaling = .scaleProportionallyDown
-        iconView.contentTintColor = Design.Text.secondary
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.applyFont(.control)
-        titleLabel.textColor = Design.Text.label
+        // The resting tiers. `updateChipInk` owns them from here — stated once there so the
+        // hover step and the starting state cannot drift apart.
+        titleLabel.applyFont(.controlRegular)
+        titleLabel.textColor = Design.Text.secondary
         titleLabel.lineBreakMode = .byTruncatingTail
         // A chip's own compression resistance decides whether the row may make it narrower.
         // Once it may, the label has to be the part that yields; leaving NSTextField's default
@@ -418,8 +459,13 @@ final class ChipView: ThemedControl {
             systemSymbolName: DesignSymbols.chevron,
             accessibilityDescription: nil
         )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.chevron, weight: .semibold))
-        chevronView.contentTintColor = Design.Text.tertiary
         chevronView.translatesAutoresizingMaskIntoConstraints = false
+        // A mark is the size it is; the title is the part that varies. With the stack's default
+        // hugging both were equally willing to grow, so a point of width meant for the label —
+        // the `titleRoundingAllowance` above all — could land in the chevron instead and the
+        // title went on drawing an ellipsis inside a chip at its own full intrinsic width.
+        chevronView.setContentHuggingPriority(.required, for: .horizontal)
+        iconView.setContentHuggingPriority(.required, for: .horizontal)
 
         // The chip is the accessibility element; exposing its decorative children too would
         // make VoiceOver announce one control as three unrelated objects.
@@ -442,11 +488,11 @@ final class ChipView: ThemedControl {
         self.heightConstraint = heightConstraint
         let leading = contentStack.leadingAnchor.constraint(
             equalTo: leadingAnchor,
-            constant: Design.Spacing.medium
+            constant: Self.horizontalPadding
         )
         let trailing = contentStack.trailingAnchor.constraint(
             equalTo: trailingAnchor,
-            constant: -Design.Spacing.medium
+            constant: -Self.horizontalPadding
         )
         contentLeadingConstraint = leading
         contentTrailingConstraint = trailing
@@ -483,7 +529,7 @@ final class ChipView: ThemedControl {
         iconView.isHidden = icon == nil || choiceStyle.isClassic
         titleLabel.stringValue = title
         toolTip = title
-        updateClassicTitleWidthConstraint(for: choiceStyle)
+        updateTitleWidthConstraint(for: choiceStyle)
         invalidateIntrinsicContentSize()
     }
 
@@ -610,14 +656,20 @@ final class ChipView: ThemedControl {
         let focused = explicitFocus ?? (window?.firstResponder === self)
         switch choiceStyle {
         case .chip:
+            // The plate is the hover. Raised for the three states that mean "you are on this
+            // one" — the pointer, an open menu, the keyboard focus — and absent otherwise, so a
+            // row of chips reads as the answers it is showing rather than as a run of objects.
+            //
+            // The glow goes with it: a theme that haloes its controls would otherwise ring a
+            // plate nobody drew, which is a lit outline around bare text.
+            let raised = isHovered || isPresentingMenu || focused
             applySurface(
-                fill: isHovered || isPresentingMenu
-                    ? Design.Surface.controlHover
-                    : Design.Surface.controlResting,
+                fill: raised ? Design.Surface.controlHover : .clear,
                 radius: .pill(height: controlHeight),
                 border: focused ? Design.Surface.accent : nil,
-                controlGlow: true
+                controlGlow: raised
             )
+            updateChipInk(raised: raised)
         case .dropdown:
             // The editable/value half of a Win32 combo is a white sunken well. The arrow is a
             // separate raised button drawn below, not a modern glyph floating in a gray pill.
@@ -643,6 +695,31 @@ final class ChipView: ThemedControl {
         needsDisplay = true
     }
 
+    /// One ramp, moved a tier by the pointer: the title from `secondary` to `label`, the mark and
+    /// the chevron from `tertiary` to `secondary`, under a plate that was not there before.
+    ///
+    /// **A settings row is not the content of the screen it sits on.** At full strength a run of
+    /// chips was the brightest thing in the composer — brighter than the brief being written
+    /// above it — which is the wrong answer to "what is this screen for": the words are, and the
+    /// row underneath says what they will be sent with. Every composer that has grown a row like
+    /// this settles in the same place; the reference shots that prompted the change (Cursor,
+    /// ChatGPT) both draw it as muted regular-weight text with a small chevron.
+    ///
+    /// The step is ink only. Weight is fixed at `controlRegular` for the same reason the padding
+    /// is fixed: a bolder face on hover is a *wider* face, and a row that reflowed under the
+    /// pointer would be a worse distraction than the one this quiets.
+    private func updateChipInk(raised: Bool) {
+        titleLabel.textColor = raised ? Design.Text.label : Design.Text.secondary
+        iconView.contentTintColor = raised ? Design.Text.secondary : Design.Text.tertiary
+        chevronView.contentTintColor = raised ? Design.Text.secondary : Design.Text.tertiary
+    }
+
+    /// The padding the hover plate needs, which the frame carries at rest as well so nothing
+    /// moves when the plate appears. A row aligning by ink subtracts it — see `ControlRowView`.
+    var opticalHorizontalInset: CGFloat {
+        choiceStyle == .chip ? Self.horizontalPadding : ClassicChoiceDrawing.textInset
+    }
+
     private var choiceStyle: AppTheme.Material.ChoiceStyle {
         AppThemePalette.current.material(for: effectiveAppearance).choiceStyle
     }
@@ -657,13 +734,21 @@ final class ChipView: ThemedControl {
 
         switch style {
         case .chip:
-            titleLabel.applyFont(.control)
+            // Regular, not the control face's medium. A chip states a setting, and `control` is
+            // the weight this app gives an *action*; at medium in a run of six the row read as
+            // six buttons under the box rather than as a line about the message in it.
+            titleLabel.applyFont(.controlRegular)
             iconView.isHidden = configuredIcon == nil
             chevronView.isHidden = false
-            contentLeadingConstraint?.constant = Design.Spacing.medium
-            contentTrailingConstraint?.constant = -Design.Spacing.medium
+            contentLeadingConstraint?.constant = Self.horizontalPadding
+            contentTrailingConstraint?.constant = -Self.horizontalPadding
         case .dropdown, .popup, .doubleArrowPopup, .aquaPopup, .cycle:
             titleLabel.applyFont(.controlRegular)
+            // A period chooser's value sits in a *drawn well* — white under Windows 98, the face
+            // colour under Platinum — and a well is a container for a value at full strength.
+            // The modern chip's resting tier is a statement about a flat row, not about a
+            // material that draws a box around every choice.
+            titleLabel.textColor = Design.Text.label
             // SF Symbols are a modern platform vocabulary. The native combo carries only its
             // value and the small filled arrow; the menu rows remain free to carry their marks.
             iconView.isHidden = true
@@ -675,7 +760,7 @@ final class ChipView: ThemedControl {
                     + classicTitleTrailingOverhang
             )
         }
-        updateClassicTitleWidthConstraint(for: style)
+        updateTitleWidthConstraint(for: style)
         invalidateIntrinsicContentSize()
     }
 

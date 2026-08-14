@@ -82,7 +82,7 @@ final class ComposerWindowFitTests: XCTestCase {
         let bare = try columnTop(of: composer)
 
         label.isHidden = false
-        label.stringValue = "5h 43% · 7d 73%"
+        label.readings = [reading("5h", "43%"), reading("7d", "73%")]
         host.layoutSubtreeIfNeeded()
         XCTAssertEqual(
             try columnTop(of: composer),
@@ -92,9 +92,7 @@ final class ComposerWindowFitTests: XCTestCase {
         )
 
         // Twelve windows on one line rather than twelve lines, which is the difference.
-        label.stringValue = (0..<12)
-            .map { "7d Model \($0) 40%" }
-            .joined(separator: UsageDefaults.segmentSeparator)
+        label.readings = (0..<12).map { reading("7d Model \($0)", "40%") }
         host.layoutSubtreeIfNeeded()
         XCTAssertEqual(
             try columnTop(of: composer),
@@ -156,9 +154,8 @@ final class ComposerWindowFitTests: XCTestCase {
 
             let label = try XCTUnwrap(usageLabel(in: composer.view))
             label.isHidden = false
-            label.stringValue = "5h 43% · 7d 73%"
+            label.readings = [reading("5h", "43%"), reading("7d", "73%")]
             host.layoutSubtreeIfNeeded()
-
             let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
             host.wantsLayer = true
             host.layer?.backgroundColor = Design.Surface.ground.cgColor
@@ -247,6 +244,64 @@ final class ComposerWindowFitTests: XCTestCase {
         )
     }
 
+    // MARK: - The Scheduled Strip Keeps Its Height
+
+    /// A scheduled row is one line, however much room the pane has to spare.
+    ///
+    /// The row stated only a floor (`height ≥ 26`), and the column above the composer has a
+    /// second free height — the hero region soaks up whatever the pane does not need. Two free
+    /// heights is an ambiguous layout, and the engine parked the pane's slack in whichever it
+    /// liked: in the app the strip's labels drew over the chip row while its remove button
+    /// floated forty points below them; in this fixture the row came out 434 points tall.
+    func testAScheduledRowStaysOneLineRatherThanAbsorbingThePanesSlack() throws {
+        let composer = SessionComposerViewController()
+        let host = host(composer, size: NSSize(width: 1454, height: 700))
+        composer.show(projectID: nil)
+        host.layoutSubtreeIfNeeded()
+
+        composer.scheduledStrip.setRows([
+            ScheduledMessageStripView.Row(
+                id: ScheduledMessageID(),
+                summary: "Pick the importer back up where we left it.",
+                timing: "tomorrow 09:31 · in 2h 26m",
+                problem: nil
+            )
+        ])
+        composer.setScheduledStripAttached(true)
+        host.layoutSubtreeIfNeeded()
+
+        let root = composer.view
+        let row = try XCTUnwrap(descendants(of: root).first { $0 is ScheduledMessageRowView })
+        let rowFrame = root.convert(row.bounds, from: row)
+        XCTAssertEqual(
+            rowFrame.height,
+            ScheduledStripDefaults.rowHeight,
+            accuracy: 1,
+            "the scheduled row absorbed the pane's slack instead of leaving it to the hero"
+        )
+
+        // The row's members share its one line — the reported bug drew the labels over the
+        // chip row above while the remove button stayed in the strip's own slot.
+        let members = descendants(of: row).filter { $0 is NSTextField || $0 is ThemedIconButton }
+        XCTAssertFalse(members.isEmpty)
+        for member in members {
+            let frame = root.convert(member.bounds, from: member)
+            XCTAssertEqual(
+                frame.midY,
+                rowFrame.midY,
+                accuracy: rowFrame.height / 2,
+                "a row member was drawn outside the row's own line"
+            )
+        }
+
+        let chips = try XCTUnwrap(descendants(of: root).first { $0 is ChipView }?.superview)
+        let chipsFrame = root.convert(chips.bounds, from: chips)
+        XCTAssertFalse(
+            rowFrame.intersects(chipsFrame),
+            "the scheduled row was drawn over the chip row above it"
+        )
+    }
+
     // MARK: - Fixtures
 
     /// An unshown window holding the composer as its content — the arrangement that grows, since
@@ -300,12 +355,17 @@ final class ComposerWindowFitTests: XCTestCase {
     /// Found through `arrangedSubviews` as well as the hierarchy: a stack with
     /// `detachesHiddenViews` takes a hidden arranged view out of the view tree, and the usage
     /// line is hidden until a reading arrives.
-    private func usageLabel(in view: NSView) -> NSTextField? {
+    private func usageLabel(in view: NSView) -> UsageReadingLabel? {
         let subtree = [view] + descendants(of: view)
         let arranged = subtree.compactMap { $0 as? NSStackView }.flatMap(\.arrangedSubviews)
         return (subtree + arranged).first {
             $0.accessibilityIdentifier() == "composer.session-start.usage"
-        } as? NSTextField
+        } as? UsageReadingLabel
+    }
+
+    /// A window as the line receives it: named, valued, and comfortable.
+    private func reading(_ name: String, _ value: String) -> AccountUsage.Reading {
+        AccountUsage.Reading(name: name, value: value, severity: .normal, fraction: 0.4)
     }
 
     private func descendants(of view: NSView) -> [NSView] {

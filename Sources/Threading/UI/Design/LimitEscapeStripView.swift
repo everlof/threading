@@ -200,7 +200,10 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
         mark.severity = .negative
         mark.translatesAutoresizingMaskIntoConstraints = false
 
-        messageLabel.applyFont(.caption, in: .chrome)
+        // The condition and its answer are peers. The old caption/secondary treatment made the
+        // state look like metadata attached to the much larger button, even though the button only
+        // makes sense after the state has been read.
+        messageLabel.applyFont(.control, in: .chrome)
         messageLabel.lineBreakMode = .byTruncatingTail
         messageLabel.usesSingleLineMode = true
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -213,7 +216,7 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
             for: .horizontal
         )
         messageLabel.setContentHuggingPriority(
-            LimitEscapeStripDefaults.sentencePriority,
+            .defaultHigh,
             for: .horizontal
         )
 
@@ -265,8 +268,12 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
             messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             actions.centerYAnchor.constraint(equalTo: centerYAnchor),
+            actions.leadingAnchor.constraint(
+                equalTo: messageLabel.trailingAnchor,
+                constant: Design.Spacing.medium
+            ),
             actions.trailingAnchor.constraint(
-                equalTo: dismissButton.leadingAnchor,
+                lessThanOrEqualTo: dismissButton.leadingAnchor,
                 constant: -Design.Spacing.small
             ),
             // The plate grows with its tallest member rather than clipping it: a material that
@@ -291,17 +298,6 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
             )
         ])
 
-        // Held apart at less than required so a pathologically narrow column collapses the
-        // sentence rather than producing an unsatisfiable pair: at that width the label has no
-        // ink left to overlap with, and a broken constraint is invisible where a broken layout
-        // is not.
-        let separation = messageLabel.trailingAnchor.constraint(
-            lessThanOrEqualTo: actions.leadingAnchor,
-            constant: -Design.Spacing.medium
-        )
-        separation.priority = .defaultHigh
-        separation.isActive = true
-
         // The plate is a recorded surface and the labels are inked here, so a live theme switch
         // has to reach both halves.
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.applyTheme() }
@@ -321,7 +317,7 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
         // would put chrome ink on an unknown colour.
         applySurface(fill: Design.Surface.panel, radius: .control)
         messageLabel.textColor = offer?.problem == nil
-            ? Design.Text.secondary
+            ? Design.Text.label
             : Design.Status.warning
     }
 

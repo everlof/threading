@@ -117,6 +117,7 @@ final class ExtensionHostService {
     private static let servicesPathPrefix = "/v1/services/"
     private static let companionsPathPrefix = "/v1/companions/"
     private static let networkFetchPath = "/v1/network/fetch"
+    private static let projectFilesQueryPath = "/v1/project-files/query"
     private static let secretsPath = "/v1/secrets"
     private static let secretsPathPrefix = "/v1/secrets/"
     private static let keyValuePath = "/v1/storage/kv"
@@ -133,6 +134,7 @@ final class ExtensionHostService {
     private static let hostCapabilities: Set<ExtensionCapability> = [
         .componentCustomization,
         .hostProjectsRead,
+        .hostProjectFilesRead,
         .hostSessionsRead,
         .hostSessionRuntimeRead,
         .hostRepositoriesRead,
@@ -157,6 +159,7 @@ final class ExtensionHostService {
     ]
     private static let hostDataCapabilities: Set<ExtensionCapability> = [
         .hostProjectsRead,
+        .hostProjectFilesRead,
         .hostSessionsRead,
         .hostSessionRuntimeRead,
         .hostRepositoriesRead,
@@ -203,6 +206,7 @@ final class ExtensionHostService {
         secretStore = KeychainExtensionSecretStore.shared
         networkBroker = ExtensionNetworkBroker.live()
         entropySource = Self.secureEntropy
+        ExtensionProjectFileBroker.shared.rootProvider = provider
     }
 
     /// Test seam which exercises authentication and routing without opening a listener.
@@ -229,6 +233,9 @@ final class ExtensionHostService {
         self.snapshotProvider = snapshots
         self.runtimeSnapshotProvider = runtimeSnapshotProvider
             ?? (snapshots as? ExtensionSessionRuntimeSnapshotProviding)
+        if let roots = snapshots as? ExtensionProjectFileRootProviding {
+            ExtensionProjectFileBroker.shared.rootProvider = roots
+        }
         self.secretStore = secretStore ?? KeychainExtensionSecretStore.shared
         self.networkBroker = networkBroker ?? ExtensionNetworkBroker.live()
         self.entropySource = entropySource
@@ -456,6 +463,9 @@ final class ExtensionHostService {
             extensionIdentifier: extensionIdentifier,
             processGeneration: processGeneration
         )
+        // File handles die with the token they were minted beside — the same rule, so a handle
+        // cannot outlive the disclosure the user answered.
+        ExtensionProjectFileBroker.shared.revoke(generation: processGeneration)
     }
 
     /// Internal for focused host tests; network connections call the same method.
@@ -484,6 +494,7 @@ final class ExtensionHostService {
             || path.hasPrefix(Self.servicesPathPrefix)
             || path.hasPrefix(Self.companionsPathPrefix)
             || path == Self.networkFetchPath
+            || path == Self.projectFilesQueryPath
             || path == Self.secretsPath
             || path.hasPrefix(Self.secretsPathPrefix)
             || path == Self.keyValuePath
@@ -522,6 +533,10 @@ final class ExtensionHostService {
         }
         if request.method == "POST", path == Self.networkFetchPath {
             routeBrokeredFetch(request, authority: authority, respond: respond)
+            return
+        }
+        if request.method == "POST", path == Self.projectFilesQueryPath {
+            routeProjectFileQuery(request, authority: authority, respond: respond)
             return
         }
         if path == Self.secretsPath || path.hasPrefix(Self.secretsPathPrefix) {
@@ -700,6 +715,69 @@ final class ExtensionHostService {
 
         default:
             respond(.status(404, "Not Found"))
+        }
+    }
+
+    /// Bounded project-file enumeration.
+    ///
+    /// A POST rather than a GET with query items: the query is a value with a scope, a filter list
+    /// and a cursor, and encoding that into a URL is how a broker ends up parsing a path.
+    private func routeProjectFileQuery(
+        _ request: HTTPRequest,
+        authority: Authority,
+        respond: @escaping (HTTPResponse) -> Void
+    ) {
+        guard require(.hostProjectFilesRead, for: authority, respond: respond) else { return }
+        let body = request.body
+        guard body.count <= Self.maximumPublicationBytes else {
+            respond(jsonFailure(status: 413, reason: "Payload Too Large", "Query is too large."))
+            return
+        }
+        guard let query = try? JSONDecoder().decode(ExtensionFileQuery.self, from: body) else {
+            respond(jsonFailure(status: 400, reason: "Bad Request", "Invalid file query."))
+            return
+        }
+        // The snapshot is refreshed first, exactly as the GET routes do. Without it, an
+        // extension whose very first call is a file query is answered from an empty journal and
+        // told its own project does not exist.
+        refreshSnapshotJournal()
+        // The project must be one this extension can already see. Enumeration is a *narrower*
+        // authority than the snapshot it names, never a way around the snapshot's own filtering.
+        guard visibleProjects(for: authority).contains(where: { $0.id == query.projectID }) else {
+            respond(jsonFailure(status: 404, reason: "Not Found", "Project not found."))
+            return
+        }
+
+        let identifier = authority.extensionIdentifier
+        let generation = authority.processGeneration
+        Task { @MainActor in
+            do {
+                let page = try await ExtensionProjectFileBroker.shared.page(
+                    for: query,
+                    extensionIdentifier: identifier,
+                    generation: generation
+                )
+                respond(self.jsonResponse(page))
+            } catch let error as ExtensionValidationError {
+                respond(self.jsonFailure(
+                    status: 400,
+                    reason: "Bad Request",
+                    error.localizedDescription
+                ))
+            } catch let error as ExtensionProjectFileError {
+                let status = error == .unavailable ? 503 : 400
+                respond(self.jsonFailure(
+                    status: status,
+                    reason: status == 503 ? "Service Unavailable" : "Bad Request",
+                    error.localizedDescription
+                ))
+            } catch {
+                respond(self.jsonFailure(
+                    status: 500,
+                    reason: "Internal Server Error",
+                    error.localizedDescription
+                ))
+            }
         }
     }
 

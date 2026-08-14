@@ -34,7 +34,8 @@ extension ExtensionHostSnapshotProviding {
 @MainActor
 final class LiveExtensionHostSnapshotProvider:
     ExtensionHostSnapshotProviding,
-    ExtensionSessionRuntimeSnapshotProviding
+    ExtensionSessionRuntimeSnapshotProviding,
+    ExtensionProjectFileRootProviding
 {
     /// The shell drawer belongs to the main window rather than AgentRuntime. The composition
     /// root supplies this resolver without exposing the window or controller to the broker.
@@ -100,6 +101,35 @@ final class LiveExtensionHostSnapshotProvider:
                     }
                 )
             }
+        }
+    }
+
+    // MARK: - Project file roots
+
+    func projectCheckoutRoot(projectID: String) -> URL? {
+        guard let project = project(withIdentifier: projectID) else { return nil }
+        return URL(fileURLWithPath: project.folderPath)
+    }
+
+    /// The exact session's execution directory — its managed worktree where it has one, the
+    /// project's checkout otherwise.
+    ///
+    /// The project check is the rule, not a convenience: a query naming project A and a session in
+    /// project B is refused rather than answered from B's workspace, and the broker never infers a
+    /// workspace from whatever is selected.
+    func sessionWorkspaceRoot(projectID: String, sessionID: String) -> URL? {
+        guard let project = project(withIdentifier: projectID),
+              let session = project.sessions.first(where: {
+                  $0.id.uuidString.lowercased() == sessionID.lowercased()
+              }) else {
+            return nil
+        }
+        return URL(fileURLWithPath: session.workingDirectory(in: project))
+    }
+
+    private func project(withIdentifier identifier: String) -> Project? {
+        ProjectStore.shared.projects.first {
+            $0.id.uuidString.lowercased() == identifier.lowercased()
         }
     }
 

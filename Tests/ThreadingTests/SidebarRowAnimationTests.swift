@@ -1,4 +1,6 @@
 import AppKit
+import LabelMorph
+import ThreadingExtensionKit
 import XCTest
 @testable import Threading
 
@@ -207,6 +209,231 @@ final class SidebarRowAnimationTests: XCTestCase {
         for (key, view) in before {
             XCTAssertEqual(after[key], view, "row \(key) was rebuilt rather than kept")
         }
+    }
+
+    // MARK: - Renaming
+
+    /// The title's morph, driven the way the app drives it: a store rename, reaching the row
+    /// through the sidebar's own change handling rather than through a `configure` call the
+    /// test makes itself. The row-level tests in `SidebarTitleMorphTests` all pass while a
+    /// rename lands instantly, because `stringValue` is set the moment a morph *starts*.
+    func testRenamingASessionMorphsTheRowThatWasShowingTheOldName() throws {
+        let fixture = makeSidebar(projects: 1, sessionsEach: 3)
+        let renamed = try XCTUnwrap(fixture.projects[0].sessions.first)
+        let key = SidebarNodeKey.session(renamed.id)
+        XCTAssertNotNil(fixture.controller.presentedRowView(of: key), "nothing was drawn")
+
+        // Nothing between the change and the assertion: see this class's note about redraws.
+        XCTAssertTrue(
+            fixture.store.renameSession(id: renamed.id, to: "A thoroughly different name")
+                .succeeded
+        )
+
+        let title = try XCTUnwrap(
+            titleLabel(of: key, in: fixture.controller),
+            "the renamed row has no title label"
+        )
+        XCTAssertEqual(title.stringValue, "A thoroughly different name")
+        XCTAssertFalse(
+            animatingGlyphs(in: title).isEmpty,
+            "the rename landed without animating a single glyph"
+        )
+    }
+
+    /// Whether the glyphs are being *drawn* somewhere other than their final places — the
+    /// question every other assertion here skips.
+    ///
+    /// A morph adds its animations synchronously, so "an animation exists" is true even when
+    /// the whole transition elapses before a single frame is composited. What the user sees is
+    /// the presentation layer, so that is what this reads: a glyph drawn away from the model
+    /// position it has already been given is a glyph the eye is watching move.
+    private func drawnMidFlightGlyphCount(in title: MorphingTitleLabel) -> Int {
+        guard let morphing = title.subviews.compactMap({ $0 as? MorphingLabel }).first else {
+            return 0
+        }
+        return (morphing.layer?.sublayers ?? []).reduce(into: 0) { count, layer in
+            guard let presented = layer.presentation() else { return }
+            if presented.frame != layer.frame || presented.opacity != layer.opacity {
+                count += 1
+            }
+        }
+    }
+
+    /// The baseline the modal case is measured against: a rename with nothing in the way is
+    /// still being drawn mid-transition a couple of frames later.
+    func testARenamedRowIsStillBeingDrawnMidMorphAFewFramesLater() throws {
+        let fixture = makeSidebar(projects: 1, sessionsEach: 3)
+        let renamed = try XCTUnwrap(fixture.projects[0].sessions.first)
+        let key = SidebarNodeKey.session(renamed.id)
+        XCTAssertNotNil(fixture.controller.presentedRowView(of: key), "nothing was drawn")
+
+        XCTAssertTrue(
+            fixture.store.renameSession(id: renamed.id, to: "A thoroughly different name")
+                .succeeded
+        )
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        let title = try XCTUnwrap(titleLabel(of: key, in: fixture.controller))
+        XCTAssertGreaterThan(
+            drawnMidFlightGlyphCount(in: title),
+            0,
+            "the morph was never drawn anywhere other than its final state"
+        )
+    }
+
+    /// The same rename performed where the Rename Session… dialog performs it: on the far side
+    /// of `runModal`, while AppKit is still unwinding the modal session the alert ran in.
+    func testARenameAnsweredAsAModalUnwindsIsStillDrawnMidMorph() throws {
+        let fixture = makeSidebar(projects: 1, sessionsEach: 3)
+        let renamed = try XCTUnwrap(fixture.projects[0].sessions.first)
+        let key = SidebarNodeKey.session(renamed.id)
+        XCTAssertNotNil(fixture.controller.presentedRowView(of: key), "nothing was drawn")
+
+        let modal = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 120),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        modal.isReleasedWhenClosed = false
+        windows.append(modal)
+        DispatchQueue.main.async { NSApp.stopModal() }
+        NSApp.runModal(for: modal)
+        modal.orderOut(nil)
+
+        // Exactly what `renameSessionClicked` does with the answer, in the same breath.
+        XCTAssertTrue(
+            fixture.store.renameSession(id: renamed.id, to: "A thoroughly different name")
+                .succeeded
+        )
+        fixture.controller.reload()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        let title = try XCTUnwrap(titleLabel(of: key, in: fixture.controller))
+        XCTAssertGreaterThan(
+            drawnMidFlightGlyphCount(in: title),
+            0,
+            "a rename answered on the modal's way out was never drawn moving"
+        )
+    }
+
+    /// The Rename Session… dialog's own sequence: the store rename, then the reload its
+    /// completion asks for. The reload finds the tree's shape unchanged and reconfigures the
+    /// viewport in place, which reaches the row whose title is mid-morph.
+    func testTheRenameDialogsReloadDoesNotCancelTheMorphItJustStarted() throws {
+        let fixture = makeSidebar(projects: 1, sessionsEach: 3)
+        let renamed = try XCTUnwrap(fixture.projects[0].sessions.first)
+        let key = SidebarNodeKey.session(renamed.id)
+        XCTAssertNotNil(fixture.controller.presentedRowView(of: key), "nothing was drawn")
+
+        XCTAssertTrue(
+            fixture.store.renameSession(id: renamed.id, to: "A thoroughly different name")
+                .succeeded
+        )
+        fixture.controller.reload()
+
+        let title = try XCTUnwrap(
+            titleLabel(of: key, in: fixture.controller),
+            "the renamed row has no title label"
+        )
+        XCTAssertFalse(
+            animatingGlyphs(in: title).isEmpty,
+            "the reload after the rename dialog cancelled the morph"
+        )
+    }
+
+    /// The same rename with an extension patching the row, which is the shape the app is
+    /// actually used in: the example extension fills every session and project row's
+    /// `after-title` slot by default, so a row's customization host is live and re-renders
+    /// its slot on the same refresh that carries the new name.
+    func testRenamingMorphsWhileAnExtensionFillsTheRowSlot() throws {
+        let provider = SlotFillingCustomizationProvider()
+        ComponentCustomizationProviderSlot.shared.provider = provider
+        defer { ComponentCustomizationProviderSlot.shared.provider = nil }
+
+        let fixture = makeSidebar(projects: 1, sessionsEach: 3)
+        let renamed = try XCTUnwrap(fixture.projects[0].sessions.first)
+        let key = SidebarNodeKey.session(renamed.id)
+        XCTAssertNotNil(fixture.controller.presentedRowView(of: key), "nothing was drawn")
+
+        XCTAssertTrue(
+            fixture.store.renameSession(id: renamed.id, to: "A thoroughly different name")
+                .succeeded
+        )
+
+        let title = try XCTUnwrap(
+            titleLabel(of: key, in: fixture.controller),
+            "the renamed row has no title label"
+        )
+        XCTAssertEqual(title.stringValue, "A thoroughly different name")
+        XCTAssertFalse(
+            animatingGlyphs(in: title).isEmpty,
+            "the rename landed without animating while an extension patched the row"
+        )
+    }
+
+    /// Stands in for the example extension as installed: a status in every session and
+    /// project row's `after-title` slot, and a replacement for the session's identity mark —
+    /// the two patches `HelloStatusExtension` publishes for a sidebar row.
+    private final class SlotFillingCustomizationProvider: ComponentCustomizationProvider {
+        func customization(
+            for target: ExtensionComponentTarget
+        ) -> ComponentCustomizationResolution {
+            if target.component == ExtensionComponentTarget.sessionIdentity().component,
+               target.entityID != nil {
+                return ComponentCustomizationResolution(
+                    properties: [:],
+                    slots: [:],
+                    replacement: .stack(
+                        axis: .horizontal,
+                        spacing: .tight,
+                        children: [ExtensionNode.status("◆", role: .neutral)]
+                    ),
+                    replacementExtensionIdentifier: "test.hello-status",
+                    replacementCandidates: ["test.hello-status"],
+                    hooks: []
+                )
+            }
+
+            let rowComponents = [
+                HostComponentContracts.sidebarSessionRow.id,
+                HostComponentContracts.sidebarProjectRow.id
+            ]
+            guard rowComponents.contains(target.component), target.entityID != nil else {
+                return .empty
+            }
+            return ComponentCustomizationResolution(
+                properties: [:],
+                slots: ["after-title": [ExtensionNode.status("Hello · 7", role: .neutral)]],
+                replacement: nil,
+                replacementExtensionIdentifier: nil,
+                replacementCandidates: [],
+                hooks: []
+            )
+        }
+    }
+
+    /// The row's title label, found through the presented row view rather than built here.
+    private func titleLabel(
+        of key: SidebarNodeKey,
+        in controller: ProjectSidebarViewController
+    ) -> MorphingTitleLabel? {
+        func walk(_ node: NSView) -> MorphingTitleLabel? {
+            if let found = node as? MorphingTitleLabel { return found }
+            for child in node.subviews {
+                if let found = walk(child) { return found }
+            }
+            return nil
+        }
+        return controller.presentedRowView(of: key).flatMap(walk)
+    }
+
+    private func animatingGlyphs(in title: MorphingTitleLabel) -> [CALayer] {
+        guard let morphing = title.subviews.compactMap({ $0 as? MorphingLabel }).first else {
+            return []
+        }
+        return (morphing.layer?.sublayers ?? [])
+            .filter { !($0.animationKeys() ?? []).isEmpty }
     }
 
     // MARK: - Leaving

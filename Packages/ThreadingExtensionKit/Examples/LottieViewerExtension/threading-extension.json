@@ -1,0 +1,93 @@
+{
+  "formatVersion": 1,
+  "identifier": "codes.threading.lottie-viewer",
+  "name": "Lottie Viewer",
+  "version": "0.1.0",
+  "runtime": "webAssembly",
+  "executable": "bin/lottie-viewer.wasm",
+  "capabilities": [
+    "commands",
+    "panels",
+    "settings",
+    "ui.media-documents",
+    "attachments.preview",
+    "attachments.file-types",
+    "host.projects.read",
+    "host.project.files.read"
+  ],
+  "settings": {
+    "pages": [
+      {
+        "id": "playback",
+        "title": "Playback",
+        "symbol": "play.circle",
+        "sections": [
+          {
+            "id": "defaults",
+            "title": "Defaults",
+            "fields": [
+              {
+                "id": "loop-mode",
+                "title": "Loop",
+                "description": "How a document plays when it is first opened.",
+                "control": {
+                  "type": "choice",
+                  "defaultValue": "loop",
+                  "options": [
+                    {
+                      "id": "once",
+                      "title": "Once"
+                    },
+                    {
+                      "id": "loop",
+                      "title": "Loop"
+                    },
+                    {
+                      "id": "ping-pong",
+                      "title": "Back and forth"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "speed",
+                "title": "Speed",
+                "description": "Playback rate, as a percentage of the document's own.",
+                "control": {
+                  "type": "integer",
+                  "defaultValue": 100,
+                  "minimum": 10,
+                  "maximum": 400,
+                  "step": 10
+                }
+              },
+              {
+                "id": "background",
+                "title": "Canvas",
+                "control": {
+                  "type": "choice",
+                  "defaultValue": "checkerboard",
+                  "options": [
+                    {
+                      "id": "surface",
+                      "title": "Pane surface"
+                    },
+                    {
+                      "id": "checkerboard",
+                      "title": "Checkerboard"
+                    },
+                    {
+                      "id": "transparent",
+                      "title": "Transparent"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "sections": []
+  }
+}

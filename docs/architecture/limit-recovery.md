@@ -334,7 +334,12 @@ being refused.
    candidate becomes a new offer at the next reading, pressed the same way this one was — which is
    the policy rule "never silently escalating to a different escape", with the user in the loop.
 4. The move runs through `SessionCoordinator`, which reopens the pane (`reopenIfShowing`) exactly
-   as the menu route does, and keeps its failure alert.
+   as the menu route does, and keeps its failure alert. The copied transcript carries the source
+   account's refusal at its tail, but that is already-observed output rather than a refusal by the
+   destination account: `ObservedUsageLimit.transcriptWasMigrated` records the installed copy's
+   exact byte boundary at the new path while clearing the account-scoped stop. Without that boundary the
+   first poll after relaunch immediately offers a second account before the destination has tried
+   a turn.
 5. The continuation is a `ScheduledMessage` — `LimitRecoveryDefaults.continuationText`, due
    `LimitEscapeDefaults.continuationDelay` from now, wall-clock anchored. **Not typed**: everything
    hard about typing into a just-relaunched TUI is already solved in
@@ -357,6 +362,12 @@ gestures back — the one-direction rule `ScheduledMessageStripView` states. It 
 from its content, while this is a condition of one conversation and belongs on that conversation's
 own column. It draws its own ground for `PaneNoticeView`'s other reason — in a terminal pane the
 surface behind it is the *terminal's* palette, which the app theme knows nothing about.
+
+The condition and the action form one leading run; only dismissal sits at the opposite edge. The
+first layout let the sentence absorb every spare point while pinning the action beside dismissal,
+so a wide terminal turned one choice into two islands hundreds of points apart. The condition uses
+the control text role and label ink rather than caption/secondary: it is the premise of the action,
+not metadata underneath it.
 
 Its hosts are the two composer areas. A rendered conversation puts it above the scheduled strip, on
 the prompt's column. A terminal session has no composer of its own — the box is inside the TUI — so

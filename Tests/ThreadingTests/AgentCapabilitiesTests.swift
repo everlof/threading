@@ -8,7 +8,7 @@ import XCTest
 /// a single point of failure worth asserting from the other side: these tests check that a
 /// capability and the code it governs cannot drift apart, and that adding a fifth runtime is a
 /// matter of filling in one switch rather than re-reading the app.
-final class AgentCapabilitiesTests: XCTestCase {
+final class AgentCapabilitiesTests: HostedStoreTestCase {
 
     // MARK: - Matrix Invariants
 

@@ -25,12 +25,16 @@ final class SessionMigrationTransactionTests: XCTestCase {
         try write("older target transcript", to: destination)
         var commits = 0
 
-        try TranscriptCopyTransaction.install(source: source, destination: destination) {
+        let copiedByteCount = try TranscriptCopyTransaction.install(
+            source: source,
+            destination: destination
+        ) {
             commits += 1
             return true
         }
 
         XCTAssertEqual(commits, 1)
+        XCTAssertEqual(copiedByteCount, Data("new complete transcript".utf8).count)
         XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "new complete transcript")
         XCTAssertEqual(try String(contentsOf: source, encoding: .utf8), "new complete transcript")
         XCTAssertTrue(try scratchFiles(beside: destination).isEmpty)

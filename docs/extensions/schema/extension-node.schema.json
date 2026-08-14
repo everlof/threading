@@ -146,10 +146,60 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["type", "document"],
+          "properties": {
+            "type": { "const": "media" },
+            "document": { "$ref": "#/$defs/mediaDocument" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["type", "scene"],
           "properties": {
             "type": { "const": "scene" },
-            "scene": { "$ref": "#/$defs/scene" }
+            "mediaDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source", "format", "accessibilityLabel"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "source": { "$ref": "#/$defs/mediaSource" },
+        "format": {
+          "type": "string",
+          "minLength": 1,
+          "description": "lottie, dot-lottie or animated-image today. A raw string rather than an enum so a newer manifest stays inspectable on an older host, which reports the format as uncarried instead of failing to decode the panel around it."
+        },
+        "playback": { "$ref": "#/$defs/mediaPlayback" },
+        "transport": { "enum": ["host-owned", "hidden"] },
+        "allowsFrameCopy": { "type": "boolean" },
+        "accessibilityLabel": { "type": "string", "minLength": 1 },
+        "preferredAspectRatio": { "type": "number", "exclusiveMinimum": 0 },
+        "stateActionID": { "type": "string", "minLength": 1 }
+      }
+    },
+    "mediaSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "value"],
+      "properties": {
+        "type": { "enum": ["extensionResource", "fileHandle", "sessionAttachment"] },
+        "value": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "description": "Never a path and never bytes. extensionResource is package-relative; fileHandle is an opaque handle from host.project.files.read; sessionAttachment is valid only inside attachments.preview@1."
+    },
+    "mediaPlayback": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "isPlaying": { "type": "boolean" },
+        "loop": { "enum": ["once", "loop", "ping-pong"] },
+        "speed": { "type": "number", "minimum": 0.1, "maximum": 4 },
+        "progress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "background": { "enum": ["surface", "checkerboard", "transparent"] }
+      }
+    },
+    "scene": { "$ref": "#/$defs/scene" }
           }
         },
         {

@@ -73,7 +73,7 @@ final class UsageDashboardWaitingTests: XCTestCase {
 
     func testTheStatusIsNotRepeatedUnderEveryMetricCard() {
         for isBuilding in [true, false] {
-            let details = dashboard(isBuilding: isBuilding).metricCardDetailsForTesting
+            let details = dashboard(isBuilding: isBuilding).statBandDetailsForTesting
             XCTAssertEqual(
                 details.filter({ !$0.isEmpty }).count,
                 0,

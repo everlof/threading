@@ -14,7 +14,7 @@ import XCTest
 /// (which is a different leading column). A regression in `ThemedMenuMetrics.CheckColumn` shows
 /// up here as every title in the picture stepping sideways.
 @MainActor
-final class SessionMenuRenderTests: XCTestCase {
+final class SessionMenuRenderTests: HostedStoreTestCase {
 
     // MARK: - Configuration
 

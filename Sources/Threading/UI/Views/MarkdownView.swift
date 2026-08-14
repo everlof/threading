@@ -173,7 +173,7 @@ final class MarkdownView: NSStackView {
         scroll.hasHorizontalScroller = true
         scroll.hasVerticalScroller = false
         scroll.horizontalScrollElasticity = .allowed
-        scroll.forwardsVerticalScrollToAncestor = true
+        scroll.verticalScrollHandoff = .always
 
         let field = NSTextField(labelWithString: code)
         field.font = style.codeFont
@@ -252,7 +252,7 @@ final class MarkdownView: NSStackView {
         scroll.hasHorizontalScroller = true
         scroll.hasVerticalScroller = false
         scroll.horizontalScrollElasticity = .allowed
-        scroll.forwardsVerticalScrollToAncestor = true
+        scroll.verticalScrollHandoff = .always
 
         let rows = NSStackView()
         rows.orientation = .vertical

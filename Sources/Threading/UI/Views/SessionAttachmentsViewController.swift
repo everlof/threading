@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingExtensionKit
 import WebKit
 
 /// The synchronous main-thread work that presents one attachment preview.
@@ -58,6 +59,23 @@ final class SessionAttachmentsViewController: NSViewController {
     /// after it has restored selection, so its delegate notification must not present the same
     /// decoder or system renderer once on the way there and then again at the end of the refresh.
     private var isRestoringSelection = false
+
+    /// The offer/decline shell for `attachments.preview@1`, and the body a candidate won with.
+    ///
+    /// Held per pane rather than per row: a new selection cancels the offer in flight, which is
+    /// what keeps a slow candidate's late answer from replacing the preview of a row the user has
+    /// already moved off.
+    private lazy var previewOffer = SessionAttachmentPreviewOffer(
+        router: ExtensionManager.shared
+    )
+    private var extensionPreviewHost: NSView?
+    private var extensionPreviewPlayers: [String: MediaDocumentPlayerView] = [:]
+    /// The attachment an extension preview may resolve a `sessionAttachment` handle for.
+    ///
+    /// Exactly one, and only while it is the row on screen. That is what makes the handle valid
+    /// *inside* the preview contract and nowhere else — replayed into a panel, or asked for after
+    /// the selection moved, it resolves to nothing.
+    private var previewableAttachment: SessionAttachment?
     private(set) var firstPreviewTimingForTesting: SessionAttachmentPreviewTiming?
     private(set) var latestPreviewTimingForTesting = SessionAttachmentPreviewTiming()
     private(set) var previewPresentationCountForTesting = 0
@@ -974,6 +992,16 @@ final class SessionAttachmentsViewController: NSViewController {
             )
             timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
 
+        case .media:
+            // The native body first, always: it is cheap, and it is what the pane shows if no
+            // extension accepts, if the winner's generation dies, or if the last contribution is
+            // removed. Removing an extension never leaves blank chrome here.
+            let clearStarted = DispatchTime.now().uptimeNanoseconds
+            hideInstalledPreviews()
+            timing.clearNanoseconds = DispatchTime.now().uptimeNanoseconds - clearStarted
+            showMediaFallback(for: attachment, size: size)
+            offerMediaPreview(for: attachment)
+
         case .diagram:
             // A tighter cap than the general one: this lands in a text view, and a text view
             // handed tens of megabytes is a stall, not a preview.
@@ -1000,6 +1028,119 @@ final class SessionAttachmentsViewController: NSViewController {
             sourcePreview.isHidden = false
             timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
         }
+    }
+
+    // MARK: - Media
+
+    /// What Threading itself can say about a document it carries no renderer for.
+    ///
+    /// Bare UTF-8 shows its source under the existing source-preview ceiling — a JSON Lottie is
+    /// readable text, and reading it is better than a shrug. A binary container says plainly that
+    /// no preview extension is available, which is a sentence rather than an empty pane.
+    private func showMediaFallback(for attachment: SessionAttachment, size: Int) {
+        guard size <= SessionAttachmentsDefaults.maximumSourcePreviewBytes,
+              let data = try? BoundedFileReader.read(
+                  attachment.url,
+                  maximumBytes: SessionAttachmentsDefaults.maximumSourcePreviewBytes
+              ),
+              let source = String(data: data, encoding: .utf8) else {
+            showPreviewMessage(L10n.string(
+                "No preview extension is available for this file."
+            ))
+            return
+        }
+        let sourcePreview = installedSourcePreview()
+        sourcePreview.textView.string = source
+        sourcePreview.isHidden = false
+    }
+
+    /// Asks the installed extensions, in the user's own order, whether any will draw this file.
+    private func offerMediaPreview(for attachment: SessionAttachment) {
+        previewableAttachment = attachment
+        let size = (try? attachment.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        let context = ExtensionAttachmentContext(
+            attachmentID: attachment.id,
+            name: attachment.name,
+            kind: attachment.kind.rawValue,
+            contentHint: Self.publishedContentHint(for: attachment),
+            byteSize: size,
+            origin: attachment.origin.rawValue,
+            sessionID: sessionID.uuidString.lowercased()
+        )
+        previewOffer.offer(context) { [weak self] outcome in
+            guard let self,
+                  self.previewableAttachment?.id == attachment.id,
+                  let outcome else { return }
+            self.installExtensionPreview(outcome, for: attachment)
+        }
+    }
+
+    private func installExtensionPreview(
+        _ outcome: SessionAttachmentPreviewOffer.Outcome,
+        for attachment: SessionAttachment
+    ) {
+        let host: ExtensionNodeHostView
+        do {
+            host = try ExtensionNodeRenderer.render(
+                outcome.content,
+                mediaPlayerFactory: { [weak self] document in
+                    self?.mediaPlayer(for: document, attachment: attachment)
+                },
+                onAction: { _ in }
+            )
+        } catch {
+            // An invalid body advances to the native fallback, which is already on screen.
+            return
+        }
+        hideNativePreviews()
+        clearExtensionPreview()
+        previewMessage.stringValue = ""
+        previewMessage.isHidden = true
+        host.setAccessibilityIdentifier(
+            "attachments.extension-preview.\(outcome.extensionIdentifier)"
+        )
+        installPreviewSurface(host)
+        extensionPreviewHost = host
+        if let message = outcome.message {
+            previewMessage.stringValue = message
+            previewMessage.isHidden = false
+        }
+    }
+
+    private func mediaPlayer(
+        for document: ExtensionMediaDocument,
+        attachment: SessionAttachment
+    ) -> NSView? {
+        if let existing = extensionPreviewPlayers[document.id] {
+            existing.update(document: document)
+            return existing
+        }
+        let player = MediaDocumentPlayerView(loader: { [weak self] source in
+            await MainActor.run {
+                // The handle is valid only for the attachment currently being previewed. A
+                // package resource still resolves, because the extension owns its own package.
+                guard case .sessionAttachment(let id) = source,
+                      let self,
+                      id == attachment.id,
+                      self.previewableAttachment?.id == attachment.id,
+                      let data = try? BoundedFileReader.read(
+                          attachment.url,
+                          maximumBytes: MediaDocumentLimits.default.maximumDocumentBytes
+                      ) else {
+                    return .failure(.unresolvedSource)
+                }
+                return .success(data)
+            }
+        })
+        player.update(document: document)
+        extensionPreviewPlayers[document.id] = player
+        return player
+    }
+
+    private func clearExtensionPreview() {
+        extensionPreviewHost?.removeFromSuperview()
+        extensionPreviewHost = nil
+        extensionPreviewPlayers.removeAll()
     }
 
     /// Several rows at once. The preview cannot show three pictures, so it says the count; the
@@ -1040,25 +1181,75 @@ final class SessionAttachmentsViewController: NSViewController {
 
     /// The collection the inspector's arrows and thumbnail rail walk, positioned on `row`.
     ///
-    /// An allow-list, not "everything but HTML": the inspector's canvas decodes images and its
-    /// document view draws PDFs, and a zip paged in between two screenshots would be a rail slot
-    /// the inspector can only answer with a blank. `nil` therefore means *this row is not on the
-    /// rail*, which is also how the row's own preview key reads it.
+    /// An allow-list, not "everything but HTML": the inspector's canvas decodes images, its
+    /// document view draws PDFs and its player draws a media document the registry carries, and a
+    /// zip paged in between two screenshots would be a rail slot the inspector can only answer
+    /// with a blank. `nil` therefore means *this row is not on the rail*, which is also how the
+    /// row's own preview key reads it.
+    ///
+    /// A `.media` row belongs here only when Threading can actually draw it. A registered format
+    /// with no renderer is a real row in the pane — an extension previews it — and a rail slot
+    /// the lightbox would have nothing to put in.
     func mediaInspectorSelection(forRow row: Int) -> MediaInspectorSelection? {
         guard attachments.indices.contains(row) else { return nil }
         let selectedID = attachments[row].id
-        let inspectable = attachments.filter { $0.kind == .image || $0.kind == .pdf }
+        let inspectable = attachments.filter {
+            switch $0.kind {
+            case .image, .pdf: true
+            case .media: Self.inspectableMediaFormat(for: $0) != nil
+            case .html, .archive, .document, .diagram: false
+            }
+        }
         guard let selectedIndex = inspectable.firstIndex(where: { $0.id == selectedID }) else {
             return nil
         }
-        let items = inspectable.map {
+        let items = inspectable.map { attachment in
             MediaInspectorItem(
-                url: $0.url,
-                title: $0.name,
-                content: $0.kind == .image ? .image : .document
+                url: attachment.url,
+                title: attachment.name,
+                content: {
+                    switch attachment.kind {
+                    case .image: .image
+                    case .media:
+                        Self.inspectableMediaFormat(for: attachment)
+                            .map(MediaInspectorItemContent.media) ?? .document
+                    default: .document
+                    }
+                }()
             )
         }
         return MediaInspectorSelection(items: items, selectedIndex: selectedIndex)
+    }
+
+    /// The format the host's registry would draw this attachment with, or nil.
+    ///
+    /// Derived from the row rather than re-probed. A `.media` row that is a `.json` **is** a
+    /// Lottie by construction: `json` is a reserved extension no registration may claim, so the
+    /// only way one reached the pane is the host's own admission probe recognising the bodymovin
+    /// signature. Asking again would put a bounded file read on the main thread once per row per
+    /// selection — a hundred-attachment session would re-read a hundred files to draw a rail.
+    static func inspectableMediaFormat(
+        for attachment: SessionAttachment
+    ) -> ExtensionMediaFormat? {
+        guard attachment.kind == .media else { return nil }
+        let format: ExtensionMediaFormat
+        switch attachment.url.pathExtension.lowercased() {
+        case "lottie": format = .dotLottie
+        case "json": format = .lottie
+        case "gif", "apng": format = .animatedImage
+        default: return nil
+        }
+        return MediaDocumentRendererRegistry.supports(format) ? format : nil
+    }
+
+    /// The hint published to a preview candidate, derived the same way and for the same reason.
+    static func publishedContentHint(
+        for attachment: SessionAttachment
+    ) -> ExtensionFileContentHint? {
+        MediaContentProbe.structuralHint(
+            forExtension: attachment.url.pathExtension.lowercased()
+        ) ?? (attachment.kind == .media
+            && attachment.url.pathExtension.lowercased() == "json" ? .lottie : nil)
     }
 
     private func installedImageView() -> ThemedImagePreview {
@@ -1122,7 +1313,19 @@ final class SessionAttachmentsViewController: NSViewController {
         ])
     }
 
+    /// Takes down everything the previous row put on screen, **and** abandons any offer still in
+    /// flight for it.
     private func hideInstalledPreviews() {
+        previewOffer.cancel()
+        previewableAttachment = nil
+        clearExtensionPreview()
+        hideNativePreviews()
+    }
+
+    /// The view work alone. Split out because an accepted extension body replaces the native
+    /// fallback *while the offer that won is still the current one* — clearing the offer there
+    /// would revoke the attachment handle the winner is about to resolve.
+    private func hideNativePreviews() {
         imageView?.image = nil
         imageView?.isHidden = true
         documentView?.clear()

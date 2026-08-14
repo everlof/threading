@@ -38,6 +38,10 @@ let package = Package(
             targets: ["SessionInfoExtensionExample"]
         ),
         .executable(
+            name: "LottieViewerExtensionExample",
+            targets: ["LottieViewerExtensionExample"]
+        ),
+        .executable(
             name: "SimulatorRelayExtensionExample",
             targets: ["SimulatorRelayExtensionExample"]
         ),
@@ -113,6 +117,15 @@ let package = Package(
             name: "SessionInfoExtensionExample",
             dependencies: ["ThreadingExtensionKit"],
             path: "Examples/SessionInfoExtension",
+            exclude: ["threading-extension.json"],
+            plugins: ["ThreadingExtensionPolicyPlugin"]
+        ),
+        // The media-document, project-file-handle and attachment-preview seams, exercised by an
+        // ordinary safe extension rather than by host-only fixtures.
+        .executableTarget(
+            name: "LottieViewerExtensionExample",
+            dependencies: ["ThreadingExtensionKit"],
+            path: "Examples/LottieViewerExtension",
             exclude: ["threading-extension.json"],
             plugins: ["ThreadingExtensionPolicyPlugin"]
         ),

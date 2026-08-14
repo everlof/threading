@@ -174,10 +174,12 @@ final class SessionComposerViewController: NSViewController {
 
     /// Start it later: the same offers the reply box's chevron makes, one message earlier.
     ///
-    /// Disabled with its reason on the tooltip when there is nothing to schedule — and when
-    /// images are attached, because a pasted screenshot is a file in a temporary directory and a
-    /// path recorded now can name nothing by Monday. `DraftStore` already refuses to draft them
-    /// for that reason; scheduling is the same hazard with a longer fuse.
+    /// There is nothing to schedule until something is written, and nothing that *can* be
+    /// scheduled while images are attached — a pasted screenshot is a file in a temporary
+    /// directory, and a path recorded now can name nothing by Monday. `DraftStore` already
+    /// refuses to draft them for that reason; scheduling is the same hazard with a longer fuse.
+    /// Either way the button stays pressable and answers with the sentence
+    /// (`refreshScheduleChip`), rather than dimming and leaving the reason to a tooltip.
     /// Deliberately an icon button rather than a `ChipView`.
     ///
     /// A chip out here would join the row above the box in the one test that counts them, and
@@ -247,10 +249,14 @@ final class SessionComposerViewController: NSViewController {
 
     /// What is left of the account the chips currently name, as one line inside the box.
     ///
-    /// The same compact reading the toolbar's usage pill draws
-    /// (`AccountUsage.compactSummary`), so the number a session is started on is the number the
-    /// pill goes on showing. The detail this replaced a whole panel with is on the tooltip.
-    private let usageLabel = NSTextField(labelWithString: "")
+    /// The same reading the toolbar's usage pill draws, from the same formatter, so the number a
+    /// session is started on is the number the pill goes on showing. The detail this replaced a
+    /// whole panel with is on the tooltip.
+    ///
+    /// A `UsageReadingLabel` rather than a text field because this is the one member of the row
+    /// that may be squeezed, and a reading gives up **windows** rather than characters when it
+    /// is — `5h 86…` was a percentage with its `%` truncated off.
+    private let usageLabel = UsageReadingLabel()
 
     /// The composer's own column, bottom-flush in the pane.
     private let stack = NSStackView()
@@ -539,15 +545,8 @@ final class SessionComposerViewController: NSViewController {
         // below, not from where the send sits. See `PromptView.SubmitPlacement`.
         promptView.submitPlacement = .outside
 
-        usageLabel.applyFont(.subheading)
-        usageLabel.textColor = Design.Text.tertiary
-        usageLabel.lineBreakMode = .byTruncatingTail
         usageLabel.isHidden = true
         usageLabel.setAccessibilityIdentifier("composer.session-start.usage")
-        // The one thing on the row that may lose characters. The chips beside it name choices
-        // and are unreadable half-drawn; a reading truncated from its tail still says which
-        // window is tightest, which is the part that decides anything.
-        usageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // The chips are the row's other pressure valve, and they give way in a stated order
         // rather than all at once — see `ComposerDefaults.modelChipCompressionPriority`. None
@@ -604,12 +603,20 @@ final class SessionComposerViewController: NSViewController {
         refreshScheduledStrip()
     }
 
-    /// Whether the chip may be pressed at all, with its reason on the tooltip rather than left
-    /// to be discovered by pressing it.
+    /// Keeps the button's reason current — on the tooltip, and in the menu it opens.
+    ///
+    /// **It stays pressable when it cannot be used.** `scheduleEntries` was written to answer a
+    /// press with the sentence saying why ("Images can't be scheduled…"), on the stated grounds
+    /// that "nothing happened when I clicked it" is the worst possible answer — and then this
+    /// disabled the button, so the press never arrived and the sentence was reachable only by
+    /// hovering long enough for a tooltip. A dimmed glyph with a reason nobody can read is the
+    /// same dead end by a quieter route; it was reported as "why is this disabled for me?".
+    ///
+    /// So the glyph looks the same either way, and the menu is where the difference is: the
+    /// offers, or one row that cannot be chosen carrying the sentence. The tooltip still answers
+    /// a pointer that pauses on it, for the reading that costs no press at all.
     func refreshScheduleChip() {
-        let refusal = scheduleRefusalReason()
-        scheduleButton.isEnabled = refusal == nil
-        scheduleButton.toolTip = refusal ?? L10n.string("Start this session later")
+        scheduleButton.toolTip = scheduleRefusalReason() ?? L10n.string("Start this session later")
     }
 
     /// Each chip rebuilds its menu when opened, so a change of agent is reflected everywhere.
@@ -1245,10 +1252,12 @@ final class SessionComposerViewController: NSViewController {
     /// scans the filesystem and `refreshChips` runs on every chip change.
     ///
     /// The line is the toolbar pill's own reading, metered by the model this session would
-    /// launch on — the same string, from the same formatter, so the number a user reads here is
-    /// the number the pill goes on showing once the session exists. Hidden outright when there
-    /// is nothing to say: an account with no usage source is not a thing to report an absence
-    /// about, which is the rule the pill already keeps.
+    /// launch on — the same windows through the same formatter, so the number a user reads here
+    /// is the number the pill goes on showing once the session exists. Handed over as `Reading`s
+    /// rather than as a joined string, because how many of them the row has room for is the
+    /// line's own business (`UsageReadingLabel`). Hidden outright when there is nothing to say:
+    /// an account with no usage source is not a thing to report an absence about, which is the
+    /// rule the pill already keeps.
     private func refreshUsage(account: AgentAccount? = nil) {
         let account = account ?? AgentAccountDiscovery.account(
             for: selectedAgent,
@@ -1263,17 +1272,21 @@ final class SessionComposerViewController: NSViewController {
         AccountUsageService.shared.refresh(account)
 
         let now = Date()
-        guard let usage = AccountUsageService.shared.usage(for: account),
-              let reading = usage.compactSummary(
-                at: now,
-                metering: modelToLaunch(on: account, for: selectedAgent)
-              )
-        else {
+        guard let usage = AccountUsageService.shared.usage(for: account) else {
             clearUsage()
             return
         }
 
-        usageLabel.stringValue = reading
+        let readings = usage.readings(
+            at: now,
+            metering: modelToLaunch(on: account, for: selectedAgent)
+        )
+        guard !readings.isEmpty else {
+            clearUsage()
+            return
+        }
+
+        usageLabel.readings = readings
         usageLabel.toolTip = usageDetail(
             accountName: AccountName.display(for: account),
             usage: usage,
@@ -1283,7 +1296,7 @@ final class SessionComposerViewController: NSViewController {
     }
 
     private func clearUsage() {
-        usageLabel.stringValue = ""
+        usageLabel.readings = []
         usageLabel.toolTip = nil
         usageLabel.isHidden = true
     }

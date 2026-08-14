@@ -337,6 +337,13 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
     public let allowsProceed: Bool
     public let requiresProceed: Bool
     public let allowsOverlay: Bool
+    /// Whether this surface accepts a host-played media document.
+    ///
+    /// Defaults to **false**, deliberately: a media node is the one thing in the vocabulary whose
+    /// pixels move on their own and whose canvas has a clock, so no existing contract gains a
+    /// player by an SDK release. A surface opts in, and the manifest capability
+    /// `ui.media-documents` gates it a second time.
+    public let allowsMedia: Bool
     public let allowedCustomSurfaceKinds: [ExtensionCustomSurfaceKind]
 
     /// What a summary's second level may say here, or nil where summaries have no second level.
@@ -367,6 +374,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         allowsProceed: Bool = false,
         requiresProceed: Bool = false,
         allowsOverlay: Bool = false,
+        allowsMedia: Bool = false,
         allowedCustomSurfaceKinds: [ExtensionCustomSurfaceKind] = [],
         disclosureDetail: ExtensionComponentDetailConstraints? = nil
     ) {
@@ -389,6 +397,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         self.allowsProceed = allowsProceed
         self.requiresProceed = requiresProceed
         self.allowsOverlay = allowsOverlay
+        self.allowsMedia = allowsMedia
         self.allowedCustomSurfaceKinds = allowedCustomSurfaceKinds
         self.disclosureDetail = disclosureDetail
     }
@@ -399,7 +408,8 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         case allowedStackAxes, allowedTextRoles, allowedImageRoles, allowedButtonRoles
         case allowedStatusRoles, allowsTextInput, maximumPickerOptions, maximumSceneItems
         case allowsDivider, allowsFixedSpacer, allowsFlexibleSpacer
-        case allowsProceed, requiresProceed, allowsOverlay, allowedCustomSurfaceKinds
+        case allowsProceed, requiresProceed, allowsOverlay, allowsMedia
+        case allowedCustomSurfaceKinds
         case disclosureDetail
     }
 
@@ -454,6 +464,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         allowsProceed = try container.decodeIfPresent(Bool.self, forKey: .allowsProceed) ?? false
         requiresProceed = try container.decodeIfPresent(Bool.self, forKey: .requiresProceed) ?? false
         allowsOverlay = try container.decodeIfPresent(Bool.self, forKey: .allowsOverlay) ?? false
+        allowsMedia = try container.decodeIfPresent(Bool.self, forKey: .allowsMedia) ?? false
         allowedCustomSurfaceKinds = try container.decodeIfPresent(
             [ExtensionCustomSurfaceKind].self,
             forKey: .allowedCustomSurfaceKinds
@@ -779,6 +790,18 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
                     maximumTextLength: maximumTextLength
                 ))
             }
+
+        case .media(let document):
+            require(
+                allowsMedia,
+                path: path,
+                message: "media is not allowed",
+                issues: &issues
+            )
+            issues.append(contentsOf: document.validationIssues(
+                path: "\(path).document",
+                maximumTextLength: maximumTextLength
+            ))
 
         case .status(let text, let role):
             require(

@@ -173,7 +173,14 @@ final class ControlRowTests: XCTestCase {
             trailingInk, row.bounds.maxX, accuracy: 0.5,
             "the last action's mark sits \(row.bounds.maxX - trailingInk)pt off the row's edge"
         )
-        XCTAssertEqual(placed(chip, in: row).minX, row.bounds.minX, accuracy: 0.5)
+        // The chip states an inset of its own now that its plate is only drawn under the
+        // pointer, so what lands on the margin is its title rather than the edge of a shape
+        // nobody is looking at.
+        XCTAssertEqual(
+            placed(chip, in: row).minX + chip.opticalHorizontalInset,
+            row.bounds.minX,
+            accuracy: 0.5
+        )
         XCTAssertGreaterThan(
             placed(export, in: row).minX - placed(chip, in: row).maxX, Fixture.width / 2,
             "the actions collapsed back against the chip instead of holding the far edge"
@@ -242,7 +249,9 @@ final class ControlRowTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
 
         XCTAssertEqual(
-            placed(chip, in: row).minX, row.bounds.minX, accuracy: 0.5,
+            placed(chip, in: row).minX + chip.opticalHorizontalInset,
+            row.bounds.minX,
+            accuracy: 0.5,
             "the chip stayed indented past a button that is not on screen"
         )
     }

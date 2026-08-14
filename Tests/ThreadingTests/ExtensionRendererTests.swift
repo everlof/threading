@@ -5685,6 +5685,13 @@ private final class TestExtensionPanelRouter: ExtensionPanelRouting {
     nil
   }
 
+  func extensionMediaResourceData(
+    extensionIdentifier: String,
+    relativePath: String
+  ) -> Data? {
+    nil
+  }
+
   func invokePanelAction(
     extensionIdentifier: String,
     panelID: String,

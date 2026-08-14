@@ -165,6 +165,60 @@ final class UsageLimitStopTests: XCTestCase {
         XCTAssertNotNil(ClaudeTranscriptUsageLimit.known(at: url))
     }
 
+    /// The regression from session 4ce20d8d: moving the refused transcript to Daniel copied the
+    /// old account's 429 to a new path, whose empty cache announced it as a fresh Daniel refusal
+    /// and immediately offered Viktor. A migration carries the copied byte boundary, but not the
+    /// account-scoped stop, and still notices genuinely appended output afterwards.
+    @MainActor
+    func testAMigratedRefusalIsNotAnnouncedAgainOnTheDestinationAccount() throws {
+        let source = try transcript([refusal()])
+        let destination = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("migrated-usage-limit-\(UUID().uuidString).jsonl")
+        try FileManager.default.copyItem(at: source, to: destination)
+        addTeardownBlock { try? FileManager.default.removeItem(at: destination) }
+
+        ClaudeTranscriptUsageLimit.forgetAll()
+        defer { ClaudeTranscriptUsageLimit.forgetAll() }
+
+        let sourceRead = expectation(description: "source refusal read")
+        ClaudeTranscriptUsageLimit.revalidate(at: source) { stop in
+            XCTAssertNotNil(stop)
+            sourceRead.fulfill()
+        }
+        wait(for: [sourceRead], timeout: 5)
+
+        let copiedByteCount = try XCTUnwrap(
+            destination.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        )
+        ClaudeTranscriptUsageLimit.acknowledgeAccountMigration(
+            to: destination,
+            copiedByteCount: copiedByteCount
+        )
+        XCTAssertNil(
+            ClaudeTranscriptUsageLimit.known(at: destination),
+            "the copied refusal belongs to the account the conversation left"
+        )
+
+        let copiedRefusal = expectation(description: "copied refusal announced")
+        copiedRefusal.isInverted = true
+        ClaudeTranscriptUsageLimit.revalidate(at: destination) { _ in
+            copiedRefusal.fulfill()
+        }
+        wait(for: [copiedRefusal], timeout: 0.5)
+
+        let handle = try FileHandle(forWritingTo: destination)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((refusal(text: "Daniel reached a new limit") + "\n").utf8))
+        try handle.close()
+
+        let destinationRefusal = expectation(description: "destination refusal read")
+        ClaudeTranscriptUsageLimit.revalidate(at: destination) { stop in
+            XCTAssertEqual(stop?.message, "Daniel reached a new limit")
+            destinationRefusal.fulfill()
+        }
+        wait(for: [destinationRefusal], timeout: 5)
+    }
+
     // MARK: - The table and its contract
 
     /// The capability is what a surface asks before it has a session in hand; the switch in

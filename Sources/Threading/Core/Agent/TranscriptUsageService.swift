@@ -10,6 +10,9 @@ struct TranscriptUsageReport: Codable, Equatable, Sendable {
         var billedTokens: Int64
         var turns: Int
         var costUSD: Double = 0
+        /// See `Slice.runtimeID`. A checkout usually is worked in by more than one runtime, so
+        /// this is nil more often than it is set — which is the honest answer, not a gap.
+        var runtimeID: String?
     }
 
     struct Slice: Codable, Equatable, Sendable {
@@ -18,6 +21,14 @@ struct TranscriptUsageReport: Codable, Equatable, Sendable {
         var tokens: UsageTokenCounts = .init()
         var costUSD: Double = 0
         var records: Int = 0
+        /// The one runtime every cell folded into this slice came through, or nil when more than
+        /// one did.
+        ///
+        /// Attribution rather than a second axis: it exists so a breakdown row can wear the mark
+        /// of the agent that produced it, and a slice that cannot name one runtime wears none.
+        /// `nil` is absorbing — see `accumulate` — because "several" and "not known" are the same
+        /// answer to the only question asked of it.
+        var runtimeID: String?
     }
 
     struct Bucket: Codable, Equatable, Sendable {
@@ -205,11 +216,13 @@ struct UsageReportSelection: Equatable, Sendable {
                 label: cell.checkoutLabel,
                 billedTokens: 0,
                 turns: 0,
-                costUSD: 0
+                costUSD: 0,
+                runtimeID: cell.origin.runtimeID
             )
             checkout.billedTokens += cell.tokens.legacyBilled
             checkout.turns += cell.records
             checkout.costUSD += cell.costUSD
+            if checkout.runtimeID != cell.origin.runtimeID { checkout.runtimeID = nil }
             byCheckout[cell.checkoutPath] = checkout
         }
 
@@ -244,11 +257,19 @@ struct UsageReportSelection: Equatable, Sendable {
         name: String,
         cell: TranscriptUsageReport.Cell
     ) {
-        var value = values[key] ?? .init(name: name, billedTokens: 0)
+        var value = values[key] ?? .init(
+            name: name,
+            billedTokens: 0,
+            runtimeID: cell.origin.runtimeID
+        )
         value.tokens += cell.tokens
         value.billedTokens += cell.tokens.legacyBilled
         value.costUSD += cell.costUSD
         value.records += cell.records
+        // Absorbing on purpose: a slice already reading "several runtimes" (nil) can never be
+        // talked back into naming one, and a second runtime always removes the name. One
+        // comparison, no mixed-flag to keep in step with it.
+        if value.runtimeID != cell.origin.runtimeID { value.runtimeID = nil }
         values[key] = value
     }
 

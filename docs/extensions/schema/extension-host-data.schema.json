@@ -14,6 +14,60 @@
     { "$ref": "#/$defs/eventPage" }
   ],
   "$defs": {
+    "fileQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectID", "fileExtensions"],
+      "description": "The POST body for /v1/project-files/query. The extension supplies no path, glob, command or root \u2014 only an authorized project ID and, for a session workspace, the exact session whose execution checkout it wants.",
+      "properties": {
+        "projectID": { "type": "string", "minLength": 1 },
+        "scope": { "$ref": "#/$defs/fileScope" },
+        "fileExtensions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "type": "string", "pattern": "^[a-z0-9]{1,12}$" }
+        },
+        "maximumResults": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "cursor": { "type": "string", "minLength": 1 }
+      }
+    },
+    "fileScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["projectCheckout", "sessionWorkspace"] },
+        "sessionID": { "type": "string", "minLength": 1 }
+      }
+    },
+    "fileHandle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "relativePath", "byteSize", "modifiedAt"],
+      "description": "id is a content handle, not bytes and not a path that can be opened. It is generation-bound, revoked with the bearer token, and resolvable only by the host renderer that consumes it.",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "relativePath": { "type": "string", "minLength": 1 },
+        "byteSize": { "type": "integer", "minimum": 0 },
+        "modifiedAt": { "type": "string", "format": "date-time" },
+        "contentHint": { "type": "string", "minLength": 1 }
+      }
+    },
+    "filePage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "handles"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "handles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/fileHandle" }
+        },
+        "nextCursor": { "type": "string", "minLength": 1 }
+      }
+    },
     "cursor": {
       "type": "integer",
       "minimum": 0

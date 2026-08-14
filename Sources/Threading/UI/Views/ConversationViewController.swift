@@ -596,6 +596,7 @@ final class ConversationViewController: NSViewController {
         case timeline(Int)
         case divider(turnStart: Int)
         case fold(turnStart: Int)
+        case toolFold(firstIndex: Int)
         case retained(UUID)
         case streaming
     }
@@ -628,6 +629,7 @@ final class ConversationViewController: NSViewController {
                 duration: TimeInterval?,
                 outcome: TurnOutcome
             )
+            case toolFold(indices: [Int])
             case retained(NSView)
             case streaming(NSTextField)
         }
@@ -660,8 +662,13 @@ final class ConversationViewController: NSViewController {
     /// Disclosure state belongs outside recyclable views, so scrolling a row away and back does
     /// not collapse something the user opened.
     var expandedTurnStarts: Set<Int> = []
+    var expandedToolGroups: Set<Int> = []
     var expandedToolRows: Set<Int> = []
     var expandedUserRows: Set<Int> = []
+
+    /// The consecutive tool run at the presentation tail. Keeping this tiny bit of reduction
+    /// state makes extending a 500-call run O(1) instead of repeatedly walking its whole turn.
+    var activeToolGroupIndices: [Int] = []
 
     /// Turns already folded, by the row index of their opening user message, so a fold is
     /// never inserted twice.
@@ -1655,19 +1662,31 @@ final class ConversationViewController: NSViewController {
 
     /// Moves to the tool call before or after the top of the pane.
     ///
-    /// Walked over the **presentation** rather than the timeline, which is what makes a folded
-    /// turn's steps skip: they are not presented, so they are not places a reader can be sent.
+    /// Walked over the **presentation** rather than the timeline, which makes a settled turn's
+    /// folded work skip while a compact live tool group can expand at an exact target.
     @discardableResult
     func goToAdjacentStep(forward: Bool) -> Bool {
         let top = topVisibleTimelineIndex
         var target: Int?
 
         for item in forward ? presentationItems : presentationItems.reversed() {
-            guard case .timeline(let index) = item.content,
-                  timeline.rows.indices.contains(index),
-                  case .toolCall = timeline.rows[index] else { continue }
-            guard let top else { target = index; break }
-            if forward ? index > top : index < top { target = index; break }
+            let toolIndices: [Int]
+            switch item.content {
+            case .timeline(let index):
+                guard timeline.rows.indices.contains(index),
+                      case .toolCall = timeline.rows[index] else { continue }
+                toolIndices = [index]
+            case .toolFold(let indices):
+                toolIndices = forward ? indices : Array(indices.reversed())
+            case .timeline, .divider, .fold, .retained, .streaming:
+                continue
+            }
+
+            for index in toolIndices {
+                guard let top else { target = index; break }
+                if forward ? index > top : index < top { target = index; break }
+            }
+            if target != nil { break }
         }
 
         guard let target else { return false }
@@ -1689,6 +1708,7 @@ final class ConversationViewController: NSViewController {
         _ index: Int,
         animated: Bool
     ) -> ExactNavigationMeasurements? {
+        revealToolGroup(containing: index)
         guard let tableRow = presentationRow(forTimelineIndex: index) else { return nil }
 
         // The user deliberately went somewhere; only their own gesture re-pins.

@@ -407,6 +407,89 @@ final class MediaInspectorTests: XCTestCase {
         XCTAssertTrue(ThemeBoundaryAudit.violations(in: document).isEmpty)
     }
 
+    /// The crash of 2026-08-13, as a test. Quick Look closes a `QLPreviewView` with the window it
+    /// is in, and setting an item on a closed one aborts the process — so a document view that
+    /// outlives a window (the Attachments tab detached into its own window, then closed, which
+    /// hands the same controller back to the display panel) must not keep its renderer.
+    func testAClosedWindowLeavesTheDocumentViewAbleToPreviewAgain() throws {
+        let file = try documentFile(named: "notes.txt")
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let window = quickLookFixtureWindow()
+        let document = MediaInspectorDocumentView(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+        window.contentView?.addSubview(document)
+
+        XCTAssertTrue(document.display(file))
+        XCTAssertTrue(document.hasQuickLookRendererForTesting)
+
+        window.close()
+        XCTAssertFalse(
+            document.hasQuickLookRendererForTesting,
+            "a renderer Quick Look closed with its window was kept for the next document"
+        )
+
+        // The line that used to abort: the same view, asked for the same file, after the window
+        // that owned its renderer went away.
+        XCTAssertTrue(document.display(file))
+        XCTAssertTrue(document.hasQuickLookRendererForTesting)
+    }
+
+    /// The move production actually makes: a tab's controller is unparented and installed
+    /// somewhere else, which takes its renderer with it. The document has to survive that on its
+    /// own — nothing re-runs the pane's preview for a tab that merely came back.
+    func testADocumentViewCarriesItsPreviewBetweenWindows() throws {
+        let file = try documentFile(named: "handover.txt")
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let document = MediaInspectorDocumentView(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+        let first = quickLookFixtureWindow()
+        first.contentView?.addSubview(document)
+
+        XCTAssertTrue(document.display(file))
+        XCTAssertTrue(document.hasQuickLookRendererForTesting)
+
+        document.removeFromSuperview()
+        XCTAssertFalse(
+            document.hasQuickLookRendererForTesting,
+            "a renderer outlived the window it was built in"
+        )
+
+        let second = quickLookFixtureWindow()
+        second.contentView?.addSubview(document)
+        XCTAssertTrue(
+            document.hasQuickLookRendererForTesting,
+            "a document view that changed windows came back with an empty preview"
+        )
+        XCTAssertTrue(document.subviews.allSatisfy { document.permitsSystemChrome($0) })
+
+        document.clear()
+        document.removeFromSuperview()
+        first.contentView?.addSubview(document)
+        XCTAssertFalse(
+            document.hasQuickLookRendererForTesting,
+            "a cleared preview came back when the view changed windows"
+        )
+    }
+
+    /// The same rule from the other door: the lightbox closes its renderer when it goes away, and
+    /// the next document it is asked for gets a new one rather than the closed one.
+    func testAClosedDocumentViewPreviewsAgainWithoutItsClosedRenderer() throws {
+        let file = try documentFile(named: "receipt.txt")
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let document = MediaInspectorDocumentView(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+
+        XCTAssertTrue(document.display(file))
+        XCTAssertTrue(document.hasQuickLookRendererForTesting)
+
+        document.close()
+        XCTAssertFalse(
+            document.hasQuickLookRendererForTesting,
+            "closing kept the renderer it had just closed"
+        )
+
+        XCTAssertTrue(document.display(file))
+        XCTAssertTrue(document.hasQuickLookRendererForTesting)
+        XCTAssertTrue(document.subviews.allSatisfy { document.permitsSystemChrome($0) })
+    }
+
     func testInspectorTreeIsThemeClean() throws {
         let fixture = try imageFiles(count: 3)
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
@@ -617,6 +700,37 @@ final class MediaInspectorTests: XCTestCase {
             "ThreadingRenders",
             isDirectory: true
         )
+    }
+
+    /// Quick Look completes display-bundle activation asynchronously, so a fixture window that
+    /// held a `QLPreviewView` is retained past teardown — the same parking
+    /// `SessionAttachmentsLayoutTests` keeps for its archive fixture.
+    private static var parkedQuickLookWindows: [NSWindow] = []
+
+    /// An unshown window, parked for the process's lifetime: a fixture that held a `QLPreviewView`
+    /// is never released inside XCTest's teardown.
+    private func quickLookFixtureWindow() -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        Self.parkedQuickLookWindows.append(window)
+        return window
+    }
+
+    /// A file Quick Look renders and Threading does not, which is what routes a preview through
+    /// `QLPreviewView` rather than PDFKit or the canvas.
+    private func documentFile(named name: String) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "threading-media-inspector-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent(name)
+        try Data("A document the app has no renderer of its own for.\n".utf8).write(to: url)
+        return url
     }
 
     private func imageFiles(count: Int) throws

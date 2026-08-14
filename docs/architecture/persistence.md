@@ -198,6 +198,58 @@ unregistered key, and `bool(forKey:)` answers `false`, which for every seeded se
 are registered by the readers themselves now; registration is idempotent, and an invariant that
 depends on instantiation order is not an invariant.
 
+## Two Writers, and the Reconcile That Trusted There Was One
+
+`save(_:)` reconciles rather than rewrites: upsert what is there, delete what has gone. That is
+the right shape for the single writer `SingleInstanceLock` promises, and it is unsurvivable for a
+second one — a stale snapshot's reconcile deletes rows it never knew existed, and `session`'s
+`ON DELETE CASCADE` takes each project's chats with it. There was a second writer, and it cost a
+user real projects.
+
+**The hosted XCTest bundle was the second writer.** It runs inside the shipping app, so
+`StateManager.shared` resolved the developer's own Application Support directory and
+`ProjectStore.shared` opened their live `threading.db`. Twenty test classes mutate that singleton
+— `SessionComposerRenderTests` alone calls `addProject` a dozen times — and every one of those
+calls `save()`. The test host never acquires the lock that was supposed to prevent exactly this:
+`applicationDidFinishLaunching` returns on `NSClassFromString("XCTestCase")` *before* the
+`SingleInstanceLock.acquire()` whose own comment says a second instance "must never get far
+enough to write". So a test run's snapshot, frozen at whenever its `ProjectStore.shared` first
+loaded, deleted every project the user added afterwards. The diagnosis is not inferential: fixture
+project rows for `/var/folders/…/T/sound-scope-…`, `theme-menu-…` and `threading-drawer-drag-…`
+were recovered from the live database, and two `threading.db.corrupt-*` files hold four projects
+that no longer exist anywhere.
+
+Two changes, because either alone leaves the failure reachable.
+
+- **`StateManager` redirects under a hosted test** (`isHostedTest`), to a scratch directory keyed
+  by pid — per-process because concurrent agents run this suite on one machine, and two runs
+  sharing a store would be the same race one directory further out. This is the fix; every other
+  store that matters already had this guard, and the one holding the projects and chats did not.
+  A killed run leaks a scratch directory into the OS temporary directory, which is deliberate:
+  sweeping the siblings would let one run delete a live one's store.
+- **The reconcile proves it is current before it prunes.** `app_state.storeGeneration` counts
+  changes to *which* rows exist; `load` records it, and `save(_:)` re-reads it inside its own
+  transaction and throws `ProjectDatabaseWriteError.staleGeneration` rather than deleting when it
+  has moved. `removeSession` advances it too, being the other write that changes membership;
+  `saveProject` and `saveSelectedSessionID` do not, because neither adds or removes a row and
+  charging an expansion toggle for a counter write was the cost those paths exist to avoid.
+
+A refusal is **not** `requireRecovery()`. Nothing is corrupt — the store is intact and this writer
+is merely behind it — so quarantining would take a launch's writes away over a guard that already
+did its job. `ProjectStore` sees the failed write, rolls back to its last persisted snapshot, and
+the row the other writer added survives. Refusing costs one unsaved edit; pruning cost projects.
+
+It needed no migration and no `user_version` bump: `app_state` is key/value, and a build without
+the guard simply ignores the key. Living in the same transaction as the reconcile is what makes
+the check meaningful — read it outside and another writer commits between the check and the
+`DELETE`.
+
+`HostedStoreTestCase` is the test-side half, and it fails loudly rather than quietly: its teardown
+asserts `StateManager.sharedUsesHostedTestState` before erasing anything, so a build that undoes
+the redirect fails the suite instead of deleting the developer's projects on the way past.
+`HostedStoreIsolationTests` reproduces the loss directly — two connections, one adds a project,
+the stale one's reconcile must throw and leave that project standing.
+
 ## The Pre-Rename Directory
 
 The rename to Threading moved the Application Support directory with the app —

@@ -75,7 +75,8 @@ Components so far:
 
 | | |
 |---|---|
-| `ChipView` | A compact chooser that opens a menu. It is a flat pill by default; a material may request the classic square dropdown anatomy: sunken value well, separate raised arrow button, regular control text, and no SF-symbol decoration. The same authorable choice carries through the shared menu presenter, whose compact rows, flat selection band, etched separators, filled arrows, edge attachment, and hard panel edge complete the control instead of leaving a modern popover under a period button. |
+| `ChipView` | A compact chooser that opens a menu. **The pill is the hover, not the chip**: at rest it draws no plate, no border and no glow — the answer it is showing is content, and content on this surface is set in text, which is the rule `PageTitleView` and every plain `ThemedButton` already keep. The plate rises for the three states that mean *you are on this one* — the pointer, an open menu, the keyboard focus — and the ink rises with it on one ramp: the title `secondary`→`label`, the mark and chevron `tertiary`→`secondary`. Quiet at rest because a row of settings is not the content of the screen it sits under; the step is **ink only**, at a fixed `controlRegular` weight, since a bolder face on hover is a wider one and the row would reflow under the pointer. `horizontalPadding` is `Spacing.small` and is carried by the frame in every state, so nothing reflows as the plate appears, and `OpticalInsetProviding` reports it for a row aligning by ink. A material may instead request the classic square dropdown anatomy: sunken value well, separate raised arrow button, regular control text, and no SF-symbol decoration. The same authorable choice carries through the shared menu presenter, whose compact rows, flat selection band, etched separators, filled arrows, edge attachment, and hard panel edge complete the control instead of leaving a modern popover under a period button. See [2026-08-13 below](#2026-08-13--a-row-of-pills-was-six-objects-where-the-answer-was-six-words). |
+| `UsageReadingLabel` | An account's rate-limit windows as one line — `5h 43% · 7d 73%` — that gives up **whole windows** rather than characters when the row squeezes it. Given room for one it states one, complete; given room for none it draws nothing and leaves the row to the controls. Its intrinsic width is always the whole line, so a dropped window returns when the window widens — sizing to what it last drew would be a ratchet. One composition, shared with the toolbar pill (`AccountUsageItemView`), so the reading a session is started on is the reading the pill goes on showing: name a tier under value, and the value tinted only once its window is close enough to its limit for the colour to mean anything. |
 | `CodeContextPreviewView` | The bounded diff-shaped context above a code-comment field. It keeps two neighbouring rendered rows around an ordinary target, preserves additions/removals and line numbers, and marks every target row with the theme's selection surface plus a leading `›` so the distinction survives without colour. The presentation model draws at most ten code rows; a larger selection retains both ends around one counted omission row, while the attachment still carries the complete selected excerpt. |
 | `ConversationContextRailView` | The compact reference/comment receipts shared by the Chat composer and sent-message transcript. It groups a large batch into quiet count chips, then uses the themed menu for inspection, removal, re-reference, and comment actions. |
 | `SubagentSummaryView` | The compact child-agent navigator shared by the overview and transcript pane. Feature code supplies `SubagentSummaryItem.TranscriptAvailability` as one of three states: unavailable, openable from memory/while still running, or on disk with the file URL. A file-backed row is therefore structurally openable and revealable; the chevron and Finder action cannot disagree through independent Boolean/optional inputs. |
@@ -90,7 +91,9 @@ Components so far:
 | `ThemedButton` | A drop-in `NSButton`: bordered, plain, or prominent — `emphasis` names those three as primary/secondary/tertiary, `buttonStyle.primaryTreatment` decides whether a primary is filled, outlined, or a classic raised default action, and `shortcut` draws the chord it answers to on its own face. `buttonStyle.titleRendering: pixel_5x6` selects the clean-room one-bit display alphabet for supported titles; a title containing any unsupported localized character stays whole and falls back to the scalable font. |
 | `ThemedTextField` | A drop-in editable `NSTextField`, bezel drawn rather than stock. `SurfacePresentation.persistent` is the ordinary standing well; `.onInteraction` keeps the same text inset, frame and hit target while drawing no plate at rest, raises `controlHover` under the pointer, and restores the ordinary well and focus ring for editing — the browser address bar's content-first grammar. `Design.Size.fieldHeight`, its own step: it borrowed `chipHeight` for as long as a field was "a chip you can type in", and a chip holds a word at rest where a field holds a caret. With a 2pt rule on each side, 26 left twenty points inside for a 13pt face — about three points of air — and the text read as wedged against the border. The two fields placed by frame rather than by intrinsic size (`TextPromptDefaults.fieldHeight`, `SidebarDefaults.renameFieldHeight`) restate the same token. |
 | `ThemedSearchField` | The same field with a magnifier, replacing `NSSearchField`. |
-| `SearchMatchLabel` | The other half of a search field: a line of text that says which of its own words the query accounts for. **Two signals, always both** — the matched run takes its role's `emphasized` weight *and* `Design.Surface.searchMatch`, an accent held at `Opacity.searchMatchGround` behind it. Weight alone vanishes in a list where several rows matched; a tint alone is the first thing Differentiate Without Colour takes away. It is a component rather than a call to `NSTextField.label(attributed:)` because an attributed string freezes its fonts and inks and `AppThemeRefresh`'s sweep re-resolves a *recorded role*, which it cannot reach inside — so this rebuilds on `AppThemeDidChange`, the same wiring `ThemedTextField`'s placeholder carries. `SearchTextMatch` is where "a query landed here" is decided, and filters may read its `comparisonOptions` so a result cannot be admitted by a more forgiving spelling than the mark uses. Its second rule is the one to know: **a token containing the whole line marks all of it**, which is what makes a row showing eight characters of a session id answer honestly to a pasted thirty-six-character one. The settings sidebar deliberately stays simpler: it filters its page destinations live and leaves the pane already being read in place until a destination is chosen. |
+| `SearchMatchLabel` | The other half of a search field: a line of text that says which of its own words the query accounts for. **Two signals, always both** — the matched run takes its role's `emphasized` weight *and* `Design.Surface.searchMatch`, an accent held at `Opacity.searchMatchGround` behind it. Weight alone vanishes in a list where several rows matched; a tint alone is the first thing Differentiate Without Colour takes away. It is a component rather than a call to `NSTextField.label(attributed:)` because an attributed string freezes its fonts and inks and `AppThemeRefresh`'s sweep re-resolves a *recorded role*, which it cannot reach inside — so this rebuilds on `AppThemeDidChange`, the same wiring `ThemedTextField`'s placeholder carries. `SearchTextMatch` is where "a query landed here" is decided, and filters may read its `comparisonOptions` so a result cannot be admitted by a more forgiving spelling than the mark uses. Its second rule is the one to know: **a token containing the whole line marks all of it**, which is what makes a row showing eight characters of a session id answer honestly to a pasted thirty-six-character one. |
+| `SearchResultRowView` | One destination a search turned up, with where it lives: a `SearchMatchLabel` title over a quiet caption path line — the settings sidebar's "Alert sound / Notifications" under the General row. A component of its own rather than a taller `ThemedTabItemView`: a tab names a *place* and holds one line forever, while a result names a thing the reader just asked for and owes them the path to it; what the two share (hover plate, press, keyboard activation, focus ring, ink source) they share through `BackdropThemedControl`. The host hands it the leading inset of the rows above so results align with the page row's title ink. Choosing one reports page **and** row, because the row is the answer — the settings sidebar routes that through `SettingsRowReveal`, which scrolls the built page to the anchored row (`SettingsRowAnchor`, the tag `SettingsUI` puts on every titled row) and stands the wash below on it. |
+| `RevealHighlightView` | The wash a search leaves on the row it just scrolled to: `Design.Surface.searchMatch` — the same ground `SearchMatchLabel` puts behind matched text, so "the query landed here" is one signal at both scales — fading in, standing `Design.Motion.revealHold`, and leaving. Decorative by contract: `hitTest` nil, not an accessibility element (the reveal posts its own announcement), drawn in `draw(_:)` so a live theme switch re-resolves it. The fades collapse under Reduce Motion; the hold does not, because a hold is not movement and being seen standing still is its whole job. |
 | `SemanticSceneView` | A bounded semantic visualization drawn from normalized marks. It is intentionally not a named chart or extension-specific tree: rectangles, rounded rectangles, and ellipses cover treemaps, heatmaps, timelines, scatter plots, and bubbles. Measured values belong in `ChartCardView` instead: this component is handed geometry and trusts it, which is the right contract for a caller that already has coordinates and the wrong one for a caller that has numbers. Each mark is a native accessible element and, when actionable, a `ThemedControl` with pointer, keyboard, hover, focus, enabled, and selected states. Callers supply semantic colour roles; the design system owns every pixel. |
 | `ChartCardView` | One agent-produced chart — title plus chart — over a `ChartSpec` of values, categories and words. The same card serves the display panel and an inline conversation row, so a chart the user scrolled past and a chart they opened in the panel cannot be two different pictures. It answers `preferredHeight(for:)` before it exists, which is what a virtualized transcript row needs, and rounds the value axis to a readable ceiling rather than fitting it to the data. Re-applying a spec re-animates the retained chart; only a change of composition rebuilds it, because a stacked total cannot be interpolated from independent heights without drawing a frame that described no data. |
 | `ThemedTimeSeriesChartView` / `ThemedStackedBandChartView` | Two reusable retained time-series boundaries over the same data model. The first keeps independent zero-baseline series; the second requires aligned timestamps and draws additive bands whose final upper edge is the total. Both own axes, native drawing, bounded monotone curves, hover/keyboard inspection, accessibility, a 240-point-per-series cap, two-edge morph animation and synchronous Reduce Motion. Material selects presentation: continuous curves normally, or a segmented spectrum analyzer for Classic Player and imported player skins. Projections may remain explicitly linear and dashed in either material. Both also draw **bars** — grouped or stacked, vertical or as a horizontal ranking — over a categorical axis, on the same geometry: a bar is `baselineY → y` in the space a line already occupies, so composition alone decides grouped versus stacked. A bar stays a bar in every material; the spectrum analyzer renders filled bands, and running a three-category comparison through it answers the question with a column of cells. With nothing to plot the model's `emptyMessage`/`emptyDetail`/`placeholder` reach `ThemedChartPlaceholderView` and the **value axis prints no numbers**: an empty chart labelling its rules 0/0.2/0.5/0.8/1 is the automatic domain describing itself rather than anything anyone measured. See [`usage-dashboard.md`](usage-dashboard.md) and [`mcp-and-display.md`](mcp-and-display.md). |
@@ -2219,3 +2222,137 @@ itself is a rendered state (`toast-opened-*`), since whether three strips of wor
 a 240-point column read as a queue or as a wall over the list is not a thing an assertion says —
 rendered through `openDeck(_:animated:)`, whose unanimated path exists so a still is a picture of
 the settled deck rather than of one two frames into opening.
+
+## 2026-08-13 — a row of pills was six objects where the answer was six words
+
+Reported from a screenshot of the session composer with three arrows on it. The first: *can we
+make all the "pill" only show the actual pill on hover, and just be plain text when not — that
+would make them take less space and look cleaner.*
+
+The vocabulary already said this and the chip was the one control not keeping it. A plain
+`ThemedButton` is "a mark until it is wanted"; `PageTitleView` has no plate at rest and raises a
+quiet one under the pointer; `ThemedIconButton` rests on a clear fill. `ChipView` alone wore a
+`controlResting` plate at all times — and a chip is not an action waiting to be taken, it is an
+**answer being shown**, so the plate was contrast spent on saying "control" beside the words the
+user is writing. Six of them along the composer's footer read as six objects.
+
+So the plate now belongs to the pointer: `.clear` at rest, `controlHover` for the three states
+that mean *you are on this one* — hovered, menu open, keyboard focus — and the control glow goes
+with it, since a theme that haloes its controls would otherwise ring a plate nobody drew.
+
+**The ink moves with the plate, on one ramp.** Removing the plate alone left the row *louder*
+than before: white `label` text at the control face's medium weight, with nothing around it to
+share the contrast, was the brightest thing in a composer whose point is the brief being typed
+above it. The second look at the same screenshot said so — "a little more subtle… compare to
+Cursor/ChatGPT, it is not the main focus" — and both of those draw the same row as muted
+regular-weight text with a small chevron. So a chip rests at `secondary` for its title and
+`tertiary` for its mark and chevron, and the pointer lifts each one tier while the plate appears.
+The title is deliberately **not** kept at full strength: the earlier note here argued it was the
+answer and had to stay bright, which is true of a chip standing alone and false of six in a row
+under the thing they modify — the hover is what makes one of them the answer being read.
+
+The step is ink only. The weight is fixed at `controlRegular`, one tier below the `control` face
+this app gives an *action*: a bolder face on hover is a **wider** face, and a row that reflowed
+under the pointer would be a worse distraction than the one this quiets. A period material is
+exempt — its value sits in a drawn well, and a well is a container for a value at full strength.
+
+**A sub-point of rounding is not a squeeze.** Dropping to regular took away a point of slack the
+medium measurement happened to carry, and `Claude Code · Everlof` began drawing as
+`Claude Code · Everl…` inside a chip whose frame was its own full intrinsic width. The repair
+already existed for the classic anatomy — a minimum on the label itself at `defaultHigh`, since
+a text cell's natural width is fractional and stack layout rounds the arranged frame down — and
+it is now stated for every anatomy. The chip's own edge pins are required, so a real squeeze
+still costs characters; only the rounding no longer does.
+
+**The padding stayed in the frame, and shrank a step.** Nothing may move as the plate appears — a
+run of chips that reflowed under the pointer would trade one distraction for a worse one — so the
+frame carries the plate's padding at rest as well, and `OpticalInsetProviding` reports it so a
+`ControlRowView` puts the chip's *text* on the margin rather than the edge of a shape that is not
+drawn. But ten points is what a **drawn** pill needs to hold its text clear of the curve at each
+end, and at rest there is no curve: on the composer's footer that was eighty points of invisible
+air in the one row with none to spare. `ChipView.horizontalPadding` is `Spacing.small`, and the
+plate still reads at six points because only one chip wears it at a time.
+
+### The reading beside the send was not short of room; it was bidding against a gap for it
+
+The second arrow pointed at `5h 86…` — *this is so compacted that it can't be read* — and it was
+two bugs wearing one symptom.
+
+**A tail-truncated reading is not a shorter reading.** The line was an `NSTextField` with
+`byTruncatingTail` and the row's lowest compression resistance, on the reasoning that a chip is
+unreadable half-drawn while a reading keeps its meaning as it loses characters. That is wrong
+about where a reading's meaning lives: what `5h 86…` lost is the `%` that made the number a
+proportion, and the week beside it went without a trace. `UsageReadingLabel` gives up **windows**
+instead — the whole line, else one complete reading, else nothing at all, with the full pair still
+on the tooltip and the accessibility value. Its intrinsic width stays the whole line whatever it
+last drew, so a widened window brings the dropped window back; sizing to the drawn text would have
+made the first squeeze permanent.
+
+**And the row had slack the reading never saw.** `PromptView`'s footer spacer held `defaultLow`
+for both hugging and compression resistance — which is the usage reading's own compression
+resistance to the point. Two claims on the same slack at the same priority is an ambiguous system,
+and it was resolved by squeezing the reading to a third of its width and handing the difference to
+the gap: a footer sitting on spare points beside a truncated number. The spacer is
+`PromptViewDefaults.spacerPriority` (1) now, the same value and the same sentence as the
+composer's own `chipSpacer`: the empty middle stretches last and collapses first.
+
+Measured on the row from the screenshot — five posture chips and a two-window reading in a
+720-point column — the reading went from 31 points (nothing drawable) to enough for a complete
+window, and `SessionComposerRenderTests` pins both ends of it: whole windows in the crowded row,
+and no squeeze at all in a roomy one.
+
+### A dimmed glyph with its reason on a tooltip is the same dead end, quieter
+
+The third arrow, on the schedule clock: *why is this disabled for me?*
+
+Because a screenshot was attached, and a pasted screenshot is a file in a temporary directory that
+a plan firing on Monday cannot count on. `scheduleEntries` already answered that in a sentence —
+written, in that file, on the stated grounds that "nothing happened when I clicked it" is the
+worst possible answer — and `refreshScheduleChip` then disabled the button, so the press never
+arrived and the sentence was reachable only by hovering long enough for a tooltip. The composer
+makes the opposite promise about its send two hundred lines earlier: it "says why rather than
+sitting there dimmed with nothing to explain itself".
+
+The button is always pressable now and the menu is the refusal — one disabled row carrying the
+sentence. The missing-project case joined it rather than returning an empty menu, using the
+composer's existing `chooseProjectFirstReason`, so the screen states one blocker once instead of
+in three phrasings.
+
+## 2026-08-13 — a dropdown covered the seam, but not the cursor over it
+
+Reported straight from use: **"if a dropdown is open and I have the mouse inside it, but behind it
+there's a pane, the cursor turns ↔ even though it's still inside the dropdown."**
+
+Nothing about the menu was wrong. `ThemedMenuPresenter` draws a dropdown as a *view* over the
+window's content — deliberately, and for four reasons stated on that file — and AppKit's cursor
+rectangles are a **window's** list, not a view's. `ThemedSplitView` puts a resize rectangle over
+each seam; the menu overlay registered none; so the strip of window where a seam ran behind the
+open panel kept answering the pointer with the divider's arrows. The one thing a click could reach
+there was the menu, and the cursor was offering to drag a pane edge. Every platform menu escapes
+this by being a window of its own, whose cursor rectangles stop at its own edges.
+
+The fix is the switch AppKit already has for a surface that has taken a window over —
+`NSWindow.disableCursorRects()` — held for as long as the dropdown is up, with the arrow set once
+on the way in, because disabling stops the *next* answer and leaves whatever the seam already put
+on screen. A menu opened by pressing a control that sits beside a divider is exactly the case that
+needs that second line.
+
+**What AppKit does not have is a count**, and that is why `CoveredWindowCursor` exists rather than
+two calls inside the menu session. Measured on `NSWindow`: two `disableCursorRects()` followed by
+one `enableCursorRects()` leave cursor management **on**. One surface closing inside another would
+therefore hand back a window the outer one is still covering. The claims are counted here, keyed
+weakly to the covering view, and a surface that leaves its window without releasing stops counting
+on the next claim — the failure being guarded against is a window whose cursor never answers again
+for the rest of the session, which is not a thing to leave to a `guard` somebody may move.
+
+**Only a surface that answers for every cursor beneath it may claim, and that is the boundary of
+this fix.** A dropdown qualifies: it covers the whole content view and contains nothing that wants
+a cursor other than the arrow. A modal on an `InWindowOverlay` scrim does not — the command
+palette's search field, the media inspector's drag handles and its own resize rectangles are
+registered in the same window's list, so a window-wide switch would silence the cursors it means
+to keep along with the ones it means to stop. The scrim has the same defect over a seam it covers,
+and it needs a different answer: either a claim held only while the pointer is over the bare scrim
+rather than over the surface in front of it, or a cursor rectangle on the scrim itself if a
+front-most rectangle is shown to win over one behind it. That precedence is **not** established —
+an attempt to measure it in a scratch app failed to make its window key, and no measurement means
+no rule. Do not extend `CoveredWindowCursor` to the scrim on the assumption either way.

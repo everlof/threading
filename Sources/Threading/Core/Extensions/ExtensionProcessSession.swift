@@ -90,6 +90,10 @@ enum ExtensionProcessError: LocalizedError {
 /// request if the child exits.
 final class ExtensionProcessSession: @unchecked Sendable {
     static let defaultTimeout: TimeInterval = 3
+    /// Shorter than an action's, because a preview offer happens while the user is looking at a
+    /// row they just selected: a candidate that has not answered by now is one the shell should
+    /// already have moved past.
+    static let attachmentPreviewTimeout: TimeInterval = 1.5
     static let maximumLineBytes = 1024 * 1024
     private static let maximumDiagnosticBytes = 64 * 1024
 
@@ -116,6 +120,9 @@ final class ExtensionProcessSession: @unchecked Sendable {
     typealias ToolCompletion = @MainActor @Sendable (
         Result<ExtensionMCPToolResponse, Error>
     ) -> Void
+    typealias AttachmentPreviewCompletion = @MainActor @Sendable (
+        Result<ExtensionAttachmentPreviewResponse, Error>
+    ) -> Void
 
     private struct PendingAction {
         let actionID: String
@@ -134,6 +141,12 @@ final class ExtensionProcessSession: @unchecked Sendable {
     private struct PendingTool {
         let toolID: String
         let completion: ToolCompletion
+        let timeoutItem: DispatchWorkItem
+    }
+
+    private struct PendingAttachmentPreview {
+        let attachmentID: String
+        let completion: AttachmentPreviewCompletion
         let timeoutItem: DispatchWorkItem
     }
 
@@ -180,6 +193,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
     private var startupResult: Result<ExtensionRegistration, Error>?
     private var pendingActions: [String: PendingAction] = [:]
     private var pendingNavigators: [String: PendingNavigator] = [:]
+    private var pendingAttachmentPreviews: [String: PendingAttachmentPreview] = [:]
     private var pendingCommands: [String: PendingCommand] = [:]
     private var pendingSettings: [String: PendingSettings] = [:]
     private var pendingServices: [String: PendingService] = [:]
@@ -407,6 +421,78 @@ final class ExtensionProcessSession: @unchecked Sendable {
             }
         } catch {
             deliver(.failure(error), to: completion)
+        }
+    }
+
+    /// Offers one attachment to this extension and waits for its answer.
+    ///
+    /// The timeout is shorter than an action's: a preview offer happens while the user is looking
+    /// at a selected row, and a candidate that has not answered promptly is one the shell should
+    /// have moved past already.
+    func invokeAttachmentPreview(
+        _ attachment: ExtensionAttachmentContext,
+        requestID: String = UUID().uuidString.lowercased(),
+        timeout: TimeInterval = attachmentPreviewTimeout,
+        completion: @escaping AttachmentPreviewCompletion
+    ) {
+        let request = ExtensionAttachmentPreviewRequest(
+            requestID: requestID,
+            attachment: attachment
+        )
+        do {
+            try request.validate()
+            var encoded = try JSONEncoder().encode(request)
+            encoded.append(0x0A)
+            let data = encoded
+
+            let timeoutItem = DispatchWorkItem { [weak self] in
+                self?.timeOutAttachmentPreview(requestID: requestID)
+            }
+            let pending = PendingAttachmentPreview(
+                attachmentID: attachment.attachmentID,
+                completion: completion,
+                timeoutItem: timeoutItem
+            )
+
+            lock.lock()
+            guard !isStopped, child.isRunning else {
+                lock.unlock()
+                deliverAttachmentPreview(
+                    .failure(ExtensionProcessError.notRunning),
+                    to: completion
+                )
+                return
+            }
+            guard requestIDIsAvailableLocked(requestID) else {
+                lock.unlock()
+                deliverAttachmentPreview(
+                    .failure(ExtensionProcessError.invalidMessage(
+                        "request id “\(requestID)” is already pending"
+                    )),
+                    to: completion
+                )
+                return
+            }
+            pendingAttachmentPreviews[requestID] = pending
+            lock.unlock()
+
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(
+                deadline: .now() + timeout,
+                execute: timeoutItem
+            )
+            writeQueue.async { [weak self] in
+                guard let self else { return }
+                do {
+                    try self.stdin.fileHandleForWriting.write(contentsOf: data)
+                } catch {
+                    self.finish(
+                        with: ExtensionProcessError.writeFailed(error.localizedDescription),
+                        terminate: true
+                    )
+                }
+            }
+        } catch {
+            deliverAttachmentPreview(.failure(error), to: completion)
         }
     }
 
@@ -854,6 +940,10 @@ final class ExtensionProcessSession: @unchecked Sendable {
                 try handleNavigatorResponse(data)
                 return
             }
+            if hasPendingAttachmentPreview(requestID: envelope.requestID) {
+                try handleAttachmentPreviewResponse(data)
+                return
+            }
             if hasPendingCommand(requestID: envelope.requestID) {
                 try handleCommandResponse(data)
                 return
@@ -941,6 +1031,80 @@ final class ExtensionProcessSession: @unchecked Sendable {
         lock.unlock()
         action?.timeoutItem.cancel()
         return action
+    }
+
+    /// One candidate's answer to a preview offer.
+    ///
+    /// A **decline is not a failure**: an extension that previews Lottie declines every PDF it is
+    /// offered, and the shell simply moves to the next candidate. What is refused here is an
+    /// answer about a different attachment, or a body outside the contract's vocabulary — either
+    /// would let the ordering that decides the winner be decided by the candidate instead.
+    private func handleAttachmentPreviewResponse(_ data: Data) throws {
+        let response = try JSONDecoder().decode(
+            ExtensionAttachmentPreviewResponse.self,
+            from: data
+        )
+        guard let pending = takePendingAttachmentPreview(requestID: response.requestID) else {
+            finish(
+                with: ExtensionProcessError.responseForUnknownRequest(response.requestID),
+                terminate: true
+            )
+            return
+        }
+        do {
+            try response.validate()
+        } catch {
+            let detail = (error as? ExtensionValidationError)?.description
+                ?? error.localizedDescription
+            deliverAttachmentPreview(
+                .failure(ExtensionProcessError.invalidMessage(detail)),
+                to: pending.completion
+            )
+            return
+        }
+        guard response.attachmentID == pending.attachmentID else {
+            deliverAttachmentPreview(
+                .failure(ExtensionProcessError.invalidMessage(
+                    "the preview answered for a different attachment"
+                )),
+                to: pending.completion
+            )
+            return
+        }
+        deliverAttachmentPreview(.success(response), to: pending.completion)
+    }
+
+    private func timeOutAttachmentPreview(requestID: String) {
+        guard let pending = takePendingAttachmentPreview(requestID: requestID) else { return }
+        deliverAttachmentPreview(
+            .failure(ExtensionProcessError.actionTimedOut(pending.attachmentID)),
+            to: pending.completion
+        )
+    }
+
+    private func takePendingAttachmentPreview(
+        requestID: String
+    ) -> PendingAttachmentPreview? {
+        lock.lock()
+        let pending = pendingAttachmentPreviews.removeValue(forKey: requestID)
+        lock.unlock()
+        pending?.timeoutItem.cancel()
+        return pending
+    }
+
+    private func hasPendingAttachmentPreview(requestID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return pendingAttachmentPreviews[requestID] != nil
+    }
+
+    private func deliverAttachmentPreview(
+        _ result: Result<ExtensionAttachmentPreviewResponse, Error>,
+        to completion: @escaping AttachmentPreviewCompletion
+    ) {
+        Task { @MainActor in
+            completion(result)
+        }
     }
 
     private func handleNavigatorResponse(_ data: Data) throws {
@@ -1201,6 +1365,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
             && pendingSettings[requestID] == nil
             && pendingServices[requestID] == nil
             && pendingTools[requestID] == nil
+            && pendingAttachmentPreviews[requestID] == nil
     }
 
     private func completeStartup(_ result: Result<ExtensionRegistration, Error>) {
@@ -1231,6 +1396,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
         let settings: [PendingSettings]
         let services: [PendingService]
         let tools: [PendingTool]
+        let previews: [PendingAttachmentPreview]
         let observer: (@MainActor @Sendable (Error) -> Void)?
         var shouldSignalStartup = false
 
@@ -1256,6 +1422,8 @@ final class ExtensionProcessSession: @unchecked Sendable {
         pendingServices.removeAll()
         tools = Array(pendingTools.values)
         pendingTools.removeAll()
+        previews = Array(pendingAttachmentPreviews.values)
+        pendingAttachmentPreviews.removeAll()
         terminalError = error
         observer = terminationObserver
         terminationObserver = nil
@@ -1284,6 +1452,10 @@ final class ExtensionProcessSession: @unchecked Sendable {
         tools.forEach {
             $0.timeoutItem.cancel()
             deliverTool(.failure(error), to: $0.completion)
+        }
+        previews.forEach {
+            $0.timeoutItem.cancel()
+            deliverAttachmentPreview(.failure(error), to: $0.completion)
         }
         if shouldSignalStartup {
             startupSemaphore.signal()

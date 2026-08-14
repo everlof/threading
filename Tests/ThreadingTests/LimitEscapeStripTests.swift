@@ -478,6 +478,28 @@ final class LimitEscapeStripTests: XCTestCase {
         }
     }
 
+    /// The screenshot regression: the sentence was assigned the row's slack while the action was
+    /// pinned beside the far-edge dismissal, turning one choice into two unrelated islands. The
+    /// action belongs to the sentence; only dismissal owns the opposite edge.
+    func testAWideStripKeepsTheActionWithTheConditionItAnswers() throws {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(Fixture.offer)
+        host(strip, width: 900)
+
+        let sentence = try sentence(in: strip)
+        let action = strip.continueControl
+        let actionInStrip = try XCTUnwrap(action.superview).convert(action.frame, to: strip)
+
+        let actionGap = actionInStrip.minX - sentence.frame.maxX
+        XCTAssertGreaterThanOrEqual(actionGap, Design.Spacing.small)
+        XCTAssertLessThanOrEqual(actionGap, Design.Spacing.medium)
+        XCTAssertGreaterThan(
+            strip.bounds.maxX - actionInStrip.maxX,
+            Design.Spacing.pane,
+            "the action is still being used as the strip's trailing-edge furniture"
+        )
+    }
+
     // MARK: - Theme
 
     /// The plate is a **recorded** surface rather than a frozen layer colour, so a theme switched
@@ -498,7 +520,7 @@ final class LimitEscapeStripTests: XCTestCase {
         NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeStyles.cyberpunk.id))
 
         XCTAssertNotEqual(before, strip.layer?.backgroundColor, "the plate kept its old ground")
-        XCTAssertEqual(try sentence(in: strip).textColor, Design.Text.secondary)
+        XCTAssertEqual(try sentence(in: strip).textColor, Design.Text.label)
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: strip), [])
     }
 
@@ -508,7 +530,7 @@ final class LimitEscapeStripTests: XCTestCase {
         let strip = LimitEscapeStripView()
         strip.setOffer(Fixture.offer)
         host(strip)
-        XCTAssertEqual(try sentence(in: strip).textColor, Design.Text.secondary)
+        XCTAssertEqual(try sentence(in: strip).textColor, Design.Text.label)
 
         strip.setOffer(LimitEscapeStripView.Offer(
             accountName: Fixture.accountName,

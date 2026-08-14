@@ -106,6 +106,12 @@ The first vertical slice exists:
   host-rendered content beside or over the original without receiving an `NSView`. A separate
   `ui.rendering.metal` capability admits bounded extension shader source in those declared
   positions; Threading still owns the renderer and input lifecycle.
+- The `media` node is the only one whose pixels move on their own, and the host draws all of
+  them. An extension states which document, whether it is playing, how fast and how it loops, and
+  receives a coalesced state report; the decoder, the clock, the transport, the ceilings and the
+  pasteboard stay on the host side. `ui.media-documents` gates it, and every surface opts in
+  separately (`allowsMedia` defaults to false), so no existing contract gained a player when the
+  node shipped.
 - A process declaring any implemented host capability receives a per-generation loopback URL
   and bearer token. `ExtensionHostClient` publishes complete patch sets atomically and reads
   separately gated project/session snapshots and cursor events; the host derives source
@@ -144,6 +150,9 @@ capabilities, so a small extension can grow without changing package format:
 | Component extension | `ui.components` | Properties, slots, and constrained content replacement | Documented host components |
 | Navigator extension | `ui.workspace-navigation` | Complete semantic navigator documents with virtualizable collections | Leading workspace navigator |
 | Metal surface extension | `ui.rendering.metal` + `ui.components` | Bounded fragment surfaces inside declared component hooks | Contracts whose hook vocabulary admits Metal |
+| Media extension | `ui.media-documents` | A `media` node — a document handle plus a playback intent, drawn by a host-owned player | Panels, and any surface whose vocabulary admits media |
+| Asset-browsing extension | `host.project.files.read` | Bounded, cursor-paged enumeration as opaque content handles | A project's own documents |
+| Attachment-preview extension | `attachments.preview` (+ `attachments.file-types`) | A preview body offered for one attachment; ordering decides the winner | The Attachments pane's preview body |
 | Identity extension | `appearance.provider-icons`, `appearance.account-icons`, `appearance.session-identity` | Primitive image recipes and constrained composition | Provider/account marks and session identity layout |
 | Appearance extension | `appearance.themes`, `appearance.fonts` | App-theme documents and font files carried as package data | Settings ▸ Themes and the chrome/conversation font pickers |
 | Hybrid extension | Any combination | Two or more contribution forms | One process sharing state across surfaces |
@@ -223,7 +232,11 @@ These are separate authorities rather than one shared writable directory:
    account presentation.** `host.projects.read`, `host.sessions.read`,
    `host.sessions.runtime.read`, `host.repositories.read`, `host.providers.read`,
    `host.accounts.presentation.read`, and `host.events` gate versioned snapshots and a bounded
-   cursor feed. The runtime broker accepts an exact stable session ID and returns only
+   cursor feed. `host.project.files.read` is separate and implied by none of them: it returns
+   opaque, generation-bound content **handles** plus bounded filesystem metadata — name,
+   project-relative path, byte size, modification date, and the host's content hint — and never
+   bytes or an absolute path. See
+   [`media-documents.md`](../architecture/media-documents.md). The runtime broker accepts an exact stable session ID and returns only
    Threading-attributed agent/shell process groups and listening-port metadata; it is not a raw
    process-table or arbitrary-PID API. One reading is capped at 256 processes and 128 ports.
    Extensions receive stable values, not paths to

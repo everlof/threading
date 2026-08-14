@@ -468,13 +468,17 @@ For either native transport, a request is shown **inline in the conversation tha
 as a `PermissionRequestView` card (`ConversationViewController.presentPermission`),
 not a window-modal sheet. A sheet was the wrong shape: it seized the whole window for a decision
 belonging to one session and gave no clue which session asked when several were running. The card
-sits in the thread, keeps its place as a record of what was chosen after it is answered, and
-carries the edit diff for edits. The modal sheet survives only as a fallback for the impossible
-case — a request with no live conversation.
+sits in the thread while the decision is pending and carries the edit diff for edits. It leaves
+the presentation immediately after an answer: the tool row and Execution Audit are the durable
+record, while a second copy of the prompt made the conversation read as still blocked. The modal
+sheet survives only as a fallback for the impossible case — a request with no live conversation.
 
 Requests are shown **one at a time**: an agent can fire several tool calls in a turn, but
 a stack of cards is answered out of context, so they queue and the next appears only once the
 current one is decided (`permissionQueue` / `activePermissionCard`, `showNextPermissionIfIdle`).
+Each queued request is re-evaluated when it reaches the front. Parallel calls may all have been
+classified before the first card's **Allow for Session** choice changed policy; presenting the
+later cards from that stale classification contradicted both the choice and the **Auto** chip.
 
 A pending Claude request in an **off-screen** session raises the sidebar's attention dot: a
 native session reports `activity` through `AgentRuntime` alongside terminal sessions, returning
@@ -706,9 +710,13 @@ of a row:
   system's own "quiet until relevant" rule, applied where it was most needed. Hover matters
   more than usual here: with no fill, it is the only thing saying the row can be clicked.
 - **A rule separates turns** (`ConversationRowView.turnDivider`, above each user turn but not
-  the first), and `turnSpacing` went 16 → 30. Spacing alone was tried first and was not
-  enough: the rows on either side of the gap are themselves separated by space, so a bigger
-  gap reads as a bigger gap rather than as a boundary.
+  the first), so `turnSpacing` is one `large` step rather than an additional 30-point gulf.
+  Within a turn, ordinary rows use `small` and work-adjacent rows use `tight`; the row kind, not
+  one blanket gap, decides density.
+- **Consecutive live tool calls reduce to one disclosure** as soon as the second arrives. A
+  lone call remains readable, the group expands back to its canonical timeline rows, and the
+  settled whole-turn fold still replaces it. This is the main transcript form of the work-group
+  treatment already used in child transcripts and in t3code's `WorkGroupSection`.
 
 **A settled turn folds behind one line** — "Worked for 42s" (`TurnFoldView`,
 `Change.turnSettled`). This finishes what quieting the tool rows started: twenty quiet rows
@@ -717,8 +725,7 @@ arrives, everything between its user message and its final assistant reply hides
 fold, so the conversation reads as its exchanges. The rules that came with it: an
 *interrupted* turn stays expanded so the user keeps their place — the next turn folds it, and
 it reads "Stopped after 42s" rather than claiming to have worked; the running turn never
-folds; a decided permission card stays visible through a fold, because it is the record of
-what was allowed. Folded work remains in the timeline but not in the live view hierarchy:
+folds. Folded work remains in the timeline but not in the live view hierarchy:
 merely setting `isHidden` kept every nested tool and Markdown constraint in the window's layout
 engine, so scrolling a settled conversation still laid out work that was not on screen.
 
@@ -1004,6 +1011,10 @@ to dismiss.
 
 The queue rows sit **directly above the box, below the status line**. Both halves were arrived at
 from a rendered fixture:
+
+Only pending messages draw there. A handed-over message remains in `ConversationOutbox` for
+lifecycle completion and interruption reclaim, but its user bubble is already the visible record;
+showing the same prompt again in a disabled tray row was the gray duplicate above the composer.
 
 - The status line is the *turn* talking — orb, working word, what the last one cost — and reads
   with the transcript. The queue is what happens next and belongs to the composer. Put above the

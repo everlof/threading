@@ -12,7 +12,7 @@ import XCTest
 /// -matches rule, which is what keeps a chat *following* its project instead of freezing a copy
 /// of its answer.
 @MainActor
-final class SoundMenuTests: XCTestCase {
+final class SoundMenuTests: HostedStoreTestCase {
 
     // MARK: - Fixtures
 

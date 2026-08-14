@@ -17,7 +17,7 @@ import XCTest
 /// So the two homes hold one view between them, and these tests pin the property that fixes it:
 /// pressing the toggle leaves the same view under the pointer.
 @MainActor
-final class DisplayPanelTogglePressTests: XCTestCase {
+final class DisplayPanelTogglePressTests: HostedStoreTestCase {
 
     // MARK: - Fixture
 

@@ -370,6 +370,13 @@ is shown on, and the account's usage reading beside the send — see
 [Usage when picking an account](#usage-when-picking-an-account). Above the box is who and
 where; inside it is what with.
 
+A chip is drawn as the answer it is showing — quiet text and a small chevron — and takes its
+rounded plate only under the pointer, while its menu is open, or when the keyboard reaches it.
+Pointing at one brings its words up a step as the plate appears, so the chip you are about to
+use is the one that reads clearly. The row is deliberately below the brief in the box above it:
+it says what the message will be sent with, and the message is the point. Nothing moves as the
+plate comes and goes.
+
 Every chip's dropdown is Threading's own menu, and it tracks like a menu should: click to open
 and browse, or **press, drag onto a row, and release** to choose in one motion. Arrow keys
 move the highlight, **Return** chooses, **Escape** lets the menu go. **Typing while it is
@@ -1244,7 +1251,9 @@ so those wait for one click instead. And a session that is mid-turn when the mom
 waited on rather than interrupted.
 
 **Images can't be scheduled.** A pasted screenshot lives in a temporary file that may be gone by
-the time the message sends, so the offer is disabled while one is attached and says so.
+the time the message sends, so the offer refuses while one is attached. It refuses out loud: the
+clock stays pressable whenever it cannot be used — no project chosen, nothing written yet, or an
+image attached — and opening it shows the reason instead of a list of times.
 
 If you schedule against a usage window's reset, **Settings ▸ Usage Windows** decides what happens
 when the moment comes and the window has not actually turned over: send it anyway, wait once for
@@ -1493,7 +1502,10 @@ week is a poor place to start a long task — so the composer shows it twice ove
 - **Inside the prompt box**, beside the send: the same short reading the toolbar's pill carries
   once the session is running, so the number you start on is the number you keep watching.
   Point at it for the detail — which account it belongs to, when each window comes back, and
-  how old the reading is. It stays out of the way when the account has nothing to report.
+  how old the reading is. It stays out of the way when the account has nothing to report. In a
+  narrow window it **drops a window rather than clipping one**: the row states as many complete
+  readings as it has room for, and none at all before it will show you half of one. The tooltip
+  and the toolbar pill still carry every window.
 
 A window is named by its length, and one that meters a single model adds that model: `5h`, `7d`,
 `7d Fable` in a line or at the head of a column; `5-hour`, `Weekly`, `Weekly · Fable` on a bar.
@@ -2261,10 +2273,22 @@ archives that went in either direction, newest first. Two things land there:
   ODP, DOCX, XLSX, PPTX, RTF), or diagram source (DOT, GV, MMD, Mermaid), in the terminal or in
   a native Chat reply, and any image it shows deliberately through the display tool. Code files
   are ignored because Git Review already covers them.
+- **Animations, when Threading recognises one.** A Lottie animation is a `.json` file, and the
+  pane will not list every `.json` in your session to catch it — so Threading looks inside the
+  first part of the file and lists it only when what it finds is actually an animation. A
+  `package.json` stays out. An extension can add file types of its own (a `.lottie` container,
+  say); it cannot claim `.json`, `.png` or any of the types above.
 - **What you send.** An image you paste or drop into a composer, or drop onto a terminal —
   including the ones attached to the prompt that *starts* a session. These are marked **You** so
   the picture you just sent is findable next to whatever the agent made of it, rather than
   disappearing into the conversation.
+
+An animation plays in the preview with play/pause, a scrubber and its elapsed time, and it keeps
+playing in the lightbox when you press Space or double-click. It stops when you look away —
+another tab, a collapsed pane, a window behind another one, or the Dock. Under **Reduce Motion**
+it opens paused; press Play and it plays. If an extension is installed that draws a format
+Threading does not carry itself, its preview takes the place of the built-in one; remove the
+extension and the built-in preview comes back.
 
 Every row shows the picture itself and when it arrived — the time for today, the date before
 that — and is marked **Agent** or **You**; when a session has both, a small **All / Agent / You**
@@ -3229,19 +3253,31 @@ case; every word must match. Extension-provided pages and sections participate w
 localized titles, descriptions, choices, and placeholders, and the query stays in place when
 an extension is enabled or disabled.
 
-The sidebar filters immediately while you type and remains a list of pages: searching *mute*,
-for example, leaves **General** as the matching destination. The page already open in the right
-pane stays put until you choose one of those filtered destinations. Clearing the field restores
-the complete page list.
+A typed query shows a **✕** at the field's trailing edge; clicking it — or pressing **Escape**
+in the field — clears the search and restores the full page list, keeping the caret where it
+was. With nothing typed, Escape passes through as before.
 
-Whenever something is typed, an **Ask AI** button appears beneath the filtered list — with
-results and without, because the filter matches words while the setting you *mean* may use
-different ones. Clicking it runs a short one-off agent turn (Claude Code if it has a login,
-otherwise Codex; the button is absent without either) that reads only the catalogue of
-Settings pages and answers in the right pane with up to four suggested pages, each carrying
-one sentence on why and an **Open** button. The run uses your own agent login and spends a
-small amount of its usage, which is why it only ever happens on the click — typing alone
-never launches anything. It can see which pages exist and their keywords, never your values.
+The sidebar filters immediately while you type and shows the results with their paths:
+searching *mute*, for example, keeps the **General** row and lists **Silence every sound**
+beneath it with its section as a quiet second line. Clicking a page row opens the page as
+always; clicking a *setting* opens its page, scrolls straight to that row, and briefly marks
+it with the same highlight the search results use, so the answer is the row itself rather
+than a page to search again by hand. The results scroll when they outgrow the sidebar. The
+page already open in the right pane stays put until you choose a destination, and clearing
+the field restores the complete page list. (Pages whose contents are dynamic inventories —
+Storage's checkouts, Tools' tool groups — match at page level and open at the top.)
+
+Whenever something is typed, a quiet **Ask AI** button appears inside the search field's
+trailing edge — with results and without, because the filter matches words while the setting
+you *mean* may use different ones. Clicking it runs a short one-off agent turn (Claude Code
+if it has a login, otherwise Codex; the button is absent without either) that reads only the
+catalogue of Settings pages and their settings, and answers in the right pane with up to four
+suggestions, each named by its full path — *General › Notifications › Alert sound* — with one
+sentence on why and an **Open** button. Opening a suggestion that names a setting scrolls to
+and marks that row, exactly like the keyword results. The run uses your own agent login and
+spends a small amount of its usage, which is why it only ever happens on the click — typing
+alone never launches anything. It can see which pages and settings exist and their keywords,
+never your values.
 
 Opening a suggestion is an ordinary page visit, so **Back** (⌃⌘← or the toolbar arrow)
 returns to the suggestions exactly as you left them. Clicking **Ask AI** again with the same
@@ -3251,8 +3287,8 @@ starts a new run.
 The page list is grouped under six quiet captions — **App** (General, Keyboard), **Appearance**
 (Themes, Profiles, Motion), **Agents** (Accounts, Tools, Usage), **Access** (Remote Access,
 GitHub, Privacy), **Data** (Storage, Archived, Advanced), and **Extensions**, which also holds
-any page an extension contributes. Filtering keeps only the sections that still have matching
-pages.
+any page an extension contributes. While a search is typed the captions stand down: a result's
+geography is the page row above it, not the sidebar's sections.
 
 Every page keeps its title, a one-line summary and its page-wide actions in a **fixed header**
 above the scroll, so where you are — and, on Storage, how much is reclaimable — stays on screen
@@ -3527,7 +3563,10 @@ list-price estimate is not a provider limit and a limit percentage is not a toke
 
 Overview starts at 30 days and can switch between 7, 30 and 90 days and between **Cost** and
 **Tokens**. The total and stacked daily chart lead, followed by provider/billing-route shares,
-token and cache totals, project/account/model breakdowns and coverage. Coverage remains visible
+token and cache totals, project/account/model breakdowns and coverage. The breakdown is a real
+table — Cost, Share, Tokens and Requests down labelled columns, the agent's own mark on any row
+whose records all came through one runtime — and in a squeezed window the request column stands
+down rather than the table scrolling sideways. Coverage remains visible
 when an agent source is partial or unavailable. Provider-reported cost wins; otherwise a versioned
 exact-model catalog may estimate it. Unmatched tokens remain visibly unpriced, and the page says
 that estimates are not an invoice.
@@ -3591,6 +3630,26 @@ everything smaller folds into a single **"N smaller directories"** line — a co
 dozens of tiny caches, and they used to bury the two directories holding the space. Click the
 fold to show them, and **Show fewer** to close it again.
 
+**Build caches in temporary locations are found too.** An agent working in a scratchpad under
+`/tmp` builds there, and what it leaves belongs to no checkout. Xcode writes an `info.plist` at
+the top of a derived data tree naming the workspace it was built for, and that name is what the
+page files each finding by:
+
+```
+Threading · build cache in /tmp · 27.1 GB
+Left over from deleted workspaces · 14.4 GB
+Other build caches in temporary locations · 9.4 GB
+```
+
+A cache built for a workspace inside one of your projects appears under that project, sorting
+among its checkouts by size. A cache whose workspace no longer exists is left over from a tree
+that has already been cleaned up: nothing can rebuild into it and nothing will read it again,
+which makes it the safest thing the page offers. A cache built for a workspace that *does* still
+exist but is not one of your projects — usually another session's copy of a repository — gets a
+heading of its own rather than being called deleted, because somebody may be building in it right
+now. Every one of these rows names the workspace it was built for, so two caches of the same
+project are told apart.
+
 Every row says what it costs to bring back — the command that rebuilds it — and when anything
 inside it was last written. A directory written in the last few minutes is marked **in use**,
 which almost always means a build is running in it right now.
@@ -3601,7 +3660,11 @@ if a session is running in the project or if anything about to go was written mo
 **The page never makes you wait.** Threading surveys the disk quietly in the background — at low
 priority, and never while a session in that project is working — and remembers what it found
 between launches. Opening Storage shows what is already known, with a line saying when it was
-measured, and refreshes anything stale behind you. **Rescan** re-reads everything now.
+measured, and refreshes anything stale behind you. **Rescan** re-reads everything now. Temporary
+locations ride the same schedule, and are skipped while a session is working *anywhere*: they
+belong to no project, so any build in flight may be writing into the tree being measured. That
+reading also ages faster than a project's — agents and macOS both clean in `/tmp` — which is part
+of why the measured line is there.
 
 **Agents can help, but cannot delete.** With **Settings > Tools > Disk space** on, an agent that
 notices the disk is filling can read this same listing and *propose* a cleanup — "these three
@@ -3615,6 +3678,16 @@ and it is told to propose rather than reach for `rm` itself.
 files that are not build output are never touched, which matters more than it sounds: your
 `.env.local` and your secrets files are ignored too. Anything a repository tracks is left alone
 whatever it is called, even if `.gitignore` also matches it.
+
+In a temporary location that rule has nothing to ask: the trees worth finding there have no
+repository at all, since an agent's verification copy is made without `.git` on purpose so a
+build in it cannot touch your index. The proof there is Xcode's own manifest instead. A derived
+data tree carrying one is offered; an agent's working copy of a repository is not, and neither is
+a log, a socket, or anything else in `/tmp`, whatever it is called and however large it is.
+
+Safety is checked again at the moment of deletion rather than only when the page was drawn — a
+listing you are reading is a listing going stale. An orphan whose workspace has come back since,
+or a directory that has stopped being what it claimed to be, is refused instead of removed.
 
 Removal is immediate rather than to the Trash, since space in the Trash has not been reclaimed.
 Sizes are measured the way `du` measures them, counting a hard-linked file once however many

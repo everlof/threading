@@ -65,11 +65,11 @@ final class PaneNoticeRenderTests: XCTestCase {
                 actions: [
                     PaneNoticeAction(title: L10n.string("Restore")) {},
                     PaneNoticeAction(
-                        title: L10n.string("Show Crash Report"),
-                        emphasis: .tertiary
+                        title: L10n.string("Send to Developer"),
+                        emphasis: .secondary
                     ) {},
                     PaneNoticeAction(
-                        title: L10n.string("Send to Developer"),
+                        title: L10n.string("Show Crash Report"),
                         emphasis: .tertiary
                     ) {}
                 ],
@@ -92,7 +92,7 @@ final class PaneNoticeRenderTests: XCTestCase {
                     PaneNoticeAction(title: L10n.string("Restore")) {},
                     PaneNoticeAction(
                         title: L10n.string("Send to Developer"),
-                        emphasis: .tertiary
+                        emphasis: .secondary
                     ) {}
                 ],
                 onDismiss: {}

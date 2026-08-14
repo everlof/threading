@@ -19,6 +19,10 @@ final class SettingsSearchResearchTests: XCTestCase {
         XCTAssertTrue(prompt.contains("list_settings"))
         XCTAssertTrue(prompt.contains(#"{"matches":["#))
         XCTAssertTrue(
+            prompt.contains(#""setting""#),
+            "the prompt has to offer the setting-level answer or every reply stays page-level"
+        )
+        XCTAssertTrue(
             prompt.contains(#"{"matches":[]}"#),
             "the prompt never said an empty answer is allowed, so the model will invent one"
         )
@@ -87,6 +91,28 @@ final class SettingsSearchResearchTests: XCTestCase {
         XCTAssertEqual(matches.map(\.pageID), [SettingsPages.generalID, SettingsPages.themesID])
         XCTAssertEqual(matches.first?.reason, "Notifications live here.")
         XCTAssertEqual(matches.first?.title, SettingsPages.page(id: SettingsPages.generalID)?.title)
+    }
+
+    /// A named setting is vouched for against the page's own entries — case-insensitively,
+    /// since a model may re-case what it read — and an invented one degrades to the page
+    /// rather than promising a scroll to a row that does not exist.
+    func testValidationResolvesSettingsAndDegradesInventedOnes() throws {
+        let silence = L10n.string("Silence every sound")
+        let matches = SettingsSearchResearch.validated([
+            .init(page: SettingsPages.generalID, setting: silence.lowercased(), reason: "mute"),
+            .init(page: SettingsPages.generalID, setting: "No Such Setting", reason: "x")
+        ])
+
+        XCTAssertEqual(matches.count, 2, "two destinations on one page are two answers")
+        let resolved = try XCTUnwrap(matches.first)
+        XCTAssertEqual(resolved.settingTitle, silence, "resolved to the catalogue's spelling")
+        XCTAssertEqual(
+            resolved.settingSection, L10n.string("Silence"),
+            "the section travels with the setting so the row can print the path"
+        )
+        let degraded = try XCTUnwrap(matches.last)
+        XCTAssertNil(degraded.settingTitle)
+        XCTAssertEqual(degraded.pageID, SettingsPages.generalID)
     }
 
     /// A repeated page is one suggestion, and more than four stops being an answer — the cap

@@ -143,7 +143,10 @@ final class AdvancedPreferencesViewController: NSViewController {
         content.distribution = .fill
         content.spacing = Design.Spacing.medium
 
-        return SettingsUI.fullRow(content)
+        let container = SettingsUI.fullRow(content)
+        // Hand-built rather than `SettingsUI.row`, so the search anchor is stated here.
+        SettingsRowAnchor.tag(container, title: title)
+        return container
     }
 
     /// `~` rather than `/Users/<name>`, which is both shorter and the form a user can paste.

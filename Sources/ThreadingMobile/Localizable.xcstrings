@@ -4933,6 +4933,7 @@
     "Used": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använt" } } }
     },
+    "This animation plays on your Mac.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här animationen spelas på din Mac."}}}},
     "This file previews on your Mac.": {
       "localizations": {
         "sv": {

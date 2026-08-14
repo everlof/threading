@@ -39,11 +39,16 @@ extension ConversationViewController {
                 ))
             }
 
-            appendPresentationItem(PresentationItem(
-                id: .timeline(index),
-                content: .timeline(index),
-                opensTurn: startsTurn && timeline.rows.count == 1
-            ))
+            if case .toolCall(let call) = row, call.chart == nil {
+                appendToolPresentation(index)
+            } else {
+                activeToolGroupIndices.removeAll(keepingCapacity: true)
+                appendPresentationItem(PresentationItem(
+                    id: .timeline(index),
+                    content: .timeline(index),
+                    opensTurn: startsTurn && timeline.rows.count == 1
+                ))
+            }
 
             // A live user row advances the rail by one; settlement later fills that mark's
             // answer and duration without rebuilding its historical prefix.
@@ -149,8 +154,6 @@ extension ConversationViewController {
     /// assistant reply — behind a one-line `TurnFoldView`.
     ///
     /// The canonical rows stay in `timeline`; only their presentation entries leave the table.
-    /// Permission cards deliberately stay visible — a decided card is the record of what was
-    /// allowed, which is worth more than the symmetry.
     func foldTurn(startingAt startIndex: Int, outcome: TurnOutcome) {
         guard !foldedTurnStarts.contains(startIndex),
               let turn = timeline.turn(startingAt: startIndex),
@@ -160,10 +163,9 @@ extension ConversationViewController {
               }) else { return }
 
         let turnIndices = turn.rowIndex + 1 ... turn.endIndex
-        // A chart stays through the fold for the same reason a decided permission card does:
-        // it is not the record of work done on the way to the answer, it is part of the answer.
-        // Folding the picture and keeping the sentence about it leaves a claim with nothing
-        // behind it.
+        // A chart is not merely the record of work done on the way to the answer; it is part of
+        // the answer. Folding the picture and keeping the sentence about it leaves a claim with
+        // nothing behind it.
         let hiddenIndices = turnIndices.filter { index in
             guard index != turn.finalAssistantIndex else { return false }
             if case .toolCall(let call) = timeline.rows[index], call.chart != nil { return false }
@@ -177,14 +179,24 @@ extension ConversationViewController {
         let removalPositions = presentationItems.indices
             .dropFirst(userPosition + 1)
             .filter { position in
-                guard case .timeline(let index) = presentationItems[position].content else {
+                switch presentationItems[position].content {
+                case .timeline(let index):
+                    return hiddenSet.contains(index)
+                case .toolFold(let indices):
+                    return !hiddenSet.isDisjoint(with: indices)
+                case .divider, .fold, .retained, .streaming:
                     return false
                 }
-                return hiddenSet.contains(index)
             }
         for position in removalPositions.reversed() {
+            if case .toolFold(let indices) = presentationItems[position].content,
+               let first = indices.first {
+                expandedToolGroups.remove(first)
+                rowHeightCache[.toolFold(firstIndex: first)] = nil
+            }
             presentationItems.remove(at: position)
         }
+        activeToolGroupIndices.removeAll(keepingCapacity: true)
         let insertion = min(userPosition + 1, presentationItems.count)
         presentationItems.insert(PresentationItem(
             id: .fold(turnStart: startIndex),
@@ -275,6 +287,116 @@ extension ConversationViewController {
         }
         rowHeightCache[.fold(turnStart: turnStart)] = nil
         reloadConversationRows()
+    }
+
+    /// Reduces a consecutive live tool run to one disclosure as it arrives. The canonical rows
+    /// remain in `timeline`; only the viewport-sized presentation changes. A lone call stays
+    /// visible, while the second turns the pair into a group and later calls extend it in O(1).
+    private func appendToolPresentation(_ index: Int) {
+        if activeToolGroupIndices.isEmpty {
+            guard index > 0,
+                  case .toolCall(let previousCall) = timeline.rows[index - 1],
+                  previousCall.chart == nil,
+                  presentationItems.last?.id == .timeline(index - 1)
+            else {
+                appendPresentationItem(PresentationItem(
+                    id: .timeline(index),
+                    content: .timeline(index),
+                    opensTurn: false
+                ))
+                return
+            }
+
+            let indices = [index - 1, index]
+            activeToolGroupIndices = indices
+            let position = presentationItems.count - 1
+            presentationItems[position] = PresentationItem(
+                id: .toolFold(firstIndex: index - 1),
+                content: .toolFold(indices: indices),
+                opensTurn: false
+            )
+            presentationRowsByTimelineIndex[index - 1] = nil
+            pendingToolViews[index - 1] = nil
+            rowHeightCache[.timeline(index - 1)] = nil
+            reloadPresentationRow(at: position)
+            return
+        }
+
+        let previousCount = activeToolGroupIndices.count
+        guard activeToolGroupIndices.last == index - 1,
+              let first = activeToolGroupIndices.first else {
+            activeToolGroupIndices.removeAll(keepingCapacity: true)
+            appendPresentationItem(PresentationItem(
+                id: .timeline(index),
+                content: .timeline(index),
+                opensTurn: false
+            ))
+            return
+        }
+
+        let foldPosition = expandedToolGroups.contains(first)
+            ? presentationItems.count - previousCount - 1
+            : presentationItems.count - 1
+        guard presentationItems.indices.contains(foldPosition),
+              presentationItems[foldPosition].id == .toolFold(firstIndex: first) else {
+            activeToolGroupIndices.removeAll(keepingCapacity: true)
+            appendPresentationItem(PresentationItem(
+                id: .timeline(index),
+                content: .timeline(index),
+                opensTurn: false
+            ))
+            return
+        }
+
+        activeToolGroupIndices.append(index)
+        presentationItems[foldPosition] = PresentationItem(
+            id: .toolFold(firstIndex: first),
+            content: .toolFold(indices: activeToolGroupIndices),
+            opensTurn: false
+        )
+        reloadPresentationRow(at: foldPosition)
+
+        if expandedToolGroups.contains(first) {
+            appendPresentationItem(PresentationItem(
+                id: .timeline(index),
+                content: .timeline(index),
+                opensTurn: false
+            ))
+        }
+    }
+
+    private func setToolGroup(_ indices: [Int], expanded: Bool) {
+        guard let first = indices.first,
+              let foldPosition = presentationItems.firstIndex(where: {
+                  $0.id == .toolFold(firstIndex: first)
+              }) else { return }
+
+        if expanded {
+            guard expandedToolGroups.insert(first).inserted else { return }
+            presentationItems.insert(contentsOf: indices.map {
+                PresentationItem(id: .timeline($0), content: .timeline($0), opensTurn: false)
+            }, at: foldPosition + 1)
+        } else {
+            guard expandedToolGroups.remove(first) != nil else { return }
+            let hidden = Set(indices)
+            presentationItems.removeAll { item in
+                guard case .timeline(let index) = item.content else { return false }
+                return hidden.contains(index)
+            }
+        }
+        rowHeightCache[.toolFold(firstIndex: first)] = nil
+        reloadConversationRows()
+    }
+
+    /// Makes an exact tool target addressable without giving up compact groups by default.
+    /// Keyboard navigation, minimap jumps and deep links all pass through the same reveal path.
+    func revealToolGroup(containing timelineIndex: Int) {
+        guard let item = presentationItems.first(where: {
+                  guard case .toolFold(let indices) = $0.content else { return false }
+                  return indices.contains(timelineIndex)
+              }),
+              case .toolFold(let indices) = item.content else { return }
+        setToolGroup(indices, expanded: true)
     }
 
     // MARK: - Changed Files Card
@@ -491,6 +613,7 @@ extension ConversationViewController {
     // MARK: - Streaming
 
     private func showStreaming(_ text: String) {
+        activeToolGroupIndices.removeAll(keepingCapacity: true)
         guard let streamingLabel else {
             let label = ConversationRowView.streaming(text)
             presentationItems.append(PresentationItem(
@@ -520,19 +643,6 @@ extension ConversationViewController {
     }
 
     // MARK: - Layout
-
-    /// Adds one full-width row, insetting its content from the pane edges consistently.
-    ///
-    /// `newTurn` opens extra space above the row, used before a user bubble so each exchange
-    /// reads as its own block rather than one unbroken column.
-    func addRow(_ view: NSView, newTurn: Bool = false) {
-        appendPresentationItem(PresentationItem(
-            id: .retained(UUID()),
-            content: .retained(view),
-            opensTurn: newTurn
-        ))
-        scrollToBottom()
-    }
 
     func setStatus(_ text: String) {
         statusLabel.stringValue = text
@@ -614,14 +724,7 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
         host.setColumnWidth(conversationColumnWidth)
 
         let content = makePresentationView(for: item)
-        let topInset: CGFloat
-        if tableRow == 0 {
-            topInset = Design.Spacing.inset
-        } else if item.opensTurn {
-            topInset = Design.Chat.turnSpacing
-        } else {
-            topInset = Design.Spacing.medium
-        }
+        let topInset = presentationTopInset(at: tableRow)
         let bottomInset = tableRow == presentationItems.count - 1
             ? Design.Spacing.inset
             : 0
@@ -685,6 +788,17 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
             presentationRowsByTimelineIndex[timelineIndex] = index
         }
         notifyPresentationRowsInserted(at: IndexSet(integer: index))
+    }
+
+    private func reloadPresentationRow(at row: Int) {
+        guard presentationItems.indices.contains(row) else { return }
+        rowHeightCache[presentationItems[row].id] = nil
+        guard isViewLoaded, !isReplaying, row < tableView.numberOfRows else { return }
+        tableView.reloadData(
+            forRowIndexes: IndexSet(integer: row),
+            columnIndexes: IndexSet(integer: 0)
+        )
+        tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
     }
 
     func notifyPresentationRowsInserted(at indexes: IndexSet) {
@@ -766,12 +880,54 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
                 )
             }
 
+        case .toolFold(let indices):
+            let count = indices.count
+            let label = count == 1
+                ? L10n.string("1 tool call")
+                : L10n.format("%lld tool calls", Int64(count))
+            let first = indices[0]
+            return TurnFoldView(
+                label: label,
+                folding: [],
+                expanded: expandedToolGroups.contains(first)
+            ) { [weak self] _, expanded in
+                self?.setToolGroup(indices, expanded: expanded)
+            }
+
         case .retained(let view):
             AppThemeRefresh.repaintIfNeeded(view)
             return view
 
         case .streaming(let label):
             return label
+        }
+    }
+
+    private func presentationTopInset(at row: Int) -> CGFloat {
+        guard row > 0 else { return Design.Spacing.inset }
+        let item = presentationItems[row]
+        if item.opensTurn { return Design.Chat.turnSpacing }
+
+        let previous = presentationItems[row - 1]
+        if isWorkPresentation(item) || isWorkPresentation(previous) {
+            return Design.Spacing.tight
+        }
+        return Design.Spacing.small
+    }
+
+    private func isWorkPresentation(_ item: PresentationItem) -> Bool {
+        switch item.content {
+        case .toolFold:
+            return true
+        case .timeline(let index):
+            switch timeline.rows[index] {
+            case .toolCall, .thinking:
+                return true
+            case .userMessage, .assistant, .turnOutcome, .notice:
+                return false
+            }
+        case .divider, .fold, .retained, .streaming:
+            return false
         }
     }
 
@@ -968,9 +1124,7 @@ final class ConversationVirtualRowHost: NSTableCellView {
 extension ConversationViewController {
 
     /// Queues a tool-approval request, showing it as a card once any earlier one is answered.
-    ///
-    /// The card stays in the transcript after the decision as a record of what was allowed, and
-    /// while anything waits it drives the sidebar's attention dot through `activity`.
+    /// While anything waits it drives the sidebar's attention dot through `activity`.
     func presentPermission(
         _ request: PermissionRequest,
         decide: @escaping @MainActor @Sendable (PermissionDecision) -> Void
@@ -998,10 +1152,24 @@ extension ConversationViewController {
 
         let pending = permissionQueue.removeFirst()
 
+        // Parallel tool calls can all reach this queue before the user chooses Allow for
+        // Session on the first one. Re-evaluate when each request reaches the front so a stale
+        // queued decision cannot raise a prompt the current policy already answers.
+        if let decision = PermissionBroker.automaticDecision(for: pending.request) {
+            pending.decide(decision)
+            delegate?.conversationDidChangeActivity(self)
+            showNextPermissionIfIdle()
+            RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+            return
+        }
+
+        let cardID = PresentationID.retained(UUID())
+
         let card = PermissionRequestView(request: pending.request) { [weak self] decision in
             pending.decide(decision)
             guard let self else { return }
             self.activePermissionCard = nil
+            self.removePresentationItem(cardID)
             self.delegate?.conversationDidChangeActivity(self)
             self.showNextPermissionIfIdle()
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
@@ -1016,10 +1184,22 @@ extension ConversationViewController {
         let target = ExtensionComponentTarget.conversationPermissionCard(
             sessionID: agentSession.id.uuidString.lowercased()
         )
-        addRow(
-            customizeConversationRow(card, target: target),
-            newTurn: true
-        )
+        activeToolGroupIndices.removeAll(keepingCapacity: true)
+        appendPresentationItem(PresentationItem(
+            id: cardID,
+            content: .retained(customizeConversationRow(card, target: target)),
+            opensTurn: false
+        ))
+        scrollToBottom()
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+    }
+
+    private func removePresentationItem(_ id: PresentationID) {
+        guard let position = presentationItems.firstIndex(where: { $0.id == id }) else { return }
+        presentationItems.remove(at: position)
+        rowHeightCache[id] = nil
+        // A permission may have later timeline rows below it. Rebuild their index map once at
+        // this user-driven boundary instead of leaving navigation pointed one row too low.
+        reloadConversationRows()
     }
 }

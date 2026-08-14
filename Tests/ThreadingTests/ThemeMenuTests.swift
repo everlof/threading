@@ -9,7 +9,7 @@ import XCTest
 /// accessibility API here, so without this the wiring between an item and the assignment it
 /// makes would be checked by clicking it and looking.
 @MainActor
-final class ThemeMenuTests: XCTestCase {
+final class ThemeMenuTests: HostedStoreTestCase {
 
     private func themeSubmenu(of entry: ThemedMenuEntry) throws -> [ThemedMenuEntry] {
         guard case .item(let item) = entry else {

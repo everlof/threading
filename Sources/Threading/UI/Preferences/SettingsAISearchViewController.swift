@@ -2,19 +2,21 @@ import AppKit
 
 // MARK: - Settings AI Search
 
-/// What the settings pane shows for an Ask AI search: the run's progress, then the pages it
-/// pointed at — each with the run's own sentence saying why, and a way in.
+/// What the settings pane shows for an Ask AI search: the run's progress, then the
+/// destinations it pointed at — each named by its full path, with the run's own sentence
+/// saying why, and a way in that lands *on the row* when the run named one.
 ///
-/// Like `SettingsSearchResultsViewController` it is not a settings *page*: it has no ID and is
-/// never cached by id. Unlike it, its content costs a run of the user's account, so it is
-/// rebuilt only when a run starts or answers — never on a keystroke.
+/// It is not a settings *page*: it has no ID and is never cached by id. And because its
+/// content costs a run of the user's account, it is rebuilt only when a run starts or
+/// answers — never on a keystroke.
 @MainActor
 final class SettingsAISearchViewController: NSViewController {
 
     // MARK: - Properties
 
-    /// The page a result row was asked to open.
-    var onOpen: ((String) -> Void)?
+    /// The destination a result row was asked to open: the page, and the setting's anchor
+    /// title when the run named a row — nil for a page-level answer.
+    var onOpen: ((String, String?) -> Void)?
 
     /// What the pane is showing. Internal so the tests can render an answer without spending
     /// a run.
@@ -27,9 +29,9 @@ final class SettingsAISearchViewController: NSViewController {
 
     private(set) var phase: Phase = .idle
 
-    /// The page each row's button opens, indexed by the button's tag — rebuilt with the rows
-    /// or not at all, `SettingsSearchResultsViewController`'s rule.
-    private var rowPageIDs: [String] = []
+    /// The destination each row's button opens, indexed by the button's tag — rebuilt with
+    /// the rows or not at all.
+    private var rowDestinations: [(pageID: String, anchorTitle: String?)] = []
 
     // MARK: - Public Methods
 
@@ -80,7 +82,7 @@ final class SettingsAISearchViewController: NSViewController {
 
     private func rebuild() {
         view.subviews.forEach { $0.removeFromSuperview() }
-        rowPageIDs = []
+        rowDestinations = []
 
         let page = SettingsUI.page(sections())
         page.translatesAutoresizingMaskIntoConstraints = false
@@ -144,19 +146,29 @@ final class SettingsAISearchViewController: NSViewController {
         }
     }
 
-    /// One suggested page: what it is called, the run's sentence on why, and the way in.
+    /// One suggestion: its full path — "General › Notifications › Alert sound", or just the
+    /// page when the run answered page-level — the run's sentence on why, and the way in.
+    /// The path is the row's title because the answer *is* a place: a row reading only
+    /// "General" is the result the reader then has to search the page for, which is the bug
+    /// this surface exists to not have.
     private func row(for match: SettingsSearchResearch.Match) -> NSView {
+        let path = SettingsPath.display(
+            pageTitle: match.title,
+            section: match.settingSection,
+            title: match.settingTitle
+        )
+
         let open = SettingsUI.button(
             L10n.string("Open"),
             target: self,
             action: #selector(openClicked)
         )
-        open.tag = rowPageIDs.count
-        open.setAccessibilityLabel(L10n.format("Open %@", match.title))
-        rowPageIDs.append(match.pageID)
+        open.tag = rowDestinations.count
+        open.setAccessibilityLabel(L10n.format("Open %@", match.settingTitle ?? match.title))
+        rowDestinations.append((pageID: match.pageID, anchorTitle: match.settingTitle))
 
         return SettingsUI.row(
-            title: match.title,
+            title: path,
             subtitle: match.reason.isEmpty ? nil : match.reason,
             control: open,
             localizes: false
@@ -164,7 +176,8 @@ final class SettingsAISearchViewController: NSViewController {
     }
 
     @objc private func openClicked(_ sender: NSControl) {
-        guard rowPageIDs.indices.contains(sender.tag) else { return }
-        onOpen?(rowPageIDs[sender.tag])
+        guard rowDestinations.indices.contains(sender.tag) else { return }
+        let destination = rowDestinations[sender.tag]
+        onOpen?(destination.pageID, destination.anchorTitle)
     }
 }

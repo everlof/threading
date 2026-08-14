@@ -431,8 +431,20 @@ final class PromptView: NSView, ThemedComponent {
         footerRow.isHidden = true
 
         footerSpacer.translatesAutoresizingMaskIntoConstraints = false
-        footerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        footerSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // **Below every member of the row**, which `defaultLow` was not: it is the usage
+        // reading's own compression resistance to the point, so the gap between the two runs and
+        // the reading beside it were two claims on the same slack at the same priority, and an
+        // ambiguous system resolves that however it likes. It resolved it by squeezing the
+        // reading to a third of its width and handing the difference to the gap — a row visibly
+        // holding 90 spare points while the number in it read `5h 86…`. The empty middle is
+        // never the thing worth keeping, so it stretches last and collapses first.
+        // `PromptViewDefaults.spacerPriority` is the composer's `spacerPriority`, for the same
+        // reason and stated the same way.
+        footerSpacer.setContentHuggingPriority(PromptViewDefaults.spacerPriority, for: .horizontal)
+        footerSpacer.setContentCompressionResistancePriority(
+            PromptViewDefaults.spacerPriority,
+            for: .horizontal
+        )
         footerRow.addArrangedSubview(footerSpacer)
     }
 
@@ -2139,6 +2151,12 @@ enum PromptSubmitIntent: Equatable {
 
 enum PromptViewDefaults {
     static let submitSize = Design.Size.compactSubmitHeight
+
+    /// Below every control the footer row can hold, so the empty middle between the two runs is
+    /// what stretches when there is room and what disappears when there is not. Any real
+    /// priority leaves the row's own members bidding against a gap for their width — see
+    /// `setupFooterRow`.
+    static let spacerPriority = NSLayoutConstraint.Priority(1)
 
     /// The chevron beside the send. Deliberately narrower than the glyph it sits next to: the
     /// press is the point of the pair and the chevron is the day the answer is different, which

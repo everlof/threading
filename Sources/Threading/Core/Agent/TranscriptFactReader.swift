@@ -90,6 +90,19 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
         beginRevalidation(at: url, completions: [completion])
     }
 
+    /// Seeds a byte-for-byte transcript copy with the size installed at its new path.
+    ///
+    /// A copied transcript has a new path but not new provider output. Without carrying the size
+    /// boundary across, the first validation at the destination announces every fact in the copied
+    /// tail as though it had just happened there. `value` is supplied by the fact owner because a
+    /// copy can preserve one fact (the model) while invalidating another (a refusal belonging to
+    /// the account the transcript just left). The copy transaction supplies the byte count rather
+    /// than this reader asking the main thread to stat the file, and rather than reusing a possibly
+    /// stale source reading from before the provider finished its last write.
+    func seedCopiedTranscript(at destination: URL, byteCount: Int, value: Value?) {
+        readings[destination.path] = Reading(size: byteCount, value: value)
+    }
+
     /// Starts one single-flight read. Calls that overlap it collect in `pendingCompletions` and
     /// are answered by one subsequent read against the newest file size.
     private func beginRevalidation(at url: URL, completions: [Completion]) {

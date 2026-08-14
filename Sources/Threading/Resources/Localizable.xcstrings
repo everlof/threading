@@ -4,12 +4,31 @@
     "%@ — the default for new chats in Settings.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ — standardvalet för nya chattar i Inställningar."}}}},
     "%@ — this agent's own setting.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ — den här agentens egen inställning."}}}},
     "%@ — what this agent last ran in. It decides again each launch.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ — det som den här agenten kördes med senast. Den väljer på nytt vid varje start."}}}},
+    "A demonstration animation": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En demonstrationsanimation"}}}},
+    "A document that varies over time, drawn by the host. The registry decodes it, the player owns the clock, and the clock stops the moment nothing can see it — another tab, a collapsed pane, an occluded window.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ett dokument som ändras över tid, ritat av värden. Registret avkodar det, spelaren äger klockan, och klockan stannar i samma stund som ingen kan se den — en annan flik, en hopfälld ruta, ett skymt fönster."}}}},
+    "A position the user sets. Drag it, or traverse to it and use the arrow keys — Shift for the fine step. The receipt below tells the travel from the commit: a seek happens once, at the end.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En position som användaren ställer in. Dra den, eller flytta fokus dit och använd piltangenterna — Skift för det fina steget. Kvittot nedan skiljer förflyttningen från bekräftelsen: en sökning sker en gång, i slutet."}}}},
     "Continue at Reset": { "localizations" : { "sv" : { "stringUnit" : { "state" : "translated", "value" : "Fortsätt vid återställning" } } } },
     "Continues at reset": { "localizations" : { "sv" : { "stringUnit" : { "state" : "translated", "value" : "Fortsätter vid återställning" } } } },
     "Continuing when the window resets.": { "localizations" : { "sv" : { "stringUnit" : { "state" : "translated", "value" : "Fortsätter när fönstret återställs." } } } },
+    "Copy Frame": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kopiera bildruta"}}}},
     "Has its own settings": { "localizations" : { "sv" : { "stringUnit" : { "state" : "translated", "value" : "Har egna inställningar" } } } },
+    "MediaDocumentCanvasView": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "MediaDocumentCanvasView"}}}},
+    "MediaDocumentPlayerView": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "MediaDocumentPlayerView"}}}},
+    "MediaDocumentPlayerView reported “%@”.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "MediaDocumentPlayerView rapporterade ”%@”."}}}},
+    "MediaTransportView": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "MediaTransportView"}}}},
+    "MediaTransportView asked to pause.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "MediaTransportView bad om paus."}}}},
+    "MediaTransportView asked to play.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "MediaTransportView bad om uppspelning."}}}},
+    "MediaTransportView sought to %lld%%.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "MediaTransportView sökte till %lld%%."}}}},
+    "No preview extension is available for this file.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inget tillägg kan förhandsvisa den här filen."}}}},
+    "No project with that identifier is open.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inget projekt med den identifieraren är öppet."}}}},
     "Notifications muted": { "localizations" : { "sv" : { "stringUnit" : { "state" : "translated", "value" : "Aviseringar tystade" } } } },
     "Notifications on": { "localizations" : { "sv" : { "stringUnit" : { "state" : "translated", "value" : "Aviseringar på" } } } },
+    "Pause": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Pausa"}}}},
+    "Play": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Spela upp"}}}},
+    "Playback": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Uppspelning"}}}},
+    "Playback position": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Uppspelningsposition"}}}},
+    "Position": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Position"}}}},
+    "Project files are unavailable.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Projektfiler är inte tillgängliga."}}}},
     "Running at last quit": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kördes vid senaste avslut"}}}},
     "Recently used": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Nyligen använda"}}}},
     "At most %d": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Högst %d"}}}},
@@ -27,6 +46,26 @@
     "Settings ▸ General decides what comes back at launch.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inställningar ▸ Allmänt bestämmer vad som kommer tillbaka vid start."}}}},
     "Stop here and continue when the usage window resets": { "localizations" : { "sv" : { "stringUnit" : { "state" : "translated", "value" : "Stanna här och fortsätt när användningsfönstret återställs" } } } },
     "Stops at its limit": { "localizations" : { "sv" : { "stringUnit" : { "state" : "translated", "value" : "Stannar vid sin gräns" } } } },
+    "That session does not belong to this project.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den sessionen hör inte till det här projektet."}}}},
+    "The animation container could not be read.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Animationsbehållaren kunde inte läsas."}}}},
+    "The animation contains no frames.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Animationen innehåller inga bildrutor."}}}},
+    "The animation could not be read as an image.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Animationen kunde inte läsas som en bild."}}}},
+    "The animation has more than the %lld frames this player accepts.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Animationen har fler än de %lld bildrutor som spelaren accepterar."}}}},
+    "The animation has more than the %lld layers this player accepts.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Animationen har fler än de %lld lager som spelaren accepterar."}}}},
+    "The animation has no layers this player can draw.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Animationen har inga lager som spelaren kan rita."}}}},
+    "The animation has no readable size.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Animationen har ingen läsbar storlek."}}}},
+    "The animation is larger than the %lld-pixel limit on either axis.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Animationen är större än gränsen på %lld bildpunkter på någon av axlarna."}}}},
+    "The animation is longer than the %lld seconds this player accepts.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Animationen är längre än de %lld sekunder som spelaren accepterar."}}}},
+    "The animation is missing its frame rate or layers.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Animationen saknar bildfrekvens eller lager."}}}},
+    "The animation is not a readable Lottie document.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Animationen är inte ett läsbart Lottie-dokument."}}}},
+    "The animation's out point is not after its in point.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Animationens slutpunkt ligger inte efter dess startpunkt."}}}},
+    "The bounded surface a document is drawn on. Its three grounds: the pane’s own surface, the checkerboard that says the document has transparency, and nothing at all.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den begränsade ytan ett dokument ritas på. Dess tre bakgrunder: rutans egen yta, schackrutmönstret som säger att dokumentet har genomskinlighet, och ingenting alls."}}}},
+    "The container expands to more than this player accepts.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Behållaren packas upp till mer än vad spelaren accepterar."}}}},
+    "The container holds more than the %lld entries this player accepts.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Behållaren innehåller fler än de %lld poster som spelaren accepterar."}}}},
+    "The container holds no animation this player can read.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Behållaren innehåller ingen animation som spelaren kan läsa."}}}},
+    "The current frame could not be copied.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den aktuella bildrutan kunde inte kopieras."}}}},
+    "The current frame could not be decoded.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den aktuella bildrutan kunde inte avkodas."}}}},
+    "The document is larger than the %@ this player accepts.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dokumentet är större än de %@ som spelaren accepterar."}}}},
     "The last quit left no record of what was running.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det senaste avslutet lämnade ingen notering om vad som kördes."}}}},
     "Commits in each of the past 12 weeks, oldest to newest: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Incheckningar under var och en av de senaste 12 veckorna, äldst till nyast: %@"}}}},
     "Latest commit %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Senaste incheckning %@"}}}},
@@ -40,8 +79,14 @@
     "Account deletion failed. Try again.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kontot kunde inte raderas. Försök igen."}}}},
     "Delete Account": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Radera konto"}}}},
     "Delete hosted account?": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Radera värdtjänstkontot?"}}}},
+    "The page marker no longer matches this query.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sidmarkören stämmer inte längre med den här frågan."}}}},
     "The session is not showing the limit prompt.": { "localizations" : { "sv" : { "stringUnit" : { "state" : "translated", "value" : "Sessionen visar inte gränsdialogen." } } } },
+    "The transport a host-owned media player wears: play/pause, the scrubber and a monospaced-digit reading. It owns no clock — it states what it was told and raises what the user did.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kontrollerna som en värdägd mediaspelare bär: spela/pausa, reglaget och en avläsning med fasta siffror. Den äger ingen klocka — den visar det den fått veta och rapporterar det användaren gjorde."}}}},
+    "ThemedScrubber": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ThemedScrubber"}}}},
+    "ThemedScrubber committed %lld%%.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ThemedScrubber bekräftade %lld%%."}}}},
+    "ThemedScrubber travelled to %lld%%.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ThemedScrubber flyttades till %lld%%."}}}},
     "There is no usage reading yet to schedule against.": { "localizations" : { "sv" : { "stringUnit" : { "state" : "translated", "value" : "Det finns ännu ingen användningsavläsning att schemalägga mot." } } } },
+    "This document is no longer available to the extension.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dokumentet är inte längre tillgängligt för tillägget."}}}},
     "This permanently removes your Threading service account, revokes direct access for every paired iPhone, and signs this Mac out. Local chats and settings stay on this Mac.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Detta tar permanent bort ditt konto hos Threadings tjänst, återkallar direktåtkomst för alla parkopplade iPhone-enheter och loggar ut denna Mac. Lokala chattar och inställningar finns kvar på denna Mac."}}}},
     "Hosted Direct": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Direktanslutning"}}}},
     "Not configured in this build": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inte konfigurerat i den här versionen"}}}},
@@ -52,6 +97,8 @@
     "Sign out failed. Try again.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Utloggningen misslyckades. Försök igen."}}}},
     "Signed in": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inloggad"}}}},
     "Temporarily unavailable": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tillfälligt otillgänglig"}}}},
+    "This surface cannot play media documents.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här ytan kan inte spela mediadokument."}}}},
+    "Threading carries no player for “%@” documents.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading har ingen spelare för ”%@”-dokument."}}}},
     "Uses Threading’s service only to introduce this Mac and iPhone, then prefers a direct encrypted connection. TURN is used only when direct network traversal cannot connect.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Använder Threadings tjänst enbart för att introducera denna Mac och iPhone och föredrar därefter en direkt krypterad anslutning. TURN används bara när en direkt anslutning inte kan upprättas genom nätverket."}}}},
     "Its checkout or working directory changed before a terminal could accept the command.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dess checkout eller arbetskatalog ändrades innan en terminal kunde ta emot kommandot."}}}},
     "Project Scripts": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Projektskript"}}}},
@@ -603,6 +650,9 @@
     "Provider-reported cost where available; exact catalog pricing otherwise.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsrapporterad kostnad där den finns; annars exakt katalogpris." } } } },
     "Provider-neutral charts and the retained dashboard they compose.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsneutrala diagram och den beständiga instrumentpanel de bygger upp." } } } },
     "Providers": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörer" } } } },
+    "Account": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Konto" } } } },
+    "Share": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Andel" } } } },
+    "%@ · %@ · %@ · %@ requests": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ · %@ · %@ · %@ anrop" } } } },
     "DiffSkeletonView": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "DiffSkeletonView" } } } },
     "The ghost a review row holds while its diff is deferred. Each file's own added and removed counts split the changed run, so the silhouette never invents a removal the file does not have.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skuggan en granskningsrad håller medan dess diff är uppskjuten. Varje fils egna antal tillagda och borttagna rader delar den ändrade sekvensen, så silhuetten hittar aldrig på en borttagning som filen inte har." } } } },
     "ThemedChartPlaceholderView": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ThemedChartPlaceholderView" } } } },
@@ -636,6 +686,8 @@
     "Usage over time": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användning över tid" } } } },
     "Usage section": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användningssektion" } } } },
     "UsageDashboardView": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "UsageDashboardView" } } } },
+    "UsageReadingLabel": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "UsageReadingLabel" } } } },
+    "Narrow the row and the reading gives up whole windows rather than characters: everything, then one complete window, then nothing.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Smalna av raden så ger avläsningen upp hela fönster i stället för tecken: allt, sedan ett helt fönster, sedan ingenting." } } } },
     "Uncached input": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Icke-cachelagrad indata" } } } },
     "Use Left and Right Arrow to inspect points.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använd vänster- och högerpil för att granska punkter." } } } },
     "Weekly": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Veckovis" } } } },
@@ -7364,6 +7416,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Rensa webbdata…"
+          }
+        }
+      }
+    },
+    "Clear Search": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rensa sökning"
           }
         }
       }
@@ -17080,6 +17143,39 @@
         }
       }
     },
+    "SearchResultRowView": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SearchResultRowView"
+          }
+        }
+      }
+    },
+    "RevealHighlightView": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RevealHighlightView"
+          }
+        }
+      }
+    },
+    "Flash": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blinka"
+          }
+        }
+      }
+    },
     "Searching": {
       "extractionState": "stale",
       "localizations": {
@@ -17999,6 +18095,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Visa “%@” i %@?"
+          }
+        }
+      }
+    },
+    "Showing “%@”": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visar “%@”"
           }
         }
       }
@@ -19751,6 +19857,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Den del som sökningen förklarar får både tyngd och botten — båda, så att en träff överlever Skilj åt utan färg. Klistra in hela ID:t för att se en rad kortare än sökningen ändå svara för sig själv."
+          }
+        }
+      }
+    },
+    "One destination a search turned up: the matched words marked on the title, the path underneath. These rows follow the query field above; hover, press, Space and the focus ring are live.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En destination en sökning hittade: de matchade orden markerade i titeln, sökvägen under. Raderna följer sökfältet ovanför; hovring, tryck, mellanslag och fokusringen är levande."
+          }
+        }
+      }
+    },
+    "The wash a search leaves on the row it scrolled to — the search-match ground fading in, standing a beat, and leaving. Flash replays it; the hold survives Reduce Motion because a hold is not movement.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Svepet en sökning lämnar på raden den rullade till — sökträffens ton som tonar in, står ett slag och lämnar. Blinka spelar upp det igen; pausen överlever Minskad rörelse eftersom en paus inte är rörelse."
           }
         }
       }
@@ -27774,6 +27902,8 @@
     "Sounds you add are copied into ~/Library/Sounds, which is macOS's folder rather than Threading's: anything installed there also appears in System Settings' alert-sound list, and removing a file there removes it from both.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ljud du lägger till kopieras till ~/Library/Sounds, som är macOS mapp och inte Threadings: allt som installeras där syns även i listan över varningsljud i Systeminställningar, och att ta bort en fil där tar bort den från båda."}}}},
     "Nothing overrides these sounds": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inget åsidosätter de här ljuden"}}}},
     "A chat, a checkout or a terminal given a sound of its own from its Sounds menu is listed here.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En chatt, en utcheckning eller en terminal som fått ett eget ljud från sin Ljud-meny listas här."}}}},
+    "%lld more page matches": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld ytterligare sida matchar"}}}},
+    "%lld more pages match": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld ytterligare sidor matchar"}}}},
     "%lld more scope carries a sound": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld ytterligare omfång bär ett ljud"}}}},
     "%lld more scopes carry a sound": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld ytterligare omfång bär ett ljud"}}}},
     "Reset All clears every one of them.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ allt rensar var och en av dem."}}}},
@@ -27795,7 +27925,15 @@
     "Show or Hide the Display Panel": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa eller dölj visningspanelen"}}}},
     "A reported text/background pair shown touching, for the diagnostic that has to say two colours are the same colour. Nothing is drawn between the halves: the third sample is one white on the same white, and it has to read as one field with its specimen gone.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ett rapporterat text-/bakgrundspar visat kant i kant, för diagnostiken som måste säga att två färger är samma färg. Ingenting ritas mellan halvorna: det tredje provet är ett vitt på samma vitt, och det måste läsas som ett enda fält med sitt provexemplar borta."}}}},
     "ColorPairSpecimenView": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ColorPairSpecimenView"}}}},
-    "Available in Cursor's own terminal; not available in native Chat yet": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tillgängligt i Cursors egen terminal men ännu inte i inbyggd chatt"}}}}
+    "Available in Cursor's own terminal; not available in native Chat yet": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tillgängligt i Cursors egen terminal men ännu inte i inbyggd chatt"}}}},
+    "Xcode derived data": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Xcode-byggdata"}}}},
+    "Build output your projects can make again — Rust and Swift build directories, installed packages, caches. Worktrees are included, which is usually where most of it is hiding. Temporary locations are scanned too, since that is where an agent builds when it is not building in a project.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Byggutdata som dina projekt kan skapa igen – byggkataloger för Rust och Swift, installerade paket och cachefiler. Worktrees ingår, eftersom det ofta är där det mesta finns. Tillfälliga platser genomsöks också, eftersom det är där en agent bygger när den inte bygger i ett projekt."}}}},
+    "Only directories git ignores and a known tool can rebuild are offered. Anything tracked in a repository is left alone, whatever it is called — and ignored files that are not build output, such as .env files, are never touched. In a temporary location a build cache is offered only when Xcode's own manifest identifies it, never an agent's working copy of a repository. Removal is immediate rather than moved to the Trash, since space in the Trash has not been reclaimed.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Endast kataloger som git ignorerar och som ett känt verktyg kan återskapa visas. Allt som spåras i ett kodförråd lämnas orört, oavsett namn. Ignorerade filer som inte är byggutdata, till exempel .env-filer, rörs aldrig. På en tillfällig plats erbjuds en byggcache bara när Xcodes eget manifest identifierar den, aldrig en agents arbetskopia av ett kodförråd. Borttagning sker direkt i stället för via Papperskorgen, eftersom utrymmet annars inte frigörs."}}}},
+    "build cache in /tmp": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "byggcache i /tmp"}}}},
+    "Left over from deleted workspaces": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kvar från borttagna arbetsytor"}}}},
+    "Other build caches in temporary locations": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Andra byggcacher på tillfälliga platser"}}}},
+    "built for %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "byggd för %@"}}}},
+    "built for %@, which no longer exists": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "byggd för %@, som inte längre finns"}}}}
   },
   "version": "1.0"
 }

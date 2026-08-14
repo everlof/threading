@@ -152,6 +152,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Session state (`dormant`/`idle`/`working`/`needsAttention`/`limitReached`), Claude/Codex lifecycle hooks, provider-neutral output inference, `hooks.json`, the shell-command policy | [`session-activity.md`](docs/architecture/session-activity.md) |
 | Reading git metadata (worktrees, submodules, identities), the Git Review pane, staging, the commit graph, diff syntax highlighting | [`git.md`](docs/architecture/git.md) |
 | The draft opt-in for a session-owned detached worktree, execution-directory routing, finish handshake, local merge and disposal | [`managed-workspaces.md`](docs/architecture/managed-workspaces.md) |
+| Documents that vary over time: the `media` node, the host-owned player and its renderer registry, the Lottie engine, bounded project-file handles, the attachments preview seam | [`media-documents.md`](docs/architecture/media-documents.md) |
 | The runtime capability matrix, side chats and forking, the shell drawer, session naming, launching, resuming, importing outside conversations | [`sessions.md`](docs/architecture/sessions.md) |
 | Writing a message now and sending it later: the record, the store, the clock, waking a dormant session, the usage-reset presets | [`scheduled-messages.md`](docs/architecture/scheduled-messages.md) |
 | A session refused over a rate limit: the transcript signal, the limit chooser, recovery policies, the parked state, the scheduled continuation | [`limit-recovery.md`](docs/architecture/limit-recovery.md) |
@@ -463,6 +464,20 @@ choice there changes what the app the developer is running launches into next. T
 choice** goes through `PreferenceStore`, which redirects to a scratch suite under a test bundle;
 behavioural settings stay on `.standard` because tests set those deliberately and assert the app
 read them. See [`themes.md`](docs/architecture/themes.md) for the line between the two.
+
+**A hosted test also wrote to the developer's own projects and chats, and deleted them.** The
+same hosting that hands a test `UserDefaults.standard` handed it `StateManager.shared`, so
+`ProjectStore.shared` in a test opened the real `threading.db`. `ProjectDatabase.save(_:)`
+reconciles the whole graph — `DELETE FROM project WHERE id NOT IN (…)`, with sessions following
+through `ON DELETE CASCADE` — and the test host never reaches `SingleInstanceLock`, because
+`applicationDidFinishLaunching` returns on `NSClassFromString("XCTestCase")` first. So a fixture's
+`addProject` wrote the test's project list over the user's, deleting every project added since
+that test process loaded. Real projects and their chats were lost this way; fixture rows for
+`/var/folders/…/T/sound-scope-…` were still sitting in the live database afterwards.
+`StateManager` now redirects to a per-pid scratch directory under a test bundle, the reconcile
+refuses when the store's generation has moved beneath it, and **a test that touches
+`ProjectStore.shared` inherits `HostedStoreTestCase`**, which proves the redirect still holds and
+erases the scratch store in teardown. See [`persistence.md`](docs/architecture/persistence.md).
 
 **A component tested outside the container it ships in can pass while being unusable.** A sidebar
 row's buttons were asserted on a row held in a plain `NSView`, so two rounds of fixes landed

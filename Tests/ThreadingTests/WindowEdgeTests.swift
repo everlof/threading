@@ -19,7 +19,7 @@ import XCTest
 /// column of a window whose trailing pane is collapsed must be that pane's neighbour, not a rule.
 /// Confirmed to have teeth by stubbing the fix out — the seam reappears in the last column.
 @MainActor
-final class WindowEdgeTests: XCTestCase {
+final class WindowEdgeTests: HostedStoreTestCase {
 
     private struct ResizeSweepResult {
         let samples: [UInt64]

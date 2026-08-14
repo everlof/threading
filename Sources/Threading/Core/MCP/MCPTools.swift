@@ -4705,10 +4705,13 @@ enum MCPTools {
         Find safe, rebuildable build output when disk space is short, a command fails \
         with ENOSPC or “No space left on device”, or the user asks what is taking up \
         space. Lists Rust and Swift build directories, node_modules, and caches across \
-        the user's projects, with each size, checkout, and last-write time. Threading \
-        has already checked that everything listed is ignored by git and rebuildable by \
-        a known command, so nothing tracked or irreplaceable appears here. Reading this \
-        changes nothing.
+        the user's projects, and Xcode build caches left in the temporary locations \
+        agents build in (/private/tmp and the per-user temp directory), with each size, \
+        what it belongs to, and its last-write time. Threading has already checked that \
+        everything listed is either ignored by git or identified as a build cache by \
+        Xcode's own manifest, and rebuildable by a known command, so nothing tracked or \
+        irreplaceable appears here. A cache whose workspace no longer exists is marked \
+        ORPHANED. Reading this changes nothing.
         """,
       inputSchema: MCPInputSchema(properties: [:], required: [])
     ),
@@ -4745,10 +4748,12 @@ enum MCPTools {
       tool: .listSettings,
       description: """
         List Threading's own Settings pages — every destination the app's Settings \
-        sidebar offers, each with its stable id, the sidebar group it sits under, and \
-        the vocabulary of what it contains. Use it to answer where a *Threading* \
-        preference lives (it says nothing about the agent CLI's own configuration), and \
-        answer with the page's id. One call returns the whole catalogue.
+        sidebar offers, each with its stable id, the sidebar group it sits under, the \
+        vocabulary of what it contains, and the individual settings on it (each a title \
+        plus its section). Use it to answer where a *Threading* preference lives (it \
+        says nothing about the agent CLI's own configuration); answer with the page's \
+        id, plus the setting's title when one specific row is the answer. One call \
+        returns the whole catalogue.
         """,
       inputSchema: MCPInputSchema(properties: [:], required: [])
     ),

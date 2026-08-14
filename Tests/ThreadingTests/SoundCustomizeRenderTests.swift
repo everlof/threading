@@ -14,7 +14,7 @@ import XCTest
 /// The fixture window is built and never shown, per `CLAUDE.md`: an unshown window still lays
 /// out and still draws through `cacheDisplay`.
 @MainActor
-final class SoundCustomizeRenderTests: XCTestCase {
+final class SoundCustomizeRenderTests: HostedStoreTestCase {
 
     // MARK: - Configuration
 

@@ -33,6 +33,15 @@ final class ExtensionPanelLayoutTests: XCTestCase {
             nil
         }
 
+        /// The fixture carries no package, so a media document never resolves. Tests that need
+        /// one install a renderer through the registry instead.
+        func extensionMediaResourceData(
+            extensionIdentifier: String,
+            relativePath: String
+        ) -> Data? {
+            nil
+        }
+
         func invokePanelAction(
             extensionIdentifier: String,
             panelID: String,

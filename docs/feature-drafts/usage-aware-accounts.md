@@ -98,6 +98,15 @@ choice cannot be explained to the person whose money it spent.
 Rejected alternative: rank purely by headroom. It reliably picks the account the user was
 saving, which is the one behaviour guaranteed to make the feature untrusted.
 
+Every headroom and pace reading here is against the **effective** line, not the provider's
+100%: [limit-management.md](limit-management.md) lets the user draw a tighter one (a fixed cap,
+a pace share, a synthetic window). Filter 3 consults it, and the pace comparison generalizes to
+`bound × elapsedFraction − usedFraction` — the shipped deficit exactly when no rule applies. An
+account at its own rule's line is not "worth moving to" whatever the provider would still
+accept, and the receipt says "excluded by your limit", never "spent". This ranking is also the
+combined "yours vs. theirs" reading across several shared logins — the answer surfaces where an
+account is chosen rather than on a standing dashboard.
+
 ### B3. When it fires
 
 **Trigger pre-emptively at `UsageDefaults.criticalFraction` (0.92), not at 97%.** A migration
@@ -138,6 +147,51 @@ draft must be re-checked against it before implementation.
 - **If nothing qualifies, park and say so.** Silence, or continuing on a spent account, are both
   worse than the existing park.
 
+### B5. Poke on reset: keep a draining fleet's windows cycling
+
+An anchored window's meter only starts on the first message after its reset — the premise of
+the Usage Windows page ([`accounts.md`](../architecture/accounts.md)). For the accounts this
+draft ranks as overflow and drains to their caps, that anchor is a leak: every hour between a
+reset and the account's next first message is a window opening late, and over a month that is
+whole windows lost. Community practice already names the workaround — r/codex's PSA "send at
+least one message per account after fresh reset", and 9router automating "using tokens shortly
+after resetting".
+
+Threading holds both halves of that automation today, unjoined: the **poke run** (cheapest
+model, scratch directory, no MCP or tools, reply discarded, routed by the account's own
+environment key — `usageWindowPokeCommand`) and the **reset clock** (scheduled messages already
+fire at a window's `resetsAt` plus a margin, and re-arm boundedly when the window turns out
+still spent). The new piece is per-account consent and the guards:
+
+- **Opt-in per account, and deliberately not inherited from `overflowRank`.** The rank consents
+  to moving work *in*; this spends a message and **starts the owner's clock**, which on a
+  shared login is a fact about the owner's week, not ours. A custom limit's hold applies on top
+  ([limit-management.md](limit-management.md)) — the keep-alive is Threading-initiated spend
+  like any other.
+- **It fires a margin after the anchored window's reset and verifies with a refreshed
+  reading.** An account already used since the reset skips — the owner's own message beat it —
+  and `usageUnknown` skips outright, the day poke's first refusal for the same reason.
+- **`neverExhausts` inverts into the eligibility rather than out of it.** An account whose
+  history never reaches its weekly cap gains nothing from cycling and keeps the *later* anchor,
+  which is worth more to a light user — the window then covers time they are actually present.
+  The keep-alive is for accounts the ledger shows being drained; a naive "always poke at reset"
+  actively harms the light ones.
+- **The daily cap sits below the rules**, the day poke's own backstop, so a defect above cannot
+  turn this into a poller.
+- The same run is reachable **by hand** from the account's row — "start the window now" — for
+  whoever wants the workaround with themselves in the loop; the alert-only version ("tell me it
+  reset") is a reset-edge alert in [limit-management.md](limit-management.md)'s alert family.
+
+The weekly window is the one worth cycling; the short window's phase already belongs to the day
+poke, whose lead arithmetic would be fought rather than helped by pinning it to reset.
+
+The PSA is also **evidence about Codex**: "your weekly timer gets pushed back to exactly 7 days
+after your first message" is the anchored shape `anchoredUsageWindow` refuses to assume for
+Codex until it is measured from an account's own history. The honest order stands — but the
+180-day journal now holds exactly the history that can answer it (a quiet account across a
+boundary), and the poke's Codex branch is already written behind the gate. This PSA is a reason
+to run that measurement.
+
 ---
 
 ## C. Budget ceilings, as grants
@@ -145,6 +199,10 @@ draft must be re-checked against it before implementation.
 "Work until 80% of weekly" needs the app to enforce it, because the agent cannot: it reads 78%,
 starts a large refactor, and lands at 91%. It cannot price the next chunk of work, so its
 stopping is a hope.
+
+The account-level bound model and evaluator a ceiling reads — fixed caps, pace shares,
+synthetic windows, and their alert/hold/park consequences — are designed in
+[limit-management.md](limit-management.md); this section keeps the actor-scoped grant half.
 
 A ceiling is an **authority**, which is exactly the third axis
 [`control-plane.md`](../architecture/control-plane.md) reserves for slice two —
@@ -170,6 +228,7 @@ voice. Pushed reading (A) is what lets the agent stop *gracefully* before the ce
 | **`overflowRank` + its Settings surface** | new, small |
 | **The ranker** | new — policy over data that already exists |
 | **Window-type-aware trigger + failover policy case** | new |
+| **Reset keep-alive poke (B5)** | new — joins the existing poke run and the reset clock |
 | **Pushed usage reading** | new — a channel, not a tool |
 | **Budget ceilings** | new — slice two's authority axis |
 
@@ -205,6 +264,9 @@ voice. Pushed reading (A) is what lets the agent stop *gracefully* before the ce
 3. **B2–B4. Ranker, trigger, failover**, re-checked against the recovery-policy chooser once it
    lands.
 4. **C. Ceilings**, with slice two's grants.
+
+B5 rides beside the sequence: it depends on nothing above beyond its own per-account opt-in,
+and its Claude half could ship first — the Codex half waits on the anchoring measurement.
 
 ## Open questions
 

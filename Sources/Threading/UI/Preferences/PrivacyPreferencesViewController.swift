@@ -250,6 +250,8 @@ final class PrivacyPreferencesViewController: NSViewController {
 
         let container = SettingsUI.fullRow(row)
         container.setAccessibilityIdentifier("settings.privacy.\(permission.rawValue)")
+        // Hand-built rather than `SettingsUI.row`, so the search anchor is stated here.
+        SettingsRowAnchor.tag(container, title: permission.title)
 
         rows[permission] = PermissionRow(
             statusGlyph: statusGlyph,

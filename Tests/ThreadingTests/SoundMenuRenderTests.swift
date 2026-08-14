@@ -9,7 +9,7 @@ import XCTest
 /// the checkmark is a relationship no assertion states — `SoundMenuTests` pins the strings and
 /// the check, and these pin what they look like beside each other.
 @MainActor
-final class SoundMenuRenderTests: XCTestCase {
+final class SoundMenuRenderTests: HostedStoreTestCase {
 
     // MARK: - Configuration
 

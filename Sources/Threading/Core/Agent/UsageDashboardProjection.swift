@@ -28,6 +28,13 @@ struct UsageDashboardBreakdownRowProjection: Equatable, Sendable {
     let tokens: Int64
     let costUSD: Double
     let records: Int
+    /// The runtime every record behind this row came through, or nil when more than one did —
+    /// and nil for a row that is not about a runtime at all, such as a checkout.
+    ///
+    /// Presentation only: it decides whether the row wears a provider mark. It is never a
+    /// second cost axis, and a row that cannot name one runtime honestly wears none rather
+    /// than the first one it saw.
+    var runtimeID: String?
 }
 
 struct UsageDashboardBreakdownProjection: Equatable, Sendable {
@@ -428,21 +435,46 @@ enum UsageDashboardProjector {
         _ selection: UsageReportSelection,
         calendar: Calendar
     ) -> UsageDashboardRangeProjection {
+        // `runtimeID` follows the rule stated on `UsageDashboardBreakdownRowProjection`: a row
+        // names a runtime only when every record behind it came through that one. The slices
+        // resolved that while folding the cells, so nothing here re-reads the ledger.
         let models = cappedBreakdown(selection.models.map {
-            .init(title: $0.name, tokens: $0.tokens.processed, costUSD: $0.costUSD, records: $0.records)
+            .init(
+                title: $0.name,
+                tokens: $0.tokens.processed,
+                costUSD: $0.costUSD,
+                records: $0.records,
+                runtimeID: $0.runtimeID
+            )
         })
         let accounts = cappedBreakdown(selection.accounts.map {
-            .init(title: $0.name, tokens: $0.tokens.processed, costUSD: $0.costUSD, records: $0.records)
+            .init(
+                title: $0.name,
+                tokens: $0.tokens.processed,
+                costUSD: $0.costUSD,
+                records: $0.records,
+                runtimeID: $0.runtimeID
+            )
         })
         let projects = cappedBreakdown(selection.checkouts.map {
-            .init(title: $0.label, tokens: $0.billedTokens, costUSD: $0.costUSD, records: $0.turns)
+            .init(
+                title: $0.label,
+                tokens: $0.billedTokens,
+                costUSD: $0.costUSD,
+                records: $0.turns,
+                runtimeID: $0.runtimeID
+            )
         })
+        // A provider row *is* one route, so its runtime is known outright — including a billing
+        // route such as OpenRouter, whose records all came through OpenCode and which therefore
+        // honestly wears OpenCode's mark rather than none.
         let providers = cappedBreakdown(selection.providers.map {
             .init(
                 title: $0.origin.seriesName,
                 tokens: $0.tokens.processed,
                 costUSD: $0.costUSD,
-                records: $0.records
+                records: $0.records,
+                runtimeID: $0.origin.runtimeID
             )
         })
         return UsageDashboardRangeProjection(

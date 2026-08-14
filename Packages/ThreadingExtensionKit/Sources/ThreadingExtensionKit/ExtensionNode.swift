@@ -37,6 +37,12 @@ public indirect enum ExtensionNode: Equatable, Sendable {
     )
     /// A host-rendered, interactive visualization with normalized semantic marks.
     case scene(ExtensionScene)
+    /// A document that varies over time, drawn by a host-owned player.
+    ///
+    /// The only node whose pixels move on their own. Everything about *how* it plays — decoder,
+    /// clock, transport, ceilings, visibility gating — stays on the host side; the extension
+    /// states which document and what it should be doing. See `ExtensionMediaDocument`.
+    case media(ExtensionMediaDocument)
     case status(String, role: ExtensionStatusRole)
     /// A summary that has a second level behind it.
     ///
@@ -123,6 +129,7 @@ extension ExtensionNode: Codable {
         case selection
         case options
         case scene
+        case document
         case isEnabled
         case reference
         case accessibilityLabel
@@ -143,6 +150,7 @@ extension ExtensionNode: Codable {
         case textInput
         case picker
         case scene
+        case media
         case status
         case disclosure
         case proceed
@@ -205,6 +213,10 @@ extension ExtensionNode: Codable {
             )
         case .scene:
             self = .scene(try container.decode(ExtensionScene.self, forKey: .scene))
+        case .media:
+            self = .media(
+                try container.decode(ExtensionMediaDocument.self, forKey: .document)
+            )
         case .status:
             self = .status(
                 try container.decode(String.self, forKey: .text),
@@ -292,6 +304,9 @@ extension ExtensionNode: Codable {
         case .scene(let scene):
             try container.encode(Kind.scene, forKey: .type)
             try container.encode(scene, forKey: .scene)
+        case .media(let document):
+            try container.encode(Kind.media, forKey: .type)
+            try container.encode(document, forKey: .document)
         case .status(let text, let role):
             try container.encode(Kind.status, forKey: .type)
             try container.encode(text, forKey: .text)

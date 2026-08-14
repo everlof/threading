@@ -39,6 +39,13 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   cursor events. SDK snapshot 1 includes separately gated session-runtime readings: process groups,
   CPU, memory, and listening-port metadata already attributed to one exact session, without raw
   process-table access.
+- Host-played media documents: a `media` node carrying a document handle and a playback intent,
+  drawn by Threading's own renderer registry, with a coalesced state report back. The extension
+  receives no decoder, surface or pixel, and `ui.media-documents` gates it independently of
+  `panels` and `ui.components`.
+- Bounded project-file enumeration as opaque, generation-bound content handles
+  (`host.project.files.read`), plus the `attachments.preview@1` offer contract and
+  `attachments.file-types` registration.
 - Provider/account icon resolution and constrained session identity composition.
 - Component contracts `application.main-window@1`, `sidebar.project-row@1`,
   `sidebar.project-hover-card@1`, `sidebar.session-row@1`,

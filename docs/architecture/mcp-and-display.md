@@ -202,12 +202,17 @@ the capability pairing (a plan exists exactly where `.headlessResearch` is claim
 lets the Ask AI affordance hide by asking `SettingsSearchResearch.provider` instead of naming a
 runtime.
 
-`list_settings` itself answers with page ids, titles, groups and each page's search vocabulary
-— `SettingsPages.all`, the same catalogue both search paths read. It holds no values: which
+`list_settings` itself answers with page ids, titles, groups, each page's search vocabulary,
+and the individual settings a page holds (title plus section, from `SettingsEntry`) —
+`SettingsPages.all`, the same catalogue both search paths read. It holds no values: which
 pages exist is not a secret, what is set on them stays behind the pages. The helper's reply is
-JSON naming page ids; `SettingsSearchResearch.validated` lets through only pages the catalogue
-vouches for (an unknown id gets one second chance as a title), so the UI never navigates on an
-invented destination.
+JSON naming page ids and optionally a setting's title; `SettingsSearchResearch.validated` lets
+through only destinations the catalogue vouches for (an unknown page id gets one second chance
+as a title; an unknown setting title quietly degrades to the page), so the UI never navigates
+on an invented destination. A vouched-for setting travels to the suggestion row as its anchor:
+the row shows the full path ("General › Notifications › Alert sound") and opening it scrolls
+to and marks the row through `SettingsRowReveal`, the same jump the sidebar's keyword results
+make.
 
 The answer is deliberately hard to lose once bought. The suggestions surface is a
 `NavigationHistory.Page` (`.settingsAISearch`), so opening a suggestion leaves it one Back

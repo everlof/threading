@@ -14,7 +14,7 @@ import XCTest
 /// the terminal (see `BackdropOverlay`), while pane controls use chrome ink, so the paired matrix
 /// checks the right contrast contract for each kind of component.
 @MainActor
-final class ToolbarChromeRenderTests: XCTestCase {
+final class ToolbarChromeRenderTests: HostedStoreTestCase {
 
     // MARK: - Configuration
 

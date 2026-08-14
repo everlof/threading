@@ -20,6 +20,11 @@ enum SettingsSearchResearch {
         let pageID: String
         let title: String
         let symbol: String
+        /// The specific setting on the page, when the run named one the catalogue vouches
+        /// for — the anchor the reveal scrolls to. Nil answers stay page-level.
+        let settingTitle: String?
+        /// The named setting's section caption, carried so the row can print the full path.
+        let settingSection: String?
         /// The run's own sentence saying why this page answers the query. May be empty.
         let reason: String
     }
@@ -27,7 +32,15 @@ enum SettingsSearchResearch {
     /// What the run replied, before the catalogue has vouched for it.
     struct RawMatch: Decodable, Equatable {
         let page: String
+        /// The setting's title as `list_settings` printed it, or absent for a whole page.
+        let setting: String?
         let reason: String?
+
+        init(page: String, setting: String? = nil, reason: String?) {
+            self.page = page
+            self.setting = setting
+            self.reason = reason
+        }
     }
 
     enum ResearchError: Error, Equatable {
@@ -128,14 +141,20 @@ enum SettingsSearchResearch {
         \(query)
 
         Call the list_settings tool once to read the catalogue of Threading's Settings \
-        pages. Choose the pages — at most \(SettingsResearchDefaults.maximumMatches), most \
-        likely first — where the user would actually find what they mean. Judge by intent \
-        rather than wording: "stop it flashing when it finishes" is about notifications or \
-        motion, whatever words those pages use.
+        pages and the individual settings each page holds. Choose the destinations — at \
+        most \(SettingsResearchDefaults.maximumMatches), most likely first — where the \
+        user would actually find what they mean. Judge by intent rather than wording: \
+        "stop it flashing when it finishes" is about notifications or motion, whatever \
+        words those pages use.
+
+        Point at a specific setting whenever one answers: give its title in "setting", \
+        exactly as the catalogue lists it, and the app will scroll to that row. Omit \
+        "setting" only when the whole page is the answer.
 
         Reply with only this JSON — no code fences, no prose around it:
-        {"matches":[{"page":"<page id>","reason":"<one short sentence, in the user's own \
-        language, saying what on that page answers them>"}]}
+        {"matches":[{"page":"<page id>","setting":"<the setting's title exactly as \
+        listed, or omit>","reason":"<one short sentence, in the user's own language, \
+        saying what there answers them>"}]}
 
         If nothing plausibly answers the query, reply {"matches":[]}.
         """
@@ -183,19 +202,38 @@ enum SettingsSearchResearch {
     ///
     /// A page id is the identity, but a model that read the catalogue sometimes answers with
     /// the title it showed the user — so an unknown id gets one more chance as a title before
-    /// it is dropped.
+    /// it is dropped. A named setting is vouched for the same way: resolved against the page's
+    /// own entries (case-insensitively, since a model may re-case what it read), and quietly
+    /// dropped to a page-level answer when nothing there carries the title — a page that is
+    /// right is still an answer, while a scroll to a row that does not exist is not.
     static func validated(_ raw: [RawMatch]) -> [Match] {
         var seen = Set<String>()
         let matches: [Match] = raw.compactMap { candidate in
             let identifier = candidate.page.trimmingCharacters(in: .whitespacesAndNewlines)
             let page = SettingsPages.page(id: identifier)
                 ?? SettingsPages.id(ofTitle: identifier).flatMap { SettingsPages.page(id: $0) }
-            guard let page, seen.insert(page.id).inserted else { return nil }
+            guard let page else { return nil }
+
+            let entry = candidate.setting
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .flatMap { named -> SettingsEntry? in
+                    page.entries.first {
+                        $0.title.compare(named, options: [.caseInsensitive]) == .orderedSame
+                    }
+                }
+
+            // Deduplicated by destination rather than by page: two different rows on one
+            // page are two answers.
+            guard seen.insert(page.id + "\u{1F}" + (entry?.title ?? "")).inserted else {
+                return nil
+            }
 
             return Match(
                 pageID: page.id,
                 title: page.title,
                 symbol: page.symbol,
+                settingTitle: entry?.title,
+                settingSection: entry?.section,
                 reason: candidate.reason?
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             )

@@ -220,7 +220,10 @@ extension ConversationViewController {
     /// gestures back as intentions — move this, remove this, edit this — and never mutates.
     func refreshOutboxRail() {
         guard isViewLoaded else { return }
-        outboxRail.setRows(outbox.items.map {
+        // Once handed to the transport, the prompt's user bubble is the visible record. Keep
+        // lifecycle entries in the model for completion and reclaim, but do not echo the same
+        // text in a disabled gray row over the composer.
+        outboxRail.setRows(outbox.pending.map {
             ConversationOutboxRailView.Row(id: $0.id, summary: $0.summary, state: $0.state)
         })
     }

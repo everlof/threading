@@ -382,6 +382,17 @@ items.
   grants no project or session data by itself; request the applicable host-read capabilities
   separately.
 - Declare `host.projects.read` before calling `projects()` or `project(id:)`.
+- Declare `host.project.files.read` before calling `projectFiles(_:)`. It is **not** implied by
+  `host.projects.read`: that authority returns a sanitized snapshot with no filesystem in it, and
+  this one returns names, project-relative paths, byte sizes and modification dates. The answer
+  carries opaque handles, never bytes and never an absolute path; a handle is only usable by
+  naming it as an `ExtensionMediaSource.fileHandle` for a host renderer to resolve.
+- Declare `ui.media-documents` before putting a `media` node in any contribution. The surface must
+  also admit it — `allowsMedia` is false in every published contract unless its constraints say
+  otherwise.
+- Declare `attachments.preview` before answering an `ExtensionAttachmentPreviewRequest`, and
+  `attachments.file-types` before registering `previewableFileTypes`. A registration may not claim
+  an extension Threading already classifies (`json`, `png`, `pdf`, `html`, `zip`, …).
 - Declare `host.sessions.read` before calling `sessions()` or `session(id:)`.
 - Declare `host.sessions.runtime.read` before calling `sessionRuntime(id:)`. Pass only a stable
   session ID received from host context or a session snapshot. The result is already filtered
@@ -751,6 +762,37 @@ examples, limits, and architecture diagram.
 These richer nodes are available in full panels. Compact component surfaces disallow them unless
 their published constraint vocabulary explicitly opts in. Read the contract rather than assuming
 that a node legal in a panel is legal in a sidebar row, toolbar, or annotation.
+
+### A document that varies over time
+
+`.media` is the only node whose pixels move on their own, and **Threading draws all of them**. The
+extension states which document, whether it is playing, how fast and how it loops; the host carries
+the decoder, the clock, the transport, the ceilings, the theme, the accessibility and the
+pasteboard, and answers with a coalesced `ExtensionMediaStateReport` on `stateActionID`.
+
+```swift
+.media(ExtensionMediaDocument(
+    id: "hero",                              // stable id: playback survives a panel replacement
+    source: .fileHandle(handle.id),          // opaque; never a path, never bytes
+    format: .lottie,
+    playback: ExtensionMediaPlayback(isPlaying: true, loop: .loop, speed: 1),
+    allowsFrameCopy: true,                   // the host owns the pasteboard action
+    accessibilityLabel: "Hero animation",
+    stateActionID: "playback-state"
+))
+```
+
+Three rules worth internalizing:
+
+- **Keep `id` stable.** Replacing the panel to update a label must not restart the animation; a
+  changed id is what resets it.
+- **Do not draw a scrubber.** `transport: .hostOwned` gives you one. A scrubber made of extension
+  nodes would be a display-rate callback over a JSONL round trip.
+- **Reports are coalesced.** `ready`, `completed`, `failed`, play/pause and scrub end — never per
+  frame. Read them with `ExtensionMediaStateReport(actionValue:)`.
+
+`Examples/LottieViewerExtension` is the reference: it enumerates a project's animations as handles,
+plays one, and offers a preview body for a Lottie an attachment carries.
 
 ### A summary with a second level
 

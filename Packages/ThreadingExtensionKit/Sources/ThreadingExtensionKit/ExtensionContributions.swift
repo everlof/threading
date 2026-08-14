@@ -181,7 +181,8 @@ public struct ExtensionPanel: Codable, Equatable, Sendable {
         maximumSceneItems: 500,
         allowsDivider: true,
         allowsFixedSpacer: true,
-        allowsFlexibleSpacer: true
+        allowsFlexibleSpacer: true,
+        allowsMedia: true
     )
 
     public let id: String
@@ -264,23 +265,27 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
     public let workspaceNavigators: [ExtensionWorkspaceNavigator]
     public let mcpTools: [ExtensionMCPTool]
     public let services: [ExtensionServiceDefinition]
+    /// File extensions this package asks the attachments scanner to notice.
+    public let previewableFileTypes: [ExtensionPreviewableFileType]
 
     public init(
         commands: [ExtensionCommand] = [],
         panels: [ExtensionPanel] = [],
         workspaceNavigators: [ExtensionWorkspaceNavigator] = [],
         mcpTools: [ExtensionMCPTool] = [],
-        services: [ExtensionServiceDefinition] = []
+        services: [ExtensionServiceDefinition] = [],
+        previewableFileTypes: [ExtensionPreviewableFileType] = []
     ) {
         self.commands = commands
         self.panels = panels
         self.workspaceNavigators = workspaceNavigators
         self.mcpTools = mcpTools
         self.services = services
+        self.previewableFileTypes = previewableFileTypes
     }
 
     private enum CodingKeys: String, CodingKey {
-        case commands, panels, workspaceNavigators, mcpTools, services
+        case commands, panels, workspaceNavigators, mcpTools, services, previewableFileTypes
     }
 
     public init(from decoder: Decoder) throws {
@@ -295,6 +300,10 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
         services = try container.decodeIfPresent(
             [ExtensionServiceDefinition].self,
             forKey: .services
+        ) ?? []
+        previewableFileTypes = try container.decodeIfPresent(
+            [ExtensionPreviewableFileType].self,
+            forKey: .previewableFileTypes
         ) ?? []
     }
 
@@ -358,6 +367,43 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
                     message: "must contain 'panels' when panels are registered"
                 )
             )
+        }
+        var seenFileExtensions: Set<String> = []
+        for (index, fileType) in previewableFileTypes.enumerated() {
+            let path = "previewableFileTypes[\(index)]"
+            issues.append(contentsOf: fileType.validationIssues(path: path))
+            if !seenFileExtensions.insert(fileType.fileExtension).inserted {
+                issues.append(.init(
+                    path: "\(path).fileExtension",
+                    message: "duplicates '\(fileType.fileExtension)'"
+                ))
+            }
+        }
+        if previewableFileTypes.count > ExtensionPreviewableFileType.maximumCount {
+            issues.append(.init(
+                path: "previewableFileTypes",
+                message: "must contain at most "
+                    + "\(ExtensionPreviewableFileType.maximumCount) file types"
+            ))
+        }
+        if !previewableFileTypes.isEmpty,
+           !manifest.capabilities.contains(.attachmentFileTypes) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'attachments.file-types' when file types are registered"
+            ))
+        }
+
+        // The capability is checked against the *contribution*, not the manifest alone: a
+        // package may declare `ui.media-documents` and never use it, but a panel carrying a
+        // player without it is a surface the user was never asked about.
+        for (index, panel) in panels.enumerated()
+        where panel.root.containsMediaDocument
+            && !manifest.capabilities.contains(.mediaDocuments) {
+            issues.append(.init(
+                path: "panels[\(index)].root",
+                message: "must declare 'ui.media-documents' to contain a media node"
+            ))
         }
         if panels.count > 32 {
             issues.append(.init(

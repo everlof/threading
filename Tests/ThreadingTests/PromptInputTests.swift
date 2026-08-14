@@ -1421,10 +1421,13 @@ final class PromptInputTests: XCTestCase {
         let usage = try XCTUnwrap(
             controls(in: composer.view).first {
                 $0.accessibilityIdentifier() == "composer.session-start.usage"
-            } as? NSTextField
+            } as? UsageReadingLabel
         )
         usage.isHidden = false
-        usage.stringValue = "5h 43% · 7d 73%"
+        usage.readings = [
+            AccountUsage.Reading(name: "5h", value: "43%", severity: .normal, fraction: 0.43),
+            AccountUsage.Reading(name: "7d", value: "73%", severity: .normal, fraction: 0.73)
+        ]
 
         try captureAppFixture(window, named: "composer-column")
 

@@ -6,7 +6,7 @@ import XCTest
 /// The themed controls that replace stock AppKit, so a styled app is themed all the way down
 /// rather than themed cards around system-blue switches.
 @MainActor
-final class ThemedControlTests: XCTestCase {
+final class ThemedControlTests: HostedStoreTestCase {
 
     func testAMenuRowHasOnlyOneDestination() {
         let inert = ThemedMenuItem(title: "Unavailable", isEnabled: false)
@@ -3510,9 +3510,18 @@ final class ThemedControlTests: XCTestCase {
         func plateIsDrawn() throws -> Bool {
             let rep = try XCTUnwrap(title.bitmapImageRepForCachingDisplay(in: title.bounds))
             title.cacheDisplay(in: title.bounds, to: rep)
-            // The top-left corner of the row: inside the plate if there is one, and clear of
-            // every glyph the row draws either way.
-            let sample = try XCTUnwrap(rep.colorAt(x: 2, y: 2))
+            // Sampled in **points**, converted through the rep's own scale. `colorAt(x:y:)` takes
+            // pixels, and the backing store is 2× here: reading (2, 2) directly was reading point
+            // (1, 1), which is inside the plate's corner radius and correctly empty — so a plate
+            // that drew perfectly still measured as absent.
+            let scale = CGFloat(rep.pixelsWide) / title.bounds.width
+            // Near the top-leading corner but clear of the arc, and above the mark, which is
+            // centred in the row: what the assertion wants is plate rather than glyph.
+            let point = NSPoint(x: 6, y: 4)
+            let sample = try XCTUnwrap(rep.colorAt(
+                x: Int((point.x * scale).rounded()),
+                y: Int((point.y * scale).rounded())
+            ))
             return sample.alphaComponent > 0.01
         }
 
@@ -6520,7 +6529,7 @@ final class ThemedControlTests: XCTestCase {
         let codeScroll = ThemedScrollView(frame: NSRect(x: 20, y: 20, width: 240, height: 80))
         codeScroll.hasHorizontalScroller = true
         codeScroll.hasVerticalScroller = false
-        codeScroll.forwardsVerticalScrollToAncestor = true
+        codeScroll.verticalScrollHandoff = .always
         document.addSubview(codeScroll)
 
         codeScroll.scrollWheel(with: try wheelEvent(horizontal: 0, vertical: 12))
@@ -6896,7 +6905,9 @@ final class ThemedControlTests: XCTestCase {
                 "PaneNoticeView",
                 "PromptCompletionPresenter",
                 "PromptView",
+                "RevealHighlightView",
                 "SearchMatchLabel",
+                "SearchResultRowView",
                 "SemanticSceneView",
                 "SeparatorView",
                 "ShortcutRecorderView",
@@ -6959,6 +6970,7 @@ final class ThemedControlTests: XCTestCase {
                 "ToastView",
                 "ToolbarButtonGroupView",
                 "UsageDashboardView",
+                "UsageReadingLabel",
                 "WorkingOrbView",
                 "WindowBackdrop",
                 "WindowChromeButton",

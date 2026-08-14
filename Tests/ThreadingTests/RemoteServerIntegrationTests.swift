@@ -9,7 +9,7 @@ import ThreadingRemoteKit
 /// MCP, permission or lifecycle path — those belong to a different server the tunnel never
 /// reaches — and an unauthenticated API call must be refused.
 @MainActor
-final class RemoteServerIntegrationTests: XCTestCase {
+final class RemoteServerIntegrationTests: HostedStoreTestCase {
 
     private var server: RemoteAccessServer!
     private var authority: RemoteAuthorityStore!

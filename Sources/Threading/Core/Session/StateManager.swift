@@ -47,6 +47,30 @@ final class StateManager {
 
     static let shared = StateManager()
 
+    /// Whether this process is a hosted XCTest bundle rather than the app the user is running.
+    ///
+    /// The test bundle is hosted *inside* the shipping app, so `StateManager.shared` otherwise
+    /// resolves the developer's own Application Support directory — the live projects database.
+    /// That is not a theoretical hazard: `save(_:)` reconciles the whole graph, so a test that
+    /// touched `ProjectStore.shared` wrote its fixture list over the real store and deleted every
+    /// project its stale snapshot had not seen, taking each project's chats with it through
+    /// `ON DELETE CASCADE`. Projects were lost this way.
+    ///
+    /// Persistence tests already pass `appSupportDirectory`; this covers the singleton the other
+    /// tests reach through `ProjectStore.shared`, exactly as `PreferenceStore` covers
+    /// `UserDefaults.standard`. The redirect is deliberately unconditional rather than opt-in: a
+    /// test that has to remember to isolate itself is one crash away from taking the store with it.
+    static let isHostedTest = NSClassFromString("XCTestCase") != nil
+
+    /// The per-process scratch directory a hosted test gets instead of the user's state.
+    ///
+    /// Keyed by pid because several test runs share this machine — this repository is worked on
+    /// by concurrent agents — and two runs sharing one store would reintroduce the very
+    /// two-writer race this redirect exists to remove.
+    private static var hostedTestDirectoryName: String {
+        "Threading-HostedTestState-\(ProcessInfo.processInfo.processIdentifier)"
+    }
+
     private let fileManager: FileManager
     private let appSupportDirectoryOverride: URL?
     private let now: () -> Date
@@ -93,6 +117,12 @@ final class StateManager {
             return appSupportDirectoryOverride
         }
 
+        if Self.isHostedTest {
+            let scratch = Self.hostedTestDirectory(fileManager: fileManager)
+            ensureDirectoryExists(scratch)
+            return scratch
+        }
+
         let appSupport = fileManager.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
@@ -115,6 +145,35 @@ final class StateManager {
         }
     }
 
+    // MARK: - Hosted Test State
+
+    static func hostedTestDirectory(fileManager: FileManager = .default) -> URL {
+        fileManager.temporaryDirectory
+            .appendingPathComponent(hostedTestDirectoryName, isDirectory: true)
+    }
+
+    /// Whether `shared` is currently pointed at the scratch store rather than the user's own.
+    ///
+    /// Exposed so a test teardown can *prove* what it is about to erase instead of trusting that
+    /// the redirect above is still in place. A cleanup that silently no-ops when the redirect
+    /// regresses would delete the developer's projects on the very build that broke it.
+    static var sharedUsesHostedTestState: Bool { isHostedTest }
+
+    /// Erases this process's hosted-test scratch store.
+    ///
+    /// Deliberately **only this pid's** directory. Sweeping the siblings would put one test run in
+    /// a position to delete another's store mid-flight, which is the two-writer race this whole
+    /// redirect exists to remove — reintroduced one directory further out. A run killed before its
+    /// teardown leaks a scratch directory into the OS temporary directory, which the system purges.
+    @discardableResult
+    static func eraseHostedTestState(fileManager: FileManager = .default) -> Bool {
+        guard isHostedTest else { return false }
+
+        shared.closeDatabase()
+        try? fileManager.removeItem(at: hostedTestDirectory(fileManager: fileManager))
+        return true
+    }
+
     private var sessionStateURL: URL {
         appSupportDirectory.appendingPathComponent("session-state.json")
     }
@@ -135,6 +194,23 @@ final class StateManager {
         do {
             try database().save(state)
             return true
+        } catch ProjectDatabaseWriteError.staleGeneration(let observed, let found) {
+            // Deliberately *not* `requireRecovery()`. Nothing here is corrupt — the store is
+            // intact and readable, and this writer is simply behind it. Quarantining would take
+            // the whole launch's writes away over a refusal that already did its job.
+            //
+            // Two counters and no payload, so the whole message can be public.
+            ThreadingLogger.agent.error(
+                """
+                Refused a whole-graph projects-state write: the store moved from generation \
+                \(observed, privacy: .public) to \(found, privacy: .public) beneath this writer
+                """
+            )
+            EventLog.shared.record(.app, "Refused a stale projects-state write", [
+                "observed": String(observed),
+                "found": String(found),
+            ])
+            return false
         } catch {
             ThreadingLogger.agent.error("Failed to save projects state: \(error.localizedDescription, privacy: .private(mask: .hash))")
             requireRecovery()

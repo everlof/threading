@@ -6,7 +6,7 @@ import XCTest
 /// conversations, and duplicates skipped whether they repeat something the project already
 /// tracks or each other.
 @MainActor
-final class ProjectStoreImportBatchTests: XCTestCase {
+final class ProjectStoreImportBatchTests: HostedStoreTestCase {
 
     func testBatchAdoptsResumableSessionsAndSkipsDuplicates() throws {
         let store = ProjectStore.shared

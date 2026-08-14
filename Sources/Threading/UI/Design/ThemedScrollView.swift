@@ -2439,13 +2439,43 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
         didSet { applySurfaceRole() }
     }
 
-    /// Hands vertical-dominant gestures to the nearest enclosing scroll view.
+    /// What a nested viewport does with a vertical-dominant gesture.
     ///
-    /// Opt this in for a nested, horizontal-only viewport such as a Markdown code block. AppKit
-    /// otherwise sends the whole trackpad gesture to the view beneath the pointer, even when
-    /// that view has no vertical range, which makes the surrounding conversation appear stuck.
-    /// Horizontal-dominant gestures remain local.
-    var forwardsVerticalScrollToAncestor = false
+    /// AppKit sends a whole trackpad gesture to the view beneath the pointer, whether or not
+    /// that view has anywhere to go — which is what makes a page appear stuck the moment the
+    /// pointer crosses something nested inside it. There are two different nested viewports
+    /// here and they need two different answers, so this is a policy rather than a flag.
+    /// Horizontal-dominant gestures always remain local.
+    enum VerticalScrollHandoff: Equatable {
+        /// The gesture is this viewport's, always. The default, and right for anything that
+        /// owns its own vertical range outright.
+        case never
+        /// This viewport has no vertical range to speak of — a Markdown code block, a wide
+        /// document table — so vertical belongs to the page above it from the first pixel.
+        case always
+        /// This viewport does scroll vertically, and hands the *rest* of a gesture up once it
+        /// has nothing left to give in that direction: the Usage breakdown, whose table is
+        /// virtualized and therefore cannot simply grow to fit its rows.
+        case atContentEnds
+    }
+
+    var verticalScrollHandoff: VerticalScrollHandoff = .never {
+        didSet {
+            guard verticalScrollHandoff != oldValue else { return }
+            // Exhaustion has to be exact for `.atContentEnds`: a rubber band *is* movement, so
+            // an elastic viewport never reports that it ran out and the page below it never
+            // gets its gesture. Removing the bounce is also the right answer on its own — a
+            // nested list that bounces inside a page that also scrolls reads as two surfaces
+            // fighting over one flick.
+            if verticalScrollHandoff == .atContentEnds { verticalScrollElasticity = .none }
+            handsOverCurrentGesture = false
+        }
+    }
+
+    /// Once a gesture has been given away it stays given away, momentum included. Re-deciding
+    /// mid-flick means the page scrolls, this viewport comes back into range, and it starts
+    /// stealing the tail of a gesture the reader aimed at the page.
+    private var handsOverCurrentGesture = false
 
     /// Reports a wheel or trackpad event before it scrolls, momentum included.
     ///
@@ -2534,20 +2564,50 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        if forwardsVerticalScrollToAncestor,
-           nestedGestureRouter.forwardsToAncestor(
-               deltaX: event.scrollingDeltaX,
-               deltaY: event.scrollingDeltaY,
-               phase: event.phase,
-               momentumPhase: event.momentumPhase
-           ), let ancestorScrollView {
+        guard verticalScrollHandoff != .never else {
+            nestedGestureRouter.reset()
+            handsOverCurrentGesture = false
+            onUserScroll?()
+            super.scrollWheel(with: event)
+            return
+        }
+
+        if event.phase.contains(.began) { handsOverCurrentGesture = false }
+        let isVertical = nestedGestureRouter.forwardsToAncestor(
+            deltaX: event.scrollingDeltaX,
+            deltaY: event.scrollingDeltaY,
+            phase: event.phase,
+            momentumPhase: event.momentumPhase
+        )
+        let endsGesture = event.phase.contains(.ended)
+            || event.phase.contains(.cancelled)
+            || event.momentumPhase.contains(.ended)
+            || event.momentumPhase.contains(.cancelled)
+        defer { if endsGesture { handsOverCurrentGesture = false } }
+
+        guard isVertical, let ancestorScrollView else {
+            onUserScroll?()
+            super.scrollWheel(with: event)
+            return
+        }
+
+        if verticalScrollHandoff == .always || handsOverCurrentGesture {
+            handsOverCurrentGesture = true
             ancestorScrollView.scrollWheel(with: event)
             return
         }
-        if !forwardsVerticalScrollToAncestor { nestedGestureRouter.reset() }
 
+        // `.atContentEnds`, and this gesture has not been given away yet. Rather than reason
+        // about which way a positive `scrollingDeltaY` points — which depends on the document's
+        // flippedness *and* on whether the reader has natural scrolling switched on — let the
+        // viewport try, and read whether it went anywhere. With elasticity off (above) that
+        // answer is exact, and it is the same question the reader is asking: did anything move?
+        let before = contentView.bounds.origin
         onUserScroll?()
         super.scrollWheel(with: event)
+        guard contentView.bounds.origin == before else { return }
+        handsOverCurrentGesture = true
+        ancestorScrollView.scrollWheel(with: event)
     }
 
     private var ancestorScrollView: NSScrollView? {

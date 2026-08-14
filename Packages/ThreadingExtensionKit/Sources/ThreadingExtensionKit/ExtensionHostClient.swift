@@ -180,6 +180,26 @@ public struct ExtensionHostClient: Sendable {
         )
     }
 
+    /// Lists the project's documents matching a bounded query, as opaque handles.
+    ///
+    /// Requires `host.project.files.read`. The answer carries handles and bounded metadata; it
+    /// never carries bytes or an absolute path, and a handle is only usable by naming it as an
+    /// `ExtensionMediaSource.fileHandle` for a host renderer to resolve.
+    public func projectFiles(_ query: ExtensionFileQuery) async throws -> ExtensionFilePage {
+        try query.validate()
+        let data = try await request(
+            path: "project-files/query",
+            method: "POST",
+            body: JSONEncoder().encode(query)
+        )
+        let page = try decode(ExtensionFilePage.self, from: data)
+        guard page.protocolVersion == ExtensionFilePage.currentProtocolVersion,
+              page.handles.count <= query.maximumResults else {
+            throw ExtensionHostClientError.invalidResponse
+        }
+        return page
+    }
+
     /// Returns sessions across projects. Filesystem and transcript locations are never included.
     public func sessions() async throws -> ExtensionSessionSnapshotPage {
         try await get("sessions", as: ExtensionSessionSnapshotPage.self)

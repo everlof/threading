@@ -73,11 +73,15 @@ final class ConversationRenderTests: XCTestCase {
     }
 
     /// Lays the rows out in a stack shaped like the conversation pane's, at a fixed width.
-    private func laidOut(_ rows: [ConversationTimeline.Row], width: CGFloat) -> NSStackView {
+    private func laidOut(
+        _ rows: [ConversationTimeline.Row],
+        width: CGFloat,
+        compactTools: Bool = false
+    ) -> NSStackView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = Design.Spacing.medium
+        stack.spacing = 0
         stack.edgeInsets = NSEdgeInsets(
             top: Design.Spacing.inset,
             left: Design.Spacing.inset,
@@ -85,29 +89,82 @@ final class ConversationRenderTests: XCTestCase {
             right: Design.Spacing.inset
         )
 
-        var previous: NSView?
+        enum RenderItem {
+            case row(ConversationTimeline.Row)
+            case toolFold([ConversationTimeline.ToolCall])
+        }
 
-        func add(_ view: NSView, startsTurn: Bool) {
+        var items: [RenderItem] = []
+        var pendingTools: [ConversationTimeline.ToolCall] = []
+
+        func flushTools() {
+            guard !pendingTools.isEmpty else { return }
+            if pendingTools.count == 1, let call = pendingTools.first {
+                items.append(.row(.toolCall(call)))
+            } else {
+                items.append(.toolFold(pendingTools))
+            }
+            pendingTools.removeAll(keepingCapacity: true)
+        }
+
+        for row in rows {
+            if compactTools,
+               case .toolCall(let call) = row,
+               call.chart == nil {
+                pendingTools.append(call)
+            } else {
+                flushTools()
+                items.append(.row(row))
+            }
+        }
+        flushTools()
+
+        var previous: NSView?
+        var previousWasWork = false
+
+        func add(_ view: NSView, opensTurn: Bool, isWork: Bool) {
+            if let previous {
+                let spacing = opensTurn
+                    ? Design.Chat.turnSpacing
+                    : (isWork || previousWasWork ? Design.Spacing.tight : Design.Spacing.small)
+                stack.setCustomSpacing(spacing, after: previous)
+            }
             stack.addArrangedSubview(view)
             NSLayoutConstraint.activate([
                 view.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: Design.Spacing.inset),
                 view.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -Design.Spacing.inset)
             ])
-            if startsTurn, let previous {
-                stack.setCustomSpacing(Design.Chat.turnSpacing, after: previous)
-            }
             previous = view
+            previousWasWork = isWork
         }
 
         // Mirrors `ConversationRendering.apply(_:)`. Divergence here would make the images
         // pictures of something the app never draws, so any change to placement belongs in
         // both — the row views themselves are already shared.
-        for row in rows {
-            let (view, startsTurn) = ConversationRowView.make(for: row)
-            if startsTurn, previous != nil {
-                add(ConversationRowView.turnDivider(), startsTurn: true)
+        for item in items {
+            switch item {
+            case .row(let row):
+                let (view, startsTurn) = ConversationRowView.make(for: row)
+                if startsTurn, previous != nil {
+                    add(ConversationRowView.turnDivider(), opensTurn: true, isWork: false)
+                }
+                let isWork: Bool
+                switch row {
+                case .toolCall, .thinking:
+                    isWork = true
+                case .userMessage, .assistant, .turnOutcome, .notice:
+                    isWork = false
+                }
+                add(view, opensTurn: false, isWork: isWork)
+
+            case .toolFold(let calls):
+                let label = L10n.format("%lld tool calls", Int64(calls.count))
+                add(
+                    TurnFoldView(label: label, folding: [], expanded: false) { _, _ in },
+                    opensTurn: false,
+                    isWork: true
+                )
             }
-            add(view, startsTurn: startsTurn)
         }
 
         // Width is pinned and height left free, which is the pane's own arrangement: a
@@ -1085,7 +1142,11 @@ final class ConversationRenderTests: XCTestCase {
         let events = Self.stressEvents(shape: .mixed, turns: 1)
         Self.apply(Array(events.prefix(2)), to: controller)
 
-        XCTAssertEqual(controller.presentationItems.count, 6)
+        XCTAssertEqual(controller.presentationItems.count, 4)
+        XCTAssertTrue(controller.presentationItems.contains {
+            guard case .toolFold(let indices) = $0.content else { return false }
+            return indices == [2, 3, 4]
+        })
         XCTAssertTrue(controller.rowViews.isEmpty)
 
         Self.apply(Array(events.dropFirst(2)), to: controller)
@@ -1188,6 +1249,101 @@ final class ConversationRenderTests: XCTestCase {
         )
     }
 
+    func testConsecutiveLiveToolsUseOneExpandableWorkGroup() throws {
+        let controller = requireConversationViewController(
+            agentSession: AgentSession(kind: .codex, title: "Tool group", usesNativeUI: true),
+            project: Project(
+                name: "Tool group",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: Render.width,
+            height: Render.viewportHeight
+        )
+        controller.view.layoutSubtreeIfNeeded()
+
+        Self.apply([
+            .userMessage("Inspect the three files"),
+            .assistantMessage(blocks: [
+                .toolUse(id: "one", tool: .read, input: ["file_path": "one.swift"]),
+                .toolUse(id: "two", tool: .read, input: ["file_path": "two.swift"]),
+                .toolUse(id: "three", tool: .read, input: ["file_path": "three.swift"])
+            ])
+        ], to: controller)
+
+        let foldRow = try XCTUnwrap(controller.presentationItems.firstIndex {
+            guard case .toolFold(let indices) = $0.content else { return false }
+            return indices == [1, 2, 3]
+        })
+        XCTAssertEqual(controller.presentationItems.count, 2)
+        XCTAssertTrue((1...3).allSatisfy {
+            controller.presentationRow(forTimelineIndex: $0) == nil
+        })
+
+        let host = try XCTUnwrap(
+            controller.tableView.view(atColumn: 0, row: foldRow, makeIfNecessary: true)
+        )
+        let fold = try XCTUnwrap(Self.firstDescendant(TurnFoldView.self, in: host))
+        fold.setExpanded(true)
+
+        XCTAssertEqual(controller.presentationItems.count, 5)
+        XCTAssertTrue((1...3).allSatisfy {
+            controller.presentationRow(forTimelineIndex: $0) != nil
+        })
+
+        fold.setExpanded(false)
+        XCTAssertEqual(controller.presentationItems.count, 2)
+
+        XCTAssertNotNil(controller.scrollToTimelineRow(2, animated: false))
+        XCTAssertTrue(controller.expandedToolGroups.contains(1))
+        XCTAssertNotNil(controller.presentationRow(forTimelineIndex: 2))
+        XCTAssertNotNil(controller.rowViews[2])
+    }
+
+    func testAnsweredPermissionDisappearsAndQueuedRequestsRecheckSessionApproval() {
+        let session = AgentSession(kind: .codex, title: "Permission queue", usesNativeUI: true)
+        defer { PermissionBroker.discard(sessionID: session.id) }
+        let controller = requireConversationViewController(
+            agentSession: session,
+            project: Project(
+                name: "Permission queue",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+        let baseline = controller.presentationItems.count
+        var decisions: [PermissionDecision] = []
+        let request = PermissionRequest(
+            sessionID: session.id,
+            toolName: "Write",
+            input: ["file_path": "status.txt", "content": "done"]
+        )
+
+        controller.presentPermission(request) { decisions.append($0) }
+        controller.presentPermission(request) { decisions.append($0) }
+
+        XCTAssertEqual(controller.permissionQueue.count, 1)
+        XCTAssertEqual(controller.presentationItems.count, baseline + 1)
+
+        PermissionBroker.allowAlways(toolName: "Write", for: session.id)
+        controller.activePermissionCard?.resolve(.allow(reason: "Approved for the session."))
+
+        XCTAssertNil(controller.activePermissionCard)
+        XCTAssertTrue(controller.permissionQueue.isEmpty)
+        XCTAssertEqual(controller.presentationItems.count, baseline)
+        XCTAssertEqual(decisions.count, 2)
+        XCTAssertTrue(decisions.allSatisfy {
+            if case .allow = $0 { return true }
+            return false
+        })
+    }
+
     func testReplayFinishAttachesAnUnfinishedTail() {
         let session = AgentSession(kind: .codex, title: "Replay tail", usesNativeUI: true)
         let controller = requireConversationViewController(
@@ -1205,14 +1361,17 @@ final class ConversationRenderTests: XCTestCase {
             Array(Self.stressEvents(shape: .mixed, turns: 1).prefix(2)),
             to: controller
         )
-        XCTAssertEqual(controller.presentationItems.count, 6)
+        XCTAssertEqual(controller.presentationItems.count, 4)
         XCTAssertTrue(controller.rowViews.isEmpty)
 
         controller.finishReplayRendering()
 
-        XCTAssertEqual(controller.tableView.numberOfRows, 6)
-        XCTAssertTrue((0...5).allSatisfy {
+        XCTAssertEqual(controller.tableView.numberOfRows, 4)
+        XCTAssertTrue([0, 1, 5].allSatisfy {
             controller.presentationRow(forTimelineIndex: $0) != nil
+        })
+        XCTAssertTrue((2...4).allSatisfy {
+            controller.presentationRow(forTimelineIndex: $0) == nil
         })
     }
 
@@ -1802,7 +1961,7 @@ final class ConversationRenderTests: XCTestCase {
         let activeRows = controller.timeline.rows.count
         let activePresented = controller.presentationItems.count
         XCTAssertEqual(activeRows, baseRows + toolCount + 1)
-        XCTAssertEqual(activePresented, basePresented + toolCount + 2)
+        XCTAssertEqual(activePresented, basePresented + 3)
         XCTAssertEqual(controller.minimapTurnCount, baseTurns + 1)
         XCTAssertLessThan(
             controller.rowViews.count,
@@ -1811,12 +1970,6 @@ final class ConversationRenderTests: XCTestCase {
         )
 
         let targetTimelineRow = activeStartIndex + 1 + toolCount / 2
-        guard let targetPresentationRow = controller.presentationRow(
-            forTimelineIndex: targetTimelineRow
-        ) else {
-            XCTFail("the middle active tool had no presentation identity")
-            return
-        }
         let jumpStarted = DispatchTime.now().uptimeNanoseconds
         let jumpMeasurements = controller.scrollToTimelineRow(
             targetTimelineRow,
@@ -1825,6 +1978,12 @@ final class ConversationRenderTests: XCTestCase {
         controller.view.layoutSubtreeIfNeeded()
         let jumpElapsed = DispatchTime.now().uptimeNanoseconds - jumpStarted
         XCTAssertNotNil(jumpMeasurements)
+        guard let targetPresentationRow = controller.presentationRow(
+            forTimelineIndex: targetTimelineRow
+        ) else {
+            XCTFail("exact navigation did not expand the middle tool's group")
+            return
+        }
         XCTAssertTrue(
             controller.tableView.rect(ofRow: targetPresentationRow)
                 .intersects(controller.scrollView.contentView.documentVisibleRect),
@@ -1836,6 +1995,8 @@ final class ConversationRenderTests: XCTestCase {
         )
         let targetRowHeight = controller.tableView.rect(ofRow: targetPresentationRow).height
         let activeMaterialized = controller.rowViews.count
+        let expandedPresented = controller.presentationItems.count
+        XCTAssertEqual(expandedPresented, activePresented + toolCount)
 
         let streamStarted = DispatchTime.now().uptimeNanoseconds
         for index in 0..<250 {
@@ -1845,7 +2006,7 @@ final class ConversationRenderTests: XCTestCase {
         }
         controller.view.layoutSubtreeIfNeeded()
         let streamElapsed = DispatchTime.now().uptimeNanoseconds - streamStarted
-        XCTAssertEqual(controller.presentationItems.count, activePresented + 1)
+        XCTAssertEqual(controller.presentationItems.count, expandedPresented + 1)
         peakMemory = max(peakMemory, Self.physicalFootprintBytes())
 
         var resultDurations: [UInt64] = []
@@ -1925,7 +2086,9 @@ final class ConversationRenderTests: XCTestCase {
             "THREADING_PERF conversation-active-build "
                 + "base_turns=\(baseTurns) tools=\(toolCount) batch_size=\(batchSize) "
                 + "base_rows=\(baseRows) active_rows=\(activeRows) "
-                + "presented=\(activePresented) materialized=\(activeMaterialized) "
+                + "collapsed_presented=\(activePresented) "
+                + "expanded_presented=\(expandedPresented) "
+                + "materialized=\(activeMaterialized) "
                 + "batches=\(appendDurations.count) "
                 + "user_ms=\(Self.milliseconds(userElapsed)) "
                 + "append_total_ms=\(Self.milliseconds(appendDurations.reduce(0, +))) "
@@ -2741,7 +2904,7 @@ final class ConversationRenderTests: XCTestCase {
 
         var data: Data?
         let render = {
-            let stack = self.laidOut(rows, width: Render.width)
+            let stack = self.laidOut(rows, width: Render.width, compactTools: true)
             stack.appearance = appearance
 
             guard let host = stack.superview else { return }

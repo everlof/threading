@@ -271,6 +271,20 @@ struct ExtensionLocalizationResolver: Sendable {
                 accessibilityLabel: string(accessibilityLabel),
                 isEnabled: isEnabled
             )
+        case .media(let document):
+            // Everything else in a media document is a handle, an id or a number; the label is
+            // the one string it carries, and it is the one a screen reader will say.
+            return .media(ExtensionMediaDocument(
+                id: document.id,
+                source: document.source,
+                format: document.format,
+                playback: document.playback,
+                transport: document.transport,
+                allowsFrameCopy: document.allowsFrameCopy,
+                accessibilityLabel: string(document.accessibilityLabel),
+                preferredAspectRatio: document.preferredAspectRatio,
+                stateActionID: document.stateActionID
+            ))
         case .scene(let scene):
             return .scene(
                 ExtensionScene(

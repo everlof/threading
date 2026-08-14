@@ -33,6 +33,7 @@ general; a selector such as `NSView > NSStackView:nth-child(2)` is not.
 | Display-pane header | `display.pane-header@1` | protected command/status hook | tab ownership, close/select/order, overflow, persistence, `+` menu | Implemented |
 | Display tab header | `display.tab-header@1` | display-only `after-title` slot | identity, active state, close/select, ordering, overflow | Implemented |
 | Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity presentation, refresh, the whole reveal gesture | Implemented |
+| Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, the inspector rail | Implemented |
 
 ## Project hover-card precedent
 
@@ -130,6 +131,32 @@ vocabulary in the contract (`disclosureDetail`), which is where the display-only
 the corner card's second level may carry `standard` buttons, because a control there fights
 nothing. Opening it is what the reader just asked for. A hover reveal is still not where a
 destructive or primary action belongs, and the contract says so by allowing neither role.
+
+## Attachment-preview precedent
+
+Every other surface in this table is *published to*: an extension declares a patch and the host
+applies it. `attachments.preview@1` is the first that is **asked**, and the difference is the point.
+
+A preview body is exclusive — one row shows one thing — so a published patch would have needed a
+conflict rule, and every conflict rule invents a state ("two extensions claim this file") that a
+user has to resolve. Instead the host offers the attachment to each candidate in the order the
+user's own extension list puts them in, and the first valid acceptance wins. Ordering *is* the
+conflict policy.
+
+That shape also gets three properties for free:
+
+- **Declining is ordinary.** An extension that previews Lottie declines every PDF it is offered,
+  and the host simply moves on. There is no registration to keep accurate.
+- **A failure is a decline.** A timeout, a generation that died mid-offer and an invalid body all
+  advance to the next candidate, so a slow or crashing extension costs the user one preview rather
+  than the pane.
+- **The fallback is always already there.** The native body is drawn first and replaced only when a
+  candidate wins, so removing the last contribution never closes the built-in surface or leaves
+  blank chrome.
+
+At most eight candidates are consulted for one presentation, because selecting a row must not be
+able to turn into unbounded process work as the user installs more extensions. See
+[`media-documents.md`](../architecture/media-documents.md).
 
 ## Gate for every new surface
 

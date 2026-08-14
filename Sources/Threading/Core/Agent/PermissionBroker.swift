@@ -376,33 +376,8 @@ enum PermissionBroker {
         _ request: PermissionRequest,
         completion: @escaping @MainActor @Sendable (PermissionDecision) -> Void
     ) {
-        if PermissionPolicy.isAutoAllowed(request.tool) {
-            completion(.allow(reason: "Read-only tool, allowed automatically by Threading."))
-            return
-        }
-
-        // A shell call is judged by what it runs, because one tool name covers both reading and
-        // writing — and under Codex it is how files are read at all.
-        if request.tool == .bash,
-           let command = request.shellCommand,
-           ShellCommandPolicy.isReadOnly(command) {
-            completion(.allow(reason: "Read-only command, allowed automatically by Threading."))
-            return
-        }
-
-        if alwaysAllowed[request.sessionID]?.contains(request.tool) == true {
-            completion(.allow(reason: "Allowed for this session by the user."))
-            return
-        }
-
-        // The session's permission mode, honoured here because the CLI does not honour it *for*
-        // us: measured against 2.1.220, `PreToolUse` fires under `bypassPermissions` and
-        // `dontAsk` exactly as it does under `manual`. Without this, a natively rendered session
-        // in Bypass would still be stopped by Threading's own sheet — the app contradicting the
-        // mode the user picked in it.
-        if let mode = permissionMode(for: request.sessionID),
-           let standing = PermissionPolicy.standingDecision(for: request.tool, in: mode) {
-            completion(standing)
+        if let decision = automaticDecision(for: request) {
+            completion(decision)
             return
         }
 
@@ -412,6 +387,38 @@ enum PermissionBroker {
         }
 
         present(request, completion)
+    }
+
+    /// The ordinary policy that can change while a request waits behind another approval.
+    /// Kept separate from system-grant briefing so the UI queue can safely re-check it without
+    /// forecasting or presenting the macOS dialog twice.
+    static func automaticDecision(for request: PermissionRequest) -> PermissionDecision? {
+        if PermissionPolicy.isAutoAllowed(request.tool) {
+            return .allow(reason: "Read-only tool, allowed automatically by Threading.")
+        }
+
+        // A shell call is judged by what it runs, because one tool name covers both reading and
+        // writing — and under Codex it is how files are read at all.
+        if request.tool == .bash,
+           let command = request.shellCommand,
+           ShellCommandPolicy.isReadOnly(command) {
+            return .allow(reason: "Read-only command, allowed automatically by Threading.")
+        }
+
+        if alwaysAllowed[request.sessionID]?.contains(request.tool) == true {
+            return .allow(reason: "Allowed for this session by the user.")
+        }
+
+        // The session's permission mode, honoured here because the CLI does not honour it *for*
+        // us: measured against 2.1.220, `PreToolUse` fires under `bypassPermissions` and
+        // `dontAsk` exactly as it does under `manual`. Without this, a natively rendered session
+        // in Bypass would still be stopped by Threading's own sheet — the app contradicting the
+        // mode the user picked in it.
+        if let mode = permissionMode(for: request.sessionID),
+           let standing = PermissionPolicy.standingDecision(for: request.tool, in: mode) {
+            return standing
+        }
+        return nil
     }
 
     /// Forgets which grants have been briefed. For tests, which must not inherit a set left

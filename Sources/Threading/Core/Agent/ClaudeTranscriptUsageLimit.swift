@@ -59,6 +59,15 @@ enum ClaudeTranscriptUsageLimit {
         reader.revalidate(at: url, completion: completion)
     }
 
+    /// Carries the reader's size boundary across an account migration without carrying the stop.
+    ///
+    /// The destination is an exact copy, so its old tail is already observed. The refusal itself
+    /// belonged to the account the conversation left, though: treating it as a live refusal on the
+    /// destination immediately offers a second migration before that account has attempted a turn.
+    static func acknowledgeAccountMigration(to destination: URL, copiedByteCount: Int) {
+        reader.seedCopiedTranscript(at: destination, byteCount: copiedByteCount, value: nil)
+    }
+
     /// Forgets what has been read. For tests, and for a reset that should re-ask.
     static func forgetAll() {
         reader.forgetAll()

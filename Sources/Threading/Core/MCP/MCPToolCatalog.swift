@@ -712,15 +712,18 @@ enum MCPToolCatalog {
       If a command fails for lack of disk space — "No space left on device", ENOSPC, a \
       build or install dying partway with a write error — call list_reclaimable_storage \
       before reporting failure or asking the user to free space by hand. It reports build \
-      output across their projects that can be deleted and rebuilt, with sizes, and their \
-      worktrees are usually holding far more of it than they realise. Also reach for it \
+      output that can be deleted and rebuilt, with sizes: across their projects, whose \
+      worktrees are usually holding far more of it than they realise, and in the temporary \
+      locations agents build in, /private/tmp and the per-user temp directory, where build \
+      caches left by earlier sessions outlive the work they were for. Also reach for it \
       when they ask what is taking up space.
 
       To act on any of it, call propose_storage_cleanup with paths taken from that listing \
-      and a sentence saying what it buys and what has to be rebuilt. It asks the user, who \
-      approves or declines; only then does Threading remove anything. Never delete these \
-      directories yourself with shell commands — the proposal exists so the user sees what \
-      is going before it goes.
+      and a sentence saying what it buys and what has to be rebuilt. Lead with anything the \
+      listing marks ORPHANED: the workspace it was built for is gone, so nothing can rebuild \
+      into it and nothing will read it again. It asks the user, who approves or declines; \
+      only then does Threading remove anything. Never delete these directories yourself with \
+      shell commands — the proposal exists so the user sees what is going before it goes.
       """
   )
 

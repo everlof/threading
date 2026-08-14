@@ -390,7 +390,7 @@ struct RemoteUsageDashboardView: View {
             (MobileL10n.string("Cache writes"), compact(Double(range.tokens.cacheWrite))),
             (MobileL10n.string("Output"), compact(Double(range.tokens.output))),
             (MobileL10n.string("Reasoning"), compact(Double(range.tokens.reasoning))),
-            (MobileL10n.string("Cache savings"), currency(range.cost.cacheSavingsUSD)),
+            (MobileL10n.string("Cache savings"), compactCurrency(range.cost.cacheSavingsUSD)),
             (MobileL10n.string("Unpriced tokens"), compact(Double(range.cost.unpricedTokens))),
         ]
         return VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
@@ -916,8 +916,17 @@ struct RemoteUsageDashboardView: View {
         }
     }
 
+    /// The same spelling the Mac uses, from the same implementation: the phone renders the
+    /// prepared values the desktop prepared, so the two cannot disagree about how a dollar
+    /// reads. See `UsageValueFormat`.
     private func currency(_ value: Double) -> String {
-        value.formatted(.currency(code: "USD").precision(.fractionLength(value >= 1_000 ? 0 : 2)))
+        UsageValueFormat.currency(value)
+    }
+
+    /// For a tile whose width is the grid's rather than the number's — the same rule the Mac's
+    /// stats band follows.
+    private func compactCurrency(_ value: Double) -> String {
+        UsageValueFormat.compactCurrency(value)
     }
 
     private func compact(_ value: Double) -> String {

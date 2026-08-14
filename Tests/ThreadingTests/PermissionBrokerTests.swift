@@ -174,6 +174,23 @@ final class PermissionBrokerTests: XCTestCase {
         )
     }
 
+    /// A request can wait behind another card while the first decision changes session policy.
+    /// The queue uses this pure re-check rather than presenting its stale earlier classification.
+    func testAutomaticDecisionSeesAStandingApprovalAddedWhileQueued() {
+        let request = PermissionRequest(
+            sessionID: session,
+            toolName: "Write",
+            input: ["file_path": "/tmp/x", "content": "done"]
+        )
+
+        XCTAssertNil(PermissionBroker.automaticDecision(for: request))
+        PermissionBroker.allowAlways(toolName: "Write", for: session)
+
+        guard case .allow = PermissionBroker.automaticDecision(for: request) else {
+            return XCTFail("the queued request ignored the new session approval")
+        }
+    }
+
     /// A resumed conversation starts asking again: the approvals belonged to the run that is
     /// over, and a session id outlives the process that earned them.
     func testDiscardingASessionForgetsItsApprovals() {

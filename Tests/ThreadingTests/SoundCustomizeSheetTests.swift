@@ -12,7 +12,7 @@ import XCTest
 /// nothing has ever voiced, at the app scope where the word changes, and across a scope holding
 /// two levels at once.
 @MainActor
-final class SoundCustomizeSheetTests: XCTestCase {
+final class SoundCustomizeSheetTests: HostedStoreTestCase {
 
     // MARK: - Fixtures
 

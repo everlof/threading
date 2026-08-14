@@ -13,7 +13,7 @@ import XCTest
 /// Plus what ⌘, restores on the way out, which is the same question asked of the pane rather
 /// than of the history: a detour must end where it started.
 @MainActor
-final class MainWindowNavigationTests: XCTestCase {
+final class MainWindowNavigationTests: HostedStoreTestCase {
 
     private var controller: MainWindowController?
 

@@ -179,13 +179,21 @@ enum PermissionModePresentation {
     /// The rows every surface offers: each mode once, with what it does and what it costs on
     /// this agent, and the inherited answer marked where it stands in that list.
     ///
-    /// The inherited answer is *not* a row of its own. It was, and it named a mode the list
-    /// then repeated — a menu of seven items for six postures, in which the pair that named the
-    /// same mode were the two rows hardest to tell apart. The marked row answers `nil`, which is
-    /// what the row above it used to answer: choosing it leaves the session following whatever
-    /// it was following rather than pinning a copy of that value today. Only where *nothing* can
-    /// name the inherited mode does a separate row appear, and then it duplicates nothing —
-    /// "Agent's Setting" is not one of the six.
+    /// An inherited answer that **governs the next launch** is not a row of its own. It was, and
+    /// it named a mode the list then repeated — a menu of seven items for six postures, in which
+    /// the pair that named the same mode were the two rows hardest to tell apart. The marked row
+    /// answers `nil`, which is what the row above it used to answer: choosing it leaves the
+    /// session following whatever it was following rather than pinning a copy of that value
+    /// today. Where nothing governs, a separate row appears and duplicates nothing — "Agent's
+    /// Setting" is not one of the six.
+    ///
+    /// **Only a setting may be collapsed into that row.** This once marked whichever mode
+    /// `inherited` named, including the two that merely *report* one — what this conversation got
+    /// to, what this login last ran in. Nothing replays those, so choosing the marked row (or the
+    /// mode it named, which answered the same `nil`) recorded no choice, emitted no
+    /// `--permission-mode`, and started the session in the CLI's own fallback while the chip went
+    /// on reading Auto. A report is now an ordinary row that pins: the checkmark sits on "Use
+    /// Agent's Setting", the mode keeps its `(last used)` qualifier, and choosing it means it.
     ///
     /// Both `representedValue` and `onChoose` are filled, because the two kinds of caller read
     /// the answer differently — a `ChipView` reads the value back through its own `onSelect`,

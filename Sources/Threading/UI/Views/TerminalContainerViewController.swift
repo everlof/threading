@@ -617,7 +617,7 @@ final class TerminalContainerViewController: NSViewController {
     ///
     /// The page is pinned straight to the pane — centred, capped at a readable width, floored by
     /// margins — rather than through an intermediate container, which did not size its child.
-    func showSettingsPage(id: String) {
+    func showSettingsPage(id: String, revealing anchorTitle: String? = nil) {
         guard let definition = SettingsPages.page(id: id) else { return }
 
         currentSettingsPageID = id
@@ -629,7 +629,17 @@ final class TerminalContainerViewController: NSViewController {
             return made
         }()
 
-        install(settings: page, repaint: cached != nil)
+        install(settings: page, repaint: cached != nil, width: definition.width)
+
+        // After the pane's own layout pass, so the row the reveal scrolls to has a frame. A
+        // page that cannot answer for the anchor — table-backed, or rebuilt by an extension —
+        // just stays open, which is everything the click promised before reveals existed.
+        if let anchorTitle {
+            DispatchQueue.main.async { [weak page] in
+                guard let page, page.isViewLoaded else { return }
+                SettingsRowReveal.reveal(title: anchorTitle, in: page.view)
+            }
+        }
     }
 
     /// Shows the AI settings search surface and starts a run for the query.
@@ -661,7 +671,11 @@ final class TerminalContainerViewController: NSViewController {
     /// Puts a settings-shaped child in the pane: centred, capped at a readable width, floored by
     /// margins — pinned straight to the pane rather than through an intermediate container,
     /// which did not size its child.
-    private func install(settings page: NSViewController, repaint: Bool) {
+    private func install(
+        settings page: NSViewController,
+        repaint: Bool,
+        width: SettingsPageWidth = .readable
+    ) {
         consumeComposerHandoff(for: nil)
         currentComposerProjectID = nil
 
@@ -690,9 +704,12 @@ final class TerminalContainerViewController: NSViewController {
         // fonts that one walk can simply take again.
         if repaint { AppThemeRefresh.repaint(content) }
 
-        // The cap is the readable measure plus the glow gutters the page pads itself with,
-        // so the cards inside keep the readable width.
-        let preferred = content.widthAnchor.constraint(equalToConstant: SettingsUIDefaults.pageWidth)
+        // The cap is the measure this page asked for plus the glow gutters the page pads itself
+        // with, so the cards inside keep that measure. A form asks for the readable one; the
+        // Usage dashboard asks for a wider one, because its content is a picture rather than a
+        // column of rows (`SettingsPageWidth`).
+        let pageWidth = SettingsUIDefaults.width(for: width)
+        let preferred = content.widthAnchor.constraint(equalToConstant: pageWidth)
         preferred.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
@@ -700,7 +717,7 @@ final class TerminalContainerViewController: NSViewController {
             content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             content.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             preferred,
-            content.widthAnchor.constraint(lessThanOrEqualToConstant: SettingsUIDefaults.pageWidth),
+            content.widthAnchor.constraint(lessThanOrEqualToConstant: pageWidth),
             content.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: Design.Spacing.large),
             content.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -Design.Spacing.large)
         ])

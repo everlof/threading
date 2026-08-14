@@ -2,6 +2,7 @@ import AppKit
 import ImageIO
 import PDFKit
 import QuickLookUI
+import ThreadingExtensionKit
 
 // MARK: - Media Inspector Model
 
@@ -133,10 +134,16 @@ enum BoundedImageDecoder {
     }
 }
 
-enum MediaInspectorItemContent: Sendable {
+enum MediaInspectorItemContent: Sendable, Equatable {
     case automatic
     case image
     case document
+    /// A document that varies over time, drawn by the host's own renderer registry.
+    ///
+    /// Carried on the rail rather than left off it: a `.media` row missing from the collection
+    /// has no visible symptom in the pane at all — the failure only appears when someone presses
+    /// the arrow key and the animation they were just looking at is not there.
+    case media(format: ExtensionMediaFormat)
 }
 
 /// One file the app-owned inspector can show.
@@ -311,6 +318,32 @@ final class MediaInspectorView: NSView, ThemedComponent {
     private(set) var selectedIndex: Int
     private let canvas = MediaInspectorCanvas()
     private let documentView = MediaInspectorDocumentView()
+    /// Built lazily: most inspections are images, and a player that never plays anything should
+    /// not be one more view every lightbox lays out.
+    private lazy var mediaPlayer: MediaDocumentPlayerView = {
+        let player = MediaDocumentPlayerView(loader: { [weak self] _ in
+            await MainActor.run {
+                guard let self,
+                      let data = try? BoundedFileReader.read(
+                          self.selectedItem.url,
+                          maximumBytes: MediaDocumentLimits.default.maximumDocumentBytes
+                      ) else {
+                    return .failure(.unresolvedSource)
+                }
+                return .success(data)
+            }
+        })
+        player.isHidden = true
+        addSubview(player)
+        NSLayoutConstraint.activate([
+            player.topAnchor.constraint(equalTo: canvas.topAnchor),
+            player.leadingAnchor.constraint(equalTo: canvas.leadingAnchor),
+            player.trailingAnchor.constraint(equalTo: canvas.trailingAnchor),
+            player.bottomAnchor.constraint(lessThanOrEqualTo: canvas.bottomAnchor)
+        ])
+        return player
+    }()
+    private var hasInstalledMediaPlayer = false
     private let headerSeparator = SeparatorView()
     private let railSeparator = SeparatorView()
     private let railScrollView = ThemedScrollView()
@@ -603,11 +636,18 @@ final class MediaInspectorView: NSView, ThemedComponent {
         ThemedMenuPresenter.dismiss(menuSession)
         menuSession = nil
         documentView.close()
+        if hasInstalledMediaPlayer {
+            // The lightbox is going away, so its clock goes with it rather than running behind
+            // a window nobody can see.
+            mediaPlayer.setPresentationActive(false)
+        }
     }
 
     private func showSelectedItem() {
         let item = selectedItem
-        let image = item.image ?? (item.content == .document
+        let isMedia: Bool
+        if case .media = item.content { isMedia = true } else { isMedia = false }
+        let image = item.image ?? (item.content == .document || isMedia
             ? nil
             : BoundedImageDecoder.image(at: item.url, policy: .userMedia))
 
@@ -615,7 +655,29 @@ final class MediaInspectorView: NSView, ThemedComponent {
         titleLabel.toolTip = item.url.path
         detailLabel.stringValue = detail(for: item, image: image)
 
-        if let image, image.isValid {
+        if hasInstalledMediaPlayer {
+            mediaPlayer.setPresentationActive(isMedia)
+            mediaPlayer.isHidden = !isMedia
+        }
+
+        if case .media(let format) = item.content {
+            canvas.clear()
+            canvas.isHidden = true
+            documentView.close()
+            documentView.isHidden = true
+            zoomModeControl.isHidden = true
+            zoomLabel.isHidden = true
+            hasInstalledMediaPlayer = true
+            mediaPlayer.isHidden = false
+            mediaPlayer.setPresentationActive(true)
+            mediaPlayer.update(document: ExtensionMediaDocument(
+                id: "inspector",
+                source: .sessionAttachment(item.url.lastPathComponent),
+                format: format,
+                playback: ExtensionMediaPlayback(isPlaying: true, loop: .loop),
+                accessibilityLabel: item.title
+            ))
+        } else if let image, image.isValid {
             documentView.clear()
             documentView.isHidden = true
             canvas.isHidden = false
@@ -1154,7 +1216,12 @@ final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBou
     }
 
     private var pdfView: PDFView?
+    /// Held only while Quick Look will still accept an item for it — see `discardQuickLookView`.
     private var quickLookView: QLPreviewView?
+    /// What Quick Look has been asked to show, which outlives the renderer showing it: a document
+    /// view is unparented by an ordinary tab switch, and the document has to come back with it.
+    private var quickLookURL: URL?
+    private let windowEvents = AppEventObservations()
     private var themeRedraw: ThemeRedraw?
     private(set) var latestDisplayTimingForTesting = DisplayTiming()
 
@@ -1183,6 +1250,41 @@ final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBou
         bounds.fill()
     }
 
+    /// A Quick Look renderer lives no longer than the window it was built in.
+    ///
+    /// `QLPreviewView` closes itself with its window — `shouldCloseWithWindow` is true by
+    /// default — and a closed one does not *refuse* the next item, it aborts the process:
+    /// `-[QLPreviewView setPreviewItem:]` raises "Trying to set a preview item on a closed
+    /// preview view" through `_QLCrash`. Nothing about this view is transient, so ordinary tab
+    /// handling reached that: an Attachments tab dragged into its own window and then closed
+    /// hands the *same* controller back to the display panel, and the next attachment it was
+    /// asked to preview killed the app.
+    ///
+    /// So the renderer is dropped both when the window announces its close and when this view
+    /// leaves a window at all — the two arrive in an order AppKit does not promise, and either
+    /// one alone leaves a hole. That makes `quickLookView != nil` mean "Quick Look will still
+    /// take an item", which is the one thing every call below relies on.
+    ///
+    /// **The document is not dropped with it.** Unparenting is ordinary here — the display panel
+    /// unparents a tab's controller whenever another tab is shown — so a renderer discarded on
+    /// the way out is rebuilt on the way back in, from `quickLookURL`. Without that, switching
+    /// away from Attachments and back would return a pane whose list still names a document over
+    /// a preview area with nothing in it.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        windowEvents.removeAll()
+        guard let window else {
+            discardQuickLookView()
+            return
+        }
+        windowEvents.observe(NSWindow.willCloseNotification, object: window) { [weak self] in
+            self?.discardQuickLookView()
+        }
+        if let quickLookURL, quickLookView == nil {
+            display(quickLookURL)
+        }
+    }
+
     @discardableResult
     func display(_ url: URL) -> Bool {
         var timing = DisplayTiming()
@@ -1206,6 +1308,7 @@ final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBou
             let presentStarted = DispatchTime.now().uptimeNanoseconds
             quickLookView.previewItem = url as NSURL
             quickLookView.isHidden = false
+            quickLookURL = url
             timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
         }
         return true
@@ -1214,13 +1317,14 @@ final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBou
     func clear() {
         pdfView?.document = nil
         quickLookView?.previewItem = nil
+        quickLookURL = nil
         pdfView?.isHidden = true
         quickLookView?.isHidden = true
     }
 
     func close() {
-        quickLookView?.close()
         clear()
+        discardQuickLookView()
     }
 
     func applyTheme() {
@@ -1262,6 +1366,21 @@ final class MediaInspectorDocumentView: NSView, ThemedComponent, SystemChromeBou
         return view
     }
 
+    /// Forgets the renderer. It is dropped, **not** `close()`d, and that is the second half of
+    /// the same lesson: `-[QLPreviewView close]` aborts through `_QLRaiseAssert` in `deactivate`
+    /// when the view was never activated — a document previewed before the pane reached a window,
+    /// which the attachments pane does on every cold open. Closing is Quick Look's own job here,
+    /// since `shouldCloseWithWindow` is left true; ours is only to stop reusing what it closed.
+    ///
+    /// Dropping the reference is therefore the whole operation, and it must stay callable from
+    /// inside `NSWindow.willCloseNotification` — where Quick Look's identical observer may have
+    /// run first — without calling into Quick Look at all.
+    private func discardQuickLookView() {
+        guard let view = quickLookView else { return }
+        quickLookView = nil
+        view.removeFromSuperview()
+    }
+
     private func belongs(_ view: NSView, to root: NSView) -> Bool {
         var candidate: NSView? = view
         while let current = candidate {
@@ -1297,7 +1416,9 @@ private final class MediaInspectorThumbnail: ThemedControl {
         let thumbnailPixels = Int(
             (Design.Size.mediaInspectorThumbnail * 2).rounded(.up)
         )
-        preview = item.image ?? (item.content == .document
+        var isThumbnailable = item.content != .document
+        if case .media = item.content { isThumbnailable = false }
+        preview = item.image ?? (!isThumbnailable
             ? nil
             : BoundedImageDecoder.thumbnail(
                 at: item.url,

@@ -1388,6 +1388,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// The report is *revealed* rather than opened: an `.ips` opens in Console, and what someone
     /// filing a bug needs is the file, in the Finder, ready to attach.
     ///
+    /// Two answers carry the band's weight — take my workspace back, and tell the developer —
+    /// and the Finder reveal trails them as the technical footnote it is. Neither of the two is
+    /// primary: a band that appears unasked has no claim on the screen's one primary action.
+    ///
     /// The escalated wording is the only thing a crash *loop* changes here. It says the app has
     /// died more than once and stops: what to do about it is Recovery Mode's to offer, and a band
     /// that hinted at a mode the build does not have would be worse than one that says nothing.
@@ -1406,21 +1410,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 restore()
             }
         ]
-        if let crashReport {
-            actions.append(
-                PaneNoticeAction(
-                    title: L10n.string("Show Crash Report"),
-                    emphasis: .tertiary
-                ) {
-                    NSWorkspace.shared.activateFileViewerSelecting([crashReport])
-                }
-            )
-        }
         if let submitter = issueReportSubmitter {
             actions.append(
                 PaneNoticeAction(
+                    // The band's second answer, at the band's second weight. The report is the
+                    // only thing this band asks *for* — a crash nobody sends is a crash nobody
+                    // can fix — and as a tertiary label behind the Finder reveal it read as a
+                    // footnote to the one action that only helps the developer if it is pressed.
                     title: L10n.string("Send to Developer"),
-                    emphasis: .tertiary
+                    emphasis: .secondary
                 ) { [weak self] in
                     guard let self, !isSendingCrashReport else { return }
                     isSendingCrashReport = true
@@ -1438,6 +1436,18 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                         )
                         showCrashReportSubmissionOutcome(outcome)
                     }
+                }
+            )
+        }
+        // Last, and quiet: revealing the `.ips` is for the person who wants to read it or attach
+        // it themselves, which is the rarer of the two things to do with a crash report.
+        if let crashReport {
+            actions.append(
+                PaneNoticeAction(
+                    title: L10n.string("Show Crash Report"),
+                    emphasis: .tertiary
+                ) {
+                    NSWorkspace.shared.activateFileViewerSelecting([crashReport])
                 }
             )
         }
@@ -2639,11 +2649,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         showSettingsPage(id: pageID)
     }
 
-    func showSettingsPage(id pageID: String) {
+    /// `revealing` names a row on the page — a search result's anchor — for the pane to
+    /// scroll to and mark once the page is up.
+    func showSettingsPage(id pageID: String, revealing anchorTitle: String? = nil) {
         guard SettingsPages.page(id: pageID) != nil else { return }
         showSettings()
         sidebarViewController.selectSettingsPage(id: pageID)
-        containerViewController.showSettingsPage(id: pageID)
+        containerViewController.showSettingsPage(id: pageID, revealing: anchorTitle)
         updateSessionTitleItem()
         recordVisit(.settings(pageID))
     }
@@ -3857,11 +3869,21 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
 
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
+        didSelectSettingsPage pageID: String,
+        revealing anchorTitle: String
+    ) {
+        containerViewController.showSettingsPage(id: pageID, revealing: anchorTitle)
+        updateSessionTitleItem()
+        recordVisit(.settings(pageID))
+    }
+
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
         askAIAboutSettings query: String
     ) {
         let controller = containerViewController.showSettingsAISearch(query: query)
-        controller.onOpen = { [weak self] pageID in
-            self?.showSettingsPage(id: pageID)
+        controller.onOpen = { [weak self] pageID, anchorTitle in
+            self?.showSettingsPage(id: pageID, revealing: anchorTitle)
         }
         updateSessionTitleItem()
         // A page in history, so opening a suggestion leaves the answer one Back away

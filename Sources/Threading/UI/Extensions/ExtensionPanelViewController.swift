@@ -27,6 +27,13 @@ final class ExtensionPanelViewController: NSViewController,
     private var actionSequence = 0
     private var remoteSurfaceView: ExtensionRemoteSurfaceView?
     private var isPanelVisible = false
+    /// Players, retained by document id rather than by row.
+    ///
+    /// The panel virtualizes its rows, so the cell holding a canvas is recycled the moment it
+    /// scrolls away — and a player rebuilt per materialization would restart the animation every
+    /// time the table reused a cell, which is the same defect as a panel replacement restarting
+    /// it. The id is the identity; a document that keeps it keeps its position.
+    private var playersByDocumentID: [String: MediaDocumentPlayerView] = [:]
 
     private let scrollView = ThemedScrollView()
     private lazy var tableView: ThemedTableView = {
@@ -155,12 +162,23 @@ final class ExtensionPanelViewController: NSViewController,
         super.viewDidAppear()
         isPanelVisible = true
         remoteSurfaceView?.setPresentationVisible(true)
+        applyMediaPresentation()
     }
 
     override func viewDidDisappear() {
         isPanelVisible = false
         remoteSurfaceView?.setPresentationVisible(false)
+        applyMediaPresentation()
         super.viewDidDisappear()
+    }
+
+    /// The clock stops when this panel is not the selected tab. Everything else a player watches
+    /// — occlusion, miniaturization, a hidden ancestor — it observes itself; a tab going away is
+    /// the one thing only its host knows.
+    private func applyMediaPresentation() {
+        for player in playersByDocumentID.values {
+            player.setPresentationActive(isPanelVisible)
+        }
     }
 
     private func refreshRegistration() {
@@ -258,6 +276,7 @@ final class ExtensionPanelViewController: NSViewController,
             )
         }
 
+        pruneRetiredMediaPlayers(keeping: panel.root)
         do {
             try ExtensionNodeRenderer.validate(panel.root)
             appendSemanticNode(
@@ -320,7 +339,7 @@ final class ExtensionPanelViewController: NSViewController,
 
     private static func fillsWidthInsideVerticalStack(_ node: ExtensionNode) -> Bool {
         switch node {
-        case .textInput, .scene, .divider:
+        case .textInput, .scene, .divider, .media:
             true
         default:
             false
@@ -371,6 +390,9 @@ final class ExtensionPanelViewController: NSViewController,
                     fillsContentWidth: fillsContentWidth,
                     imageResolver: { [weak self] reference in
                         self?.resolveImage(reference)
+                    },
+                    mediaPlayerFactory: { [weak self] document in
+                        self?.player(for: document)
                     },
                     onEvent: { [weak self] actionID, value in
                         self?.invoke(actionID, value: value)
@@ -486,6 +508,81 @@ final class ExtensionPanelViewController: NSViewController,
         remoteSurfaceView = nil
     }
 
+    // MARK: - Media
+
+    /// The player for one document, created once and kept for as long as the panel names it.
+    private func player(for document: ExtensionMediaDocument) -> NSView? {
+        let player: MediaDocumentPlayerView
+        if let existing = playersByDocumentID[document.id] {
+            player = existing
+        } else {
+            let identifier = extensionIdentifier
+            let created = MediaDocumentPlayerView(loader: { [weak self] source in
+                await self?.loadMediaDocument(source, for: identifier)
+                    ?? .failure(.unresolvedSource)
+            })
+            created.onStateReport = { [weak self] report in
+                guard let self,
+                      let actionID = self.panel?.root.mediaDocuments
+                          .first(where: { $0.id == report.documentID })?.stateActionID
+                else { return }
+                self.invoke(actionID, value: report.actionValue, silently: true)
+            }
+            playersByDocumentID[document.id] = created
+            player = created
+        }
+        player.setPresentationActive(isPanelVisible)
+        player.update(document: document)
+        return player
+    }
+
+    /// Drops the players for documents this panel no longer names.
+    ///
+    /// The cardinality here is *documents the extension has shown*, which is externally sized: an
+    /// asset browser walked through a hundred animations would otherwise retain a hundred decoded
+    /// sessions, none of them on screen. A player is kept only while the panel still names it.
+    private func pruneRetiredMediaPlayers(keeping root: ExtensionNode) {
+        let live = Set(root.mediaDocuments.map(\.id))
+        for (id, player) in playersByDocumentID where !live.contains(id) {
+            player.setPresentationActive(false)
+            player.removeFromSuperview()
+            playersByDocumentID.removeValue(forKey: id)
+        }
+    }
+
+    /// Resolves a source to bytes on the host's side of the boundary.
+    ///
+    /// Only `extensionResource` resolves here. A project-file handle is a separate authority
+    /// (`host.project.files.read`) resolved by its own broker, and an attachment handle is valid
+    /// **only** inside `attachments.preview@1` — replaying one into a panel is refused rather than
+    /// quietly resolved, which is what keeps the preview contract from becoming a read authority.
+    private func loadMediaDocument(
+        _ source: ExtensionMediaSource,
+        for extensionIdentifier: String
+    ) async -> Result<Data, MediaDocumentFailure> {
+        switch source {
+        case .extensionResource(let path):
+            guard let data = router?.extensionMediaResourceData(
+                extensionIdentifier: extensionIdentifier,
+                relativePath: path
+            ) else {
+                return .failure(.unresolvedSource)
+            }
+            return .success(data)
+        case .fileHandle(let handle):
+            guard let data = ExtensionProjectFileBroker.shared.documentData(
+                forHandle: handle,
+                extensionIdentifier: extensionIdentifier,
+                maximumBytes: MediaDocumentLimits.default.maximumDocumentBytes
+            ) else {
+                return .failure(.unresolvedSource)
+            }
+            return .success(data)
+        case .sessionAttachment:
+            return .failure(.unresolvedSource)
+        }
+    }
+
     private func resolveImage(_ reference: ExtensionImageReference) -> NSImage? {
         switch reference {
         case .systemSymbol(let name):
@@ -506,12 +603,18 @@ final class ExtensionPanelViewController: NSViewController,
     private func invoke(
         _ actionID: String,
         value: ExtensionJSONValue? = nil,
-        pendingMessage: String? = nil
+        pendingMessage: String? = nil,
+        silently: Bool = false
     ) {
         actionSequence += 1
         let sequence = actionSequence
-        statusMessage = pendingMessage ?? "Running “\(actionID)”…"
-        render()
+        // A state report is not something the user asked for, so it does not put "Running…" over
+        // the panel and does not re-render the tree it was raised from — a re-render would tear
+        // down the player mid-frame and report again.
+        if !silently {
+            statusMessage = pendingMessage ?? "Running “\(actionID)”…"
+            render()
+        }
 
         guard router?.invokePanelAction(
             extensionIdentifier: extensionIdentifier,

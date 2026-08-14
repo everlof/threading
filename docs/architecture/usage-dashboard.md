@@ -49,6 +49,81 @@ therefore bounded local model changes rather than a main-actor fold over report 
 records. The same semantic values are the input intended for the owner-only remote bridge; neither
 platform renderer receives raw transcript cells or the raw journal.
 
+## The page is a picture, not a form
+
+Every other settings page is a column of rows and keeps `Design.Size.readableWidth`. This one is a
+total beside its own time series over a table of named columns, and it was laid out at the same
+620 points as a preferences form — which is where nearly every visual defect on it came from at
+once. The chart got whatever the hero left of a measure sized for prose (288 points for 90 days,
+three points a day), five bordered tiles each truncated their own explanation inside a fifth of
+it, and the value axis printed `US$100,0…`.
+
+`SettingsPageWidth` (`SettingsComponents.swift`) is the per-page opt-in, and the Usage page is the
+only `.dashboard` in the catalogue. `Design.Size.dashboardWidth` is **derived rather than picked**:
+the plot rectangle keeps the readable measure, its axis gutters are added beside it, and the hero's
+fixed column is added again with a pane's air between — so "the chart is content" is stated once,
+in arithmetic. `Design.UsageDashboard.minimumContentWidth` is still the floor a squeezed pane
+leaves, and both widths are rendered.
+
+Three presentation rules follow from that, and each replaced something that had been quietly
+lying:
+
+- **One money vocabulary, in one locale.** `UsageValueFormat` (in `ThreadingRemoteKit`, because the
+  phone spells the same prepared values) has an exact form for figures a reader checks against an
+  invoice — the hero total, every breakdown cost — and a compact form for a slot whose width is
+  fixed by something other than its text: the chart's value axis, a stat in the band. It formats in
+  a fixed `en_US` on purpose. A local estimate at published US list prices is a US-dollar figure
+  whichever country reads it, and formatting it in the reader's locale does not convert it — it
+  only changes the separators and buys an ambiguous `US$` in return.
+- **The five supporting measures are one band, not five plates.** `UsageStatBandView` is a single
+  quiet container, five equal columns and a hairline between them — a rule that stops short of the
+  band's edges, because run out to them it divides the band from itself and collides with an
+  authored chrome's own border. System draws no plate at all
+  there, while an authored chrome states its own surface exactly as the hero beside it does. The
+  empty state is unchanged and load-bearing: titles and a dash, and nothing else (see
+  [Before there are numbers](#before-there-are-numbers)).
+- **The breakdown is a table with headings.** A ranked list of two-line rows with one right-hand
+  figure could not be read down any of its numbers, and that figure silently changed meaning with
+  the metric control. The columns are the row's own subject (Model, Project, Account or Provider),
+  Cost, Share, Tokens and Requests; only **Share** follows the selected metric. Numerics are set
+  against the trailing edge in tabular figures. At the narrow floor the request count stands down
+  rather than the table growing a sideways scroller inside a page that already scrolls; the row's
+  accessibility value still states all four. The table is `.plain` on purpose: the automatic style
+  resolves to `.inset` inside a scroll view and lays the header and rows out shifted
+  `systemInsetStylePadding` in from each edge — *after* the columns were fit to the clip exactly,
+  which pushed the request column's tail past the table's edge while every width still summed
+  right. The fit probe the render tests assert therefore measures the last heading's drawn
+  trailing edge as well as the widths' sum, so that shape of lie stays caught.
+
+### Attribution, and what a row may claim
+
+`UsageDashboardBreakdownRowProjection.runtimeID` decides whether a row wears an agent's mark. It is
+presentation only, never a second cost axis, and it follows one rule: a row names a runtime only
+when **every** record behind it came through that one. `UsageReportSelection` resolves it while it
+is already folding cells, so nothing re-reads the ledger — and `nil` is absorbing, because "several
+runtimes" and "not known" are the same answer to the only question being asked. A model two agents
+both ran, and a checkout worked in from two runtimes, therefore wear no mark rather than the mark of
+whichever record was folded in first. A provider row always knows, including a billing route:
+OpenRouter's spend came through OpenCode, so it honestly wears OpenCode's.
+
+The mark itself is the app's existing `AgentKind.icon` seam — a brand mark where one exists, the
+kind's SF Symbol otherwise — in a fixed-width slot, so every name in the column starts on one line
+whether or not its row has one.
+
+### Height, and whose gesture it is
+
+The breakdown grows to fit its rows up to `Design.UsageDashboard.breakdownVisibleRows` and scrolls
+past that, instead of holding a fixed 300 points whether it had three rows or three hundred. It is
+still an `NSTableView` for the reason it always was — the projection allows 500 rows, and only the
+visible ones may become views — which is exactly why it cannot simply grow: the section states its
+own bound, and the virtualization keeps it cheap.
+
+A nested viewport that scrolls inside a page that also scrolls has to say which gesture is whose.
+`ThemedScrollView.verticalScrollHandoff` is that policy, and the breakdown asks for
+`.atContentEnds`: the table keeps a vertical flick while it still has somewhere to go, and hands
+the rest — momentum included — to the settings page once it does not. Elasticity is off there
+because a rubber band *is* movement, so an elastic viewport never reports that it ran out.
+
 ## Cross-platform delivery boundary
 
 macOS and iOS share `UsageDashboardProjector` values, not a view hierarchy. AppKit keeps the
@@ -202,6 +277,13 @@ default to a bounded monotone cubic curve whose control points remain within adj
 extents, so a spike cannot create a fabricated overshoot. Callers can request a linear curve for
 estimated or contractually straight segments; the limit projection does so explicitly. Area fills
 follow the same path.
+
+Two axis behaviours exist because a squeezed pane found their absence: time-axis labels drop to
+fewer, evenly re-spaced ones — never closer than `Design.Chart.minimumXLabelSpacing`, floored at
+the domain's two ends — rather than letting neighbours collide, and the legend draws whole or not
+at all. It already refused to clip half a word beside a colour; keeping one key of four lies the
+same way about how many series there are, and hover, keyboard inspection and the accessibility
+summary still name every series when the room is not there.
 
 `ThemedStackedBandChartView` is the separate additive composition. Its series must have aligned
 timestamps and segment boundaries. Each rendered band starts at the cumulative edge beneath it,

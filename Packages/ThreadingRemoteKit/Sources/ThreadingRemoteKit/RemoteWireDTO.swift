@@ -1378,9 +1378,11 @@ public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let path: String
     public let name: String
-    /// `image`, `pdf`, `html`, `archive`, `document`, or `diagram`. A string rather than an
-    /// enum on purpose: a phone from before a kind existed still decodes the row and falls
-    /// into its default presentation, instead of refusing the whole list.
+    /// `image`, `pdf`, `html`, `archive`, `document`, `diagram`, or `media`. A string rather
+    /// than an enum on purpose: a phone from before a kind existed still decodes the row and
+    /// falls into its default presentation, instead of refusing the whole list — which is
+    /// exactly what happened when `media` was added, and why nothing here had to change for a
+    /// phone that predates it.
     public let kind: String
     public let byteCount: Int64
     public let modifiedAt: Date?

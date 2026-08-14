@@ -37,6 +37,100 @@ final class SidebarTitleMorphTests: XCTestCase {
         return row
     }
 
+    /// A row in a window sized like a sidebar's. The package refuses to animate a label that
+    /// is not in a window, so the one thing these tests never checked — that a rename actually
+    /// moves — can only be asserted against a hosted row. The window is never ordered on
+    /// screen: an unshown one still lays out, and `window != nil` is all the morph asks.
+    private func hostedSessionRow() -> (SessionRowView, NSWindow) {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 60),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let row = SessionRowView(customizationLookup: { _ in .empty })
+        row.translatesAutoresizingMaskIntoConstraints = false
+        let content = window.contentView!
+        content.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            row.topAnchor.constraint(equalTo: content.topAnchor),
+            row.widthAnchor.constraint(equalToConstant: 220),
+            row.heightAnchor.constraint(equalToConstant: 24)
+        ])
+        window.layoutIfNeeded()
+        return (row, window)
+    }
+
+    /// The glyph layers currently carrying a morph animation.
+    private func animatingGlyphs(in title: MorphingTitleLabel) throws -> [CALayer] {
+        let morphing = try XCTUnwrap(
+            title.subviews.compactMap { $0 as? MorphingLabel }.first,
+            "the wrapper is not holding a MorphingLabel"
+        )
+        return (morphing.layer?.sublayers ?? [])
+            .filter { !($0.animationKeys() ?? []).isEmpty }
+    }
+
+    /// The header names the same page it named before, under the same identity — the
+    /// definition of a rename it should morph through. Hosted for the same reason the row is.
+    func testRenamingThePageTitleAnimatesItsGlyphs() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 60),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let header = PageTitleView(symbolName: "folder", inkSource: .backdrop)
+        let content = window.contentView!
+        content.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            header.topAnchor.constraint(equalTo: content.topAnchor)
+        ])
+        let identity = UUID()
+        header.update(title: "Land the fix", symbolName: "folder", identity: identity)
+        window.layoutIfNeeded()
+
+        header.update(title: "Land the other fix", symbolName: "folder", identity: identity)
+
+        let title = try XCTUnwrap(
+            walkForMorphingTitle(in: header),
+            "the header has no morphing title"
+        )
+        XCTAssertFalse(
+            try animatingGlyphs(in: title).isEmpty,
+            "the header's rename landed without animating a single glyph"
+        )
+    }
+
+    private func walkForMorphingTitle(in view: NSView) -> MorphingTitleLabel? {
+        if let found = view as? MorphingTitleLabel { return found }
+        for child in view.subviews {
+            if let found = walkForMorphingTitle(in: child) { return found }
+        }
+        return nil
+    }
+
+    /// The bug this suite was blind to: every assertion about a rename read `stringValue`,
+    /// which is set the moment the morph *starts*, so a rename that landed instantly passed
+    /// them all. This asserts the animation itself.
+    func testRenamingAHostedSessionAnimatesItsGlyphs() throws {
+        let (row, _) = hostedSessionRow()
+        var session = AgentSession(kind: .claude, title: "Land the fix")
+        row.configure(with: session, activity: .idle)
+        row.layoutSubtreeIfNeeded()
+
+        session.customTitle = "Land the other fix"
+        row.configure(with: session, activity: .idle)
+
+        let title = try label("sidebar.session.title", in: row)
+        XCTAssertFalse(
+            try animatingGlyphs(in: title).isEmpty,
+            "the rename landed without animating a single glyph"
+        )
+    }
+
     // MARK: - Session rows
 
     func testSessionRowShowsItsTitle() throws {

@@ -23,6 +23,7 @@ final class UsageDashboardRenderTests: XCTestCase {
 
         let fixtures = [
             Fixture(name: "system-dark", theme: .system, appearance: .darkAqua),
+            Fixture(name: "system-light", theme: .system, appearance: .aqua),
             Fixture(name: "cyberpunk", theme: AppThemeStyles.cyberpunk, appearance: .darkAqua),
             Fixture(name: "neo-brutalism", theme: AppThemeStyles.neoBrutalism, appearance: .aqua),
             Fixture(name: "classic-player", theme: AppThemeStyles.classicPlayer, appearance: .darkAqua)
@@ -81,6 +82,40 @@ final class UsageDashboardRenderTests: XCTestCase {
                 try XCTUnwrap(payload, "No Usage \(tabName) render for \(fixture.name)")
                     .write(to: url)
                 files.append(url)
+
+                // After the draw, deliberately: a column fits itself to the clip the scroll view
+                // settles during its own tile, so what the columns are is only finally true once
+                // the page has been asked to draw itself.
+                guard tab == .overview else { continue }
+                XCTAssertEqual(
+                    dashboard.breakdownColumnTitlesForTesting,
+                    [
+                        L10n.string("Model"),
+                        L10n.string("Cost"),
+                        L10n.string("Share"),
+                        L10n.string("Tokens"),
+                        L10n.string("Requests")
+                    ],
+                    "the wide page has room for every column, headed by the row's own subject"
+                )
+                XCTAssertGreaterThan(
+                    dashboard.breakdownProviderMarkCountForTesting,
+                    0,
+                    "every model in this fixture came through exactly one runtime"
+                )
+                print("usage-breakdown \(fixture.name) \(dashboard.breakdownDebugGeometryForTesting)")
+                let fit = dashboard.breakdownColumnFitForTesting
+                XCTAssertLessThanOrEqual(
+                    fit.occupied,
+                    fit.available + 0.5,
+                    "the breakdown's columns hang \(fit.occupied - fit.available)pt outside the table"
+                )
+                // The defect this page shipped was invisible to every other assertion in this
+                // file: a detail line one character too long for its fifth of the row.
+                XCTAssertTrue(
+                    dashboard.statBandDetailsFitForTesting,
+                    "a stat's detail line is truncated at the page's own width"
+                )
             }
         }
 
@@ -167,6 +202,78 @@ final class UsageDashboardRenderTests: XCTestCase {
         XCTAssertEqual(files.count, fixtures.count * states.count)
     }
 
+    /// The same page in the pane squeezed to its floor.
+    ///
+    /// Every render here was taken at 932 points for a page that has never been that wide: it is
+    /// laid out at `Design.Size.dashboardWidth` and floors at
+    /// `Design.UsageDashboard.minimumContentWidth`, so the one width nobody was looking at was
+    /// the only width anyone had a picture of. The floor is where the columns have to give
+    /// something up, and this says which.
+    func testRendersTheDashboardSqueezedToItsNarrowestPane() throws {
+        let directory = renderDirectory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+
+        let fixtures = [
+            Fixture(name: "system-dark", theme: .system, appearance: .darkAqua),
+            Fixture(name: "system-light", theme: .system, appearance: .aqua)
+        ]
+        let report = reportFixture()
+        var files: [URL] = []
+
+        for fixture in fixtures {
+            AppThemePalette.set(fixture.theme)
+            let appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
+            let dashboard = UsageDashboardView()
+            dashboard.update(
+                report: report,
+                limits: limitFixtures(),
+                isBuilding: false,
+                animated: false
+            )
+            let host = laidOut(
+                dashboard,
+                appearance: appearance,
+                width: Design.UsageDashboard.minimumContentWidth
+            )
+            AppThemeRefresh.repaint(host)
+            host.layoutSubtreeIfNeeded()
+
+            XCTAssertGreaterThan(dashboard.breakdownVisibleSubviewCountForTesting, 0)
+
+            var payload: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                payload = png(of: host)
+            }
+            let url = directory.appendingPathComponent(
+                "usage-dashboard-overview-narrow-\(fixture.name).png"
+            )
+            try XCTUnwrap(payload, "No narrow Usage render for \(fixture.name)").write(to: url)
+            files.append(url)
+
+            XCTAssertEqual(
+                dashboard.breakdownColumnTitlesForTesting,
+                [
+                    L10n.string("Model"),
+                    L10n.string("Cost"),
+                    L10n.string("Share"),
+                    L10n.string("Tokens")
+                ],
+                "at the floor the request count stands down rather than the table scrolling sideways"
+            )
+            let fit = dashboard.breakdownColumnFitForTesting
+            XCTAssertLessThanOrEqual(
+                fit.occupied,
+                fit.available + 0.5,
+                "the breakdown's columns hang \(fit.occupied - fit.available)pt outside the table"
+            )
+        }
+
+        print("Rendered narrow Usage fixtures to \(directory.path)")
+        XCTAssertEqual(files.count, fixtures.count)
+    }
+
     private var renderDirectory: URL {
         if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
             return URL(fileURLWithPath: override)
@@ -175,8 +282,14 @@ final class UsageDashboardRenderTests: XCTestCase {
             .appendingPathComponent("ThreadingUsageRenders", isDirectory: true)
     }
 
-    private func laidOut(_ dashboard: UsageDashboardView, appearance: NSAppearance) -> NSView {
-        let dashboardWidth: CGFloat = 932
+    /// The page at a width it actually has. `Design.Size.dashboardWidth` is what the settings
+    /// pane gives it (`SettingsPageWidth.dashboard`); the floor is what a squeezed window leaves.
+    private func laidOut(
+        _ dashboard: UsageDashboardView,
+        appearance: NSAppearance,
+        width: CGFloat = Design.Size.dashboardWidth
+    ) -> NSView {
+        let dashboardWidth = width
         dashboard.translatesAutoresizingMaskIntoConstraints = false
         dashboard.widthAnchor.constraint(equalToConstant: dashboardWidth).isActive = true
         let dashboardHeight = dashboard.fittingSize.height

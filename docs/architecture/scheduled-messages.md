@@ -234,6 +234,19 @@ A split Start button was the other candidate and was rejected: `ThemedButton` ha
 `drawsSurface`/`isRaised`/`surfaceStateDidChange`, so welding a chevron to a filled accent plate
 means teaching every button in the app to stop drawing its own surface.
 
+**It is pressable even when it cannot be used**, because the refusal *is* the answer. There are
+four reasons a start cannot be scheduled — no project, nothing written, an attached image, and a
+store that refuses the record — and `scheduleEntries` states the first three as a single disabled
+menu row, in the words the user should read, on the grounds that "nothing happened when I clicked
+it" is the worst of them. Disabling the button defeated exactly that: the press never arrived, so
+the sentence survived only on a tooltip, and what reached the user was a dim glyph and a question
+("why is this disabled for me?"). The tooltip still carries the reason for a pointer that pauses;
+the press now carries it for everyone else. The missing-project case is one of the three rather
+than an empty menu, and it borrows the composer's own `chooseProjectFirstReason` so the screen
+states one blocker once. Images stay refused for the reason `DraftStore` refuses to draft them: a
+pasted screenshot lives in a temporary directory, and a path recorded now can name nothing by
+Monday.
+
 **“When a conversation finishes…” in both schedule menus.** The row is enabled only when at
 least one live conversation has a current turn with an authoritative finish signal. It opens a
 searchable sheet naming the conversation, project and agent. Candidate discovery value-scans the
@@ -253,6 +266,16 @@ from a stack's layout but is still a subview with constraints of its own, and th
 pull the draft view's column off the pane's width — which
 `ComposerWindowFitTests.testTheColumnFillsThePaneUpToItsCap` caught. A view with nothing to say
 leaves the room.
+
+**A row states its height; a floor alone is not a height.** The row stated only `height ≥ 26`,
+and the draft view's column has a second free height above it — the hero region soaks up
+whatever the pane does not need. Two free heights is an ambiguous layout, and the engine parked
+the pane's slack in whichever it liked: scheduling a start on the next 5-hour reset drew the
+row's labels over the chip row while its remove button floated forty points below them. The row
+now prefers exactly `rowHeight` at `.defaultHigh` over the required floor, with required `≥` top
+pins on its members so genuinely taller content still grows it honestly — stretching the row
+costs something, growing the hero costs nothing, and the slack has one home.
+`ComposerWindowFitTests.testAScheduledRowStaysOneLineRatherThanAbsorbingThePanesSlack` holds it.
 
 ## What this deliberately does not do
 

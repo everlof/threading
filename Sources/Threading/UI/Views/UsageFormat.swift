@@ -1,7 +1,29 @@
 import AppKit
+import ThreadingRemoteKit
 
 /// Display vocabulary shared by the usage pill and its popover.
 enum UsageFormat {
+
+    /// Measured spend, exactly: `$531,676.76`.
+    ///
+    /// One implementation, in `ThreadingRemoteKit`, because the phone renders the same prepared
+    /// values and must spell them the same way — and because `.currency(code:)` is
+    /// locale-sensitive, so three independent call sites printed `US$…` for every reader
+    /// outside `en_US`. See `UsageValueFormat`.
+    static func currency(_ value: Double) -> String {
+        UsageValueFormat.currency(value)
+    }
+
+    /// The same amount where the slot's width is fixed by something other than the text —
+    /// a chart's value axis, a stat in a band: `$25k`, `$1.2M`.
+    static func compactCurrency(_ value: Double) -> String {
+        UsageValueFormat.compactCurrency(value)
+    }
+
+    /// A share of a total, at one decimal so a column of them stays a column.
+    static func share(_ fraction: Double) -> String {
+        UsageValueFormat.share(fraction)
+    }
 
     /// Compact time until a reset: `47m`, `2h 14m`, `3d 4h`.
     ///

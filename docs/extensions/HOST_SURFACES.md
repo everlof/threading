@@ -181,6 +181,9 @@ Implemented contribution capabilities:
 
 ```text
 ui.components
+ui.media-documents
+attachments.preview
+attachments.file-types
 appearance.provider-icons
 appearance.account-icons
 appearance.session-identity
@@ -190,6 +193,7 @@ Implemented read authorities:
 
 ```text
 host.projects.read
+host.project.files.read
 host.sessions.read
 host.sessions.runtime.read
 host.repositories.read
@@ -200,6 +204,19 @@ host.events
 
 Future contribution/presentation authorities include `sidebar.accessories` and
 `host.assets.read`.
+
+`host.project.files.read` is separate from the ordinary project snapshot, and deliberately not
+implied by it. The snapshot has no filesystem in it at all; this returns names,
+project-relative paths, byte sizes, modification dates and the host's own content hint, as
+opaque, generation-bound **handles**. It never returns bytes or an absolute path, and a handle is
+only usable by naming it as an `ExtensionMediaSource.fileHandle` for a host renderer to resolve.
+Enumeration is bounded, cursor-paged, lexically ordered, refuses symlinks that leave the checkout,
+and re-checks containment when a handle is opened.
+
+`ui.media-documents` permits a `media` node. Threading carries the decoder, the clock, the
+transport, the ceilings and the pasteboard; the extension supplies a document handle and a
+playback intent and receives a coalesced state report. `attachments.preview` permits *offering* a
+preview body for one attachment and grants no attachment read authority.
 
 Network and future filesystem access are independent authorities. Declaring component UI
 does not imply project paths, account configuration, transcripts, network, or credentials.

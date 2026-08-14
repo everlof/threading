@@ -9,7 +9,7 @@ import XCTest
 /// describing records that no longer say that, and the failure is silent: a stale row still
 /// names a real chat and offers a Reset that clears nothing.
 @MainActor
-final class SoundOverrideAuditTests: XCTestCase {
+final class SoundOverrideAuditTests: HostedStoreTestCase {
 
     // MARK: - Fixtures
 

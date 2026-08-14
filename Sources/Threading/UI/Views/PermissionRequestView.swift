@@ -5,9 +5,8 @@ import ThreadingRemoteKit
 ///
 /// A modal sheet was the wrong shape for a chat: it seized the whole window for a decision that
 /// belongs to one session, and gave no clue which session had asked when several were running.
-/// Here the request sits in the thread that raised it, keeps its place in the transcript after
-/// it is answered, and — through the sidebar's attention dot — announces itself from a session
-/// that is not on screen.
+/// Here the request sits in the thread that raised it until it is answered and — through the
+/// sidebar's attention dot — announces itself from a session that is not on screen.
 final class PermissionRequestView: NSView {
 
     // MARK: - Properties
@@ -219,8 +218,8 @@ final class PermissionRequestView: NSView {
         settle(.deny(reason: "The user declined in Threading."), note: L10n.string("Denied."))
     }
 
-    /// Records the decision, swaps the buttons for a one-line outcome so the transcript keeps a
-    /// record of what was chosen, and calls back exactly once.
+    /// Records the decision, settles the card's own state, and calls back exactly once. The
+    /// controller then removes it; the execution audit is the durable decision record.
     private func settle(_ decision: PermissionDecision, note: String) {
         guard !isResolved else { return }
         isResolved = true
@@ -238,8 +237,8 @@ final class PermissionRequestView: NSView {
         applyLayerBorder(Design.Surface.border)
 
         // The controller's closure refers back to this card while it advances the queue.
-        // Release it before invoking it so a settled card keeps only its visual record, not
-        // the callback, the card itself, or the MCP response continuation behind the callback.
+        // Release it before invoking it so neither the card nor its controller-owned wrapper
+        // retains the MCP response continuation while the controller removes the row.
         let callback = onDecision
         onDecision = nil
         callback?(decision)

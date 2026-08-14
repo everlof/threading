@@ -192,6 +192,23 @@ enum Design {
         /// Widest a column of content grows before it becomes hard to scan.
         static let readableWidth: CGFloat = 620
 
+        /// The measure a page whose content is a *picture* keeps, instead of `readableWidth`.
+        ///
+        /// A form is read down one column, so 620 is exactly right for it. A dashboard is read
+        /// *across*: a total beside its own time series, and a table of named columns under
+        /// them. Laid out at the readable measure the Usage page carved its hero out of the
+        /// same 620 and left the 90-day chart 288 points — three points a day — so every
+        /// defect on it (a chart nobody could read a spike out of, tiles truncating their
+        /// detail, an axis printing `US$100,0…`) came from one number.
+        ///
+        /// Derived rather than picked: the **plot rectangle** keeps the readable measure, its
+        /// axis gutters are added beside it rather than taken out of it, and the hero's column
+        /// is added again beyond that with a pane's worth of air between. Widening the page is
+        /// therefore the same decision as "the chart is content", stated once.
+        static let dashboardWidth: CGFloat = UsageDashboard.consumptionSummaryWidth
+            + Spacing.pane
+            + Chart.axisLeading + readableWidth + Chart.axisTrailing
+
         /// The bottom band of a pane, holding its footer controls — see `PaneFooterView`.
         ///
         /// Deeper than the controls it holds, and deliberately: the band used to sit inside
@@ -693,6 +710,10 @@ enum Design {
         static let axisBottom: CGFloat = 28
         static let gridLineCount = 5
         static let xLabelCount = 4
+        /// The least room between two time-axis labels before one stands down: the chart drops
+        /// to fewer, evenly re-spaced labels rather than letting neighbours collide. Sized to a
+        /// short-date pair with air between.
+        static let minimumXLabelSpacing: CGFloat = 96
         static let lineWidth: CGFloat = 2
         static let systemLineWidth: CGFloat = 1.6
         static let projectionLineWidth: CGFloat = 1.5
@@ -782,12 +803,49 @@ enum Design {
 
     enum UsageDashboard {
         static let metricCardHeight: CGFloat = 76
-        static let breakdownHeight: CGFloat = 300
-        static let breakdownRowHeight: CGFloat = 48
+
+        /// One row of the stats band: a caption, a numeric value and the line explaining it,
+        /// with a container's inset above and below. Taller than the bordered tile it replaces
+        /// because the band draws no plate — the air is what separates it from the chart.
+        static let statBandHeight: CGFloat = 88
+
+        /// The Overview chart is the page's anchor rather than a strip beside the total, so it
+        /// states its own height instead of inheriting the shared card measure. The hero column
+        /// is pinned to it, so this is the height of that whole row.
+        static let chartHeight: CGFloat = 300
+
+        /// Rules across the Overview chart. Fewer than the shared default because this chart is
+        /// read for its shape — where the spend went — while the numbers it would be measured
+        /// against are already printed beside it, in full, in the hero. Four rules through a
+        /// stack of filled bands were the loudest ink on the page. See
+        /// `ThemedChartModel.valueGridLineCount`.
+        static let chartGridLineCount = 3
+
+        static let breakdownRowHeight: CGFloat = 32
+        static let breakdownHeaderHeight: CGFloat = 26
+
+        /// How many breakdown rows stand before the table starts scrolling. The table is still
+        /// virtualized above this — the cap is about how much of the page one section may take,
+        /// not about how many rows may exist.
+        static let breakdownVisibleRows = 12
+
+        /// The provider mark before a breakdown row's name, and the gap after it. Fixed, so
+        /// every name in the column starts on one line whether or not its row has a mark.
+        static let breakdownIconSlot: CGFloat = 16
+
+        /// The named numeric columns. Sized for their widest realistic value — `$531,676.76`,
+        /// `100%`, `1000.44B`, `7,411,502` — at `numericBody`, so nothing truncates on the
+        /// wide page and the ranking stays readable when the pane is squeezed to the floor.
+        static let breakdownCostColumnWidth: CGFloat = 124
+        static let breakdownShareColumnWidth: CGFloat = 76
+        static let breakdownTokensColumnWidth: CGFloat = 104
+        static let breakdownRequestsColumnWidth: CGFloat = 112
+        static let breakdownNameMinimumWidth: CGFloat = 168
+
         static let coverageRowHeight: CGFloat = 54
         static let minimumContentWidth: CGFloat = 560
         static let tabControlWidth: CGFloat = 280
-        static let consumptionSummaryWidth: CGFloat = 276
+        static let consumptionSummaryWidth: CGFloat = 300
         static let rangeControlWidth: CGFloat = 148
         static let metricControlWidth: CGFloat = 144
         /// The rescan strip's bar, beside the tabs. Short on purpose: a page already showing its
@@ -1293,12 +1351,9 @@ enum Design {
         /// legible and it does not compete with the agent's reply for attention.
         static var bubbleFill: NSColor { AppThemePalette.color(.accentMuted) }
 
-        /// Vertical gap between one turn and the next.
-        ///
-        /// Wider than a gap between rows *within* a turn by enough to read as a boundary: a
-        /// conversation rendered at the old 16pt was one uniform column, and where an exchange
-        /// began could only be worked out by reading it.
-        static let turnSpacing: CGFloat = 30
+        /// Vertical gap between one turn and the next. The divider now carries the boundary, so
+        /// this only needs to be one large step rather than a second oversized separator.
+        static let turnSpacing: CGFloat = Design.Spacing.large
 
         /// The fixed-width column a tool row's glyph sits in, so rows align down the edge.
         static let toolIconWidth: CGFloat = 16
@@ -1434,6 +1489,13 @@ enum Design {
         /// movement, and a scrollbar that vanishes the instant a gesture ends is harder to
         /// use, not calmer.
         static let scrollerHold: TimeInterval = 1.1
+
+        /// How long the reveal wash stands on the row a settings search jumped to, between its
+        /// fade in and fade out — long enough to move the eye from the sidebar to the row it
+        /// marks, short enough that the page is back to normal before the next thing is read.
+        /// A hold rather than a transition, so like `scrollerHold` it survives Reduce Motion;
+        /// the fades either side of it collapse there on their own.
+        static let revealHold: TimeInterval = 1.4
 
         /// The pause a repeating demonstration holds a finished state before starting the next
         /// — long enough to read the name that just arrived, short enough that a hovered row

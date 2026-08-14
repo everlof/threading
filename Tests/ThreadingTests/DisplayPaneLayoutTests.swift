@@ -10,7 +10,7 @@ import XCTest
 /// window may be, and whether the image in it can be opened properly. The last part is where a
 /// shown picture now *arrives*: the Attachments list rather than a tab of its own.
 @MainActor
-final class DisplayPaneLayoutTests: XCTestCase {
+final class DisplayPaneLayoutTests: HostedStoreTestCase {
 
     func testDisplayImagePixelGateBoundsDimensionsAndDecodedMemoryWithoutOverflow() {
         XCTAssertTrue(DisplayImageSafety.accepts(width: 1_440, height: 20_000))

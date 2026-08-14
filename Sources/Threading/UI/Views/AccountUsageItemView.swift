@@ -224,50 +224,22 @@ final class AccountUsageItemView: BackdropOverlay {
     /// that window's own severity. The vocabulary is Claude's own status line, so the short
     /// names read as familiar rather than cryptic.
     ///
-    /// Consumes `AccountUsage.Reading` rather than raw windows, so the stale-value and
-    /// severity rules are the model's — decided once for this pill, the account menu's rows
-    /// and every tooltip, which is what keeps two statements of one window from disagreeing.
+    /// Composed by `UsageReadingLabel`, which is where the composer's line comes from too. The
+    /// composer promises to show *the reading this pill will go on showing* once the session
+    /// exists, and two implementations of one sentence is how a promise like that stops being
+    /// true. What stays here is the empty case: a pill is a fixed slot in the chrome and says
+    /// `—` when there is nothing to report, where a line on a control row leaves instead.
     private static func summary(readings: [AccountUsage.Reading], ink: Design.Ink) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-
-        func append(_ text: String, font: NSFont, color: NSColor) {
-            result.append(NSAttributedString(
-                string: text,
-                attributes: [.font: font, .foregroundColor: color]
-            ))
-        }
-
         guard !readings.isEmpty else {
-            append(
-                AccountUsageItemDefaults.unknownValue,
-                font: Design.Typography.control(),
-                color: ink.secondary
-            )
-            return result
-        }
-
-        for (index, reading) in readings.enumerated() {
-            if index > 0 {
-                append(
-                    AccountUsageItemDefaults.segmentSeparator,
-                    font: Design.Typography.control(),
-                    color: ink.tertiary
-                )
-            }
-
-            append(
-                "\(reading.name) ",
-                font: Design.Typography.caption(),
-                color: ink.tertiary
-            )
-            append(
-                reading.value,
-                font: Design.Typography.control(),
-                color: reading.severity == .normal ? ink.secondary : reading.severity.glyphColor
+            return NSAttributedString(
+                string: AccountUsageItemDefaults.unknownValue,
+                attributes: [
+                    .font: Design.Typography.control(),
+                    .foregroundColor: ink.secondary
+                ]
             )
         }
-
-        return result
+        return UsageReadingLabel.summary(readings: readings, ink: ink)
     }
 
     // MARK: - Interaction

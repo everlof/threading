@@ -40,6 +40,74 @@ final class UsageDashboardProjectionTests: XCTestCase {
         )
     }
 
+    /// A breakdown row wears a provider mark only when it can name one runtime honestly.
+    ///
+    /// The rule is stated on `UsageDashboardBreakdownRowProjection.runtimeID` and it is the whole
+    /// contract: a model, account or checkout that two runtimes both touched has no single agent
+    /// behind it, and marking it with whichever one was folded in first would be a picture of
+    /// something nobody measured. A provider row is the one kind that always knows — it *is* a
+    /// route — including a billing route such as OpenRouter, whose records all came through
+    /// OpenCode.
+    func testABreakdownRowNamesItsRuntimeOnlyWhenEveryRecordCameThroughOne() throws {
+        let now = Date(timeIntervalSince1970: 1_900_000_000)
+        let today = calendar.startOfDay(for: now)
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+        let cells = [
+            // One runtime, twice, so a repeated key is not mistaken for a second runtime.
+            attributedCell(day: today, origin: .direct(.claude), account: "solo", model: "claude-opus-5", checkout: "solo"),
+            attributedCell(day: yesterday, origin: .direct(.claude), account: "solo", model: "claude-opus-5", checkout: "solo"),
+            // The same model, account and checkout reached through two runtimes.
+            attributedCell(day: today, origin: .direct(.claude), account: "shared", model: "shared-model", checkout: "shared"),
+            attributedCell(day: today, origin: .direct(.codex), account: "shared", model: "shared-model", checkout: "shared"),
+            // A billing route: OpenRouter's spend is OpenCode's runtime.
+            attributedCell(day: today, origin: .openCode(providerID: "openrouter"), account: "router", model: "router-model", checkout: "router")
+        ]
+        let projection = try XCTUnwrap(UsageDashboardProjector.overview(
+            report: TranscriptUsageReport(cells: cells, builtAt: now),
+            now: now,
+            calendar: calendar
+        ))
+        let range = try XCTUnwrap(projection.range(days: 30))
+
+        func runtime(
+            _ kind: UsageDashboardBreakdownKind,
+            _ title: String
+        ) throws -> String? {
+            try XCTUnwrap(
+                range.breakdown(kind).rows.first { $0.title == title },
+                "no \(title) row in the \(kind) breakdown"
+            ).runtimeID
+        }
+
+        XCTAssertEqual(try runtime(.models, "claude-opus-5"), AgentKind.claude.rawValue)
+        XCTAssertNil(try runtime(.models, "shared-model"))
+        XCTAssertEqual(try runtime(.models, "router-model"), AgentKind.openCode.rawValue)
+
+        XCTAssertEqual(try runtime(.accounts, "Account solo"), AgentKind.claude.rawValue)
+        XCTAssertNil(try runtime(.accounts, "Account shared"))
+
+        XCTAssertEqual(try runtime(.projects, "Project solo"), AgentKind.claude.rawValue)
+        XCTAssertNil(try runtime(.projects, "Project shared"))
+
+        XCTAssertEqual(
+            try runtime(.providers, UsageOrigin.direct(.claude).seriesName),
+            AgentKind.claude.rawValue
+        )
+        XCTAssertEqual(
+            try runtime(.providers, UsageOrigin.direct(.codex).seriesName),
+            AgentKind.codex.rawValue
+        )
+        XCTAssertEqual(
+            try runtime(.providers, UsageOrigin.openCode(providerID: "openrouter").seriesName),
+            AgentKind.openCode.rawValue,
+            "a route is not a fifth runtime; its records came through OpenCode"
+        )
+        XCTAssertTrue(
+            range.breakdown(.providers).rows.allSatisfy { $0.runtimeID != nil },
+            "a provider row always knows its own runtime"
+        )
+    }
+
     func testLimitProjectionKeepsNilAndZeroBankedResetsDistinct() throws {
         let now = Date(timeIntervalSince1970: 1_900_000_000)
         let expiry = now.addingTimeInterval(2 * 86_400)
@@ -176,6 +244,31 @@ final class UsageDashboardProjectionTests: XCTestCase {
             model: "model-\(index)",
             checkoutPath: "/project/\(index % 700)",
             checkoutLabel: "Project \(index % 700)",
+            tokens: .init(uncachedInput: 80, cachedInput: 20, output: 10),
+            providerReportedCostUSD: 0.002,
+            catalogCostUSD: 0,
+            unpricedTokens: 0,
+            cacheSavingsUSD: 0.001,
+            records: 1
+        )
+    }
+
+    /// One response, stated by the four axes runtime attribution is asked about.
+    private func attributedCell(
+        day: Date,
+        origin: UsageOrigin,
+        account: String,
+        model: String,
+        checkout: String
+    ) -> TranscriptUsageReport.Cell {
+        .init(
+            day: day,
+            origin: origin,
+            accountID: "account-\(account)",
+            accountName: "Account \(account)",
+            model: model,
+            checkoutPath: "/project/\(checkout)",
+            checkoutLabel: "Project \(checkout)",
             tokens: .init(uncachedInput: 80, cachedInput: 20, output: 10),
             providerReportedCostUSD: 0.002,
             catalogCostUSD: 0,

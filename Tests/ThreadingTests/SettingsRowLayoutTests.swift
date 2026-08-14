@@ -472,19 +472,6 @@ final class SettingsRowLayoutTests: XCTestCase {
 
     // MARK: - What a search found
 
-    /// A page qualifies on **all** tokens; a term is worth showing if **any** token touched it.
-    /// The two rules are deliberately different — see `SettingsSearch.terms(in:touchedBy:)`.
-    func testATermIsShownWhenAnyTokenTouchesItEvenThoughThePageNeedsAll() {
-        let terms = ["Notifications", "Mute", "Sound", "Startup"]
-
-        XCTAssertEqual(
-            SettingsSearch.terms(in: terms, touchedBy: "mute sound"),
-            ["Mute", "Sound"]
-        )
-        XCTAssertEqual(SettingsSearch.terms(in: terms, touchedBy: "notif"), ["Notifications"])
-        XCTAssertEqual(SettingsSearch.terms(in: terms, touchedBy: "nothing"), [])
-    }
-
     /// The raw term lists hold every localised spelling of one concept, so a page carries
     /// "sessions", "Sessions" and the translation. Three rows saying one thing is worse than
     /// none: the first spelling wins, capitalised so a row reads as a label.
@@ -495,65 +482,83 @@ final class SettingsRowLayoutTests: XCTestCase {
         )
     }
 
-    func testAMatchNeverShowsMoreTermsThanItCanSummarise() {
-        let many = (0..<20).map { "Term \($0)" }
-        XCTAssertEqual(
-            SettingsSearch.terms(in: many, touchedBy: "term").count,
-            SettingsSearch.maximumTermsShown
+    /// The catalogue's own answer, so a feature whose vocabulary stops matching is caught here
+    /// rather than by a reader who searched for it and found nothing. "mute" has to surface
+    /// the actual setting — a result that only said "General" made the reader run their own
+    /// search inside the page.
+    func testTheCatalogueAnswersMuteWithTheSilenceSetting() throws {
+        let general = try XCTUnwrap(
+            SettingsPages.sidebarItems.first { $0.id == SettingsPages.generalID }
         )
-    }
-
-    /// The catalogue's own answer, so a page whose terms stop matching is caught here rather
-    /// than by a reader who searched for a feature and was shown its section with nothing said.
-    func testTheCatalogueReportsWhichTermsAQueryLandedOn() throws {
-        let match = try XCTUnwrap(
-            SettingsPages.search("mute").first { $0.pageID == SettingsPages.generalID }
+        let hits = general.entries.filter {
+            SettingsSearch.matches(query: "mute", text: $0.searchText)
+        }
+        XCTAssertTrue(
+            hits.contains { $0.title == L10n.string("Silence every sound") },
+            "mute should name the silence setting, found \(hits.map(\.title))"
         )
-        XCTAssertEqual(match.terms, ["Mute"])
-        XCTAssertTrue(SettingsPages.search("").isEmpty, "an empty query is not a search")
     }
 
     /// The Startup section's verbs joined the vocabulary the day a search for the relaunch
     /// feature found nothing: the section relaunches and reopens sessions, and neither word
     /// was indexed on General.
-    func testTheCatalogueFindsTheStartupRelaunchFeatureByItsVerbs() {
+    func testTheCatalogueFindsTheStartupRelaunchFeatureByItsVerbs() throws {
+        let general = try XCTUnwrap(
+            SettingsPages.sidebarItems.first { $0.id == SettingsPages.generalID }
+        )
         for query in ["relaunch", "reopen at startup", "resume automatically"] {
             XCTAssertTrue(
-                SettingsPages.search(query).contains { $0.pageID == SettingsPages.generalID },
+                SettingsSearch.matches(query: query, text: general.searchText),
                 "\(query) no longer lands on General"
             )
         }
     }
 
     /// Copy-on-select is a terminal behaviour that lives on a page called Profiles, so the word
-    /// someone will actually type for it is "terminal" — and the result has to *say* selection,
-    /// not leave them opening the page to find out which of its settings matched.
+    /// someone will actually type for it is "terminal" — and the result has to *name* the
+    /// setting, not leave them opening the page to find out which of its rows matched.
     func testTheCatalogueFindsCopyOnSelectByWhatItIsCalled() throws {
+        let profiles = try XCTUnwrap(
+            SettingsPages.sidebarItems.first { $0.id == SettingsPages.profilesID }
+        )
         for query in ["copy on select", "clipboard", "terminal selection"] {
             XCTAssertTrue(
-                SettingsPages.search(query).contains { $0.pageID == SettingsPages.profilesID },
+                SettingsSearch.matches(query: query, text: profiles.searchText),
                 "\(query) no longer lands on Profiles"
             )
         }
 
-        let match = try XCTUnwrap(
-            SettingsPages.search("terminal").first { $0.pageID == SettingsPages.profilesID }
-        )
+        let hits = profiles.entries.filter {
+            SettingsSearch.matches(query: "terminal selection", text: $0.searchText)
+        }
         XCTAssertTrue(
-            match.terms.contains("Terminal selection"),
-            "a search for terminal should name the selection setting, showed \(match.terms)"
+            hits.contains { $0.title == L10n.string("Copy selected text to the clipboard") },
+            "a search for terminal selection should name the setting, found \(hits.map(\.title))"
         )
     }
 
-    /// Typing filters destinations in place. Search terms decide whether a page stays, but do
-    /// not become extra rows that can overflow the sidebar or duplicate the destination.
-    func testTheListFiltersPagesWithoutAddingSettingHits() {
+    /// Typing turns the list into results: each surviving page keeps its row, and beneath it
+    /// the settings the query landed on — title plus its section as the path — because a
+    /// result saying only "General" is the reader's own search handed back to them.
+    func testSearchingShowsTheSettingsUnderTheirPageWithTheirSections() {
         let sidebar = SettingsSidebar(items: [
             .init(
                 id: "general",
                 title: "General",
                 symbol: "gearshape",
-                searchText: "General notifications mute sound"
+                searchText: "General notifications mute sound silence",
+                entries: [
+                    .init(
+                        title: "Alert sound",
+                        section: "Notifications",
+                        searchText: "Alert sound Notifications General"
+                    ),
+                    .init(
+                        title: "Silence every sound",
+                        section: "Silence",
+                        searchText: "Silence every sound mute Silence General"
+                    )
+                ]
             ),
             .init(
                 id: "themes",
@@ -563,13 +568,55 @@ final class SettingsRowLayoutTests: XCTestCase {
             )
         ])
 
-        sidebar.updateSearchQuery("mute")
+        sidebar.updateSearchQuery("sound")
         XCTAssertEqual(sidebar.visibleItemIDs, ["general"])
         XCTAssertEqual(rowTitles(in: sidebar), ["General"])
+        XCTAssertEqual(
+            sidebar.visibleEntryTitles,
+            ["Alert sound — Notifications", "Silence every sound — Silence"]
+        )
 
-        // Cleared, every destination returns in place.
+        // A narrower query keeps the page and narrows its settings.
+        sidebar.updateSearchQuery("mute")
+        XCTAssertEqual(sidebar.visibleEntryTitles, ["Silence every sound — Silence"])
+
+        // Cleared, every destination returns in place, and no result rows remain.
         sidebar.updateSearchQuery("")
         XCTAssertEqual(rowTitles(in: sidebar), ["General", "Themes"])
+        XCTAssertEqual(sidebar.visibleEntryTitles, [])
+    }
+
+    /// Choosing a setting-level result reports the page *and* the row, so the pane can scroll
+    /// to and mark the setting rather than leaving the reader at the top of the page.
+    func testChoosingASettingResultReportsThePageAndTheRow() throws {
+        let sidebar = SettingsSidebar(items: [
+            .init(
+                id: "general",
+                title: "General",
+                symbol: "gearshape",
+                searchText: "General mute",
+                entries: [
+                    .init(
+                        title: "Silence every sound",
+                        section: "Silence",
+                        searchText: "Silence every sound mute"
+                    )
+                ]
+            )
+        ])
+        var openedPage: String?
+        var openedRow: String?
+        sidebar.onOpenSetting = { page, row in
+            openedPage = page
+            openedRow = row
+        }
+
+        sidebar.updateSearchQuery("mute")
+        let hit = try XCTUnwrap(sidebar.hitRows.first)
+        XCTAssertTrue(hit.performPrimaryAction(), "the row must answer keyboard activation")
+        XCTAssertEqual(openedPage, "general")
+        XCTAssertEqual(openedRow, "Silence every sound")
+        XCTAssertEqual(sidebar.selectedID, "general", "the page row should read as chosen")
     }
 
     // MARK: - Ask AI
@@ -625,22 +672,33 @@ final class SettingsRowLayoutTests: XCTestCase {
 
     // MARK: - The AI results page
 
-    /// The pane's answer to an Ask AI run: each suggested page with the run's own sentence
-    /// on why, and a way in — the tag indexing this page's rows, never the catalogue.
+    /// The pane's answer to an Ask AI run: each suggested destination named by its full path,
+    /// with the run's own sentence on why, and a way in — the tag indexing this page's rows,
+    /// never the catalogue.
     func testTheAIResultsPageListsSuggestionsAndOpensThePageBehindARow() throws {
         let results = SettingsAISearchViewController()
-        var opened: String?
-        results.onOpen = { opened = $0 }
+        var openedPage: String?
+        var openedRow: String?
+        results.onOpen = { page, row in
+            openedPage = page
+            openedRow = row
+        }
         results.loadView()
         results.apply(.answered(query: "flashing", matches: [
             .init(pageID: "general", title: "General", symbol: "gearshape",
+                  settingTitle: "Alert sound", settingSection: "Notifications",
                   reason: "Notifications and their sounds live here."),
             .init(pageID: "motion", title: "Motion", symbol: "sparkles",
+                  settingTitle: nil, settingSection: nil,
                   reason: "The working indicator's animation.")
         ]))
 
         let titles = labels(in: results.view)
-        XCTAssertTrue(titles.contains("General"))
+        XCTAssertTrue(
+            titles.contains("General › Notifications › Alert sound"),
+            "a suggestion that names a setting shows its whole path, showed \(titles)"
+        )
+        XCTAssertTrue(titles.contains("Motion"), "a page-level answer stays the page's name")
         XCTAssertTrue(titles.contains("Notifications and their sounds live here."))
         XCTAssertTrue(
             titles.contains { $0.localizedCaseInsensitiveContains("flashing") },
@@ -651,9 +709,15 @@ final class SettingsRowLayoutTests: XCTestCase {
             .compactMap { $0 as? ThemedButton }
             .filter { $0.title == L10n.string("Open") }
         XCTAssertEqual(buttons.count, 2)
+        let first = try XCTUnwrap(buttons.first)
+        _ = NSApp.sendAction(try XCTUnwrap(first.action), to: first.target, from: first)
+        XCTAssertEqual(openedPage, "general")
+        XCTAssertEqual(openedRow, "Alert sound", "the named setting travels with the open")
+
         let second = try XCTUnwrap(buttons.last)
         _ = NSApp.sendAction(try XCTUnwrap(second.action), to: second.target, from: second)
-        XCTAssertEqual(opened, "motion")
+        XCTAssertEqual(openedPage, "motion")
+        XCTAssertNil(openedRow, "a page-level answer has no row to scroll to")
     }
 
     /// An answer already held for the same query is re-shown rather than re-bought: the run
@@ -665,7 +729,10 @@ final class SettingsRowLayoutTests: XCTestCase {
         results.loadView()
         let answered = SettingsAISearchViewController.Phase.answered(
             query: "flashing",
-            matches: [.init(pageID: "motion", title: "Motion", symbol: "sparkles", reason: "r")]
+            matches: [.init(
+                pageID: "motion", title: "Motion", symbol: "sparkles",
+                settingTitle: nil, settingSection: nil, reason: "r"
+            )]
         )
         results.apply(answered)
 
@@ -691,98 +758,82 @@ final class SettingsRowLayoutTests: XCTestCase {
         XCTAssertTrue(labels(in: results.view).contains("The search timed out."))
     }
 
-    // MARK: - The results page
+    /// The ✕ appears exactly while there is a query, and pressing it clears the way typing
+    /// would: through the field's own change path, so the list, the hits and the Ask AI
+    /// affordance all stand down together.
+    func testTheClearButtonEmptiesTheQueryAndRestoresTheList() throws {
+        let sidebar = SettingsSidebar(items: [
+            .init(id: "general", title: "General", symbol: "gearshape", searchText: "General mute"),
+            .init(id: "themes", title: "Themes", symbol: "paintpalette", searchText: "Themes font")
+        ])
+        sidebar.isAskAIAvailable = true
 
-    /// The pane's half of the answer. A search that only narrowed the sidebar left the one
-    /// surface the reader is looking at showing the page they had open before they typed.
-    func testTheResultsPageListsEverySectionTheQueryFound() {
-        let results = SettingsSearchResultsViewController(
-            query: "mute",
-            matches: [
-                .init(pageID: "general", title: "General", symbol: "gearshape", terms: ["Mute"]),
-                .init(pageID: "motion", title: "Motion", symbol: "sparkles", terms: [])
-            ]
-        )
-        let window = searchResultsWindow(results)
+        XCTAssertNil(sidebar.clearSearchButton, "nothing typed means nothing to clear")
 
-        let titles = labels(in: results.view)
-        XCTAssertTrue(titles.contains("General"))
-        XCTAssertTrue(titles.contains("Motion"))
-        XCTAssertTrue(titles.contains("Mute"), "the row never said what the query landed on")
-        // The caption is set in the design's uppercase, so the query comes back shouted.
+        sidebar.updateSearchQuery("mute")
+        XCTAssertEqual(sidebar.visibleItemIDs, ["general"])
+        let clear = try XCTUnwrap(sidebar.clearSearchButton)
+
+        XCTAssertTrue(clear.accessibilityPerformPress(), "the ✕ must answer its press")
+        XCTAssertEqual(sidebar.visibleItemIDs, ["general", "themes"], "clearing restores the list")
+        XCTAssertNil(sidebar.clearSearchButton, "an empty field has nothing to clear")
+        XCTAssertNil(sidebar.askAIButton, "an empty field has nothing to interpret")
+    }
+
+    /// Escape clears a filled query and keeps the caret — Spotlight's contract. Empty, the
+    /// command travels on to whoever owns dismissal, exactly as before.
+    func testEscapeClearsAFilledQueryAndTravelsOnWhenEmpty() {
+        let sidebar = SettingsSidebar(items: [
+            .init(id: "general", title: "General", symbol: "gearshape", searchText: "General mute")
+        ])
+        sidebar.updateSearchQuery("mute")
+
+        let field = sidebar.searchFieldForTesting
+        let escape = #selector(NSResponder.cancelOperation(_:))
         XCTAssertTrue(
-            titles.contains { $0.localizedCaseInsensitiveContains("mute") },
-            "the page never repeated the query it is answering"
+            sidebar.control(field, textView: NSTextView(), doCommandBy: escape),
+            "a filled field claims Escape"
         )
-        withExtendedLifetime(window) {}
-    }
+        XCTAssertEqual(field.stringValue, "")
+        XCTAssertEqual(sidebar.visibleItemIDs, ["general"], "the full list is back")
 
-    func testTheResultsPageSaysSoWhenNothingMatched() {
-        let results = SettingsSearchResultsViewController(query: "zzzz", matches: [])
-        let window = searchResultsWindow(results)
-        XCTAssertTrue(labels(in: results.view).contains(L10n.string("No settings found.")))
-        withExtendedLifetime(window) {}
-    }
-
-    /// The tag indexes the rows this page built, never `SettingsPages.all` — an extension
-    /// starting between the build and the click would re-number the catalogue under it.
-    func testOpeningAResultReportsThePageBehindIt() throws {
-        let results = SettingsSearchResultsViewController(
-            query: "font",
-            matches: [
-                .init(pageID: "profiles", title: "Profiles", symbol: "person", terms: ["Font"]),
-                .init(pageID: "themes", title: "Themes", symbol: "paintpalette", terms: ["Font"])
-            ]
+        XCTAssertFalse(
+            sidebar.control(field, textView: NSTextView(), doCommandBy: escape),
+            "an empty field lets Escape travel on"
         )
-        var opened: String?
-        results.onOpen = { opened = $0 }
-        let window = searchResultsWindow(results)
-
-        let buttons = descendants(of: results.view)
-            .compactMap { $0 as? ThemedButton }
-            .filter { $0.title == L10n.string("Open") }
-        XCTAssertEqual(buttons.count, 2)
-
-        let second = try XCTUnwrap(buttons.last)
-        _ = NSApp.sendAction(try XCTUnwrap(second.action), to: second.target, from: second)
-        XCTAssertEqual(opened, "themes")
-        withExtendedLifetime(window) {}
     }
 
-    /// Listing the terms said *that* the query landed here and left the reader to find the word
-    /// themselves — which on a row reading "Notifications · Mute · Sound" is the row asking them
-    /// to search inside the answer to their search.
-    func testAResultMarksTheWordsTheQueryAccountsFor() {
-        let results = SettingsSearchResultsViewController(
-            query: "mute",
-            matches: [
-                .init(
-                    pageID: "general",
-                    title: "General",
-                    symbol: "gearshape",
-                    terms: ["Notifications", "Mute", "Sound"]
-                )
-            ]
-        )
-        let window = searchResultsWindow(results)
+    // MARK: - The result rows
 
-        XCTAssertEqual(marks(in: results.view), ["Mute"])
-        withExtendedLifetime(window) {}
+    /// A setting-level result marks the words the query accounts for, so the reader is not
+    /// asked to run their own search inside the answer to their search. The page-level
+    /// searchText carries the entry's words too, as `SettingsPages.sidebarItems` builds it —
+    /// the page has to survive the filter for its settings to be shown at all.
+    func testAResultRowMarksTheWordsTheQueryAccountsFor() {
+        let sidebar = SettingsSidebar(items: [
+            .init(
+                id: "general",
+                title: "General",
+                symbol: "gearshape",
+                searchText: "General mute Silence every sound",
+                entries: [
+                    .init(
+                        title: "Silence every sound",
+                        section: "Silence",
+                        searchText: "Silence every sound mute"
+                    )
+                ]
+            )
+        ])
+        sidebar.updateSearchQuery("silence")
+        XCTAssertEqual(marks(in: sidebar), ["Silence"])
     }
 
-    /// A page whose *name* is what matched says so on the line the reader is reading, rather than
-    /// leaving the only evidence in a sidebar that has already narrowed itself.
-    func testAResultMarksAMatchedPageTitleToo() {
-        let results = SettingsSearchResultsViewController(
-            query: "motion",
-            matches: [.init(pageID: "motion", title: "Motion", symbol: "sparkles", terms: [])]
-        )
-        let window = searchResultsWindow(results)
-
-        XCTAssertEqual(marks(in: results.view), ["Motion"])
-        withExtendedLifetime(window) {}
-    }
-
+    /// The results are a retained stack rebuilt per keystroke while pages are externally
+    /// sized — 256 installed packages may contribute eight pages each — so the search path
+    /// caps construction at `SettingsSidebar.Defaults.maximumResultRows` and says what it
+    /// cut. This fixture drives the extension-scale worst case through the real sidebar;
+    /// `scripts/profile_threading.sh settings-search-stress` runs it with measurements.
     @MainActor
     func testStressSettingsSearchResultsWhenEnabled() throws {
         let environment = ProcessInfo.processInfo.environment
@@ -793,74 +844,74 @@ final class SettingsRowLayoutTests: XCTestCase {
             Int(environment["THREADING_SETTINGS_SEARCH_STRESS_RESULTS"] ?? "") ?? 2_048,
             1
         )
-        let matches = (0..<resultCount).map { index in
-            SettingsSearchMatch(
-                pageID: "com.example.stress-\(index).page",
+        let items = (0..<resultCount).map { index in
+            SettingsSidebar.Item(
+                id: "com.example.stress-\(index).page",
                 title: "Stress Extension \(index) — Matching Settings Page",
                 symbol: "puzzlepiece.extension",
-                terms: ["Matching", "Settings", "Performance"]
+                searchText: "Stress Extension \(index) Matching Settings Performance",
+                group: "Extensions"
             )
         }
-        let memoryBefore = ProcessUtility.getResourceUsage(
-            forPid: Int32(ProcessInfo.processInfo.processIdentifier)
-        )?.memoryBytes ?? 0
-        let controller = SettingsSearchResultsViewController(query: "matching", matches: matches)
-        let loadStarted = DispatchTime.now().uptimeNanoseconds
-        let page = controller.view
-        let loaded = DispatchTime.now().uptimeNanoseconds
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 760),
-            styleMask: .borderless,
-            backing: .buffered,
-            defer: false
-        )
-        window.contentView = page
-        page.layoutSubtreeIfNeeded()
-        let laidOut = DispatchTime.now().uptimeNanoseconds
-        let scrollView = try XCTUnwrap(
-            descendants(of: page).compactMap { $0 as? NSScrollView }.first
-        )
-        let overflow = max(
-            (scrollView.documentView?.bounds.height ?? 0) - scrollView.contentView.bounds.height,
-            0
-        )
-        scrollView.contentView.scroll(to: NSPoint(x: 0, y: overflow))
-        scrollView.reflectScrolledClipView(scrollView.contentView)
-        page.layoutSubtreeIfNeeded()
-        let originBeforeUpdate = scrollView.contentView.bounds.origin
-        let updateStarted = DispatchTime.now().uptimeNanoseconds
-        controller.update(query: "settings", matches: matches)
-        let updated = DispatchTime.now().uptimeNanoseconds
-        page.layoutSubtreeIfNeeded()
-        let updateLaidOut = DispatchTime.now().uptimeNanoseconds
-        let originAfterUpdate = scrollView.contentView.bounds.origin
-        let memoryAfter = ProcessUtility.getResourceUsage(
-            forPid: Int32(ProcessInfo.processInfo.processIdentifier)
-        )?.memoryBytes ?? 0
-        let memoryDelta = memoryAfter >= memoryBefore ? memoryAfter - memoryBefore : 0
-        let footprintMB = String(format: "%.1f", Double(memoryDelta) / 1_048_576)
 
+        let loadStarted = DispatchTime.now().uptimeNanoseconds
+        let sidebar = SettingsSidebar(items: items)
+        let host = NSView()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        sidebar.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(sidebar)
+        NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: 240),
+            host.heightAnchor.constraint(equalToConstant: 600),
+            sidebar.topAnchor.constraint(equalTo: host.topAnchor),
+            sidebar.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            sidebar.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            sidebar.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+        host.layoutSubtreeIfNeeded()
+        let loaded = DispatchTime.now().uptimeNanoseconds
+
+        let searchStarted = DispatchTime.now().uptimeNanoseconds
+        sidebar.updateSearchQuery("matching")
+        host.layoutSubtreeIfNeeded()
+        let searched = DispatchTime.now().uptimeNanoseconds
+
+        let updateStarted = DispatchTime.now().uptimeNanoseconds
+        sidebar.updateSearchQuery("settings")
+        host.layoutSubtreeIfNeeded()
+        let updated = DispatchTime.now().uptimeNanoseconds
+
+        let resultRows = rowTitles(in: sidebar).count
         print(
             "THREADING_PERF settings-search results=\(resultCount) "
                 + "load_ms=\(Self.milliseconds(loaded - loadStarted)) "
-                + "layout_ms=\(Self.milliseconds(laidOut - loaded)) "
+                + "search_ms=\(Self.milliseconds(searched - searchStarted)) "
                 + "update_ms=\(Self.milliseconds(updated - updateStarted)) "
-                + "update_layout_ms=\(Self.milliseconds(updateLaidOut - updated)) "
-                + "virtual_rows=\(controller.virtualRowCountForTesting) "
-                + "materialized_rows=\(controller.materializedRowCountForTesting) "
-                + "descendants=\(descendants(of: page).count + 1) "
-                + "footprint_delta_mb=\(footprintMB)"
+                + "result_rows=\(resultRows) "
+                + "descendants=\(descendants(of: sidebar).count + 1)"
         )
-        XCTAssertEqual(controller.virtualRowCountForTesting, resultCount + 1)
-        XCTAssertGreaterThan(controller.materializedRowCountForTesting, 0)
-        XCTAssertLessThan(
-            controller.materializedRowCountForTesting,
-            controller.virtualRowCountForTesting
+
+        XCTAssertEqual(
+            sidebar.visibleItemIDs.count, resultCount,
+            "every matching page is still reported as matching"
         )
-        XCTAssertEqual(originAfterUpdate.x, originBeforeUpdate.x, accuracy: 0.5)
-        XCTAssertEqual(originAfterUpdate.y, originBeforeUpdate.y, accuracy: 0.5)
-        XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
-        withExtendedLifetime(window) {}
+        XCTAssertLessThanOrEqual(
+            resultRows,
+            SettingsSidebar.Defaults.maximumResultRows,
+            "the capped search built more rows than it promised"
+        )
+        XCTAssertTrue(
+            labels(in: sidebar).contains {
+                $0.contains("\(resultCount - SettingsSidebar.Defaults.maximumResultRows)")
+            },
+            "a capped list has to say how much it cut"
+        )
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: sidebar), [])
+        withExtendedLifetime(host) {}
+    }
+
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.2f", Double(nanoseconds) / 1_000_000)
     }
 
     /// An ordinary settings page is not a search result. Every row on it must be exactly the row
@@ -890,24 +941,6 @@ final class SettingsRowLayoutTests: XCTestCase {
 
     private func labels(in view: NSView) -> [String] {
         descendants(of: view).compactMap { ($0 as? NSTextField)?.stringValue }
-    }
-
-    private static func milliseconds(_ nanoseconds: UInt64) -> String {
-        String(format: "%.2f", Double(nanoseconds) / 1_000_000)
-    }
-
-    private func searchResultsWindow(
-        _ controller: SettingsSearchResultsViewController
-    ) -> NSWindow {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 760),
-            styleMask: .borderless,
-            backing: .buffered,
-            defer: false
-        )
-        window.contentView = controller.view
-        window.contentView?.layoutSubtreeIfNeeded()
-        return window
     }
 
     /// Pre-order, so the titles come back in the order they are read down the list.

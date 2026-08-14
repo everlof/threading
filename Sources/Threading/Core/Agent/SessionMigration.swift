@@ -10,12 +10,13 @@ enum TranscriptCopyTransactionError: Error, Equatable {
 /// durable record update commits too. Candidate and backup live beside the destination, so their
 /// promotions are same-volume renames rather than partial cross-volume copies.
 enum TranscriptCopyTransaction {
+    @discardableResult
     static func install(
         source: URL,
         destination: URL,
         fileManager: FileManager = .default,
         commit: () -> Bool
-    ) throws {
+    ) throws -> Int {
         let values = try source.resourceValues(forKeys: [
             .isRegularFileKey, .isSymbolicLinkKey
         ])
@@ -33,6 +34,9 @@ enum TranscriptCopyTransaction {
 
         try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
         try fileManager.copyItem(at: source, to: staging)
+        guard let copiedByteCount = try staging.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+            throw CocoaError(.fileReadUnknown)
+        }
         if fileManager.fileExists(atPath: destination.path) {
             try fileManager.moveItem(at: destination, to: backup)
             movedStandingDestination = true
@@ -85,6 +89,7 @@ enum TranscriptCopyTransaction {
                 )
             }
         }
+        return copiedByteCount
     }
 }
 
@@ -196,8 +201,12 @@ enum SessionMigration {
         // so it is torn down before the file is copied.
         AgentRuntime.shared.discard(sessionID: sessionID)
 
+        let copiedByteCount: Int
         do {
-            try TranscriptCopyTransaction.install(source: source, destination: destination) {
+            copiedByteCount = try TranscriptCopyTransaction.install(
+                source: source,
+                destination: destination
+            ) {
                 let mutation = ProjectStore.shared.setAccountHandle(account.handle, for: sessionID)
                 return mutation == .applied || mutation == .unchanged
             }
@@ -224,6 +233,17 @@ enum SessionMigration {
             )
             return .failure(MoveError(message: "Could not copy the conversation: \(error.localizedDescription)"))
         }
+
+        // The file at `destination` is new only by path. In particular, a usage-limit record at
+        // its tail belongs to the account this move just left; letting the destination reader
+        // discover that copied record afresh immediately offers another account migration before
+        // the destination account has attempted anything. Record the installed copy's exact byte
+        // boundary while invalidating that account-scoped fact.
+        ObservedUsageLimit.transcriptWasMigrated(
+            for: session.kind,
+            to: destination,
+            copiedByteCount: copiedByteCount
+        )
 
         ThreadingLogger.agent.info(
             "Migrated session \(sessionID, privacy: .public) to account \(account.handle, privacy: .private(mask: .hash))"

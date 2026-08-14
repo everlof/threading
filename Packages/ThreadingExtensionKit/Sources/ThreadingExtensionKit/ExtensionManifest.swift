@@ -519,7 +519,31 @@ public struct ExtensionCapability: RawRepresentable, Codable, Hashable, Sendable
     public static let componentCustomization = Self(rawValue: "ui.components")
     public static let workspaceNavigation = Self(rawValue: "ui.workspace-navigation")
     public static let customMetalSurfaces = Self(rawValue: "ui.rendering.metal")
+    /// Permission to place a `media` node — a document the host plays — in a contribution.
+    ///
+    /// Independent of `panels` and of `ui.components`, so no existing contract silently gains a
+    /// player when this SDK ships: a surface that carries one has to say so, and a user granting
+    /// panels has not thereby granted animation.
+    public static let mediaDocuments = Self(rawValue: "ui.media-documents")
+    /// Permission to offer a preview body for an attachment Threading has no renderer for.
+    ///
+    /// Grants no attachment read authority: a candidate learns an attachment's name, kind, size,
+    /// origin and the host's content hint, and nothing about its content that the host did not
+    /// already publish.
+    public static let attachmentsPreview = Self(rawValue: "attachments.preview")
+    /// Permission to add file extensions to the attachments scanner's allow-list.
+    ///
+    /// The store still decides recording, copying, ceilings and pruning. A registration may not
+    /// claim an extension the host already classifies.
+    public static let attachmentFileTypes = Self(rawValue: "attachments.file-types")
     public static let hostProjectsRead = Self(rawValue: "host.projects.read")
+    /// Bounded, cursor-paged enumeration of a project's own documents as opaque **handles**.
+    ///
+    /// Deliberately not implied by `host.projects.read`: that authority returns a sanitized
+    /// snapshot with no filesystem in it at all, and this one returns names, project-relative
+    /// paths, byte sizes and modification dates. Installation and enablement disclose it
+    /// separately because it is a different question.
+    public static let hostProjectFilesRead = Self(rawValue: "host.project.files.read")
     public static let hostSessionsRead = Self(rawValue: "host.sessions.read")
     public static let hostSessionRuntimeRead = Self(rawValue: "host.sessions.runtime.read")
     public static let hostRepositoriesRead = Self(rawValue: "host.repositories.read")

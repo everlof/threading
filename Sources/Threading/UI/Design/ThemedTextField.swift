@@ -212,6 +212,16 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
         set { (cell as? ThemedFieldCell)?.contentInset = newValue }
     }
 
+    /// The trailing edge the text stops at, so a subclass can put a control after it.
+    fileprivate var trailingContentInset: CGFloat {
+        get { (cell as? ThemedFieldCell)?.trailingContentInset ?? Layout.inset }
+        set {
+            guard newValue != trailingContentInset else { return }
+            (cell as? ThemedFieldCell)?.trailingContentInset = newValue
+            needsDisplay = true
+        }
+    }
+
     private func drawSurface() {
         if surfacePresentation == .onInteraction, !isEditing {
             guard isHovered else { return }
@@ -281,6 +291,7 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
 @MainActor
 protocol ThemedFieldCell: AnyObject {
     var contentInset: CGFloat { get set }
+    var trailingContentInset: CGFloat { get set }
 }
 
 /// The text rect both themed cells place their content in.
@@ -296,13 +307,14 @@ protocol ThemedFieldCell: AnyObject {
 private func themedFieldTextRect(
     _ rect: NSRect,
     font: NSFont?,
-    contentInset: CGFloat
+    contentInset: CGFloat,
+    trailingContentInset: CGFloat
 ) -> NSRect {
     let height = ceil((font ?? Design.Typography.body()).boundingRectForFont.height)
     return NSRect(
         x: rect.minX + contentInset,
         y: rect.midY - height / 2,
-        width: max(0, rect.width - contentInset - ThemedTextField.Layout.inset),
+        width: max(0, rect.width - contentInset - trailingContentInset),
         height: height
     )
 }
@@ -312,9 +324,15 @@ private func themedFieldTextRect(
 private final class ThemedTextFieldCell: NSTextFieldCell, ThemedFieldCell {
 
     var contentInset: CGFloat = ThemedTextField.Layout.inset
+    var trailingContentInset: CGFloat = ThemedTextField.Layout.inset
 
     private func adjusted(_ rect: NSRect) -> NSRect {
-        themedFieldTextRect(rect, font: font, contentInset: contentInset)
+        themedFieldTextRect(
+            rect,
+            font: font,
+            contentInset: contentInset,
+            trailingContentInset: trailingContentInset
+        )
     }
 
     override func drawingRect(forBounds rect: NSRect) -> NSRect {
@@ -378,6 +396,21 @@ final class ThemedSecureField: ThemedTextField {
         set { super.cellClass = newValue }
     }
 
+    // Both designated initializers restated so `init()` keeps being inherited — the search
+    // field's note on `init(frame:surfacePresentation:)` applies here too.
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+    }
+
+    override init(frame frameRect: NSRect, surfacePresentation: SurfacePresentation) {
+        super.init(frame: frameRect, surfacePresentation: surfacePresentation)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     /// The secure field editor is a `NSSecureTextView` inside the same private clip view an
     /// ordinary field expands into. `ThemedTextField.permitsSystemChrome` already answers for
     /// `NSTextView` subclasses, so nothing is relaxed here — this is only where that is stated.
@@ -390,9 +423,15 @@ final class ThemedSecureField: ThemedTextField {
 private final class ThemedSecureFieldCell: NSSecureTextFieldCell, ThemedFieldCell {
 
     var contentInset: CGFloat = ThemedTextField.Layout.inset
+    var trailingContentInset: CGFloat = ThemedTextField.Layout.inset
 
     private func adjusted(_ rect: NSRect) -> NSRect {
-        themedFieldTextRect(rect, font: font, contentInset: contentInset)
+        themedFieldTextRect(
+            rect,
+            font: font,
+            contentInset: contentInset,
+            trailingContentInset: trailingContentInset
+        )
     }
 
     override func drawingRect(forBounds rect: NSRect) -> NSRect {
@@ -442,10 +481,148 @@ final class ThemedSearchField: ThemedTextField {
         static let glyphSize: CGFloat = Design.Symbol.control
         static let glyphLeading: CGFloat = Design.Spacing.small
         static let glyphGap: CGFloat = Design.Spacing.small
+        /// Air between the trailing controls and the field's own border.
+        static let actionEdgeGap: CGFloat = Design.Spacing.tight
+        /// Air the *text* keeps clear of the controls, so a long query truncates before it
+        /// runs underneath them.
+        static let actionTextGap: CGFloat = Design.Spacing.small
+    }
+
+    // MARK: - Trailing Controls
+
+    /// The controls riding inside the field's trailing edge, sharing one run: an optional
+    /// owner-installed action (Settings' Ask AI), then the ✕ every search field owes its
+    /// reader. Inside the field rather than beside the results, because both act on *what was
+    /// typed*: they belong to the query the way the magnifier does, and a button below a
+    /// changing results list is never twice in the same place.
+    private var trailingControlsBuilt = false
+
+    private lazy var trailingControls: NSStackView = {
+        trailingControlsBuilt = true
+        let stack = NSStackView(views: [clearButton])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = Design.Spacing.tight
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -Layout.actionEdgeGap
+            )
+        ])
+        return stack
+    }()
+
+    /// The way a query leaves without being deleted a character at a time. At the far edge —
+    /// every search field's own convention — and only while there is something to clear.
+    private(set) lazy var clearButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "xmark",
+            accessibility: L10n.string("Clear Search"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.onPress = { [weak self] in self?.clear() }
+        button.isHidden = true
+        return button
+    }()
+
+    /// The owner-installed action while it is on offer, nil while hidden.
+    ///
+    /// Tertiary emphasis on purpose: no surface until the pointer is on it, so at rest it
+    /// reads as part of the field, not as a second control fighting the caret for the row.
+    private(set) var trailingActionButton: ThemedButton?
+
+    /// Creates the action once. Hidden until `isTrailingActionVisible` says otherwise, because
+    /// with nothing typed there is nothing for it to act on.
+    func installTrailingAction(
+        title: String,
+        accessibilityLabel: String,
+        accessibilityIdentifier: String,
+        target: AnyObject,
+        action: Selector
+    ) {
+        guard trailingActionButton == nil else { return }
+        let button = ThemedButton(title: title, target: target, action: action)
+        button.emphasis = .tertiary
+        button.setAccessibilityLabel(accessibilityLabel)
+        button.setAccessibilityIdentifier(accessibilityIdentifier)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.isHidden = true
+        trailingControls.insertArrangedSubview(button, at: 0)
+        trailingActionButton = button
+        refreshTrailingControls()
+    }
+
+    var isTrailingActionVisible = false {
+        didSet {
+            guard isTrailingActionVisible != oldValue else { return }
+            trailingActionButton?.isHidden = !isTrailingActionVisible
+            refreshTrailingControls()
+        }
+    }
+
+    // MARK: - Clearing
+
+    /// Empties the field the way typing would have: the live editor with it, and the owner's
+    /// text-change path afterwards, so a cleared search rebuilds exactly what a deleted query
+    /// rebuilds.
+    ///
+    /// The ✕ presses this; **Escape is the owner's to bind**, through the ordinary
+    /// `control(_:textView:doCommandBy:)` seam, because what Escape means belongs to the
+    /// surface — the find bar closes on it, the settings sidebar clears. A component that
+    /// claimed the key would decide that for every owner at once.
+    func clear() {
+        guard !stringValue.isEmpty else { return }
+        stringValue = ""
+        currentEditor()?.string = ""
+        NotificationCenter.default.post(name: NSControl.textDidChangeNotification, object: self)
+    }
+
+    /// The ✕ answers the text, the text yields the room the visible controls occupy — and with
+    /// nothing visible the field is exactly the field it always was.
+    private func refreshTrailingControls() {
+        // An empty field that has never shown a control has nothing to lay out — and this can
+        // run from `stringValue`'s setter mid-`init`, where forcing the lazy stack into
+        // existence would build subviews under a half-initialized field.
+        guard trailingControlsBuilt || !stringValue.isEmpty else { return }
+        clearButton.isHidden = stringValue.isEmpty
+        let width = ceil(trailingControls.fittingSize.width)
+        trailingContentInset = width > 0
+            ? Layout.actionEdgeGap + width + Layout.actionTextGap
+            : ThemedTextField.Layout.inset
+    }
+
+    override var stringValue: String {
+        get { super.stringValue }
+        set {
+            super.stringValue = newValue
+            refreshTrailingControls()
+        }
+    }
+
+    override func textDidChange(_ notification: Notification) {
+        super.textDidChange(notification)
+        refreshTrailingControls()
     }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        applyGlyphInset()
+    }
+
+    /// Overridden alongside `init(frame:)` so the subclass keeps providing **all** of the
+    /// field's designated initializers — that is what lets `init()` and `init(string:)` keep
+    /// being inherited, which every call site building a bare `ThemedSearchField()` relies on.
+    override init(frame frameRect: NSRect, surfacePresentation: SurfacePresentation) {
+        super.init(frame: frameRect, surfacePresentation: surfacePresentation)
+        applyGlyphInset()
+    }
+
+    /// The magnifier's room, however the field was built.
+    private func applyGlyphInset() {
         contentInset = Layout.glyphLeading + Layout.glyphSize + Layout.glyphGap
     }
 

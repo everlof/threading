@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import ThreadingExtensionKit
 import ThinkingOrbs
 
@@ -111,7 +112,10 @@ final class ComponentGalleryViewController: NSViewController {
         "LimitEscapeStripView",
         "MediaInspectorCanvas",
         "MediaInspectorDocumentView",
+        "MediaDocumentCanvasView",
+        "MediaDocumentPlayerView",
         "MediaInspectorView",
+        "MediaTransportView",
         "MorphingTitleLabel",
         "NavigatorGridItemView",
         "PageTitleView",
@@ -120,7 +124,9 @@ final class ComponentGalleryViewController: NSViewController {
         "PaneNoticeView",
         "PromptCompletionPresenter",
         "PromptView",
+        "RevealHighlightView",
         "SearchMatchLabel",
+        "SearchResultRowView",
         "SemanticSceneView",
         "SeparatorView",
         "ShortcutRecorderView",
@@ -152,6 +158,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedProgressBar",
         "ThemedScroller",
         "ThemedScrollView",
+        "ThemedScrubber",
         "ThemedSegmentedControl",
         "ThemedSpinner",
         "ThemedSplitView",
@@ -182,6 +189,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ToastView",
         "ToolbarButtonGroupView",
         "UsageDashboardView",
+        "UsageReadingLabel",
         "WorkingOrbView",
         "WindowBackdrop",
         "WindowChromeButton",
@@ -234,6 +242,11 @@ final class ComponentGalleryViewController: NSViewController {
         SearchMatchLabel(role: .code(), ink: { Design.Text.quaternary })
     ]
 
+    /// The result-row story's samples, re-marked by the same live query as `matchSamples`.
+    private var resultRowSamples: [SearchResultRowView] = []
+    /// The row the RevealHighlightView story flashes over.
+    private weak var revealSampleRow: NSView?
+
     /// The tab strip's live model, so its story can be driven rather than looked at: closing
     /// and dragging mutate this and the strip re-renders from it, exactly as a host would.
     private let tabStrip = ThemedTabStripView(inkSource: .chrome)
@@ -258,6 +271,20 @@ final class ComponentGalleryViewController: NSViewController {
     private var activityBeamDemoCursor = 2
     private let progressBar = ThemedProgressBar()
     private let progressLabel = NSTextField(labelWithString: "42%")
+    /// The scrubber's own story, retained so the receipt can tell the travel from its end —
+    /// the distinction the component exists for.
+    private let galleryScrubber = ThemedScrubber(frame: .zero)
+    private let galleryTransport = MediaTransportView(frame: .zero)
+    /// The player's story runs a real document through the real registry — a synthesized
+    /// animated GIF, so the story exercises the decoder, the clock and the transport together
+    /// rather than a canvas holding a still.
+    private lazy var galleryMediaPlayer = MediaDocumentPlayerView(loader: { _ in
+        await MainActor.run {
+            ComponentGalleryViewController.demonstrationAnimation()
+                .map { Result<Data, MediaDocumentFailure>.success($0) }
+                ?? .failure(.invalidDocument("The gallery could not synthesize an animation."))
+        }
+    })
     private let themeImageView = NSImageView()
     private let galleryScrollView = ThemedScrollView()
     private let tableModel = ComponentGalleryTableModel()
@@ -1224,6 +1251,56 @@ final class ComponentGalleryViewController: NSViewController {
         matchStory.alignment = .leading
         matchStory.spacing = Design.Spacing.small
 
+        // The result rows follow the same live query field as the match samples above them.
+        resultRowSamples = Self.resultRowSampleData.map { sample in
+            let row = SearchResultRowView(
+                title: sample.title,
+                path: sample.path,
+                matching: matchQueryField.stringValue,
+                leadingInset: Design.Spacing.inset,
+                inkSource: .chrome
+            )
+            row.onSelect = { [weak self] in
+                self?.showReceipt(L10n.format("Pressed %@.", sample.title))
+            }
+            return row
+        }
+        let resultRows = NSStackView(views: resultRowSamples)
+        resultRows.orientation = .vertical
+        resultRows.alignment = .leading
+        resultRows.spacing = Design.Spacing.hairline
+        for row in resultRowSamples {
+            row.widthAnchor.constraint(equalTo: resultRows.widthAnchor).isActive = true
+        }
+
+        let revealDemoRow = NSView()
+        revealDemoRow.applySurface(
+            fill: Design.Surface.panel,
+            radius: .control,
+            border: Design.Surface.border
+        )
+        let revealDemoTitle = NSTextField(labelWithString: L10n.string("Alert sound"))
+        revealDemoTitle.applyFont(.body)
+        revealDemoTitle.textColor = Design.Text.label
+        revealDemoTitle.translatesAutoresizingMaskIntoConstraints = false
+        revealDemoRow.translatesAutoresizingMaskIntoConstraints = false
+        revealDemoRow.addSubview(revealDemoTitle)
+        NSLayoutConstraint.activate([
+            revealDemoRow.heightAnchor.constraint(equalToConstant: 44),
+            revealDemoTitle.leadingAnchor.constraint(
+                equalTo: revealDemoRow.leadingAnchor,
+                constant: Design.Spacing.inset
+            ),
+            revealDemoTitle.centerYAnchor.constraint(equalTo: revealDemoRow.centerYAnchor)
+        ])
+        revealSampleRow = revealDemoRow
+        let flash = button("Flash", action: #selector(replayReveal))
+        let revealStory = NSStackView(views: [revealDemoRow, flash])
+        revealStory.orientation = .vertical
+        revealStory.alignment = .leading
+        revealStory.spacing = Design.Spacing.small
+        revealDemoRow.widthAnchor.constraint(equalTo: revealStory.widthAnchor).isActive = true
+
         let scrollingText = ThemedTextView.scrolling()
         scrollingText.translatesAutoresizingMaskIntoConstraints = false
         scrollingText.heightAnchor.constraint(equalToConstant: 100).isActive = true
@@ -1489,6 +1566,20 @@ final class ComponentGalleryViewController: NSViewController {
                     matchStory
                 ),
                 story(
+                    "SearchResultRowView",
+                    "One destination a search turned up: the matched words marked on the "
+                        + "title, the path underneath. These rows follow the query field "
+                        + "above; hover, press, Space and the focus ring are live.",
+                    resultRows
+                ),
+                story(
+                    "RevealHighlightView",
+                    "The wash a search leaves on the row it scrolled to — the search-match "
+                        + "ground fading in, standing a beat, and leaving. Flash replays it; "
+                        + "the hold survives Reduce Motion because a hold is not movement.",
+                    revealStory
+                ),
+                story(
                     "ShortcutRecorderView",
                     "Click one and press a chord. Escape cancels, Delete clears; the third is fixed.",
                     row([recorder, unboundRecorder, disabledRecorder])
@@ -1639,6 +1730,34 @@ final class ComponentGalleryViewController: NSViewController {
                     row([less, progressBar, progressLabel, more])
                 ),
                 story(
+                    "ThemedScrubber",
+                    "A position the user sets. Drag it, or traverse to it and use the arrow "
+                        + "keys — Shift for the fine step. The receipt below tells the travel "
+                        + "from the commit: a seek happens once, at the end.",
+                    makeScrubberSample()
+                ),
+                story(
+                    "MediaDocumentPlayerView",
+                    "A document that varies over time, drawn by the host. The registry decodes "
+                        + "it, the player owns the clock, and the clock stops the moment nothing "
+                        + "can see it — another tab, a collapsed pane, an occluded window.",
+                    makeMediaPlayerSample()
+                ),
+                story(
+                    "MediaDocumentCanvasView",
+                    "The bounded surface a document is drawn on. Its three grounds: the pane’s "
+                        + "own surface, the checkerboard that says the document has "
+                        + "transparency, and nothing at all.",
+                    row(makeMediaCanvasSamples())
+                ),
+                story(
+                    "MediaTransportView",
+                    "The transport a host-owned media player wears: play/pause, the scrubber "
+                        + "and a monospaced-digit reading. It owns no clock — it states what it "
+                        + "was told and raises what the user did.",
+                    makeTransportSample()
+                ),
+                story(
                     "FileActivityMapView",
                     "Every tracked file as a mark: reads glow in the secondary tier, edits in "
                         + "the accent, both fading to a residual. Hover names the file.",
@@ -1760,6 +1879,11 @@ final class ComponentGalleryViewController: NSViewController {
                     "ThemedChartPlaceholderView",
                     "What a chart says with no series: work in flight on the left, a finished empty answer on the right.",
                     galleryChartPlaceholders()
+                ),
+                story(
+                    "UsageReadingLabel",
+                    "Narrow the row and the reading gives up whole windows rather than characters: everything, then one complete window, then nothing.",
+                    galleryUsageReadings()
                 ),
                 story(
                     "UsageDashboardView",
@@ -2027,6 +2151,31 @@ final class ComponentGalleryViewController: NSViewController {
             xRange: start...today,
             valueFormat: .number
         )
+    }
+
+    /// One reading at three widths, which is the whole of what this component decides: the row
+    /// it stands in is what varies in the app, and a still of it at one width says nothing.
+    private func galleryUsageReadings() -> NSView {
+        let readings = [
+            AccountUsage.Reading(name: "5h", value: "86%", severity: .warning, fraction: 0.86),
+            AccountUsage.Reading(name: "7d", value: "41%", severity: .normal, fraction: 0.41)
+        ]
+
+        let column = NSStackView()
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Design.Spacing.small
+
+        for width in [160.0, 60.0, 24.0] as [CGFloat] {
+            let line = UsageReadingLabel()
+            line.readings = readings
+            line.widthAnchor.constraint(equalToConstant: width).isActive = true
+            line.heightAnchor.constraint(
+                equalToConstant: line.intrinsicContentSize.height
+            ).isActive = true
+            column.addArrangedSubview(line)
+        }
+        return column
     }
 
     private func galleryUsageDashboardFixture() -> UsageDashboardView {
@@ -2743,6 +2892,142 @@ final class ComponentGalleryViewController: NSViewController {
         return row([surface, cycle])
     }
 
+    private func makeScrubberSample() -> NSView {
+        galleryScrubber.value = 0.35
+        galleryScrubber.setAccessibilityLabel(L10n.string("Playback position"))
+        galleryScrubber.onChange = { [weak self] value in
+            self?.showReceipt(L10n.format(
+                "ThemedScrubber travelled to %lld%%.",
+                Int64((value * 100).rounded())
+            ))
+        }
+        galleryScrubber.onScrubEnd = { [weak self] value in
+            self?.showReceipt(L10n.format(
+                "ThemedScrubber committed %lld%%.",
+                Int64((value * 100).rounded())
+            ))
+        }
+        galleryScrubber.widthAnchor.constraint(equalToConstant: 260).isActive = true
+
+        let disabled = ThemedScrubber(frame: .zero)
+        disabled.value = 0.65
+        disabled.isEnabled = false
+        disabled.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        return row([galleryScrubber, disabled])
+    }
+
+    private func makeTransportSample() -> NSView {
+        galleryTransport.documentDuration = 100
+        galleryTransport.progress = 0.12
+        galleryTransport.onPlayPause = { [weak self] in
+            guard let self else { return }
+            self.galleryTransport.isPlaying.toggle()
+            self.showReceipt(
+                self.galleryTransport.isPlaying
+                    ? L10n.string("MediaTransportView asked to play.")
+                    : L10n.string("MediaTransportView asked to pause.")
+            )
+        }
+        galleryTransport.onScrubEnd = { [weak self] value in
+            self?.showReceipt(L10n.format(
+                "MediaTransportView sought to %lld%%.",
+                Int64((value * 100).rounded())
+            ))
+        }
+        galleryTransport.widthAnchor.constraint(equalToConstant: 360).isActive = true
+
+        let unknown = MediaTransportView(frame: .zero)
+        unknown.widthAnchor.constraint(equalToConstant: 300).isActive = true
+
+        let stack = NSStackView(views: [galleryTransport, unknown])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        return stack
+    }
+
+    private func makeMediaPlayerSample() -> NSView {
+        galleryMediaPlayer.onStateReport = { [weak self] report in
+            self?.showReceipt(L10n.format(
+                "MediaDocumentPlayerView reported “%@”.",
+                report.phase.rawValue
+            ))
+        }
+        galleryMediaPlayer.update(document: ExtensionMediaDocument(
+            id: "gallery-animation",
+            source: .extensionResource("gallery/demo.gif"),
+            format: .animatedImage,
+            playback: ExtensionMediaPlayback(
+                isPlaying: true,
+                loop: .loop,
+                speed: 1,
+                background: .checkerboard
+            ),
+            allowsFrameCopy: true,
+            accessibilityLabel: L10n.string("A demonstration animation"),
+            stateActionID: "gallery-media-state"
+        ))
+        galleryMediaPlayer.widthAnchor.constraint(equalToConstant: 320).isActive = true
+        return galleryMediaPlayer
+    }
+
+    private func makeMediaCanvasSamples() -> [NSView] {
+        [ExtensionMediaBackground.surface, .checkerboard, .transparent].map { background in
+            let canvas = MediaDocumentCanvasView()
+            canvas.background = background
+            canvas.widthAnchor.constraint(equalToConstant: 96).isActive = true
+            canvas.heightAnchor.constraint(equalToConstant: 64).isActive = true
+            return labelledControl(background.rawValue, control: canvas)
+        }
+    }
+
+    /// A four-frame animated GIF built in memory, so the player's story needs no bundled asset
+    /// and still exercises the whole decode-and-present path.
+    static func demonstrationAnimation() -> Data? {
+        let side = 64
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output,
+            "com.compuserve.gif" as CFString,
+            4,
+            nil
+        ) else { return nil }
+        CGImageDestinationSetProperties(destination, [
+            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]
+        ] as CFDictionary)
+
+        for step in 0..<4 {
+            guard let context = CGContext(
+                data: nil,
+                width: side,
+                height: side,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return nil }
+            context.setFillColor(
+                red: CGFloat(step) / 3,
+                green: 0.3,
+                blue: 1 - CGFloat(step) / 3,
+                alpha: 1
+            )
+            let inset = CGFloat(step) * 6
+            context.fillEllipse(in: CGRect(
+                x: inset,
+                y: inset,
+                width: CGFloat(side) - inset * 2,
+                height: CGFloat(side) - inset * 2
+            ))
+            guard let frame = context.makeImage() else { return nil }
+            CGImageDestinationAddImage(destination, frame, [
+                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.25]
+            ] as CFDictionary)
+        }
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+
     private func makeCodeContextPreviewSample() -> NSView {
         let lines = [
             "func render(_ project: Project) {",
@@ -3145,6 +3430,9 @@ final class ComponentGalleryViewController: NSViewController {
             actions: [
                 PaneNoticeAction(title: L10n.string("Restore")) { [weak self] in
                     self?.dismissGalleryNotice()
+                },
+                PaneNoticeAction(title: L10n.string("Send to Developer"), emphasis: .secondary) {
+                    [weak self] in self?.showReceipt(L10n.string("Send to Developer"))
                 },
                 PaneNoticeAction(title: L10n.string("Show Crash Report"), emphasis: .tertiary) {
                     [weak self] in self?.showReceipt(L10n.string("Show Crash Report"))
@@ -4236,6 +4524,9 @@ final class ComponentGalleryViewController: NSViewController {
         for (label, line) in zip(matchSamples, Self.matchSampleLines) {
             label.show(line, matching: query)
         }
+        for (row, sample) in zip(resultRowSamples, Self.resultRowSampleData) {
+            row.show(title: sample.title, path: sample.path, matching: query)
+        }
     }
 
     private static var matchSampleLines: [String] {
@@ -4244,6 +4535,25 @@ final class ComponentGalleryViewController: NSViewController {
             L10n.string("Play a sound when a session needs attention"),
             "9f3c1a20-77b4-4e6d-9c02-5a1e8b3d40ff"
         ]
+    }
+
+    private static var resultRowSampleData: [(title: String, path: String?)] {
+        [
+            (L10n.string("Alert sound"), L10n.string("Notifications")),
+            (L10n.string("Silence every sound"), nil)
+        ]
+    }
+
+    /// Replays the reveal wash over the sample row — the whole presence transition, exactly
+    /// as `SettingsRowReveal` stands it on a real settings row.
+    @objc private func replayReveal() {
+        guard let target = revealSampleRow else { return }
+        let wash = RevealHighlightView(frame: target.bounds)
+        wash.autoresizingMask = [.width, .height]
+        target.addSubview(wash, positioned: .above, relativeTo: nil)
+        wash.flash { [weak wash] in
+            wash?.removeFromSuperview()
+        }
     }
 
     private func configureActivityMap() {

@@ -18,6 +18,29 @@ enum ProjectDatabaseLoadError: LocalizedError {
     }
 }
 
+/// A whole-graph write was refused because the store changed underneath the writer.
+///
+/// `save(_:)` reconciles: it deletes every project and session the state it was handed does not
+/// mention. That is correct for the single writer `SingleInstanceLock` promises, and catastrophic
+/// for a second one — its stale snapshot deletes rows it never knew existed, and `ON DELETE
+/// CASCADE` takes each project's chats with it. A hosted XCTest bundle was exactly that second
+/// writer, because it runs inside the shipping app and never reaches the lock.
+///
+/// The redirect in `StateManager` removes that writer. This is the backstop for the next one:
+/// reconciliation now proves it is working from the generation it last read, and refuses rather
+/// than prunes when it is not. Refusing costs one unsaved edit; pruning costs projects.
+enum ProjectDatabaseWriteError: LocalizedError {
+    case staleGeneration(observed: Int, found: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .staleGeneration(let observed, let found):
+            return "Refused a whole-graph write: the store moved from generation "
+                + "\(observed) to \(found) beneath this writer"
+        }
+    }
+}
+
 /// The rows of one auxiliary table this build could not read.
 ///
 /// A panel layout or attachment list that does not decode is not the same failure as a session
@@ -84,6 +107,13 @@ final class ProjectDatabase {
     // MARK: - Properties
 
     private let database: SQLiteDatabase
+
+    /// The store generation this connection last read or wrote.
+    ///
+    /// `nil` until the graph has been read once. A connection that has never loaded cannot have a
+    /// stale picture of the graph, so it adopts whatever it finds rather than refusing — that is
+    /// the legacy-import and first-write path, not the hazard.
+    private var observedGeneration: Int?
 
     // MARK: - Initialization
 
@@ -261,6 +291,10 @@ final class ProjectDatabase {
             )
         }
 
+        // Read *after* the rows, so the generation this connection claims to hold can never be
+        // newer than the graph it actually read.
+        observedGeneration = try storeGeneration()
+
         return ProjectsStateLoad(
             state: ProjectsState(
                 projects: projects,
@@ -283,6 +317,16 @@ final class ProjectDatabase {
     /// extra steps, and would churn the write-ahead log for a renamed tab.
     func save(_ state: ProjectsState) throws {
         try database.transaction {
+            // Inside the transaction, so the check and the reconcile it authorises cannot be
+            // separated by another writer's commit.
+            let found = try storeGeneration()
+            if let observedGeneration, observedGeneration != found {
+                throw ProjectDatabaseWriteError.staleGeneration(
+                    observed: observedGeneration,
+                    found: found
+                )
+            }
+
             var liveProjects: Set<String> = []
             var liveSessions: Set<String> = []
 
@@ -299,6 +343,7 @@ final class ProjectDatabase {
             try deleteRows(in: "session", keeping: liveSessions)
             try deleteRows(in: "project", keeping: liveProjects)
             try setSelectedSessionID(state.selectedSessionID)
+            try advanceGeneration(from: found)
         }
     }
 
@@ -344,6 +389,9 @@ final class ProjectDatabase {
                 .bind(2, position)
                 .run()
             try setSelectedSessionID(selectedSessionID)
+            // Membership changed, so a whole-graph writer holding the older picture must be
+            // refused rather than allowed to resurrect this row.
+            try advanceGeneration(from: try storeGeneration())
         }
     }
 
@@ -511,6 +559,30 @@ final class ProjectDatabase {
         }
 
         return unreadable
+    }
+
+    /// The store's current generation, or 0 for a database written before it had one.
+    ///
+    /// Absent and unparsable are the same answer on purpose: this counter authorises nothing on
+    /// its own, it only has to change when the graph does, and a store that has never counted is
+    /// indistinguishable from one at zero.
+    private func storeGeneration() throws -> Int {
+        let statement = try database.prepare("SELECT value FROM app_state WHERE key = ?")
+        defer { statement.finalize() }
+        statement.bind(1, ProjectDatabaseSchema.storeGenerationKey)
+
+        guard try statement.step(), let raw = statement.text(0) else { return 0 }
+        return Int(raw) ?? 0
+    }
+
+    /// Records that this writer changed which rows exist, and that it is now up to date.
+    private func advanceGeneration(from current: Int) throws {
+        let next = current &+ 1
+        try database.prepare(ProjectDatabaseSchema.upsertAppState)
+            .bind(1, ProjectDatabaseSchema.storeGenerationKey)
+            .bind(2, String(next))
+            .run()
+        observedGeneration = next
     }
 
     private func selectedSessionID() throws -> SessionID? {
@@ -766,6 +838,11 @@ enum ProjectDatabaseSchema {
     static let selectedSessionKey = "selectedSessionID"
 
     static let runningSessionsKey = "runningSessionIDs"
+
+    /// Counts changes to *which* rows exist, so a reconciling write can prove it is not working
+    /// from a snapshot another writer has already moved past. Lives in `app_state` rather than a
+    /// column, so it needs no migration and an older build simply ignores it.
+    static let storeGenerationKey = "storeGeneration"
 
     /// The auxiliary tables are named outside their own statements — a load reports what it could
     /// not read per table — so the name is a constant rather than a literal per call site.

@@ -194,6 +194,7 @@ final class ScheduledMessageRowView: ThemedControl {
             sendNowButton.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
                 sendNowButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+                sendNowButton.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
                 sendNowButton.trailingAnchor.constraint(
                     equalTo: removeButton.leadingAnchor,
                     constant: -Design.Spacing.small
@@ -202,19 +203,38 @@ final class ScheduledMessageRowView: ThemedControl {
             trailing = sendNowButton
         }
 
+        // The floor states what a row may never be squeezed below; the preferred height beside
+        // it states what a row *is*. With only the floor, the row's height was a free variable,
+        // and the composer's column has another one: the hero region above it soaks up whatever
+        // the pane does not need. Two free heights is an ambiguous layout, and the engine parked
+        // the pane's slack in whichever it liked — a scheduled row hundreds of points tall,
+        // drawing its labels over the chip row above while its remove button floated below them.
+        // The `.defaultHigh` preference makes stretching this row cost something and growing the
+        // hero region cost nothing, so the slack has one home. The required top pins are what
+        // lets genuinely taller content — the Send-now button — still raise the row honestly.
+        let preferredHeight = heightAnchor.constraint(
+            equalToConstant: ScheduledStripDefaults.rowHeight
+        )
+        preferredHeight.priority = .defaultHigh
+
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.small),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
             stack.trailingAnchor.constraint(
                 lessThanOrEqualTo: trailing.leadingAnchor,
                 constant: -Design.Spacing.small
             ),
             removeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            removeButton.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
             removeButton.trailingAnchor.constraint(
                 equalTo: trailingAnchor,
                 constant: -Design.Spacing.small
             ),
-            heightAnchor.constraint(greaterThanOrEqualToConstant: ScheduledStripDefaults.rowHeight)
+            heightAnchor.constraint(
+                greaterThanOrEqualToConstant: ScheduledStripDefaults.rowHeight
+            ),
+            preferredHeight
         ])
 
         removeButton.onPress = { [weak self] in self?.onRemove?() }

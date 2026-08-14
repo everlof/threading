@@ -35,7 +35,13 @@ public enum ThreadingExtensionAPI {
         .componentCustomization,
         .workspaceNavigation,
         .customMetalSurfaces,
+        // Host-owned rendering: the guest supplies a document handle and a playback intent and
+        // receives a coalesced state report. No decoder, surface, or pixel reaches it.
+        .mediaDocuments,
+        .attachmentsPreview,
+        .attachmentFileTypes,
         .hostProjectsRead,
+        .hostProjectFilesRead,
         .hostSessionsRead,
         .hostSessionRuntimeRead,
         .hostRepositoriesRead,

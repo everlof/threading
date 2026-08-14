@@ -109,6 +109,13 @@ process first (it belongs to the old account and is still writing the file), and
 touches a token — the official CLI authenticates under whichever account, so this is
 portability, not credential reuse.
 
+The copied tail is not new provider output at the destination. Transcript readers normally key
+their changed-only cache by path, so a migration also records the installed copy's exact byte
+boundary through
+`ObservedUsageLimit.transcriptWasMigrated`. Its value is cleared rather than copied: a 429 at the
+tail belongs to the account the session left, and rediscovering it at the new path would claim the
+destination refused before it had attempted a turn.
+
 Same agent only. Cross-agent (Claude ↔ Codex) is *not* a resume — the transcript formats,
 provider state and resume paths differ. That distinction is visible in the second verb,
 **Continue with Claude/Codex** (`ConversationContinuation`): it stops a live source after

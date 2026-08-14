@@ -1976,6 +1976,14 @@ extension ProjectSidebarViewController {
             guard let self else { return }
             self.delegate?.projectSidebar(self, didSelectSettingsPage: pageID)
         }
+        sidebar.onOpenSetting = { [weak self] pageID, anchorTitle in
+            guard let self else { return }
+            self.delegate?.projectSidebar(
+                self,
+                didSelectSettingsPage: pageID,
+                revealing: anchorTitle
+            )
+        }
         // Read once as the sidebar is built: availability is a filesystem scan for logins,
         // which a per-keystroke rebuild must not repeat.
         sidebar.isAskAIAvailable = SettingsSearchResearch.provider != nil
@@ -1994,7 +2002,9 @@ extension ProjectSidebarViewController {
             ),
             sidebar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.medium),
             sidebar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Design.Spacing.medium),
-            sidebar.bottomAnchor.constraint(lessThanOrEqualTo: footer.topAnchor)
+            // Pinned rather than merely bounded: the sidebar's results scroll, so it owns the
+            // whole run down to the footer instead of sizing to however few rows survive.
+            sidebar.bottomAnchor.constraint(equalTo: footer.topAnchor)
         ])
 
         settingsSidebar = sidebar
@@ -3284,6 +3294,13 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didCloseTerminal terminalID: TerminalID)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage pageID: String)
+    /// A search result named a setting: open its page and scroll to the row `anchorTitle`
+    /// names, marking it — see `SettingsRowReveal`.
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        didSelectSettingsPage pageID: String,
+        revealing anchorTitle: String
+    )
     func projectSidebar(_ sidebar: ProjectSidebarViewController, askAIAboutSettings query: String)
 }
 

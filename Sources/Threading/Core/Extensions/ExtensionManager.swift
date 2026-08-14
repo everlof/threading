@@ -201,6 +201,13 @@ protocol ExtensionPanelRouting: AnyObject {
         relativePath: String
     ) -> URL?
 
+    /// Reads a package-relative media document through the same containment boundary every other
+    /// package resource goes through, at the media ceiling rather than the image one.
+    func extensionMediaResourceData(
+        extensionIdentifier: String,
+        relativePath: String
+    ) -> Data?
+
     @discardableResult
     func invokePanelAction(
         extensionIdentifier: String,
@@ -259,6 +266,31 @@ extension ExtensionPanelRouting {
     }
 }
 
+/// One candidate for an attachment preview, in the order the user's extension list puts it.
+struct ExtensionAttachmentPreviewCandidate: Equatable, Sendable {
+    let extensionIdentifier: String
+    let extensionName: String
+    let processGeneration: String
+}
+
+/// The host-owned offer/decline boundary for `attachments.preview@1`.
+///
+/// The pane asks for candidates and then offers the attachment to each in turn. Ordering *is* the
+/// conflict policy — the first valid acceptance wins — so the manager's job is to answer with a
+/// stable order and to route one offer at a time.
+@MainActor
+protocol ExtensionAttachmentPreviewRouting: AnyObject {
+    /// Candidates that declared the contract, in user-visible order, capped by the contract.
+    func attachmentPreviewCandidates() -> [ExtensionAttachmentPreviewCandidate]
+
+    @discardableResult
+    func requestAttachmentPreview(
+        extensionIdentifier: String,
+        attachment: ExtensionAttachmentContext,
+        completion: @escaping @MainActor (Result<ExtensionAttachmentPreviewResponse, Error>) -> Void
+    ) -> Bool
+}
+
 /// The application-wide lifecycle owner for installed extension processes.
 ///
 /// Installation and process startup happen away from the main thread. Inventory, desired
@@ -269,7 +301,8 @@ final class ExtensionManager:
     ExtensionServiceRouting,
     ExtensionCompanionRouting,
     ExtensionWorkspaceNavigatorRouting,
-    ExtensionPanelRouting
+    ExtensionPanelRouting,
+    ExtensionAttachmentPreviewRouting
 {
     static let shared = ExtensionManager()
 
@@ -718,6 +751,50 @@ final class ExtensionManager:
         }
     }
 
+    func attachmentPreviewCandidates() -> [ExtensionAttachmentPreviewCandidate] {
+        registrations.compactMap { identifier, _ -> ExtensionAttachmentPreviewCandidate? in
+            guard enabledIdentifiers.contains(identifier),
+                  sessions[identifier] != nil,
+                  let processGeneration = sessionGenerations[identifier],
+                  let bundle = packages[identifier]?.bundle,
+                  bundle.manifest.capabilities.contains(.attachmentsPreview) else {
+                return nil
+            }
+            let localization = ExtensionLocalizationResolver(catalogs: bundle.localizations)
+            return ExtensionAttachmentPreviewCandidate(
+                extensionIdentifier: identifier,
+                extensionName: localization.string(bundle.manifest.name),
+                processGeneration: processGeneration
+            )
+        }
+        // The same ordering every other inventory uses, so "user order" means one thing in the
+        // app rather than one thing per surface.
+        .sorted {
+            $0.extensionName.localizedCaseInsensitiveCompare($1.extensionName)
+                == .orderedAscending
+        }
+        .prefix(ExtensionAttachmentPreviewContract.maximumCandidates)
+        .map { $0 }
+    }
+
+    @discardableResult
+    func requestAttachmentPreview(
+        extensionIdentifier: String,
+        attachment: ExtensionAttachmentContext,
+        completion: @escaping @MainActor (Result<ExtensionAttachmentPreviewResponse, Error>) -> Void
+    ) -> Bool {
+        guard enabledIdentifiers.contains(extensionIdentifier),
+              let bundle = packages[extensionIdentifier]?.bundle,
+              bundle.manifest.capabilities.contains(.attachmentsPreview),
+              let session = sessions[extensionIdentifier] else {
+            return false
+        }
+        session.invokeAttachmentPreview(attachment) { result in
+            completion(result)
+        }
+        return true
+    }
+
     func registeredWorkspaceNavigator(
         extensionIdentifier: String,
         navigatorID: String
@@ -806,6 +883,24 @@ final class ExtensionManager:
         imageResourceURL(
             relativePath: relativePath,
             extensionIdentifier: extensionIdentifier
+        )
+    }
+
+    /// The metadata preflight in `resourceURL` is only an early refusal — an extension can grow
+    /// its own resource afterwards — so the read is bounded again at the door, exactly as the
+    /// Metal source read is.
+    func extensionMediaResourceData(
+        extensionIdentifier: String,
+        relativePath: String
+    ) -> Data? {
+        guard let url = resourceURL(
+            relativePath: relativePath,
+            extensionIdentifier: extensionIdentifier,
+            maximumBytes: ExtensionResourceDefaults.maximumMediaDocumentBytes
+        ) else { return nil }
+        return try? BoundedFileReader.read(
+            url,
+            maximumBytes: ExtensionResourceDefaults.maximumMediaDocumentBytes
         )
     }
 
@@ -1718,6 +1813,12 @@ final class ExtensionManager:
                     self.sessions[identifier] = started.session
                     self.sessionGenerations[identifier] = processGeneration
                     self.registrations[identifier] = localizedRegistration
+                    AttachmentMediaTypeRegistry.shared.register(
+                        bundle.manifest.capabilities.contains(.attachmentFileTypes)
+                            ? localizedRegistration.previewableFileTypes
+                            : [],
+                        extensionIdentifier: identifier
+                    )
                     CommandRegistry.shared.replaceExtensionCommands(
                         extensionIdentifier: identifier,
                         extensionName: localization.string(bundle.manifest.name),
@@ -2197,6 +2298,7 @@ enum ExtensionImageResourcePolicy {
 private enum ExtensionResourceDefaults {
     static let maximumImageBytes = ExtensionImageResourcePolicy.maximumBytes
     static let maximumCustomSurfaceBytes = 256 * 1024
+    static let maximumMediaDocumentBytes = MediaDocumentLimits.default.maximumDocumentBytes
 }
 
 private enum ExtensionSettingsManagerError: LocalizedError {

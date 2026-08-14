@@ -7,7 +7,7 @@ import XCTest
 /// than a wall. Geometry and legibility are reviewed on the renders; the behavior the layout
 /// promises is asserted.
 @MainActor
-final class SessionComposerRenderTests: XCTestCase {
+final class SessionComposerRenderTests: HostedStoreTestCase {
 
     private enum Render {
         static let tall = NSSize(width: 900, height: 640)
@@ -120,7 +120,7 @@ final class SessionComposerRenderTests: XCTestCase {
         speed.configure(symbolName: "bolt.fill", title: "Standard")
         speed.isHidden = false
         surface.configure(symbolName: "bubble.left.and.text.bubble.right", title: "Terminal")
-        usage.stringValue = "5h 43% · 7d 73%"
+        usage.readings = [reading("5h", "43%"), reading("7d", "73%")]
         usage.isHidden = false
         host.layoutSubtreeIfNeeded()
 
@@ -898,6 +898,163 @@ final class SessionComposerRenderTests: XCTestCase {
         XCTAssertNil(recorder.fastModes[1])
     }
 
+    /// The row the screenshot showed: five posture choices and a reading, in a 720-point
+    /// column. It does not all fit, and what the reader got was `5h 86…` — a percentage with
+    /// its `%` truncated off. Whatever the row can spare, the reading spends on **whole**
+    /// windows, so what is left standing is a number that can be read.
+    func testTheReadingKeepsWholeWindowsInTheRowThatCouldNotHoldItAll() throws {
+        let composer = SessionComposerViewController()
+        let host = host(composer, size: Render.tall)
+
+        let model = try XCTUnwrap(chip(named: "composer.session-start.model", in: composer.view))
+        let mode = try XCTUnwrap(chip(named: "composer.session-start.mode", in: composer.view))
+        let effort = try XCTUnwrap(chip(named: "composer.session-start.effort", in: composer.view))
+        let speed = try XCTUnwrap(chip(named: "composer.session-start.speed", in: composer.view))
+        let surface = try XCTUnwrap(chip(named: "composer.session-start.surface", in: composer.view))
+        let usage = try XCTUnwrap(usageLabel(in: composer.view))
+
+        model.configure(symbolName: "cpu", title: "Opus · 1M")
+        mode.configure(symbolName: "hand.raised", title: "Manual")
+        effort.configure(symbolName: "brain", title: "Extra High")
+        speed.configure(symbolName: "bolt.fill", title: "Standard")
+        surface.configure(symbolName: "bubble.left.and.text.bubble.right", title: "Native (Experimental)")
+        for chip in [model, mode, effort, speed, surface] { chip.isHidden = false }
+        usage.readings = [reading("5h", "86%"), reading("7d", "41%")]
+        usage.isHidden = false
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThanOrEqual(
+            usage.drawableReadingCount(in: usage.bounds.width),
+            1,
+            "the reading was left with room for no complete window "
+                + "(frame=\(usage.bounds.width), whole line=\(usage.intrinsicContentSize.width))"
+        )
+
+        // Whatever it drew, the whole of it is still what a tooltip and VoiceOver carry.
+        XCTAssertEqual(usage.plainValue, "5h 86% · 7d 41%")
+    }
+
+    /// With room to spare, every window is stated: the empty middle of the row is what stretches,
+    /// not the gap in the reading.
+    ///
+    /// The spacer used to hold `defaultLow` — the reading's own compression resistance — so the
+    /// two bid for the same slack at the same priority and an ambiguous layout handed it to the
+    /// gap. The row then sat with points to spare beside a truncated number.
+    func testARoomyFooterSpendsItsSlackOnTheGapRatherThanOnTheReading() throws {
+        let composer = SessionComposerViewController()
+        let host = host(composer, size: Render.tall)
+        let usage = try XCTUnwrap(usageLabel(in: composer.view))
+
+        usage.readings = [reading("5h", "43%"), reading("7d", "73%")]
+        usage.isHidden = false
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            usage.bounds.width,
+            usage.intrinsicContentSize.width,
+            accuracy: 0.5,
+            "a footer with slack still squeezed the reading"
+        )
+        XCTAssertEqual(usage.drawableReadingCount(in: usage.bounds.width), 2)
+    }
+
+    /// The identity is the row's stable answer and is not the chip that yields: the location
+    /// breadcrumb is (`locationChipCompressionPriority`, plus its own cap). So in a pane with
+    /// room to spare, `Claude Code · Everlof` is what the chip draws — not `Claude Code · Everl…`.
+    func testTheIdentityChipDrawsItsWholeAnswerInARoomyPane() throws {
+        let composer = SessionComposerViewController()
+        let host = host(composer, size: Render.tall)
+        let identity = try XCTUnwrap(
+            chip(named: "composer.session-start.identity", in: composer.view)
+        )
+
+        identity.configure(symbolName: "sparkle", title: "Claude Code · Everlof")
+        host.layoutSubtreeIfNeeded()
+
+        let label = try XCTUnwrap(
+            descendants(of: identity).compactMap { $0 as? NSTextField }.first
+        )
+        let cell = try XCTUnwrap(label.cell)
+        XCTAssertTrue(
+            cell.expansionFrame(withFrame: label.bounds, in: label).isEmpty,
+            "the identity truncated in a pane with room to spare "
+                + "(chip=\(identity.frame.width), intrinsic=\(identity.intrinsicContentSize.width), "
+                + "label=\(label.frame.width), cell=\(cell.cellSize.width))"
+        )
+    }
+
+    // MARK: - Starting It Later
+
+    /// **The offer that cannot be taken still answers.**
+    ///
+    /// `scheduleEntries` was written to answer a press with the sentence saying why — and the
+    /// button was disabled whenever there was one, so the press never arrived and the sentence
+    /// lived only on a tooltip. What reached the user was a dim glyph and no reason, reported as
+    /// "why is this disabled for me?". The reason has to be one press away, on the surface the
+    /// press already opens.
+    func testTheScheduleOfferStaysPressableAndSaysWhyItCannotBeUsed() throws {
+        let composer = SessionComposerViewController()
+        _ = composer.view
+
+        func refusal() throws -> String? {
+            let entries = composer.scheduleEntries()
+            guard entries.count == 1, case .item(let item) = try XCTUnwrap(entries.first) else {
+                return nil
+            }
+            XCTAssertFalse(item.isEnabled, "the reason was offered as something to choose")
+            return item.title
+        }
+
+        // No project: the same sentence the send and the placeholder are already using, rather
+        // than the empty menu this case used to answer with.
+        composer.show(projectID: nil)
+        XCTAssertTrue(composer.scheduleButton.isEnabled)
+        XCTAssertEqual(composer.scheduleButton.toolTip, ComposerDefaults.chooseProjectFirstReason)
+        XCTAssertEqual(try refusal(), ComposerDefaults.chooseProjectFirstReason)
+
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
+        defer {
+            store.removeProject(id: project.id)
+            DraftStore.shared.setDraft("", for: project.id)
+        }
+        composer.show(projectID: project.id)
+
+        // A project but nothing written.
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+        XCTAssertTrue(composer.scheduleButton.isEnabled)
+        XCTAssertEqual(try refusal(), "Write the brief first.")
+
+        // Something written and an image beside it: a pasted screenshot is a file in a temporary
+        // directory, and a path recorded now can name nothing by Monday.
+        let imageURL = try makeImageFile()
+        defer { try? FileManager.default.removeItem(at: imageURL) }
+        prompt.stringValue = "Crop the empty space out of this"
+        prompt.attachFiles(at: [imageURL.path])
+        composer.refreshScheduleChip()
+        XCTAssertTrue(composer.scheduleButton.isEnabled)
+        XCTAssertEqual(
+            composer.scheduleButton.toolTip,
+            "Images can't be scheduled — they are temporary files."
+        )
+        XCTAssertEqual(try refusal(), "Images can't be scheduled — they are temporary files.")
+
+        // Nothing in the way: the menu is the offers, and every one of them can be chosen.
+        prompt.clear()
+        prompt.stringValue = "Crop the empty space out of this"
+        composer.refreshScheduleChip()
+        let offers = composer.scheduleEntries()
+        XCTAssertGreaterThan(offers.count, 1, "a usable schedule offered one row")
+        XCTAssertTrue(
+            offers.contains { entry in
+                if case .item(let item) = entry { return item.isEnabled }
+                return false
+            },
+            "nothing on the menu could be chosen"
+        )
+        XCTAssertEqual(composer.scheduleButton.toolTip, "Start this session later")
+    }
+
     func testWordsTypedBeforeChoosingAProjectFollowIntoIt() throws {
         let composer = SessionComposerViewController()
         _ = composer.view
@@ -1424,10 +1581,15 @@ final class SessionComposerRenderTests: XCTestCase {
         controls(in: view).first { $0.accessibilityIdentifier() == identifier } as? ChipView
     }
 
-    private func usageLabel(in view: NSView) -> NSTextField? {
+    private func usageLabel(in view: NSView) -> UsageReadingLabel? {
         controls(in: view).first {
             $0.accessibilityIdentifier() == "composer.session-start.usage"
-        } as? NSTextField
+        } as? UsageReadingLabel
+    }
+
+    /// A window as the line receives it: named, valued, and comfortable.
+    private func reading(_ name: String, _ value: String) -> AccountUsage.Reading {
+        AccountUsage.Reading(name: name, value: value, severity: .normal, fraction: 0.4)
     }
 
     /// Every control the composer owns, whether or not it is currently drawn.

@@ -41,12 +41,57 @@
     },
     {
       "$ref": "#/$defs/serviceResponse"
+    },
+    {
+      "$ref": "#/$defs/attachmentPreviewRequest"
+    },
+    {
+      "$ref": "#/$defs/attachmentPreviewResponse"
     }
   ],
   "$defs": {
     "identifier": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9.-]*$"
+    },
+    "attachmentContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attachmentID", "name", "kind", "byteSize", "origin", "sessionID"],
+      "description": "What a candidate is told about the attachment it is offered. Not the path, and not the bytes: attachmentID is opaque and resolves only while this presentation is the one on screen.",
+      "properties": {
+        "attachmentID": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "contentHint": { "type": "string", "minLength": 1 },
+        "byteSize": { "type": "integer", "minimum": 0 },
+        "origin": { "enum": ["agent", "user"] },
+        "sessionID": { "type": "string", "minLength": 1 }
+      }
+    },
+    "attachmentPreviewRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "requestID", "contractVersion", "attachment"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "contractVersion": { "const": 1 },
+        "attachment": { "$ref": "#/$defs/attachmentContext" }
+      }
+    },
+    "attachmentPreviewResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "requestID", "attachmentID"],
+      "description": "An absent content is the decline, and a decline is a first-class answer: an extension that previews Lottie declines every PDF it is offered, and the host moves to the next candidate.",
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1 },
+        "attachmentID": { "type": "string", "minLength": 1 },
+        "content": { "$ref": "https://threading.codes/schema/extension-node.schema.json" },
+        "message": { "type": "string", "minLength": 1 }
+      }
     },
     "actionRequest": {
       "type": "object",

@@ -252,6 +252,15 @@ private struct RemoteExtensionNodeView: View {
         case .scene(let scene):
             RemoteExtensionSceneView(scene: scene, onEvent: onEvent)
 
+        case .media(let document):
+            let message = MobileL10n.string("This animation plays on your Mac.")
+            Label(message, systemImage: "play.rectangle")
+                .font(.footnote)
+                .foregroundStyle(theme.secondaryLabel)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(document.accessibilityLabel)
+                .accessibilityIdentifier("extension.media.\(document.id)")
+
         case .status(let text, let role):
             Text(text)
                 .font(.callout)

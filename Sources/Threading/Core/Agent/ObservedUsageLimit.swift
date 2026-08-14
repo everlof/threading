@@ -69,6 +69,26 @@ enum ObservedUsageLimit {
         source.revalidate(source.url, completion)
     }
 
+    /// A transcript moved between accounts is byte-for-byte old output at a new path, not a new
+    /// refusal by the destination account. Transfer that observation through the capability seam
+    /// so the first poll after relaunch waits for genuinely appended output.
+    static func transcriptWasMigrated(
+        for kind: AgentKind,
+        to destination: URL,
+        copiedByteCount: Int
+    ) {
+        switch record(for: kind) {
+        case .claudeTranscript:
+            ClaudeTranscriptUsageLimit.acknowledgeAccountMigration(
+                to: destination,
+                copiedByteCount: copiedByteCount
+            )
+
+        case nil:
+            break
+        }
+    }
+
     // MARK: - Private Methods
 
     /// One session's readable refusal: the file it is in, and the reader that answers for it.

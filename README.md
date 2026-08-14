@@ -49,6 +49,8 @@ under `Targets/`.
 - [`docs/architecture/`](docs/architecture/) — one file per subsystem, recording the decisions
   and measurements behind it. Read the relevant file before changing a subsystem; the index is
   [`CLAUDE.md`](CLAUDE.md).
+- [`docs/feature-drafts/`](docs/feature-drafts/) — researched proposals that are not committed
+  product behavior yet; its README is the single priority index for those drafts.
 
 ## Licensing
 

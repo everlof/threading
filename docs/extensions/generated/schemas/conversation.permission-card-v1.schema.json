@@ -33,6 +33,7 @@
         "allowsDivider" : true,
         "allowsFixedSpacer" : true,
         "allowsFlexibleSpacer" : false,
+        "allowsMedia" : false,
         "allowsOverlay" : false,
         "allowsProceed" : true,
         "allowsTextInput" : false,

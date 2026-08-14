@@ -8,7 +8,7 @@ import XCTest
 /// tokenized launch line — the words the CLI actually receives — rather than against the
 /// resolver, which could agree with itself while emitting a flag neither CLI takes.
 @MainActor
-final class AgentPermissionModeTests: XCTestCase {
+final class AgentPermissionModeTests: HostedStoreTestCase {
 
     private var defaultMode: AgentPermissionMode?
 

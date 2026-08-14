@@ -185,6 +185,18 @@ struct ThemedChartModel: Equatable, Sendable {
     let xAxis: ThemedChartXAxis
     let orientation: ThemedChartOrientation
     let showsLegend: Bool
+    /// How many rules the value axis draws, when this chart wants fewer than the shared default.
+    ///
+    /// The default (`Design.Chart.gridLineCount`) is right for a chart read for a *value*: five
+    /// rules put a labelled step close enough to any point to read it off the axis. A chart read
+    /// for its *shape* — the Usage overview's daily bands, where the totals are already stated
+    /// beside it in words — wants the opposite, and four rules through a stack of filled bands
+    /// is the loudest thing on that page.
+    ///
+    /// Only the rules and their labels thin. The domain still resolves on the shared interval
+    /// count, so the numbers stay the round ones `niceAutomaticY` chose: halving or quartering a
+    /// scale that ends on 1/2/2.5/5 × 10ⁿ lands on another of them.
+    let valueGridLineCount: Int?
 
     init(
         title: String,
@@ -194,6 +206,7 @@ struct ThemedChartModel: Equatable, Sendable {
         xRange: ClosedRange<Date>? = nil,
         yRange: ClosedRange<Double>? = nil,
         valueFormat: ThemedChartValueFormat = .number,
+        valueGridLineCount: Int? = nil,
         emptyMessage: String = L10n.string("No data in this range"),
         emptyDetail: String? = nil,
         placeholder: ThemedChartPlaceholder = .empty,
@@ -204,6 +217,7 @@ struct ThemedChartModel: Equatable, Sendable {
         self.xAxis = xAxis
         self.orientation = orientation
         self.showsLegend = showsLegend
+        self.valueGridLineCount = valueGridLineCount
         self.title = title
         self.accessibilitySummary = accessibilitySummary
         self.series = series
@@ -960,17 +974,24 @@ class ThemedTimeSeriesChartView: ThemedControl {
     /// the chart's own frame and the ghost stands against them; the numbers go.
     var valueAxisLabels: [String] {
         guard !showsPlaceholder else { return [] }
-        return (0..<Design.Chart.gridLineCount).map { index in
-            valueString(yValue(at: Double(index) / Double(Design.Chart.gridLineCount - 1)))
+        return (0..<gridLineCount).map { index in
+            valueString(yValue(at: Double(index) / Double(gridLineCount - 1)))
         }
+    }
+
+    /// See `ThemedChartModel.valueGridLineCount`. Two is the floor: a value axis has to keep the
+    /// rule at each end of the domain, and one rule is a baseline rather than a scale.
+    private var gridLineCount: Int {
+        max(2, model.valueGridLineCount ?? Design.Chart.gridLineCount)
     }
 
     private func drawGrid(in plot: NSRect) {
         let grid = NSBezierPath()
         let isRanking = model.orientation == .horizontal
         let labels = valueAxisLabels
-        for index in 0..<Design.Chart.gridLineCount {
-            let phase = CGFloat(index) / CGFloat(Design.Chart.gridLineCount - 1)
+        let gridLineCount = gridLineCount
+        for index in 0..<gridLineCount {
+            let phase = CGFloat(index) / CGFloat(gridLineCount - 1)
             let value = labels.indices.contains(index) ? labels[index] : ""
             if isRanking {
                 // The value axis runs along the bottom, so the rules stand up and the numbers
@@ -984,7 +1005,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
                     color: axisTextColor,
                     alignment: index == 0
                         ? .left
-                        : (index == Design.Chart.gridLineCount - 1 ? .right : .center)
+                        : (index == gridLineCount - 1 ? .right : .center)
                 )
             } else {
                 let y = plot.minY + phase * plot.height
@@ -1018,8 +1039,15 @@ class ThemedTimeSeriesChartView: ThemedControl {
         }
 
         guard let range = xDomain else { return }
-        for index in 0..<Design.Chart.xLabelCount {
-            let phase = Double(index) / Double(Design.Chart.xLabelCount - 1)
+        // As many of the standard labels as the plot can keep apart. A narrow pane squeezed the
+        // same four into colliding pairs at each end; two is the floor, because the domain's
+        // ends are the axis's whole claim.
+        let labelCount = max(2, min(
+            Design.Chart.xLabelCount,
+            1 + Int(plot.width / Design.Chart.minimumXLabelSpacing)
+        ))
+        for index in 0..<labelCount {
+            let phase = Double(index) / Double(labelCount - 1)
             let date = range.lowerBound.addingTimeInterval(
                 range.upperBound.timeIntervalSince(range.lowerBound) * phase
             )
@@ -1028,7 +1056,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
                 dateFormatter.string(from: date),
                 at: NSPoint(x: x, y: bounds.minY + Design.Spacing.small),
                 color: axisTextColor,
-                alignment: index == 0 ? .left : (index == Design.Chart.xLabelCount - 1 ? .right : .center)
+                alignment: index == 0 ? .left : (index == labelCount - 1 ? .right : .center)
             )
         }
     }
@@ -1087,20 +1115,26 @@ class ThemedTimeSeriesChartView: ThemedControl {
         let keys = model.series.filter { !$0.title.isEmpty }
         guard model.showsLegend, !keys.isEmpty else { return }
         let font = Design.Typography.detail()
-        var x = bounds.minX + Design.Chart.axisLeading
-        let y = bounds.maxY - Design.Chart.legendHeight
         let swatch = Design.Chart.legendSwatch
-
-        for series in keys {
-            let title = NSAttributedString(
+        let titles = keys.map { series in
+            NSAttributedString(
                 string: series.title,
                 attributes: [.font: font, .foregroundColor: Design.Text.secondary]
             )
-            let width = swatch + Design.Spacing.small + ceil(title.size().width)
-            // A key that would run off the edge is dropped rather than clipped: half a word
-            // beside a colour is a legend that lies about which series it names.
-            guard x + width <= bounds.maxX - Design.Spacing.inset else { return }
+        }
+        let widths = titles.map { swatch + Design.Spacing.small + ceil($0.size().width) }
+        let occupied = widths.reduce(0, +)
+            + CGFloat(max(0, widths.count - 1)) * Design.Spacing.medium
 
+        // Whole or not at all: half a word beside a colour lies about which series it names,
+        // and a legend keeping one key of four lies about how many series there are. Hover and
+        // keyboard inspection and the accessibility summary still name every series when the
+        // room is not here.
+        var x = bounds.minX + Design.Chart.axisLeading
+        guard x + occupied <= bounds.maxX - Design.Spacing.inset else { return }
+
+        let y = bounds.maxY - Design.Chart.legendHeight
+        for (index, series) in keys.enumerated() {
             let dot = NSRect(
                 x: x,
                 y: y + (Design.Chart.legendHeight - swatch) / 2,
@@ -1110,8 +1144,8 @@ class ThemedTimeSeriesChartView: ThemedControl {
             color(for: series.style).setFill()
             let radius = Design.Radius.control(fitting: dot.size)
             NSBezierPath(roundedRect: dot, xRadius: radius, yRadius: radius).fill()
-            title.draw(at: NSPoint(x: dot.maxX + Design.Spacing.small, y: y))
-            x += width + Design.Spacing.medium
+            titles[index].draw(at: NSPoint(x: dot.maxX + Design.Spacing.small, y: y))
+            x += widths[index] + Design.Spacing.medium
         }
     }
 
@@ -1875,7 +1909,10 @@ class ThemedTimeSeriesChartView: ThemedControl {
     private func valueString(_ value: Double) -> String {
         switch model.valueFormat {
         case .percent: return "\(Int((value * 100).rounded()))%"
-        case .currency: return value.formatted(.currency(code: "USD").precision(.fractionLength(0...2)))
+        // Abbreviated, like the token axis beside it: this string goes into a fixed 64-point
+        // slot that truncates its tail, and an exact `US$100,000.00` there is `US$100,0…` —
+        // a label whose only job is to say what the marks mean, saying nothing.
+        case .currency: return UsageFormat.compactCurrency(value)
         case .tokens: return UsageFormat.tokens(Int64(value.rounded()))
         case .number: return value.formatted(.number.precision(.fractionLength(0...1)))
         case .unit(let suffix):

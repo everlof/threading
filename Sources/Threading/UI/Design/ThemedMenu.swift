@@ -734,6 +734,10 @@ private final class ThemedMenuSession: NSObject {
         overlay.onChoose = { [weak self] index, item in self?.choose(index: index, item: item) }
         overlay.autoresizingMask = [.width, .height]
         root.addSubview(overlay, positioned: .above, relativeTo: nil)
+        // The overlay covers the window's content, so every cursor rectangle under it belongs to
+        // something the pointer can no longer reach — the split view's seams above all, which
+        // offered to drag a pane from inside an open menu. See `CoveredWindowCursor`.
+        CoveredWindowCursor.claim(overlay, covering: window)
         // The surface is constructed before the overlay joins the source's view tree. A
         // window-local appearance (the gallery's Light/Dark preview) may therefore differ from
         // the app appearance under which its layer-backed fill first resolved. Re-resolve once
@@ -952,6 +956,10 @@ private final class ThemedMenuSession: NSObject {
         // `onDismiss` runs inside this call and may ask `isMenuOpen(in:)` about the window.
         withExtendedLifetime(self) {
             Self.open.remove(self)
+            // Ahead of the exit animation, with everything else observable: the pixels that
+            // outlive this call take no clicks, so the window under them is the pointer's again
+            // — cursor included.
+            CoveredWindowCursor.release(overlay)
             removeFocusRunLoopObserver()
             removeKeyEventMonitor()
             removeHeldPressMonitor()

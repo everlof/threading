@@ -916,6 +916,14 @@ session first, so the detached windows it brings with it are not built twice. Th
 filing a bug needs is the file, ready to attach; the action is absent entirely when macOS filed
 nothing, which is the ordinary case for a kill or a power loss.
 
+**Two answers carry the band, and the reveal trails them.** Restore and Send to Developer are both
+`secondary`; Show Crash Report is `tertiary` and sits last. Sending the report was tertiary too at
+first, behind the Finder reveal, which read as a footnote to the one action on the band that only
+helps if it is pressed — nothing about a crash reaches the developer unless someone presses it,
+while revealing the file is the rarer, more technical thing to do with it. Neither of the two is
+`primary`: a band that appears unasked has no claim on the screen's one primary action, which is
+`PaneNoticeAction`'s default and the rule the whole component is built on.
+
 The offer is one-shot **per launch**, held in memory on the `LaunchRestoration` instance. The gate
 can fire twice in one launch (the walkthrough re-run from Settings ▸ Advanced finishes and asks
 again), and a second run restores in full rather than holding the same workspace back again with

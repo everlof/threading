@@ -16,10 +16,9 @@ extension SessionComposerViewController {
     ///
     /// Refuses rather than offering an unusable menu: there has to be a project, something
     /// written, and no images — each with its own sentence, because "nothing happened when I
-    /// clicked it" is the worst of the three possible answers.
+    /// clicked it" is the worst of the three possible answers. The missing project used to be
+    /// the exception, answered with an empty menu, which is that worst answer exactly.
     func scheduleEntries() -> [ThemedMenuEntry] {
-        guard projectID != nil else { return [] }
-
         if let reason = scheduleRefusalReason() {
             return [.item(ThemedMenuItem(title: reason, isEnabled: false))]
         }
@@ -80,6 +79,11 @@ extension SessionComposerViewController {
 
     /// Why the button cannot be used, in the words it will say.
     func scheduleRefusalReason() -> String? {
+        if projectID == nil {
+            // The same sentence the send and the placeholder are already using, so the screen
+            // states one blocker once rather than three phrasings of it.
+            return ComposerDefaults.chooseProjectFirstReason
+        }
         if !promptView.attachmentPaths.isEmpty {
             return L10n.string("Images can't be scheduled — they are temporary files.")
         }

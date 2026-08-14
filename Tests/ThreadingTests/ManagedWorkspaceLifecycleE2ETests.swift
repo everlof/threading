@@ -8,7 +8,7 @@ import XCTest
 /// it stands in for Claude/Codex only after Threading has chosen the execution directory. That
 /// keeps the fixture out of `AgentKind` and the Draft UI while still proving that real process
 /// work lands in the detached checkout production code later validates and disposes.
-final class ManagedWorkspaceLifecycleE2ETests: XCTestCase {
+final class ManagedWorkspaceLifecycleE2ETests: HostedStoreTestCase {
 
     /// Native chat must receive the same per-session fixture boundary as terminal sessions.
     /// Otherwise a UI scenario that looks isolated can silently launch the developer's real

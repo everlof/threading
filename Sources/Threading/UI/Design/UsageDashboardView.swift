@@ -18,6 +18,17 @@ private extension UsageDashboardBreakdownKind {
         case .providers: return L10n.string("Providers")
         }
     }
+
+    /// What one row is. The chooser names the set, the column names the row — a column headed
+    /// "Models" over a single model reads as a count of them.
+    var rowTitle: String {
+        switch self {
+        case .models: return L10n.string("Model")
+        case .projects: return L10n.string("Project")
+        case .accounts: return L10n.string("Account")
+        case .providers: return L10n.string("Provider")
+        }
+    }
 }
 
 // MARK: - Dashboard
@@ -68,7 +79,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
     private let metricControl = ThemedSegmentedControl()
     private let consumptionHero = UsageConsumptionHeroView()
     private let usageChart = ThemedStackedBandChartView(frame: .zero)
-    private let metricCards = (0..<5).map { _ in UsageMetricCardView() }
+    private let statBand = UsageStatBandView()
     private let breakdownPopUp = ThemedPopUp()
     private let breakdownTable = UsageBreakdownTableView()
     private let coverageView = UsageCoverageListView()
@@ -180,7 +191,22 @@ final class UsageDashboardView: NSView, ThemedComponent {
     var usagePlaceholderDetailForTesting: String? {
         usageChart.showsPlaceholder ? usageChart.model.emptyDetail : nil
     }
-    var metricCardDetailsForTesting: [String] { metricCards.map(\.detailForTesting) }
+    var statBandDetailsForTesting: [String] { statBand.detailsForTesting }
+    /// Whether every stat detail line has room for all of its own text.
+    ///
+    /// The band's details are the page's most truncation-prone slot — a fifth of the width,
+    /// holding a sentence — and truncation is invisible to every other assertion here, which is
+    /// how `260.2M cache…` shipped.
+    var statBandDetailsFitForTesting: Bool { statBand.detailsFitForTesting }
+    /// The breakdown's visible column headings, leading to trailing.
+    var breakdownColumnTitlesForTesting: [String] { breakdownTable.columnTitlesForTesting }
+    /// What the breakdown's columns occupy, and the width they have to fit in.
+    var breakdownColumnFitForTesting: (occupied: CGFloat, available: CGFloat) {
+        breakdownTable.columnFitForTesting
+    }
+    var breakdownDebugGeometryForTesting: String { breakdownTable.debugGeometryForTesting }
+    /// How many breakdown rows are wearing a provider mark.
+    var breakdownProviderMarkCountForTesting: Int { breakdownTable.providerMarkCountForTesting }
     /// The rescan strip beside the tabs: whether it is up, and the fraction it is showing.
     var scanStripForTesting: (isVisible: Bool, progress: Double?) {
         (!scanStatus.isHidden, scanProgressBar.isHidden ? nil : scanProgressBar.progress)
@@ -285,20 +311,23 @@ final class UsageDashboardView: NSView, ThemedComponent {
         consumptionHero.widthAnchor.constraint(
             equalToConstant: Design.UsageDashboard.consumptionSummaryWidth
         ).isActive = true
+        // The hero is the only fixed column on this row; everything the page's width gains goes
+        // to the chart, which is the content. Hugging it below the hero's is what keeps the
+        // stack from splitting the surplus between them.
         usageChart.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        consumptionHero.setContentHuggingPriority(.required, for: .horizontal)
         let heroRow = NSStackView(views: [consumptionHero, usageChart])
         heroRow.orientation = .horizontal
         heroRow.alignment = .top
         heroRow.distribution = .fill
-        heroRow.spacing = Design.Spacing.large
+        heroRow.spacing = Design.Spacing.pane
         overviewColumn.addArrangedSubview(heroRow)
+        usageChart.heightAnchor.constraint(
+            equalToConstant: Design.UsageDashboard.chartHeight
+        ).isActive = true
         consumptionHero.heightAnchor.constraint(equalTo: usageChart.heightAnchor).isActive = true
 
-        let cards = NSStackView(views: metricCards)
-        cards.orientation = .horizontal
-        cards.distribution = .fillEqually
-        cards.spacing = Design.Spacing.medium
-        overviewColumn.addArrangedSubview(cards)
+        overviewColumn.addArrangedSubview(statBand)
 
         breakdownPopUp.target = self
         breakdownPopUp.action = #selector(breakdownChanged)
@@ -344,9 +373,6 @@ final class UsageDashboardView: NSView, ThemedComponent {
                 view.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
             }
         }
-        breakdownTable.heightAnchor.constraint(
-            equalToConstant: Design.UsageDashboard.breakdownHeight
-        ).isActive = true
         applyTabVisibility()
     }
 
@@ -470,18 +496,11 @@ final class UsageDashboardView: NSView, ThemedComponent {
     private func refreshUsage(animated: Bool) {
         guard let range = overview?.range(days: selectedDays) else {
             showPlaceholderHero()
-            let titles = [
-                L10n.string("Processed tokens"), L10n.string("Cached input"),
-                L10n.string("Uncached input"), L10n.string("Output"),
-                L10n.string("Cache saved")
-            ]
-            for (card, title) in zip(metricCards, titles) {
-                // The status is said once, in the chart. Repeating it under five dashes made a
-                // page whose whole content was one sentence printed six times.
-                card.show(title: title, value: "—", detail: "")
-            }
+            // The status is said once, in the chart. Repeating it under five dashes made a
+            // page whose whole content was one sentence printed six times.
+            statBand.show(Self.statTitles.map { .init(title: $0, value: "—", detail: "") })
             usageChart.setModel(placeholderChartModel(), animated: false)
-            breakdownTable.show([])
+            breakdownTable.show([], subject: selectedBreakdown.rowTitle)
             coverageView.show(defaultCoverage())
             return
         }
@@ -498,7 +517,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
             return UsageToolSummary(
                 title: provider.origin.seriesName,
                 value: selectedMetric == .cost
-                    ? currency(value)
+                    ? UsageFormat.currency(value)
                     : UsageFormat.tokens(Int64(value.rounded())),
                 share: metricTotal > 0 ? value / metricTotal : 0,
                 style: .categorical(provider.styleIndex)
@@ -516,7 +535,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
             heroTools.append(UsageToolSummary(
                 title: L10n.string("Other"),
                 value: selectedMetric == .cost
-                    ? currency(value)
+                    ? UsageFormat.currency(value)
                     : UsageFormat.tokens(Int64(value.rounded())),
                 share: metricTotal > 0 ? value / metricTotal : 0,
                 style: .categorical(styleIndex)
@@ -525,7 +544,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
         consumptionHero.show(
             metric: selectedMetric == .cost ? L10n.string("Total cost") : L10n.string("Processed tokens"),
             value: selectedMetric == .cost
-                ? currency(range.cost.totalUSD)
+                ? UsageFormat.currency(range.cost.totalUSD)
                 : UsageFormat.tokens(range.tokens.processed),
             scope: L10n.format(
                 "%lld days · %lld requests",
@@ -539,40 +558,47 @@ final class UsageDashboardView: NSView, ThemedComponent {
             remainingToolCount: 0
         )
 
-        metricCards[0].show(
-            title: L10n.string("Processed tokens"),
-            value: UsageFormat.tokens(range.tokens.processed),
-            detail: L10n.format("%lld active days", Int64(range.activeDayCount))
-        )
         let observedInput = range.tokens.uncachedInput
             + range.tokens.cachedInput
             + range.tokens.cacheWrite
         let cachedShare = observedInput > 0
             ? Double(range.tokens.cachedInput) / Double(observedInput)
             : 0
-        metricCards[1].show(
-            title: L10n.string("Cached input"),
-            value: UsageFormat.tokens(range.tokens.cachedInput),
-            detail: L10n.format("%@ of observed input", percent(cachedShare))
-        )
-        metricCards[2].show(
-            title: L10n.string("Uncached input"),
-            value: UsageFormat.tokens(range.tokens.uncachedInput),
-            detail: L10n.format("%@ cache writes", UsageFormat.tokens(range.tokens.cacheWrite))
-        )
-        metricCards[3].show(
-            title: L10n.string("Output"),
-            value: UsageFormat.tokens(range.tokens.output),
-            detail: L10n.format("%@ reasoning", UsageFormat.tokens(range.tokens.reasoning))
-        )
         let savingsMultiple = range.cost.totalUSD > 0
             ? range.cost.cacheSavingsUSD / range.cost.totalUSD
             : 0
-        metricCards[4].show(
-            title: L10n.string("Cache saved"),
-            value: currency(range.cost.cacheSavingsUSD),
-            detail: L10n.format("%@× measured cost", savingsMultiple.formatted(.number.precision(.fractionLength(1))))
-        )
+        statBand.show([
+            .init(
+                title: Self.statTitles[0],
+                value: UsageFormat.tokens(range.tokens.processed),
+                detail: L10n.format("%lld active days", Int64(range.activeDayCount))
+            ),
+            .init(
+                title: Self.statTitles[1],
+                value: UsageFormat.tokens(range.tokens.cachedInput),
+                detail: L10n.format("%@ of observed input", UsageFormat.share(cachedShare))
+            ),
+            .init(
+                title: Self.statTitles[2],
+                value: UsageFormat.tokens(range.tokens.uncachedInput),
+                detail: L10n.format("%@ cache writes", UsageFormat.tokens(range.tokens.cacheWrite))
+            ),
+            .init(
+                title: Self.statTitles[3],
+                value: UsageFormat.tokens(range.tokens.output),
+                detail: L10n.format("%@ reasoning", UsageFormat.tokens(range.tokens.reasoning))
+            ),
+            // A fifth of a fixed-width band is not a slot for `$3,503,525.25`, and the exact
+            // figure is not what this one is for: it is read against the total beside it.
+            .init(
+                title: Self.statTitles[4],
+                value: UsageFormat.compactCurrency(range.cost.cacheSavingsUSD),
+                detail: L10n.format(
+                    "%@× measured cost",
+                    savingsMultiple.formatted(.number.precision(.fractionLength(1)))
+                )
+            )
+        ])
 
         usageChart.setModel(chartModel(range), animated: animated)
         refreshBreakdown()
@@ -634,6 +660,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
                 .compactMap { $0 }
                 .joined(separator: ". "),
             series: [],
+            valueGridLineCount: Design.UsageDashboard.chartGridLineCount,
             emptyMessage: placeholder.title,
             emptyDetail: placeholder.detail,
             placeholder: placeholder.state
@@ -651,7 +678,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
                     at: point.at,
                     value: point.value,
                     label: selectedMetric == .cost
-                        ? currency(point.value)
+                        ? UsageFormat.currency(point.value)
                         : UsageFormat.tokens(Int64(point.value.rounded())),
                     detail: title
                 )
@@ -662,7 +689,11 @@ final class UsageDashboardView: NSView, ThemedComponent {
             )
         }
         let summary = selectedMetric == .cost
-            ? L10n.format("%@ total over %lld days", currency(range.cost.totalUSD), Int64(range.days))
+            ? L10n.format(
+                "%@ total over %lld days",
+                UsageFormat.currency(range.cost.totalUSD),
+                Int64(range.days)
+            )
             : L10n.format("%@ total over %lld days", UsageFormat.tokens(range.tokens.processed), Int64(range.days))
         return ThemedChartModel(
             title: selectedMetric == .cost ? L10n.string("Daily cost") : L10n.string("Daily tokens"),
@@ -679,18 +710,32 @@ final class UsageDashboardView: NSView, ThemedComponent {
             } ?? [],
             xRange: range.start...range.end,
             valueFormat: selectedMetric == .cost ? .currency : .tokens,
+            valueGridLineCount: Design.UsageDashboard.chartGridLineCount,
             showsLegend: true
         )
     }
 
     private func refreshBreakdown() {
+        let subject = selectedBreakdown.rowTitle
         guard let range = overview?.range(days: selectedDays) else {
-            breakdownTable.show([])
+            breakdownTable.show([], subject: subject)
             return
         }
         let breakdown = range.breakdown(selectedBreakdown)
+        // Share is of whichever metric the page is currently reading, so the column answers the
+        // question the rest of the page is answering rather than a second, silent one.
+        let total = selectedMetric == .cost
+            ? range.cost.totalUSD
+            : Double(range.tokens.processed)
         var rows = breakdown.rows.map {
-            row(name: $0.title, tokens: $0.tokens, cost: $0.costUSD, records: $0.records)
+            row(
+                name: $0.title,
+                runtimeID: $0.runtimeID,
+                tokens: $0.tokens,
+                cost: $0.costUSD,
+                records: $0.records,
+                total: total
+            )
         }
         if breakdown.omittedRowCount > 0 {
             rows.append(row(
@@ -698,19 +743,32 @@ final class UsageDashboardView: NSView, ThemedComponent {
                     "+%lld more included in total",
                     Int64(breakdown.omittedRowCount)
                 ),
+                runtimeID: nil,
                 tokens: breakdown.omittedTokens,
                 cost: breakdown.omittedCostUSD,
-                records: breakdown.omittedRecords
+                records: breakdown.omittedRecords,
+                total: total
             ))
         }
-        breakdownTable.show(rows)
+        breakdownTable.show(rows, subject: subject)
     }
 
-    private func row(name: String, tokens: Int64, cost: Double, records: Int) -> UsageBreakdownRow {
-        UsageBreakdownRow(
+    private func row(
+        name: String,
+        runtimeID: String?,
+        tokens: Int64,
+        cost: Double,
+        records: Int,
+        total: Double
+    ) -> UsageBreakdownRow {
+        let value = selectedMetric == .cost ? cost : Double(tokens)
+        return UsageBreakdownRow(
             title: name,
-            detail: L10n.format("%@ · %lld requests", UsageFormat.tokens(tokens), Int64(records)),
-            value: selectedMetric == .cost ? currency(cost) : UsageFormat.tokens(tokens)
+            runtimeID: runtimeID,
+            cost: UsageFormat.currency(cost),
+            share: UsageFormat.share(total > 0 ? value / total : 0),
+            tokens: UsageFormat.tokens(tokens),
+            requests: records.formatted()
         )
     }
 
@@ -877,8 +935,17 @@ final class UsageDashboardView: NSView, ThemedComponent {
         ]
     }
 
-    private func currency(_ value: Double) -> String {
-        value.formatted(.currency(code: "USD").precision(.fractionLength(2)))
+    /// The five supporting measures, in the order they read: what was processed, what it was
+    /// made of, and what caching saved. Stated once so the empty page and the measured one
+    /// cannot drift into two different bands.
+    private static var statTitles: [String] {
+        [
+            L10n.string("Processed tokens"),
+            L10n.string("Cached input"),
+            L10n.string("Uncached input"),
+            L10n.string("Output"),
+            L10n.string("Cache saved")
+        ]
     }
 
     private func percent(_ value: Double) -> String {
@@ -893,6 +960,175 @@ final class UsageDashboardView: NSView, ThemedComponent {
         date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
 
+}
+
+// MARK: - Stats band
+
+/// The five supporting measures as one band rather than five bordered tiles.
+///
+/// The tiles were five plates in a row directly under a chart that is itself a plate, each
+/// drawing a border around numbers that are already a group — and each one a fifth of the page
+/// wide *inside* its own insets, which is where `260.2M cache…` came from. One container, five
+/// columns and a hairline between them says the same thing with a quarter of the ink: the rule
+/// separates the measures, and the air around them is what separates the band from the chart.
+///
+/// System draws no plate here for that reason. An authored chrome states its own surface, the
+/// way the hero beside it does — a theme whose identity is heavy borders should not have this
+/// one row quietly opt out of them.
+private final class UsageStatBandView: NSView, ThemedComponent {
+    struct Item {
+        let title: String
+        let value: String
+        let detail: String
+    }
+
+    private let columns = (0..<UsageStatBandView.columnCount).map { _ in UsageStatColumnView() }
+
+    /// Five, and it is the band's own fact rather than the caller's: the dividers, the equal
+    /// widths and the empty state are all built from it.
+    static let columnCount = 5
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        var arranged: [NSView] = []
+        var dividers: [SeparatorView] = []
+        for (index, column) in columns.enumerated() {
+            if index > 0 {
+                let divider = SeparatorView(.vertical)
+                // A hairline keeps its own width, always. Without this the stack has two kinds
+                // of view willing to absorb the band's surplus, and it gave all of it to a
+                // *rule* — 450 points of divider ink standing where a column should be.
+                divider.setContentHuggingPriority(.required, for: .horizontal)
+                divider.setContentCompressionResistancePriority(.required, for: .horizontal)
+                dividers.append(divider)
+                arranged.append(divider)
+            }
+            arranged.append(column)
+        }
+        let row = NSStackView(views: arranged)
+        row.orientation = .horizontal
+        // `.fill` with the columns held equal by constraint, never `.fillEqually`: the latter
+        // would hand a hairline the same width as a column.
+        row.distribution = .fill
+        row.alignment = .centerY
+        row.spacing = 0
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+
+        var constraints: [NSLayoutConstraint] = [
+            heightAnchor.constraint(equalToConstant: Design.UsageDashboard.statBandHeight),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.topAnchor.constraint(equalTo: topAnchor),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ]
+        for column in columns.dropFirst() {
+            constraints.append(column.widthAnchor.constraint(equalTo: columns[0].widthAnchor))
+        }
+        // A horizontal stack aligns its arranged views; it does not stretch them. The columns
+        // state their own height against the band; the rules between them stop short of both
+        // edges, because a rule run out to the edge stops separating the measures and starts
+        // dividing the band itself — and under an authored chrome it collides with the plate's
+        // own border.
+        for column in columns {
+            constraints.append(column.heightAnchor.constraint(equalTo: heightAnchor))
+        }
+        for divider in dividers {
+            constraints.append(divider.heightAnchor.constraint(
+                equalTo: heightAnchor,
+                constant: -Design.Spacing.inset * 2
+            ))
+        }
+        NSLayoutConstraint.activate(constraints)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(L10n.string("Consumption"))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func show(_ items: [Item]) {
+        for (column, item) in zip(columns, items) { column.show(item) }
+    }
+
+    var detailsForTesting: [String] { columns.map(\.detailForTesting) }
+
+    var detailsFitForTesting: Bool { columns.allSatisfy(\.detailFitsForTesting) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard !AppThemePalette.current.isSystem else { return }
+        _ = ThemedSurface.draw(
+            bounds,
+            fill: Design.Surface.panel,
+            border: Design.Surface.border,
+            radius: Design.Radius.panel,
+            borderWidth: Design.Radius.border
+        )
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        AppThemeRefresh.repaint(self)
+    }
+}
+
+private final class UsageStatColumnView: NSView, ThemedComponent {
+    private let titleField = NSTextField(labelWithString: "")
+    private let valueField = NSTextField(labelWithString: "")
+    private let detailField = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        titleField.applyFont(.caption)
+        titleField.textColor = Design.Text.secondary
+        valueField.applyFont(.numericBody)
+        valueField.textColor = Design.Text.label
+        detailField.applyFont(.detail())
+        detailField.textColor = Design.Text.tertiary
+        // The wide page gives every detail line its whole sentence; the floor cannot, and a
+        // tail ellipsis is the honest way to say so.
+        detailField.lineBreakMode = .byTruncatingTail
+
+        let stack = NSStackView(views: [titleField, valueField, detailField])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.hairline
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            detailField.widthAnchor.constraint(equalTo: stack.widthAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func show(_ item: UsageStatBandView.Item) {
+        titleField.stringValue = item.title
+        valueField.stringValue = item.value
+        // Emptied rather than hidden: the three lines keep their places, so the empty page and
+        // the measured one are the same band with the same rhythm.
+        detailField.stringValue = item.detail
+        setAccessibilityLabel(item.title)
+        setAccessibilityValue(item.detail.isEmpty ? item.value : "\(item.value), \(item.detail)")
+    }
+
+    var detailForTesting: String { detailField.stringValue }
+
+    /// Whether the detail line's own text fits the width it was given. Measured from the string
+    /// the label is holding rather than from the constraints that were meant to fit it.
+    var detailFitsForTesting: Bool {
+        guard !detailField.stringValue.isEmpty else { return true }
+        return detailField.attributedStringValue.size().width <= detailField.bounds.width + 0.5
+    }
 }
 
 // MARK: - Metric cards
@@ -933,8 +1169,6 @@ private final class UsageMetricCardView: NSView, ThemedComponent {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    var detailForTesting: String { detailField.stringValue }
 
     func show(title: String, value: String, detail: String) {
         titleField.stringValue = title
@@ -1157,18 +1391,103 @@ private func chartColor(_ style: ThemedChartSeriesStyle) -> NSColor {
 
 private struct UsageBreakdownRow {
     let title: String
-    let detail: String
-    let value: String
+    /// The runtime this row can honestly be attributed to, or nil. See
+    /// `UsageDashboardBreakdownRowProjection.runtimeID`.
+    let runtimeID: String?
+    let cost: String
+    let share: String
+    let tokens: String
+    let requests: String
 }
 
+/// The ranked breakdown: a named row and four numbers, in columns.
+///
+/// It was a list of two-line rows with one right-hand figure, which is why a page about how much
+/// each model cost could not be read down any of its numbers — the second line carried tokens and
+/// requests as prose, and the figure on the right silently changed meaning with the metric
+/// control. Columns state each measure once, in a heading, and let the eye run down it.
+///
+/// Still an `NSTableView`, and still for the reason it always was: a breakdown is externally
+/// sized (up to `UsageDashboardProjectionDefaults.maximumBreakdownRows`), so only the visible
+/// rows may become views. What is new is that the section stops growing the page after
+/// `Design.UsageDashboard.breakdownVisibleRows` and scrolls instead — and hands the rest of a
+/// flick back to the page when it reaches its own end, so a pointer crossing the table does not
+/// stop the settings page dead.
 private final class UsageBreakdownTableView: NSView, ThemedComponent, NSTableViewDataSource, NSTableViewDelegate {
-    private static let columnID = NSUserInterfaceItemIdentifier("UsageBreakdownColumn")
-    private static let cellID = NSUserInterfaceItemIdentifier("UsageBreakdownCell")
+
+    /// The columns, in reading order. A name reads from the leading edge; a measured quantity
+    /// reads from the trailing one, in tabular figures, so the digits line up down the column.
+    private enum Column: String, CaseIterable {
+        case name
+        case cost
+        case share
+        case tokens
+        case requests
+
+        var identifier: NSUserInterfaceItemIdentifier {
+            NSUserInterfaceItemIdentifier("UsageBreakdown.\(rawValue)")
+        }
+
+        /// Nil for the name column, whose heading is the breakdown's own subject.
+        var title: String? {
+            switch self {
+            case .name: return nil
+            case .cost: return L10n.string("Cost")
+            case .share: return L10n.string("Share")
+            case .tokens: return L10n.string("Tokens")
+            case .requests: return L10n.string("Requests")
+            }
+        }
+
+        var width: CGFloat {
+            switch self {
+            case .name: return Design.UsageDashboard.breakdownNameMinimumWidth
+            case .cost: return Design.UsageDashboard.breakdownCostColumnWidth
+            case .share: return Design.UsageDashboard.breakdownShareColumnWidth
+            case .tokens: return Design.UsageDashboard.breakdownTokensColumnWidth
+            case .requests: return Design.UsageDashboard.breakdownRequestsColumnWidth
+            }
+        }
+    }
+
     private let scrollView = ThemedScrollView()
     private let table = ThemedTableView()
     private var rows: [UsageBreakdownRow] = []
+    private var columns: [Column: NSTableColumn] = [:]
+    private lazy var heightConstraint = heightAnchor.constraint(equalToConstant: 0)
 
     var visibleCellCount: Int { table.visibleRect.isEmpty ? 0 : table.rows(in: table.visibleRect).length }
+
+    var columnTitlesForTesting: [String] {
+        table.tableColumns.filter { !$0.isHidden }.map(\.title)
+    }
+
+    var debugGeometryForTesting: String {
+        "container=\(bounds.width) scroll=\(scrollView.frame.width)"
+            + " clip=\(scrollView.contentView.bounds.width)"
+            + " contentSize=\(scrollView.contentSize.width)"
+            + " name=\(columns[.name]?.width ?? -1)"
+            + " style=\(scrollView.scrollerStyle.rawValue)"
+    }
+
+    /// What the columns occupy against what the table can show. The last column hanging outside
+    /// the clip is invisible to every other assertion — the heading is simply cut in half.
+    ///
+    /// Occupied is the greater of the widths' sum and the last heading's drawn trailing edge:
+    /// the sum alone passed while `.inset` style laid the same columns out shifted, with the
+    /// request column's tail past the clip and nothing left to measure it.
+    var columnFitForTesting: (occupied: CGFloat, available: CGFloat) {
+        let visible = table.tableColumns.enumerated().filter { !$0.element.isHidden }
+        let widths = visible.reduce(0) { $0 + $1.element.width }
+        let drawn = visible.last.flatMap { index, _ in
+            table.headerView?.headerRect(ofColumn: index).maxX
+        } ?? widths
+        return (max(widths, drawn), scrollView.contentView.bounds.width)
+    }
+
+    var providerMarkCountForTesting: Int {
+        rows.filter { $0.runtimeID.flatMap(AgentKind.init(rawValue:)) != nil }.count
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1176,43 +1495,143 @@ private final class UsageBreakdownTableView: NSView, ThemedComponent, NSTableVie
         wantsLayer = true
         applySurface(fill: Design.Surface.panel, radius: .panel, border: Design.Surface.border)
 
-        let column = NSTableColumn(identifier: Self.columnID)
-        table.addTableColumn(column)
-        table.headerView = nil
+        for kind in Column.allCases {
+            let column = NSTableColumn(identifier: kind.identifier)
+            column.title = kind.title ?? ""
+            column.width = kind.width
+            column.minWidth = kind.width
+            if kind == .name {
+                column.maxWidth = .greatestFiniteMagnitude
+            } else {
+                column.maxWidth = kind.width
+                column.headerCell.alignment = .right
+            }
+            table.addTableColumn(column)
+            columns[kind] = column
+        }
+        table.headerView = ThemedTableHeaderView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: frameRect.width,
+            height: Design.UsageDashboard.breakdownHeaderHeight
+        ))
         table.rowHeight = Design.UsageDashboard.breakdownRowHeight
         table.intercellSpacing = .zero
         table.selectionHighlightStyle = .none
+        // Flush, not inset: the automatic style resolves to `.inset` inside a scroll view and
+        // lays the header and every row `ThemedTableRowDefaults.systemInsetStylePadding` in
+        // from each side — *after* `applyColumnWidths` has fit the columns to the clip, which
+        // pushed the last column's tail that far past the table's edge. This table meets the
+        // clip exactly, so the columns it fits must be the columns it draws.
+        table.style = .plain
         table.dataSource = self
         table.delegate = self
 
         scrollView.documentView = table
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
+        // The table cannot grow to fit its rows — it is virtualized on purpose — so a gesture
+        // that has run it to an end belongs to the page under it. See `VerticalScrollHandoff`.
+        scrollView.verticalScrollHandoff = .atContentEnds
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
         NSLayoutConstraint.activate([
+            heightConstraint,
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.tight),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.tight),
             scrollView.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.tight),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.tight)
         ])
+        applyHeight()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func show(_ rows: [UsageBreakdownRow]) {
+    func show(_ rows: [UsageBreakdownRow], subject: String) {
         self.rows = rows
+        columns[.name]?.title = subject
+        table.headerView?.needsDisplay = true
         table.reloadData()
+        applyHeight()
+    }
+
+    /// As tall as its rows need, up to the page's share of them, and no taller. Below that the
+    /// section used to keep a fixed 300 points whether it had three rows or three hundred.
+    private func applyHeight() {
+        let visible = min(
+            max(rows.count, 1),
+            Design.UsageDashboard.breakdownVisibleRows
+        )
+        heightConstraint.constant = Design.UsageDashboard.breakdownHeaderHeight
+            + CGFloat(visible) * Design.UsageDashboard.breakdownRowHeight
+            + Design.Spacing.tight * 2
+    }
+
+    override func layout() {
+        super.layout()
+        applyColumnWidths()
+    }
+
+    /// Again at draw time, which is the pattern `ThemedTableView.fitSoleColumnToWidth` already
+    /// uses and for the same reason: a scroll view settles its clip — the width a column may
+    /// actually occupy — inside its own tile, which is not finished when the container's
+    /// `layout()` runs. Fitting the columns to a width that was one tile out of date is what put
+    /// the last column's heading half outside the table.
+    override func viewWillDraw() {
+        super.viewWillDraw()
+        applyColumnWidths()
+    }
+
+    /// The name column takes whatever the numbers do not need.
+    ///
+    /// When even that leaves it under its floor — the pane squeezed to
+    /// `Design.UsageDashboard.minimumContentWidth` — the request count stands down rather than
+    /// the table growing a horizontal scroller across a page that already scrolls vertically. It
+    /// is the least load-bearing of the four (the row's own accessibility value still states it),
+    /// and dropping a whole column keeps every remaining number in its own labelled place.
+    private func applyColumnWidths() {
+        // The clip's own bounds, not `contentSize`: that is the scroll view's *answer* for a
+        // frame size, computed from the scroller policy it has not necessarily applied yet.
+        let available = scrollView.contentView.bounds.width
+        guard available > 0 else { return }
+        let measured: [Column] = [.cost, .share, .tokens]
+        let fixed = measured.reduce(0) { $0 + $1.width }
+        let showsRequests = available - fixed - Column.requests.width
+            >= Column.name.width
+        if let requests = columns[.requests], requests.isHidden == showsRequests {
+            requests.isHidden = !showsRequests
+        }
+        let occupied = fixed + (showsRequests ? Column.requests.width : 0)
+        let name = max(available - occupied, Column.name.width)
+        guard let nameColumn = columns[.name], abs(nameColumn.width - name) > 0.5 else { return }
+        nameColumn.width = name
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let cell = tableView.makeView(withIdentifier: Self.cellID, owner: self)
-            as? UsageBreakdownCellView ?? UsageBreakdownCellView()
-        cell.identifier = Self.cellID
-        cell.show(rows[row])
+        guard let identifier = tableColumn?.identifier,
+              let kind = Column.allCases.first(where: { $0.identifier == identifier }) else {
+            return nil
+        }
+        let value = rows[row]
+        if kind == .name {
+            let cell = tableView.makeView(withIdentifier: identifier, owner: self)
+                as? UsageBreakdownNameCellView ?? UsageBreakdownNameCellView()
+            cell.identifier = identifier
+            cell.show(value)
+            return cell
+        }
+        let cell = tableView.makeView(withIdentifier: identifier, owner: self)
+            as? UsageBreakdownValueCellView ?? UsageBreakdownValueCellView()
+        cell.identifier = identifier
+        switch kind {
+        case .cost: cell.show(value.cost, label: kind.title)
+        case .share: cell.show(value.share, label: kind.title)
+        case .tokens: cell.show(value.tokens, label: kind.title)
+        case .requests, .name: cell.show(value.requests, label: kind.title)
+        }
         return cell
     }
 
@@ -1224,39 +1643,39 @@ private final class UsageBreakdownTableView: NSView, ThemedComponent, NSTableVie
     }
 }
 
-private final class UsageBreakdownCellView: NSTableCellView, ThemedComponent {
+/// The row's subject: the agent's own mark, then the name.
+///
+/// The mark's slot is fixed whether or not the row has one, so a column holding models from two
+/// runtimes and one that cannot be attributed still starts every name on the same line.
+private final class UsageBreakdownNameCellView: NSTableCellView, ThemedComponent {
+    private let mark = NSImageView()
     private let titleField = NSTextField(labelWithString: "")
-    private let detailField = NSTextField(labelWithString: "")
-    private let valueField = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        mark.imageScaling = .scaleProportionallyDown
+        mark.symbolConfiguration = Design.Symbol.configuration(Design.Symbol.control)
+        mark.contentTintColor = Design.Text.secondary
+        mark.setAccessibilityElement(false)
         titleField.applyFont(.body)
         titleField.textColor = Design.Text.label
+        // Middle rather than tail: a dated model identifier differs from its neighbours at both
+        // ends, and a tail ellipsis takes the half that says which one it is.
         titleField.lineBreakMode = .byTruncatingMiddle
-        detailField.applyFont(.detail())
-        detailField.textColor = Design.Text.tertiary
-        valueField.applyFont(.numericBody)
-        valueField.textColor = Design.Text.label
-        valueField.alignment = .right
 
-        let labels = NSStackView(views: [titleField, detailField])
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = Design.Spacing.hairline
-        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let row = NSStackView(views: [labels, valueField])
+        let row = NSStackView(views: [mark, titleField])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.distribution = .fill
-        row.spacing = Design.Spacing.medium
+        row.spacing = Design.Spacing.small
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
         NSLayoutConstraint.activate([
+            mark.widthAnchor.constraint(equalToConstant: Design.UsageDashboard.breakdownIconSlot),
+            mark.heightAnchor.constraint(equalToConstant: Design.UsageDashboard.breakdownIconSlot),
             row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
-            row.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.small),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.small)
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.small),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
     }
 
@@ -1264,11 +1683,46 @@ private final class UsageBreakdownCellView: NSTableCellView, ThemedComponent {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func show(_ row: UsageBreakdownRow) {
+        let kind = row.runtimeID.flatMap(AgentKind.init(rawValue:))
+        mark.image = kind?.icon
         titleField.stringValue = row.title
-        detailField.stringValue = row.detail
-        valueField.stringValue = row.value
-        setAccessibilityLabel(row.title)
-        setAccessibilityValue("\(row.value), \(row.detail)")
+        setAccessibilityLabel(kind.map { "\(row.title), \($0.displayName)" } ?? row.title)
+        setAccessibilityValue(L10n.format(
+            "%@ · %@ · %@ · %@ requests",
+            row.cost,
+            row.share,
+            row.tokens,
+            row.requests
+        ))
+    }
+}
+
+/// One measured quantity, set against the trailing edge in tabular figures.
+private final class UsageBreakdownValueCellView: NSTableCellView, ThemedComponent {
+    private let valueField = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        valueField.applyFont(.numericBody)
+        valueField.textColor = Design.Text.label
+        valueField.alignment = .right
+        valueField.lineBreakMode = .byTruncatingTail
+        valueField.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(valueField)
+        NSLayoutConstraint.activate([
+            valueField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.small),
+            valueField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
+            valueField.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func show(_ value: String, label: String?) {
+        valueField.stringValue = value
+        setAccessibilityLabel(label)
+        setAccessibilityValue(value)
     }
 }
 

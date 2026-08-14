@@ -954,17 +954,25 @@ class ThemedTableHeaderView: NSTableHeaderView, ThemedComponent {
         bounds.fill()
 
         guard let tableView else { return }
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: Design.Typography.caption(),
-            .foregroundColor: Design.Text.secondary
-        ]
 
         for index in tableView.tableColumns.indices {
+            let column = tableView.tableColumns[index]
             let rect = headerRect(ofColumn: index)
             let titleRect = rect.insetBy(dx: Design.Spacing.small, dy: Design.Spacing.tight)
-            (tableView.tableColumns[index].title as NSString).draw(
+            // A column states which edge its content is set against — a name reads from the
+            // leading edge, a figure from the trailing one — and a heading that ignores it
+            // stands over the wrong end of its own column. `NSTableColumn` already carries that
+            // answer; taking it here is what keeps a caller from re-stating alignment twice.
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = column.headerCell.alignment
+            paragraph.lineBreakMode = .byTruncatingTail
+            (column.title as NSString).draw(
                 in: titleRect,
-                withAttributes: attributes
+                withAttributes: [
+                    .font: Design.Typography.caption(),
+                    .foregroundColor: Design.Text.secondary,
+                    .paragraphStyle: paragraph
+                ]
             )
 
             if index < tableView.tableColumns.count - 1 {
@@ -1030,7 +1038,7 @@ final class ThemedDocumentTableView: NSView, ThemedComponent {
         scrollView.hasHorizontalScroller = true
         scrollView.hasVerticalScroller = false
         scrollView.horizontalScrollElasticity = .allowed
-        scrollView.forwardsVerticalScrollToAncestor = true
+        scrollView.verticalScrollHandoff = .always
         scrollView.documentView = canvas
         addSubview(scrollView)
 

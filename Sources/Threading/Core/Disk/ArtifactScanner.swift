@@ -2,8 +2,9 @@ import Foundation
 
 // MARK: - Artifact Kind
 
-/// A build output a project can regenerate, recognised by its directory name together with
-/// proof that the ecosystem which produces it is actually present.
+/// A build output a project can regenerate, recognised either by its directory name together
+/// with proof that the ecosystem which produces it is actually present, or by a manifest the
+/// tool that wrote it left behind.
 ///
 /// The marker is not decoration. `build`, `dist` and `target` are ordinary English words, and
 /// a directory called `target` beside no `Cargo.toml` is somebody's data, not Cargo's cache.
@@ -19,8 +20,14 @@ enum ArtifactKind: String, CaseIterable, Codable {
     case gradle
     case coverage
 
-    /// The directory this kind occupies.
-    var directoryName: String {
+    /// Xcode's DerivedData, identified by the manifest Xcode writes at the top of it rather
+    /// than by a name: the trees measured under `/tmp` on 2026-08-13 were called `dd`, `dd2`,
+    /// `verify-dd`, `dd-snap`, `threading-theme-polish-dd` and `derived-data`, so there is no
+    /// name to match on. See `DerivedDataManifest`.
+    case xcodeDerivedData
+
+    /// The directory this kind occupies, or nil for a kind with no fixed name at all.
+    var directoryName: String? {
         switch self {
         case .rust: return "target"
         case .node: return "node_modules"
@@ -32,11 +39,13 @@ enum ArtifactKind: String, CaseIterable, Codable {
         case .pythonCache: return "__pycache__"
         case .gradle: return "build"
         case .coverage: return "coverage"
+        case .xcodeDerivedData: return nil
         }
     }
 
     /// Files that must sit beside the directory for it to be that kind's output. Any one is
-    /// enough; an empty list means the name alone is unambiguous.
+    /// enough; an empty list means the name alone is unambiguous, or that this kind is not
+    /// recognised by name in the first place.
     var markerFiles: [String] {
         switch self {
         case .rust: return ["Cargo.toml"]
@@ -45,9 +54,30 @@ enum ArtifactKind: String, CaseIterable, Codable {
         case .cocoaPods: return ["Podfile"]
         case .pythonVenv: return ["pyproject.toml", "requirements.txt", "setup.py", "setup.cfg"]
         case .gradle: return ["build.gradle", "build.gradle.kts", "pom.xml", "settings.gradle"]
-        case .pythonCache: return []
+        case .pythonCache, .xcodeDerivedData: return []
         }
     }
+
+    /// Whether the kind is proved by a manifest its own tool wrote rather than by a name and a
+    /// marker beside it.
+    ///
+    /// This is what decides which safety gate applies. A name-gated kind is only ever offered
+    /// inside a repository that calls it disposable; a manifest-gated kind carries its own
+    /// proof and is the only thing offered outside one.
+    var isManifestGated: Bool {
+        switch self {
+        case .xcodeDerivedData: return true
+        case .rust, .node, .swiftPackage, .cocoaPods, .next, .turbo, .pythonVenv, .pythonCache,
+             .gradle, .coverage: return false
+        }
+    }
+
+    /// Every kind recognised by name, which is every kind `kind(for:)` can answer.
+    static var nameGated: [ArtifactKind] { allCases.filter { !$0.isManifestGated } }
+
+    /// The names those kinds occupy, as one set: the scratch walk prunes on this rather than
+    /// asking each kind in turn, once per directory it visits.
+    static let nameGatedDirectoryNames: Set<String> = Set(nameGated.compactMap(\.directoryName))
 
     /// What the row calls it.
     var displayName: String {
@@ -62,6 +92,7 @@ enum ArtifactKind: String, CaseIterable, Codable {
         case .pythonCache: return L10n.string("Python bytecode")
         case .gradle: return L10n.string("Gradle build output")
         case .coverage: return L10n.string("Coverage output")
+        case .xcodeDerivedData: return L10n.string("Xcode derived data")
         }
     }
 
@@ -78,13 +109,19 @@ enum ArtifactKind: String, CaseIterable, Codable {
         case .pythonCache: return L10n.string("regenerated on next run")
         case .gradle: return "gradle build"
         case .coverage: return L10n.string("re-run the tests")
+        case .xcodeDerivedData: return "xcodebuild"
         }
     }
 
     /// The kind occupying `url`, or nil when the name matches nothing or its marker is absent.
+    ///
+    /// **This answer is name-first, and stays that way.** A manifest-gated kind is deliberately
+    /// invisible here — DerivedData has no fixed name to match, and a `dd` in a project folder
+    /// is not something the project scan should start offering. Its recognizer is
+    /// `DerivedDataManifest.read(inDirectory:)`, reachable only from the scratch walk.
     static func kind(for url: URL) -> ArtifactKind? {
         let name = url.lastPathComponent
-        guard let kind = allCases.first(where: { $0.directoryName == name }) else { return nil }
+        guard let kind = nameGated.first(where: { $0.directoryName == name }) else { return nil }
 
         guard !kind.markerFiles.isEmpty else { return kind }
 
@@ -93,6 +130,82 @@ enum ArtifactKind: String, CaseIterable, Codable {
             FileManager.default.fileExists(atPath: parent.appendingPathComponent($0).path)
         }
         return hasMarker ? kind : nil
+    }
+}
+
+// MARK: - Derived Data Manifest
+
+/// What Xcode writes at the top of a DerivedData tree, and the reason such a tree can be
+/// offered outside any repository at all.
+///
+/// The project scan's necessary gate is git: without a repository nothing asserts a directory
+/// is regenerable rather than someone's only copy. Scratch directories have no git to ask —
+/// the verification copies agents build in are `rsync`'d *without* `.git` on purpose, so a
+/// build in them cannot touch the developer's index — so the gate is **replaced rather than
+/// relaxed**. A directory holding `info.plist` with a `WorkspacePath`, plus `Build/` and
+/// `ModuleCache.noindex/`, was written by Xcode and by nothing else. All 24 trees measured
+/// under `/tmp` and `$TMPDIR` on 2026-08-13 had that shape; `target` beside a `Cargo.toml` is a
+/// guess by comparison.
+struct DerivedDataManifest: Equatable {
+
+    // MARK: - Properties
+
+    /// The workspace Xcode built from. It is also the attribution: a tree whose workspace no
+    /// longer exists is an orphan that nothing can rebuild into and nothing will read again.
+    let workspacePath: String
+
+    /// The build system's own record of when it last used the tree — a better staleness reading
+    /// than the newest write inside, and absent from trees old enough not to carry it.
+    let lastAccessedDate: Date?
+
+    // MARK: - Reading
+
+    /// The manifest at the top of `url`, or nil when the directory is not a DerivedData tree.
+    ///
+    /// The two required subdirectories are checked first because they are two stats that almost
+    /// every directory in `/tmp` fails, which keeps the plist read off the walk's common path.
+    static func read(
+        inDirectory url: URL,
+        fileManager: FileManager = .default
+    ) -> DerivedDataManifest? {
+        for name in ScratchDefaults.derivedDataRequiredDirectories {
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(
+                atPath: url.appendingPathComponent(name).path,
+                isDirectory: &isDirectory
+            ), isDirectory.boolValue else { return nil }
+        }
+
+        let manifest = url.appendingPathComponent(ScratchDefaults.derivedDataManifestName)
+        // A ceiling rather than a trust: the file Xcode writes is a few hundred bytes, and a
+        // walk of somebody's scratch directory should not be able to read an arbitrary blob
+        // into memory because it was named `info.plist`.
+        guard let size = try? manifest.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size <= ScratchDefaults.maximumManifestBytes,
+              let data = try? Data(contentsOf: manifest),
+              let contents = try? PropertyListSerialization.propertyList(
+                  from: data,
+                  options: [],
+                  format: nil
+              ),
+              let plist = contents as? [String: Any],
+              let workspacePath = plist[Key.workspacePath] as? String,
+              !workspacePath.isEmpty else { return nil }
+
+        // Read leniently: a tree without a usable date is still a DerivedData tree, and the
+        // measured mtime stands in for it.
+        return DerivedDataManifest(
+            workspacePath: workspacePath,
+            lastAccessedDate: plist[Key.lastAccessedDate] as? Date
+        )
+    }
+
+    // MARK: - Keys
+
+    /// The two keys read out of `info.plist`. Everything else Xcode writes there is ignored.
+    private enum Key {
+        static let workspacePath = "WorkspacePath"
+        static let lastAccessedDate = "LastAccessedDate"
     }
 }
 
@@ -116,10 +229,42 @@ struct ReclaimableArtifact: Identifiable, Equatable, Codable {
     let modifiedAt: Date?
 
     /// The checkout it belongs to, which is not always the project's own folder: a repository's
-    /// worktrees frequently live *inside* it, each carrying build output of its own.
+    /// worktrees frequently live *inside* it, each carrying build output of its own. For a
+    /// finding in a scratch location, which belongs to no checkout, this is the scratch root it
+    /// was found under.
     let checkoutPath: String
 
+    /// What a manifest-gated finding's own tool declared it was built for — Xcode's
+    /// `WorkspacePath`. Nil for everything found by name inside a project.
+    ///
+    /// Optional so an older cache decodes unchanged, and read rather than resolved: whether the
+    /// workspace still exists, and whether it belongs to a project Threading knows, are both
+    /// answered when listing rather than when scanning, because both change in between.
+    let workspacePath: String?
+
     var id: String { url.path }
+
+    // MARK: - Initialization
+
+    /// Spelled out rather than left to the memberwise initializer so `workspacePath` can default
+    /// to nil, which is what every finding inside a project folder is.
+    init(
+        url: URL,
+        kind: ArtifactKind,
+        byteCount: Int64,
+        modifiedAt: Date?,
+        checkoutPath: String,
+        workspacePath: String? = nil
+    ) {
+        self.url = url
+        self.kind = kind
+        self.byteCount = byteCount
+        self.modifiedAt = modifiedAt
+        self.checkoutPath = checkoutPath
+        self.workspacePath = workspacePath
+    }
+
+    // MARK: - Reading
 
     /// Whether this sits in a checkout other than the project's own folder.
     func isNestedCheckout(of projectFolder: String) -> Bool {
@@ -151,6 +296,11 @@ struct ReclaimableArtifact: Identifiable, Equatable, Codable {
 /// `.env.jira` and `ansible/runner-controller-secrets.yml`. A tool that deleted everything git
 /// ignores would delete your secrets. So the ignore is *necessary* (it proves the project does
 /// not track this) and the allowlist is *sufficient* (it proves a tool can recreate it).
+///
+/// **Outside a project the necessary gate is replaced, never dropped.** `scanScratch(roots:)`
+/// walks the locations agents build in, where the trees worth finding have no repository to ask
+/// — and there the proof is a manifest the producing tool wrote (`DerivedDataManifest`) plus
+/// containment in a scratch root. Nothing recognised by name is offered there at all.
 ///
 /// Every path blocks on the filesystem, so callers hop to a queue of their own first.
 enum ArtifactScanner {
@@ -215,6 +365,85 @@ enum ArtifactScanner {
         return found.sorted { $0.byteCount > $1.byteCount }
     }
 
+    /// Every reclaimable directory in the scratch locations agents build in — outside any
+    /// project, and usually outside any repository.
+    ///
+    /// **Only manifest-gated findings are ever returned.** A `node_modules` beside a real
+    /// `package.json` in `/tmp` passes the project scan's *sufficient* gate and fails its
+    /// *necessary* one, and relaxing that is how this feature would become an
+    /// arbitrary-delete primitive pointed at a directory full of other people's data. So a
+    /// name-gated kind found here is not offered — it is **pruned**, whole, without being
+    /// measured or asked about. That prune is load-bearing rather than tidy: one `rsync`'d
+    /// scratch tree measured here holds 87,998 files, and there were 170 session directories
+    /// beside it.
+    ///
+    /// No git subprocess runs on this path. The trees worth finding have no repository to ask,
+    /// which is the entire reason the manifest gate exists.
+    static func scanScratch(roots: [URL] = ScratchDefaults.roots) -> [ReclaimableArtifact] {
+        var found: [ReclaimableArtifact] = []
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey]
+
+        for root in roots {
+            // Hidden files are deliberately *not* skipped here either: scratch directories are
+            // routinely named with a leading dot, and `.build` is one of the names pruned.
+            guard let walker = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: keys,
+                options: [.skipsPackageDescendants]
+            ) else {
+                ThreadingLogger.storage.warning(
+                    "Scratch scan could not enumerate root=\(root.path, privacy: .private(mask: .hash))"
+                )
+                continue
+            }
+
+            while let url = walker.nextObject() as? URL {
+                let values = try? url.resourceValues(forKeys: Set(keys))
+                guard values?.isDirectory == true, values?.isSymbolicLink != true else { continue }
+
+                if url.lastPathComponent == ArtifactDefaults.gitDirectoryName {
+                    walker.skipDescendants()
+                    continue
+                }
+
+                if walker.level > ScratchDefaults.maximumDepth {
+                    walker.skipDescendants()
+                    continue
+                }
+
+                // Asked before the name prune, so a DerivedData tree that happens to be called
+                // `build` or `target` is still recognised for what its own manifest says it is.
+                if let manifest = DerivedDataManifest.read(inDirectory: url) {
+                    // Nothing below a build output is a separate answer.
+                    walker.skipDescendants()
+
+                    let measured = measure(url)
+                    found.append(ReclaimableArtifact(
+                        url: url,
+                        kind: .xcodeDerivedData,
+                        byteCount: measured.bytes,
+                        // The manifest's own reading wins when it is the newer one: it is the
+                        // build system saying when it last used the tree, rather than the walk
+                        // guessing from whichever file was written last.
+                        modifiedAt: [measured.modifiedAt, manifest.lastAccessedDate]
+                            .compactMap { $0 }
+                            .max(),
+                        checkoutPath: root.path,
+                        workspacePath: manifest.workspacePath
+                    ))
+                    continue
+                }
+
+                if ArtifactKind.nameGatedDirectoryNames.contains(url.lastPathComponent) {
+                    walker.skipDescendants()
+                    continue
+                }
+            }
+        }
+
+        return found.sorted { $0.byteCount > $1.byteCount }
+    }
+
     // MARK: - Safety
 
     /// Whether git considers the path disposable — the *necessary* gate, proving the project
@@ -265,15 +494,56 @@ enum ArtifactScanner {
         }
     }
 
+    /// Whether a manifest-gated path is disposable — the replacement for the git gate, and the
+    /// only gate that can answer yes outside a repository.
+    ///
+    /// Two questions, and the second is not redundant either. The manifest is re-read rather
+    /// than remembered, because a tree stops being Xcode's the moment its `info.plist` goes.
+    /// And the path must still sit inside a scratch root: the manifest alone would make this a
+    /// rule about any directory anywhere that happens to hold three names, while the whole
+    /// claim being made is about the locations agents build in. Both sides are compared with
+    /// symlinks resolved, since `/tmp` is a symlink to `/private/tmp` and two spellings of one
+    /// directory must not read as two places.
+    static func isDisposableScratch(
+        _ url: URL,
+        kind: ArtifactKind,
+        roots: [URL] = ScratchDefaults.roots
+    ) -> Bool {
+        guard kind == .xcodeDerivedData else { return false }
+        guard DerivedDataManifest.read(inDirectory: url) != nil else { return false }
+        return isContained(url, in: roots)
+    }
+
+    /// Whether `url` sits inside one of `roots`, both normalised the same way so that `/tmp`
+    /// and `/private/tmp` cannot disagree about being the same directory.
+    private static func isContained(_ url: URL, in roots: [URL]) -> Bool {
+        let path = normalized(url)
+        return roots.contains { root in
+            let rootPath = normalized(root)
+            return path == rootPath || path.hasPrefix(rootPath + "/")
+        }
+    }
+
+    private static func normalized(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
     /// Both gates again, immediately before a delete.
     ///
     /// Re-checked rather than trusted from the scan: a listing the user is reading is a listing
-    /// going stale, and the cost of being wrong here is somebody's directory.
+    /// going stale, and the cost of being wrong here is somebody's directory. Which pair of
+    /// gates applies is decided by the kind, so a name-gated finding can never be waved through
+    /// on a manifest and a manifest-gated one is never asked a question git cannot answer.
     static func isSafeToRemove(_ artifact: ReclaimableArtifact) -> Bool {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: artifact.url.path, isDirectory: &isDirectory),
-              isDirectory.boolValue,
-              ArtifactKind.kind(for: artifact.url) == artifact.kind,
+              isDirectory.boolValue else { return false }
+
+        guard !artifact.kind.isManifestGated else {
+            return isDisposableScratch(artifact.url, kind: artifact.kind)
+        }
+
+        guard ArtifactKind.kind(for: artifact.url) == artifact.kind,
               isDisposable(artifact.url) else { return false }
 
         return true
@@ -329,10 +599,12 @@ enum ArtifactScanner {
             .linkCountKey,
             .fileResourceIdentifierKey
         ]
+        // Packages are descended into: `du` counts what is inside an `.app`, and a DerivedData's
+        // `Build/Products` is nothing but bundles — skipping them understates the one number
+        // this measurement exists to report.
         guard let walker = FileManager.default.enumerator(
             at: url,
-            includingPropertiesForKeys: keys,
-            options: [.skipsPackageDescendants]
+            includingPropertiesForKeys: keys
         ) else { return (0, nil) }
 
         var bytes: Int64 = 0
@@ -378,4 +650,48 @@ enum ArtifactDefaults {
     /// calling a live build stale is an interrupted build, while the cost of calling a stale
     /// one live is a sentence of caution on a row.
     static let inUseWindow: TimeInterval = 15 * 60
+}
+
+// MARK: - Scratch Defaults
+
+/// The scratch scope: where agents build when they are not building in a project.
+enum ScratchDefaults {
+
+    /// The shared temporary directory, spelled the way the filesystem does. `/tmp` is a symlink
+    /// to this, so naming both would walk 76 GB twice for one answer.
+    static let sharedTemporaryPath = "/private/tmp"
+
+    /// Where the scratch scan looks.
+    ///
+    /// The per-user temporary directory is the `/var/folders/…/T/` that `_CS_DARWIN_USER_TEMP_DIR`
+    /// names — 8.1 GB of it on the machine this was measured on. macOS cleans it on a schedule of
+    /// its own, which nothing does for `/private/tmp`; it is included because the space is real,
+    /// not because a reading there keeps as well.
+    ///
+    /// Standardised at the source so every containment check compares like with like.
+    static let roots: [URL] = [
+        URL(fileURLWithPath: sharedTemporaryPath, isDirectory: true),
+        FileManager.default.temporaryDirectory
+    ].map { $0.standardizedFileURL }
+
+    /// Deliberately shallower than the project scan's `maximumDepth`, and a separate constant
+    /// rather than a shared one because the two walks answer to different shapes. A project is
+    /// walked for a monorepo's `packages/<name>/node_modules` and for worktrees kept inside a
+    /// checkout; a scratch root is walked across 170 session directories, one of which alone
+    /// holds 87,998 files. Every DerivedData tree measured on 2026-08-13 sat within 6 levels of
+    /// `/private/tmp` and most within 3, so 7 buys a level of headroom over what exists while
+    /// keeping the walk off the far side of an rsync'd repository copy.
+    static let maximumDepth = 7
+
+    /// The manifest Xcode writes at the top of a DerivedData tree.
+    static let derivedDataManifestName = "info.plist"
+
+    /// The directories that must sit beside that manifest. Xcode also writes
+    /// `SDKStatCaches.noindex/` and `SourcePackages/`, which are not required: these two are
+    /// present in every tree measured, and asking for more names would refuse a real tree over
+    /// a version difference.
+    static let derivedDataRequiredDirectories = ["Build", "ModuleCache.noindex"]
+
+    /// A ceiling on the manifest read. Xcode's own is a few hundred bytes.
+    static let maximumManifestBytes = 64 * 1024
 }

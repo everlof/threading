@@ -409,6 +409,129 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         XCTAssertEqual(written, Render.fixtures.count)
     }
 
+    // MARK: - The Scratch Tiers On Storage
+
+    /// A build cache found outside every project belongs to whichever workspace its manifest
+    /// names, and the three possible answers are three different headings on the page.
+    ///
+    /// Asserted against the page's own splitter with stated projects and a stated answer for
+    /// "does this workspace still exist", because that is exactly what the page does: the
+    /// attribution is computed when the page is read, from values, with no scan and no git.
+    /// The claim that matters is the last one — a workspace that is alive and simply is not
+    /// ours must not be filed under a heading saying it was deleted.
+    @MainActor
+    func testScratchFindingsSplitByTheWorkspaceTheyWereBuiltFor() throws {
+        let project = Project(
+            name: "Threading",
+            folderURL: URL(fileURLWithPath: "/private/tmp/threading-fixture-project")
+        )
+        let live = scratchArtifact(
+            "/private/tmp/dd-live",
+            workspace: "/private/tmp/threading-fixture-project/Threading.xcodeproj",
+            bytes: 4_000_000_000
+        )
+        let orphan = scratchArtifact(
+            "/private/tmp/dd-orphan",
+            workspace: "/private/tmp/threading-verify-9f2/Threading.xcodeproj",
+            bytes: 3_000_000_000
+        )
+        let stranger = scratchArtifact(
+            "/private/tmp/dd-stranger",
+            workspace: "/private/tmp/someone-elses-copy/Other.xcodeproj",
+            bytes: 2_000_000_000
+        )
+
+        let onDisk = Set([live, stranger].compactMap(\.workspacePath))
+        let groups = StoragePreferencesViewController.scratchGroups(
+            [orphan, stranger, live],
+            among: [project],
+            workspaceExists: { onDisk.contains($0) }
+        )
+
+        XCTAssertEqual(
+            groups.map { tier(of: $0.attribution) },
+            ["project", "orphan", "other"],
+            "the tiers are not the three the page draws, in the order it draws them"
+        )
+
+        XCTAssertEqual(groups[0].artifacts.map(\.id), [live.id])
+        XCTAssertEqual(groups[0].attribution.project?.id, project.id)
+        XCTAssertTrue(
+            groups[0].title.contains(project.name),
+            "a project's own build cache is headed \(groups[0].title)"
+        )
+        XCTAssertFalse(
+            groups[0].attribution.trailsThePage,
+            "a project's cache should sort among its checkouts by size"
+        )
+
+        XCTAssertEqual(groups[1].artifacts.map(\.id), [orphan.id])
+        XCTAssertTrue(groups[1].attribution.namesADeletedWorkspace)
+        XCTAssertTrue(groups[1].attribution.trailsThePage)
+
+        XCTAssertEqual(
+            groups[2].artifacts.map(\.id), [stranger.id],
+            "a workspace that still exists was filed under the deleted-workspace heading"
+        )
+        XCTAssertFalse(groups[2].attribution.namesADeletedWorkspace)
+        XCTAssertTrue(groups[2].attribution.trailsThePage)
+
+        XCTAssertTrue(groups.allSatisfy { $0.attribution.isScratch })
+        XCTAssertEqual(
+            Set(groups.map(\.identity)).count, 3,
+            "two groups share a fold identity, so unfolding one would unfold the other"
+        )
+    }
+
+    /// The three scratch headings as cards, drawn by the page's own builder so the copy in the
+    /// picture is the copy that ships rather than a transcription of it.
+    @MainActor
+    func testRendersTheScratchStorageGroupsAcrossThemes() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { AppThemePalette.set(.system) }
+
+        let controller = StoragePreferencesViewController()
+        let groups = scratchFixtureGroups()
+        XCTAssertEqual(groups.count, 3, "the fixture did not produce all three tiers")
+
+        var written = 0
+        for fixture in Render.fixtures {
+            AppThemePalette.set(fixture.theme)
+
+            let page = SettingsUI.page(
+                title: "Storage",
+                summary: "38.1 GB reclaimable in 24 directories · measured 12 min ago · only 31 GB free",
+                actions: [
+                    SettingsUI.button("Rescan", target: self, action: #selector(noop)),
+                    SettingsUI.button("Remove All…", target: self, action: #selector(noop))
+                ],
+                sections: groups.enumerated().map { index, group in
+                    controller.groupSection(group, groupIndex: index, expanded: true)
+                },
+                localizes: false
+            )
+
+            let host = laidOut(page, height: 900)
+            let appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
+            host.appearance = appearance
+            AppThemeRefresh.repaint(host)
+            host.layoutSubtreeIfNeeded()
+
+            var data: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                data = self.png(of: host)
+            }
+            let url = directory.appendingPathComponent("storage-scratch-\(fixture.name).png")
+            try XCTUnwrap(data, "no render for \(fixture.name)").write(to: url)
+            XCTAssertEqual(ThemeBoundaryAudit.violations(in: host), [])
+            written += 1
+        }
+
+        print("Rendered \(written) scratch storage pages to \(directory.path)")
+        XCTAssertEqual(written, Render.fixtures.count)
+    }
+
     /// The grouped sidebar: one caption per section run, and a filtered list keeping only the
     /// sections that still have rows.
     @MainActor
@@ -434,11 +557,28 @@ final class SettingsDisclosureRenderTests: XCTestCase {
                 "settings-sidebar-\(fixture.name).png"
             )
             try XCTUnwrap(data, "no sidebar render for \(fixture.name)").write(to: url)
+
+            // The same sidebar mid-search: page rows over their setting-level results, the
+            // highlight on the matched words, the Ask AI action riding in the field.
+            sidebar.isAskAIAvailable = true
+            sidebar.updateSearchQuery("sound")
+            host.layoutSubtreeIfNeeded()
+            var searchData: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                searchData = self.png(of: host)
+            }
+            let searchURL = directory.appendingPathComponent(
+                "settings-sidebar-search-\(fixture.name).png"
+            )
+            try XCTUnwrap(searchData, "no sidebar search render for \(fixture.name)")
+                .write(to: searchURL)
         }
     }
 
+    /// While a search is typed the group captions stand down entirely: a result's geography
+    /// is the page row above it, not the sidebar's sections. Cleared, the geography returns.
     @MainActor
-    func testFilteringKeepsOnlySectionsWithSurvivingRows() {
+    func testFilteringStandsTheGroupCaptionsDown() {
         let sidebar = SettingsSidebar(items: [
             .init(id: "a", title: "Alpha", symbol: "gearshape", searchText: "alpha", group: "One"),
             .init(id: "b", title: "Beta", symbol: "keyboard", searchText: "beta", group: "One"),
@@ -448,10 +588,18 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         sidebar.updateSearchQuery("gamma")
 
         XCTAssertEqual(sidebar.visibleItemIDs, ["c"])
-        let captions = labels(in: sidebar).filter { $0.stringValue == "ONE" || $0.stringValue == "TWO" }
+        let captions = { self.labels(in: sidebar).filter {
+            $0.stringValue == "ONE" || $0.stringValue == "TWO"
+        } }
         XCTAssertEqual(
-            captions.map(\.stringValue), ["TWO"],
-            "a section with no surviving rows kept its caption"
+            captions().map(\.stringValue), [],
+            "results keep no section captions — the page row is the geography"
+        )
+
+        sidebar.updateSearchQuery("")
+        XCTAssertEqual(
+            captions().map(\.stringValue), ["ONE", "TWO"],
+            "the resting list keeps one caption per section run"
         )
     }
 
@@ -833,6 +981,80 @@ final class SettingsDisclosureRenderTests: XCTestCase {
     @MainActor
     private func labels(in root: NSView) -> [NSTextField] {
         descendants(of: root, type: NSTextField.self)
+    }
+
+    /// One finding from the scratch scope, shaped the way the scanner returns them: a
+    /// manifest-gated kind, a scratch root for a checkout it has none of, and the workspace its
+    /// `info.plist` named.
+    @MainActor
+    private func scratchArtifact(
+        _ path: String,
+        workspace: String,
+        bytes: Int64,
+        root: String = "/private/tmp",
+        age: TimeInterval = 60 * 60 * 26
+    ) -> ReclaimableArtifact {
+        ReclaimableArtifact(
+            url: URL(fileURLWithPath: path),
+            kind: .xcodeDerivedData,
+            byteCount: bytes,
+            modifiedAt: Date(timeIntervalSinceNow: -age),
+            checkoutPath: root,
+            workspacePath: workspace
+        )
+    }
+
+    /// Which tier a group landed in, named rather than compared: the attribution carries a
+    /// `Project`, which is not `Equatable`, and the assertion wants to read as the page's three
+    /// headings anyway.
+    @MainActor
+    private func tier(of attribution: StoragePreferencesViewController.GroupAttribution) -> String {
+        switch attribution {
+        case .checkout: return "checkout"
+        case .scratchProject: return "project"
+        case .scratchOrphan: return "orphan"
+        case .scratchOther: return "other"
+        }
+    }
+
+    /// The three tiers with enough between them to draw: two large caches and a small one under
+    /// the project's heading, so its sub-gigabyte fold row appears too, plus one orphan and one
+    /// tree belonging to a workspace that is alive and is not ours.
+    @MainActor
+    private func scratchFixtureGroups() -> [StoragePreferencesViewController.FindingsGroup] {
+        let project = Project(
+            name: "Threading",
+            folderURL: URL(fileURLWithPath: "/Users/dev/repo/Threading")
+        )
+        let workspace = "/Users/dev/repo/Threading/Threading.xcodeproj"
+        let stranger = "/Users/dev/repo/sonda/Sonda.xcodeproj"
+        let artifacts = [
+            scratchArtifact("/private/tmp/dd", workspace: workspace, bytes: 14_800_000_000),
+            scratchArtifact("/private/tmp/verify-dd", workspace: workspace, bytes: 6_120_000_000),
+            scratchArtifact(
+                "/private/tmp/dd-snap",
+                workspace: workspace,
+                bytes: 402_000_000,
+                age: 60 * 4
+            ),
+            scratchArtifact(
+                "/private/tmp/claude-501/8f3c/scratchpad/dd",
+                workspace: "/private/tmp/claude-501/8f3c/scratchpad/tree/Threading.xcodeproj",
+                bytes: 9_400_000_000
+            ),
+            scratchArtifact(
+                "/var/folders/qy/9x8k2/T/codex-dd",
+                workspace: stranger,
+                bytes: 3_260_000_000,
+                root: "/var/folders/qy/9x8k2/T"
+            )
+        ]
+
+        return StoragePreferencesViewController.scratchGroups(
+            artifacts,
+            among: [project],
+            workspaceExists: { $0 == workspace || $0 == stranger }
+        )
     }
 
     /// One reclaimable directory, built the way the Storage page builds it.

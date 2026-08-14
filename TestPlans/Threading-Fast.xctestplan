@@ -15,6 +15,10 @@
         "value" : "$(THREADING_GITHUB_E2E_REPOSITORY)"
       },
       {
+        "key" : "THREADING_LOTTIE_CORPUS",
+        "value" : "$(THREADING_LOTTIE_CORPUS)"
+      },
+      {
         "key" : "THREADING_RENDER_OUT",
         "value" : "$(THREADING_RENDER_OUT)"
       },

@@ -175,6 +175,7 @@ private struct RemoteAttachmentRow: View {
         case "archive": "archivebox"
         case "document": "doc.text"
         case "diagram": "point.3.connected.trianglepath.dotted"
+        case "media": "play.rectangle"
         default: "photo"
         }
     }
@@ -276,7 +277,12 @@ struct RemoteAttachmentPreview: View {
             // office document, or diagram source, and downloading one only to say "the image
             // could not be decoded" spends the attachment byte cap on a file it was never
             // going to show.
-            if Self.previewsOnMacOnly.contains(attachment.kind) {
+            if attachment.kind == "media" {
+                // The renderer is host-owned, so the mirror is achievable — but a live player on
+                // the phone needs a poster-frame or frame-stream endpoint the remote surface does
+                // not have yet, and a silent blank card would be worse than a sentence.
+                unavailable("This animation plays on your Mac.")
+            } else if Self.previewsOnMacOnly.contains(attachment.kind) {
                 unavailable("This file previews on your Mac.")
             } else if let data {
                 if attachment.kind == "pdf" {
@@ -338,7 +344,9 @@ struct RemoteAttachmentPreview: View {
         )
     }
 
-    private static let previewsOnMacOnly: Set<String> = ["archive", "document", "diagram"]
+    private static let previewsOnMacOnly: Set<String> = [
+        "archive", "document", "diagram", "media"
+    ]
 
     private var unavailableIconName: String {
         switch attachment.kind {
@@ -348,6 +356,7 @@ struct RemoteAttachmentPreview: View {
         case "text": "doc.plaintext"
         case "document": "doc.text"
         case "diagram": "point.3.connected.trianglepath.dotted"
+        case "media": "play.rectangle"
         default: "photo"
         }
     }
@@ -402,6 +411,8 @@ struct RemoteAttachmentPreviewDemo: View {
             .init(path: "reports/ui-evidence.html", name: "ui-evidence.html", kind: "html", byteCount: 32_914, origin: "agent")
         case "archive":
             .init(path: "exports/diagnostics.zip", name: "diagnostics.zip", kind: "archive", byteCount: 1_204_981, origin: "user")
+        case "media":
+            .init(path: "animations/loading.lottie", name: "loading.lottie", kind: "media", byteCount: 24_618, origin: "agent")
         case "text":
             .init(path: "artifacts/keyboard-lifecycle.txt", name: "keyboard-lifecycle.txt", kind: "text", byteCount: 1_284, origin: "agent")
         default:

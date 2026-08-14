@@ -10,7 +10,7 @@ import XCTest
 /// array it returned before records could carry a sound at all. That is asserted directly below
 /// rather than argued for.
 @MainActor
-final class SoundScopeTests: XCTestCase {
+final class SoundScopeTests: HostedStoreTestCase {
 
     // MARK: - The `all` Level
 

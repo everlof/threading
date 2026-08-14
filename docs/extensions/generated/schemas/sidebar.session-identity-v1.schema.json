@@ -53,6 +53,7 @@
         "allowsDivider" : false,
         "allowsFixedSpacer" : true,
         "allowsFlexibleSpacer" : false,
+        "allowsMedia" : false,
         "allowsOverlay" : false,
         "allowsProceed" : false,
         "allowsTextInput" : false,

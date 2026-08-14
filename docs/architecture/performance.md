@@ -216,7 +216,7 @@ external data reaches eager AppKit work.
 | Resolved | File pane refresh | Directory enumeration, resource-value reads, natural sorting and snapshot signatures now run off-main for initial load, hot refresh and disclosure. Main-actor reconciliation preserves node identity with a sorted merge; equal signatures skip both reconciliation and AppKit reload. The before/after measurements are below. |
 | Resolved | Archived settings | The archive is a cheap value-row model in one grouped table. The recent fold owns ten session identities; expansion inserts the older identities, and project events recycle only the viewport while preserving the clip origin. The before/after measurements are below. |
 | Resolved | Tools dynamic sections | Tool rows, extension-contributed settings, persistent website origins and Browser Sign-In inventories are all value rows in the same grouped table. Provider, credential and exemption mutations refresh cheap snapshots and recycle only the viewport. |
-| Resolved | Settings search results | An installed extension can contribute up to eight searchable pages, so the 256-package ceiling can produce 2,048 extension results before built-ins. Results are value rows; a query-only change updates the two visible labels in place and preserves the exact clip origin. |
+| Resolved | Settings search results | An installed extension can contribute up to eight searchable pages, so the 256-package ceiling can produce 2,048 extension results before built-ins. Results now render in the sidebar itself (2026-08-13 redesign: setting-level rows that jump to the row); that stack is retained and rebuilt per keystroke, so a search caps construction at `SettingsSidebar.Defaults.maximumResultRows` and prints what it cut. The stress fixture drives 2,048 pages through the real sidebar. |
 | Resolved | Git Review watched refresh | A build can expose ~9,000 generated files / ~80,000 changed lines and refresh repeatedly. The pane now reconciles stable paths in place, anchors by path + within-row offset, and defers model/height mutations until live scrolling ends. A scroller-thumb drag uses geometry-preserving identity rows and materializes full TextKit only for the resting viewport. |
 | Resolved | Git Review during live resize | The 8,985-file fixture now drives 48 distinct widths through the real layout callback. Complete-index height invalidation averages 6.08 ms, with 6.66 ms p95 and 10.49 ms max, while preserving correct offscreen wrapping estimates and scrollbar extent. |
 | Resolved | Account settings cold discovery | A fresh-process fixture separates real home-directory/login-marker/shell-alias discovery from page construction. Five accounts take 6.61 ms to discover, 12.31 ms to render and 8.14 ms to lay out; the seven-second cache makes subsequent callers lock-cheap. |
@@ -2258,10 +2258,12 @@ measured after the generated events and the separate model-only mirror exist, so
 production controller's additional timeline, presentation and viewport state rather than charging
 the fixture to the renderer.
 
-### Unresolved active-turn edge
+### Active-turn edge
 
 Settled-history replay does not cover the renderer's other extreme: a single current turn whose
-tool rows must remain individually visible and addressable until the terminal event arrives.
+canonical tool rows must remain addressable until the terminal event arrives. Consecutive calls
+now share one collapsed presentation row by default; exact navigation expands that group before
+landing on the requested call, so compact presentation does not discard identity.
 `ConversationRenderTests.testStressActiveConversationTurnWhenEnabled` starts after a mixed settled
 history, appends 25, 100 or 500 tool calls in ten-row batches, streams 250 text deltas, attaches
 every result in reverse identity order, then settles and folds the turn. It verifies an exact jump
@@ -2269,7 +2271,7 @@ to a middle tool while the turn is live, an exact jump to the final answer after
 result identity, minimap settlement, and a working set below 40 native row views. The default sweep
 also combines 1,000 settled turns with 500 live tools to expose any transcript-depth dependency.
 
-Three fresh-process 100-turn runs and the combined depth edge measured:
+Before live grouping, three fresh-process 100-turn runs and the combined depth edge measured:
 
 | Settled turns | Live tools | Append batch p95 | Result batch p95 | Settle + fold | Middle jump | Peak delta | Live row views |
 |---:|---:|---:|---:|---:|---:|---:|---:|
@@ -2277,6 +2279,13 @@ Three fresh-process 100-turn runs and the combined depth edge measured:
 | 100 | 100 | 2.4–3.0 ms | 2.7–3.1 ms | 16–31 ms | 41–46 ms | 12.1–12.4 MB | 21 |
 | 100 | 500 | 2.3–2.9 ms | 2.2–2.9 ms | 17–19 ms | 41–46 ms | 34.0–34.3 MB | 21 |
 | 1,000 | 500 | 2.9 ms | 2.5 ms | 33 ms | 61 ms | 33.9 MB | 21 |
+
+The grouping change was then rerun in a fresh `xctest` process at 100 settled turns plus 100 live
+tools. Before exact navigation, the active turn added three presentation entries — divider, user
+message and one tool disclosure — while preserving all 100 canonical calls. Expanding on the
+middle-tool jump measured 5.7 ms append-batch p95, 8.0 ms result-batch p95, 28.9 ms settlement,
+60.5 ms exact jump, a 10.3 MB active delta and 23 live row views. The gate therefore covers both
+the compact default and the addressable expanded state.
 
 The isolated 100-tool result and settle maxima were not repeatable; later fresh processes returned
 to the same 2–3 ms batch and 16–18 ms settlement band. Per-batch work is effectively independent
@@ -2848,6 +2857,21 @@ Do not rebuild result cells for a query-only highlight change, and do not turn t
 into one eager settings card. Action tags must continue to index the same match snapshot that
 created the row identities.
 
+**2026-08-13 — the surface moved into the sidebar.** The virtualized pane controller above was
+unwired from the app in the "Fix Settings sidebar search" change and later deleted with the
+row-level search redesign: results are now the sidebar's own list — each matching page's row with
+the matching *settings* beneath it, clicking a setting scrolling its page to the anchored row
+(`SettingsRowAnchor`/`SettingsRowReveal`). That list is a retained stack rebuilt per keystroke, so
+the extension ceiling applies to it instead: a search caps what it constructs at
+`SettingsSidebar.Defaults.maximumResultRows` (48) and appends a "N more pages match" line for the
+cut, while setting-level rows come only from the app's own bounded catalogue (`SettingsEntry`).
+The stress fixture kept its name (`testStressSettingsSearchResultsWhenEnabled`) and now drives
+2,048 extension-shaped pages through the real sidebar, asserting the cap held, the cut was stated,
+and the theme audit passes; `scripts/profile_threading.sh settings-search-stress` still runs it.
+The resting (query-empty) page list remains uncapped: it is the app's own catalogue plus whatever
+extensions actually installed, and it predates this change. Do not lift the cap without
+virtualizing the results, and do not let the cap go silent.
+
 ## 2026-08-09 — command and workspace-file interactive bounds
 
 The command palette and file mentions cross both scaling axes: extension/file cardinality grows,
@@ -2864,3 +2888,71 @@ and filtering runs at keystroke frequency. Their implementation-time gate is exp
 - the stress fixtures exercise 25,000 commands, 50,000 matching paths, result caps, and refusal
   just past the 100,000-path index boundary. These are correctness workloads rather than timing
   thresholds: CI variance must not turn a bounded architecture into a flaky stopwatch assertion.
+
+## Media document stress target
+
+`MediaDocumentPerformanceTests` is the scale fixture for the media path — the `media` node's
+player, the Lottie engine, the project-file walk and the attachments content probe. Default sizes
+run on every `fast` pass so an accidental shape change fails immediately;
+`THREADING_MEDIA_STRESS=1` raises the layer count to 500 and the file count to 20,000 for a
+profiling sweep, and `THREADING_MEDIA_STRESS_LAYERS` / `THREADING_MEDIA_STRESS_FILES` set them
+directly.
+
+The subsystem it measures is described in
+[`media-documents.md`](media-documents.md). **The player is the only high-frequency surface in the
+feature**; everything else there is an action round trip, so these are the numbers that decide
+whether the design holds.
+
+### Measured, 2026-08-13, Debug, M-series
+
+A 200-layer synthetic composition — each layer a filled and stroked rounded rectangle with an
+animated position and rotation, which is a heavier document than most real ones.
+
+| Path | Measured | Ceiling in the fixture |
+|---|---|---|
+| Parse, 50 layers | 5.0 ms | ratio-checked against 200 |
+| Parse, 200 layers | 17.2 ms | must stay linear in layers |
+| Rasterize one frame, 800 × 600 | 5.5 ms | 1 s |
+| Rasterize one frame, 1,920 × 1,080 | 6.7 ms | 1 s |
+| Rasterize one frame, backing cap (2,048²) | 10.7 ms | 1 s |
+| **Main actor per tick** | **0.00 ms** | 2 ms |
+| Animated GIF, decode + present | 2.8 ms/frame | 50 ms |
+| Enumerate 5,000 files, 25 pages | 792 ms | 20 s |
+| Probe 32 ambiguous candidates | 61 ms (0.9 ms read + 59 ms scan) | 1 s |
+
+Two of those are the load-bearing ones:
+
+- **0.00 ms on the main actor per tick.** `present(atProgress:)` hands the frame to a detached
+  task and returns; what runs on the main actor per tick is bookkeeping. If that number ever moves,
+  the rasterization has come back onto the main thread.
+- **Sixty positions produce two rasterizations.** The fixture drives sixty `present(atProgress:)`
+  calls while one frame is still rendering and counts what reaches the render host: the in-flight
+  frame and the last pending position. A player that queued would produce sixty and drift further
+  behind real time the longer it ran.
+
+Rasterization is ~7 ms per frame at 1080p for a deliberately heavy document, so a 60fps document at
+that size would not hold 60fps in Debug — which is why the clock is capped at the document's own
+frame rate through `CAFrameRateRange`, why frames supersede rather than queue, and why the clock
+stops the moment nothing can see it. These are Debug figures; Release is materially faster, and no
+shipping conclusion should be drawn from them.
+
+### The probe was 5× slower than it needed to be
+
+The first measurement was **295 ms** for one scan's whole 32-candidate budget — on the worker a
+debounced terminal scan shares. Attributing it split the cost cleanly: **1 ms of reading against
+294 ms of scanning**, so the bounded 64 KiB prefix read was never the problem.
+
+Three changes, each measured:
+
+1. **Scan bytes, not a `String`.** The common answer is *no*, and building a 64 KiB `String` to say
+   so costs a UTF-8 validation plus several grapheme-aware passes. 295 ms → 154 ms.
+2. **Use the raw buffer, not `Data`'s indices.** Subscripting a `Data` by `Index` is not a pointer
+   dereference. 154 ms → 110 ms.
+3. **One pass, indexed by first byte.** A naive single pass that consults every needle at every
+   position was *far worse* — **2,480 ms**, because the per-byte inner loop dominates everything.
+   Every signature starts with `"`, `o` or `s`, so a 256-entry table makes the common byte cost one
+   comparison and no iteration. 110 ms → **61 ms**.
+
+The lesson worth keeping is the middle one: "fewer passes" is not automatically faster than
+"several cheap passes", and the version that read best was 20× slower than the version it replaced.
+Measure each step.

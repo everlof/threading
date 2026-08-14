@@ -10,12 +10,19 @@ import ThreadingExtensionKit
 enum ExtensionNodeRenderer {
     typealias ImageResolver = @MainActor (ExtensionImageReference) -> NSImage?
     typealias CustomSurfaceRenderer = @MainActor (ExtensionCustomSurface) -> NSView?
+    /// Builds — or reuses — the host-owned player for one media document.
+    ///
+    /// A *factory*, not a view: playback survives a panel replacement keyed on the document's id,
+    /// so the surface hosting the tree owns the player and this hands back the one that already
+    /// exists for that id. A row rebuilt because a label changed must not restart the animation.
+    typealias MediaPlayerFactory = @MainActor (ExtensionMediaDocument) -> NSView?
 
     enum RenderError: Error, Equatable, LocalizedError {
         case tooDeep(maximum: Int)
         case tooManyNodes(maximum: Int)
         case tooManyRenderedElements(maximum: Int)
         case customSurfaceUnavailable
+        case mediaPlayerUnavailable
 
         var errorDescription: String? {
             switch self {
@@ -36,6 +43,8 @@ enum ExtensionNodeRenderer {
                 )
             case .customSurfaceUnavailable:
                 return L10n.string("The extension custom surface could not be created.")
+            case .mediaPlayerUnavailable:
+                return L10n.string("This surface cannot play media documents.")
             }
         }
     }
@@ -50,12 +59,14 @@ enum ExtensionNodeRenderer {
         _ node: ExtensionNode,
         imageResolver: @escaping ImageResolver = defaultImageResolver,
         customSurfaceRenderer: @escaping CustomSurfaceRenderer = { _ in nil },
+        mediaPlayerFactory: @escaping MediaPlayerFactory = { _ in nil },
         onAction: @escaping (String) -> Void
     ) throws -> ExtensionNodeHostView {
         try render(
             node,
             imageResolver: imageResolver,
             customSurfaceRenderer: customSurfaceRenderer,
+            mediaPlayerFactory: mediaPlayerFactory,
             onEvent: { actionID, _ in onAction(actionID) }
         )
     }
@@ -64,6 +75,7 @@ enum ExtensionNodeRenderer {
         _ node: ExtensionNode,
         imageResolver: @escaping ImageResolver = defaultImageResolver,
         customSurfaceRenderer: @escaping CustomSurfaceRenderer = { _ in nil },
+        mediaPlayerFactory: @escaping MediaPlayerFactory = { _ in nil },
         onEvent: @escaping (String, ExtensionJSONValue?) -> Void
     ) throws -> ExtensionNodeHostView {
         try validate(node)
@@ -71,6 +83,7 @@ enum ExtensionNodeRenderer {
             node: node,
             imageResolver: imageResolver,
             customSurfaceRenderer: customSurfaceRenderer,
+            mediaPlayerFactory: mediaPlayerFactory,
             onEvent: onEvent
         )
     }
@@ -101,6 +114,7 @@ enum ExtensionNodeRenderer {
         fillsContentWidth: Bool,
         imageResolver: @escaping ImageResolver = defaultImageResolver,
         customSurfaceRenderer: @escaping CustomSurfaceRenderer = { _ in nil },
+        mediaPlayerFactory: @escaping MediaPlayerFactory = { _ in nil },
         onEvent: @escaping (String, ExtensionJSONValue?) -> Void
     ) throws -> ExtensionNodeHostView {
         try ExtensionNodeHostView(
@@ -109,6 +123,7 @@ enum ExtensionNodeRenderer {
             fillsContentWidth: fillsContentWidth,
             imageResolver: imageResolver,
             customSurfaceRenderer: customSurfaceRenderer,
+            mediaPlayerFactory: mediaPlayerFactory,
             onEvent: onEvent
         )
     }
@@ -204,6 +219,7 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
 
     private let imageResolver: ExtensionNodeRenderer.ImageResolver
     private let customSurfaceRenderer: ExtensionNodeRenderer.CustomSurfaceRenderer
+    private let mediaPlayerFactory: ExtensionNodeRenderer.MediaPlayerFactory
     private let onEvent: (String, ExtensionJSONValue?) -> Void
     private var actionsByButton: [ObjectIdentifier: String] = [:]
     private var actionsByTextInput: [ObjectIdentifier: String] = [:]
@@ -216,10 +232,12 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
         fillsContentWidth: Bool = true,
         imageResolver: @escaping ExtensionNodeRenderer.ImageResolver,
         customSurfaceRenderer: @escaping ExtensionNodeRenderer.CustomSurfaceRenderer,
+        mediaPlayerFactory: @escaping ExtensionNodeRenderer.MediaPlayerFactory = { _ in nil },
         onEvent: @escaping (String, ExtensionJSONValue?) -> Void
     ) throws {
         self.imageResolver = imageResolver
         self.customSurfaceRenderer = customSurfaceRenderer
+        self.mediaPlayerFactory = mediaPlayerFactory
         self.onEvent = onEvent
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -332,6 +350,16 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
 
         case .scene(let scene):
             return makeScene(scene)
+
+        case .media(let document):
+            // A surface that was not given a factory has no player, which is a refusal rather
+            // than a blank rectangle: a canvas that draws nothing looks like a broken document.
+            guard let view = mediaPlayerFactory(document) else {
+                throw ExtensionNodeRenderer.RenderError.mediaPlayerUnavailable
+            }
+            view.translatesAutoresizingMaskIntoConstraints = false
+            view.setAccessibilityIdentifier("extension.media.\(document.id)")
+            return view
 
         case .status(let text, let role):
             let label = NSTextField(labelWithString: text)
