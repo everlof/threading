@@ -2513,9 +2513,49 @@ by the same sweep that re-applies the corner — `AppThemeRefresh.repaint` owns 
 drift apart. Call sites keep their own constraints and their own signs; only the magnitude is the
 token's.
 
-Adopted by the surfaces that pad a `.panel`: the gallery's story cards, the settings rows and the
-dividers that start on their label column, the usage dashboard's metric and coverage cards, and the
-subagent summary. Chat bubbles were left alone deliberately — they pad by `medium`, are sized to
-their text, and a short one's drawn corner is its own half-height rather than the theme's stated
-40, so the fitted inset would over-pad them. If they need it, they need the fit taken against the
-corner the bubble actually draws.
+Two things a call site states for itself. **What it pads by when the corner asks nothing** (`from`):
+a card's `inset`, but a chat bubble's own measure is `medium` and being widened to a card's would
+be a different bubble — the corner may only push content further in, never pull it back. And
+**what its content already carries** (`less`): a settings card stacks rows that pad themselves
+10pt, so the card owes only the difference at its two ends, or the first row would sit 30pt down a
+card whose rows are 10pt apart.
+
+Adopted by the surfaces that pad a `.panel`: the gallery's story cards, the settings rows, the
+dividers that start on their label column and the card's own two ends, the usage dashboard's metric
+and coverage cards, the subagent summary, and both user bubbles — where at 40pt the arc has crossed
+x=13 by the height of the first line, so 10pt of padding put the opening word outside the shape
+that was holding it.
+
+One known edge, pre-existing and now slightly more visible: the conversation's row-height cache is
+keyed by presentation and width, and a theme change invalidates neither — a bubble that grows by
+the corner's difference (or by a theme's own typeface) is measured again on the next width change
+rather than immediately.
+
+### The same corner, one layer out: a fill that runs past the panel holding it
+
+Reported from the render above, under Botanical: the highlighted **first** row's fill draws
+*outside* the menu panel's own border. Measured off that PNG, the row's wash spans x 37…222 where
+the border spans 39…220 — two to three points proud of the edge, on both sides, for the top ~19pt
+of the panel.
+
+Nothing clips it, and that is structural rather than an oversight: the panel's corner lives on a
+**layer** (it has to, because the panel also carries the theme's halo, and `masksToBounds` would
+take the halo with the overflow), while the rows live in a **scroll view** whose frame was inset by
+the same 6pt at the ends as at the sides. Six points is outside the silhouette while the corner is
+still turning — a 40pt corner has not curved past x=6 until 19pt down the edge — so the fill is
+placed beyond the shape and simply drawn there.
+
+`Design.Radius.edgeReach(of:clearing:)` states where the corner finishes for content held a fixed
+margin in from the side (`radius - √(2·radius·margin - margin²)`), and `ThemedMenuMetrics` gains a
+`verticalOuterInset` — the row area's inset at the panel's two **ends**, where its corner is, as
+against `outerInset` along its sides. Botanical takes 19, Claymorphism 14, and every other theme's
+corner is at or under the margin, so they keep 6 (or Platinum's 1, or 2) exactly. The panel is that
+much taller, which is the honest cost: a menu that reserved the old inset would put its last row
+where the corner is.
+
+This is the third fault from the same root as the two above, and worth stating as a rule rather
+than three fixes: **a broad corner is not only a look — it takes space away from the panel's own
+edges, in every direction, and anything drawn to a fixed margin has to be told where the corner
+finishes.** Text asks it as a diagonal clearance (`Spacing.inset(inside:)`), a fill asks it as an
+edge reach (`Radius.edgeReach(of:clearing:)`), and a shape asks it as a fitted corner
+(`ThemedSurface.Shape`, `Radius.control(fitting:)`).

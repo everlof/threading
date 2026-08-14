@@ -178,6 +178,67 @@ final class PanelContentInsetTests: XCTestCase {
         )
     }
 
+    // MARK: - A fill that runs to the edge
+
+    /// How far a corner reaches along its edge, for content already held in from the side.
+    func testACornerReachesAlongItsEdgePastAFillHeldInFromTheSide() {
+        let margin = ThemedMenuMetrics.outerInset
+
+        XCTAssertEqual(Design.Radius.edgeReach(of: 40, clearing: margin), 18.93, accuracy: 0.01)
+        XCTAssertEqual(Design.Radius.edgeReach(of: 32, clearing: margin), 13.35, accuracy: 0.01)
+        XCTAssertEqual(
+            Design.Radius.edgeReach(of: margin, clearing: margin),
+            0,
+            "a corner no wider than the margin has nothing to reach past"
+        )
+        XCTAssertEqual(Design.Radius.edgeReach(of: 0, clearing: margin), 0)
+    }
+
+    /// The menu's rows start where its corner has finished, so a highlighted first or last row
+    /// cannot draw outside the panel holding it — neither clips the other.
+    func testAMenuStartsItsRowsWhereItsCornerHasFinished() {
+        AppThemePalette.set(AppThemeStyles.botanical)
+        XCTAssertEqual(ThemedMenuMetrics.verticalOuterInset, 19)
+        XCTAssertGreaterThanOrEqual(
+            ThemedMenuMetrics.verticalOuterInset,
+            Design.Radius.edgeReach(
+                of: Design.Radius.panel,
+                clearing: ThemedMenuMetrics.outerInset
+            ),
+            "the first row's fill starts while the panel's corner is still outside it"
+        )
+
+        AppThemePalette.set(AppThemeStyles.claymorphism)
+        XCTAssertEqual(ThemedMenuMetrics.verticalOuterInset, 14)
+
+        AppThemePalette.set(.system)
+        XCTAssertEqual(
+            ThemedMenuMetrics.verticalOuterInset,
+            ThemedMenuMetrics.outerInset,
+            "a modest corner moved a menu that had nothing to clear"
+        )
+    }
+
+    /// The panel is as much taller as its ends are wider — a menu that reserved the old inset
+    /// would put its last row where the corner is.
+    func testAMenuPanelIsAsTallAsItsEndsAsk() {
+        let entries: [ThemedMenuEntry] = (0..<4).map {
+            .item(ThemedMenuItem(title: "Row \($0)"))
+        }
+        let rows = ThemedMenuMetrics.heights(for: entries).reduce(0, +)
+
+        AppThemePalette.set(.system)
+        let stock = ThemedMenuMetrics.height(for: entries)
+        XCTAssertEqual(stock, rows + ThemedMenuMetrics.outerInset * 2)
+
+        AppThemePalette.set(AppThemeStyles.botanical)
+        XCTAssertEqual(
+            ThemedMenuMetrics.height(for: entries),
+            rows + ThemedMenuMetrics.verticalOuterInset * 2
+        )
+        XCTAssertGreaterThan(ThemedMenuMetrics.height(for: entries), stock)
+    }
+
     // MARK: - A live theme switch
 
     /// A constraint's constant freezes exactly the way a layer's corner does, so the padding is

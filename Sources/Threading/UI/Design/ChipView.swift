@@ -58,6 +58,21 @@ enum ClassicChoiceDrawing {
         )
     }
 
+    /// The Aqua chooser's plate: a silver capsule with a hairline border.
+    ///
+    /// Stroked here rather than applied to either implementation's layer, so the corner is one
+    /// circular arc for both of them. See `ChipView.updateBackground` for what a layer border
+    /// does to this radius instead.
+    @discardableResult
+    static func drawAquaSurface(in bounds: NSRect) -> ThemedSurface.Shape {
+        ThemedSurface.draw(
+            bounds,
+            fill: Design.Surface.controlResting,
+            border: Design.Surface.border,
+            radius: aquaCornerRadius
+        )
+    }
+
     /// The blue gel plate an Aqua pop-up wears at its trailing end.
     ///
     /// Clipped to the button's own face rather than filled square. A pop-up's well reaches the
@@ -742,10 +757,17 @@ final class ChipView: ThemedControl, OpticalInsetProviding {
                 bevel: isPresentingMenu ? .sunken : .automatic
             )
         case .aquaPopup:
+            // Drawn in `draw(_:)` rather than applied here, and the layer left carrying nothing
+            // but the silhouette. A `CALayer` border follows the *continuous* corner this app
+            // rounds everything with, whose inner offset is not concentric: at a five-point
+            // radius under a one-point border the stroke thickens through the arc and leaves a
+            // visible ledge where it meets the straight run — an extra edge in the corner, on a
+            // chooser sitting a row above a `ThemedPopUp` that strokes a clean circular one. Two
+            // Aqua choosers in one window cannot have two different corners, and the way to
+            // guarantee that is one drawing path, which is what this type exists for.
             applySurface(
-                fill: Design.Surface.controlResting,
-                radius: .fixed(ClassicChoiceDrawing.aquaCornerRadius),
-                border: Design.Surface.border
+                fill: .clear,
+                radius: .fixed(ClassicChoiceDrawing.aquaCornerRadius)
             )
         }
         alphaValue = isEnabled ? 1 : 0.5
@@ -849,6 +871,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding {
                 bevel: isPresentingMenu ? .sunken : .automatic
             )
         } else if style == .aquaPopup {
+            ClassicChoiceDrawing.drawAquaSurface(in: bounds)
             ClassicChoiceDrawing.drawAquaArrowWell(
                 in: arrowRect,
                 face: ClassicChoiceDrawing.aquaFace(in: bounds),

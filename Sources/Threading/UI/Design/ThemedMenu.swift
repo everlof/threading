@@ -1586,7 +1586,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
             desiredSize: size,
             in: bounds,
             flipped: isFlipped,
-            firstRowInset: ThemedMenuMetrics.outerInset,
+            firstRowInset: ThemedMenuMetrics.verticalOuterInset,
             whenClipped: { ThemedMenuMetrics.clippedHeight(for: entries, atMost: $0) }
         )
         let index = addColumn(
@@ -1848,6 +1848,24 @@ enum ThemedMenuMetrics {
         case .automatic: return Design.Spacing.small
         default: return 2
         }
+    }
+
+    /// The same, at the panel's two **ends**, where its corner is.
+    ///
+    /// A menu is a rounded panel whose rows are a scroll view's, and neither clips the other: the
+    /// panel's corner lives on a layer that must keep its halo, and the rows are drawn inside a
+    /// frame that was inset by the same 6pt at the ends as at the sides. Under a broad corner
+    /// those 6pt are *outside* the silhouette — Botanical's 40pt corner has not curved past them
+    /// until 19pt down — so a highlighted first or last row drew its fill past the panel's own
+    /// border. Reported from a render as the inner fill protruding through the outer edge.
+    ///
+    /// So the rows start where the corner has finished. Every theme whose corner is at or under
+    /// the margin keeps `outerInset` exactly, which is all of them but Botanical (19) and
+    /// Claymorphism (14).
+    static var verticalOuterInset: CGFloat {
+        let margin = outerInset
+        let reach = Design.Radius.edgeReach(of: Design.Radius.panel, clearing: margin)
+        return max(margin, reach.rounded(.up))
     }
     static var rowHeight: CGFloat {
         switch appearance {
@@ -2312,7 +2330,7 @@ enum ThemedMenuMetrics {
     }
 
     static func height(for entries: [ThemedMenuEntry]) -> CGFloat {
-        heights(for: entries).reduce(outerInset * 2, +)
+        heights(for: entries).reduce(verticalOuterInset * 2, +)
     }
 
     /// The height to settle on when a panel cannot show every row: the tallest one within
@@ -2329,7 +2347,7 @@ enum ThemedMenuMetrics {
     /// panel's edge rather than as a row with more below it, so one is carried whole into the
     /// hidden part and the item above it does the peeking.
     static func clippedHeight(for entries: [ThemedMenuEntry], atMost limit: CGFloat) -> CGFloat {
-        let budget = limit - outerInset * 2
+        let budget = limit - verticalOuterInset * 2
         var consumed: CGFloat = 0
         var peeked: CGFloat?
 
@@ -2345,7 +2363,7 @@ enum ThemedMenuMetrics {
         // Nothing fits even half a row — a panel shortened to that would say less than the
         // clamped one does. Keep the limit and let the scroller carry it.
         guard let peeked else { return limit }
-        return peeked + outerInset * 2
+        return peeked + verticalOuterInset * 2
     }
 
     /// `selectedEntryIndex` participates because it is one of the two ways a row is marked, and
@@ -2522,7 +2540,7 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
 
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller =
-            document.naturalHeight > frame.height - ThemedMenuMetrics.outerInset * 2
+            document.naturalHeight > frame.height - ThemedMenuMetrics.verticalOuterInset * 2
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.documentView = document
         addSubview(scrollView)
@@ -2587,8 +2605,9 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
 
     override func layout() {
         super.layout()
+        // Wider at the ends than at the sides under a broad corner — see `verticalOuterInset`.
         let inset = ThemedMenuMetrics.outerInset
-        var content = bounds.insetBy(dx: inset, dy: inset)
+        var content = bounds.insetBy(dx: inset, dy: ThemedMenuMetrics.verticalOuterInset)
         if ThemedMenuMetrics.appearance == .platinum {
             // The menu's one-pixel hard shadow is outside the bordered panel on the trailing
             // edge. A symmetric inset gave the document that shadow column and separators

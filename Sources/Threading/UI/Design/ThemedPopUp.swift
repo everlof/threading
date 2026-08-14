@@ -320,12 +320,7 @@ final class ThemedPopUp: ThemedControl {
                 bevel: .sunken
             )
         } else if choiceStyle == .aquaPopup {
-            shape = ThemedSurface.draw(
-                bounds,
-                fill: Design.Surface.controlResting,
-                border: Design.Surface.border,
-                radius: ClassicChoiceDrawing.aquaCornerRadius
-            )
+            shape = ClassicChoiceDrawing.drawAquaSurface(in: bounds)
         } else if choiceStyle.isClassic {
             shape = ThemedSurface.draw(
                 bounds,

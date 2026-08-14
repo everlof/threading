@@ -123,6 +123,25 @@ enum Design {
         /// rounded rect. A third is the point at which a 16pt square still has flat edges.
         static let cornerFitFraction: CGFloat = 1.0 / 3.0
 
+        /// How far along an edge this corner reaches, for content already held `margin` in from
+        /// the side the corner meets.
+        ///
+        /// The question a *filled* row inside a panel asks, which is not the question
+        /// `Design.Spacing.inset(inside:)` answers: that one keeps a text corner clear of the
+        /// arc, this one asks where a fill that runs to a fixed margin may start. Until
+        /// `radius - √(2·radius·margin - margin²)` along the edge, the arc is still outside that
+        /// margin, and a straight-edged fill placed there is outside the shape holding it — which
+        /// is a fill the panel does not clip (its corner is a layer's and its rows are a scroll
+        /// view's), so it protrudes past the border rather than being cut by it. Measured on
+        /// Botanical's menu: a 40pt corner, rows held 6pt in, and the first row's highlight
+        /// standing outside the panel's own edge for the top 19pt.
+        ///
+        /// Zero once the margin is wider than the corner, which is every stock theme but three.
+        static func edgeReach(of radius: CGFloat, clearing margin: CGFloat) -> CGFloat {
+            guard radius > margin, margin >= 0 else { return 0 }
+            return radius - (2 * radius * margin - margin * margin).squareRoot()
+        }
+
         /// The shape twice as long as it is tall, at which the whole half is available — a
         /// capsule. Interpolated rather than switched at the threshold, so two rows of similar
         /// proportion do not come out visibly differently cornered.

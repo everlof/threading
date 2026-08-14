@@ -164,19 +164,64 @@ final class AquaChromeTests: XCTestCase {
         }
     }
 
+    /// A chip and a pop-up are the same control under this material — one serves the composer and
+    /// the other serves forms — so their corners have to be the same pixels. The chip's came from
+    /// a `CALayer` border, which follows the app's continuous corner: at this radius the stroke
+    /// thickens through the arc and leaves a ledge where it meets the straight run, a step the
+    /// pop-up a row above it does not have. Compared as drawn, because that difference is a pixel
+    /// difference and nothing else states it.
+    func testTheTwoAquaChoosersDrawTheSameCorner() throws {
+        AppThemePalette.set(AppThemeStyles.aquaTiger)
+        let frame = NSRect(x: 10, y: 9, width: 160, height: Design.Size.choiceHeight)
+
+        let popUp = ThemedPopUp()
+        popUp.addItem(withTitle: "Agent's Setting")
+        popUp.frame = frame
+        let chip = ChipView()
+        chip.configure(symbolName: nil, title: "Agent's Setting")
+        chip.frame = frame
+
+        let corner = NSRect(x: frame.minX, y: frame.maxY - 8, width: 8, height: 8)
+        let drawn = try [popUp, chip].map { control -> [NSColor] in
+            let host = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+            host.wantsLayer = true
+            host.appearance = NSAppearance(named: .aqua)
+            host.addSubview(control)
+            host.layer?.backgroundColor = Design.Surface.ground.cgColor
+            host.layoutSubtreeIfNeeded()
+            let raster = try render(host)
+            return try stride(from: corner.minY, to: corner.maxY, by: 1).flatMap { y in
+                try stride(from: corner.minX, to: corner.maxX, by: 1).map { x in
+                    try XCTUnwrap(sample(raster, in: host, at: NSPoint(x: x + 0.5, y: y + 0.5)))
+                }
+            }
+        }
+
+        print("PROBE frames popUp=\(popUp.frame) chip=\(chip.frame)")
+        for (name, block) in zip(["popUp", "chip"], drawn) {
+            let rows = stride(from: 0, to: 64, by: 8).map { start in
+                block[start..<(start + 8)]
+                    .map { String(format: "%.2f", $0.brightnessComponent) }
+                    .joined(separator: " ")
+            }
+            print("PROBE \(name)\n" + rows.reversed().joined(separator: "\n"))
+        }
+        for (index, pair) in zip(drawn[0], drawn[1]).enumerated() {
+            let (fromPopUp, fromChip) = pair
+            XCTAssertEqual(
+                fromPopUp.brightnessComponent,
+                fromChip.brightnessComponent,
+                accuracy: 0.02,
+                "the two Aqua choosers drew different corners at sample \(index)"
+            )
+        }
+    }
+
     // MARK: - Default Buttons
 
     /// Aqua's default button is the blue one. `raised` is the *classic desktop* default — the
     /// ordinary face plus an outer frame — which is Platinum's answer and Win32's, and on a
     /// material with a corner radius it also left a square of frame colour outside every curve.
-    func testProbeInk() {
-        AppThemePalette.set(AppThemeStyles.aquaTiger)
-        print("PROBE selected=\(Design.Text.selected.usingColorSpace(.sRGB)!)",
-              "label=\(Design.Text.label.usingColorSpace(.sRGB)!)",
-              "accent=\(Design.Surface.accent.usingColorSpace(.sRGB)!)",
-              "indicator=\(ClassicChoiceDrawing.indicatorInk(for: .aquaPopup).usingColorSpace(.sRGB)!)")
-    }
-
     func testTheAquaMaterialsFillTheirDefaultButton() throws {
         for theme in [AppThemeStyles.aqua, AppThemeStyles.aquaTiger] {
             let material = try XCTUnwrap(theme.variant(.light)?.material)
