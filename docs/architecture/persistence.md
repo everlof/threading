@@ -250,6 +250,36 @@ the redirect fails the suite instead of deleting the developer's projects on the
 `HostedStoreIsolationTests` reproduces the loss directly — two connections, one adds a project,
 the stale one's reconcile must throw and leave that project standing.
 
+### 2026-08-15 — The same race, one domain further out
+
+`PreferenceStore` redirects a hosted test away from `UserDefaults.standard`, which answers "not
+the user's preferences". It did not answer "not another test host's", because the scratch suite
+was one constant name — `codes.threading.hosted-tests` — for every process. The store above was
+made per-pid for precisely the reason this one was not, and several agents running the suite at
+once is this repository's ordinary working state, so two `xcodebuild test` runs shared a
+preferences domain and read each other's recorded choices.
+
+**It does not present as shared state; it presents as a haunting.** A test applies Cyberpunk,
+reads the choice back through the app's own code, and gets Claymorphism. A recovery test that
+stored `threading` reads `ext.com.example.pack.storm` — an id belonging to a *contributed* theme
+that no test in that process ever installed. Six cases failed on one run and a different six on
+the next; each passed alone, passed on a re-run, and bisected to a different neighbour every
+time, because the interfering write was never in the process being bisected. The tell, when the
+state was finally printed rather than inferred, was a stored theme id (`platinum-9`) that
+appeared in a run whose own tests had never named it.
+
+The suite is now named `codes.threading.hosted-tests.<pid>`. It stays *named* rather than
+volatile for the original reason — `restore()`'s tests read back through the app's own paths what
+they wrote through them — and the pid is what stops that name from being a rendezvous. It also
+ends the cross-run persistence `themes.md` records as a hazard for `FollowsAppThemeTests`: a
+default written by one run no longer outlives it.
+
+`scripts/test.sh` collects the domains afterwards, by **liveness rather than by its own pid**:
+cfprefsd flushes after the process it belongs to is gone, so a run deleting only its own file
+would race its own write. A domain whose pid names no live process cannot be in use, and whatever
+a run leaves behind the next one collects — the same shape as the empty-UUID-plist sweep beside
+it, and for the same reason.
+
 ## The Pre-Rename Directory
 
 The rename to Threading moved the Application Support directory with the app —

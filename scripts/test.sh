@@ -112,4 +112,32 @@ if [[ "${swept}" != "0" ]]; then
   echo "swept ${swept} empty scratch preference files"
 fi
 
+# And the hosted-test suite this run wrote its recorded choices into.
+#
+# `PreferenceStore` names that suite after the test host's pid, because one shared name let two
+# concurrent runs on the same machine read each other's answers — see the note there. The cost is
+# one plist per run, so they are collected here rather than left to accumulate the way the UUID
+# domains above once did.
+#
+# Deleted by liveness rather than by this run's own pid: cfprefsd flushes after the process it
+# belongs to is gone, so a run that removed only its own file would race its own write. A domain
+# whose pid no longer names a process cannot be in use, and whatever this run leaves behind the
+# next one collects. The unsuffixed legacy name is always stale — nothing writes it any more.
+hosted_prefix="codes.threading.hosted-tests"
+hosted_swept=0
+while IFS= read -r plist; do
+  suffix="$(basename "${plist}" .plist)"
+  suffix="${suffix#"${hosted_prefix}"}"
+  suffix="${suffix#.}"
+  if [[ -n "${suffix}" ]]; then
+    [[ "${suffix}" =~ ^[0-9]+$ ]] || continue
+    kill -0 "${suffix}" 2>/dev/null && continue
+  fi
+  rm -f "${plist}" && hosted_swept=$((hosted_swept + 1))
+done < <(find "${HOME}/Library/Preferences" -maxdepth 1 -type f -name "${hosted_prefix}*.plist" 2>/dev/null)
+
+if [[ "${hosted_swept}" != "0" ]]; then
+  echo "swept ${hosted_swept} finished hosted-test preference domains"
+fi
+
 exit "${status}"

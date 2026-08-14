@@ -22,6 +22,40 @@ final class PreferenceStoreTests: XCTestCase {
         XCTAssertFalse(PreferenceStore.shared === UserDefaults.standard)
     }
 
+    /// **And away from the other suite runs on the same machine.**
+    ///
+    /// The redirect above answers "not the user's preferences"; this answers "not another test
+    /// host's either", which is a different question and was unanswered for as long as the suite
+    /// name was a constant. Several agents run this suite at once in this repository, and a
+    /// shared domain made them read each other's recorded choices: a test applied Cyberpunk and
+    /// read Claymorphism back, a recovery test that stored `threading` read a contributed theme
+    /// id no test in its own process had ever installed. It presents as flakiness with no
+    /// culprit — every case passes alone, passes on a re-run, and bisects somewhere new each
+    /// time — because the interfering write is not in this process at all.
+    ///
+    /// Asserted on the name rather than by spawning a second host: the pid is the whole
+    /// mechanism, and a name carrying this process's pid cannot be a name another process picked.
+    func testTheScratchSuiteBelongsToThisProcessAlone() throws {
+        XCTAssertTrue(
+            PreferenceStore.hostedTestSuiteName.hasPrefix(PreferenceStore.hostedTestSuitePrefix),
+            "the sweep in scripts/test.sh finds these domains by prefix"
+        )
+        XCTAssertNotEqual(
+            PreferenceStore.hostedTestSuiteName,
+            PreferenceStore.hostedTestSuitePrefix,
+            "one name for every test host is a domain two concurrent runs share"
+        )
+
+        let suffix = PreferenceStore.hostedTestSuiteName
+            .dropFirst(PreferenceStore.hostedTestSuitePrefix.count)
+            .drop(while: { $0 == "." })
+        XCTAssertEqual(
+            String(suffix),
+            String(ProcessInfo.processInfo.processIdentifier),
+            "the suite is not named after the process that owns it"
+        )
+    }
+
     /// The specific write that was reaching the user, asserted at the library rather than at the
     /// key: any future store that records a choice should come through the same seam.
     @MainActor

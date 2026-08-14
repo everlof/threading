@@ -23,9 +23,26 @@ import Foundation
 /// app read it — a seam under those would be a second bug, not a fix.
 enum PreferenceStore {
 
+    /// The family every hosted test bundle's scratch suite belongs to. `scripts/test.sh` sweeps
+    /// by this prefix, so the name a run picks below has to keep it.
+    static let hostedTestSuitePrefix = "codes.threading.hosted-tests"
+
     /// Named rather than volatile, so a test can still read back through the app's own code
     /// paths what it wrote through them — which is what `restore()`'s tests do.
-    static let hostedTestSuiteName = "codes.threading.hosted-tests"
+    ///
+    /// **Named per process, though, or the seam only moves the collision.** One suite name for
+    /// every test host meant two `xcodebuild test` runs on the same machine shared a preferences
+    /// domain, and this repository's normal working state is several agents running the suite at
+    /// once. What that looks like from inside is not a shared-state bug but a haunting: a test
+    /// applies Cyberpunk, reads the choice back, and finds Claymorphism; a recovery test that
+    /// stored `threading` reads `ext.com.example.pack.storm`, an id from a *contributed* theme
+    /// no test in the process ever installed. Every one of them passes alone, passes on a
+    /// re-run, and bisects to a different culprit each time, because the interfering write comes
+    /// from another process rather than an earlier test. The pid is what makes a run's recorded
+    /// choices its own, and `StateManager` already scopes its scratch store the same way for the
+    /// same reason — see `persistence.md`.
+    static let hostedTestSuiteName =
+        "\(hostedTestSuitePrefix).\(ProcessInfo.processInfo.processIdentifier)"
 
     /// Resolved once: `NSClassFromString` is a runtime lookup, and the answer cannot change
     /// within a process.

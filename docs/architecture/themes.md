@@ -108,10 +108,14 @@ Three decisions carry it:
   to keep coherent, and it hid every theme's designed pairing behind a submenu. **There is no
   migration**: `defaultTheme` is an embedded copy, so anyone with a saved profile — one
   `ProfileStorage.save` is enough — keeps the palette already on disk and changes it in Settings if
-  they want the new behaviour. The same shadowing bites the test suite, because
-  `PreferenceStore.hostedTestSuiteName` is a *named* suite: a default written by
-  `ThemeToolTests` outlives its run, so a test asserting the shipped value must state its own
-  starting point rather than read one off disk (`FollowsAppThemeTests`).
+  they want the new behaviour. The same shadowing used to bite the test suite, because
+  `PreferenceStore.hostedTestSuiteName` is a *named* suite and a default written by
+  `ThemeToolTests` outlived its run. The name now carries the test host's pid, so it does not —
+  but a test asserting the shipped value should still state its own starting point rather than
+  read one off disk (`FollowsAppThemeTests`), because within one process the shadowing is real.
+  Why the pid is there at all is a different failure, and it is in
+  [`persistence.md`](persistence.md#2026-08-15--the-same-race-one-domain-further-out): the shared
+  name let two concurrent suite runs read each other's recorded theme choices.
 - **It is a reserved stable ID, not a fourth setting.** `TerminalThemeID.followsAppTheme`
   participates in the same three scoped assignments as every other terminal theme, so a session
   can follow the chrome while its project names Solarized and the narrowest scope still wins.
