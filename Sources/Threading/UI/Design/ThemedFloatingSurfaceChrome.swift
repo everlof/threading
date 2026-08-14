@@ -34,13 +34,32 @@ struct ThemedFloatingSurfaceChrome {
         let flatEdge = style.edge == .flat || (style.edge == .material && !materialEdge)
         let materialShadow = material.glow != nil
             && (style.shadow == .material || style.shadow == .automatic)
+        let systemShadow = style.shadow == .system
+            || (style.shadow == .automatic && !materialShadow)
+        let radius = style.cornerRadius.map(SurfaceRadius.fixed) ?? .panel
 
         view.applySurface(
             fill: fill,
-            radius: .panel,
+            radius: radius,
             border: flatEdge ? Design.Surface.border.composited(over: fill) : nil,
             glow: materialShadow,
             bevel: materialEdge ? .automatic : .none
         )
+
+        // A child-window popover receives the platform's window shadow. An embedded floating
+        // card does not, so the same `.system`/`.automatic` material otherwise loses the depth
+        // that separates it from the pane it covers. The neutral shadow is intentional: every
+        // themed colour follows that pane, while depth has to remain visible over all of them.
+        guard systemShadow else { return }
+        view.layer?.masksToBounds = false
+        view.applyLayerShadow(.black)
+        view.layer?.shadowOpacity = Metrics.systemShadowOpacity
+        view.layer?.shadowRadius = Metrics.systemShadowRadius
+        view.layer?.shadowOffset = .zero
+    }
+
+    private enum Metrics {
+        static let systemShadowOpacity: Float = 0.24
+        static let systemShadowRadius: CGFloat = 12
     }
 }

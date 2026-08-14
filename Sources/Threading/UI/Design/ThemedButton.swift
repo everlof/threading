@@ -43,6 +43,12 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         /// are different kinds of thing, and a hint crowding the words reads as one word.
         static let shortcutGap: CGFloat = Design.Spacing.medium
 
+        /// A menu-row disclosure is a trailing column, not another word in the title. It uses
+        /// the same optical size as the app's real menu chevron so a button acting as a cell and
+        /// a row inside `ThemedMenu` make the same promise.
+        static let submenuIndicatorSize: CGFloat = Design.Symbol.chevron
+        static let submenuIndicatorGap: CGFloat = Design.Spacing.small
+
         /// The chord is a reminder, not a second title, so it steps back from the same ink
         /// rather than taking a colour of its own — which on a filled primary is the only way
         /// to stay legible against the accent.
@@ -83,6 +89,17 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         case tertiary
     }
 
+    /// Where an icon/title unit sits when the control is wider than its intrinsic content.
+    ///
+    /// Buttons are centred by default, which is right for ordinary actions. Menu rows are a
+    /// different shape: every hit target fills one shared column, while the icon and words keep
+    /// a stable leading edge. Keeping that distinction in the design-system control means a
+    /// feature does not have to wrap a button in a second hover-drawing view to get a menu cell.
+    enum ContentAlignment {
+        case center
+        case leading
+    }
+
     /// The tier, over the two flags that draw it. Reading it back is exact, since every
     /// combination of the flags maps to one tier and back.
     var emphasis: Emphasis {
@@ -93,6 +110,22 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         set {
             isProminent = newValue == .primary
             isBordered = newValue != .tertiary
+        }
+    }
+
+    var contentAlignment: ContentAlignment = .center {
+        didSet { needsDisplay = true }
+    }
+
+    /// Draws the trailing `›` that says resting on this menu-like row reveals more choices.
+    ///
+    /// The indicator owns a real trailing column and therefore participates in intrinsic width
+    /// and title truncation. Appending a Unicode arrow to `title` cannot do either: it follows a
+    /// short title around the row and is the first thing lost when a long title truncates.
+    var showsSubmenuIndicator = false {
+        didSet {
+            guard showsSubmenuIndicator != oldValue else { return }
+            contentChanged()
         }
     }
 
@@ -407,6 +440,12 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
             width += shortcutWidth
             if !title.isEmpty || image != nil { width += Layout.shortcutGap }
         }
+        if showsSubmenuIndicator {
+            width += Layout.submenuIndicatorSize
+            if !title.isEmpty || image != nil || shortcutWidth > 0 {
+                width += Layout.submenuIndicatorGap
+            }
+        }
         if isBordered, let minimumWidth = buttonStyle.minimumWidth {
             width = max(width, minimumWidth)
         }
@@ -716,6 +755,10 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         let shortcutGap = shortcutWidth > 0 && (titleWidth > 0 || imageWidth > 0)
             ? Layout.shortcutGap
             : 0
+        let indicatorWidth = showsSubmenuIndicator
+            ? Layout.submenuIndicatorSize + Layout.submenuIndicatorGap
+            : 0
+        let contentMaxX = max(content.minX, content.maxX - indicatorWidth)
 
         // Centred as one unit while it fits, so an icon-and-title button does not read as an icon
         // with a label hanging off it. Once squeezed, anchor that unit at the leading inset:
@@ -728,10 +771,20 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         // as squeezed content pinned each affected mark four points to the right. Keep that unit on
         // the face's centre even when the title-padding budget does not fit.
         let measuredWidth = titleWidth + imageWidth + gap + shortcutWidth + shortcutGap
+            + indicatorWidth
         let isImageOnly = image != nil && titleWidth == 0 && shortcutWidth == 0
-        var x = measuredWidth <= content.width || isImageOnly
-            ? faceBounds.midX - measuredWidth / 2
-            : content.minX
+        let fits = measuredWidth <= content.width || isImageOnly
+        var x: CGFloat
+        switch contentAlignment {
+        case .center:
+            x = fits ? faceBounds.midX - measuredWidth / 2 : content.minX
+        case .leading:
+            if userInterfaceLayoutDirection == .rightToLeft, fits {
+                x = content.maxX - measuredWidth
+            } else {
+                x = content.minX
+            }
+        }
 
         if let image {
             draw(image, in: imageRect(for: image, centredOn: content.midY, from: x))
@@ -755,7 +808,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
             //
             // The chord keeps its own width out of that: a hint is what the title truncates
             // *around*, never over.
-            let available = max(0, content.maxX - x - shortcutWidth - shortcutGap)
+            let available = max(0, contentMaxX - x - shortcutWidth - shortcutGap)
             let titleRect = NSRect(
                 x: x,
                 y: titleTop - height,
@@ -772,20 +825,73 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
             x += min(titleWidth, available) + shortcutGap
         }
 
-        guard shortcutWidth > 0 else { return }
-        let shortcutHeight = lineHeight(of: shortcutFont)
-        let top = shortcutRectTop(titleTop: title.isEmpty ? nil : titleTop, centre: content.midY)
-        withTitleRasterization {
-            (shortcutText as NSString).draw(
+        if shortcutWidth > 0 {
+            let shortcutHeight = lineHeight(of: shortcutFont)
+            let top = shortcutRectTop(titleTop: title.isEmpty ? nil : titleTop, centre: content.midY)
+            withTitleRasterization {
+                (shortcutText as NSString).draw(
+                    in: NSRect(
+                        x: x,
+                        y: top - shortcutHeight,
+                        width: max(0, contentMaxX - x),
+                        height: shortcutHeight
+                    ),
+                    withAttributes: shortcutAttributes
+                )
+            }
+        }
+
+        if showsSubmenuIndicator {
+            drawSubmenuIndicator(
                 in: NSRect(
-                    x: x,
-                    y: top - shortcutHeight,
-                    width: max(0, content.maxX - x),
-                    height: shortcutHeight
-                ),
-                withAttributes: shortcutAttributes
+                    x: content.maxX - Layout.submenuIndicatorSize,
+                    y: content.midY - Layout.submenuIndicatorSize / 2,
+                    width: Layout.submenuIndicatorSize,
+                    height: Layout.submenuIndicatorSize
+                )
             )
         }
+    }
+
+    /// The same two grammars as `ThemedMenuRowView`: a hard filled triangle for the historical
+    /// menu families, a quiet stroked chevron for modern material. Kept here rather than supplied
+    /// as an SF Symbol so classic themes do not acquire one scalable Aqua glyph in their rows.
+    private func drawSubmenuIndicator(in rect: NSRect) {
+        let pointsRight = userInterfaceLayoutDirection != .rightToLeft
+        if AppThemePalette.current.material.menuAppearance.isHistorical {
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.shouldAntialias = false
+            let triangle = NSBezierPath()
+            triangle.move(to: NSPoint(
+                x: pointsRight ? rect.minX + 1 : rect.maxX - 1,
+                y: rect.minY
+            ))
+            triangle.line(to: NSPoint(
+                x: pointsRight ? rect.maxX - 1 : rect.minX + 1,
+                y: rect.midY
+            ))
+            triangle.line(to: NSPoint(
+                x: pointsRight ? rect.minX + 1 : rect.maxX - 1,
+                y: rect.maxY
+            ))
+            triangle.close()
+            foreground.setFill()
+            triangle.fill()
+            NSGraphicsContext.restoreGraphicsState()
+            return
+        }
+
+        let near = pointsRight ? rect.minX + rect.width * 0.3 : rect.maxX - rect.width * 0.3
+        let far = pointsRight ? rect.maxX - rect.width * 0.2 : rect.minX + rect.width * 0.2
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: near, y: rect.minY))
+        path.line(to: NSPoint(x: far, y: rect.midY))
+        path.line(to: NSPoint(x: near, y: rect.maxY))
+        path.lineWidth = 1.5
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        foreground.setStroke()
+        path.stroke()
     }
 
     private func drawDisplayTitle(foreground: NSColor, in rect: NSRect) {
@@ -1030,30 +1136,17 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
         ]
     }
 
-    /// Where a glyph is drawn: fitted into the image box, never stretched to fill it.
+    /// Where a glyph is drawn: fitted into the image box, never stretched to fill it — the rule
+    /// `TemplateImageDrawing.fitted(_:in:)` states for every slot in the design system.
     ///
-    /// `NSImage.draw(in:)` scales to the rect it is handed, on each axis independently, and an SF
-    /// Symbol is square only by coincidence. `ellipsis` is three dots on one line — about four
-    /// times wider than it is tall — so a square box pulled each dot into a vertical bar, which is
-    /// what the session row's and the review header's overflow buttons were drawing. Fitting
-    /// costs nothing for the square symbols and is the only thing that is right for the rest.
+    /// It is computed here as well because the button *lays out* around it: the rect a glyph
+    /// settles into is what the title measures itself against, so the fit has to be knowable
+    /// before anything is drawn rather than only inside the draw call.
     private func imageRect(for image: NSImage, centredOn midY: CGFloat, from x: CGFloat) -> NSRect {
         let box = Layout.imageSize
-        let size = image.size
-        guard size.width > 0, size.height > 0 else {
-            return NSRect(x: x, y: midY - box / 2, width: box, height: box)
-        }
-
-        let scale = min(box / size.width, box / size.height)
-        let width = size.width * scale
-        let height = size.height * scale
-        // Centred in the slot it was allotted, so a wide-and-short glyph sits where a square one
-        // would rather than hugging the slot's leading edge.
-        return NSRect(
-            x: x + (box - width) / 2,
-            y: midY - height / 2,
-            width: width,
-            height: height
+        return TemplateImageDrawing.fitted(
+            image,
+            in: NSRect(x: x, y: midY - box / 2, width: box, height: box)
         )
     }
 
@@ -1127,6 +1220,22 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
     /// subtracts to put the *ink* on a stated margin.
     var opticalHorizontalInset: CGFloat {
         isBordered ? Layout.titleInset : Layout.plainInset
+    }
+
+    /// A bordered button's face is visible ink and reaches its frame, so it has no vertical
+    /// correction. A plain button is a menu-like row whose frame reserves its hover target even
+    /// at rest; report the air around the tallest thing actually drawn inside it. The caller
+    /// supplies the row's height because a host may promote this control above its intrinsic
+    /// measure — exactly what the session status card does.
+    func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat {
+        guard !isBordered else { return 0 }
+        let contentHeight = max(
+            displayTitle.isEmpty ? 0 : titleLineHeight,
+            image == nil ? 0 : Layout.imageSize,
+            shortcutText.isEmpty ? 0 : Design.Typography.lineHeight(of: shortcutFont)
+        )
+        guard contentHeight > 0 else { return 0 }
+        return max(0, (frameHeight - contentHeight) / 2)
     }
 
     /// The slot this button draws its symbol in, and the gap after it.

@@ -7,6 +7,19 @@
     "Find in diff": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sök i diffen"}}}},
     "Increase diff text size": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öka textstorleken i diffen"}}}},
     "Search unavailable": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sökning är inte tillgänglig"}}}},
+    "Checks unavailable": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kontroller är inte tillgängliga"}}}},
+    "Open %@ in Git Review": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna %@ i Git-granskning"}}}},
+    "Open attachment": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna bilaga"}}}},
+    "Open attachment in Attachments": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna bilagan i Bilagor"}}}},
+    "Open in Attachments": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna i Bilagor"}}}},
+    "Open change request in Git Review": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna ändringsförfrågan i Git-granskning"}}}},
+    "Open checks in Git Review": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna kontroller i Git-granskning"}}}},
+    "Open the Attachments pane": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna Bilagor-rutan"}}}},
+    "View all %lld attachments": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa alla %lld bilagor"}}}},
+    "View all attachments": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa alla bilagor"}}}},
+    "Status card checks reach your code host": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Statuskortets kontroller når din kodvärd"}}}},
+    "Threading has no usage tracking and no identifier for this install. The network requests its product features make are described below; none of them is analytics.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading har ingen användningsspårning och ingen identifierare för den här installationen. Nätverksanrop som produktfunktionerna gör beskrivs nedan; inget av dem är analys."}}}},
+    "While the session status card is on, Threading asks GitHub or GitLab for the branch's open change request and checks. GitHub uses your available connection, or anonymous access for a public repository; GitLab uses glab. Turning off the card stops these lookups.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "När konversationens statuskort är på frågar Threading GitHub eller GitLab efter grenens öppna ändringsförfrågan och kontroller. GitHub använder din tillgängliga anslutning eller anonym åtkomst för ett offentligt arkiv; GitLab använder glab. Om du stänger av kortet stoppas dessa uppslagningar."}}}},
     "%@ — the default for new chats in Settings.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ — standardvalet för nya chattar i Inställningar."}}}},
     "%@ — this agent's own setting.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ — den här agentens egen inställning."}}}},
     "%@ — what this agent last ran in. It decides again each launch.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ — det som den här agenten kördes med senast. Den väljer på nytt vid varje start."}}}},
@@ -26317,6 +26330,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld godkännanden"
+          }
+        }
+      }
+    },
+    "%lld failed": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld misslyckade"
+          }
+        }
+      }
+    },
+    "%lld passed": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld godkända"
+          }
+        }
+      }
+    },
+    "%lld pending": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld väntande"
           }
         }
       }

@@ -655,6 +655,34 @@ final class ExtensionRendererTests: XCTestCase {
     XCTAssertEqual(ThemeBoundaryAudit.violations(in: host), [])
   }
 
+  func testCompactStatusKeepsShortTrailingValueReadableBesideFlexibleSpacer() throws {
+    let host = try ExtensionNodeRenderer.render(
+      .stack(
+        axis: .horizontal,
+        spacing: .small,
+        children: [
+          .text("Linear · FES-12159", role: .compactBody),
+          .flexibleSpacer,
+          .status("In progress", role: .warning),
+        ]
+      )
+    ) { _ in }
+    host.frame = NSRect(x: 0, y: 0, width: 280, height: 28)
+    host.layoutSubtreeIfNeeded()
+
+    let status = try XCTUnwrap(
+      descendants(in: host).compactMap { $0 as? NSTextField }.first {
+        $0.accessibilityIdentifier() == "extension.status"
+      }
+    )
+    let font = try XCTUnwrap(status.font)
+    let textWidth = ceil(
+      (status.stringValue as NSString).size(withAttributes: [.font: font]).width
+    )
+
+    XCTAssertGreaterThanOrEqual(status.frame.width, textWidth)
+  }
+
   /// A summary keeps a compact surface compact; the second level is drawn only once the host
   /// reveals it, on a surface of the host's own.
   func testDisclosureKeepsItsDetailOffTheRowUntilTheHostRevealsIt() throws {

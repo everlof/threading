@@ -74,9 +74,12 @@ records why it cannot be removed.
    into a constant that goes stale. `PaneFooterView` is the reference.
 9. Containers place controls by their ink, not their frames. A control whose frame carries
    invisible padding — a plain button's hover surface, an icon button's click target — states
-   it through `OpticalInsetProviding`, and the container subtracts it, so a titled button and
-   a bare glyph land on the same visual margin. Equal frame margins are not equal visual
-   margins.
+   it on **both axes** through `OpticalInsetProviding`, and the container subtracts it. Both
+   requirements are intentional: a new padded control must answer horizontal and vertical
+   layout before it compiles, rather than only the first call site's axis. `SeparatorView`
+   translates an authored ink gap into the stack or constraint gap beside a rule; feature code
+   never branches on the adjacent control type or repeats its padding. Equal frame margins and
+   gaps are not equal visual ones.
 
    The same rule applies *inside* a component: what a view draws is centred by its ink, through
    `NSBezierPath.centringInk(in:)`, never by the geometry it was built from. A rounded corner is
@@ -88,6 +91,13 @@ records why it cannot be removed.
    a mark that points) is corrected without the component claiming anything about itself. Ink
    that cannot be weighed — a template image, a glyph run, a layer's contents — states an
    `InkMass` instead, and never a number invented at the call site.
+
+   Hover detail follows the same single-owner rule. A `ThemedControl` anchor reports through its
+   shared `onHoverChange`; feature code does not install a second tracking area over it. Feed that
+   state through `HoverPopoverScheduler`, build bounded preview content only from the presentation
+   callback, and use `ThemedActionPopoverViewController` for preview-plus-command anatomy. A
+   menu-like anchor uses `ThemedButton.showsSubmenuIndicator`, not a Unicode arrow appended to its
+   title.
 10. Never assign a theme-derived `CGColor` directly to a layer. Draw at display time, use
    `applySurface`, or use the refresh-aware layer-colour helpers.
 11. Preserve accessibility. A custom-drawn control must expose its role, title/value, enabled

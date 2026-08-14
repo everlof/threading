@@ -113,6 +113,27 @@
       }
     },
     {
+      "id": "session-status-card",
+      "kind": "component",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Session environment status card",
+      "description": "The complete menu-like session status card over pane content, with connected review checks, bounded attachment rows, a full-cell hover, native and extension section dividers, and an icon-bearing extension disclosure.",
+      "states": ["Connected pull request", "Pending checks", "Recent attachments", "View all", "Extension disclosure", "Hovered attachment row"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["680×470 points"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ThemedIndicatorsTests.swift",
+        "test": "ThreadingTests/ThemedIndicatorsTests/testRendersStatusCardEnvironmentMenu"
+      },
+      "capture": {
+        "glob": "status-card-*.png"
+      }
+    },
+    {
       "id": "general-settings-layout",
       "kind": "surface",
       "status": "implemented",

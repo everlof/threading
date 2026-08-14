@@ -48,7 +48,8 @@
 
                   ],
                   "allowedImageRoles" : [
-
+                    "icon",
+                    "decoration"
                   ],
                   "allowedStackAxes" : [
                     "horizontal"

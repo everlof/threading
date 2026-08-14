@@ -219,6 +219,7 @@ external data reaches eager AppKit work.
 | Resolved | Settings search results | An installed extension can contribute up to eight searchable pages, so the 256-package ceiling can produce 2,048 extension results before built-ins. Results now render in the sidebar itself (2026-08-13 redesign: setting-level rows that jump to the row); that stack is retained and rebuilt per keystroke, so a search caps construction at `SettingsSidebar.Defaults.maximumResultRows` and prints what it cut. The stress fixture drives 2,048 pages through the real sidebar. |
 | Resolved | Git Review watched refresh | A build can expose ~9,000 generated files / ~80,000 changed lines and refresh repeatedly. The pane now reconciles stable paths in place, anchors by path + within-row offset, and defers model/height mutations until live scrolling ends. A scroller-thumb drag uses geometry-preserving identity rows and materializes full TextKit only for the resting viewport. |
 | Resolved | Git Review during live resize | The 8,985-file fixture now drives 48 distinct widths through the real layout callback. Complete-index height invalidation averages 6.08 ms, with 6.66 ms p95 and 10.49 ms max, while preserving correct offscreen wrapping estimates and scrollbar extent. |
+| Resolved | Session status card provider and attachment scale | Checkout bursts debounce for 500 ms; provider reads cache the unchanged branch + HEAD for 15 seconds and poll every 30 seconds only while checks are pending. The attachment projection bounds before view configuration at three recent rows plus one optional View all route, independent of the session's attachment count. |
 | Resolved | Account settings cold discovery | A fresh-process fixture separates real home-directory/login-marker/shell-alias discovery from page construction. Five accounts take 6.61 ms to discover, 12.31 ms to render and 8.14 ms to lay out; the seven-second cache makes subsequent callers lock-cheap. |
 | Resolved | Usage dashboard | The report scans off-main with per-source metadata caches, aggregates to 90-day cells and globally deduplicates cached plus fresh records. The breakdown uses virtual table rows, the 180-day journal loads through an actor, and both history analysis and the reusable chart enforce adversarial point budgets. The million-record profile and measured gates live in [`usage-dashboard.md`](usage-dashboard.md#scaling-gate-and-measurements). |
 | Resolved | Attachment preview cold open | The pane installs only the selected format's surface on first use, and its document boundary independently installs PDFKit or Quick Look only when that renderer is selected. Regression coverage pins the unused renderers as absent. |
@@ -1837,6 +1838,17 @@ A ghost body is also excluded from exact-height recording (`hasEstimatedGhostBod
 skeleton stretches to whatever the table gave the row, so measuring it would replace the
 model's honest line-weight estimate with the header's fitting height and collapse the
 scrollbar's extent.
+
+The 2026-08-14 review-polish pass added a retained sticky file heading, a bounded loaded-file
+navigator, split/unified presentation, and bounded context expansion without changing the table's
+file-row virtualization boundary. A same-machine Debug comparison against `29a828a9` measured the
+174-file forced-scroll workload at 15.814 ms/frame before and 16.952 ms/frame after. On the
+8,985-file fixture, resize p95 moved from 8.019 to 8.483 ms, continuous-scroll p95 from 22.769 to
+24.442 ms, and full-index seek p95 from 22.561 to 23.510 ms. Cold render plus layout was noisier:
+the single baseline sample was 36.554 ms and three retained after samples ranged from 39.887 to
+42.189 ms, so it is recorded as Debug diagnostic evidence rather than a shipping launch claim.
+The load-bearing scroll and resize comparisons remained within 10% of the matched baseline, and
+both opt-in Git Review stress tests passed after the final sticky-header implementation.
 
 The generated workload is the regression boundary, but it cannot reproduce the object database,
 index and history shape of Linux-scale repositories. `git-repository-stress` accepts an existing

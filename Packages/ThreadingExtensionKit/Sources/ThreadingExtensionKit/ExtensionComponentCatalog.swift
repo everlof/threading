@@ -250,7 +250,8 @@ public enum ThreadingComponentCatalog {
 
     /// One corner-card row is a compact horizontal reading, not a control surface: the whole
     /// card is one click target whose navigation stays host-owned, so the slot vocabulary has
-    /// no buttons. Depth 2 permits a bare status, one row stack of leaves, or a disclosure
+    /// no buttons. An icon can precede the reading, but the host still owns its size, colour and
+    /// accessibility. Depth 2 permits a bare status, one row stack of leaves, or a disclosure
     /// whose summary is that row stack.
     private static let cornerCardSlotConstraints = ExtensionComponentNodeConstraints(
         maximumDepth: 2,
@@ -258,6 +259,7 @@ public enum ThreadingComponentCatalog {
         maximumTextLength: 40,
         allowedStackAxes: [.horizontal],
         allowedTextRoles: [.compactBody, .compactDetail],
+        allowedImageRoles: [.icon, .decoration],
         allowedStatusRoles: [.neutral, .positive, .warning, .negative],
         allowsFixedSpacer: true,
         allowsFlexibleSpacer: true,
@@ -699,8 +701,9 @@ public enum ThreadingComponentCatalog {
                 + "session's pane. The slot ID names the corner: top-trailing is the only "
                 + "card today; top-leading is reserved for a future leading card. The card's "
                 + "click-through, visibility, and activity presentation stay host-owned. A row "
-                + "may be a disclosure: the summary stays a compact reading without controls, "
-                + "while the level Threading reveals from it may list, group and act.",
+                + "may combine a host-rendered icon, compact text and status, and may be a "
+                + "disclosure: the summary stays a compact reading without controls, while the "
+                + "level Threading reveals from it may list, group and act.",
             contract: sessionCornerCard,
             examplePatch: ExtensionComponentPatch(
                 id: "ci-card-row",
@@ -715,6 +718,11 @@ public enum ThreadingComponentCatalog {
                                     axis: .horizontal,
                                     spacing: .small,
                                     children: [
+                                        .image(
+                                            .systemSymbol("checkmark.circle"),
+                                            role: .icon,
+                                            accessibilityLabel: "Checks"
+                                        ),
                                         .text("Checks", role: .compactDetail),
                                         .flexibleSpacer,
                                         .status("3 pending", role: .warning)

@@ -344,6 +344,13 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         (drawnSize.width - drawnGlyph) / 2
     }
 
+    /// The target and the glyph are both design-system geometry, and a control row may promote
+    /// the former without making the latter arbitrary. Section layout asks with the height it
+    /// actually gave the button, so its visible mark — not its click target — keeps the gap.
+    func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat {
+        max(0, (frameHeight - drawnGlyph) / 2)
+    }
+
     /// Draws whatever the slot holds at the size the slot currently is.
     private func renderSlot() {
         hasMaterializedGlyph = true

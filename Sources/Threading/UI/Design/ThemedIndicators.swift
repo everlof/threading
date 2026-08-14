@@ -38,9 +38,183 @@ final class SeparatorView: NSView, ThemedComponent {
         }
     }
 
+    /// The frame gap that leaves `inkGap` between this rule and what the adjacent view visibly
+    /// draws. A padded control owns the correction; the separator merely applies it on the axis
+    /// it divides. Bare labels and structural containers have no correction and keep the full
+    /// gap.
+    func frameGap(to adjacentView: NSView, forInkGap inkGap: CGFloat) -> CGFloat {
+        guard let provider = adjacentView as? OpticalInsetProviding else {
+            return max(0, inkGap)
+        }
+        let inset: CGFloat
+        switch orientation {
+        case .horizontal:
+            inset = provider.opticalVerticalInset(
+                forFrameHeight: Self.resolvedLength(of: adjacentView, on: .vertical)
+            )
+        case .vertical:
+            inset = provider.opticalHorizontalInset
+        }
+        return max(0, inkGap - inset)
+    }
+
+    /// Applies one visible-ink gap on both sides of a rule arranged in a stack. The views are
+    /// the actual neighbours whose frames the stack places; hidden or nested content remains the
+    /// host's decision rather than something this component walks and guesses at.
+    func applyOpticalSpacing(
+        in stack: NSStackView,
+        precededBy precedingView: NSView?,
+        followedBy followingView: NSView?,
+        inkGap: CGFloat
+    ) {
+        let expectedStackOrientation: NSUserInterfaceLayoutOrientation = orientation == .horizontal
+            ? .vertical
+            : .horizontal
+        guard stack.orientation == expectedStackOrientation else {
+            assertionFailure("A separator must be perpendicular to the stack it spaces")
+            return
+        }
+        if let precedingView {
+            stack.setCustomSpacing(
+                frameGap(to: precedingView, forInkGap: inkGap),
+                after: precedingView
+            )
+        }
+        if let followingView {
+            stack.setCustomSpacing(
+                frameGap(to: followingView, forInkGap: inkGap),
+                after: self
+            )
+        }
+    }
+
+    private enum Axis {
+        case horizontal
+        case vertical
+    }
+
+    /// Prefer an active fixed constraint over `bounds`: density can change a row constraint and
+    /// ask for spacing again before the next layout pass, when the bounds still carry the old
+    /// height. Intrinsic/fitting sizes are fallbacks for naturally sized controls.
+    private static func resolvedLength(of view: NSView, on axis: Axis) -> CGFloat {
+        let attribute: NSLayoutConstraint.Attribute = axis == .horizontal ? .width : .height
+        var fixed: (priority: NSLayoutConstraint.Priority, value: CGFloat)?
+        for constraint in view.constraints where constraint.isActive
+            && constraint.relation == .equal
+            && constraint.firstAttribute == attribute
+            && constraint.secondItem == nil {
+            guard let item = constraint.firstItem as? NSView, item === view else { continue }
+            if fixed == nil || constraint.priority.rawValue > fixed!.priority.rawValue {
+                fixed = (constraint.priority, constraint.constant)
+            }
+        }
+        if let fixed, fixed.value > 0 { return fixed.value }
+
+        let boundsLength = axis == .horizontal ? view.bounds.width : view.bounds.height
+        if boundsLength > 0 { return boundsLength }
+
+        let intrinsic = view.intrinsicContentSize
+        let intrinsicLength = axis == .horizontal ? intrinsic.width : intrinsic.height
+        if intrinsicLength > 0, intrinsicLength < 10_000 { return intrinsicLength }
+
+        let fitting = view.fittingSize
+        return max(0, axis == .horizontal ? fitting.width : fitting.height)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         Design.Surface.divider.setFill()
         bounds.fill()
+    }
+}
+
+// MARK: - Status Progress Ring
+
+/// A compact semantic receipt split between completed, outstanding, and failed work.
+///
+/// The host supplies counts; the design system owns the ring's geometry and status colours.
+/// Text beside the mark still names every non-zero count, so the meaning never depends on hue.
+@MainActor
+enum ThemedStatusProgressRing {
+
+    struct Fractions: Equatable {
+        let positive: CGFloat
+        let pending: CGFloat
+        let negative: CGFloat
+    }
+
+    private enum Layout {
+        /// Matches the mark slot on an ordinary compact button without enlarging the row.
+        static let size = NSSize(width: 14, height: 14)
+        /// Thick enough for the small remaining slice to survive at 1×.
+        static let lineWidth: CGFloat = 3
+        static let startAngle: CGFloat = 90
+        static let fullCircle: CGFloat = 360
+        static let maximumCount = 10_000
+    }
+
+    static func fractions(positive: Int, pending: Int, negative: Int) -> Fractions {
+        let counts = [positive, pending, negative].map {
+            min(max(0, $0), Layout.maximumCount)
+        }
+        let total = counts.reduce(0, +)
+        guard total > 0 else { return Fractions(positive: 0, pending: 1, negative: 0) }
+        return Fractions(
+            positive: CGFloat(counts[0]) / CGFloat(total),
+            pending: CGFloat(counts[1]) / CGFloat(total),
+            negative: CGFloat(counts[2]) / CGFloat(total)
+        )
+    }
+
+    static func image(positive: Int, pending: Int, negative: Int) -> NSImage {
+        let reading = fractions(positive: positive, pending: pending, negative: negative)
+        let image = NSImage(size: Layout.size, flipped: false) { rect in
+            let ringRect = rect.insetBy(dx: Layout.lineWidth / 2, dy: Layout.lineWidth / 2)
+            let track = NSBezierPath(ovalIn: ringRect)
+            track.lineWidth = Layout.lineWidth
+            Design.Text.tertiary.setStroke()
+            track.stroke()
+
+            draw(
+                fraction: reading.positive,
+                after: 0,
+                in: ringRect,
+                color: Design.Status.positive
+            )
+            draw(
+                fraction: reading.negative,
+                after: reading.positive,
+                in: ringRect,
+                color: Design.Status.negative
+            )
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+
+    private static func draw(
+        fraction: CGFloat,
+        after completedFraction: CGFloat,
+        in rect: NSRect,
+        color: NSColor
+    ) {
+        guard fraction > 0 else { return }
+        let centre = NSPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        let start = Layout.startAngle - completedFraction * Layout.fullCircle
+        let end = start - fraction * Layout.fullCircle
+        let arc = NSBezierPath()
+        arc.appendArc(
+            withCenter: centre,
+            radius: radius,
+            startAngle: start,
+            endAngle: end,
+            clockwise: true
+        )
+        arc.lineWidth = Layout.lineWidth
+        arc.lineCapStyle = .round
+        color.setStroke()
+        arc.stroke()
     }
 }
 

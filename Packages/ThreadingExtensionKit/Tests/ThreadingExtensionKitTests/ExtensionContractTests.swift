@@ -2721,7 +2721,18 @@ final class ExtensionContractTests: XCTestCase {
             try contract.validate(patch([
                 .disclosure(
                     id: "ci-checks",
-                    summary: .status("3 pending", role: .warning),
+                    summary: .stack(
+                        axis: .horizontal,
+                        spacing: .small,
+                        children: [
+                            .image(
+                                .systemSymbol("checkmark.circle"),
+                                role: .icon,
+                                accessibilityLabel: "Checks"
+                            ),
+                            .status("3 pending", role: .warning)
+                        ]
+                    ),
                     detail: [.text("build-ananke", role: .compactBody), action]
                 )
             ]))

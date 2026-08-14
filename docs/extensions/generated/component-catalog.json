@@ -1889,7 +1889,8 @@
 
                 ],
                 "allowedImageRoles" : [
-
+                  "icon",
+                  "decoration"
                 ],
                 "allowedStackAxes" : [
                   "horizontal"
@@ -2031,6 +2032,15 @@
                     "axis" : "horizontal",
                     "children" : [
                       {
+                        "accessibilityLabel" : "Checks",
+                        "reference" : {
+                          "name" : "checkmark.circle",
+                          "type" : "systemSymbol"
+                        },
+                        "role" : "icon",
+                        "type" : "image"
+                      },
+                      {
                         "role" : "compactDetail",
                         "text" : "Checks",
                         "type" : "text"
@@ -2061,7 +2071,7 @@
         "hostAssets" : [
 
         ],
-        "summary" : "Compact display rows appended to the floating corner card over the session's pane. The slot ID names the corner: top-trailing is the only card today; top-leading is reserved for a future leading card. The card's click-through, visibility, and activity presentation stay host-owned. A row may be a disclosure: the summary stays a compact reading without controls, while the level Threading reveals from it may list, group and act."
+        "summary" : "Compact display rows appended to the floating corner card over the session's pane. The slot ID names the corner: top-trailing is the only card today; top-leading is reserved for a future leading card. The card's click-through, visibility, and activity presentation stay host-owned. A row may combine a host-rendered icon, compact text and status, and may be a disclosure: the summary stays a compact reading without controls, while the level Threading reveals from it may list, group and act."
       },
       "patchSchema" : {
         "$id" : "https://threading.codes/schema/components/session.corner-card-v1.schema.json",
@@ -2113,7 +2123,8 @@
 
                         ],
                         "allowedImageRoles" : [
-
+                          "icon",
+                          "decoration"
                         ],
                         "allowedStackAxes" : [
                           "horizontal"

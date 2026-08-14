@@ -162,32 +162,6 @@ final class AccountUsagePopoverViewController: NSViewController {
     }
 }
 
-// MARK: - Hover Tracking View
-
-/// A container that reports pointer enter and exit, so a hover-opened popover can stay open while
-/// the pointer is over its contents rather than closing the instant it leaves the pill.
-final class HoverTrackingView: NSView {
-
-    var onHoverChange: ((Bool) -> Void)?
-
-    private var hoverTrackingArea: NSTrackingArea?
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        hoverTrackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { onHoverChange?(true) }
-    override func mouseExited(with event: NSEvent) { onHoverChange?(false) }
-}
-
 // MARK: - Usage Popover Defaults
 
 enum UsagePopoverDefaults {

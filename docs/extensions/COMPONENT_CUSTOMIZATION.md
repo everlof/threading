@@ -262,6 +262,12 @@ while allowing them behind a reveal. The recursion is boxed
 (`ExtensionComponentDetailConstraints`), which is the only reason that indirect enum exists; it
 encodes as the nested vocabulary itself.
 
+`session.corner-card@1` accepts up to three compact horizontal rows. Each may combine icon or
+decoration images with compact text, semantic status and spacing. Controls remain forbidden in
+that line. A `disclosure` is the NSMenu-like route for more: its summary uses the compact
+vocabulary, while its bounded detail may use horizontal/vertical groups, dividers and standard
+buttons. Threading owns both levels' pixels, reveal gesture and accessibility.
+
 The current `sidebar.session-row` v1 replacement contract requires one horizontal root stack,
 allows at most eight nodes and one nested level, caps each text value at 80 characters, and
 accepts only compact text, identity/icon/decoration images, standard buttons, statuses, and

@@ -366,6 +366,21 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
             label.applyFont(.control)
             label.textColor = statusColor(for: role)
             label.lineBreakMode = .byTruncatingTail
+            // A compact horizontal reading conventionally puts a name on the left and a state
+            // on the right. AppKit's label cell can report a width a few points short once tail
+            // truncation is enabled, so a flexible spacer then keeps the slack while a short
+            // value such as “In progress” draws as “In progre…”. Preserve bounded states from
+            // the font's actual advance; longer prose still truncates instead of widening an
+            // extension surface without limit, and low-resistance compact text yields first.
+            let font = label.font!
+            let measuredWidth = ceil(
+                (text as NSString).size(withAttributes: [.font: font]).width
+            ) + Design.Spacing.tight
+            let readableWidth = label.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: min(measuredWidth, 120)
+            )
+            readableWidth.priority = .defaultHigh
+            readableWidth.isActive = true
             label.setAccessibilityIdentifier("extension.status")
             return label
 

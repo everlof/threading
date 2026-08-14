@@ -84,8 +84,19 @@ class ThemedControl: NSControl, ThemedComponent {
         didSet {
             guard isHovered != oldValue else { return }
             hoverDidChange()
+            onHoverChange?(isHovered)
         }
     }
+
+    /// Reports the shared hover state without asking a feature to install a second tracking
+    /// area over this control.
+    ///
+    /// Hover-opened detail is why this is a closure rather than another override point: the
+    /// control still owns the pointer invariant and its redraw, while the feature owns what the
+    /// arrival presents. Before this seam, every such caller either wrapped the control in a
+    /// tracking view or installed a competing area, and both versions could disagree with the
+    /// fill already on screen after scrolling or reuse moved the control under a still pointer.
+    var onHoverChange: ((Bool) -> Void)?
 
     /// Answered when the pointer arrives or leaves. The default redraw is what a control drawing
     /// its own hover fill needs; a control that hovers by moving a layer or a constraint overrides
@@ -120,6 +131,13 @@ class ThemedControl: NSControl, ThemedComponent {
 
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
+
+    /// Detachment produces no pointer-exit event. Clear the shared answer here so a retained
+    /// control cannot keep either its wash or hover-presented detail alive after its row left.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { isHovered = false }
+    }
 
     override func keyDown(with event: NSEvent) {
         guard isEnabled else {

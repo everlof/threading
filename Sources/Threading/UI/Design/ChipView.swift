@@ -732,6 +732,21 @@ final class ChipView: ThemedControl, OpticalInsetProviding {
         choiceStyle == .chip ? Self.horizontalPadding : ClassicChoiceDrawing.textInset
     }
 
+    /// A classic chooser draws its well to the frame and therefore has no invisible vertical
+    /// padding. A modern chip rests as content inside a hover target, so section layout measures
+    /// to the tallest visible child instead of to that target.
+    func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat {
+        guard !choiceStyle.isClassic else { return 0 }
+        let contentHeight = contentStack.arrangedSubviews.reduce(CGFloat.zero) { height, view in
+            guard !view.isHidden else { return height }
+            let intrinsic = view.intrinsicContentSize.height
+            guard intrinsic > 0, intrinsic < 10_000 else { return height }
+            return max(height, intrinsic)
+        }
+        guard contentHeight > 0 else { return 0 }
+        return max(0, (frameHeight - contentHeight) / 2)
+    }
+
     private var choiceStyle: AppTheme.Material.ChoiceStyle {
         AppThemePalette.current.material(for: effectiveAppearance).choiceStyle
     }

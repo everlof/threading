@@ -8,7 +8,38 @@ import AppKit
 /// to the glyph itself, so every design-system component gets the same clean symbol silhouette.
 enum TemplateImageDrawing {
 
-    static func draw(_ image: NSImage, in rect: NSRect, tint: NSColor) {
+    /// The rect an image actually draws into when it is handed `slot`: the largest rect with the
+    /// image's own proportions that fits, centred.
+    ///
+    /// **A slot is a box to sit in, not a shape to become.** `NSImage.draw(in:)` scales to the
+    /// rect it is given on each axis independently, and an SF Symbol is square only by
+    /// coincidence — `folder` renders 18×14 and `ellipsis` about four times wider than it is
+    /// tall. Every caller here hands over a square slot, so each one was quietly deforming its
+    /// glyph: the sidebar's add-project menu drew a folder squeezed a ninth narrow and stretched
+    /// a seventh tall, which is what "these icons look broken and dragged out" was. Fitting costs
+    /// nothing for the square symbols and is the only thing that is right for the rest.
+    ///
+    /// Fitted rather than capped: the slot stays the size the caller measured its layout around,
+    /// so correcting the aspect ratio never also shrinks a mark. Only the axis that was being
+    /// over-stretched moves.
+    static func fitted(_ image: NSImage, in slot: NSRect) -> NSRect {
+        let size = image.size
+        guard size.width > 0, size.height > 0 else { return slot }
+
+        let scale = min(slot.width / size.width, slot.height / size.height)
+        let fitted = NSSize(width: size.width * scale, height: size.height * scale)
+        // Centred in the slot it was allotted, so a wide-and-short glyph sits where a square one
+        // would rather than hugging the slot's leading edge.
+        return NSRect(
+            x: slot.midX - fitted.width / 2,
+            y: slot.midY - fitted.height / 2,
+            width: fitted.width,
+            height: fitted.height
+        )
+    }
+
+    static func draw(_ image: NSImage, in slot: NSRect, tint: NSColor) {
+        let rect = fitted(image, in: slot)
         guard image.isTemplate, let context = NSGraphicsContext.current?.cgContext else {
             image.draw(in: rect)
             return
@@ -26,7 +57,11 @@ enum TemplateImageDrawing {
         // 70% came out an opaque 70% grey whatever it stood on. `.sourceIn` keeps the silhouette
         // and replaces its colour, alpha included, leaving the transparency layer to composite it
         // over the ground the way the ink was measured against. An opaque tint is unaffected.
-        rect.fill(using: .sourceIn)
+        // The whole slot rather than the fitted rect: `.sourceIn` multiplies by the layer's own
+        // alpha, so filling wider paints nothing extra — but a glyph antialiases a fraction of a
+        // point past the rect it was drawn in, and those edge pixels would otherwise keep the
+        // template's black.
+        slot.fill(using: .sourceIn)
         context.endTransparencyLayer()
         context.restoreGState()
     }

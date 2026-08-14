@@ -1,8 +1,9 @@
 import AppKit
+import ThreadingExtensionKit
 import XCTest
 @testable import Threading
 
-/// The three views in `ThemedIndicators` replace stock AppKit parts that could not be told to
+/// The views in `ThemedIndicators` replace stock AppKit parts that could not be told to
 /// use the theme's colours: `NSBox`'s system-grey hairline, `NSProgressIndicator`'s system-grey
 /// spinner, and its system-blue bar. Each is drawn, so each is checked by sampling what it
 /// actually put on screen rather than by reading the token back.
@@ -124,6 +125,88 @@ final class ThemedIndicatorsTests: XCTestCase {
         NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeStyles.cyberpunk.id))
 
         XCTAssertTrue(view.needsDisplay, "a theme change left the rule undrawn")
+    }
+
+    /// A section states the distance between visible content and its rule, while AppKit places
+    /// frames. The separator is the shared conversion point: a padded menu row gives back its
+    /// invisible top/bottom air, and a bare label keeps the complete gap. The fixed constraint
+    /// deliberately disagrees with the stale bounds to cover a density change before layout.
+    func testTheSeparatorAppliesOneVisibleInkGapAcrossPaddedAndBareRows() {
+        let button = ThemedButton(title: "Attachment", target: nil, action: nil)
+        button.emphasis = .tertiary
+        button.frame.size.height = 40
+        let rowHeight: CGFloat = 27
+        button.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
+
+        let separator = SeparatorView()
+        let label = NSTextField(labelWithString: "Extension row")
+        let stack = NSStackView(views: [button, separator, label])
+        stack.orientation = .vertical
+        let inkGap: CGFloat = 10
+
+        separator.applyOpticalSpacing(
+            in: stack,
+            precededBy: button,
+            followedBy: label,
+            inkGap: inkGap
+        )
+
+        let buttonInset = button.opticalVerticalInset(forFrameHeight: rowHeight)
+        XCTAssertGreaterThan(buttonInset, 0, "the plain button fixture has no optical padding")
+        XCTAssertEqual(stack.customSpacing(after: button) + buttonInset, inkGap, accuracy: 0.001)
+        XCTAssertEqual(stack.customSpacing(after: separator), inkGap, accuracy: 0.001)
+    }
+
+    /// The same API works sideways: a vertical rule in a horizontal stack subtracts the icon
+    /// target's horizontal padding. A second container therefore cannot grow another local
+    /// `target minus glyph` calculation when it wants the same visual gap.
+    func testTheSeparatorUsesTheRelevantOpticalAxis() {
+        let button = ThemedIconButton(
+            symbolName: "ellipsis",
+            accessibility: "More",
+            target: .inline
+        )
+        let separator = SeparatorView(.vertical)
+        let label = NSTextField(labelWithString: "Details")
+        let stack = NSStackView(views: [button, separator, label])
+        stack.orientation = .horizontal
+        let inkGap: CGFloat = 10
+
+        separator.applyOpticalSpacing(
+            in: stack,
+            precededBy: button,
+            followedBy: label,
+            inkGap: inkGap
+        )
+
+        XCTAssertEqual(
+            stack.customSpacing(after: button) + button.opticalHorizontalInset,
+            inkGap,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(stack.customSpacing(after: separator), inkGap, accuracy: 0.001)
+    }
+
+    // MARK: - Status Progress Ring
+
+    func testStatusProgressRingKeepsEveryCheckSlice() {
+        let fractions = ThemedStatusProgressRing.fractions(
+            positive: 5,
+            pending: 2,
+            negative: 1
+        )
+        XCTAssertEqual(fractions.positive, 5.0 / 8.0, accuracy: 0.001)
+        XCTAssertEqual(fractions.pending, 2.0 / 8.0, accuracy: 0.001)
+        XCTAssertEqual(fractions.negative, 1.0 / 8.0, accuracy: 0.001)
+
+        let empty = ThemedStatusProgressRing.fractions(positive: 0, pending: 0, negative: 0)
+        XCTAssertEqual(empty.positive, 0, accuracy: 0.001)
+        XCTAssertEqual(empty.pending, 1, accuracy: 0.001)
+        XCTAssertEqual(empty.negative, 0, accuracy: 0.001)
+        XCTAssertFalse(
+            ThemedStatusProgressRing.image(positive: 5, pending: 2, negative: 1).isTemplate,
+            "semantic slices must retain their own colours inside a tinted button"
+        )
     }
 
     // MARK: - A Rule's Weight, Theme By Theme
@@ -957,7 +1040,9 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertEqual(marks.count, 2, "the branch and counters marks should both be drawn")
 
         let button = try XCTUnwrap(
-            descendants(of: card).compactMap { $0 as? ThemedButton }.first
+            descendants(of: card)
+                .compactMap { $0 as? ThemedButton }
+                .first { !$0.isHiddenOrHasHiddenAncestor }
         )
         let buttonMark = card.convert(button.bounds, from: button).minX
             + button.opticalHorizontalInset
@@ -1684,6 +1769,254 @@ final class ThemedIndicatorsTests: XCTestCase {
         print("Rendered the git card storybook to \(directory.path)")
     }
 
+    /// The review image for the menu-like card itself: remote review, bounded sources, a full
+    /// row hover, section rules, and an extension-authored disclosure all share the real host.
+    func testRendersStatusCardEnvironmentMenu() throws {
+        let directory: URL = {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+                return URL(fileURLWithPath: override)
+            }
+            return URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("ThreadingRenders", isDirectory: true)
+        }()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let sessionID = SessionID()
+        let publicSessionID = sessionID.uuidString.lowercased()
+        let registry = ComponentCustomizationRegistry()
+        try registry.register(HostComponentContracts.sessionCornerCard)
+        try registry.replacePatches([
+            .init(
+                id: "issue-reading",
+                target: .sessionCornerCard(sessionID: publicSessionID),
+                slots: [
+                    .init(
+                        slot: "top-trailing",
+                        children: [
+                            .disclosure(
+                                id: "issue-details",
+                                summary: .stack(
+                                    axis: .horizontal,
+                                    spacing: .small,
+                                    children: [
+                                        .image(
+                                            .systemSymbol("ticket"),
+                                            role: .icon,
+                                            accessibilityLabel: "Linear issue"
+                                        ),
+                                        .text("Linear · FES-12159", role: .compactBody),
+                                        .flexibleSpacer,
+                                        .status("In progress", role: .warning)
+                                    ]
+                                ),
+                                detail: [
+                                    .text("Fix attachment status menu", role: .compactBody),
+                                    .divider,
+                                    .text("Assigned to David", role: .compactDetail),
+                                    .button(
+                                        id: "open-issue",
+                                        title: "Open in Linear",
+                                        role: .standard,
+                                        isEnabled: true
+                                    )
+                                ]
+                            )
+                        ]
+                    )
+                ]
+            )
+        ], from: .init(
+            extensionIdentifier: "com.example.linear",
+            processGeneration: "environment-evidence",
+            order: 0
+        ))
+
+        let checks = ChangeRequestChecks(state: .pending, passed: 5, pending: 2, failed: 0)
+        let repository = ChangeRequestRepository(
+            provider: .github,
+            host: "github.com",
+            namespace: "threading",
+            name: "app"
+        )
+        let request = ChangeRequestSummary(
+            number: 482,
+            title: "Polish the status card",
+            body: "",
+            url: URL(string: "https://github.com/threading/app/pull/482")!,
+            isDraft: false,
+            isMerged: false,
+            baseBranch: "main",
+            headBranch: "dev/fix/FES-12159",
+            headRevision: "abc123",
+            checks: checks,
+            reviews: .empty
+        )
+        let review = ChangeRequestRepositoryStatus(
+            repository: repository,
+            defaultBranch: "main",
+            branch: request.headBranch,
+            changeRequest: request,
+            checks: checks
+        )
+        let root = URL(fileURLWithPath: "/tmp/environment-evidence", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try writeAttachmentPreviewFixture(
+            to: root.appendingPathComponent("hover-reference.png")
+        )
+        let attachments = [
+            ("build-log.txt", SessionAttachment.Kind.document),
+            ("design-notes.pdf", .pdf),
+            ("checks.png", .image),
+            ("hover-reference.png", .image),
+            ("environment-card.png", .image)
+        ].enumerated().map { index, value in
+            SessionAttachment(
+                sessionID: sessionID,
+                id: "evidence-\(index)",
+                root: root,
+                url: root.appendingPathComponent(value.0),
+                relativePath: value.0,
+                sourcePath: value.0,
+                kind: value.1,
+                origin: .agent,
+                referencedAt: Date(timeIntervalSince1970: TimeInterval(index))
+            )
+        }
+
+        AppThemePalette.set(.system)
+        for (name, appearanceName) in [
+            ("light", NSAppearance.Name.aqua),
+            ("dark", NSAppearance.Name.darkAqua)
+        ] {
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+            var data: Data?
+            var hoverData: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                MainActor.assumeIsolated {
+                    let host = NSView(frame: NSRect(x: 0, y: 0, width: 680, height: 470))
+                    host.appearance = appearance
+                    host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+
+                    let terminalLines = [
+                        "$ git status --short",
+                        " M Sources/Threading/UI/Views/GitStatusOverlayView.swift",
+                        "$ swift test --filter StatusCard",
+                        "Building for debugging…",
+                        "Test Suite 'StatusCard' passed"
+                    ]
+                    for (index, text) in terminalLines.enumerated() {
+                        let label = NSTextField(labelWithString: text)
+                        label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+                        label.textColor = Design.Ink.chrome.tertiary
+                        label.frame = NSRect(
+                            x: Design.Spacing.pane,
+                            y: host.bounds.height - 70 - CGFloat(index) * 25,
+                            width: 560,
+                            height: 18
+                        )
+                        host.addSubview(label)
+                    }
+
+                    let card = GitStatusOverlayView(
+                        customizationLookup: registry.customization(for:)
+                    )
+                    card.showSession(publicSessionID)
+                    card.update(with: .init(
+                        branch: request.headBranch,
+                        summary: GitChangeSummary(files: 12, added: 247, removed: 39)
+                    ))
+                    card.updateModel(.init(
+                        name: "Opus · 1M",
+                        mode: "Auto",
+                        effort: "Extra High"
+                    ))
+                    card.updateChangeRequest(GitStatusOverlayView.ChangeRequestReading(status: review))
+                    card.updateSubagents(workingCount: 0, doneCount: 1)
+                    card.updateAttachments(.init(attachments: attachments))
+                    card.applyInk(WindowBackdrop.ink)
+
+                    let size = card.fittingSize
+                    card.frame = NSRect(
+                        x: host.bounds.width - size.width - Design.Spacing.pane,
+                        y: host.bounds.height - size.height - Design.Spacing.pane,
+                        width: size.width,
+                        height: size.height
+                    )
+                    host.addSubview(card)
+                    host.layoutSubtreeIfNeeded()
+
+                    // Keep one entire attachment cell lit in the evidence; the title occupies
+                    // only part of it, while the hover surface proves the target does not.
+                    descendants(of: card)
+                        .compactMap { $0 as? ThemedButton }
+                        .first { $0.title == "hover-reference.png" }?
+                        .mouseEntered(with: NSEvent())
+                    host.displayIfNeeded()
+
+                    guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+                        return
+                    }
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    data = rep.representation(using: .png, properties: [:])
+
+                    // The interaction evidence uses the same card and row, then mounts the
+                    // hover body inside the production popover chrome. This keeps the picture
+                    // deterministic without ordering a child window on the test runner's screen.
+                    host.setFrameSize(NSSize(width: 980, height: 470))
+                    card.frame.origin.x = host.bounds.width - card.bounds.width
+                        - Design.Spacing.pane
+                    host.layoutSubtreeIfNeeded()
+
+                    guard let previewController = card.makeAttachmentPreviewSurface(
+                        forAttachmentAt: 1
+                    ) else { return }
+                    previewController.loadView()
+                    previewController.view.layoutSubtreeIfNeeded()
+                    let previewSize = previewController.view.fittingSize
+                    guard let button = self.descendants(of: card)
+                        .compactMap({ $0 as? ThemedButton })
+                        .first(where: { $0.title == "hover-reference.png" })
+                    else { return }
+                    let anchor = button.convert(button.bounds, to: host)
+                    let material = AppThemePalette.current.material(for: appearance)
+                    let placement = ThemedPopoverLayout.place(
+                        anchor: anchor,
+                        contentSize: previewSize,
+                        visibleFrame: host.bounds,
+                        preferredEdge: .maxX,
+                        style: material.popoverStyle,
+                        hasMaterialShadow: material.glow != nil,
+                        bevelWidth: material.bevel?.width
+                    )
+                    let chrome = ThemedPopoverChromeView(
+                        frame: placement.panelFrame
+                    )
+                    chrome.appearance = appearance
+                    chrome.placement = placement
+                    chrome.contentView = previewController.view
+                    host.addSubview(chrome)
+                    host.layoutSubtreeIfNeeded()
+                    host.displayIfNeeded()
+
+                    guard let hoverRep = host.bitmapImageRepForCachingDisplay(in: host.bounds)
+                    else { return }
+                    host.cacheDisplay(in: host.bounds, to: hoverRep)
+                    hoverData = hoverRep.representation(using: .png, properties: [:])
+                }
+            }
+            try XCTUnwrap(data).write(
+                to: directory.appendingPathComponent("status-card-environment-\(name).png")
+            )
+            try XCTUnwrap(hoverData).write(
+                to: directory.appendingPathComponent(
+                    "status-card-attachment-hover-\(name).png"
+                )
+            )
+        }
+
+        print("Rendered the environment status card to \(directory.path)")
+    }
+
     /// Hover lifts what the card *says*, not the card. The distinction is the whole fix: an
     /// alpha on the view is a hole in it.
     func testGitCardHoverLiftsItsContentsAndLeavesTheSurfaceOpaque() throws {
@@ -2017,6 +2350,162 @@ final class ThemedIndicatorsTests: XCTestCase {
         )
     }
 
+    func testStatusCardShowsConnectedReviewAndRoutesBothRowsToGitReview() throws {
+        let checks = ChangeRequestChecks(
+            state: .pending,
+            passed: 4,
+            pending: 2,
+            failed: 0
+        )
+        let repository = ChangeRequestRepository(
+            provider: .github,
+            host: "github.com",
+            namespace: "threading",
+            name: "app"
+        )
+        let request = ChangeRequestSummary(
+            number: 482,
+            title: "Make the environment card useful",
+            body: "",
+            url: URL(string: "https://github.com/threading/app/pull/482")!,
+            isDraft: false,
+            isMerged: false,
+            baseBranch: "main",
+            headBranch: "feature/environment-card",
+            headRevision: "abc123",
+            checks: checks,
+            reviews: .empty
+        )
+        let status = ChangeRequestRepositoryStatus(
+            repository: repository,
+            defaultBranch: "main",
+            branch: request.headBranch,
+            changeRequest: request,
+            checks: checks
+        )
+
+        let card = GitStatusOverlayView()
+        card.update(with: .init(branch: request.headBranch, summary: .clean))
+        card.updateChangeRequest(try XCTUnwrap(.init(status: status)))
+        card.applyInk(WindowBackdrop.ink)
+        card.frame = NSRect(origin: .zero, size: card.fittingSize)
+        card.layoutSubtreeIfNeeded()
+
+        let buttons = descendants(of: card)
+            .compactMap { $0 as? ThemedButton }
+            .filter { !$0.isHiddenOrHasHiddenAncestor }
+        XCTAssertEqual(buttons.map(\.title), [
+            "#482 · Make the environment card useful",
+            "4 passed · 2 pending"
+        ])
+        XCTAssertTrue(buttons.allSatisfy {
+            $0.frame.width >= GitStatusOverlayDefaults.minWidth - 2 * Design.Spacing.medium
+        }, "review hover targets should fill the card's menu-like column")
+
+        var opens = 0
+        card.onOpen = { opens += 1 }
+        buttons.forEach { $0.performClick() }
+        XCTAssertEqual(opens, 2)
+    }
+
+    func testStatusCardBoundsAttachmentRowsAndOpensTheAttachmentsPane() throws {
+        let sessionID = SessionID()
+        let root = URL(fileURLWithPath: "/tmp/status-card-attachments", isDirectory: true)
+        let names = ["old.txt", "notes.pdf", "trace.zip", "diagram.svg", "latest.png"]
+        let attachments = names.enumerated().map { index, name in
+            SessionAttachment(
+                sessionID: sessionID,
+                id: "attachment-\(index)",
+                root: root,
+                url: root.appendingPathComponent(name),
+                relativePath: name,
+                sourcePath: name,
+                kind: index == names.count - 1 ? .image : .document,
+                origin: .agent,
+                referencedAt: Date(timeIntervalSince1970: TimeInterval(index))
+            )
+        }
+
+        let card = GitStatusOverlayView()
+        card.update(with: .init(branch: "feature/environment-card", summary: .clean))
+        card.updateAttachments(.init(attachments: attachments))
+        card.applyInk(WindowBackdrop.ink)
+        card.frame = NSRect(origin: .zero, size: card.fittingSize)
+        card.layoutSubtreeIfNeeded()
+
+        let buttons = descendants(of: card)
+            .compactMap { $0 as? ThemedButton }
+            .filter { !$0.isHiddenOrHasHiddenAncestor }
+        XCTAssertEqual(buttons.map(\.title), [
+            "latest.png",
+            "diagram.svg",
+            "trace.zip",
+            "View all 5 attachments"
+        ], "the card mounts three recent rows and one fixed route to the full chronology")
+        let expectedCellWidth = card.bounds.width - 2 * Design.Spacing.medium
+        XCTAssertTrue(buttons.allSatisfy {
+            abs($0.frame.width - expectedCellWidth) < 0.5
+        }, "every attachment hover target covers the whole cell")
+        XCTAssertTrue(buttons.allSatisfy { !$0.showsSubmenuIndicator },
+                      "a hover preview must not masquerade as a click-to-disclose submenu")
+
+        var opened: [String?] = []
+        card.onOpenAttachment = { opened.append($0) }
+        buttons.first?.performClick()
+        buttons.last?.performClick()
+        XCTAssertEqual(opened.count, 2)
+        XCTAssertEqual(opened[0], "attachment-4")
+        XCTAssertNil(opened[1])
+    }
+
+    func testAttachmentHoverPreviewIsLazyBoundedAndCarriesFileActions() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("preview.png")
+        try writeAttachmentPreviewFixture(to: url)
+
+        let card = GitStatusOverlayView()
+        card.updateAttachments(.init(attachments: [SessionAttachment(
+            sessionID: SessionID(),
+            id: "preview",
+            root: directory,
+            url: url,
+            relativePath: url.lastPathComponent,
+            sourcePath: url.path,
+            kind: .image,
+            origin: .agent,
+            referencedAt: Date()
+        )]))
+        XCTAssertEqual(card.attachmentPreviewBuildCountForTesting, 0,
+                       "mounting the status card decoded hover-only content")
+
+        let controller = try XCTUnwrap(card.makeAttachmentPreviewSurface(forAttachmentAt: 0))
+        controller.loadView()
+        controller.view.frame = NSRect(origin: .zero, size: controller.view.fittingSize)
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(card.attachmentPreviewBuildCountForTesting, 1)
+        let image = try XCTUnwrap(
+            descendants(of: controller.view).compactMap { $0 as? ThemedImagePreview }.first
+        )
+        XCTAssertLessThanOrEqual(
+            max(image.image?.size.width ?? .infinity, image.image?.size.height ?? .infinity),
+            CGFloat(GitStatusOverlayDefaults.attachmentThumbnailMaximumPixels),
+            "the hover surface decoded the full image instead of its thumbnail"
+        )
+        let actions = descendants(of: controller.view)
+            .compactMap { $0 as? ThemedButton }
+            .map(\.title)
+        XCTAssertEqual(actions, [
+            "Copy Image",
+            "Copy Path",
+            "Open in Attachments",
+            "Reveal in Finder"
+        ])
+    }
+
     // MARK: - Card Fixtures
 
     /// A card carrying all three kinds of row — a Git receipt that acts, and an agent line that
@@ -2072,6 +2561,109 @@ final class ThemedIndicatorsTests: XCTestCase {
         let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: rep)
         return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+    }
+
+    /// A deterministic screenshot-like image for the attachment hover evidence. Generated in
+    /// the test rather than checked in as opaque binary data, so the fixture's source stays
+    /// reviewable beside the UI it exercises.
+    private func writeAttachmentPreviewFixture(to url: URL) throws {
+        let canvas = NSView(frame: NSRect(x: 0, y: 0, width: 960, height: 540))
+        canvas.wantsLayer = true
+        canvas.layer?.backgroundColor = NSColor(
+            calibratedRed: 0.055,
+            green: 0.067,
+            blue: 0.085,
+            alpha: 1
+        ).cgColor
+
+        let sidebar = NSView(frame: NSRect(x: 28, y: 28, width: 220, height: 484))
+        sidebar.wantsLayer = true
+        sidebar.layer?.cornerRadius = 18
+        sidebar.layer?.backgroundColor = NSColor(
+            calibratedRed: 0.10,
+            green: 0.12,
+            blue: 0.15,
+            alpha: 1
+        ).cgColor
+        canvas.addSubview(sidebar)
+
+        for (index, width) in [144, 174, 126, 160, 112].enumerated() {
+            let line = NSView(frame: NSRect(
+                x: 54,
+                y: 440 - CGFloat(index) * 58,
+                width: CGFloat(width),
+                height: 14
+            ))
+            line.wantsLayer = true
+            line.layer?.cornerRadius = 7
+            line.layer?.backgroundColor = NSColor(
+                calibratedWhite: index == 1 ? 0.78 : 0.34,
+                alpha: 1
+            ).cgColor
+            canvas.addSubview(line)
+        }
+
+        let content = NSView(frame: NSRect(x: 278, y: 28, width: 654, height: 484))
+        content.wantsLayer = true
+        content.layer?.cornerRadius = 18
+        content.layer?.backgroundColor = NSColor(
+            calibratedRed: 0.075,
+            green: 0.09,
+            blue: 0.115,
+            alpha: 1
+        ).cgColor
+        canvas.addSubview(content)
+
+        let title = NSTextField(labelWithString: "Attachment status menu")
+        title.font = .systemFont(ofSize: 30, weight: .semibold)
+        title.textColor = .white
+        title.frame = NSRect(x: 322, y: 424, width: 480, height: 42)
+        canvas.addSubview(title)
+
+        let card = NSView(frame: NSRect(x: 322, y: 206, width: 530, height: 172))
+        card.wantsLayer = true
+        card.layer?.cornerRadius = 15
+        card.layer?.backgroundColor = NSColor(
+            calibratedRed: 0.12,
+            green: 0.145,
+            blue: 0.18,
+            alpha: 1
+        ).cgColor
+        canvas.addSubview(card)
+
+        for (index, color) in [NSColor.systemGreen, .systemYellow, .systemBlue].enumerated() {
+            let pill = NSView(frame: NSRect(
+                x: 350 + CGFloat(index) * 154,
+                y: 300,
+                width: 130,
+                height: 28
+            ))
+            pill.wantsLayer = true
+            pill.layer?.cornerRadius = 14
+            pill.layer?.backgroundColor = color.withAlphaComponent(0.72).cgColor
+            canvas.addSubview(pill)
+        }
+
+        for (index, width) in [438, 372, 410].enumerated() {
+            let line = NSView(frame: NSRect(
+                x: 350,
+                y: 258 - CGFloat(index) * 34,
+                width: CGFloat(width),
+                height: 11
+            ))
+            line.wantsLayer = true
+            line.layer?.cornerRadius = 5.5
+            line.layer?.backgroundColor = NSColor(
+                calibratedWhite: index == 0 ? 0.78 : 0.45,
+                alpha: 1
+            ).cgColor
+            canvas.addSubview(line)
+        }
+
+        canvas.displayIfNeeded()
+        let rep = try XCTUnwrap(canvas.bitmapImageRepForCachingDisplay(in: canvas.bounds))
+        canvas.cacheDisplay(in: canvas.bounds, to: rep)
+        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: url)
     }
 }
 

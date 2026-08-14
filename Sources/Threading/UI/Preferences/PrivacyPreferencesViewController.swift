@@ -461,7 +461,16 @@ final class PrivacyPreferencesViewController: NSViewController {
                 symbol: "chart.bar.xaxis",
                 title: "No analytics",
                 detail: "Threading has no usage tracking and no identifier for this install. "
-                    + "Nothing is sent when you launch it, open a project, or run an agent."
+                    + "The network requests its product features make are described below; "
+                    + "none of them is analytics."
+            ),
+            SettingsUI.detailRow(
+                symbol: "arrow.triangle.pull",
+                title: "Status card checks reach your code host",
+                detail: "While the session status card is on, Threading asks GitHub or GitLab "
+                    + "for the branch's open change request and checks. GitHub uses your "
+                    + "available connection, or anonymous access for a public repository; "
+                    + "GitLab uses glab. Turning off the card stops these lookups."
             ),
             SettingsUI.detailRow(
                 symbol: "bell.badge",

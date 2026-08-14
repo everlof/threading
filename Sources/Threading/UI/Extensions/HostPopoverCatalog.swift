@@ -14,6 +14,7 @@ enum HostPopoverID: String, CaseIterable {
     case settingsAccountIconPicker = "settings.account-icon-picker"
     case extensionNodeDetail = "extension.node-detail"
     case conversationChangedFileDiff = "conversation.changed-file-diff"
+    case sessionCornerCardAttachment = "session.corner-card.attachment-preview"
 
     var exposure: HostPopoverExposure {
         switch self {
@@ -43,6 +44,14 @@ enum HostPopoverID: String, CaseIterable {
                     + "an extension to compose into — the body *is* the change — and the "
                     + "surface exists only while a reader is holding a row open, so its "
                     + "timing, placement, chrome and dismissal stay host-owned."
+            )
+        case .sessionCornerCardAttachment:
+            return .hostOnly(
+                reason: "A bounded glimpse of one attachment plus host file actions. Extensions "
+                    + "already contribute arbitrary rows through session.corner-card@1 and "
+                    + "attachment renderers through attachments.preview@1; composing a second "
+                    + "extension into this transient action surface would mix those authorities. "
+                    + "Its hover timing, local-file actions and dismissal stay host-owned."
             )
         }
     }

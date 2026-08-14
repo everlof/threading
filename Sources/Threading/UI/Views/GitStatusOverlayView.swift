@@ -37,6 +37,11 @@ enum GitStatusOverlayDefaults {
 
     static let maxWidth: CGFloat = 360
 
+    /// A menu-like reading needs a column, not a sequence of labels shrink-wrapped into pills.
+    /// Three hundred twenty points gives the menu-like rows a readable column and still leaves the
+    /// card below the half-pane withdrawal gate in the widths where it is useful.
+    static let minWidth: CGFloat = 320
+
     /// From the card's edge to the first and last row.
     ///
     /// A step up from `small`: with the rows on `small` and the edges on `small` too, a
@@ -53,7 +58,7 @@ enum GitStatusOverlayDefaults {
     /// `rowGap` left 2 — a 19pt wash around 15pt of words, beside a children button that pads
     /// itself to 22. The wash was *shorter* than the button it sat above, and read as shrink-wrap
     /// on the text rather than as a row lighting up.
-    static let rowPadding: CGFloat = Design.Spacing.tight
+    static let rowPadding: CGFloat = Design.Spacing.small
 
     /// One row of the card: its words, and `rowPadding` above and below them.
     ///
@@ -76,7 +81,7 @@ enum GitStatusOverlayDefaults {
     /// both of them plus the line that keeps them from fusing into one block. At `small` it
     /// could not, and the wash was clamped to 2pt to compensate — the gap was setting the
     /// padding, which is backwards.
-    static let rowGap: CGFloat = Design.Spacing.medium
+    static var rowGap: CGFloat { rowPadding * 2 + Design.Spacing.hairline }
     /// Quiet at rest, per the design system; full under the pointer.
     ///
     /// Carried by the card's **contents** rather than by the card. On the view it also thinned
@@ -142,6 +147,24 @@ enum GitStatusOverlayDefaults {
     /// nothing else in the pane moves. One step: the motion is punctuation on the fade, and a
     /// card that travels far enough to be watched is a card the eye has to wait for.
     static let withdrawnRise: CGFloat = Design.Spacing.small
+
+    /// The attachments section is a glance into the chronology, not a second copy of its list.
+    /// Bound before buttons are configured so a session with thousands of recorded files still
+    /// mounts the same fixed number of rows here.
+    nonisolated static let maximumAttachmentRows = 3
+
+    /// A hover preview is a glance beside the card, not a second Attachments pane. Its bitmap is
+    /// decoded only after the dwell and is capped near the rendered point size rather than at the
+    /// media inspector's full-image ceiling.
+    static let attachmentPreviewContentWidth: CGFloat = 248
+    static let attachmentPreviewMinimumHeight: CGFloat = 96
+    static let attachmentPreviewMaximumHeight: CGFloat = 160
+    nonisolated static let attachmentThumbnailMaximumPixels = 512
+    static let attachmentPreviewPolicy = HoverPopoverScheduler.Policy(
+        openDelay: SessionPopoverDefaults.hoverDelay,
+        closeGrace: ExtensionDisclosureDefaults.popoverPolicy.closeGrace,
+        holdsWhilePointerOnPopover: true
+    )
 }
 
 // MARK: - View
@@ -191,6 +214,47 @@ final class GitStatusOverlayView: BackdropOverlay {
         var isEmpty: Bool { name == nil && mode == nil && effort == nil && !isFast }
     }
 
+    /// The provider-neutral remote review facts this compact surface can say without becoming
+    /// Git Review itself. The complete workflow and all write actions remain in that pane.
+    struct ChangeRequestReading: Equatable {
+        let provider: SourceControlProvider
+        let number: Int
+        let title: String
+        let checks: ChangeRequestChecks
+
+        init?(status: ChangeRequestRepositoryStatus) {
+            guard let request = status.changeRequest else { return nil }
+            provider = status.repository.provider
+            number = request.number
+            title = request.title
+            checks = request.checks
+        }
+    }
+
+    /// One bounded glimpse into the session's attachment chronology. Identity, not a path, is
+    /// retained for the click; the window resolves it again through the store before opening.
+    struct AttachmentReading: Equatable {
+        struct Item: Equatable {
+            let id: String
+            let name: String
+            let url: URL
+            let kind: SessionAttachment.Kind
+        }
+
+        let items: [Item]
+        let totalCount: Int
+
+        init(attachments: [SessionAttachment]) {
+            let ordered = attachments.sorted { $0.referencedAt > $1.referencedAt }
+            items = ordered.prefix(GitStatusOverlayDefaults.maximumAttachmentRows).map {
+                Item(id: $0.id, name: $0.name, url: $0.url, kind: $0.kind)
+            }
+            totalCount = attachments.count
+        }
+
+        var isEmpty: Bool { totalCount == 0 }
+    }
+
     // MARK: - Properties
 
     /// Called when the Git portion is clicked; the container routes it to the review tab.
@@ -199,6 +263,8 @@ final class GitStatusOverlayView: BackdropOverlay {
     var onOpenSubagents: (() -> Void)?
     /// So is the audience segment, which opens the sharing pane.
     var onOpenSharing: (() -> Void)?
+    /// A concrete identity selects that attachment; nil opens the complete chronology.
+    var onOpenAttachment: ((String?) -> Void)?
 
     /// What the card says about who can see this chat from outside this Mac.
     ///
@@ -225,6 +291,8 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// The agent line: which model this session is running, and how, for the facts its own
     /// status line does not already say.
     private let modelRow = NSStackView()
+    private let sourceDivider = SeparatorView()
+    private let extensionDivider = SeparatorView()
     private let glyph = ThemedFloatingGlyphView(
         systemSymbolName: "arrow.triangle.branch",
         classicGlyph: .branch,
@@ -260,6 +328,10 @@ final class GitStatusOverlayView: BackdropOverlay {
     )
     private let subagentsButton: ThemedButton
     private let audienceButton: ThemedButton
+    private let changeRequestButton: ThemedButton
+    private let checksButton: ThemedButton
+    private let attachmentButtons: [ThemedButton]
+    private let viewAllAttachmentsButton: ThemedButton
     private var summaryLabel: NSTextField?
     private var filesLabel: NSTextField?
     private var countersLabel: NSTextField?
@@ -303,6 +375,7 @@ final class GitStatusOverlayView: BackdropOverlay {
     private var collapsedBottomConstraint: NSLayoutConstraint?
     private var expandedBottomConstraint: NSLayoutConstraint?
     private var slotTopConstraint: NSLayoutConstraint?
+    private var extensionDividerTopConstraint: NSLayoutConstraint?
     private var rowHeightConstraints: [NSLayoutConstraint] = []
     private var horizontalInsetConstraints: [NSLayoutConstraint] = []
     private var slotRowWidthConstraints: [NSLayoutConstraint] = []
@@ -324,6 +397,24 @@ final class GitStatusOverlayView: BackdropOverlay {
     private var subagentCounts = (working: 0, done: 0)
     private var modelReading: ModelReading?
     private var audienceReading = AudienceReading()
+    private var changeRequestReading: ChangeRequestReading?
+    private var attachmentReading = AttachmentReading(attachments: [])
+    private var hoveredAttachmentIndex: Int?
+    private var previewedAttachmentID: String?
+    private var attachmentPreviewPopover: ThemedPopover?
+
+    /// One scheduler for the bounded mounted rows. Moving from one attachment to another changes
+    /// the index it resolves when the dwell expires; it never creates a timer or decoder per row.
+    private lazy var attachmentPreviewScheduler: HoverPopoverScheduler = {
+        let scheduler = HoverPopoverScheduler(
+            policy: GitStatusOverlayDefaults.attachmentPreviewPolicy
+        )
+        scheduler.onPresent = { [weak self] in self?.presentAttachmentPreview() }
+        scheduler.onDismiss = { [weak self] in self?.dismissAttachmentPreview() }
+        return scheduler
+    }()
+
+    private(set) var attachmentPreviewBuildCountForTesting = 0
 
     /// Lifts the card's *contents* to full strength under the pointer. The surface behind them
     /// does not move: it is what keeps the pane's text out of the card.
@@ -373,6 +464,34 @@ final class GitStatusOverlayView: BackdropOverlay {
         audienceButton = ThemedButton(
             symbol: "eye",
             accessibility: L10n.string("Open Sharing"),
+            target: nil,
+            action: nil
+        )
+        changeRequestButton = ThemedButton(
+            symbol: "arrow.triangle.pull",
+            accessibility: L10n.string("Open change request in Git Review"),
+            target: nil,
+            action: nil
+        )
+        checksButton = ThemedButton(
+            symbol: "checkmark.circle",
+            accessibility: L10n.string("Open checks in Git Review"),
+            target: nil,
+            action: nil
+        )
+        attachmentButtons = (0..<GitStatusOverlayDefaults.maximumAttachmentRows).map { index in
+            let button = ThemedButton(
+                symbol: "paperclip",
+                accessibility: L10n.string("Open attachment"),
+                target: nil,
+                action: nil
+            )
+            button.tag = index
+            return button
+        }
+        viewAllAttachmentsButton = ThemedButton(
+            symbol: "ellipsis.circle",
+            accessibility: L10n.string("View all attachments"),
             target: nil,
             action: nil
         )
@@ -442,11 +561,22 @@ final class GitStatusOverlayView: BackdropOverlay {
         speedMark.isHidden = true
         modelRow.addArrangedSubview(speedMark)
 
+        for button in [changeRequestButton, checksButton] {
+            button.target = self
+            button.action = #selector(openGitReview)
+            button.emphasis = .tertiary
+            button.contentAlignment = .leading
+            button.applyFont(GitStatusOverlayDefaults.font)
+            button.isHidden = true
+        }
+
         // One gap, every row, and the card's own inset around the outside — see `rowGap` for
         // the rhythm this replaced. The children row is the one row that pads itself, and
         // `rebuild()` gives that padding back out of the gap beside it rather than letting the
         // stack count it twice.
         content.orientation = .vertical
+        // The card is a small menu-like column. Rows fill that column so their hover and click
+        // target cover the cell, not only the words that happened to make the card wide.
         content.alignment = .leading
         content.spacing = GitStatusOverlayDefaults.rowGap
         content.alphaValue = GitStatusOverlayDefaults.restingContentAlpha
@@ -456,27 +586,56 @@ final class GitStatusOverlayView: BackdropOverlay {
         // Under the checkout, over the children: the rows read outward from what this pane *is* —
         // which branch, what changed in it, which agent is working it, who it delegated to.
         content.addArrangedSubview(modelRow)
+        content.addArrangedSubview(changeRequestButton)
+        content.addArrangedSubview(checksButton)
 
         subagentsButton.target = self
         subagentsButton.action = #selector(openSubagents)
         subagentsButton.emphasis = .tertiary
+        subagentsButton.contentAlignment = .leading
         subagentsButton.applyFont(GitStatusOverlayDefaults.font)
         // No hover fill here: `applyInk` states it after resolving the floating chrome surface.
-        subagentsButton.setContentHuggingPriority(.required, for: .horizontal)
-        subagentsButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        subagentsButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        subagentsButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         subagentsButton.isHidden = true
         content.addArrangedSubview(subagentsButton)
 
         audienceButton.target = self
         audienceButton.action = #selector(openSharing)
         audienceButton.emphasis = .tertiary
+        audienceButton.contentAlignment = .leading
         audienceButton.applyFont(GitStatusOverlayDefaults.font)
-        audienceButton.setContentHuggingPriority(.required, for: .horizontal)
-        audienceButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        audienceButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        audienceButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         audienceButton.isHidden = true
         // Last, under the children: the rows read outward from the work to the people around it,
         // and who is watching is the outermost fact the card holds.
         content.addArrangedSubview(audienceButton)
+
+        sourceDivider.isHidden = true
+        sourceDivider.setAccessibilityIdentifier("git.status.overlay.sources-divider")
+        content.addArrangedSubview(sourceDivider)
+
+        for button in attachmentButtons {
+            button.target = self
+            button.action = #selector(openAttachment(_:))
+            button.emphasis = .tertiary
+            button.contentAlignment = .leading
+            button.applyFont(GitStatusOverlayDefaults.font)
+            button.onHoverChange = { [weak self, weak button] hovering in
+                guard let self, let button else { return }
+                self.attachmentHoverChanged(hovering, at: button.tag)
+            }
+            button.isHidden = true
+            content.addArrangedSubview(button)
+        }
+        viewAllAttachmentsButton.target = self
+        viewAllAttachmentsButton.action = #selector(openAllAttachments)
+        viewAllAttachmentsButton.emphasis = .tertiary
+        viewAllAttachmentsButton.contentAlignment = .leading
+        viewAllAttachmentsButton.applyFont(GitStatusOverlayDefaults.font)
+        viewAllAttachmentsButton.isHidden = true
+        content.addArrangedSubview(viewAllAttachmentsButton)
         addSubview(content)
 
         extensionSlotStack.orientation = .vertical
@@ -487,6 +646,9 @@ final class GitStatusOverlayView: BackdropOverlay {
         extensionSlotStack.isHidden = true
         extensionSlotStack.setAccessibilityIdentifier("session.corner-card.slot.top-trailing")
         addSubview(extensionSlotStack)
+        extensionDivider.isHidden = true
+        extensionDivider.setAccessibilityIdentifier("git.status.overlay.extension-divider")
+        addSubview(extensionDivider)
 
         // The card is padded rather than banded: the rows sit at their own heights and the
         // three constants below are the air around and between them. One row of 14-point text
@@ -509,13 +671,19 @@ final class GitStatusOverlayView: BackdropOverlay {
             constant: GitStatusOverlayDefaults.verticalInset
         )
         let slotTop = extensionSlotStack.topAnchor.constraint(
-            equalTo: content.bottomAnchor,
-            constant: GitStatusOverlayDefaults.rowGap
+            equalTo: extensionDivider.bottomAnchor,
+            constant: Design.Spacing.medium
         )
         let subagentsHeight = subagentsButton.heightAnchor.constraint(
             equalToConstant: GitStatusOverlayDefaults.rowHeight
         )
         let audienceHeight = audienceButton.heightAnchor.constraint(
+            equalToConstant: GitStatusOverlayDefaults.rowHeight
+        )
+        let changeRequestHeight = changeRequestButton.heightAnchor.constraint(
+            equalToConstant: GitStatusOverlayDefaults.rowHeight
+        )
+        let checksHeight = checksButton.heightAnchor.constraint(
             equalToConstant: GitStatusOverlayDefaults.rowHeight
         )
         let contentLeading = content.leadingAnchor.constraint(
@@ -534,6 +702,14 @@ final class GitStatusOverlayView: BackdropOverlay {
             equalTo: trailingAnchor,
             constant: -Design.Spacing.medium
         )
+        let extensionDividerLeading = extensionDivider.leadingAnchor.constraint(
+            equalTo: leadingAnchor,
+            constant: Design.Spacing.medium
+        )
+        let extensionDividerTrailing = extensionDivider.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -Design.Spacing.medium
+        )
 
         // The children row is a button, and a button carries its own padding around the mark it
         // draws. Insetting the text rows by exactly that much is what puts all three marks in
@@ -548,9 +724,30 @@ final class GitStatusOverlayView: BackdropOverlay {
         collapsedBottomConstraint = collapsedBottom
         expandedBottomConstraint = expandedBottom
         slotTopConstraint = slotTop
-        rowHeightConstraints = [subagentsHeight, audienceHeight]
+        let extensionDividerTop = extensionDivider.topAnchor.constraint(
+            equalTo: content.bottomAnchor,
+            constant: Design.Spacing.medium
+        )
+        extensionDividerTopConstraint = extensionDividerTop
+        rowHeightConstraints = [
+            subagentsHeight,
+            audienceHeight,
+            changeRequestHeight,
+            checksHeight
+        ] + attachmentButtons.map {
+            $0.heightAnchor.constraint(equalToConstant: GitStatusOverlayDefaults.rowHeight)
+        } + [
+            viewAllAttachmentsButton.heightAnchor.constraint(
+                equalToConstant: GitStatusOverlayDefaults.rowHeight
+            )
+        ]
         horizontalInsetConstraints = [
-            contentLeading, contentTrailing, slotLeading, slotTrailing
+            contentLeading,
+            contentTrailing,
+            slotLeading,
+            slotTrailing,
+            extensionDividerLeading,
+            extensionDividerTrailing
         ]
 
         NSLayoutConstraint.activate([
@@ -561,6 +758,9 @@ final class GitStatusOverlayView: BackdropOverlay {
             // and `childrenRowInset` is a number this file states rather than discovers.
             subagentsHeight,
             audienceHeight,
+            changeRequestHeight,
+            checksHeight,
+            widthAnchor.constraint(greaterThanOrEqualToConstant: GitStatusOverlayDefaults.minWidth),
             widthAnchor.constraint(lessThanOrEqualToConstant: GitStatusOverlayDefaults.maxWidth),
             contentLeading,
             contentTrailing,
@@ -569,6 +769,31 @@ final class GitStatusOverlayView: BackdropOverlay {
             slotTrailing,
             slotTop,
             collapsedBottom
+        ])
+        NSLayoutConstraint.activate(Array(rowHeightConstraints.dropFirst(4)))
+
+        // A menu cell is the column, not the words inside it. `NSStackView`'s width alignment
+        // equalises intrinsic widths; it does not promise to consume the stack's externally
+        // assigned width, which left a short attachment row with a short hover pill. Pin every
+        // native control and the section rule to the content column explicitly.
+        NSLayoutConstraint.activate(
+            ([
+                changeRequestButton,
+                checksButton,
+                subagentsButton,
+                audienceButton,
+                viewAllAttachmentsButton
+            ] + attachmentButtons).map {
+                $0.widthAnchor.constraint(equalTo: content.widthAnchor)
+            } + [
+                sourceDivider.widthAnchor.constraint(equalTo: content.widthAnchor)
+            ]
+        )
+
+        NSLayoutConstraint.activate([
+            extensionDividerLeading,
+            extensionDividerTrailing,
+            extensionDividerTop
         ])
 
         customizationHost = ComponentCustomizationHost(
@@ -616,10 +841,21 @@ final class GitStatusOverlayView: BackdropOverlay {
         // Tertiary with the row's other qualifiers: the bolt stands for a word that was set in
         // that weight, and a mark louder than the effort beside it would read as a warning.
         speedMark.tintColor = surfaceInk.tertiary
-        // Both button rows, the same way. The audience row used to be given neither, so it drew
-        // in AppKit's own label colour and lifted to nothing under the pointer — the one row of
-        // the card that was inert by omission rather than by design.
-        for button in [subagentsButton, audienceButton] {
+        // Destinations directly attached to the connected review are the primary receipt, not
+        // quiet metadata about it. Their words take label ink; the progress image is authored
+        // colour and therefore keeps its green/grey/red slices beside them.
+        for button in [changeRequestButton, checksButton] {
+            button.contentTintColor = surfaceInk.label
+            button.hoverFill = surfaceInk.surfaceHover
+        }
+        // Supporting destinations stay one tier quieter. The audience row used to be given
+        // neither colour, so it drew in AppKit's own label colour and lifted to nothing under
+        // the pointer — the one row inert by omission rather than by design.
+        for button in [
+            subagentsButton,
+            audienceButton,
+            viewAllAttachmentsButton
+        ] + attachmentButtons {
             button.contentTintColor = surfaceInk.secondary
             button.hoverFill = surfaceInk.surfaceHover
         }
@@ -675,16 +911,39 @@ final class GitStatusOverlayView: BackdropOverlay {
         rebuild()
     }
 
+    /// Adds the connected provider review and its current check summary. Nil removes both rows.
+    func updateChangeRequest(_ reading: ChangeRequestReading?) {
+        guard reading != changeRequestReading else { return }
+        changeRequestReading = reading
+        rebuild()
+    }
+
+    /// Adds at most three recent attachment rows plus one bounded way into the complete list.
+    func updateAttachments(_ reading: AttachmentReading) {
+        guard reading != attachmentReading else { return }
+        dismissAttachmentPreview()
+        attachmentReading = reading
+        rebuild()
+    }
+
     func clear() {
+        dismissAttachmentPreview()
         lastReading = nil
         isRunActive = false
         runProgress = nil
         subagentCounts = (working: 0, done: 0)
         modelReading = nil
         audienceReading = AudienceReading()
+        changeRequestReading = nil
+        attachmentReading = AttachmentReading(attachments: [])
         hasGitReceipt = false
         subagentsButton.isHidden = true
         audienceButton.isHidden = true
+        changeRequestButton.isHidden = true
+        checksButton.isHidden = true
+        sourceDivider.isHidden = true
+        attachmentButtons.forEach { $0.isHidden = true }
+        viewAllAttachmentsButton.isHidden = true
         modelRow.isHidden = true
         speedMark.isHidden = true
         hasContent = false
@@ -725,9 +984,11 @@ final class GitStatusOverlayView: BackdropOverlay {
     override func layout() {
         let rows = extensionSlotStack.arrangedSubviews
         if rows.isEmpty {
+            extensionDivider.isHidden = true
             expandedBottomConstraint?.isActive = false
             collapsedBottomConstraint?.isActive = true
         } else {
+            extensionDivider.isHidden = false
             collapsedBottomConstraint?.isActive = false
             expandedBottomConstraint?.isActive = true
         }
@@ -746,6 +1007,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         // moved and a cursor rect the window still believes.
         refreshGitHover()
         window?.invalidateCursorRects(for: self)
+        attachmentPreviewPopover?.reposition()
     }
 
     // MARK: - Private Methods
@@ -774,9 +1036,20 @@ final class GitStatusOverlayView: BackdropOverlay {
             : Design.Spacing.medium
     }
 
+    /// Visible words and marks keep this much air from a section rule. This is deliberately
+    /// separate from `rowGap`: a rule is a group boundary, not another reading in the list.
+    /// `SeparatorView` converts it to a frame gap using the adjacent control's optical inset.
+    private var separatorInkGap: CGFloat {
+        floatingStyle.density == .compact
+            ? Design.Spacing.small
+            : Design.Spacing.medium
+    }
+
     private func applyDensity() {
         content.spacing = rowGap
         extensionSlotStack.spacing = rowGap
+        extensionDividerTopConstraint?.constant = separatorInkGap
+        slotTopConstraint?.constant = separatorInkGap
         expandedBottomConstraint?.constant = verticalInset
         for constraint in rowHeightConstraints {
             constraint.constant = GitStatusOverlayDefaults.textRowHeight + rowPadding * 2
@@ -806,7 +1079,12 @@ final class GitStatusOverlayView: BackdropOverlay {
         hasGitReceipt = head != nil || counters != nil
         let hasSubagents = subagentCounts.working + subagentCounts.done > 0
         let hasAudience = !audienceReading.isEmpty
-        guard hasGitReceipt || hasSubagents || hasAudience || model != nil || isFast else {
+        let hasChangeRequest = changeRequestReading != nil
+        let hasAttachments = !attachmentReading.isEmpty
+        let hasNativeReading = hasGitReceipt || hasSubagents || hasAudience || hasChangeRequest
+            || model != nil || isFast
+        guard hasGitReceipt || hasSubagents || hasAudience || hasChangeRequest
+            || hasAttachments || model != nil || isFast else {
             hasContent = false
             applyVisibility(animated: false)
             return
@@ -868,8 +1146,15 @@ final class GitStatusOverlayView: BackdropOverlay {
         countersRow.isHidden = counters == nil
         modelRow.isHidden = model == nil && !isFast
         speedMark.isHidden = !isFast
+        changeRequestButton.isHidden = !hasChangeRequest
+        checksButton.isHidden = !hasChangeRequest
         subagentsButton.isHidden = !hasSubagents
         audienceButton.isHidden = !hasAudience
+        sourceDivider.isHidden = !hasAttachments || !hasNativeReading
+        for (index, button) in attachmentButtons.enumerated() {
+            button.isHidden = !attachmentReading.items.indices.contains(index)
+        }
+        viewAllAttachmentsButton.isHidden = attachmentReading.totalCount <= attachmentReading.items.count
 
         // A button row draws its own padding — a button pads its title out to something a
         // pointer can hit — so wherever one touches an inset or a gap, that inset or gap gives
@@ -877,7 +1162,17 @@ final class GitStatusOverlayView: BackdropOverlay {
         // them meeting give it back twice, once for each.
         let childrenInset = childrenRowInset
         let textRows = [summaryRow, countersRow, modelRow].filter { !$0.isHidden }
-        let buttonRows = [subagentsButton, audienceButton].filter { !$0.isHidden }
+        let nativeButtonRows = [
+            changeRequestButton,
+            checksButton,
+            subagentsButton,
+            audienceButton
+        ].filter { !$0.isHidden }
+        let sourceButtonRows = (attachmentButtons + [viewAllAttachmentsButton]).filter {
+            !$0.isHidden
+        }
+        let buttonRows = nativeButtonRows + sourceButtonRows
+        let visibleContentRows: [NSView] = textRows + nativeButtonRows + sourceButtonRows
         let hasButtonRows = !buttonRows.isEmpty
         contentTopConstraint?.constant = textRows.isEmpty
             ? max(0, verticalInset - childrenInset)
@@ -886,10 +1181,21 @@ final class GitStatusOverlayView: BackdropOverlay {
             ? max(0, verticalInset - childrenInset)
             : verticalInset
         collapsedBottomConstraint?.constant = bottomInset
-        // Extension rows continue the same list, so they join it on the same gap.
-        slotTopConstraint?.constant = hasButtonRows
-            ? max(0, rowGap - childrenInset)
-            : rowGap
+        // The extension section has a real rule between it and the native rows. Ask the rule for
+        // the frame gap that leaves the stated visible-ink gap above it; the final row can change
+        // from bare text to a native or attachment control without this view knowing its type or
+        // repeating its padding. Extension rows are host-rendered arbitrary content, so the slot
+        // keeps the complete gap below rather than guessing inside their view trees.
+        extensionDividerTopConstraint?.constant = visibleContentRows.last.map {
+            extensionDivider.frameGap(to: $0, forInkGap: separatorInkGap)
+        } ?? separatorInkGap
+        slotTopConstraint?.constant = separatorInkGap
+        // `NSStackView` retains custom spacing while an arranged view is hidden. Clear every
+        // possible neighbour first, then state the rhythm for the rows that are visible now.
+        for row in visibleContentRows {
+            content.setCustomSpacing(NSStackView.useDefaultSpacing, after: row)
+        }
+        content.setCustomSpacing(NSStackView.useDefaultSpacing, after: sourceDivider)
         for row in textRows.dropLast() {
             content.setCustomSpacing(NSStackView.useDefaultSpacing, after: row)
         }
@@ -901,10 +1207,25 @@ final class GitStatusOverlayView: BackdropOverlay {
                 after: above
             )
         }
-        for row in buttonRows.dropLast() {
+        for row in nativeButtonRows.dropLast() {
             content.setCustomSpacing(
                 max(0, rowGap - 2 * childrenInset),
                 after: row
+            )
+        }
+        for row in sourceButtonRows.dropLast() {
+            content.setCustomSpacing(
+                max(0, rowGap - 2 * childrenInset),
+                after: row
+            )
+        }
+        if !sourceDivider.isHidden {
+            let nativeRows: [NSView] = textRows + nativeButtonRows
+            sourceDivider.applyOpticalSpacing(
+                in: content,
+                precededBy: nativeRows.last,
+                followedBy: sourceButtonRows.first,
+                inkGap: separatorInkGap
             )
         }
 
@@ -924,6 +1245,34 @@ final class GitStatusOverlayView: BackdropOverlay {
             audienceButton.toolTip = audienceReading.following > 0
                 ? L10n.string("Somebody has this chat open from another device")
                 : L10n.string("This chat has been shared. Nobody is watching it right now.")
+        }
+        if let request = changeRequestReading {
+            changeRequestButton.title = "#\(request.number) · \(request.title)"
+            changeRequestButton.setAccessibilityHelp(
+                L10n.format("Open %@ in Git Review", request.provider.changeRequestName)
+            )
+            checksButton.title = Self.checksText(request.checks)
+            checksButton.image = ThemedStatusProgressRing.image(
+                positive: request.checks.passed,
+                pending: request.checks.pending,
+                negative: request.checks.failed
+            )
+            checksButton.setAccessibilityHelp(L10n.string("Open checks in Git Review"))
+        }
+        for (index, item) in attachmentReading.items.enumerated() {
+            guard attachmentButtons.indices.contains(index) else { break }
+            let button = attachmentButtons[index]
+            button.title = item.name
+            button.setAccessibilityHelp(L10n.string("Open attachment in Attachments"))
+        }
+        if hasAttachments {
+            viewAllAttachmentsButton.title = L10n.format(
+                "View all %lld attachments",
+                Int64(attachmentReading.totalCount)
+            )
+            viewAllAttachmentsButton.setAccessibilityHelp(
+                L10n.string("Open the Attachments pane")
+            )
         }
         // The agent line rides whichever label the card already spoke: it is a row of the same
         // card, and a row nobody hears is a row that is not there for half the readers. It does
@@ -1114,6 +1463,30 @@ final class GitStatusOverlayView: BackdropOverlay {
         return following ?? L10n.string("Shared")
     }
 
+    /// Every non-zero check bucket, shortened into one complete row. The overall state alone
+    /// loses useful information — a pending run may already have five green checks — and the
+    /// sliced ring beside this text is deliberately the same three-part reading.
+    private static func checksText(_ checks: ChangeRequestChecks) -> String {
+        switch checks.state {
+        case .unavailable:
+            return L10n.string("Checks unavailable")
+        case .none:
+            return L10n.string("No checks")
+        case .pending, .passing, .failing:
+            var parts: [String] = []
+            if checks.passed > 0 {
+                parts.append(L10n.format("%lld passed", Int64(checks.passed)))
+            }
+            if checks.pending > 0 {
+                parts.append(L10n.format("%lld pending", Int64(checks.pending)))
+            }
+            if checks.failed > 0 {
+                parts.append(L10n.format("%lld failed", Int64(checks.failed)))
+            }
+            return parts.isEmpty ? L10n.string("No checks") : parts.joined(separator: " · ")
+        }
+    }
+
     /// The agent line as one spoken phrase, or nil when the card has no agent row.
     ///
     /// Fast is a **word** here and a bolt on screen, in the same last place. A symbol is the
@@ -1236,6 +1609,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         alphaValue = shown ? 1 : 0
         layer?.transform = CATransform3DIdentity
         guard !shown else { return }
+        dismissAttachmentPreview()
         // No exit is delivered to a view hidden out from under the pointer, so a card that left
         // lit would come back lit — and come back lit on whichever row the pointer happened to
         // be over when it went.
@@ -1319,6 +1693,193 @@ final class GitStatusOverlayView: BackdropOverlay {
 
     @objc private func openSharing() {
         onOpenSharing?()
+    }
+
+    @objc private func openGitReview() {
+        onOpen?()
+    }
+
+    private func attachmentHoverChanged(_ hovering: Bool, at index: Int) {
+        guard attachmentReading.items.indices.contains(index) else { return }
+        if hovering {
+            hoveredAttachmentIndex = index
+            attachmentPreviewScheduler.pointerEntered()
+        } else if hoveredAttachmentIndex == index {
+            hoveredAttachmentIndex = nil
+            attachmentPreviewScheduler.pointerExited()
+        }
+    }
+
+    private func presentAttachmentPreview() {
+        guard let index = hoveredAttachmentIndex,
+              attachmentReading.items.indices.contains(index),
+              attachmentButtons.indices.contains(index)
+        else { return }
+        let button = attachmentButtons[index]
+        let item = attachmentReading.items[index]
+        guard !button.isHidden, button.window != nil else { return }
+
+        if attachmentPreviewPopover?.isShown == true {
+            guard previewedAttachmentID != item.id else { return }
+            attachmentPreviewPopover?.close()
+        }
+        guard let controller = makeAttachmentPreviewSurface(
+            forAttachmentAt: index,
+            onHoverChange: { [weak self] hovering in
+                self?.attachmentPreviewScheduler.popoverHoverChanged(hovering)
+            }
+        ) else { return }
+
+        let popover = HostPopoverFactory.make(.sessionCornerCardAttachment)
+        popover.behavior = .applicationDefined
+        popover.animates = false
+        popover.contentViewController = controller
+        popover.onClose = { [weak self, weak popover] in
+            guard let self, self.attachmentPreviewPopover === popover else { return }
+            self.attachmentPreviewScheduler.cancelPendingWork()
+            self.attachmentPreviewPopover = nil
+            self.previewedAttachmentID = nil
+        }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxX)
+        guard popover.isShown else { return }
+        attachmentPreviewPopover = popover
+        previewedAttachmentID = item.id
+    }
+
+    private func dismissAttachmentPreview() {
+        attachmentPreviewScheduler.cancelPendingWork()
+        attachmentPreviewPopover?.close()
+        attachmentPreviewPopover = nil
+        previewedAttachmentID = nil
+        hoveredAttachmentIndex = nil
+    }
+
+    /// Builds the hover body separately from presentation so it can be rendered and asserted
+    /// without ordering a child window. This is also the scaling boundary: `updateAttachments`
+    /// stores three lightweight references, and the bounded thumbnail decode happens only here,
+    /// after the hover dwell has asked for one concrete row.
+    func makeAttachmentPreviewSurface(
+        forAttachmentAt index: Int,
+        onHoverChange: @escaping (Bool) -> Void = { _ in }
+    ) -> NSViewController? {
+        guard attachmentReading.items.indices.contains(index) else { return nil }
+        attachmentPreviewBuildCountForTesting += 1
+        let item = attachmentReading.items[index]
+
+        let preview: NSView?
+        let previewHeight: CGFloat
+        if item.kind == .image,
+           let image = BoundedImageDecoder.thumbnail(
+               at: item.url,
+               policy: .thumbnail(
+                   maximumPixelDimension:
+                       GitStatusOverlayDefaults.attachmentThumbnailMaximumPixels
+               )
+           ), image.isValid {
+            let imageView = ThemedImagePreview()
+            imageView.image = image
+            imageView.fileURL = item.url
+            imageView.setAccessibilityIdentifier("git.status.attachment-preview.image")
+            preview = imageView
+            previewHeight = Self.attachmentPreviewHeight(for: image.size)
+        } else {
+            preview = nil
+            previewHeight = 0
+        }
+
+        let copyTitle = item.kind == .image
+            ? L10n.string("Copy Image")
+            : L10n.string("Copy File")
+        let copySymbol = item.kind == .image ? "photo.on.rectangle" : "doc.on.doc"
+        let entries: [ThemedActionPopoverEntry] = [
+            .action(ThemedActionPopoverAction(
+                title: copyTitle,
+                systemSymbolName: copySymbol,
+                onChoose: { [weak self] in self?.copyAttachment(item) }
+            )),
+            .action(ThemedActionPopoverAction(
+                title: L10n.string("Copy Path"),
+                systemSymbolName: "folder",
+                onChoose: { [weak self] in self?.copyAttachmentPath(item) }
+            )),
+            .separator,
+            .action(ThemedActionPopoverAction(
+                title: L10n.string("Open in Attachments"),
+                systemSymbolName: "paperclip",
+                onChoose: { [weak self] in self?.openAttachmentFromPreview(item) }
+            )),
+            .action(ThemedActionPopoverAction(
+                title: L10n.string("Reveal in Finder"),
+                systemSymbolName: "magnifyingglass",
+                onChoose: { [weak self] in self?.revealAttachment(item) }
+            ))
+        ]
+        return ThemedActionPopoverViewController(
+            preview: preview,
+            previewHeight: previewHeight,
+            entries: entries,
+            contentWidth: GitStatusOverlayDefaults.attachmentPreviewContentWidth,
+            onHoverChange: onHoverChange
+        )
+    }
+
+    private static func attachmentPreviewHeight(for imageSize: NSSize) -> CGFloat {
+        guard imageSize.width > 0, imageSize.height > 0 else {
+            return GitStatusOverlayDefaults.attachmentPreviewMinimumHeight
+        }
+        let fitted = GitStatusOverlayDefaults.attachmentPreviewContentWidth
+            * imageSize.height / imageSize.width
+        return min(
+            GitStatusOverlayDefaults.attachmentPreviewMaximumHeight,
+            max(GitStatusOverlayDefaults.attachmentPreviewMinimumHeight, fitted.rounded(.up))
+        )
+    }
+
+    private func copyAttachment(_ item: AttachmentReading.Item) {
+        dismissAttachmentPreview()
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if item.kind == .image,
+           let image = BoundedImageDecoder.image(at: item.url, policy: .userMedia),
+           image.isValid {
+            pasteboard.writeObjects([image])
+        } else {
+            pasteboard.writeObjects([item.url as NSURL])
+        }
+    }
+
+    private func copyAttachmentPath(_ item: AttachmentReading.Item) {
+        dismissAttachmentPreview()
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([item.url as NSURL])
+        pasteboard.setString(item.url.path, forType: .string)
+    }
+
+    private func openAttachmentFromPreview(_ item: AttachmentReading.Item) {
+        dismissAttachmentPreview()
+        onOpenAttachment?(item.id)
+    }
+
+    private func revealAttachment(_ item: AttachmentReading.Item) {
+        dismissAttachmentPreview()
+        NSWorkspace.shared.activateFileViewerSelecting([item.url])
+    }
+
+    @objc private func openAttachment(_ sender: ThemedButton) {
+        guard attachmentReading.items.indices.contains(sender.tag) else { return }
+        dismissAttachmentPreview()
+        onOpenAttachment?(attachmentReading.items[sender.tag].id)
+    }
+
+    @objc private func openAllAttachments() {
+        dismissAttachmentPreview()
+        onOpenAttachment?(nil)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { dismissAttachmentPreview() }
     }
 
     override func updateTrackingAreas() {
