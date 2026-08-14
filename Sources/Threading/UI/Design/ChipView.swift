@@ -280,6 +280,18 @@ final class ChipView: ThemedControl, OpticalInsetProviding {
     private func updateTitleWidthConstraint(for style: AppTheme.Material.ChoiceStyle) {
         titleWidthConstraint?.isActive = false
         titleWidthConstraint = nil
+        // Which child absorbs the slack is the same question, answered the other way round per
+        // anatomy. Past a modern chip's title there is nothing but padding, so the title should
+        // take the fraction `titleRoundingAllowance` reserved — at the default 250 it merely ties
+        // with `NSStackView`'s own hugging, a tie is settled by leaving the space unspent, and the
+        // label kept the width Auto Layout had floored out of its fractional intrinsic: an
+        // ellipsis a third of a point short of its own glyphs, inside a chip at full width.
+        // A classic chooser must not, because the slack past *its* title is the arrow well, drawn
+        // outside Auto Layout — a title willing to grow runs straight under the arrow.
+        titleLabel.setContentHuggingPriority(
+            style.isClassic ? .defaultLow : .defaultLow - 1,
+            for: .horizontal
+        )
         guard style.isClassic else { return }
 
         let constraint = titleLabel.widthAnchor.constraint(
