@@ -489,8 +489,15 @@ final class ProjectIconTests: XCTestCase {
             GeneratedProjectIcon.stableHash("sonda"),
             GeneratedProjectIcon.stableHash("sondalabs")
         )
-        XCTAssertTrue(
-            GeneratedProjectIcon.image(for: "sonda") === GeneratedProjectIcon.image(for: "sonda")
+        // The drawing repeats; the instance carrying it is not promised to. `image(for:)` is
+        // backed by an `NSCache`, which discards entries whenever it decides to — so `===` here
+        // asserted a guarantee the cache does not make, and it came due exactly where the
+        // pressure is: late in a full-plan run of five thousand tests, the entry was dropped
+        // between the two calls and a test named for determinism failed over a cache miss.
+        // What a caller depends on is that the second icon looks like the first.
+        XCTAssertEqual(
+            GeneratedProjectIcon.image(for: "sonda").tiffRepresentation,
+            GeneratedProjectIcon.image(for: "sonda").tiffRepresentation
         )
     }
 
