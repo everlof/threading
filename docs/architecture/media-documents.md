@@ -224,6 +224,45 @@ Rules, each with a test:
 - **byte access is a separate, later authority** (`host.project.files.content.read`) and was not
   folded in to save a round trip.
 
+## Marking up a picture (`ImageAnnotation`, `MediaInspectorAnnotationHost`)
+
+A numbered pin on an image, a field per pin, and one seam deciding who owns the list.
+
+**The inspector never owns the marks.** Opened from the element-report sheet it is a second view
+of a list that sheet is already showing in its rail, and a pin dropped at 400% has to appear in a
+field the user goes back to. Opened from anywhere else — an attachment, a chart an agent drew, a
+browser baseline — there is no rail and no report, and the marks are worth exactly one thing:
+handing them to the chat. Both are the same gesture over the same picture, so the difference
+belongs in *who is asked*, not in a mode flag inside the inspector. `MediaInspectorAnnotationHost`
+is that question; `MediaInspectorPresenter.defaultAnnotationHost` is who answers it when the
+opener named nobody, installed by `AppDelegate` because this file draws pictures and knows
+nothing about sessions or composers.
+
+Three decisions worth their words:
+
+- **The point is normalized into the image's own space**, never a view coordinate. One mark is
+  read in four rectangles — a preview scaled to fit a column, the zoomed canvas with a pan
+  offset, a flattened copy at the file's pixel size, and a coordinate in prose — and storing any
+  one of them makes the other three a conversion somebody forgets.
+- **A mark is a click; panning is a drag; the mark is decided on the way up.** Both start with
+  the button going down on the same pixel, and a zoomed picture is exactly when someone wants to
+  pan *and* has a reason to mark a detail. Deciding on the way down dropped a pin at the start of
+  every pan.
+- **The chat gets the flattened picture and the coordinates**, once, on close. Marking is a
+  sentence being composed — the third pin often renames the first — so a handoff per click would
+  put three versions of the same image in the composer. It rides `SessionContextHandoff`, the
+  seam that answers for a native conversation *and* a terminal, rather than an image-only route
+  that would work on one surface and silently do nothing on the other.
+
+`ChatImageAnnotationHost` is held **strongly** by `MediaInspectorSession`: the view's reference is
+weak, and a host built on demand by the default provider has no other owner. Without that, the
+chat host was deallocated between being created and being asked for the marks, and annotation
+quietly never appeared outside the report sheet.
+
+The pin is `BrowserAnnotationOverlay`'s pin — same chip height, border weight, accent fill with
+the ground stroked around it, numeric face, top-most-wins hit test. A second numbered mark with
+its own anatomy would be two annotation vocabularies in one app.
+
 ## Attachments
 
 ### The probe, and why it runs before admission

@@ -6863,6 +6863,7 @@ final class ThemedControlTests: HostedStoreTestCase {
             [
                 "AgentActivityBeamView",
                 "AgentWorkSummaryView",
+                "AnnotatedImageView",
                 "BackdropOverlay",
                 "BackdropThemedControl",
                 "BrowserAnnotationOverlay",
@@ -6888,6 +6889,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "GlyphView",
                 "HostedServiceSignInButton",
                 "HoverPopoverScheduler",
+                "ImageAnnotationRailView",
                 "ImageCompareCanvas",
                 "ImageCompareView",
                 "LimitEscapeStripView",

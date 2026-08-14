@@ -2141,6 +2141,17 @@ open Threading's media inspector inside the same window. It starts fitted; pinch
 directly to an item. **Space** or **Escape** closes and returns focus to the image you came from.
 The inspector's **⋯** offers copying, Finder, the default app, and **Open in System Quick Look**
 as the last-resort system viewer. The panel's own **⋯** advertises the same routes.
+**Marking up a picture.** The inspector's pin button turns on annotation: click anywhere on the
+image to drop a numbered mark, and a field for it appears in a column beside the picture. Click a
+mark to put the caret in its field; put the caret in a field and its mark lights up, so "which one
+is this?" is answered by looking rather than counting. Marks survive zoom and pan because they
+belong to the picture rather than to the view. Remove one with the **✕** beside its field.
+
+When you close the inspector, the marks go to the chat you are looking at: a copy of the image
+with the numbers drawn into it, plus the numbered notes, each carrying its point in the image's
+own pixels. Nothing is sent while you are still marking, and nothing is sent if you made no
+marks. A session with no live chat or terminal receives nothing — there is nowhere to put it.
+
 
 **The panel gives way to the window.** Showing an image opens the panel, and an open panel used
 to put a floor under how narrow the window could be made. It no longer does: drag the window's

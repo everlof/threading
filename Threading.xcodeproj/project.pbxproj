@@ -385,6 +385,8 @@
 		AED739CD88C89C59BCF9F2A4 /* ArtifactScanServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A43E999F4BE3B43A3BE48F86 /* ArtifactScanServiceTests.swift */; };
 		CB7ABE0BF24D01E10E30187A /* HostedStoreTestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3C1A38E90E61005AB83938E /* HostedStoreTestCase.swift */; };
 		39AE379A652DA7220789E2F0 /* HostedStoreIsolationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA52E9B62F293F037D2CE0EB /* HostedStoreIsolationTests.swift */; };
+		4756835B9D4657C4B38B2D67 /* DeveloperReportChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 521725A989370F7B1857A7CB /* DeveloperReportChatTests.swift */; };
+		038A7049F80DDF77A21C8B8D /* ImageAnnotationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 704F514AF69C00BF1ACBDB9D /* ImageAnnotationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -825,6 +827,8 @@
 		A43E999F4BE3B43A3BE48F86 /* ArtifactScanServiceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ArtifactScanServiceTests.swift; sourceTree = "<group>"; };
 		A3C1A38E90E61005AB83938E /* HostedStoreTestCase.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HostedStoreTestCase.swift; sourceTree = "<group>"; };
 		CA52E9B62F293F037D2CE0EB /* HostedStoreIsolationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HostedStoreIsolationTests.swift; sourceTree = "<group>"; };
+		521725A989370F7B1857A7CB /* DeveloperReportChatTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DeveloperReportChatTests.swift; sourceTree = "<group>"; };
+		704F514AF69C00BF1ACBDB9D /* ImageAnnotationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ImageAnnotationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1351,6 +1355,8 @@
 				A43E999F4BE3B43A3BE48F86 /* ArtifactScanServiceTests.swift */,
 				A3C1A38E90E61005AB83938E /* HostedStoreTestCase.swift */,
 				CA52E9B62F293F037D2CE0EB /* HostedStoreIsolationTests.swift */,
+				521725A989370F7B1857A7CB /* DeveloperReportChatTests.swift */,
+				704F514AF69C00BF1ACBDB9D /* ImageAnnotationTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -2242,6 +2248,8 @@
 				AED739CD88C89C59BCF9F2A4 /* ArtifactScanServiceTests.swift in Sources */,
 				CB7ABE0BF24D01E10E30187A /* HostedStoreTestCase.swift in Sources */,
 				39AE379A652DA7220789E2F0 /* HostedStoreIsolationTests.swift in Sources */,
+				4756835B9D4657C4B38B2D67 /* DeveloperReportChatTests.swift in Sources */,
+				038A7049F80DDF77A21C8B8D /* ImageAnnotationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

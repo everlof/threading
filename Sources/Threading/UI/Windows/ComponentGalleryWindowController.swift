@@ -185,6 +185,8 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemeRedraw",
         "ThemedIconButton",
         "ThemedImagePreview",
+        "AnnotatedImageView",
+        "ImageAnnotationRailView",
         "ToastPresenter",
         "ToastView",
         "ToolbarButtonGroupView",
@@ -2644,6 +2646,17 @@ final class ComponentGalleryViewController: NSViewController {
                     makeImagePreviewSample()
                 ),
                 story(
+                    "AnnotatedImageView / ImageAnnotationRailView",
+                    "A picture you can point at. Click it anywhere to drop a numbered pin and "
+                        + "a field for it appears beside it; click a pin to put the caret in "
+                        + "its field, and put the caret in a field to light its pin. The tie "
+                        + "runs both ways because the question is always which mark is this "
+                        + "one. Space opens the picture full size, where the same marks are "
+                        + "editable over the zoomed image. The pin is the browser overlay's "
+                        + "pin, deliberately.",
+                    makeImageAnnotationSample()
+                ),
+                story(
                     "ThemedFileIconView",
                     "Native Finder artwork under System; semantic, theme-owned file kinds under authored themes.",
                     makeFileIconSample()
@@ -3255,6 +3268,64 @@ final class ComponentGalleryViewController: NSViewController {
         NSLayoutConstraint.activate([
             row.widthAnchor.constraint(equalToConstant: 520),
             row.heightAnchor.constraint(equalToConstant: 160)
+        ])
+        return row
+    }
+
+    /// The picture and its rail, wired to each other exactly as the report sheet wires them —
+    /// this story is the one place the two halves can be exercised without filing a report.
+    private func makeImageAnnotationSample() -> NSView {
+        let size = NSSize(width: 900, height: 500)
+        let plate = NSImage(size: size)
+        plate.lockFocus()
+        Design.Surface.panel.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        Design.Surface.accent.setFill()
+        NSRect(x: 60, y: 60, width: 240, height: 120).fill()
+        Design.Status.positive.setFill()
+        NSRect(x: 420, y: 260, width: 300, height: 90).fill()
+        plate.unlockFocus()
+
+        let picture = AnnotatedImageView()
+        picture.image = plate
+
+        let rail = ImageAnnotationRailView()
+        var annotations: [ImageAnnotation] = []
+
+        func apply(_ updated: [ImageAnnotation]) {
+            annotations = updated
+            picture.annotations = updated
+            rail.setAnnotations(updated)
+        }
+
+        picture.onAddAnnotation = { point in
+            guard annotations.count < ImageAnnotationDefaults.maximumCount else { return }
+            let annotation = ImageAnnotation(point: point)
+            apply(annotations + [annotation])
+            picture.selectedAnnotationID = annotation.id
+            rail.selectedAnnotationID = annotation.id
+            rail.focusNote(for: annotation.id)
+        }
+        picture.onSelectAnnotation = { id in
+            rail.selectedAnnotationID = id
+            if let id { rail.focusNote(for: id) }
+        }
+        rail.onFocus = { id in picture.selectedAnnotationID = id }
+        rail.onRemove = { id in apply(annotations.filter { $0.id != id }) }
+        rail.onNoteChange = { id, note in
+            apply(annotations.map { $0.id == id ? ImageAnnotation(id: id, point: $0.point, note: note) : $0 })
+        }
+
+        let row = NSStackView(views: [picture, rail])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.spacing = Design.Spacing.large
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            row.widthAnchor.constraint(equalToConstant: 620),
+            row.heightAnchor.constraint(equalToConstant: 240),
+            rail.widthAnchor.constraint(equalToConstant: 220)
         ])
         return row
     }

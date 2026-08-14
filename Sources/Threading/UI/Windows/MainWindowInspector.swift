@@ -43,6 +43,14 @@ extension MainWindowController {
                 await submitter.submit(trigger: "manual", draft: draft)
             }
         }
+#if DEBUG
+        sheet.onSendToChat = { [weak self] request in
+            guard let self else {
+                return .failed(message: DeveloperReportChatStrings.notCreated)
+            }
+            return self.startDeveloperReportChat(request)
+        }
+#endif
 
         contentViewController?.presentAsSheet(sheet)
     }
@@ -159,6 +167,9 @@ extension MainWindowController {
             screenshot: screenshot,
             screenshotURL: screenshotURL
         )
+        // Read before the view loads, because the sheet sizes itself to the window it is about
+        // to slide out of — the capture is the content now, and it is worth the whole window.
+        sheet.availableSize = window?.contentView?.bounds.size
         sheet.onDone = { [weak self, weak sheet] in
             guard let self, let sheet else { return }
             self.contentViewController?.dismiss(sheet)
@@ -173,6 +184,14 @@ extension MainWindowController {
                 )
             }
         }
+#if DEBUG
+        sheet.onSendToChat = { [weak self] request in
+            guard let self else {
+                return .failed(message: DeveloperReportChatStrings.notCreated)
+            }
+            return self.startDeveloperReportChat(request)
+        }
+#endif
 
         contentViewController?.presentAsSheet(sheet)
     }

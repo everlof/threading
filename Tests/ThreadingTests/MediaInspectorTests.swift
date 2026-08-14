@@ -733,6 +733,151 @@ final class MediaInspectorTests: XCTestCase {
         return url
     }
 
+    // MARK: - Annotating
+
+    /// The host is asked for the marks, told of every change, and told once on the way out.
+    /// A fake stands in for both real hosts: the report sheet, which keeps up as it goes, and
+    /// the chat host, which waits for the close.
+    @MainActor
+    private final class FakeAnnotationHost: MediaInspectorAnnotationHost {
+        var marks: [ImageAnnotation] = []
+        private(set) var changeCount = 0
+        private(set) var closedWith: [ImageAnnotation]?
+
+        func annotations(for item: MediaInspectorItem) -> [ImageAnnotation] { marks }
+
+        func inspector(
+            didChange annotations: [ImageAnnotation],
+            for item: MediaInspectorItem,
+            image: NSImage?
+        ) {
+            marks = annotations
+            changeCount += 1
+        }
+
+        func inspectorDidClose(
+            with annotations: [ImageAnnotation],
+            for item: MediaInspectorItem,
+            image: NSImage?
+        ) {
+            closedWith = annotations
+        }
+    }
+
+    @MainActor
+    func testMarkingIsOfferedOnlyWhenSomebodyWillTakeTheMarks() throws {
+        let fixture = try imageFiles(count: 1)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let unhosted = MediaInspectorView(items: fixture.items, selectedIndex: 0)
+        unhosted.setAnnotating(true)
+        XCTAssertFalse(
+            unhosted.isAnnotating,
+            "an inspector with nowhere to send marks offered to collect them"
+        )
+
+        // Held in a local on purpose: the view's reference to its host is weak, so an inline
+        // `FakeAnnotationHost()` is deallocated before the next line runs — which is the same
+        // lifetime `MediaInspectorSession` exists to supply for the chat host.
+        let host = FakeAnnotationHost()
+        let hosted = MediaInspectorView(
+            items: fixture.items,
+            selectedIndex: 0,
+            annotationHost: host
+        )
+        hosted.setAnnotating(true)
+        XCTAssertTrue(hosted.isAnnotating)
+        XCTAssertTrue(host.marks.isEmpty)
+    }
+
+    /// A click marks the picture, the host hears about it at once, and closing the overlay is
+    /// the one notice the chat host is waiting for.
+    @MainActor
+    func testAMarkReachesTheHostAndTheCloseNoticeCarriesTheWholeList() throws {
+        let fixture = try imageFiles(count: 1)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let host = FakeAnnotationHost()
+        let inspector = MediaInspectorView(
+            items: fixture.items,
+            selectedIndex: 0,
+            annotationHost: host
+        )
+        inspector.frame = NSRect(x: 0, y: 0, width: 900, height: 640)
+        inspector.layoutSubtreeIfNeeded()
+        inspector.setAnnotating(true)
+        inspector.layoutSubtreeIfNeeded()
+
+        let canvas = try XCTUnwrap(
+            descendants(of: inspector).compactMap { $0 as? MediaInspectorCanvas }.first
+        )
+        XCTAssertTrue(canvas.isAnnotating, "the canvas was not put into marking mode")
+
+        let centre = NSPoint(x: canvas.imageRect.midX, y: canvas.imageRect.midY)
+        canvas.mouseDown(with: try mouseEvent(.leftMouseDown, at: centre, in: canvas))
+        canvas.mouseUp(with: try mouseEvent(.leftMouseUp, at: centre, in: canvas))
+
+        XCTAssertEqual(host.marks.count, 1, "a click in marking mode did not mark the picture")
+        XCTAssertEqual(host.changeCount, 1)
+        XCTAssertEqual(canvas.annotations.count, 1, "the pin was not drawn on the canvas")
+
+        inspector.prepareForRemoval()
+        XCTAssertEqual(host.closedWith?.count, 1, "the close notice carried nothing")
+    }
+
+    /// A drag pans; only a click marks. A zoomed picture is exactly when somebody wants to pan
+    /// *and* has a reason to mark a detail, and deciding on the way down dropped a pin at the
+    /// start of every pan.
+    @MainActor
+    func testPanningAZoomedPictureDoesNotLeaveAPinWhereTheDragBegan() throws {
+        let fixture = try imageFiles(count: 1)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let host = FakeAnnotationHost()
+        let inspector = MediaInspectorView(
+            items: fixture.items,
+            selectedIndex: 0,
+            annotationHost: host
+        )
+        inspector.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        inspector.layoutSubtreeIfNeeded()
+        inspector.setAnnotating(true)
+        inspector.layoutSubtreeIfNeeded()
+
+        let canvas = try XCTUnwrap(
+            descendants(of: inspector).compactMap { $0 as? MediaInspectorCanvas }.first
+        )
+        canvas.showActualSize()
+
+        let start = NSPoint(x: canvas.bounds.midX, y: canvas.bounds.midY)
+        let end = NSPoint(x: start.x + 60, y: start.y + 40)
+        canvas.mouseDown(with: try mouseEvent(.leftMouseDown, at: start, in: canvas))
+        canvas.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: end, in: canvas))
+        canvas.mouseUp(with: try mouseEvent(.leftMouseUp, at: end, in: canvas))
+
+        XCTAssertTrue(host.marks.isEmpty, "panning left a pin behind")
+        XCTAssertNotEqual(canvas.panOffset, .zero, "the drag did not pan")
+    }
+
+    @MainActor
+    private func mouseEvent(
+        _ type: NSEvent.EventType,
+        at point: NSPoint,
+        in view: NSView
+    ) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.mouseEvent(
+            with: type,
+            location: view.convert(point, to: nil),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: view.window?.windowNumber ?? 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ))
+    }
+
     private func imageFiles(count: Int) throws
         -> (directory: URL, items: [MediaInspectorItem]) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(

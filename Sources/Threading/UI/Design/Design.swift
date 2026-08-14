@@ -189,6 +189,12 @@ enum Design {
         /// The rail around those thumbnails, including its vertical breathing room.
         static let mediaInspectorRailHeight: CGFloat = 72
 
+        /// The notes column beside a picture being marked up, in the inspector and in the
+        /// report sheet. Wide enough for a sentence about one detail and no wider: the picture
+        /// is what the reader is looking at, and a column that competes with it for the window
+        /// turns "mark this" into a two-panel editor.
+        static let mediaInspectorAnnotationColumnWidth: CGFloat = 300
+
         /// Widest a column of content grows before it becomes hard to scan.
         static let readableWidth: CGFloat = 620
 

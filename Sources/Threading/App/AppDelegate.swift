@@ -612,6 +612,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // Remote access is a separate loopback server behind a tunnel, independent of the MCP
         // listener — no ordering dependency, and it starts only if the user has turned it on.
         RemoteAccessCoordinator.shared.startIfEnabled()
+        // Who takes the marks made on an image nobody else claimed. Installed here rather than
+        // reached for from the design system: `MediaInspector` draws pictures and knows nothing
+        // about sessions or composers, and this is the one place that knows both. A test host
+        // never reaches this line, so a fixture that opens an image is offered no annotation
+        // mode and needs no session.
+        MediaInspectorPresenter.defaultAnnotationHost = { window in
+            guard let controller = window?.windowController as? MainWindowController else {
+                return nil
+            }
+            let host = ChatImageAnnotationHost(sessionID: { [weak controller] in
+                controller?.currentSessionID
+            })
+            return host.canHandOff ? host : nil
+        }
+
 
         // The disk survey runs itself from here on, at background priority and on its own
         // delay — it is the least urgent thing the app does, and the Storage page is only ever

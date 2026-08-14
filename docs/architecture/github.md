@@ -105,6 +105,52 @@ rather than `[String: Any]`. The generated API body is capped at 60,000 characte
 fallback at 6,000, and labels have explicit count and length budgets. Truncation includes its
 marker inside the budget. An accepted POST with an unreadable response still counts as created:
 retrying would risk filing a duplicate.
+## The development build's third button: **Send to Chat** (`DeveloperReportChat`)
+
+Debug builds only. The same reviewed report, opened as a chat in the repository the running
+binary was compiled from, instead of being posted to the private intake.
+
+The reason is not convenience. `MacIssueReportOutbox` is durable by design: a report the intake
+service does not accept stays on disk and retries, so nothing is lost. While that service is
+still a checklist rather than a deployment (see
+[`issue-reporting-setup.md`](../operations/issue-reporting-setup.md)), *every* report a
+developer files behaves that way — two sat in `~/Library/Application Support/Threading/
+IssueReports/Outbox/` for two days, exactly as specified, and told nobody anything. A queue for
+a service that does not answer yet is not a way to say something to someone.
+
+So the button takes, in one press, the path a developer takes by hand: Copy Report, new chat,
+paste, Return.
+
+Four decisions are worth their words:
+
+- **The report keeps its screenshot path.** The private route strips it deliberately — a
+  temporary file on this machine means nothing to an intake service — and this one carries
+  `details` rather than `publicDetails`, because a path is the one form of an image the agent
+  CLIs can act on. That difference is the whole value of the route, and a test holds both
+  readings of the same sheet together.
+- **The project is the build's own source root** (`#filePath`), matched **exactly** against the
+  sidebar, with the on-screen project as the fallback. Exact rather than "somewhere under",
+  because one repository holds several projects here and a report about this window belongs to
+  the tree that drew it. A build run from a copy — an rsync'd tree, a second checkout — resolves
+  to that copy, and falls back when Threading has never been pointed at it.
+- **The chat is configured like the last one used in that project**, not from app defaults: the
+  person filing the report was working there a moment ago, and a chat that comes up on a
+  different agent, login or permission mode is one they must reconfigure before it is useful.
+  `lastUsedAt`, not `lastActiveAt` — a background relaunch touches every session at once.
+  Archived rows are skipped; a managed workspace and a branch are never chosen, because a UI
+  report is read against the tree the build came from.
+- **One line of frame, and it is Threading speaking.** Deliberately not the
+  `[Cross-session message …]` header from [`control-plane.md`](control-plane.md): nothing here
+  was written by another session's agent, and this is the opening prompt of a chat the user
+  started by pressing a button. The line exists to keep the trailing view chain from reading as
+  something the person typed, and to say the screenshot is a file worth opening.
+
+Starting the chat goes through `startSessionUnattended` + `launchInBackground` — the scheduled
+new-session path, which is already the one shape that creates and launches a session with an
+opening prompt. It differs in one respect, and on purpose: this one **selects** the new row. A
+schedule firing at 09:00 must not reach across whatever the user is reading; a button pressed a
+moment ago is being waited on, and the chat coming up is the receipt.
+
 
 ## GitHub pull-request adapter (`GitHubPullRequestClient`)
 

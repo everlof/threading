@@ -29,6 +29,15 @@ final class ReportProblemViewController: NSViewController {
     /// composition root.
     var onSubmitReport: ((DeveloperIssueReportDraft) async -> DeveloperIssueReportSubmission)?
 
+#if DEBUG
+    /// Opens a chat on the same reviewed report. There is no capture here, so what a chat gets
+    /// is exactly what the inbox would have got — which is the whole of what this sheet knows.
+    /// See `DeveloperReportChat`.
+    var onSendToChat: ((DeveloperReportChatRequest) -> DeveloperReportChatOutcome)?
+
+    private let chatButton = ThemedButton()
+#endif
+
     // MARK: - Lifecycle
 
     override func loadView() {
@@ -214,7 +223,17 @@ final class ReportProblemViewController: NSViewController {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let footer = NSStackView(views: [spacer, cancelButton, submitButton])
+        var buttons: [NSView] = [spacer, cancelButton]
+#if DEBUG
+        chatButton.title = DeveloperReportChatStrings.buttonTitle
+        chatButton.target = self
+        chatButton.action = #selector(sendToChat)
+        chatButton.setAccessibilityIdentifier(ReportProblemIdentifiers.chat)
+        buttons.append(chatButton)
+#endif
+        buttons.append(submitButton)
+
+        let footer = NSStackView(views: buttons)
         footer.orientation = .horizontal
         footer.spacing = Design.Spacing.small
 
@@ -244,6 +263,31 @@ final class ReportProblemViewController: NSViewController {
             self?.finishSubmitting(outcome)
         }
     }
+
+#if DEBUG
+    /// The same empty-report guard the private route applies, for the same reason: the reader
+    /// is a person either way, and an agent handed a blank report answers by asking what it is.
+    @objc func sendToChat() {
+        guard !isSubmitting, let onSendToChat else { return }
+        guard !draftIsEmpty else {
+            statusView.show(ReportProblemStrings.emptyWarning, tone: .failed)
+            view.window?.makeFirstResponder(titleField)
+            return
+        }
+
+        let draft = reportDraft()
+        statusView.show(DeveloperReportChatStrings.startingStatus, tone: .working)
+        switch onSendToChat(
+            DeveloperReportChatRequest(title: draft.title, report: draft.description)
+        ) {
+        case .started(let projectName):
+            statusView.show(DeveloperReportChatStrings.started(projectName: projectName), tone: .done)
+            onDone?()
+        case .failed(let message):
+            statusView.show(message, tone: .failed)
+        }
+    }
+#endif
 
     @objc private func cancel() {
         onDone?()
@@ -312,6 +356,9 @@ enum ReportProblemIdentifiers {
     static let environment = "report.problem.environment"
     static let status = "report.problem.status"
     static let submit = "report.problem.submit"
+#if DEBUG
+    static let chat = "report.problem.chat"
+#endif
 }
 
 // MARK: - Strings

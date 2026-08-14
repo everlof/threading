@@ -192,6 +192,44 @@ enum MediaInspectorZoomMode: Equatable {
     case custom
 }
 
+// MARK: - Annotation Host
+
+/// Who owns the marks made on a picture in the inspector.
+///
+/// **The inspector never owns them, and that is the whole point of the seam.** Opened from the
+/// report sheet it is a second view of a list the sheet is already showing in its rail, and a
+/// pin dropped at 400% has to appear in a field the user goes back to. Opened from anywhere else
+/// — an attachment, a chart the agent drew, a browser baseline — there is no rail and no report,
+/// and the marks are worth exactly one thing: handing them to the chat. Both are the same
+/// gesture over the same picture, so the difference belongs in who is asked, not in a mode flag
+/// inside the inspector.
+///
+/// A host is asked for the current marks each time an item is shown, told of every edit, and
+/// told once when the inspector closes. The report sheet needs only the middle one — it has been
+/// keeping up all along — so the close notice has a default that does nothing.
+@MainActor
+protocol MediaInspectorAnnotationHost: AnyObject {
+    func annotations(for item: MediaInspectorItem) -> [ImageAnnotation]
+    func inspector(
+        didChange annotations: [ImageAnnotation],
+        for item: MediaInspectorItem,
+        image: NSImage?
+    )
+    func inspectorDidClose(
+        with annotations: [ImageAnnotation],
+        for item: MediaInspectorItem,
+        image: NSImage?
+    )
+}
+
+extension MediaInspectorAnnotationHost {
+    func inspectorDidClose(
+        with annotations: [ImageAnnotation],
+        for item: MediaInspectorItem,
+        image: NSImage?
+    ) {}
+}
+
 // MARK: - Presentation
 
 /// Presents one app-owned inspector per window, inside that window's themed content hierarchy.
@@ -204,10 +242,19 @@ enum MediaInspectorPresenter {
 
     private static var sessions: [ObjectIdentifier: MediaInspectorSession] = [:]
 
+    /// Who takes the marks when the opener named nobody.
+    ///
+    /// Installed by the application at startup rather than reached for from here: this file is a
+    /// design component and knows nothing about sessions, composers or window controllers, and a
+    /// default that imported them would drag the whole app into every fixture that opens an
+    /// image. Nil — in a test, in the component gallery — simply leaves annotation unoffered.
+    static var defaultAnnotationHost: ((NSWindow?) -> MediaInspectorAnnotationHost?)?
+
     @discardableResult
     static func present(
         _ selection: MediaInspectorSelection,
-        from source: NSView
+        from source: NSView,
+        annotationHost: MediaInspectorAnnotationHost? = nil
     ) -> Bool {
         guard let window = source.window, window.contentView != nil else { return false }
 
@@ -229,6 +276,7 @@ enum MediaInspectorPresenter {
             selectedIndex: selectedIndex,
             source: source,
             window: window,
+            annotationHost: annotationHost ?? defaultAnnotationHost?(window),
             onClose: { sessions.removeValue(forKey: key) }
         )
         sessions[key] = session
@@ -236,8 +284,16 @@ enum MediaInspectorPresenter {
     }
 
     @discardableResult
-    static func present(_ item: MediaInspectorItem, from source: NSView) -> Bool {
-        present(MediaInspectorSelection(items: [item], selectedIndex: 0), from: source)
+    static func present(
+        _ item: MediaInspectorItem,
+        from source: NSView,
+        annotationHost: MediaInspectorAnnotationHost? = nil
+    ) -> Bool {
+        present(
+            MediaInspectorSelection(items: [item], selectedIndex: 0),
+            from: source,
+            annotationHost: annotationHost
+        )
     }
 
     static func dismiss(in window: NSWindow?) {
@@ -260,6 +316,11 @@ private final class MediaInspectorSession {
     private let inspector: MediaInspectorView
     private let onClose: () -> Void
     private var isClosed = false
+    /// Held **strongly**, because the view's reference is weak and a host built on demand by
+    /// `defaultAnnotationHost` has no other owner. Without this the chat host was deallocated
+    /// between being created and being asked for the marks, and annotation quietly never
+    /// appeared outside the report sheet. No cycle: nothing a host owns owns this session.
+    private let annotationHost: MediaInspectorAnnotationHost?
     /// The surface and its scrim, held as the one thing so neither can be taken away alone.
     private var presentation: InWindowOverlay.Presentation?
 
@@ -268,13 +329,19 @@ private final class MediaInspectorSession {
         selectedIndex: Int,
         source: NSView,
         window: NSWindow,
+        annotationHost: MediaInspectorAnnotationHost?,
         onClose: @escaping () -> Void
     ) {
         self.source = source
         self.window = window
         previousFirstResponder = window.firstResponder
         self.onClose = onClose
-        inspector = MediaInspectorView(items: items, selectedIndex: selectedIndex)
+        self.annotationHost = annotationHost
+        inspector = MediaInspectorView(
+            items: items,
+            selectedIndex: selectedIndex,
+            annotationHost: annotationHost
+        )
 
         inspector.onDismiss = { [weak self] in self?.close() }
         // Below the window's own chrome, never over it — see `InWindowOverlay`. Pinned to the
@@ -358,6 +425,32 @@ final class MediaInspectorView: NSView, ThemedComponent {
     private var themeRedraw: ThemeRedraw?
     private let appEvents = AppEventObservations()
 
+    // MARK: - Annotation
+
+    private weak var annotationHost: MediaInspectorAnnotationHost?
+    private let annotationRail = ImageAnnotationRailView()
+    private let annotationScrollView = ThemedScrollView()
+    /// **Vertical, and stating so is load-bearing.** A `SeparatorView` reports its thickness on
+    /// the axis it is drawn along and `noIntrinsicMetric` on the other. Left at the default
+    /// horizontal, this rule had no width of its own while sitting between the canvas's trailing
+    /// edge and the notes column — so Auto Layout was free to satisfy the chain by giving the
+    /// rule the room and the canvas none. The inspector then drew a blank picture, in every
+    /// inspection in the app, with no broken constraint to say why.
+    private let annotationSeparator = SeparatorView(.vertical)
+    private var annotationWidthConstraint: NSLayoutConstraint?
+    private var annotations: [ImageAnnotation] = []
+
+    /// Whether marking is currently on. Held here rather than read off the canvas because the
+    /// column, the toggle and the canvas all have to agree, and the canvas is one of the three.
+    private(set) var isAnnotating = false
+
+    private lazy var annotateButton = ThemedIconButton(
+        symbolName: "mappin.and.ellipse",
+        accessibility: MediaInspectorAnnotationStrings.toggle,
+        target: .toolbar,
+        inkSource: .chrome
+    )
+
     var onDismiss: (() -> Void)?
 
     private lazy var previousButton = ThemedIconButton(
@@ -385,9 +478,14 @@ final class MediaInspectorView: NSView, ThemedComponent {
         inkSource: .chrome
     )
 
-    init(items: [MediaInspectorItem], selectedIndex: Int) {
+    init(
+        items: [MediaInspectorItem],
+        selectedIndex: Int,
+        annotationHost: MediaInspectorAnnotationHost? = nil
+    ) {
         self.items = items
         self.selectedIndex = min(max(selectedIndex, 0), max(0, items.count - 1))
+        self.annotationHost = annotationHost
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
@@ -491,9 +589,12 @@ final class MediaInspectorView: NSView, ThemedComponent {
             railScrollView.documentView = railStack
         }
 
+        setupAnnotating()
+
         for view in [canvas, documentView, headerSeparator, railSeparator, railScrollView,
                      titleLabel, detailLabel, zoomLabel, zoomModeControl, previousButton,
-                     nextButton, actionsButton, closeButton] {
+                     nextButton, annotateButton, actionsButton, closeButton,
+                     annotationScrollView, annotationSeparator] {
             addSubview(view)
         }
 
@@ -523,8 +624,13 @@ final class MediaInspectorView: NSView, ThemedComponent {
                 constant: -Design.Spacing.tight
             ),
             actionsButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            zoomModeControl.trailingAnchor.constraint(
+            annotateButton.trailingAnchor.constraint(
                 equalTo: actionsButton.leadingAnchor,
+                constant: -Design.Spacing.tight
+            ),
+            annotateButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            zoomModeControl.trailingAnchor.constraint(
+                equalTo: annotateButton.leadingAnchor,
                 constant: -Design.Spacing.medium
             ),
             zoomModeControl.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
@@ -551,8 +657,20 @@ final class MediaInspectorView: NSView, ThemedComponent {
 
             canvas.topAnchor.constraint(equalTo: headerSeparator.bottomAnchor),
             canvas.leadingAnchor.constraint(equalTo: leadingAnchor),
-            canvas.trailingAnchor.constraint(equalTo: trailingAnchor),
+            canvas.trailingAnchor.constraint(equalTo: annotationSeparator.leadingAnchor),
             canvas.bottomAnchor.constraint(equalTo: railSeparator.topAnchor),
+
+            // A column of zero width with nothing in it is what "not annotating" looks like, so
+            // the ordinary inspector keeps exactly the geometry it had: the separator lands on
+            // the trailing edge and the canvas reaches it.
+            annotationSeparator.topAnchor.constraint(equalTo: canvas.topAnchor),
+            annotationSeparator.bottomAnchor.constraint(equalTo: canvas.bottomAnchor),
+            annotationSeparator.trailingAnchor.constraint(
+                equalTo: annotationScrollView.leadingAnchor
+            ),
+            annotationScrollView.topAnchor.constraint(equalTo: canvas.topAnchor),
+            annotationScrollView.bottomAnchor.constraint(equalTo: canvas.bottomAnchor),
+            annotationScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             documentView.topAnchor.constraint(equalTo: canvas.topAnchor),
             documentView.leadingAnchor.constraint(equalTo: canvas.leadingAnchor),
             documentView.trailingAnchor.constraint(equalTo: canvas.trailingAnchor),
@@ -560,12 +678,111 @@ final class MediaInspectorView: NSView, ThemedComponent {
 
             previousButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
             previousButton.centerYAnchor.constraint(equalTo: canvas.centerYAnchor),
-            nextButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
+            // Against the canvas rather than the window, so opening the notes column does not
+            // leave the next-item chevron sitting on top of the fields.
+            nextButton.trailingAnchor.constraint(
+                equalTo: canvas.trailingAnchor,
+                constant: -Design.Spacing.inset
+            ),
             nextButton.centerYAnchor.constraint(equalTo: canvas.centerYAnchor)
         ])
 
         rebuildRail()
         applyTheme()
+    }
+
+    // MARK: - Annotating
+
+    private func setupAnnotating() {
+        annotateButton.isHidden = annotationHost == nil
+        annotateButton.onPress = { [weak self] in
+            guard let self else { return }
+            self.setAnnotating(!self.isAnnotating)
+        }
+
+        annotationScrollView.hasVerticalScroller = true
+        annotationScrollView.hasHorizontalScroller = false
+        annotationScrollView.translatesAutoresizingMaskIntoConstraints = false
+        annotationScrollView.documentView = annotationRail
+        annotationScrollView.setAccessibilityIdentifier(ImageAnnotationIdentifiers.rail)
+        annotationRail.setAccessibilityLabel(ImageAnnotationStrings.caption)
+
+        let width = annotationScrollView.widthAnchor.constraint(equalToConstant: 0)
+        width.isActive = true
+        annotationWidthConstraint = width
+        annotationScrollView.isHidden = true
+        annotationSeparator.isHidden = true
+
+        canvas.onAddAnnotation = { [weak self] point in self?.addAnnotation(at: point) }
+        canvas.onSelectAnnotation = { [weak self] id in
+            guard let self else { return }
+            self.annotationRail.selectedAnnotationID = id
+            if let id { self.annotationRail.focusNote(for: id) }
+        }
+
+        annotationRail.onNoteChange = { [weak self] id, note in
+            self?.updateAnnotation(id: id) { $0.note = note }
+        }
+        annotationRail.onRemove = { [weak self] id in
+            guard let self else { return }
+            self.applyAnnotations(self.annotations.filter { $0.id != id })
+        }
+        annotationRail.onFocus = { [weak self] id in
+            self?.canvas.selectedAnnotationID = id
+        }
+    }
+
+    /// Turning marking on opens the column with it: a mode whose only visible sign is a lit
+    /// toolbar button is a mode people leave on and then wonder why the picture keeps growing
+    /// pins. The fields are the mode's own evidence.
+    func setAnnotating(_ annotating: Bool) {
+        guard annotationHost != nil else { return }
+        isAnnotating = annotating
+        canvas.isAnnotating = annotating
+        annotateButton.isSelected = annotating
+        annotationScrollView.isHidden = !annotating
+        annotationSeparator.isHidden = !annotating
+        annotationWidthConstraint?.constant = annotating
+            ? Design.Size.mediaInspectorAnnotationColumnWidth
+            : 0
+        if annotating { reloadAnnotationsFromHost() }
+        needsLayout = true
+    }
+
+    private func reloadAnnotationsFromHost() {
+        annotations = annotationHost?.annotations(for: selectedItem) ?? []
+        canvas.annotations = annotations
+        annotationRail.setAnnotations(annotations)
+    }
+
+    private func addAnnotation(at point: CGPoint) {
+        guard annotations.count < ImageAnnotationDefaults.maximumCount else { return }
+        let annotation = ImageAnnotation(point: point)
+        applyAnnotations(annotations + [annotation])
+        canvas.selectedAnnotationID = annotation.id
+        annotationRail.selectedAnnotationID = annotation.id
+        annotationRail.focusNote(for: annotation.id)
+    }
+
+    private func updateAnnotation(
+        id: ImageAnnotation.ID,
+        _ change: (inout ImageAnnotation) -> Void
+    ) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        var updated = annotations
+        change(&updated[index])
+        applyAnnotations(updated)
+    }
+
+    private func applyAnnotations(_ updated: [ImageAnnotation]) {
+        annotations = updated
+        canvas.annotations = updated
+        annotationRail.setAnnotations(updated)
+        annotationHost?.inspector(
+            didChange: updated,
+            for: selectedItem,
+            image: canvas.image
+        )
     }
 
     /// `elevated`, not `ground`: the ground is by definition what the window behind this surface
@@ -633,6 +850,16 @@ final class MediaInspectorView: NSView, ThemedComponent {
     }
 
     func prepareForRemoval() {
+        // Told once, on the way out, and only when there is something to tell. This is the
+        // moment the chat host has been waiting for — the report sheet has been kept up to date
+        // all along and its default implementation ignores it.
+        if !annotations.isEmpty {
+            annotationHost?.inspectorDidClose(
+                with: annotations,
+                for: selectedItem,
+                image: canvas.image
+            )
+        }
         ThemedMenuPresenter.dismiss(menuSession)
         menuSession = nil
         documentView.close()
@@ -704,6 +931,16 @@ final class MediaInspectorView: NSView, ThemedComponent {
         nextButton.isEnabled = selectedIndex + 1 < items.count
         previousButton.isHidden = items.count < 2
         nextButton.isHidden = items.count < 2
+
+        // Marks belong to the picture, so arrowing to the next one asks the host for *its*
+        // marks. Carrying them across would draw one image's pins on another.
+        annotateButton.isEnabled = !canvas.isHidden
+        if canvas.isHidden, isAnnotating {
+            setAnnotating(false)
+        } else if isAnnotating {
+            reloadAnnotationsFromHost()
+        }
+
         updateRailSelection()
         window?.makeFirstResponder(preferredFirstResponder)
         setAccessibilityLabel(L10n.format("Media inspector, %@", item.title))
@@ -872,6 +1109,8 @@ final class MediaInspectorCanvas: ThemedControl {
     private var imageTitle = ""
     private var dragOrigin: NSPoint?
     private var dragStartingOffset = NSPoint.zero
+    /// Whether this press has already moved the picture — see `mouseUp`.
+    private var didPanDuringDrag = false
     private var horizontalGesture: CGFloat = 0
     private var focusOrigin = KeyboardFocusOrigin()
 
@@ -879,6 +1118,35 @@ final class MediaInspectorCanvas: ThemedControl {
     var onPrevious: (() -> Void)?
     var onNext: (() -> Void)?
     var onZoomChange: ((MediaInspectorZoomMode, Int) -> Void)?
+
+    // MARK: - Annotation
+
+    /// The marks drawn over the picture, in the order they were made.
+    var annotations: [ImageAnnotation] = [] {
+        didSet {
+            guard annotations != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    var selectedAnnotationID: ImageAnnotation.ID? {
+        didSet {
+            guard selectedAnnotationID != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    /// Whether a click marks the picture. Off by default: the canvas's own gesture is zoom and
+    /// pan, and every inspection in the app that has nothing to do with reporting keeps it.
+    var isAnnotating = false {
+        didSet {
+            guard isAnnotating != oldValue else { return }
+            window?.invalidateCursorRects(for: self)
+        }
+    }
+
+    var onAddAnnotation: ((CGPoint) -> Void)?
+    var onSelectAnnotation: ((ImageAnnotation.ID?) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1053,6 +1321,17 @@ final class MediaInspectorCanvas: ThemedControl {
             respectFlipped: true,
             hints: [.interpolation: NSImageInterpolation.high]
         )
+
+        // Inside the same clip as the picture, unlike the report sheet's preview: here the
+        // picture is deliberately larger than the canvas at any zoom above fit, and a pin on a
+        // part currently panned off screen would otherwise be drawn over the header.
+        ImageAnnotationMarks.draw(
+            annotations,
+            in: imageRect,
+            isFlipped: isFlipped,
+            selected: selectedAnnotationID
+        )
+
         // Only under keyboard traversal: this control fills the inspector, so the ring is an
         // accent rectangle around the whole window rather than a hint about where focus is.
         guard showsKeyboardFocusRing else { return }
@@ -1064,7 +1343,9 @@ final class MediaInspectorCanvas: ThemedControl {
     override func resetCursorRects() {
         guard image != nil else { return }
         let cursor: NSCursor
-        if canPan {
+        if isAnnotating {
+            cursor = .crosshair
+        } else if canPan {
             cursor = .openHand
         } else if #available(macOS 15.0, *) {
             cursor = zoomMode == .fit ? .zoomIn : .zoomOut
@@ -1084,6 +1365,7 @@ final class MediaInspectorCanvas: ThemedControl {
         }
         dragOrigin = convert(event.locationInWindow, from: nil)
         dragStartingOffset = panOffset
+        didPanDuringDrag = false
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -1091,10 +1373,43 @@ final class MediaInspectorCanvas: ThemedControl {
         let point = convert(event.locationInWindow, from: nil)
         panOffset = dragStartingOffset
         pan(by: NSPoint(x: point.x - dragOrigin.x, y: point.y - dragOrigin.y))
+        didPanDuringDrag = true
     }
 
+    /// **A mark is a click, and panning is a drag — the mark is decided on the way up.**
+    ///
+    /// Both gestures start with the button going down on the same pixel, and a zoomed picture is
+    /// exactly when a person both wants to pan *and* has a reason to mark a detail. Deciding on
+    /// the way down would have made annotation mode drop a pin at the start of every pan; the
+    /// first version did, and marking anything at 400% was impossible without also leaving a pin
+    /// where the drag began.
     override func mouseUp(with event: NSEvent) {
-        dragOrigin = nil
+        defer {
+            dragOrigin = nil
+            didPanDuringDrag = false
+        }
+        guard isAnnotating, !didPanDuringDrag, event.clickCount == 1, image != nil else { return }
+
+        let point = convert(event.locationInWindow, from: nil)
+        if let hit = ImageAnnotationGeometry.annotationID(
+            at: point,
+            among: annotations,
+            in: imageRect,
+            isFlipped: isFlipped
+        ) {
+            selectedAnnotationID = hit
+            onSelectAnnotation?(hit)
+            return
+        }
+        guard let normalized = ImageAnnotationGeometry.normalizedPoint(
+            for: point,
+            in: imageRect,
+            isFlipped: isFlipped
+        ) else {
+            onSelectAnnotation?(nil)
+            return
+        }
+        onAddAnnotation?(normalized)
     }
 
     override func magnify(with event: NSEvent) {

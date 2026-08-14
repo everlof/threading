@@ -3389,6 +3389,21 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         sessionCoordinator.newSession()
     }
 
+#if DEBUG
+    /// Opens the chat a development build's report is sent to. Lives here rather than in
+    /// `MainWindowInspector`, which raises the sheets, because `sessionCoordinator` is private
+    /// to this file — and the fallback project is this window's own answer to "what am I
+    /// looking at", which only this file can give.
+    func startDeveloperReportChat(
+        _ request: DeveloperReportChatRequest
+    ) -> DeveloperReportChatOutcome {
+        sessionCoordinator.startDeveloperReportChat(
+            request,
+            fallbackProjectID: currentProjectID
+        )
+    }
+#endif
+
     func addProject() {
         guard !showRecoverySurfaceIfActive() else { return }
         sessionCoordinator.addProject()

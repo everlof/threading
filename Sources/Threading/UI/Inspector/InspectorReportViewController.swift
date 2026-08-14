@@ -40,7 +40,25 @@ final class InspectorReportViewController: NSViewController {
     private let submitButton = ThemedButton()
     private let statusView = SubmissionStatusView()
 
+    private let imageView = AnnotatedImageView()
+    private let annotationRail = ImageAnnotationRailView()
+    private let sideColumn = NSStackView()
+    /// The caption-and-rail pair, shown only once something has been marked. Named apart from
+    /// `annotationSection`, which is the same marks as prose.
+    private weak var annotationSectionView: NSView?
+    /// The evidence box, kept so a new mark can be written into it. Weak-by-optional rather than
+    /// force-unwrapped: the box exists only once the view is loaded.
+    private weak var detailsTextView: NSTextView?
+
+    /// The marks, owned here because three views show them: the picture, the rail, and — once
+    /// the capture is opened full size — the inspector's own canvas and rail.
+    private(set) var annotations: [ImageAnnotation] = []
+
     private var isSubmitting = false
+
+#if DEBUG
+    private let chatButton = ThemedButton()
+#endif
 
     /// Called when the sheet is done, however it was closed.
     var onDone: (() -> Void)?
@@ -50,6 +68,13 @@ final class InspectorReportViewController: NSViewController {
     var onSubmitReport: (
         (DeveloperIssueReportDraft, NSImage?) async -> DeveloperIssueReportSubmission
     )?
+
+#if DEBUG
+    /// Opens a chat on the same reviewed report. Injected for the reason above, and synchronous
+    /// because nothing here crosses a network: the chat is created, launched and selected in one
+    /// main-actor pass. See `DeveloperReportChat`.
+    var onSendToChat: ((DeveloperReportChatRequest) -> DeveloperReportChatOutcome)?
+#endif
 
     // MARK: - Initialization
 
@@ -78,22 +103,26 @@ final class InspectorReportViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        view = NSView(frame: NSRect(
-            x: 0, y: 0,
-            width: InspectorReportLayout.sheetWidth,
-            height: InspectorReportLayout.sheetHeight
-        ))
+        let size = InspectorReportLayout.sheetSize(inWindowOf: availableSize)
+        view = NSView(frame: NSRect(origin: .zero, size: size))
         setupViews()
 
-        // Sized to what is in it rather than to a number. A guessed height leaves slack, and a
-        // stack pinned top and bottom spends slack on the gaps between fields — which reads as
-        // a form with a hole in it, and moves as soon as the status line appears.
+        // **Sized to the window rather than to its content**, which is the opposite of what this
+        // sheet used to do and for a reason the content change made true: what the sheet is now
+        // mostly showing is a *picture*, and a picture wants every point the window will give it.
+        // Fitting to content sized the sheet to the sum of a fixed preview height and three
+        // boxes — which is how the capture ended up 280 points tall inside a 900-point window,
+        // small enough that marking anything on it meant guessing.
         view.layoutSubtreeIfNeeded()
-        view.setFrameSize(NSSize(
-            width: InspectorReportLayout.sheetWidth,
-            height: view.fittingSize.height
-        ))
+        view.setFrameSize(size)
     }
+
+    /// The room the sheet may take, which only the presenting window knows.
+    ///
+    /// Nil in a fixture, where there is no window — `sheetSize(inWindowOf:)` then falls back to
+    /// its own floor rather than to zero, so a render test draws the same sheet a small display
+    /// would get instead of a sheet with no size at all.
+    var availableSize: NSSize?
 
     override func viewDidAppear() {
         super.viewDidAppear()
@@ -126,60 +155,239 @@ final class InspectorReportViewController: NSViewController {
         headings.alignment = .leading
         headings.spacing = Design.Spacing.hairline
 
-        var content: [NSView] = [headings]
-        if let preview = makePreview() {
-            content.append(preview)
+        // **Two columns, because the picture and the words about it are read together.**
+        //
+        // Stacked, the capture and the field naming it competed for the same vertical space: the
+        // image had to be short enough to leave room for the form, and the form scrolled the
+        // image off the top the moment there were three annotations. Side by side, the picture
+        // takes the height of the sheet and each note stays beside the pin it names.
+        //
+        // **Pinned rather than stacked, and that is the second attempt.** A horizontal
+        // `NSStackView` distributes by hugging priority, and neither column here has an
+        // intrinsic width worth ranking: the picture states none by design, the rail's is
+        // whatever its longest line happens to be. Asked to `.fill`, it gave the capture about a
+        // third of the room and settled it against the bottom of a sheet the sheet's own height
+        // had been raised to provide. Four edges and one stated measure cannot be interpreted.
+        let body = NSView()
+        body.translatesAutoresizingMaskIntoConstraints = false
+        let imageColumn = makeImageColumn()
+        let rail = makeSideColumn()
+        body.addSubview(imageColumn)
+        body.addSubview(rail)
+
+        let footer = makeFooter()
+        footer.translatesAutoresizingMaskIntoConstraints = false
+
+        let headerRow = headings
+        headerRow.translatesAutoresizingMaskIntoConstraints = false
+        let statusRow = makeStatusRow()
+
+        for child in [headerRow, body, statusRow, footer] {
+            view.addSubview(child)
+            child.translatesAutoresizingMaskIntoConstraints = false
         }
-        content.append(makeNoteField())
-        content.append(makeReportText())
-        content.append(makeStatusRow())
-        content.append(makeFooter())
 
-        let stack = NSStackView(views: content)
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.medium
-        stack.setCustomSpacing(Design.Spacing.large, after: headings)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        view.addSubview(stack)
-
+        let inset = Design.Spacing.pane
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: Design.Spacing.pane),
-            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -Design.Spacing.pane),
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.pane),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Design.Spacing.pane)
-        ])
+            headerRow.topAnchor.constraint(equalTo: view.topAnchor, constant: inset),
+            headerRow.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
+            headerRow.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
 
-        for child in stack.arrangedSubviews {
-            child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        }
+            // The body is everything between the heading and the footer, and it takes every
+            // point of that — which is what makes the capture as large as the window allows.
+            body.topAnchor.constraint(
+                equalTo: headerRow.bottomAnchor,
+                constant: Design.Spacing.large
+            ),
+            body.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
+            body.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
+            body.bottomAnchor.constraint(
+                equalTo: statusRow.topAnchor,
+                constant: -Design.Spacing.medium
+            ),
+
+            statusRow.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
+            statusRow.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
+            statusRow.bottomAnchor.constraint(
+                equalTo: footer.topAnchor,
+                constant: -Design.Spacing.medium
+            ),
+
+            footer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
+            footer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
+            footer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -inset),
+
+            // The rail is a stated measure; the picture takes whatever is left. Sizing them by
+            // content priority instead let a long class name in the captured details widen the
+            // rail and squeeze the capture.
+            rail.topAnchor.constraint(equalTo: body.topAnchor),
+            rail.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+            rail.bottomAnchor.constraint(equalTo: body.bottomAnchor),
+            rail.widthAnchor.constraint(
+                equalToConstant: Design.Size.mediaInspectorAnnotationColumnWidth
+            ),
+
+            imageColumn.topAnchor.constraint(equalTo: body.topAnchor),
+            imageColumn.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+            imageColumn.bottomAnchor.constraint(equalTo: body.bottomAnchor),
+            imageColumn.trailingAnchor.constraint(
+                equalTo: rail.leadingAnchor,
+                constant: -Design.Spacing.large
+            )
+        ])
     }
 
-    private func makePreview() -> NSView? {
-        guard let screenshot else { return nil }
+    // MARK: - The Picture
 
-        let preview = ThemedImagePreview()
-        preview.image = screenshot
-        preview.fileURL = screenshotURL
+    /// The capture, as large as the sheet can make it, with the line that says it can be marked.
+    private func makeImageColumn() -> NSView {
+        imageView.image = screenshot
+        imageView.fileURL = screenshotURL
+        imageView.setAccessibilityIdentifier(ImageAnnotationIdentifiers.image)
+        imageView.onAddAnnotation = { [weak self] point in self?.addAnnotation(at: point) }
+        imageView.onSelectAnnotation = { [weak self] id in
+            guard let self else { return }
+            self.annotationRail.selectedAnnotationID = id
+            if let id { self.annotationRail.focusNote(for: id) }
+        }
+        // The picture opens into the same inspector every other image in the app opens into,
+        // handing it this sheet as the annotation host — so a pin dropped at 400% arrives in the
+        // rail behind it, and comes back with the sheet when the overlay closes.
+        imageView.onOpenFullSize = { [weak self] in self?.openFullSize() }
 
-        // Exactly one already-decoded window capture lives here (ordinary 2–8 MP; a maximized
-        // high-density display is the stress case). `ThemedImagePreview` has no intrinsic size,
-        // so those pixels cannot drive the sheet's width, and opening it hands the same image to
-        // a one-item inspector. Zoom and pan mutate scalar state rather than decoding or building
-        // anything proportional to the image in their event callbacks.
+        // **No plate behind it.** A panel fill under a picture that is scaled to fit and pinned
+        // to the top edge draws an empty box wherever the picture is shorter than the column,
+        // which on a wide capture is most of the column. The picture carries its own silhouette;
+        // the inspector's canvas grounds an image the same way.
+        let hint = NSTextField(labelWithString: ImageAnnotationStrings.addHint)
+        hint.applyFont(.caption)
+        hint.textColor = Design.Text.tertiary
+        hint.lineBreakMode = .byTruncatingTail
+        hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        preview.heightAnchor
-            .constraint(equalToConstant: InspectorReportLayout.previewHeight)
-            .isActive = true
+        // Pinned rather than stacked, for the reason the two columns are: the picture must take
+        // every point the column is not spending on the caption, and a stack decides that by
+        // hugging priorities the picture deliberately has no opinion about.
+        let column = NSView()
+        column.translatesAutoresizingMaskIntoConstraints = false
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        column.addSubview(imageView)
+        column.addSubview(hint)
 
-        preview.applySurface(
-            fill: Design.Surface.panel,
-            radius: .panel,
-            border: Design.Surface.border
+        NSLayoutConstraint.activate([
+            imageView.topAnchor.constraint(equalTo: column.topAnchor),
+            imageView.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+            imageView.bottomAnchor.constraint(
+                equalTo: hint.topAnchor,
+                constant: -Design.Spacing.small
+            ),
+            hint.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            hint.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor),
+            hint.bottomAnchor.constraint(equalTo: column.bottomAnchor)
+        ])
+        return column
+    }
+
+    // MARK: - The Rail
+
+    /// Description, then the annotations, then the evidence — in the order they are written.
+    private func makeSideColumn() -> NSView {
+        annotationRail.onNoteChange = { [weak self] id, note in
+            self?.updateAnnotation(id: id) { $0.note = note }
+        }
+        annotationRail.onRemove = { [weak self] id in
+            guard let self else { return }
+            self.applyAnnotations(self.annotations.filter { $0.id != id })
+        }
+        annotationRail.onFocus = { [weak self] id in
+            self?.imageView.selectedAnnotationID = id
+        }
+
+        // Hidden until there is a mark. A caption standing over an empty rail is a section that
+        // has nothing to say, and the invitation to make one is already under the picture, which
+        // is where the gesture is.
+        let marksSection = section(
+            caption: ImageAnnotationStrings.caption,
+            content: annotationRail
         )
+        marksSection.isHidden = true
+        annotationSectionView = marksSection
 
-        return preview
+        sideColumn.orientation = .vertical
+        sideColumn.alignment = .leading
+        sideColumn.spacing = Design.Spacing.medium
+        sideColumn.translatesAutoresizingMaskIntoConstraints = false
+        for view in [makeNoteField(), marksSection, makeReportText()] {
+            sideColumn.addArrangedSubview(view)
+            view.widthAnchor.constraint(equalTo: sideColumn.widthAnchor).isActive = true
+        }
+        return sideColumn
+    }
+
+    // MARK: - Annotating
+
+    /// Exactly one already-decoded window capture lives here (ordinary 2–8 MP; a maximized
+    /// high-density display is the stress case), and at most
+    /// `ImageAnnotationDefaults.maximumCount` marks on it. `AnnotatedImageView` states no
+    /// intrinsic size, so those pixels cannot drive the sheet's width, and a click mutates one
+    /// small array rather than decoding or rebuilding anything proportional to the picture.
+    private func addAnnotation(at point: CGPoint) {
+        guard annotations.count < ImageAnnotationDefaults.maximumCount else {
+            statusView.show(ImageAnnotationStrings.fullCount, tone: .failed)
+            return
+        }
+        let annotation = ImageAnnotation(point: point)
+        applyAnnotations(annotations + [annotation])
+        imageView.selectedAnnotationID = annotation.id
+        annotationRail.selectedAnnotationID = annotation.id
+        annotationRail.focusNote(for: annotation.id)
+    }
+
+    private func updateAnnotation(
+        id: ImageAnnotation.ID,
+        _ change: (inout ImageAnnotation) -> Void
+    ) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        var updated = annotations
+        change(&updated[index])
+        applyAnnotations(updated)
+    }
+
+    /// The one write. Both views are told, and the evidence box is rewritten, because the
+    /// captured details are what Copy Report copies and what the private report files — a mark
+    /// the user can see on the picture and cannot find in the report is a mark that did nothing.
+    ///
+    /// Not private: the fullscreen inspector writes through it as this sheet's annotation host,
+    /// and a render fixture states a marked-up sheet the same way rather than through a second
+    /// door of its own.
+    func applyAnnotations(_ updated: [ImageAnnotation]) {
+        annotations = updated
+        imageView.annotations = updated
+        annotationRail.setAnnotations(updated)
+        annotationSectionView?.isHidden = updated.isEmpty
+        detailsTextView?.string = details
+    }
+
+    /// Opens the capture in the app's own image inspector, with this sheet as the annotation
+    /// host. Marks made there arrive through `inspector(didChange:for:image:)` and are already
+    /// in the rail by the time the overlay closes.
+    /// Needs the capture's *file*, not only its pixels: the inspector refuses an item whose URL
+    /// is not on disk, which is right — its file actions and its rail are about a file. A
+    /// capture whose PNG could not be written stays markable here and simply does not open.
+    private func openFullSize() {
+        guard let screenshot, let screenshotURL else { return }
+        MediaInspectorPresenter.present(
+            MediaInspectorItem(
+                url: screenshotURL,
+                title: subheading,
+                image: screenshot,
+                content: .image
+            ),
+            from: imageView,
+            annotationHost: self
+        )
     }
 
     /// The surface goes on a container, not on the scroll view.
@@ -193,6 +401,7 @@ final class InspectorReportViewController: NSViewController {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         let textView = scrollView.textView
+        detailsTextView = textView
         textView.string = details
         textView.isEditable = false
         textView.isSelectable = true
@@ -204,6 +413,10 @@ final class InspectorReportViewController: NSViewController {
 
         let box = NSView()
         box.translatesAutoresizingMaskIntoConstraints = false
+        // The one elastic row in the rail: the description is as tall as a description, the
+        // marks are as tall as there are marks, and what is left belongs to the evidence.
+        box.setContentHuggingPriority(.defaultLow, for: .vertical)
+        box.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         box.applySurface(
             fill: Design.Surface.panel,
             radius: .panel,
@@ -212,7 +425,9 @@ final class InspectorReportViewController: NSViewController {
         box.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            box.heightAnchor.constraint(equalToConstant: InspectorReportLayout.textHeight),
+            // A floor, not a height. The rail runs the full depth of the sheet now, and a
+            // fixed 150-point box left the evidence clipped mid-line with empty rail under it.
+            box.heightAnchor.constraint(greaterThanOrEqualToConstant: InspectorReportLayout.textHeight),
             scrollView.topAnchor.constraint(equalTo: box.topAnchor, constant: Design.Spacing.tight),
             scrollView.bottomAnchor.constraint(
                 equalTo: box.bottomAnchor,
@@ -316,7 +531,20 @@ final class InspectorReportViewController: NSViewController {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let footer = NSStackView(views: [spacer, closeButton, copyButton, submitButton])
+        var buttons: [NSView] = [spacer, closeButton, copyButton]
+#if DEBUG
+        // Beside Copy Report rather than beside Send to Developer, because that is what it is:
+        // the same local text, carried the rest of the way. The prominent button stays the one
+        // that files the report the way a shipped build files it.
+        chatButton.title = DeveloperReportChatStrings.buttonTitle
+        chatButton.target = self
+        chatButton.action = #selector(sendToChat)
+        chatButton.setAccessibilityIdentifier(InspectorReportIdentifiers.chat)
+        buttons.append(chatButton)
+#endif
+        buttons.append(submitButton)
+
+        let footer = NSStackView(views: buttons)
         footer.orientation = .horizontal
         footer.spacing = Design.Spacing.small
 
@@ -343,16 +571,63 @@ final class InspectorReportViewController: NSViewController {
         }
     }
 
+#if DEBUG
+    /// Hands the *local* report to a chat: the note, the whole capture, and the screenshot's
+    /// path — deliberately `details` rather than `publicDetails`, which strips the path because
+    /// a temporary file on this machine means nothing to an intake service and everything to an
+    /// agent standing next to it.
+    ///
+    /// The sheet closes on success. The new chat coming up selected is the receipt, and a sheet
+    /// left over a conversation the user asked to watch is one more thing to dismiss.
+    @objc func sendToChat() {
+        guard !isSubmitting, let onSendToChat else { return }
+
+        statusView.show(DeveloperReportChatStrings.startingStatus, tone: .working)
+        switch onSendToChat(chatRequest()) {
+        case .started(let projectName):
+            statusView.show(DeveloperReportChatStrings.started(projectName: projectName), tone: .done)
+            onDone?()
+        case .failed(let message):
+            statusView.show(message, tone: .failed)
+        }
+    }
+
+    /// Titled exactly the way `reportDraft` titles the private report, so the same note names
+    /// the chat and the report it would have filed.
+    func chatRequest() -> DeveloperReportChatRequest {
+        DeveloperReportChatRequest(
+            title: DeveloperIssueReportComposer.title(
+                fromNote: noteField.stringValue,
+                fallback: L10n.format("%@ — %@", heading, subheading)
+            ),
+            report: InspectorReportComposer.compose(
+                note: noteField.stringValue,
+                markdown: details
+            )
+        )
+    }
+#endif
+
     @objc func submitIssue() {
         guard !isSubmitting, let onSubmitReport else { return }
 
         let draft = reportDraft()
         beginSubmitting()
 
+        // The *marked* capture, not the bare one. The preview is the only picture the private
+        // report carries, and one showing none of the marks the report's own text refers to
+        // would leave a reader looking for a pin that is not there.
+        let picture = annotatedScreenshot
         Task { @MainActor [weak self] in
-            let outcome = await onSubmitReport(draft, self?.screenshot)
+            let outcome = await onSubmitReport(draft, picture)
             self?.finishSubmitting(outcome)
         }
+    }
+
+    /// The capture with the marks drawn in, or the capture unchanged when nothing was marked.
+    var annotatedScreenshot: NSImage? {
+        guard let screenshot else { return nil }
+        return ImageAnnotationFlattening.flattened(screenshot, annotations: annotations)
     }
 
     /// What reaches the private inbox: the description leads, bounded structural evidence and
@@ -383,15 +658,31 @@ final class InspectorReportViewController: NSViewController {
         let capturedEnvironment = environment.isEmpty
             ? DeveloperIssueReportComposer.environment()
             : environment
-        return safeCapture + "\n\n" + capturedEnvironment
+        return join(safeCapture, annotationSection, capturedEnvironment)
     }
 
-    /// The capture and what it was captured under, in the order they are read. One blank line
-    /// between them: the environment is a different kind of fact from the geometry above it, and
-    /// a flat list of eighteen bullets is one nobody finishes.
+    /// The capture, the marks made on it, and what it was captured under — in the order they are
+    /// read. One blank line between each: the environment is a different kind of fact from the
+    /// geometry above it, and a flat list of eighteen bullets is one nobody finishes.
     var details: String {
-        guard !environment.isEmpty else { return markdown }
-        return markdown + "\n\n" + environment
+        join(markdown, annotationSection, environment.isEmpty ? nil : environment)
+    }
+
+    /// The marks as prose, positioned in the *image's own pixels*.
+    ///
+    /// Coordinates as well as a flattened picture, and both on purpose: the picture shows where,
+    /// and the numbers let a reader who is measuring the PNG — an agent counting pixels, a person
+    /// checking a frame against the geometry three lines above — land on the same spot without
+    /// eyeballing a disc.
+    private var annotationSection: String? {
+        guard let screenshot else { return nil }
+        return ImageAnnotationSummary.section(annotations, imageSize: screenshot.size)
+    }
+
+    private func join(_ parts: String?...) -> String {
+        parts.compactMap { $0 }
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: "\n\n")
     }
 
     @objc private func close() {
@@ -426,6 +717,30 @@ final class InspectorReportViewController: NSViewController {
     var statusMessage: String { statusView.message }
 }
 
+// MARK: - Media Inspector Annotation Host
+
+/// The sheet stays the owner of the marks while the picture is open full size.
+///
+/// This is the whole point of the host seam: the inspector is a *second view* of the list in the
+/// rail behind it, not a place that collects marks of its own and hands them back at the end. A
+/// pin dropped at 400% is in the rail before the overlay closes, and the report text under it is
+/// already rewritten — so closing the inspector is a dismissal rather than a commit, and
+/// dismissing it by Escape cannot lose work.
+extension InspectorReportViewController: MediaInspectorAnnotationHost {
+
+    func annotations(for item: MediaInspectorItem) -> [ImageAnnotation] {
+        annotations
+    }
+
+    func inspector(
+        didChange annotations: [ImageAnnotation],
+        for item: MediaInspectorItem,
+        image: NSImage?
+    ) {
+        applyAnnotations(annotations)
+    }
+}
+
 // MARK: - Report Composition
 
 enum InspectorReportComposer {
@@ -442,9 +757,29 @@ enum InspectorReportComposer {
 // MARK: - Report Layout
 
 enum InspectorReportLayout {
-    static let sheetWidth: CGFloat = 640
-    static let sheetHeight: CGFloat = 800
-    static let previewHeight: CGFloat = 280
+    /// The floor, and what a fixture with no window gets. Two columns need the side rail's
+    /// stated measure plus a picture worth looking at beside it; below this the capture is
+    /// smaller than it was before the sheet grew, which would be a regression dressed as one.
+    static let minimumSheetWidth: CGFloat = 900
+    static let minimumSheetHeight: CGFloat = 620
+
+    /// How much of the window a sheet may take. Not all of it: a sheet flush with its window's
+    /// edges stops reading as a sheet, and the strip of window left around it is what says the
+    /// report is *over* the thing being reported on.
+    static let windowFraction: CGFloat = 0.88
+
+    /// As large as the window allows, between the floor above and the window itself.
+    static func sheetSize(inWindowOf available: NSSize?) -> NSSize {
+        guard let available, available.width > 0, available.height > 0 else {
+            return NSSize(width: minimumSheetWidth, height: minimumSheetHeight)
+        }
+        return NSSize(
+            width: max(minimumSheetWidth, (available.width * windowFraction).rounded(.down)),
+            height: max(minimumSheetHeight, (available.height * windowFraction).rounded(.down))
+        )
+    }
+
+    /// The evidence box's floor. It grows into whatever the rail does not spend above it.
     static let textHeight: CGFloat = 150
     /// Several lines, opened rather than grown into: the box's size is what says how much is
     /// expected of it, and a report is a paragraph.
@@ -458,6 +793,9 @@ enum InspectorReportIdentifiers {
     static let copy = "inspector.report.copy"
     static let submit = "inspector.report.submit"
     static let status = "inspector.report.status"
+#if DEBUG
+    static let chat = "inspector.report.chat"
+#endif
 }
 
 // MARK: - Report Strings

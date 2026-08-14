@@ -212,7 +212,11 @@ final class IssueReportingRenderTests: XCTestCase {
         window.contentView = host
         defer { MediaInspectorPresenter.dismiss(in: window) }
 
-        let preview = try XCTUnwrap(firstSubview(of: ThemedImagePreview.self, under: host))
+        // The capture is an `AnnotatedImageView` since the sheet grew a marking gesture: a click
+        // now drops a pin, and opening the picture full size moved to the *keyboard* half of the
+        // control. What this test guards is unchanged — the report's picture opens into the same
+        // zoomable inspector every other image in the app opens into.
+        let preview = try XCTUnwrap(firstSubview(of: AnnotatedImageView.self, under: host))
         XCTAssertEqual(preview.fileURL, screenshotURL)
         XCTAssertNotNil(preview.accessibilityHelp(), "the preview does not advertise inspection")
         XCTAssertTrue(preview.performPrimaryAction(), "the report image did not open")
@@ -390,6 +394,12 @@ final class IssueReportingRenderTests: XCTestCase {
                 let mode = name == .aqua ? "light" : "dark"
                 for (label, image) in [
                     ("issue-report-inspector", sheetImage(appearance: name) { self.makeInspectorSheet() }),
+                    // The marked-up state drawn as well as the empty one, because the pins, the
+                    // rail beside them and the lit pair are the whole of this screen's new
+                    // behaviour and none of it appears in the picture above.
+                    ("issue-report-annotated", sheetImage(appearance: name) {
+                        self.makeAnnotatedInspectorSheet()
+                    }),
                     ("issue-report-problem", sheetImage(appearance: name) { ReportProblemViewController() })
                 ] {
                     guard let image else {
@@ -404,7 +414,9 @@ final class IssueReportingRenderTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(written, 12)
+        // Three sheets — empty inspector, marked-up inspector, Report a Problem — in two
+        // appearances under three themes.
+        XCTAssertEqual(written, 18)
     }
 
     // MARK: - Helpers
@@ -436,11 +448,16 @@ final class IssueReportingRenderTests: XCTestCase {
     /// Fixed text rather than a live `InspectorEnvironment.capture`: the renders are compared
     /// between runs, and a block carrying this machine's window size and theme would differ in
     /// every one of them.
+    /// A stated window size rather than none, so the renders show the sheet somebody actually
+    /// gets. Left nil, `sheetSize(inWindowOf:)` falls back to its floor and every review picture
+    /// is of the smallest display in the world — which is how a capture that is legible in the
+    /// app looked unreadable in the only place anybody was checking it.
     @MainActor
     private func makeInspectorSheet(
-        screenshotURL: URL? = nil
+        screenshotURL: URL? = nil,
+        availableSize: NSSize? = NSSize(width: 1440, height: 900)
     ) -> InspectorReportViewController {
-        InspectorReportViewController(
+        let sheet = InspectorReportViewController(
             heading: InspectorStrings.elementHeading,
             subheading: "SidebarRowView",
             markdown: """
@@ -458,6 +475,23 @@ final class IssueReportingRenderTests: XCTestCase {
             screenshot: swatch(),
             screenshotURL: screenshotURL
         )
+        sheet.availableSize = availableSize
+        return sheet
+    }
+
+    /// The same sheet with three marks on it, the second one lit as it is while its field holds
+    /// the caret. Fixed points rather than synthesized clicks: this is a picture to look at, and
+    /// it has to be the same picture on every run.
+    @MainActor
+    private func makeAnnotatedInspectorSheet() -> InspectorReportViewController {
+        let sheet = makeInspectorSheet()
+        sheet.loadView()
+        sheet.applyAnnotations([
+            ImageAnnotation(point: CGPoint(x: 0.22, y: 0.18), note: "This padding is tight"),
+            ImageAnnotation(point: CGPoint(x: 0.64, y: 0.42), note: "5h and 2% run together"),
+            ImageAnnotation(point: CGPoint(x: 0.41, y: 0.79), note: "")
+        ])
+        return sheet
     }
 
     @MainActor
