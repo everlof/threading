@@ -100,6 +100,7 @@ final class ComponentGalleryViewController: NSViewController {
         "CompareInspectorView",
         "CodeContextPreviewView",
         "CommandPaletteViewController",
+        "CompoundValueLabel",
         "ControlRowView",
         "DiffSkeletonView",
         "ExecutionAuditEventView",
@@ -122,6 +123,7 @@ final class ComponentGalleryViewController: NSViewController {
         "PaneFooterView",
         "PaneHeaderView",
         "PaneNoticeView",
+        "PanelListView",
         "PromptCompletionPresenter",
         "PromptView",
         "RevealHighlightView",
@@ -1888,6 +1890,13 @@ final class ComponentGalleryViewController: NSViewController {
                     galleryUsageReadings()
                 ),
                 story(
+                    "CompoundValueLabel",
+                    "The same rule for plain segments — the info panel's CPU · memory reading: "
+                        + "both parts, then one complete part, then nothing, never a number "
+                        + "whose unit went missing.",
+                    galleryCompoundValues()
+                ),
+                story(
                     "UsageDashboardView",
                     "Overview and Limit History are separate tabs; switch ranges or metrics to inspect the retained chart morph.",
                     dashboard
@@ -2153,6 +2162,51 @@ final class ComponentGalleryViewController: NSViewController {
             xRange: start...today,
             valueFormat: .number
         )
+    }
+
+    /// The info panel's shape in miniature: two sections on one ink column, a real row between
+    /// them, and the note an empty section speaks with.
+    private func makePanelListSample() -> NSView {
+        let list = PanelListView(rowSpacing: Design.Spacing.hairline)
+        list.addSection(L10n.string("Processes"))
+        list.addRow(SessionInfoRowView(
+            symbolName: "circle.fill",
+            symbolColor: Design.Status.positive,
+            primary: "node",
+            secondary: "50301",
+            valueSegments: ["3%", "96 MB"],
+            accessibilityLabel: L10n.format("%@ · process %lld", "node", Int64(50301))
+        ))
+        list.addSection(L10n.string("Ports"))
+        list.addNote(L10n.string("Nothing listening."))
+
+        list.widthAnchor.constraint(equalToConstant: PanelListStory.width).isActive = true
+        list.heightAnchor.constraint(equalToConstant: PanelListStory.height).isActive = true
+        return list
+    }
+
+    private enum PanelListStory {
+        static let width: CGFloat = 320
+        static let height: CGFloat = 130
+    }
+
+    /// The reading at three widths: whole, one complete segment, nothing.
+    private func galleryCompoundValues() -> NSView {
+        let column = NSStackView()
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Design.Spacing.small
+
+        for width in [110.0, 40.0, 8.0] as [CGFloat] {
+            let value = CompoundValueLabel()
+            value.segments = ["12%", "248 MB"]
+            value.widthAnchor.constraint(equalToConstant: width).isActive = true
+            value.heightAnchor.constraint(
+                equalToConstant: value.intrinsicContentSize.height
+            ).isActive = true
+            column.addArrangedSubview(value)
+        }
+        return column
     }
 
     /// One reading at three widths, which is the whole of what this component decides: the row
@@ -2625,6 +2679,13 @@ final class ComponentGalleryViewController: NSViewController {
                     "SubagentSummaryView",
                     "Working and completed child agents; select a row to inspect its bounded activity.",
                     makeSubagentSummarySample()
+                ),
+                story(
+                    "PanelListView",
+                    "The display panel's list vocabulary — sections, notes and full-width rows "
+                        + "on one ink column, the geometry the Info and Sharing panes share "
+                        + "instead of each stating their own insets.",
+                    makePanelListSample()
                 ),
                 story(
                     "ImageCompareView & CompareInspectorView",

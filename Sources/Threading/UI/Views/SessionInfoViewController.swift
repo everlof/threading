@@ -32,6 +32,12 @@ final class SessionInfoViewController: NSViewController {
     /// Opening a port hands the URL back to the pane, which has a browser tab to put it in.
     var onOpenURL: ((URL) -> Void)?
 
+    /// Test seams at the user-decision boundary, the Sharing pane's pattern. Production leaves
+    /// both nil: the alert goes through `ConfirmationAlert` and the signal through
+    /// `SessionProcessTerminator`.
+    var confirmStop: ((ConfirmationRequest) -> Bool)?
+    var onStopProcess: ((pid_t, ProcessStartTime) -> Void)?
+
     private let reader = SessionInfoReader()
     private let pollTimer = MainRunLoopTimer()
 
@@ -72,31 +78,7 @@ final class SessionInfoViewController: NSViewController {
         button.toolTip = L10n.string("Copy the folder path")
         return button
     }()
-    private lazy var stack: NSStackView = {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.hairline
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.small,
-            left: Design.Spacing.small,
-            bottom: Design.Spacing.inset,
-            right: Design.Spacing.small
-        )
-        return stack
-    }()
-    private lazy var scrollView: ThemedScrollView = {
-        let clipView = FlippedClipView()
-        clipView.drawsBackground = false
-        let scroll = ThemedScrollView()
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.contentView = clipView
-        scroll.documentView = stack
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        return scroll
-    }()
+    private let list = PanelListView(rowSpacing: Design.Spacing.hairline)
 
     // MARK: - Initialization
 
@@ -139,7 +121,7 @@ final class SessionInfoViewController: NSViewController {
     }
 
     private func setupBody() {
-        view.addSubview(scrollView)
+        view.addSubview(list)
     }
 
     private func setupConstraints() {
@@ -166,16 +148,19 @@ final class SessionInfoViewController: NSViewController {
             copyButton.leadingAnchor.constraint(equalTo: revealButton.trailingAnchor, constant: Design.Spacing.tight),
             copyButton.trailingAnchor.constraint(lessThanOrEqualTo: directoryLabel.trailingAnchor),
 
-            scrollView.topAnchor.constraint(equalTo: revealButton.bottomAnchor, constant: Design.Spacing.small),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-
-            stack.widthAnchor.constraint(equalTo: scrollView.widthAnchor)
+            list.topAnchor.constraint(equalTo: revealButton.bottomAnchor, constant: Design.Spacing.small),
+            list.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            list.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            list.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
     }
 
     // MARK: - Public Methods
+
+    /// Test seam at the reading boundary: when set, `refresh()` asks this for its snapshot
+    /// instead of resolving live roots and walking the machine — so the poll re-applies the
+    /// fixture rather than racing it with real processes. Production leaves it nil.
+    var readSource: ((@escaping @MainActor (SessionInfoSnapshot) -> Void) -> Void)?
 
     /// Re-reads now, whatever the poll was going to do. Called when the tab is shown and when the
     /// session stops working, which is when an agent has most likely just started or killed
@@ -184,6 +169,13 @@ final class SessionInfoViewController: NSViewController {
         guard isViewLoaded else { return }
 
         updateHeader()
+
+        if let readSource {
+            readSource { [weak self] snapshot in
+                self?.apply(snapshot, isRunning: !snapshot.processes.isEmpty)
+            }
+            return
+        }
 
         let agentRoot = agentRootPid
         let shellRoot = shellRootProvider?()
@@ -230,7 +222,9 @@ final class SessionInfoViewController: NSViewController {
         metaLabel.stringValue = gitDescription(for: directory)
     }
 
-    private func apply(_ snapshot: SessionInfoSnapshot, isRunning: Bool) {
+    /// Installs a known reading. Kept internal for behavior/render tests — live refreshes use
+    /// the exact same path after the reader walks the real machine.
+    func apply(_ snapshot: SessionInfoSnapshot, isRunning: Bool) {
         let shape = self.shape(of: snapshot, isRunning: isRunning)
 
         guard shape != renderedShape else {
@@ -242,13 +236,15 @@ final class SessionInfoViewController: NSViewController {
         rebuild(snapshot, isRunning: isRunning)
     }
 
-    /// Everything about a reading except the numbers that move. Two readings with the same shape
-    /// describe the same rows.
+    /// Everything about a reading except the facts that move. Two readings with the same shape
+    /// describe the same rows. Depth is part of a row's identity — its indent is a constraint,
+    /// set at construction — while state, readings and tooltips deliberately are not: a process
+    /// stopping must not cost the pointer its hover or the panel its scroll position.
     private func shape(of snapshot: SessionInfoSnapshot, isRunning: Bool) -> String {
         var parts = ["running:\(isRunning)"]
 
         for group in snapshot.processGroups {
-            let pids = group.processes.map { "\($0.pid):\($0.command)" }.joined(separator: ",")
+            let pids = group.processes.map { "\($0.pid):\($0.depth):\($0.command)" }.joined(separator: ",")
             parts.append("p/\(group.origin.rawValue)/\(pids)")
         }
 
@@ -262,37 +258,79 @@ final class SessionInfoViewController: NSViewController {
 
     private func updateValues(_ snapshot: SessionInfoSnapshot) {
         for process in snapshot.processes {
-            processRows[process.pid]?.value = "\(process.formattedCPU) · \(process.formattedMemory)"
+            processRows[process.pid]?.update(reading(for: process))
         }
     }
 
-    private func rebuild(_ snapshot: SessionInfoSnapshot, isRunning: Bool) {
-        stack.arrangedSubviews.forEach {
-            stack.removeArrangedSubview($0)
-            $0.removeFromSuperview()
+    /// One poll's moving facts for one process: the readings, the state the dot must not
+    /// overstate, and the tooltip's fact lines.
+    private func reading(for process: SessionProcess) -> SessionInfoRowView.Reading {
+        var facts: [String] = []
+        if process.state == .stopped {
+            facts.append(L10n.string("Stopped"))
         }
+        if let path = process.executablePath {
+            facts.append(L10n.format("Program: %@", path))
+        }
+        if let started = process.startDate {
+            facts.append(L10n.format(
+                "Started %@",
+                Self.startFormatter.localizedString(for: started, relativeTo: Date())
+            ))
+        }
+        if let directory = process.workingDirectory {
+            facts.append(L10n.format("Working directory: %@", directory))
+        }
+
+        let readings = [process.formattedCPU, process.formattedMemory]
+        let spoken = process.state == .stopped
+            ? [L10n.string("Stopped")] + readings
+            : readings
+
+        // A stopped process holds its memory and its ports while running nothing — the one
+        // state the filled "alive" dot must not claim. Hollow, in the warning role: paused is a
+        // fact worth noticing, not a failure.
+        return SessionInfoRowView.Reading(
+            valueSegments: readings,
+            dotSymbolName: process.state == .stopped ? "circle" : SessionInfoSymbols.process,
+            dotColor: process.state == .stopped ? Design.Status.warning : Design.Status.positive,
+            factLines: facts,
+            accessibilityValue: spoken.joined(separator: " · ")
+        )
+    }
+
+    /// Relative, because "8 min ago" answers "did the agent just start this or is it left
+    /// over" without the reader doing arithmetic against a clock.
+    private static let startFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
+
+    private func rebuild(_ snapshot: SessionInfoSnapshot, isRunning: Bool) {
+        list.clear()
         processRows.removeAll()
 
         guard isRunning else {
-            add(note: L10n.string("This session isn’t running."))
+            list.addNote(L10n.string("This session isn’t running."))
             return
         }
 
-        add(sectionTitle: L10n.string("Processes"), count: snapshot.processes.count)
-        for group in snapshot.processGroups {
+        list.addSection(L10n.string("Processes"))
+        for (index, group) in snapshot.processGroups.enumerated() {
             if snapshot.namesProcessOrigins {
-                add(originTitle: group.origin)
+                add(originTitle: group.origin, breathes: index > 0)
             }
             group.processes.forEach(add(process:))
         }
 
-        add(sectionTitle: L10n.string("Ports"), count: snapshot.ports.count)
+        list.addSection(L10n.string("Ports"))
         if snapshot.ports.isEmpty {
-            add(note: L10n.string("Nothing listening."))
+            list.addNote(L10n.string("Nothing listening."))
         } else {
-            for group in snapshot.portGroups {
+            for (index, group) in snapshot.portGroups.enumerated() {
                 if snapshot.namesPortOrigins {
-                    add(originTitle: group.origin)
+                    add(originTitle: group.origin, breathes: index > 0)
                 }
                 group.ports.forEach(add(port:))
             }
@@ -308,10 +346,73 @@ final class SessionInfoViewController: NSViewController {
             symbolColor: Design.Status.positive,
             primary: process.command,
             secondary: "\(process.pid)",
-            value: "\(process.formattedCPU) · \(process.formattedMemory)"
+            valueSegments: [process.formattedCPU, process.formattedMemory],
+            indentLevel: process.depth,
+            commandLine: commandLine(for: process),
+            accessibilityLabel: L10n.format("%@ · process %lld", process.command, Int64(process.pid))
         )
+        row.update(reading(for: process))
+
+        // Never on a root — session teardown owns those — and never without the start identity
+        // that authorises the signal: no identity, no kill.
+        if !process.isRoot, let startTime = process.startTime {
+            let pid = process.pid
+            let command = process.command
+            row.offerStop(titled: L10n.format("Stop %@", command)) { [weak self] in
+                self?.requestStop(of: pid, command: command, startTime: startTime)
+            }
+        }
+
         processRows[process.pid] = row
-        addFullWidth(row)
+        list.addRow(row)
+    }
+
+    /// Asks, signals, and lets the next poll show the truth. A skipped kill — the process
+    /// already gone, or the pid meaning somebody else by now — is deliberately silent in the
+    /// UI: the journal records it, and the refreshed list *is* the answer.
+    private func requestStop(of pid: pid_t, command: String, startTime: ProcessStartTime) {
+        let request = ConfirmationRequest(
+            prompt: .stopSessionProcess,
+            title: L10n.format("Stop %@?", command),
+            message: L10n.format(
+                "Process %lld receives a terminate signal. The session itself keeps running.",
+                Int64(pid)
+            ),
+            confirmTitle: L10n.string("Stop")
+        )
+
+        let proceed: @MainActor (Bool) -> Void = { [weak self] allowed in
+            guard allowed, let self else { return }
+            if let onStopProcess = self.onStopProcess {
+                onStopProcess(pid, startTime)
+            } else {
+                SessionProcessTerminator.terminate(pid: pid, expectedStart: startTime)
+            }
+            self.refresh()
+        }
+
+        if let confirmStop {
+            proceed(confirmStop(request))
+        } else {
+            ConfirmationAlert.ask(request, in: view.window) { proceed($0) }
+        }
+    }
+
+    /// What the row shows and what it can reveal. Display lines omit `argv[0]` — the primary
+    /// label already names the process — while the tooltip carries the whole line. Secrets are
+    /// hidden by `CommandLineRedactor` before anything is drawn; the raw vector survives only
+    /// inside the row, behind its reveal.
+    private func commandLine(for process: SessionProcess) -> SessionInfoRowView.CommandLine? {
+        guard !process.arguments.isEmpty else { return nil }
+
+        let redacted = CommandLineRedactor.redact(process.arguments)
+        return SessionInfoRowView.CommandLine(
+            redactedDisplay: redacted.arguments.dropFirst().joined(separator: " "),
+            fullDisplay: process.arguments.dropFirst().joined(separator: " "),
+            redactedLine: redacted.arguments.joined(separator: " "),
+            fullLine: process.arguments.joined(separator: " "),
+            redactedCount: redacted.redactedCount
+        )
     }
 
     private func add(port: ListeningPort) {
@@ -323,7 +424,8 @@ final class SessionInfoViewController: NSViewController {
             symbolColor: Design.Text.secondary,
             primary: "\(port.port)",
             secondary: port.command,
-            value: port.interface.displayName,
+            valueSegments: [port.interface.displayName],
+            accessibilityLabel: L10n.format("Port %lld · %@", Int64(port.port), port.command),
             action: url.map { url in { [weak self] in self?.onOpenURL?(url) } }
         )
         row.toolTip = url.map {
@@ -337,55 +439,37 @@ final class SessionInfoViewController: NSViewController {
             port.address,
             Int64(port.port)
         )
-        addFullWidth(row)
+        list.addRow(row)
     }
 
-    private func add(sectionTitle: String, count: Int) {
-        let label = NSTextField(
-            labelWithString: L10n.format(
-                "%@  %lld",
-                sectionTitle.uppercased(),
-                Int64(count)
-            )
-        )
-        label.applyFont(.caption)
-        label.textColor = Design.Text.quaternary
-        label.translatesAutoresizingMaskIntoConstraints = false
-
-        let spacer = NSView()
-        spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.heightAnchor.constraint(equalToConstant: Design.Spacing.small).isActive = true
-
-        if !stack.arrangedSubviews.isEmpty {
-            addFullWidth(spacer)
+    /// A sub-heading under a section: which of the session's two roots contributed the rows
+    /// that follow. The section's own regular face — caption's semibold made "Agent" louder
+    /// than the "Processes" over it, which read as the hierarchy inverted — one shade brighter
+    /// than the section, and subordinated by *position*: indented one step onto the glyph
+    /// column, with a breath above a second group so the division is felt before it is read.
+    private func add(originTitle origin: SessionInfoOrigin, breathes: Bool) {
+        if breathes {
+            let spacer = NSView()
+            spacer.translatesAutoresizingMaskIntoConstraints = false
+            spacer.heightAnchor.constraint(equalToConstant: Design.Spacing.tight).isActive = true
+            list.addRow(spacer)
         }
-        addFullWidth(label)
-    }
 
-    private func add(originTitle origin: SessionInfoOrigin) {
         let label = NSTextField(labelWithString: L10n.string(origin.rawValue))
-        label.applyFont(.caption)
+        label.applyFont(.detail())
         label.textColor = Design.Text.tertiary
         label.translatesAutoresizingMaskIntoConstraints = false
-        addFullWidth(label)
-    }
 
-    private func add(note: String) {
-        let label = NSTextField(labelWithString: note)
-        label.applyFont(.body)
-        label.textColor = Design.Text.tertiary
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.lineBreakMode = .byWordWrapping
-        label.maximumNumberOfLines = 0
-        addFullWidth(label)
-    }
-
-    private func addFullWidth(_ subview: NSView) {
-        stack.addArrangedSubview(subview)
-        subview.widthAnchor.constraint(
-            equalTo: stack.widthAnchor,
-            constant: -(stack.edgeInsets.left + stack.edgeInsets.right)
-        ).isActive = true
+        let indented = NSView()
+        indented.translatesAutoresizingMaskIntoConstraints = false
+        indented.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: indented.leadingAnchor, constant: Design.Spacing.small),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: indented.trailingAnchor),
+            label.topAnchor.constraint(equalTo: indented.topAnchor),
+            label.bottomAnchor.constraint(equalTo: indented.bottomAnchor)
+        ])
+        list.addRow(indented)
     }
 
     // MARK: - Session State

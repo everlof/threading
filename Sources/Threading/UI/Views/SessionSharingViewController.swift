@@ -75,32 +75,7 @@ final class SessionSharingViewController: NSViewController {
         return button
     }()
 
-    private lazy var stack: NSStackView = {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.small
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.small,
-            left: Design.Spacing.inset,
-            bottom: Design.Spacing.inset,
-            right: Design.Spacing.inset
-        )
-        return stack
-    }()
-
-    private lazy var scrollView: ThemedScrollView = {
-        let clipView = FlippedClipView()
-        clipView.drawsBackground = false
-        let scroll = ThemedScrollView()
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.contentView = clipView
-        scroll.documentView = stack
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        return scroll
-    }()
+    private let list = PanelListView(rowSpacing: Design.Spacing.small)
 
     // MARK: - Initialization
 
@@ -130,7 +105,7 @@ final class SessionSharingViewController: NSViewController {
             $0.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview($0)
         }
-        view.addSubview(scrollView)
+        view.addSubview(list)
         setupConstraints()
 
         // Both halves move on their own clocks: who *may* watch changes when the owner acts,
@@ -270,14 +245,11 @@ final class SessionSharingViewController: NSViewController {
         links: [RemoteAccessCoordinator.SessionAccess.Link],
         inputControl: RemoteInputControlStateDTO
     ) {
-        stack.arrangedSubviews.forEach {
-            stack.removeArrangedSubview($0)
-            $0.removeFromSuperview()
-        }
+        list.clear()
         ageRows.removeAll()
 
         guard AppSettings.shared.remoteAccessEnabled else {
-            add(note: L10n.string(
+            list.addNote(L10n.string(
                 "Remote Access is off, so nothing outside this Mac can reach this chat."
             ))
             shareButton.isHidden = true
@@ -286,7 +258,7 @@ final class SessionSharingViewController: NSViewController {
         shareButton.isHidden = false
 
         if followers.isEmpty, away.isEmpty, links.isEmpty {
-            add(note: L10n.string(
+            list.addNote(L10n.string(
                 "Nobody else can reach this chat. Sharing it creates a single-use invitation "
                     + "to this one chat — never to your other sessions."
             ))
@@ -296,17 +268,17 @@ final class SessionSharingViewController: NSViewController {
         addInputControl(inputControl)
 
         if !followers.isEmpty {
-            add(sectionTitle: L10n.string("Watching now"), count: followers.count)
+            list.addSection(L10n.string("Watching now"))
             followers.forEach(add(follower:))
         }
 
         if !away.isEmpty {
-            add(sectionTitle: L10n.string("With access"), count: away.count)
+            list.addSection(L10n.string("With access"))
             away.forEach(add(member:))
         }
 
         if !links.isEmpty {
-            add(sectionTitle: L10n.string("Invited"), count: links.count)
+            list.addSection(L10n.string("Invited"))
             links.forEach(add(link:))
         }
     }
@@ -314,7 +286,7 @@ final class SessionSharingViewController: NSViewController {
     // MARK: - Rows
 
     private func addInputControl(_ state: RemoteInputControlStateDTO) {
-        add(sectionTitle: L10n.string("Input control"))
+        list.addSection(L10n.string("Input control"))
 
         let mode = ThemedSegmentedControl()
         mode.configure(
@@ -330,10 +302,10 @@ final class SessionSharingViewController: NSViewController {
             )
         }
         mode.translatesAutoresizingMaskIntoConstraints = false
-        addFullWidth(mode)
+        list.addRow(mode)
 
         if state.mode == .collaborative {
-            add(note: L10n.string("Everyone with reply access can send."))
+            list.addNote(L10n.string("Everyone with reply access can send."))
             return
         }
 
@@ -381,8 +353,8 @@ final class SessionSharingViewController: NSViewController {
             picker.topAnchor.constraint(equalTo: controllerRow.topAnchor),
             picker.bottomAnchor.constraint(equalTo: controllerRow.bottomAnchor)
         ])
-        addFullWidth(controllerRow)
-        add(note: L10n.string("Others can watch and keep drafts."))
+        list.addRow(controllerRow)
+        list.addNote(L10n.string("Others can watch and keep drafts."))
     }
 
     private func add(follower: RemoteSessionMirrorRegistry.Follower) {
@@ -400,7 +372,7 @@ final class SessionSharingViewController: NSViewController {
             )
             : L10n.format("%@ has this chat open", name(for: follower))
         ageRows["\(follower.id)"] = row
-        addFullWidth(row)
+        list.addRow(row)
     }
 
     private func add(member: RemoteAccessCoordinator.SessionAccess.Member) {
@@ -418,7 +390,7 @@ final class SessionSharingViewController: NSViewController {
             ]
         )
         ageRows[member.id] = row
-        addFullWidth(row)
+        list.addRow(row)
     }
 
     private func add(link: RemoteAccessCoordinator.SessionAccess.Link) {
@@ -453,7 +425,7 @@ final class SessionSharingViewController: NSViewController {
         )
         row.toolTip = L10n.string("Nobody has used this link yet")
         ageRows[link.id] = row
-        addFullWidth(row)
+        list.addRow(row)
     }
 
     // MARK: - Row text
@@ -605,49 +577,6 @@ final class SessionSharingViewController: NSViewController {
         tickTimer.invalidate()
     }
 
-    // MARK: - Stack helpers
-
-    private func add(sectionTitle: String, count _: Int) {
-        // The rows themselves make the count apparent. Repeating it beside every heading added
-        // another visual token without helping the owner make a decision.
-        add(sectionTitle: sectionTitle)
-    }
-
-    private func add(sectionTitle: String) {
-        let label = NSTextField(labelWithString: sectionTitle)
-        label.applyFont(.detail())
-        label.textColor = Design.Text.quaternary
-        label.translatesAutoresizingMaskIntoConstraints = false
-
-        if !stack.arrangedSubviews.isEmpty {
-            let spacer = NSView()
-            spacer.translatesAutoresizingMaskIntoConstraints = false
-            spacer.heightAnchor.constraint(
-                equalToConstant: Design.Spacing.tight
-            ).isActive = true
-            addFullWidth(spacer)
-        }
-        addFullWidth(label)
-    }
-
-    private func add(note: String) {
-        let label = NSTextField(labelWithString: note)
-        label.applyFont(.subheading)
-        label.textColor = Design.Text.tertiary
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.lineBreakMode = .byWordWrapping
-        label.maximumNumberOfLines = 0
-        addFullWidth(label)
-    }
-
-    private func addFullWidth(_ subview: NSView) {
-        stack.addArrangedSubview(subview)
-        subview.widthAnchor.constraint(
-            equalTo: stack.widthAnchor,
-            constant: -(stack.edgeInsets.left + stack.edgeInsets.right)
-        ).isActive = true
-    }
-
     private func setupConstraints() {
         let inset = Design.Spacing.inset
         NSLayoutConstraint.activate([
@@ -676,15 +605,13 @@ final class SessionSharingViewController: NSViewController {
                 constant: -inset
             ),
 
-            scrollView.topAnchor.constraint(
+            list.topAnchor.constraint(
                 equalTo: subtitleLabel.bottomAnchor,
                 constant: Design.Spacing.small
             ),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-
-            stack.widthAnchor.constraint(equalTo: scrollView.widthAnchor)
+            list.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            list.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            list.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
     }
 }

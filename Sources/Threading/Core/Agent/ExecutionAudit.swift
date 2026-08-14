@@ -951,14 +951,6 @@ private enum ExecutionAuditSanitizer {
         let redactions: [ExecutionAuditRecord.Redaction]
     }
 
-    private static let credentialKeys: Set<String> = [
-        "password", "passwd", "passcode", "secret", "token", "access_token", "refresh_token",
-        "accesstoken", "refreshtoken", "id_token", "session_token", "sessiontoken",
-        "api_key", "apikey", "x_api_key", "client_secret", "private_key", "secret_key",
-        "authorization", "proxy_authorization", "cookie", "set_cookie", "credential",
-        "credentials", "cvv", "cvc", "security_code", "card_security_code", "pin"
-    ]
-
     static func sanitize(operation _: String, input: JSONValue?, output: JSONValue?) -> Result {
         var redactions: [ExecutionAuditRecord.Redaction] = []
         let sanitizedInput = walk(
@@ -987,9 +979,8 @@ private enum ExecutionAuditSanitizer {
             var result: [String: JSONValue] = [:]
             for key in object.keys.sorted() {
                 let childPath = "\(path).\(key)"
-                let normalized = key.lowercased().replacingOccurrences(of: "-", with: "_")
                 let reason: ExecutionAuditRecord.Redaction.Reason?
-                if credentialKeys.contains(normalized) {
+                if CredentialVocabulary.isCredentialKey(key) {
                     reason = .credential
                 } else if isImage && key == "data" {
                     reason = .imageBytes

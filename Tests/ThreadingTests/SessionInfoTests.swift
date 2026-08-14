@@ -19,6 +19,30 @@ final class SessionInfoTests: XCTestCase {
         ListeningPort(port: number, pid: pid, command: command, address: address, isIPv6: isIPv6)
     }
 
+    /// A real child with a command line this test chose, so the kernel readings have a known
+    /// right answer. `sleep` because it does nothing, predictably, for longer than any test runs.
+    private func spawnSleepFixture() throws -> Process {
+        let fixture = Process()
+        fixture.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        fixture.arguments = ["300"]
+        try fixture.run()
+        return fixture
+    }
+
+    /// Polls the process table until `pid` reads as `expected`, returning the last state seen.
+    /// State transitions are asynchronous — the kernel marks a corpse or a stop after the signal
+    /// returns — so a single read would race the very thing being asserted.
+    private func waitForState(_ expected: ProcessRunState, of pid: pid_t) -> ProcessRunState? {
+        let deadline = Date().addingTimeInterval(5)
+        var last: ProcessRunState?
+        while Date() < deadline {
+            last = ProcessUtility.processTable()[pid]?.state
+            if last == expected { return last }
+            usleep(50_000)
+        }
+        return last
+    }
+
     // MARK: - Process Table
 
     /// The process list is sized from the kernel's own count rather than a fixed buffer.
@@ -60,6 +84,124 @@ final class SessionInfoTests: XCTestCase {
         // this process is a child of its own parent in both.
         XCTAssertTrue(childrenOfParent.contains(getpid()))
         XCTAssertTrue(tableChildren.contains(getpid()))
+    }
+
+    // MARK: - Command Line
+
+    /// The whole launch is readable: the executable's path and every argument — and *only* the
+    /// arguments. The region's leading count is what keeps the walk from running into the
+    /// environment behind argv, which is where secrets actually live.
+    func testCommandLineReportsThePathAndEveryArgumentAndNothingMore() throws {
+        let fixture = try spawnSleepFixture()
+        defer { fixture.terminate() }
+
+        let commandLine = try XCTUnwrap(ProcessUtility.commandLine(forPid: fixture.processIdentifier))
+        XCTAssertEqual(commandLine.executablePath, "/bin/sleep")
+        XCTAssertEqual(commandLine.arguments.count, 2, "argv ran past argc into the environment")
+        XCTAssertEqual((commandLine.arguments[0] as NSString).lastPathComponent, "sleep")
+        XCTAssertEqual(commandLine.arguments[1], "300")
+
+        // The name reading is the same parse, so the two can never disagree about a process.
+        XCTAssertEqual(ProcessUtility.processName(forPid: fixture.processIdentifier), "sleep")
+    }
+
+    // MARK: - Run State & Identity
+
+    /// One table pass answers state and start identity too — the fields the kill affordance and
+    /// the honest status dot stand on.
+    func testTheTableReportsARunningStateAndTheKernelsStartIdentity() throws {
+        let fixture = try spawnSleepFixture()
+        defer { fixture.terminate() }
+
+        let summary = try XCTUnwrap(ProcessUtility.processTable()[fixture.processIdentifier])
+        XCTAssertEqual(summary.state, .running)
+
+        let identity = try XCTUnwrap(summary.startTime)
+        XCTAssertEqual(identity, ProcessUtility.startTime(forPid: fixture.processIdentifier))
+    }
+
+    /// A stopped process is a different fact from a running one — it holds its memory and its
+    /// ports while doing nothing, which is exactly the state a status dot must not paint green.
+    func testAStoppedProcessReadsAsStoppedUntilContinued() throws {
+        let fixture = try spawnSleepFixture()
+        defer {
+            kill(fixture.processIdentifier, SIGCONT)
+            fixture.terminate()
+        }
+
+        XCTAssertEqual(kill(fixture.processIdentifier, SIGSTOP), 0)
+        XCTAssertEqual(waitForState(.stopped, of: fixture.processIdentifier), .stopped)
+
+        XCTAssertEqual(kill(fixture.processIdentifier, SIGCONT), 0)
+        XCTAssertEqual(waitForState(.running, of: fixture.processIdentifier), .running)
+    }
+
+    /// A platform tripwire, not a behaviour test: `proc_pidinfo` cannot see a zombie — both
+    /// bsdinfo flavours answer ESRCH (measured) — so an exited unreaped child *drops out of the
+    /// table* while its pid still holds a place in the kernel's list. That is why
+    /// `ProcessRunState` has no zombie case. The day this fails, the table has learned to read
+    /// corpses and the status dot can learn the word. Spawned raw because `Foundation.Process`
+    /// reaps its own children, which is the one thing this fixture must not do yet.
+    func testAnExitedUnreapedChildDropsOutOfTheTableEntirely() {
+        var pid: pid_t = 0
+        var argv: [UnsafeMutablePointer<CChar>?] = [strdup("/usr/bin/true"), nil]
+        defer { argv.forEach { free($0) } }
+
+        XCTAssertEqual(posix_spawn(&pid, "/usr/bin/true", nil, nil, &argv, nil), 0)
+        defer {
+            var status: Int32 = 0
+            waitpid(pid, &status, 0)
+        }
+
+        let deadline = Date().addingTimeInterval(5)
+        var vanished = false
+        while Date() < deadline {
+            if ProcessUtility.processTable()[pid] == nil {
+                vanished = true
+                break
+            }
+            usleep(50_000)
+        }
+
+        XCTAssertTrue(vanished, "the corpse still reads as a live table row")
+
+        // The unreaped pid is still occupied — it left the *table*, not the pid space. If this
+        // fails, something else in the host reaped the child and the run proves nothing.
+        XCTAssertTrue(
+            ProcessUtility.liveProcessIdentifiers().contains(pid),
+            "the child was reaped out from under the test"
+        )
+    }
+
+    // MARK: - Tree Order
+
+    /// The walk is preorder: each child directly under its parent, siblings by pid. Breadth
+    /// first put every grandchild after every child, which drew a list no indentation could
+    /// explain.
+    func testPreorderPutsChildrenDirectlyUnderTheirParent() {
+        let children: [pid_t: [pid_t]] = [1: [2, 5], 2: [3, 4]]
+
+        let walked = SessionInfoGrouping.preorder(root: 1, children: children)
+
+        XCTAssertEqual(walked.map(\.pid), [1, 2, 3, 4, 5])
+        XCTAssertEqual(walked.map(\.depth), [0, 1, 2, 2, 1])
+    }
+
+    func testPreorderOfALoneRootIsJustTheRoot() {
+        let walked = SessionInfoGrouping.preorder(root: 7, children: [:])
+
+        XCTAssertEqual(walked.map(\.pid), [7])
+        XCTAssertEqual(walked.map(\.depth), [0])
+    }
+
+    /// A live process table can in principle carry a cycle after pid reuse; the walk visits
+    /// each pid once rather than hanging on a malformed table.
+    func testPreorderSurvivesACyclicTable() {
+        let children: [pid_t: [pid_t]] = [1: [2], 2: [3], 3: [1]]
+
+        let walked = SessionInfoGrouping.preorder(root: 1, children: children)
+
+        XCTAssertEqual(walked.map(\.pid), [1, 2, 3])
     }
 
     // MARK: - Interface Classification

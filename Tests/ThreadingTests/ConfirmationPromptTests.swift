@@ -54,6 +54,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "clearBrowserWebsiteData",
             "runDestructiveExtensionCommand",
             "runProjectScript",
+            "stopSessionProcess",
             "grantBrowserOriginAccess",
             "approveSensitiveBrowserAction",
             "approveToolPermission",

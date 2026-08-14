@@ -2192,6 +2192,38 @@ a drawer tab. Either way the tab moves live — a shell keeps its process and sc
 browser keeps its page — and the new home survives a relaunch. The panel-only surfaces
 (Review, Info, Activity, comparisons) stay where they are one of a kind.
 
+### Session Info
+
+**View ▸ Session Info** (**⌘⇧I**) opens the panel's Info tab: what the session is actually
+running, right now. At the top is where the agent is working — its current directory and branch,
+with **Finder** and **Copy** buttons — and below it two lists that refresh every couple of
+seconds while the tab is visible.
+
+**Processes** is the session's process tree: the agent (and, when the shell drawer is open, your
+shell) with every process under it, children indented beneath the process that started them.
+Each row shows the command's name, its pid, its arguments, and its CPU and memory readings on
+the right. The dot before the name is the state: filled green for a live process, a hollow
+amber circle for one that is stopped (suspended) rather than running. Hover over a row for the
+full story — the complete command line, the program's path, when it started, and the directory
+it is running from.
+
+**Arguments keep your secrets.** Command lines are where tokens and passwords travel
+(`--api-key …`, `-p …`), and this panel ends up in screenshots — so values behind
+credential-shaped flags are drawn as `<redacted>`. When you need the real thing,
+**right-click the row ▸ Show Full Command**; the reveal applies to that row only and is
+forgotten when the list rebuilds. Rows that hid nothing offer no menu.
+
+**Stopping a process.** Hover over any process the session started — not the agent's own root;
+closing the session owns that — and a **✕** appears in place of its readings. It asks first
+(**Stop *name*?**), then sends an ordinary terminate signal to exactly that process, and the
+next refresh shows the result. Threading double-checks that the pid still belongs to the
+process you saw before signalling, so a stale row can never stop a stranger.
+
+**Ports** lists every TCP port those processes are listening on, with the bind address spelled
+out — `localhost` for a server only this Mac can reach, the interface address when it is
+reachable from your network. A port the browser can actually connect to is a link: click it and
+the panel's browser opens `http://localhost:…`. When nothing is listening, the panel says so.
+
 ### The session header
 
 Every session sits under a header of its own, at the top of the pane: the agent's mark, the

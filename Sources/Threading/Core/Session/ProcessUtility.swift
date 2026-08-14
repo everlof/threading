@@ -28,12 +28,36 @@ struct ProcessStartTime: Equatable, Codable, Sendable {
     let microseconds: UInt64
 }
 
+/// How the kernel reports a process's run state, reduced to the two answers the info panel can
+/// stand behind. Everything that is not stopped — running, sleeping in a syscall, idle — reads
+/// as `.running`, because "asleep in `select`" and "burning a core" are the same answer to "is
+/// this process alive".
+///
+/// There is deliberately no zombie case: `proc_pidinfo` cannot see a zombie at all — both
+/// bsdinfo flavours answer ESRCH — so an exited unreaped child drops out of the table rather
+/// than reading as a state. `SessionInfoTests` pins that platform behaviour; the day it changes,
+/// this enum can learn the word.
+enum ProcessRunState: Equatable, Sendable {
+    case running
+    case stopped
+}
+
+/// What a process was launched as: the executable's path and the argument vector, straight from
+/// the kernel's argument area. `arguments[0]` is what the process calls itself.
+struct ProcessCommandLine: Equatable, Sendable {
+    let executablePath: String
+    let arguments: [String]
+}
+
 /// The cheap half of `ProcessDetails`: what one pass over the process table can answer without
-/// a further syscall per process. Enough to reconstruct parentage and name a process.
+/// a further syscall per process. Enough to reconstruct parentage, name a process, and tell
+/// whether the pid still means the process it did.
 struct ProcessSummary {
     let pid: pid_t
     let parentPid: pid_t
     let command: String
+    let state: ProcessRunState
+    let startTime: ProcessStartTime?
 }
 
 /// Utility for querying process information.
@@ -148,6 +172,11 @@ enum ProcessUtility {
         }
     }
 
+    /// Reduces Darwin's process-state constants to the stable states the UI exposes.
+    private static func runState(fromStatus status: UInt32) -> ProcessRunState {
+        Int32(status) == SSTOP ? .stopped : .running
+    }
+
     /// Every live process keyed by pid, with its parent and command, in a single pass.
     ///
     /// `getProcessChildren(forPid:)` walks the machine's whole process table to answer about one
@@ -171,7 +200,20 @@ enum ProcessUtility {
                 ptr.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN)) { String(cString: $0) }
             }
 
-            table[pid] = ProcessSummary(pid: pid, parentPid: pid_t(taskInfo.pbi_ppid), command: command)
+            let startTime: ProcessStartTime? = taskInfo.pbi_start_tvsec > 0
+                ? ProcessStartTime(
+                    seconds: UInt64(taskInfo.pbi_start_tvsec),
+                    microseconds: UInt64(taskInfo.pbi_start_tvusec)
+                )
+                : nil
+
+            table[pid] = ProcessSummary(
+                pid: pid,
+                parentPid: pid_t(taskInfo.pbi_ppid),
+                command: command,
+                state: runState(fromStatus: taskInfo.pbi_status),
+                startTime: startTime
+            )
         }
 
         return table
@@ -212,12 +254,13 @@ enum ProcessUtility {
     }()
 
     /// The kernel's own start timestamp for a process, which is what makes a recorded pid
-    /// identifiable later. `nil` means the process is gone or its info could not be read — two
+    /// identifiable later. `nil` means the process is gone, a zombie, or otherwise unreadable —
     /// answers a caller must treat the same way, which is to do nothing.
     ///
-    /// A zombie still answers this, and that matters: a child is only reaped once, so its pid
-    /// cannot be handed out again before the reap, which is what makes reading the start time
-    /// straight after `posix_spawn` race-free.
+    /// Reading this straight after `posix_spawn` is still race-free even though a zombie
+    /// answers ESRCH (measured; `proc_pidinfo` cannot see zombies at all): the pid cannot be
+    /// handed out again before the child is reaped, so the worst case is a nil that fails
+    /// closed, never a reading taken from a stranger's process.
     static func startTime(forPid pid: pid_t) -> ProcessStartTime? {
         guard pid > 0 else { return nil }
 
@@ -240,16 +283,15 @@ enum ProcessUtility {
         return result == size
     }
 
-    /// What the process calls itself — `argv[0]`'s last component, which is what `ps` reports.
+    /// What a process was launched as — the executable's path and its whole argument vector.
     ///
-    /// `proc_bsdinfo.pbi_comm` is the *executable file's* name, truncated to 16 characters, and
-    /// for a versioned install that is the version rather than the tool: Claude Code's binary
-    /// lives at `…/versions/2.1.218`, so the agent — the row this panel exists to show — renders
-    /// as "2.1.218", which names nothing a user recognises. `argv[0]` says "claude".
+    /// The region is `[argc][exec_path\0][\0 padding][argv[0]\0][argv[1]\0]…[environ…]`: the
+    /// leading count is what separates the arguments from the environment behind them, which
+    /// must never be read past — the environment is where secrets actually live.
     ///
-    /// Callers should cache the answer: a process cannot rename itself here, and this copies the
-    /// argument area out of the kernel, which is far more than a poll should repeat.
-    static func processName(forPid pid: pid_t) -> String? {
+    /// Callers should cache the answer: a process cannot rewrite its argument area here, and
+    /// this copies it out of the kernel, which is far more than a poll should repeat.
+    static func commandLine(forPid pid: pid_t) -> ProcessCommandLine? {
         var argumentMaximum: Int32 = 0
         var maximumSize = MemoryLayout<Int32>.size
         var maximumMib: [Int32] = [CTL_KERN, KERN_ARGMAX]
@@ -261,21 +303,44 @@ enum ProcessUtility {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return nil }
 
-        // The region is `[argc][exec_path\0][\0 padding][argv[0]\0][argv[1]\0]…`, so reaching
-        // argv[0] means stepping over the executable path and the alignment nulls behind it.
         let headerSize = MemoryLayout<Int32>.size
         guard size > headerSize else { return nil }
 
+        let argumentCount = buffer.withUnsafeBytes { $0.load(as: Int32.self) }
+        guard argumentCount > 0 else { return nil }
+
         var index = headerSize
+        let pathStart = index
         while index < size, buffer[index] != 0 { index += 1 }
+        guard index > pathStart else { return nil }
+        let executablePath = String(decoding: buffer[pathStart..<index], as: UTF8.self)
+
+        // Alignment nulls sit between the path and argv[0]; an *empty* argument later on is a
+        // lone null and must not be skipped the same way, so the padding walk happens only here.
         while index < size, buffer[index] == 0 { index += 1 }
-        guard index < size else { return nil }
 
-        let start = index
-        while index < size, buffer[index] != 0 { index += 1 }
-        guard index > start else { return nil }
+        var arguments: [String] = []
+        arguments.reserveCapacity(Int(argumentCount))
+        while arguments.count < Int(argumentCount), index < size {
+            let start = index
+            while index < size, buffer[index] != 0 { index += 1 }
+            arguments.append(String(decoding: buffer[start..<index], as: UTF8.self))
+            index += 1
+        }
 
-        let name = (String(decoding: buffer[start..<index], as: UTF8.self) as NSString).lastPathComponent
+        guard !arguments.isEmpty else { return nil }
+        return ProcessCommandLine(executablePath: executablePath, arguments: arguments)
+    }
+
+    /// What the process calls itself — `argv[0]`'s last component, which is what `ps` reports.
+    ///
+    /// `proc_bsdinfo.pbi_comm` is the *executable file's* name, truncated to 16 characters, and
+    /// for a versioned install that is the version rather than the tool: Claude Code's binary
+    /// lives at `…/versions/2.1.218`, so the agent — the row this panel exists to show — renders
+    /// as "2.1.218", which names nothing a user recognises. `argv[0]` says "claude".
+    static func processName(forPid pid: pid_t) -> String? {
+        guard let argumentZero = commandLine(forPid: pid)?.arguments.first else { return nil }
+        let name = (argumentZero as NSString).lastPathComponent
         return name.isEmpty ? nil : name
     }
 

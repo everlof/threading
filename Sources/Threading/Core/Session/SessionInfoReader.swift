@@ -24,6 +24,56 @@ struct SessionProcess: Equatable, Sendable {
     /// `0%` for "not yet known" would claim a measurement that was never taken.
     let cpuPercent: Double?
 
+    /// Distance from the origin's root in the process tree; the root itself is 0. The panel
+    /// indents by it, which is how parentage is drawn.
+    let depth: Int
+
+    /// The kernel's run state at this reading — the fact the status dot must not overstate.
+    let state: ProcessRunState
+
+    /// The kernel's start identity, the other half of what a pid means. Nil when it could not
+    /// be read, which any action on this process must treat as "do nothing".
+    let startTime: ProcessStartTime?
+
+    /// The executable's path and full argument vector, when the argument area was readable.
+    let executablePath: String?
+    let arguments: [String]
+
+    /// Where the process is *now* — read fresh each poll, since a process moves.
+    let workingDirectory: String?
+
+    init(
+        pid: pid_t,
+        command: String,
+        memoryBytes: UInt64,
+        cpuPercent: Double?,
+        depth: Int = 0,
+        state: ProcessRunState = .running,
+        startTime: ProcessStartTime? = nil,
+        executablePath: String? = nil,
+        arguments: [String] = [],
+        workingDirectory: String? = nil
+    ) {
+        self.pid = pid
+        self.command = command
+        self.memoryBytes = memoryBytes
+        self.cpuPercent = cpuPercent
+        self.depth = depth
+        self.state = state
+        self.startTime = startTime
+        self.executablePath = executablePath
+        self.arguments = arguments
+        self.workingDirectory = workingDirectory
+    }
+
+    /// The session's own root — the row session teardown owns, which the panel therefore
+    /// never offers to stop.
+    var isRoot: Bool { depth == 0 }
+
+    var startDate: Date? {
+        startTime.map { Date(timeIntervalSince1970: TimeInterval($0.seconds)) }
+    }
+
     @MainActor
     var formattedMemory: String {
         Self.memoryFormatter.string(fromByteCount: Int64(memoryBytes))
@@ -96,6 +146,29 @@ enum SessionInfoGrouping {
         return groups
     }
 
+    /// Every pid in the tree rooted at `root`, depth first with each node's distance from the
+    /// root — the order a tree is *read*: children directly under their parent, siblings by pid
+    /// (the caller hands children pre-sorted). A breadth-first walk put every grandchild after
+    /// every child, which drew a list no indentation could explain.
+    ///
+    /// A process table read live can in principle contain a cycle after pid reuse; the seen set
+    /// means a malformed table costs a wrong row rather than a hang.
+    static func preorder(root: pid_t, children: [pid_t: [pid_t]]) -> [(pid: pid_t, depth: Int)] {
+        var ordered: [(pid: pid_t, depth: Int)] = []
+        var seen: Set<pid_t> = []
+        var stack: [(pid: pid_t, depth: Int)] = [(root, 0)]
+
+        while let (pid, depth) = stack.popLast() {
+            guard seen.insert(pid).inserted else { continue }
+            ordered.append((pid, depth))
+            for child in (children[pid] ?? []).reversed() {
+                stack.append((child, depth + 1))
+            }
+        }
+
+        return ordered
+    }
+
     /// One row per port, newest binding wins, ordered as a person reads them.
     ///
     /// A port can legitimately be reported more than once: a pre-forking server (gunicorn,
@@ -155,10 +228,12 @@ final class SessionInfoReader: @unchecked Sendable {
     /// Previous CPU readings keyed by pid. Only ever touched on `queue`.
     private var previousCPU: [pid_t: CPUSample] = [:]
 
-    /// Resolved process names keyed by pid. A process cannot rename itself here, so each pid is
-    /// asked once — reading `argv[0]` copies the argument area out of the kernel, which is far
-    /// more than a two-second poll should repeat. Only ever touched on `queue`.
-    private var resolvedNames: [pid_t: String] = [:]
+    /// Resolved command lines keyed by pid, each guarded by the start identity it was read
+    /// under. A process cannot rewrite its argument area, so each *process* is asked once —
+    /// copying it out of the kernel is far more than a two-second poll should repeat — but a
+    /// pid can be handed out again, and a recycled pid must not inherit a dead process's
+    /// command line. Only ever touched on `queue`.
+    private var resolvedCommandLines: [pid_t: (identity: ProcessStartTime?, commandLine: ProcessCommandLine?)] = [:]
 
     // MARK: - Public Methods
 
@@ -192,22 +267,27 @@ final class SessionInfoReader: @unchecked Sendable {
         // The shell drawer is started by the app, so both roots are our own descendants and
         // cannot overlap — but a root that failed to start reads as pid 0, which must not be
         // mistaken for a real process.
-        let agentPids = descendants(of: agentRoot, children: children, table: table)
-        let shellPids = descendants(of: shellRoot, children: children, table: table)
-            .filter { !agentPids.contains($0) }
+        let agentEntries = descendants(of: agentRoot, children: children, table: table)
+        let agentPids = Set(agentEntries.map(\.pid))
+        let shellEntries = descendants(of: shellRoot, children: children, table: table)
+            .filter { !agentPids.contains($0.pid) }
 
         var sampled: [pid_t: CPUSample] = [:]
 
-        let agentProcesses = agentPids.map { measure($0, in: table, at: taken, into: &sampled) }
-        let shellProcesses = shellPids.map { measure($0, in: table, at: taken, into: &sampled) }
+        let agentProcesses = agentEntries.map {
+            measure($0.pid, depth: $0.depth, in: table, at: taken, into: &sampled)
+        }
+        let shellProcesses = shellEntries.map {
+            measure($0.pid, depth: $0.depth, in: table, at: taken, into: &sampled)
+        }
 
         // Keep only what is still alive, or the maps grow with every process the session ever ran.
         previousCPU = sampled
-        let living = Set(agentPids).union(shellPids)
-        resolvedNames = resolvedNames.filter { living.contains($0.key) }
+        let living = agentPids.union(shellEntries.map(\.pid))
+        resolvedCommandLines = resolvedCommandLines.filter { living.contains($0.key) }
 
-        let agentPorts = SessionInfoGrouping.deduplicated(ports(for: agentPids, in: table))
-        let shellPorts = SessionInfoGrouping.deduplicated(ports(for: shellPids, in: table))
+        let agentPorts = SessionInfoGrouping.deduplicated(ports(for: agentProcesses))
+        let shellPorts = SessionInfoGrouping.deduplicated(ports(for: shellProcesses))
 
         return SessionInfoSnapshot(
             processGroups: SessionInfoGrouping.groups(agent: agentProcesses, shell: shellProcesses)
@@ -217,29 +297,16 @@ final class SessionInfoReader: @unchecked Sendable {
         )
     }
 
-    /// Every pid in the tree rooted at `root`, the root itself included, breadth first.
+    /// Every pid in the tree rooted at `root`, the root itself included, in reading order —
+    /// `SessionInfoGrouping.preorder`, which is where the walk itself is testable without a
+    /// live process.
     private func descendants(
         of root: pid_t?,
         children: [pid_t: [pid_t]],
         table: [pid_t: ProcessSummary]
-    ) -> [pid_t] {
+    ) -> [(pid: pid_t, depth: Int)] {
         guard let root, root > 0, table[root] != nil else { return [] }
-
-        var ordered: [pid_t] = []
-        var seen: Set<pid_t> = []
-        var queue: [pid_t] = [root]
-
-        while let pid = queue.first {
-            queue.removeFirst()
-
-            // A process table read live can in principle contain a cycle after pid reuse; the
-            // seen set means a malformed table costs a wrong row rather than a hang.
-            guard seen.insert(pid).inserted else { continue }
-            ordered.append(pid)
-            queue.append(contentsOf: children[pid] ?? [])
-        }
-
-        return ordered
+        return SessionInfoGrouping.preorder(root: root, children: children)
     }
 
     private func childrenByParent(in table: [pid_t: ProcessSummary]) -> [pid_t: [pid_t]] {
@@ -255,6 +322,7 @@ final class SessionInfoReader: @unchecked Sendable {
 
     private func measure(
         _ pid: pid_t,
+        depth: Int,
         in table: [pid_t: ProcessSummary],
         at taken: Date,
         into sampled: inout [pid_t: CPUSample]
@@ -263,26 +331,51 @@ final class SessionInfoReader: @unchecked Sendable {
         let cpuTime = usage?.cpuTime ?? 0
         sampled[pid] = CPUSample(cpuTimeNanoseconds: cpuTime, taken: taken)
 
+        let summary = table[pid]
+        let commandLine = self.commandLine(for: pid, identity: summary?.startTime)
+
         return SessionProcess(
             pid: pid,
-            command: name(for: pid, in: table),
+            command: name(from: commandLine, in: table, pid: pid),
             memoryBytes: usage?.memoryBytes ?? 0,
-            cpuPercent: percentage(forPid: pid, cpuTime: cpuTime, at: taken)
+            cpuPercent: percentage(forPid: pid, cpuTime: cpuTime, at: taken),
+            depth: depth,
+            state: summary?.state ?? .running,
+            startTime: summary?.startTime,
+            executablePath: commandLine?.executablePath,
+            arguments: commandLine?.arguments ?? [],
+            workingDirectory: ProcessUtility.workingDirectory(forPid: pid)?.path
         )
     }
 
-    /// What to call a process, asked once per pid.
+    /// The cached command line for a live process, re-read only when the pid's start identity
+    /// says it is no longer the process the cache knew.
+    private func commandLine(for pid: pid_t, identity: ProcessStartTime?) -> ProcessCommandLine? {
+        if let cached = resolvedCommandLines[pid], cached.identity == identity {
+            return cached.commandLine
+        }
+
+        let resolved = ProcessUtility.commandLine(forPid: pid)
+        resolvedCommandLines[pid] = (identity, resolved)
+        return resolved
+    }
+
+    /// What to call a process.
     ///
     /// `argv[0]` is preferred over the executable's filename because a versioned install names
     /// its binary after the version — the agent would otherwise read as "2.1.218" rather than
     /// "claude". The process table's own name is the fallback, for a process whose arguments
     /// cannot be read.
-    private func name(for pid: pid_t, in table: [pid_t: ProcessSummary]) -> String {
-        if let cached = resolvedNames[pid] { return cached }
-
-        let resolved = ProcessUtility.processName(forPid: pid) ?? table[pid]?.command ?? "—"
-        resolvedNames[pid] = resolved
-        return resolved
+    private func name(
+        from commandLine: ProcessCommandLine?,
+        in table: [pid_t: ProcessSummary],
+        pid: pid_t
+    ) -> String {
+        if let argumentZero = commandLine?.arguments.first {
+            let name = (argumentZero as NSString).lastPathComponent
+            if !name.isEmpty { return name }
+        }
+        return table[pid]?.command ?? "—"
     }
 
     /// CPU as a share of one core between this reading and the last, the way `top` reports it —
@@ -298,9 +391,9 @@ final class SessionInfoReader: @unchecked Sendable {
         return max(0, burned / elapsed * 100)
     }
 
-    private func ports(for pids: [pid_t], in table: [pid_t: ProcessSummary]) -> [ListeningPort] {
-        pids.flatMap { pid in
-            ProcessUtility.listeningPorts(forPid: pid, command: name(for: pid, in: table))
+    private func ports(for processes: [SessionProcess]) -> [ListeningPort] {
+        processes.flatMap { process in
+            ProcessUtility.listeningPorts(forPid: process.pid, command: process.command)
         }
     }
 }

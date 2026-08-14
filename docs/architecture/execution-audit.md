@@ -53,7 +53,9 @@ fidelity, explicit redaction paths, the previous digest and its own digest.
 - **Exact** means the decoded native JSON value is retained. JSON object key order is made stable on
   disk, but no semantic fields are renamed or summarized inside `input` or `output`.
 - **Exact · redacted** means the native shape is retained with specific values replaced. Every
-  replacement is listed by JSON path and reason in `redactions`.
+  replacement is listed by JSON path and reason in `redactions`. The credential-key list the
+  sanitizer matches against lives in `CredentialVocabulary` (`Core/Agent/`), shared with the
+  info panel's command-line redactor so the two surfaces cannot drift on what counts as a secret.
 - **Canonicalized** exists for an explicitly projected source that cannot provide a native value. It
   must never be used to make a normalized provider tool row look exact.
 

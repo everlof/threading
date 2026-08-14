@@ -28069,7 +28069,20 @@
     "Left over from deleted workspaces": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kvar från borttagna arbetsytor"}}}},
     "Other build caches in temporary locations": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Andra byggcacher på tillfälliga platser"}}}},
     "built for %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "byggd för %@"}}}},
-    "built for %@, which no longer exists": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "byggd för %@, som inte längre finns"}}}}
+    "built for %@, which no longer exists": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "byggd för %@, som inte längre finns"}}}},
+    "Show Full Command": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa hela kommandot"}}}},
+    "Program: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Program: %@"}}}},
+    "Started %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Startad %@"}}}},
+    "Working directory: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Arbetskatalog: %@"}}}},
+    "%@ · process %lld": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ · process %lld"}}}},
+    "Port %lld · %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Port %lld · %@"}}}},
+    "Stop %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Stoppa %@"}}}},
+    "Stop %@?": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Stoppa %@?"}}}},
+    "Process %lld receives a terminate signal. The session itself keeps running.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Processen %lld får en avslutningssignal. Själva sessionen fortsätter att köra."}}}},
+    "PanelListView": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "PanelListView"}}}},
+    "CompoundValueLabel": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "CompoundValueLabel"}}}},
+    "The display panel's list vocabulary — sections, notes and full-width rows on one ink column, the geometry the Info and Sharing panes share instead of each stating their own insets.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visningspanelens listvokabulär — sektioner, noteringar och rader i full bredd på en gemensam bläckkolumn; geometrin som Info- och Delningspanelerna delar i stället för att var och en anger sina egna indrag."}}}},
+    "The same rule for plain segments — the info panel's CPU · memory reading: both parts, then one complete part, then nothing, never a number whose unit went missing.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Samma regel för enkla segment — infopanelens CPU · minnes-avläsning: båda delarna, sedan en komplett del, sedan ingenting, aldrig ett tal vars enhet försvunnit."}}}}
   },
   "version": "1.0"
 }

@@ -1291,6 +1291,25 @@ here — the sidebar's attention dot is the same colour — and spending it on w
 to be open says that about nothing. The info panel's process dots follow the same rule and draw
 in the positive status role, which is what a running process actually is.
 
+**The info panel is `PanelListView` speech.** Its sections ("Processes", "Ports"), notes
+("Nothing listening.") and header block all stand on the component's one ink column — the panel
+once had four different leading edges, each individually "correct", and the misalignment was
+visible only in a picture (`SessionInfoRenderTests` now takes that picture). Its rows carry the
+process *tree*: children indent under their parent by `Spacing.medium` per level, drawn by the
+dot column itself, and the dot is honest about state — filled positive for alive, a hollow
+`circle` in the warning role for stopped, because a suspended process holding its memory and
+its ports is a fact the "alive" dot must not paint over. A zombie is not a state here: Darwin's
+`proc_pidinfo` cannot see one at all (measured; `SessionInfoTests` pins it), so an unreaped
+child leaves the list instead. The value column is a `CompoundValueLabel` — `12% · 248 MB`
+gives up whole segments, never characters — and the row speaks as one accessibility element: a
+pressable link where the row opens a port, a quiet group otherwise. Command lines render
+through `CommandLineRedactor` (secrets behind credential-shaped flags become `<redacted>`,
+shared vocabulary with the execution audit); the raw line is one right-click away, per row,
+forgotten on rebuild. The hover plate belongs only to the port rows, whose whole surface is a
+click; a stoppable process row hovers by revealing its `✕` in the value's place — a
+`ThemedIconButton` that asks (`ConfirmationPrompt.stopSessionProcess`, `.irreversible`) and
+signals exactly one pid through `SessionProcessTerminator`'s identity-checked SIGTERM.
+
 `SessionComposerViewController` is the reference implementation, and **the only way a session
 is created**. Reading down its column: **two** chips above the box answer *where* and *who* —
 a location breadcrumb (`AnotherTerminal ▸ master`) and an identity (`Claude Code · work`) — and
