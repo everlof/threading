@@ -788,7 +788,13 @@ when no line is drawn. The ring's *fill* stays the provider's figure — a ring 
 consumed-of-bound would report a level the account never reached, on the one control whose whole
 job is to say how much is left.
 
-Still reading the provider's 100%: the model menu's scoped columns and the Limit History charts.
+**The model menu carries the scoped half**, which is the one surface where a scoped limit is
+*actionable* — a spent Fable window is escaped by picking something else. Its header takes the
+account's own windows' tones and each row takes its model's, so a line drawn on one model's window
+tints that row and no other.
+
+Still reading the provider's 100%: the Limit History charts, where the cap belongs as its own
+marker kind beside the existing reset/expiry/projection markers.
 
 `UsageBarView.drawnFillWidth` and `drawnCapTrackWidth` exist because a test reached the fill
 through `subviews.first`, and the capped track inserted below it quietly made that a different

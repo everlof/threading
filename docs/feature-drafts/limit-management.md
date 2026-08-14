@@ -4,8 +4,7 @@
 2026-08-14: the rule record, the two storage scopes, `CustomLimitEvaluator`, window-instance
 identity, the fired-state ledger, `UsageAlertCenter` and the Accounts page's Limits section. Step
 2's *bar* half shipped 2026-08-15 — `CustomLimitBounds`, the capped track on `UsageBarView`,
-effective-bound tinting on `UsageWindowRow`, the identity menu's metric columns and the
-always-visible pill. Its
+effective-bound tinting on `UsageWindowRow`, both account menus and the always-visible pill. Its
 durable decisions now live in
 [`accounts.md § Your own limits, ahead of the provider's`](../architecture/accounts.md#your-own-limits-ahead-of-the-providers);
 **that file is authoritative for what exists**, and this one remains the plan for steps 2–6.
@@ -325,9 +324,8 @@ Two extensions fall out nearly free, and one is deliberately deferred:
    (`CustomLimitBounds`, `UsageBarView.capMark`, `UsageWindowRow`). The line turned out not to be
    a tick: it is a change in the *track*, because a pace mark and a cap mark on a 6pt bar are two
    different kinds of thing and cannot share one vocabulary. What remains of this step is the
-   *model* menu's scoped columns and the cap-line marker on the Limit History charts. The bar,
-   the identity menu's columns and the always-visible pill — segments, ring and the per-rule
-   `showsInToolbar` switch — all shipped.
+   cap-line marker on the Limit History charts. The bar, both menus and the always-visible pill —
+   segments, ring and the per-rule `showsInToolbar` switch — all shipped.
 3. **Holds:** the three existing seams plus the plane's refusal sentence.
 4. **The two new metrics:** pace share, then synthetic windows (fraction-delta first, ledger
    funding second).

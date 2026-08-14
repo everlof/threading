@@ -496,7 +496,8 @@ insets its content, since a control aligned by ink reaches past the margin its g
 
 **Rendered-state tests are how appearance is reviewed here.** `ConversationRenderTests`,
 `GitReviewRenderTests`, `ThemeSettingsRenderTests`, `CodeStatsRenderTests`,
-`ToolbarChromeRenderTests`, `AccountLimitsSectionTests/testRendersTheLimitsSectionToImages` and
+`ToolbarChromeRenderTests`, `AccountLimitsSectionTests/testRendersTheLimitsSectionToImages`,
+`CustomLimitShowTests/testRendersTheCappedBarToImages` and
 `SessionAttachmentComparisonTests/testRendersTheDropAffordance`
 draw real fixtures to PNGs, light and dark (`THREADING_RENDER_OUT` redirects the output). Several
 bugs in this codebase were visible in a picture and in no assertion anyone would have written —

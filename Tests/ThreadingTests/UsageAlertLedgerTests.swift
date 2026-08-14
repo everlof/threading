@@ -10,6 +10,13 @@ import XCTest
 @MainActor
 final class UsageAlertLedgerTests: XCTestCase {
 
+    /// One scratch suite for the whole class, cleared at both ends.
+    ///
+    /// A fresh `UUID` suite per *test method* is the obvious shape and the wrong one: each is a
+    /// real preferences domain the daemon then holds, a run of this target left a hundred of them
+    /// behind, and `scripts/test.sh` sweeps them afterwards precisely because they accumulate.
+    /// Clearing in `setUp` as well as `tearDown` buys the same isolation — a crashed test's
+    /// leftovers are gone before the next one reads anything — at four domains instead of forty.
     private var suiteName = ""
     private var defaults: UserDefaults!
     private var ledger: UsageAlertLedger!
@@ -20,8 +27,9 @@ final class UsageAlertLedgerTests: XCTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        suiteName = "UsageAlertLedgerTests-\(UUID().uuidString)"
+        suiteName = "UsageAlertLedgerTests"
         defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
         ledger = UsageAlertLedger(defaults: defaults)
     }
 

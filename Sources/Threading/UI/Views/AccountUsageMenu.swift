@@ -95,7 +95,7 @@ enum AccountUsageMenu {
         item.metrics = identityMetrics(for: usage, at: now, limits: limits)
         item.trailingDetail = resetColumn(for: usage, metering: model, at: now)
 
-        let scoped = scopedSegments(for: usage, at: now)
+        let scoped = scopedSegments(for: usage, at: now, limits: limits)
         if !scoped.isEmpty { item.setSubtitle(scoped) }
     }
 
@@ -161,9 +161,17 @@ enum AccountUsageMenu {
     /// something the columns could not say.
     static func scopedSegments(
         for usage: AccountUsage,
-        at now: Date = Date()
+        at now: Date = Date(),
+        limits: [CustomLimit] = []
     ) -> [ThemedMenuSubtitleSegment] {
-        readingSegments(usage.readings(of: usage.modelWindows, at: now), joining: false)
+        readingSegments(
+            CustomLimitBounds.retinted(
+                usage.readings(of: usage.modelWindows, at: now),
+                of: usage.modelWindows,
+                in: limits
+            ),
+            joining: false
+        )
     }
 
     /// The whole identity row as one plain line — what a tooltip and VoiceOver get, and what a
@@ -238,7 +246,12 @@ enum AccountUsageMenu {
         // window the ring has already decided is expired.
         item.image = UsageRingImage.make(for: usage, at: now, metering: model)
 
-        let segments = modelSummarySegments(for: usage, running: model, at: now)
+        let segments = modelSummarySegments(
+            for: usage,
+            running: model,
+            at: now,
+            limits: CustomLimitSettings.shared.rules(for: account.id)
+        )
         guard !segments.isEmpty else { return }
         item.setSubtitle(segments)
     }
@@ -259,7 +272,11 @@ enum AccountUsageMenu {
         at now: Date = Date()
     ) -> ThemedMenuItem? {
         guard let usage = AccountUsageService.shared.usage(for: account) else { return nil }
-        let segments = modelMenuHeaderSegments(for: usage, at: now)
+        let segments = modelMenuHeaderSegments(
+            for: usage,
+            at: now,
+            limits: CustomLimitSettings.shared.rules(for: account.id)
+        )
         guard !segments.isEmpty else { return nil }
 
         var item = ThemedMenuItem(title: account.displayName, isEnabled: false)
@@ -273,7 +290,8 @@ enum AccountUsageMenu {
     /// menu.
     static func modelMenuHeaderSegments(
         for usage: AccountUsage,
-        at now: Date = Date()
+        at now: Date = Date(),
+        limits: [CustomLimit] = []
     ) -> [ThemedMenuSubtitleSegment] {
         var segments: [ThemedMenuSubtitleSegment] = []
 
@@ -281,7 +299,11 @@ enum AccountUsageMenu {
             segments.append(ThemedMenuSubtitleSegment(plan))
         }
         segments += readingSegments(
-            usage.readings(at: now, metering: nil),
+            CustomLimitBounds.retinted(
+                usage.readings(at: now, metering: nil),
+                of: usage.windows,
+                in: limits
+            ),
             joining: !segments.isEmpty
         )
         if let reset = resetLine(for: usage, metering: nil, at: now) {
@@ -301,9 +323,15 @@ enum AccountUsageMenu {
     static func modelSummary(
         for usage: AccountUsage,
         running model: String?,
-        at now: Date = Date()
+        at now: Date = Date(),
+        limits: [CustomLimit] = []
     ) -> String? {
-        let segments = modelSummarySegments(for: usage, running: model, at: now)
+        let segments = modelSummarySegments(
+            for: usage,
+            running: model,
+            at: now,
+            limits: limits
+        )
         guard !segments.isEmpty else { return nil }
         return segments.map(\.text).joined()
     }
@@ -320,12 +348,23 @@ enum AccountUsageMenu {
     static func modelSummarySegments(
         for usage: AccountUsage,
         running model: String?,
-        at now: Date = Date()
+        at now: Date = Date(),
+        limits: [CustomLimit] = []
     ) -> [ThemedMenuSubtitleSegment] {
         let scoped = usage.scopedWindows(metering: model)
         guard !scoped.isEmpty else { return [] }
 
-        var segments = readingSegments(usage.readings(of: scoped, at: now), joining: false)
+        // The model menu is the one surface where a *scoped* limit is actionable — a spent Fable
+        // window is escaped by picking something else — so it is also where a line drawn on one
+        // has to be visible.
+        var segments = readingSegments(
+            CustomLimitBounds.retinted(
+                usage.readings(of: scoped, at: now),
+                of: scoped,
+                in: limits
+            ),
+            joining: false
+        )
 
         if let binding = usage.bindingWindow(at: now, metering: model),
            binding.scopeName != nil,

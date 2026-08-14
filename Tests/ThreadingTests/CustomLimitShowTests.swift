@@ -370,6 +370,48 @@ final class CustomLimitShowTests: XCTestCase {
         XCTAssertEqual(after.severity, .critical)
     }
 
+    /// The model menu is the one surface where a *scoped* limit is actionable — a spent Fable
+    /// window is escaped by picking something else — so a line drawn on one has to be visible
+    /// there, and only on the row that model's window belongs to.
+    func testAScopedLimitTintsTheModelRowItBelongsTo() throws {
+        let now = Date(timeIntervalSince1970: 1_770_000_000)
+        let fable = "fable"
+        var usage = AccountUsage(windows: [], planLabel: nil, observedAt: now, source: .api)
+        usage.modelWindows = [
+            AccountUsage.Window(
+                id: fable,
+                label: "Weekly · Fable",
+                fraction: 0.47,
+                resetsAt: now.addingTimeInterval(86_400),
+                windowDuration: UsageDefaults.sevenDaySeconds,
+                scopeName: "Fable"
+            )
+        ]
+
+        let plain = AccountUsageMenu.modelSummarySegments(
+            for: usage,
+            running: fable,
+            at: now
+        )
+        let capped = AccountUsageMenu.modelSummarySegments(
+            for: usage,
+            running: fable,
+            at: now,
+            limits: [CustomLimit(windowID: fable, bound: 0.5)]
+        )
+
+        XCTAssertEqual(
+            capped.map(\.text),
+            plain.map(\.text),
+            "the line changed what the row says, not only how it says it"
+        )
+        XCTAssertNotEqual(
+            capped.map(\.tone),
+            plain.map(\.tone),
+            "a scoped window fenced off at half still read as comfortable"
+        )
+    }
+
     // MARK: - Images
 
     /// One window at four readings under one line, so the whole tier can be reviewed at a glance.
