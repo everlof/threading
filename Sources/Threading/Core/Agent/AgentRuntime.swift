@@ -191,6 +191,10 @@ final class AgentRuntime {
         switch report.event {
         case .turnFinished:
             SessionSnoozeCenter.shared.record(.turnCompleted, for: report.sessionID)
+            // The turn's own boundary is where this session's observed work catches up. A hook
+            // per tool call would be exact and would spend a spawned process on every `Read`;
+            // the transcript already holds every call, and the turn end is when it is complete.
+            AgentWorkHydration.hydrate(sessionID: report.sessionID)
         case .awaitingUser:
             SessionSnoozeCenter.shared.record(.inputRequested, for: report.sessionID)
         case .blockingAskOpened:

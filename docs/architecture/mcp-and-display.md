@@ -244,6 +244,50 @@ incrementally from file events, not computed by walking its subtree. Row queries
 current viewport, cache at most 256 paths, and run through `AgentWorkTraceStore`'s utility worker.
 Closed directories are neither enumerated nor represented by views merely because the pane opened.
 
+**Observed work has two feeds, and the second one is why the panel is not empty for most chats.**
+A rendered conversation records each tool call as it streams, from `ConversationViewController`.
+A session Threading does not render has no such stream — its calls reach us as PTY bytes — so for
+a long time Activity drew the whole repository and reported zeros beside it: measured on this
+machine, 179 of one project's 183 sessions. `AgentWorkHydration` closes that by folding the
+session's *own transcript* in, through `TranscriptReplay.toolCalls`, which is `read`'s sibling:
+same closed `TranscriptReplayFormat` set, same record-to-event mapping, two deliberate
+differences.
+
+- **It resumes.** `JSONLReader.forEachRecord(at:from:limit:)` returns the position just past the
+  last record delivered, and `AgentSessionWorkTrace.transcriptOffset` persists it beside the work
+  it counted. The in-memory call-id dedupe cannot survive a relaunch; this can, which is the
+  difference between re-reading a transcript and re-*counting* it.
+- **It keeps each record's own timestamp.** `[StreamEvent]` carries none, which is why the replay
+  seed stamps its whole reduction `distantPast` — honest for a footprint, useless for recency, and
+  actively wrong here in a second way: stamping folded-in work `Date()` would light the map's glow,
+  and start its refresh timer, for every old session whose tab was opened.
+
+Three rules keep repeated passes honest, and they live in the worker beside the trace:
+a trace holding work but no offset is a conversation that **changed surface**, so the transcript is
+adopted at its current end rather than counted from the top; a file **shorter** than the position
+already consumed is a different conversation (a fork's copy, a rewritten rollout), so that session
+starts over; and everything else is `size > offset`, which is the entire cost of a pass with
+nothing to do.
+
+That cheapness is what lets the trigger sites be blunt: the `turnFinished` lifecycle hook a
+terminal session already carries, the inferred activity edge for a session whose runtime or user
+has no hooks, and the Activity tab opening. **No hook is registered per tool call** — every hook
+is a process spawned on the agent's own turn boundary, so that would buy this panel with the
+user's latency on every `Read`, and the transcript already holds every call by the time the turn
+ends. Measured, Debug: 2,000 calls fold in in 184 ms on the worker queue, a resumed pass over the
+same file costs 0.07 ms, and twenty triggers cost 0.3 ms *on the main actor* between them. Calls
+are applied one at a time through the same incremental path live events take — the first shape
+merged a delta trace and called `rebuildDirectories`, which is O(every file every session in the
+project has touched), per turn, for a reading that changed one directory.
+
+This is capability-shaped, not runtime-shaped: `.transcriptReplay` is the fact that a normalizable
+local conversation exists, so Claude and Codex are covered today and a sixth runtime is covered the
+day it earns the capability. What a transcript cannot say stays unsaid — a shell edit no tool
+named lights no file, exactly as for a rendered conversation. The remaining runtimes, the git-
+observed floor for them, and the empty state that should replace "0 of N files" for a session with
+no source are in
+[`observed-work-for-terminal-sessions.md`](../feature-drafts/observed-work-for-terminal-sessions.md).
+
 **The panel's one header row ends in two controls: `+`, and the panel's own toggle.** The toggle
 sits outermost with `+` beside it, and it runs through the same `onClose` the last tab closing
 already used, so the window collapses the split item one way rather than two. It hides nothing

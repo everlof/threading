@@ -27,6 +27,25 @@ enum TranscriptReplayFormat: CaseIterable, Sendable {
     }
 }
 
+// MARK: - Persisted tool calls
+
+/// One tool call as its transcript recorded it, dated by that record.
+struct TranscriptToolCall: Equatable, Sendable {
+    let callID: String
+    let tool: ToolIdentity
+    let input: [String: JSONValue]
+    let date: Date
+}
+
+/// A resumable pass over a transcript's tool calls: what it read, and where to start next time.
+struct TranscriptToolCallScan: Equatable, Sendable {
+    let calls: [TranscriptToolCall]
+
+    /// The absolute byte position just past the last record folded in. A caller that persists it
+    /// alongside the work it counted can re-read the same file without counting anything twice.
+    let endOffset: UInt64
+}
+
 /// Rebuilds a past conversation from the transcript its agent keeps on disk.
 ///
 /// A resumed session picks up with its full context, but the CLI replays none of it down the
@@ -154,6 +173,60 @@ enum TranscriptReplay {
         endOpenTurn()
 
         return (events, dropped > 0)
+    }
+
+    /// The tool calls a transcript records from `offset` onward, each with the time its own
+    /// record carries.
+    ///
+    /// This is `read`'s sibling for the Activity panel rather than for the conversation view, and
+    /// the two differences are the whole reason it exists. It resumes, because a session's work is
+    /// folded in repeatedly while the session runs and re-counting the calls already folded in
+    /// would inflate every reading. And it keeps each record's own timestamp, which `[StreamEvent]`
+    /// cannot carry — replay stamps its whole reduction `distantPast` for exactly that reason,
+    /// which is honest for a footprint and useless for recency.
+    ///
+    /// Everything else is shared: the same closed format set, the same record-to-event mapping,
+    /// so a runtime whose conversation replays correctly reports its work correctly too.
+    static func toolCalls(
+        at url: URL,
+        kind: AgentKind,
+        from offset: UInt64,
+        limit: Int = ReplayDefaults.workScanCalls
+    ) -> TranscriptToolCallScan {
+        guard let format = TranscriptReplayFormat(kind: kind) else {
+            return TranscriptToolCallScan(calls: [], endOffset: offset)
+        }
+
+        var calls: [TranscriptToolCall] = []
+        // Records that carry a tool call do not all carry a stamp — Codex writes the call and its
+        // time on separate lines — so the newest stamp seen stands in. It is never in the future
+        // of the call it dates, which is what the heat reading needs.
+        var lastStamp: Date?
+
+        let endOffset = JSONLReader.forEachRecord(
+            at: url,
+            from: offset,
+            limit: ReplayDefaults.scanLimit
+        ) { record in
+            if let stamp = timestamp(of: record) { lastStamp = stamp }
+            guard case .assistantMessage(let blocks)? = event(from: record, format: format) else {
+                return true
+            }
+
+            let date = timestamp(of: record) ?? lastStamp ?? Date.distantPast
+            for block in blocks {
+                guard case .toolUse(let callID, let tool, let input) = block else { continue }
+                calls.append(TranscriptToolCall(
+                    callID: callID, tool: tool, input: input, date: date
+                ))
+            }
+            // Bounded per pass rather than per file: a first hydration of a very long
+            // conversation stops here and the next pass continues from the position returned,
+            // so no reading is lost and no single pass is unbounded.
+            return calls.count < limit
+        }
+
+        return TranscriptToolCallScan(calls: calls, endOffset: endOffset)
     }
 
     /// The assistant prose in the newest transcript turn, in conversational order.
@@ -713,6 +786,12 @@ enum ReplayDefaults {
     /// Read the whole file rather than a prefix: the end of a conversation is what is wanted,
     /// and it is by definition at the end.
     static let scanLimit = 64 * 1024 * 1024
+
+    /// How many tool calls one observed-work pass folds in before stopping and returning its
+    /// position. A long-running conversation here reaches a few hundred; the cap exists so a
+    /// first hydration of an imported year-long transcript arrives in bounded pieces rather than
+    /// as one unbounded array, and costs nothing when it is never reached.
+    static let workScanCalls = 5_000
 
     /// Rendered items kept. Each is a view, so a very long conversation would otherwise cost
     /// thousands of them at launch for turns nobody is going to scroll back to.

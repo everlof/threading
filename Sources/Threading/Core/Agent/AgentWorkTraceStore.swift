@@ -83,6 +83,14 @@ final class AgentWorkTraceStore {
             date: Date
         )
         case seed(sessionID: SessionID, trace: AgentSessionWorkTrace)
+        case hydrate(
+            sessionID: SessionID,
+            sessionTitle: String,
+            agentLabel: String,
+            kind: AgentKind,
+            transcript: URL,
+            rootPath: String
+        )
         case removeSession(SessionID)
     }
 
@@ -242,6 +250,36 @@ final class AgentWorkTraceStore {
                 )
             }
         }
+    }
+
+    /// Folds a session's own transcript into its trace, from wherever the last pass stopped.
+    ///
+    /// This is the capture path for a session Threading does not render: its tool calls exist for
+    /// us only as bytes in a terminal, while the runtime is writing the same calls to a file we
+    /// already know how to read. The pass is incremental and its position is persisted with the
+    /// trace, so it can be run on every turn boundary without counting a call twice — including
+    /// across relaunches, which the in-memory call-id dedupe cannot cover.
+    ///
+    /// `AgentWorkHydration` decides *when*, and is the only caller. The rules that keep the
+    /// reading honest live in the worker beside the trace they protect.
+    func record(
+        transcriptAt url: URL,
+        kind: AgentKind,
+        projectID: ProjectID,
+        session: AgentSession,
+        rootPath: String
+    ) {
+        guard !removedProjects.contains(projectID), !removedSessions.contains(session.id) else {
+            return
+        }
+        enqueue(.hydrate(
+            sessionID: session.id,
+            sessionTitle: session.displayTitle,
+            agentLabel: session.kind.displayName,
+            kind: kind,
+            transcript: url,
+            rootPath: rootPath
+        ), projectID: projectID)
     }
 
     /// Seeds a conversation that predates the cache from its bounded transcript replay. It is
@@ -658,8 +696,12 @@ private final class AgentWorkWorker: @unchecked Sendable {
     ) {
         queue.async { [self] in
             let memory = memory(for: projectID)
-            let change = Self.apply(mutation, to: memory)
-            if change != nil { scheduleSave(projectID) }
+            let revisionBefore = memory.revision
+            let change = Self.apply(mutation, to: memory, fileManager: fileManager)
+            // Revision rather than `change != nil`: a hydration pass that found no new work still
+            // moved the transcript's resume position, and losing that means re-reading — and
+            // re-counting — everything before it after the next launch.
+            if memory.revision != revisionBefore { scheduleSave(projectID) }
             let revision = memory.revision
             Task { @MainActor in completion(change, revision) }
         }
@@ -827,7 +869,8 @@ private final class AgentWorkWorker: @unchecked Sendable {
 
     private static func apply(
         _ mutation: AgentWorkTraceStore.Mutation,
-        to memory: ProjectMemory
+        to memory: ProjectMemory,
+        fileManager: FileManager
     ) -> AgentWorkTraceStore.AppliedChange? {
         switch mutation {
         case .file(let sessionID, let title, let agent, let kind, let path, let date):
@@ -886,6 +929,90 @@ private final class AgentWorkWorker: @unchecked Sendable {
                 contributor: contributor(sessionID: sessionID, trace: trace)
             )
 
+        case .hydrate(
+            let sessionID, let title, let agent, let kind, let transcript, let rootPath
+        ):
+            var trace = memory.file.sessions[sessionID] ?? AgentSessionWorkTrace()
+            let size = Self.fileSize(of: transcript, fileManager: fileManager)
+
+            // A transcript that shrank is not this one any more — a fork copied over it, a
+            // rollout was rewritten, a file was replaced by an import. Keeping the old counts and
+            // reading the new file from the old position would mix two conversations, so the
+            // session starts over from the top of what is there now.
+            if let consumed = trace.transcriptOffset, size < consumed {
+                memory.file.sessions[sessionID] = AgentSessionWorkTrace()
+                memory.aggregate.remove(
+                    trace, sessionID: sessionID, remainingTraces: memory.file.sessions
+                )
+                memory.rebuildDirectories()
+                trace = AgentSessionWorkTrace()
+            }
+
+            // Work already recorded, but never from this file: the conversation was rendered
+            // natively and is now in a terminal (or the other way about). Its calls are in the
+            // trace once already, so the transcript is adopted at its current end and only what
+            // happens next is counted.
+            if trace.transcriptOffset == nil, !trace.files.isEmpty || !trace.categoryCounts.isEmpty {
+                trace.transcriptOffset = size
+                trace.sessionTitle = title
+                trace.agentLabel = agent
+                memory.file.sessions[sessionID] = trace
+                memory.revision += 1
+                return nil
+            }
+
+            let start = trace.transcriptOffset ?? 0
+            // The whole cost of a pass that has nothing to do: one file-size comparison, on this
+            // queue. Turn ends, activity edges and tab openings can all ask freely.
+            guard size > start else { return nil }
+
+            let scan = TranscriptReplay.toolCalls(at: transcript, kind: kind, from: start)
+            trace.sessionTitle = title
+            trace.agentLabel = agent
+            trace.transcriptOffset = scan.endOffset
+            memory.file.sessions[sessionID] = trace
+            memory.revision += 1
+
+            // Each call is applied as the live path applies it, so the aggregate and the
+            // incremental directory totals stay O(new work). The first shape of this folded a
+            // whole delta trace in and called `rebuildDirectories`, which is O(every file every
+            // session in the project has ever touched) — per turn, for a reading that changed
+            // one directory.
+            var recorded = false
+            for call in scan.calls {
+                let operation = call.tool.rawName
+                _ = Self.apply(.action(
+                    sessionID: sessionID,
+                    sessionTitle: title,
+                    agentLabel: agent,
+                    category: ExecutionAuditStore.category(for: operation),
+                    operation: operation,
+                    date: call.date
+                ), to: memory, fileManager: fileManager)
+                recorded = true
+
+                for signal in AgentFileActivityClassifier.signals(
+                    tool: call.tool, input: call.input
+                ) {
+                    guard let path = AgentWorkPath.relative(signal.path, root: rootPath) else {
+                        continue
+                    }
+                    _ = Self.apply(.file(
+                        sessionID: sessionID,
+                        sessionTitle: title,
+                        agentLabel: agent,
+                        kind: signal.kind,
+                        relativePath: path,
+                        date: call.date
+                    ), to: memory, fileManager: fileManager)
+                }
+            }
+
+            // One rebuild for the whole pass rather than a change per call: a turn's calls land
+            // together, and the bounded projection is cheaper once than N incremental patches of
+            // the same presentation.
+            return recorded ? .rebuilt(sessionID: sessionID) : nil
+
         case .seed(let sessionID, let seed):
             let current = memory.file.sessions[sessionID] ?? AgentSessionWorkTrace()
             guard current.files.isEmpty, current.categoryCounts.isEmpty else { return nil }
@@ -908,6 +1035,13 @@ private final class AgentWorkWorker: @unchecked Sendable {
             memory.revision += 1
             return .rebuilt(sessionID: sessionID)
         }
+    }
+
+    /// Zero for a file that is not there, which reads as "nothing new" against any position
+    /// already consumed and starts a never-hydrated trace at the top.
+    private static func fileSize(of url: URL, fileManager: FileManager) -> UInt64 {
+        let attributes = try? fileManager.attributesOfItem(atPath: url.path)
+        return (attributes?[.size] as? NSNumber)?.uint64Value ?? 0
     }
 
     private static func contributor(

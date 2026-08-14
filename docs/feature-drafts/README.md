@@ -43,6 +43,13 @@ reshuffling it is a line move.
 
 ### Next — researched and ready, waiting for a slot
 
+- [Observed work for terminal sessions](observed-work-for-terminal-sessions.md) — feed the Activity
+  tab from the transcript, export and git checkpoint a session already leaves behind, so a chat
+  Threading does not render itself stops reporting zeros over a full repository atlas. **The Claude
+  and Codex half shipped 2026-08-14**; it stays first here because what remains is what the shipped
+  half made visible — a runtime with no transcript adapter still reports zeros, and needs the
+  honest empty state and the git-observed floor before the panel can be trusted at a glance. The
+  OpenCode and Grok feed waits on measuring their exports.
 - [Conversation forks and quick asides](conversation-forks-and-quick-asides.md) — separate the
   current durable Claude fork from a true temporary side question, add persistent forks for
   Codex, Grok and OpenCode, and add native read-only asides for Codex and Grok first. High-frequency

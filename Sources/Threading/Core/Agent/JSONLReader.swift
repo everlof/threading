@@ -23,6 +23,29 @@ enum JSONLReader {
         }
     }
 
+    /// The same forward stream, **resumable**: reading starts at `offset`, and the returned
+    /// position is just past the last record handed out.
+    ///
+    /// A trailing record with no newline is deliberately *not* delivered here, which is the one
+    /// place this reader differs from the plain forward scan. A resumable caller cannot tell a
+    /// final record from one the agent is halfway through writing, and remembering a position
+    /// inside a half-written line would drop its remainder for good. Waiting for the newline
+    /// costs one re-read of one line and cannot lose a record.
+    ///
+    /// Stopping early is free for the same reason: the returned position covers exactly the
+    /// records `handle` accepted, so a bounded pass resumes where it left off.
+    @discardableResult
+    static func forEachRecord(
+        at url: URL,
+        from offset: UInt64,
+        limit: Int,
+        _ handle: ([String: Any]) -> Bool
+    ) -> UInt64 {
+        scanForward(at: url, from: offset, limit: limit, deliversTrailingRecord: false) { line in
+            deliver(line, to: handle)
+        }
+    }
+
     /// The same stream, **unparsed**.
     ///
     /// Exists for the one caller that reads whole conversations rather than the head of one:
@@ -34,11 +57,30 @@ enum JSONLReader {
     /// The chunking, the newline handling and the never-truncate-a-record rule stay here, so
     /// the two views cannot drift apart.
     static func forEachLine(at url: URL, limit: Int, _ handle: (Data) -> Bool) {
-        guard let file = try? FileHandle(forReadingFrom: url) else { return }
+        _ = scanForward(at: url, from: 0, limit: limit, deliversTrailingRecord: true, handle)
+    }
+
+    /// The one forward implementation, so the chunking, the newline handling, the
+    /// never-truncate-a-record rule and the resume position cannot drift apart.
+    ///
+    /// Returns the absolute position just past the last record handed to `handle`.
+    private static func scanForward(
+        at url: URL,
+        from offset: UInt64,
+        limit: Int,
+        deliversTrailingRecord: Bool,
+        _ handle: (Data) -> Bool
+    ) -> UInt64 {
+        guard let file = try? FileHandle(forReadingFrom: url) else { return offset }
         defer { try? file.close() }
+
+        if offset > 0 {
+            guard (try? file.seek(toOffset: offset)) != nil else { return offset }
+        }
 
         var buffer = Data()
         var consumed = 0
+        var delivered = offset
         var reachedEndOfFile = false
         let newline = UInt8(ascii: "\n")
 
@@ -56,11 +98,15 @@ enum JSONLReader {
             var lineStart = buffer.startIndex
             while let index = buffer[lineStart...].firstIndex(of: newline) {
                 let line = buffer[lineStart..<index]
-                lineStart = buffer.index(after: index)
+                let next = buffer.index(after: index)
 
-                if !line.isEmpty, !handle(line) { return }
+                if !line.isEmpty, !handle(line) {
+                    return delivered + UInt64(next - buffer.startIndex)
+                }
+                lineStart = next
             }
 
+            delivered += UInt64(lineStart - buffer.startIndex)
             buffer.removeSubrange(buffer.startIndex..<lineStart)
         }
 
@@ -71,7 +117,11 @@ enum JSONLReader {
         // chunk, so every bounded scan of a file larger than 64 KB ended by delivering a record
         // cut in half. `forEachRecordFromEnd` already guards this with `offset == 0`; the two
         // directions now make the same promise.
-        if reachedEndOfFile, !buffer.isEmpty { _ = handle(buffer) }
+        //
+        // A resumable scan declines it even at end of file, and `delivered` stays behind it: see
+        // `forEachRecord(at:from:limit:)`.
+        if deliversTrailingRecord, reachedEndOfFile, !buffer.isEmpty { _ = handle(buffer) }
+        return delivered
     }
 
     /// Reads the last complete JSON object without walking the whole file.

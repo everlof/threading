@@ -2283,6 +2283,13 @@ example, moves naturally from the aggregate into the individual files. Untouched
 the tree without a badge. Closed folders stay lazy and only visible rows ask for activity, so a
 large checkout does not have to be built merely to open the pane.
 
+Chats running in the terminal are counted too, not only the ones Threading draws itself. Their work
+is read from the transcript the agent keeps, so it appears when the tab is opened — including for a
+chat that last ran days ago — and catches up as each turn ends. Only Claude and Codex keep a
+transcript Threading can read; a Grok or OpenCode session in the terminal still shows nothing.
+Either way, only work a tool named exactly is shown: files changed by a shell command are not
+attributed to it, which is what keeps the counts honest rather than guessed.
+
 Five kinds of content:
 
 - **Images** — screenshots, generated charts, design assets. Anything `NSImage` reads: PNG,

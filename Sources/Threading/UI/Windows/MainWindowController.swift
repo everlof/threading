@@ -3945,6 +3945,12 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
         // An agent that just stopped working may have switched branches on the way.
         if AgentRuntime.shared.activity(sessionID: sessionID) != .working {
+            // The hook-less half of observed-work capture. A reporting session already caught up
+            // on its `turnFinished` hook; this edge is inferred from output, so it is later and
+            // vaguer, but it is the only "something happened" a session without lifecycle hooks
+            // has. The pass costs a file-size comparison when nothing was written.
+            AgentWorkHydration.hydrate(sessionID: sessionID)
+
             sidebarViewController.refreshProjectRow(forSessionID: sessionID)
 
             // The session's own branch record follows the same moment; a change regroups

@@ -394,6 +394,7 @@
 		C62D5AED56825BDD2ACAA6C7 /* SessionInfoRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99F3C73D726A0A923255A571 /* SessionInfoRenderTests.swift */; };
 		919A56E50DEEA8B476D2DB4B /* SessionInfoRowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE56F39C751920328E1559F0 /* SessionInfoRowTests.swift */; };
 		05BFEE4A0C11DF49378E6E7B /* SessionProcessTerminatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D6FA09EFE53491C1A36889 /* SessionProcessTerminatorTests.swift */; };
+		31F0A006746EDD74B68E09F4 /* AgentWorkHydrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B7174E68BCBEBC146A0609 /* AgentWorkHydrationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -843,6 +844,7 @@
 		99F3C73D726A0A923255A571 /* SessionInfoRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionInfoRenderTests.swift; sourceTree = "<group>"; };
 		FE56F39C751920328E1559F0 /* SessionInfoRowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionInfoRowTests.swift; sourceTree = "<group>"; };
 		C0D6FA09EFE53491C1A36889 /* SessionProcessTerminatorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionProcessTerminatorTests.swift; sourceTree = "<group>"; };
+		15B7174E68BCBEBC146A0609 /* AgentWorkHydrationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentWorkHydrationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1378,6 +1380,7 @@
 				99F3C73D726A0A923255A571 /* SessionInfoRenderTests.swift */,
 				FE56F39C751920328E1559F0 /* SessionInfoRowTests.swift */,
 				C0D6FA09EFE53491C1A36889 /* SessionProcessTerminatorTests.swift */,
+				15B7174E68BCBEBC146A0609 /* AgentWorkHydrationTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -2278,6 +2281,7 @@
 				C62D5AED56825BDD2ACAA6C7 /* SessionInfoRenderTests.swift in Sources */,
 				919A56E50DEEA8B476D2DB4B /* SessionInfoRowTests.swift in Sources */,
 				05BFEE4A0C11DF49378E6E7B /* SessionProcessTerminatorTests.swift in Sources */,
+				31F0A006746EDD74B68E09F4 /* AgentWorkHydrationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -1218,6 +1218,11 @@ final class DisplayPaneController: NSViewController {
   @discardableResult
   func activateFiles(for sessionID: SessionID) -> FileTreeViewController? {
     restoreIfNeeded(sessionID)
+    // Opening the tab is the moment its reading has to be current. For a session Threading
+    // renders, it already is; for a terminal session this is where its transcript is folded in,
+    // including one that has not run since a previous launch. The render path asks as well, for
+    // the tab that comes back already open; both go through the same coalescer.
+    AgentWorkHydration.hydrate(sessionID: sessionID)
     var tabs = tabsBySession[sessionID] ?? []
 
     if let existing = tabs.first(where: { $0.files != nil }) {
@@ -2048,6 +2053,13 @@ final class DisplayPaneController: NSViewController {
       // Reads the root on first show and re-reads what is open on later ones, so a file an
       // agent just wrote is there without the folder being collapsed and reopened.
       files.refresh()
+      // The reading beside those files follows the same rule. This covers the tab restored from
+      // a previous launch, which is shown without ever being activated. Renders are frequent —
+      // an agent rewrites its terminal title constantly — so the ask is coalesced rather than
+      // rationed by the caller; see `AgentWorkHydrationThrottle`.
+      if let sessionID = currentSessionID {
+        AgentWorkHydration.hydrate(sessionID: sessionID)
+      }
 
     case .attachments(let attachments):
       imageView.image = nil
