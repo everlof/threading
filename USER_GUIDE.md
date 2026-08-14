@@ -555,10 +555,14 @@ you reach for it: a **⋯** holding the row's actions — Archive, Close Session
 and, outboard of it, an **archive** button that files the session away in one press without
 opening the menu first. The archive button is the menu item's shortcut, not a second behaviour.
 
-The indicator keeps the row's trailing edge either way, and the buttons keep the two places
-inboard of it whether or not that session has anything to show there. So the archive button is
-in the same place on every row of the list, and a session that starts working — or starts
-loading because you just clicked it — does not move the button out from under the pointer.
+The archive button sits on the row's very edge — in the same column the status indicator
+occupies at rest. The two trade places under the pointer: the indicator fades out as the
+buttons fade in, exactly where it stood, so nothing moves out from under a pointer reaching
+for archive, and every row of the list keeps the button in one place. The state is not lost
+while it yields — the hover card still names it, and the **selected** row wears its activity
+as a soft breathing ring around the whole row (under the System theme, on macOS 14 and later)
+while its session is loading or working, so the one row whose spinner is most often covered
+by your pointer shows its work around the pointer instead of under it.
 
 Close and Archive sound alike and answer different questions. **Close Session** ends the
 agent but keeps the row — greyed out, ready to be resumed. (It ships without a keyboard

@@ -70,7 +70,7 @@ around them.
 | **SwiftTerm** | `./Packages/Vendor/SwiftTerm/` — [migueldeicaza/SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | Terminal emulation: VT100/xterm, ANSI parsing, PTY. The iOS folder is excluded on macOS builds. |
 | **ThinkingOrbs** | `./Packages/Vendor/ThinkingOrbs/` — [everlof/thinking-orbs-swift](https://github.com/everlof/thinking-orbs-swift) | The dotted "working" orb beside the conversation status. AppKit `ThinkingOrbView` only; the app stays AppKit-only. |
 | **LabelMorph** | `./Packages/Vendor/LabelMorph/` — [everlof/LabelMorph](https://github.com/everlof/LabelMorph) | The label that morphs a name character by character — every session, project and checkout name. |
-| **BorderBeamKit** | `./Packages/Vendor/BorderBeamKit/` — [Jakubantalik/border-beam](https://github.com/Jakubantalik/border-beam) (its `ports/ios` tree, extracted) | The breathing agent-activity ring over the composer. AppKit `BorderBeamHostView` only; the SwiftUI + Metal half stays inside the package. |
+| **BorderBeamKit** | `./Packages/Vendor/BorderBeamKit/` — [Jakubantalik/border-beam](https://github.com/Jakubantalik/border-beam) (its `ports/ios` tree, extracted) | The breathing agent-activity ring over the composer and around the sidebar's selected working row. AppKit `BorderBeamHostView` only; the SwiftUI + Metal half stays inside the package. |
 
 Each has a seam that is ours (ThinkingOrbs' `tint`, LabelMorph's truncation, BorderBeamKit's
 AppKit host) plus the theme wrapper that drives it: see

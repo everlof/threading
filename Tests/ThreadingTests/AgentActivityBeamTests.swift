@@ -142,6 +142,18 @@ final class AgentActivityBeamTests: XCTestCase {
         XCTAssertEqual(view.appliedBorderRadiusForTesting, Double(SurfaceRadius.panel.current))
     }
 
+    /// The sidebar-row surface follows the selection capsule instead. The ring only draws
+    /// under the System theme, so the capsule in question is the stock source list's — the
+    /// same radius `SidebarHoverRowView` was measured against.
+    func testTheRowSurfaceFollowsTheSelectionCapsuleRadius() {
+        let view = AgentActivityBeamView(surface: .sidebarRow)
+        view.update(workload: AgentWorkload(workingCount: 1, anyAtTopEffort: false))
+        XCTAssertEqual(
+            view.appliedBorderRadiusForTesting,
+            Double(SidebarRowDefaults.systemHoverHighlightRadius)
+        )
+    }
+
     // MARK: - Measuring the workload
 
     func testMeasureCountsWorkingSessionsAndJudgesTopByTheLadder() {

@@ -916,11 +916,14 @@ final class SessionRowActionsTests: XCTestCase {
         )
     }
 
-    /// The dot must not move or disappear when actions arrive. Activity is durable state, so the
-    /// pair occupies the two columns inboard of the one status keeps at the list's trailing edge.
-    func testTheStatusDotKeepsTheRowsTrailingEdge() throws {
+    /// The archive button replaces the status *in its own column*: the two crossfade at the
+    /// row's edge rather than standing side by side. The swap moves nothing — the button
+    /// appears exactly where the mark was — and the pointer leaving hands the column straight
+    /// back to the status, so no state is erased, only yielded while the row is being acted on.
+    func testArchiveTakesTheStatussColumnUnderThePointer() throws {
         let (host, row) = hostedRow()
-        row.configure(with: session(), activity: .working)
+        let session = session()
+        row.configure(with: session, activity: .working)
         host.layoutSubtreeIfNeeded()
 
         let status = try view(named: "sidebar.session.status", in: row)
@@ -928,9 +931,12 @@ final class SessionRowActionsTests: XCTestCase {
             NSPoint(x: status.bounds.midX, y: status.bounds.midY),
             from: status
         )
+        XCTAssertEqual(status.alphaValue, 1, accuracy: 0.01)
 
+        // Read through `configure`, which reasserts the hover state without animating —
+        // reading straight after enter/exit would race the crossfade rather than test it.
         enter(row)
-        defer { leave(row) }
+        row.configure(with: session, activity: .working)
         host.layoutSubtreeIfNeeded()
 
         let archive = try view(named: "sidebar.session.archive", in: row)
@@ -938,17 +944,32 @@ final class SessionRowActionsTests: XCTestCase {
         let archiveCentre = row.convert(NSPoint(x: archive.bounds.midX, y: archive.bounds.midY), from: archive)
 
         XCTAssertEqual(
+            archiveCentre.x,
+            restingStatusCentre.x,
+            accuracy: 0.5,
+            "the archive button should land in the very column the status mark occupies"
+        )
+        XCTAssertEqual(
             statusCentre.x,
             restingStatusCentre.x,
             accuracy: 0.5,
-            "the status dot left the row's trailing edge when the slot widened"
+            "the status geometry itself must hold still under the crossfade"
         )
-        XCTAssertGreaterThan(statusCentre.x, archiveCentre.x)
-        XCTAssertEqual(status.alphaValue, 1, accuracy: 0.01)
-        XCTAssertFalse(
-            row.convert(status.bounds, from: status)
-                .intersects(row.convert(archive.bounds, from: archive)),
-            "the persistent status overlapped the action moved inboard beside it"
+        XCTAssertEqual(
+            status.alphaValue,
+            0,
+            accuracy: 0.01,
+            "the status mark should yield its column while the actions are up"
+        )
+
+        leave(row)
+        row.configure(with: session, activity: .working)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            status.alphaValue,
+            1,
+            accuracy: 0.01,
+            "the status mark should take its column back when the pointer leaves"
         )
     }
 

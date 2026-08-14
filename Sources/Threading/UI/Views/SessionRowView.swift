@@ -33,8 +33,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     )
 
     /// Archiving without opening the menu first — the one row action reached often enough to
-    /// earn the row's own surface. It sits outermost of the pair, one column in from the row's
-    /// edge, which the status keeps.
+    /// earn the row's own surface. It sits outermost of the pair, on the row's very edge — the
+    /// column the status mark occupies at rest and yields while the pointer is on the row.
     private let archiveButton = ThemedIconButton(
         symbolName: SidebarRowDefaults.archiveSymbol,
         accessibility: SidebarRowDefaults.archiveAccessibilityLabel,
@@ -43,7 +43,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         glyphMaterialization: .deferred
     )
 
-    /// The buttons the pointer reveals, fading in as one beside the status rather than over it.
+    /// The buttons the pointer reveals, fading in as one while the status mark fades out —
+    /// a crossfade inside the status's own column, not an arrival beside it.
     ///
     /// Sized into the slot rather than overhanging it — see `sessionTrailingSlotWidth` for why
     /// the slot expands before these buttons appear.
@@ -53,8 +54,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// for the status target alone; under the pointer it expands to contain both actions.
     private let trailingSlot = NSView()
     private var trailingSlotWidthConstraint: NSLayoutConstraint?
-    private var hoverControlsAtEdgeConstraint: NSLayoutConstraint?
-    private var hoverControlsInStatusColumnConstraint: NSLayoutConstraint?
     private var presentsStatus = false
 
     private var trackingArea: NSTrackingArea?
@@ -586,8 +585,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // session it was aimed at rather than read the row's current one when it fires.
         archiveButton.translatesAutoresizingMaskIntoConstraints = false
 
-        // Trailing-most last: the archive button takes the outer of the two action columns, and
-        // the `⋯` sits inboard of it.
+        // Trailing-most last: the archive button takes the row's edge — the same column the
+        // status mark holds at rest — and the `⋯` sits inboard of it.
         hoverControls.orientation = .horizontal
         hoverControls.alignment = .centerY
         hoverControls.spacing = SidebarRowDefaults.hoverButtonSpacing
@@ -609,25 +608,13 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             equalToConstant: SidebarRowDefaults.trailingSlotSize
         )
         trailingSlotWidthConstraint = width
-        // Two positions, and only the second is ever seen: the pair lives inboard of the status
-        // column whenever it is visible. The at-edge one holds the invisible buttons inside the
-        // collapsed slot, so nothing overhangs a container that would not hit-test it.
-        let hoverAtEdge = hoverControls.trailingAnchor.constraint(
-            equalTo: trailingSlot.trailingAnchor
-        )
-        let hoverInsideStatusColumn = hoverControls.trailingAnchor.constraint(
-            equalTo: trailingSlot.trailingAnchor,
-            constant: -(SidebarRowDefaults.trailingSlotSize + SidebarRowDefaults.hoverButtonSpacing)
-        )
-        hoverControlsAtEdgeConstraint = hoverAtEdge
-        hoverControlsInStatusColumnConstraint = hoverInsideStatusColumn
         NSLayoutConstraint.activate([
             width,
             trailingSlot.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize),
 
-            // The outer target remains the status target even when working-row actions appear.
-            // Pinning to the slot instead of an action keeps status truth stable while those
-            // actions move inboard.
+            // The status and the archive button share the row's outer column and trade
+            // visibility there — see `setActionVisible`. Both are pinned to the slot's trailing
+            // edge rather than to each other, so neither one's absence moves the other.
             statusSlot.centerXAnchor.constraint(
                 equalTo: trailingSlot.trailingAnchor,
                 constant: -SidebarRowDefaults.trailingSlotSize / 2
@@ -635,7 +622,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             statusSlot.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor),
             statusSlot.widthAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
             statusSlot.heightAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
-            hoverAtEdge,
+            hoverControls.trailingAnchor.constraint(equalTo: trailingSlot.trailingAnchor),
             hoverControls.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
         ])
     }
@@ -825,19 +812,25 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         popover = nil
     }
 
-    /// Reveals the action pair without erasing durable activity, and without either one deciding
-    /// where the other sits: the status keeps the row's trailing column and the pair takes the two
-    /// columns inboard of it, on every row, whatever the row is doing.
+    /// Crossfades between the row's two trailing readings: status at rest, actions under the
+    /// pointer. The archive button takes the very column the status mark occupies, so the swap
+    /// moves nothing — the marks trade visibility inside a geometry that holds still.
+    ///
+    /// The status yielding to the pointer is deliberate, not lost truth: the pointer is on the
+    /// row *to act on it*, the hover card still names the state, and the selected row — the one
+    /// whose spinner is most often under a pointer, because clicking it is what raised it —
+    /// wears its activity as the row's own beam ring instead. See `SidebarHoverRowView`.
     private func setActionVisible(_ visible: Bool, animated: Bool) {
         if visible {
             actionButton.materializeGlyphIfNeeded()
             archiveButton.materializeGlyphIfNeeded()
             setTrailingSlotExpanded(true)
         }
+        let statusAlpha: CGFloat = (presentsStatus && !visible) ? 1 : 0
 
         guard animated else {
             hoverControls.alphaValue = visible ? 1 : 0
-            statusSlot.alphaValue = presentsStatus ? 1 : 0
+            statusSlot.alphaValue = statusAlpha
             setTrailingSlotExpanded(visible)
             return
         }
@@ -845,7 +838,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = Design.Motion.quick
             hoverControls.animator().alphaValue = visible ? 1 : 0
-            statusSlot.animator().alphaValue = presentsStatus ? 1 : 0
+            statusSlot.animator().alphaValue = statusAlpha
         }, completionHandler: { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !visible, !self.isHovered else { return }
@@ -858,14 +851,11 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// fade in so both targets remain inside the hit-tested parent; collapse waits until the fade
     /// out completes so a visible button never overhangs it.
     ///
-    /// The expanded geometry is the same one whatever the row is doing. It reserves the status
-    /// column even for a row with no status to draw, which is the empty column that row already
-    /// shows at rest, so revealing the actions moves nothing and neither does an activity change
-    /// arriving while the pointer is on the row. See `SidebarRowDefaults.sessionTrailingSlotWidth`
-    /// for the behaviour that bought.
+    /// The expanded geometry is the same one whatever the row is doing: the pair holds the row's
+    /// edge, with archive in the status's own column, so revealing the actions moves nothing and
+    /// neither does an activity change arriving while the pointer is on the row. See
+    /// `SidebarRowDefaults.sessionTrailingSlotWidth` for the behaviour that bought.
     private func setTrailingSlotExpanded(_ expanded: Bool) {
-        hoverControlsAtEdgeConstraint?.isActive = !expanded
-        hoverControlsInStatusColumnConstraint?.isActive = expanded
         let target = expanded
             ? SidebarRowDefaults.sessionTrailingSlotWidth
             : SidebarRowDefaults.trailingSlotSize

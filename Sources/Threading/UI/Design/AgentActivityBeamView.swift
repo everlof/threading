@@ -8,13 +8,19 @@ enum ActivityBeamDefaults {
     static let strengthPerAdditionalAgent: Double = 0.1
 }
 
-/// The breathing border ring that says "agents are working somewhere in this
-/// app" — the theme boundary for `BorderBeamKit`, the way `WorkingOrbView` is
-/// for ThinkingOrbs. A host pins this view over the surface to ring and
-/// restates the workload; everything visual is decided here: the
-/// count-to-strength curve, the adaptive mono ring escalating to colorful
-/// when any working session runs at the top of its provider's reasoning
-/// ladder, and the theme and motion gates.
+/// The breathing border ring that says "agents are working" — the theme
+/// boundary for `BorderBeamKit`, the way `WorkingOrbView` is for ThinkingOrbs.
+/// A host pins this view over the surface to ring and restates the workload;
+/// everything visual is decided here: the count-to-strength curve, the
+/// adaptive mono ring escalating to colorful when any working session runs at
+/// the top of its provider's reasoning ladder, and the theme and motion gates.
+///
+/// Two surfaces wear it, each with its own silhouette and its own workload:
+/// the composer's panel restates the app-wide aggregate ("somewhere in this
+/// app"), and the sidebar's selected row restates that one session — the ring
+/// is what keeps its activity visible while the pointer swaps the row's
+/// status mark for the archive button. The surface decides only the corner
+/// the ring follows; every gate and curve is shared.
 ///
 /// The beam belongs to the stock look only. A styled theme — every retro
 /// chrome especially — states its own idea of depth and glow, and a breathing
@@ -30,8 +36,27 @@ enum ActivityBeamDefaults {
 /// Shader API does not exist and the view is simply empty.
 final class AgentActivityBeamView: NSView {
 
+    /// What the ring is pinned over, which decides the corner it follows.
+    /// The ring only ever draws under the System theme, so the row case takes
+    /// the radius measured against the stock source list's selection capsule
+    /// rather than a themed one.
+    enum Surface {
+        /// A composer panel — the app-wide ambient ring.
+        case panel
+        /// The sidebar's selected session row — one session's own ring.
+        case sidebarRow
+
+        @MainActor var borderRadius: CGFloat {
+            switch self {
+            case .panel: return SurfaceRadius.panel.current
+            case .sidebarRow: return SidebarRowDefaults.systemHoverHighlightRadius
+            }
+        }
+    }
+
     // MARK: - Properties
 
+    private let surface: Surface
     private let appEvents = AppEventObservations()
     private var workload: AgentWorkload = .none
     /// `BorderBeamHostView` behind its availability gate; nil until first
@@ -43,12 +68,14 @@ final class AgentActivityBeamView: NSView {
 
     // MARK: - Initialization
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+    init(surface: Surface = .panel) {
+        self.surface = surface
+        super.init(frame: .zero)
         commonInit()
     }
 
     required init?(coder: NSCoder) {
+        surface = .panel
         super.init(coder: coder)
         commonInit()
     }
@@ -110,7 +137,7 @@ final class AgentActivityBeamView: NSView {
             colorVariant: workload.anyAtTopEffort ? .colorful : .mono,
             theme: .auto,
             active: working && onSystemTheme,
-            borderRadius: Double(SurfaceRadius.panel.current),
+            borderRadius: Double(surface.borderRadius),
             strength: lastStrength
         )
         host.rendersStatically = Design.Motion.reducesMotion

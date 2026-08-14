@@ -252,8 +252,9 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     points and back. On the profiling machine this moved resize p95 from 10.9–12.5 ms to
     6.0–6.4 ms, and total resize work from 400–453 ms to 282–300 ms.
 
-- **BorderBeamKit** (local fork): the breathing agent-activity ring over both composers,
-  extracted from the author's own verified SwiftUI port.
+- **BorderBeamKit** (local fork): the breathing agent-activity ring over both composers and
+  around the sidebar's selected working row, extracted from the author's own verified SwiftUI
+  port.
   - Location: `./Packages/Vendor/BorderBeamKit/` (git submodule), a local Swift package like the other two.
   - Upstream: https://github.com/Jakubantalik/border-beam — the `ports/ios/BorderBeamKit`
     tree of the MIT-licensed web library, extracted into a standalone package with a macOS

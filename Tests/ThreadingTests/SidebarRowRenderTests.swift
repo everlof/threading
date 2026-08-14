@@ -32,6 +32,15 @@ final class SidebarRowRenderTests: XCTestCase {
     private enum Fixture {
         static let width: CGFloat = 240
         static let height: CGFloat = 28
+
+        /// Where the real outline places a session cell inside its row — measured through the
+        /// production tree (a 320pt sidebar puts the cell at 39…304 in a row whose hover and
+        /// selection capsule spans 10…310). The depth of the session decides the leading edge;
+        /// the trailing inset is the outline's own. A story that pins the cell to the row's
+        /// edges instead paints the archive box *outside* the capsule — an overhang the app
+        /// does not have, and one that was reported as a bug from these very pictures.
+        static let cellLeadingInset: CGFloat = 39
+        static let cellTrailingInset: CGFloat = 16
     }
 
     // MARK: - Stories
@@ -273,9 +282,17 @@ final class SidebarRowRenderTests: XCTestCase {
                     let ground = SidebarHoverRowView()
                     ground.translatesAutoresizingMaskIntoConstraints = false
                     ground.addSubview(cell)
+                    // The cell sits where the outline actually places it, inside the capsule
+                    // the ground draws — see `Fixture.cellLeadingInset`.
                     NSLayoutConstraint.activate([
-                        cell.leadingAnchor.constraint(equalTo: ground.leadingAnchor),
-                        cell.trailingAnchor.constraint(equalTo: ground.trailingAnchor),
+                        cell.leadingAnchor.constraint(
+                            equalTo: ground.leadingAnchor,
+                            constant: Fixture.cellLeadingInset
+                        ),
+                        cell.trailingAnchor.constraint(
+                            equalTo: ground.trailingAnchor,
+                            constant: -Fixture.cellTrailingInset
+                        ),
                         cell.topAnchor.constraint(equalTo: ground.topAnchor),
                         cell.bottomAnchor.constraint(equalTo: ground.bottomAnchor)
                     ])
@@ -337,10 +354,9 @@ final class SidebarRowRenderTests: XCTestCase {
     /// is what closes that gap; this asserts the row actually subtracts it.
     ///
     /// A project row is asserted at rest, where its count and the controls that replace it share
-    /// the one line. A session row keeps its status on that line under the pointer too, and puts
-    /// its actions on a second line one column inboard — reserved whether or not the row has any
-    /// status to draw, so the pair never moves. That second line is asserted here as well,
-    /// because "the archive button is one column in" is only true if the column is a constant.
+    /// the one line. A session row's archive button takes that same line under the pointer —
+    /// it crossfades with the status mark inside the status's own column, so the mark at rest
+    /// and the button that replaces it are asserted against the *same* margin.
     func testEveryTrailingMarkLandsOnOneOpticalLine() throws {
         let margin = Fixture.width - SidebarRowDefaults.trailingInset
 
@@ -390,9 +406,7 @@ final class SidebarRowRenderTests: XCTestCase {
         try assertOpticalEdge(
             ofControlsIn: "sidebar.session.hover-controls",
             of: sessionRow,
-            equals: margin
-                - SidebarRowDefaults.trailingSlotSize
-                - SidebarRowDefaults.hoverButtonSpacing,
+            equals: margin,
             "the session row's archive button"
         )
     }
@@ -852,9 +866,17 @@ final class SidebarRowRenderTests: XCTestCase {
                     row.topAnchor.constraint(equalTo: host.topAnchor),
                     row.bottomAnchor.constraint(equalTo: host.bottomAnchor)
                 ])
+                // The cell sits where the outline actually places it, inside the hover and
+                // selection capsule the row draws — see `Fixture.cellLeadingInset`.
                 NSLayoutConstraint.activate([
-                    cell.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-                    cell.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+                    cell.leadingAnchor.constraint(
+                        equalTo: row.leadingAnchor,
+                        constant: Fixture.cellLeadingInset
+                    ),
+                    cell.trailingAnchor.constraint(
+                        equalTo: row.trailingAnchor,
+                        constant: -Fixture.cellTrailingInset
+                    ),
                     cell.topAnchor.constraint(equalTo: row.topAnchor),
                     cell.bottomAnchor.constraint(equalTo: row.bottomAnchor)
                 ])

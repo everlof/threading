@@ -388,6 +388,7 @@
 		4756835B9D4657C4B38B2D67 /* DeveloperReportChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 521725A989370F7B1857A7CB /* DeveloperReportChatTests.swift */; };
 		038A7049F80DDF77A21C8B8D /* ImageAnnotationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 704F514AF69C00BF1ACBDB9D /* ImageAnnotationTests.swift */; };
 		25DA169FF0FB6A2E2186E790 /* ScratchpadWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74C7CB7D3809605F70BF1A63 /* ScratchpadWorkspaceTests.swift */; };
+		AF2DC6F63CCE3D31C7C07D29 /* SidebarSelectedRowBeamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BABBCA7483954F63C4557ED3 /* SidebarSelectedRowBeamTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -831,6 +832,7 @@
 		521725A989370F7B1857A7CB /* DeveloperReportChatTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DeveloperReportChatTests.swift; sourceTree = "<group>"; };
 		704F514AF69C00BF1ACBDB9D /* ImageAnnotationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ImageAnnotationTests.swift; sourceTree = "<group>"; };
 		74C7CB7D3809605F70BF1A63 /* ScratchpadWorkspaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScratchpadWorkspaceTests.swift; sourceTree = "<group>"; };
+		BABBCA7483954F63C4557ED3 /* SidebarSelectedRowBeamTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarSelectedRowBeamTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1360,6 +1362,7 @@
 				521725A989370F7B1857A7CB /* DeveloperReportChatTests.swift */,
 				704F514AF69C00BF1ACBDB9D /* ImageAnnotationTests.swift */,
 				74C7CB7D3809605F70BF1A63 /* ScratchpadWorkspaceTests.swift */,
+				BABBCA7483954F63C4557ED3 /* SidebarSelectedRowBeamTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -2254,6 +2257,7 @@
 				4756835B9D4657C4B38B2D67 /* DeveloperReportChatTests.swift in Sources */,
 				038A7049F80DDF77A21C8B8D /* ImageAnnotationTests.swift in Sources */,
 				25DA169FF0FB6A2E2186E790 /* ScratchpadWorkspaceTests.swift in Sources */,
+				AF2DC6F63CCE3D31C7C07D29 /* SidebarSelectedRowBeamTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

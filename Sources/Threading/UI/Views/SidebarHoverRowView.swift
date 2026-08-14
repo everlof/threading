@@ -8,6 +8,13 @@ import AppKit
 /// "selected", so rows read as clickable before they are clicked. Group headings do not get
 /// one — they only expand from their disclosure, and a highlight would promise more.
 ///
+/// The **selected** session's row can additionally wear the agent-activity beam — the same
+/// breathing ring the composer has, on the selection capsule's own silhouette — while its
+/// session loads or works. The sidebar controller stamps it (`setActivityBeam`), because only
+/// the controller knows which row is the selected session and what that session is doing; the
+/// ring is what keeps that row's activity visible while the pointer swaps its status mark for
+/// the archive button, and it is bounded at one live host because only one row is selected.
+///
 /// A `ThemedComponent` for the reason `ThemeBoundaryAudit` states about rows: a row that draws
 /// theme colours has to be distinguishable from the plain one AppKit builds, which draws the
 /// system's. This is the sidebar's louder answer to the question `ThemedTableRowView` answers
@@ -54,6 +61,53 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
     private(set) var isMouseInside = false {
         didSet { needsDisplay = true }
     }
+
+    /// The row's activity ring; exists only after this row has actually been told to wear one,
+    /// so a list of rows carries no retained SwiftUI hosts for a state almost none of them has.
+    private var activityBeam: AgentActivityBeamView?
+
+    // MARK: - Activity Beam
+
+    /// Restates what the row's ring should draw. `.none` fades a mounted ring out — and costs
+    /// nothing on the rows that never mounted one, which is every row but the selected.
+    func setActivityBeam(workload: AgentWorkload) {
+        guard workload != .none || activityBeam != nil else { return }
+        beamForPresentation().update(workload: workload)
+    }
+
+    /// Pinned to the selection capsule's silhouette — the one rectangle `highlightPath` fills —
+    /// so the ring reads as the selection working, not as a second shape over it. Above the
+    /// cell views, because the ring's ink belongs on top of the row it describes; it takes no
+    /// clicks (`AgentActivityBeamView.hitTest` answers nil), so nothing under it goes dead.
+    private func beamForPresentation() -> AgentActivityBeamView {
+        if let activityBeam { return activityBeam }
+
+        let beam = AgentActivityBeamView(surface: .sidebarRow)
+        addSubview(beam, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            beam.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: SidebarRowDefaults.hoverHighlightInsetX
+            ),
+            beam.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -SidebarRowDefaults.hoverHighlightInsetX
+            ),
+            beam.topAnchor.constraint(
+                equalTo: topAnchor,
+                constant: SidebarRowDefaults.hoverHighlightInsetY
+            ),
+            beam.bottomAnchor.constraint(
+                equalTo: bottomAnchor,
+                constant: -SidebarRowDefaults.hoverHighlightInsetY
+            )
+        ])
+        activityBeam = beam
+        return beam
+    }
+
+    /// The judgement, not the pixels — mirrors `AgentActivityBeamView`'s own seams.
+    var activityBeamForTesting: AgentActivityBeamView? { activityBeam }
 
     // MARK: - Hover
 

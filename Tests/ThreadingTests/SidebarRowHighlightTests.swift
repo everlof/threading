@@ -141,6 +141,58 @@ final class SidebarRowHighlightTests: XCTestCase {
         }
     }
 
+    // MARK: - The Selected Row's Activity Beam
+
+    /// The ring is pinned to the very silhouette hover and selection fill — the row inset by
+    /// the highlight insets — so it reads as the selection itself working rather than as a
+    /// third shape with its own opinion of the row's edge.
+    func testTheActivityBeamRingsTheSelectionSilhouette() throws {
+        AppThemePalette.set(.system)
+        defer { AppThemePalette.set(.system) }
+
+        let row = SidebarHoverRowView(
+            frame: NSRect(x: 0, y: 0, width: Fixture.width, height: Fixture.height)
+        )
+        row.setActivityBeam(workload: AgentWorkload(workingCount: 1, anyAtTopEffort: false))
+
+        let beam = try XCTUnwrap(
+            row.activityBeamForTesting,
+            "a working workload should mount the row's ring"
+        )
+        row.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            beam.frame,
+            row.bounds.insetBy(
+                dx: SidebarRowDefaults.hoverHighlightInsetX,
+                dy: SidebarRowDefaults.hoverHighlightInsetY
+            ),
+            "the ring should take the selection capsule's own silhouette"
+        )
+        XCTAssertEqual(beam.appliedActiveForTesting, true)
+    }
+
+    /// Almost every row is never the selected working one, and telling those rows so must stay
+    /// free: no host is mounted for a `.none` restatement.
+    func testAnIdleRestatementMountsNoBeamHost() {
+        let row = SidebarHoverRowView()
+        row.setActivityBeam(workload: .none)
+        XCTAssertNil(row.activityBeamForTesting)
+    }
+
+    /// The beam moving to another row fades this one's ring out rather than leaving two lit.
+    func testClearingTheBeamDeactivatesTheMountedRing() {
+        AppThemePalette.set(.system)
+        defer { AppThemePalette.set(.system) }
+
+        let row = SidebarHoverRowView(
+            frame: NSRect(x: 0, y: 0, width: Fixture.width, height: Fixture.height)
+        )
+        row.setActivityBeam(workload: AgentWorkload(workingCount: 1, anyAtTopEffort: false))
+        row.setActivityBeam(workload: .none)
+        XCTAssertEqual(row.activityBeamForTesting?.appliedActiveForTesting, false)
+    }
+
     // MARK: - Comparison
 
     /// Compares two corners to within a point, which is as exact as a *curved* edge can be

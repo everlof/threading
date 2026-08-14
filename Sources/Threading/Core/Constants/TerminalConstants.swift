@@ -849,21 +849,22 @@ enum SidebarRowDefaults {
     /// Gap between the `+` and `⋯` when a project row shows both on hover.
     static let hoverButtonSpacing: CGFloat = 2
 
-    /// Expanded width of a *session* row's trailing slot: the pair of actions, plus the status
-    /// target the row keeps reserved at its trailing edge.
+    /// Expanded width of a *session* row's trailing slot: the `⋯`/archive pair, which takes the
+    /// row's edge — archive outermost, in the same column the status mark occupies at rest.
     ///
-    /// The status column is reserved whether or not the row is drawing anything in it. Sized to
-    /// the actual state instead, the trailing geometry became a function of activity, and the
-    /// archive button sat 22pt further out on an idle row than on a working one. Worse, that
-    /// difference moved *under the pointer*: `SessionLoadingState.presentation` is raised because
-    /// the sidebar is putting the row you just clicked on screen, so reaching for archive on a
-    /// row you had selected made the button step aside and step back. A click target does not
-    /// move for a spinner, so it does not share a column with one.
+    /// The pair and the status *crossfade in place* rather than standing side by side. That is
+    /// what keeps this one geometry for every state: the archive button sits on the list's
+    /// trailing margin on an idle row, a working one, and the row that raises
+    /// `SessionLoadingState.presentation` the moment it is clicked — nothing steps aside and
+    /// nothing steps back, because nothing *moves*; the marks trade visibility inside a column
+    /// that never does. Activity is not erased by the swap where it matters most: the selected
+    /// row — the one whose spinner lives under the pointer that just clicked it — wears its
+    /// activity as the row's own beam ring, and every row's hover card still names its state.
     ///
     /// At rest the row reserves only `trailingSlotSize` for the status. It pays this full width
     /// while the buttons are visible, when yielding that title space describes what is actually
     /// on screen rather than taxing every truncated title for controls nobody can see.
-    static let sessionTrailingSlotWidth: CGFloat = trailingSlotSize * 3 + hoverButtonSpacing * 2
+    static let sessionTrailingSlotWidth: CGFloat = trailingSlotSize * 2 + hoverButtonSpacing
 
     /// Expanded width of a *project* row's trailing slot: the `+ ⋯` pair, which takes the row's
     /// edge because the count it replaces is not durable state the way a session's status is.

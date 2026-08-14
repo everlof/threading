@@ -306,6 +306,11 @@ final class ProjectSidebarViewController: NSViewController {
     /// keeps that pass proportional to mounted rows.
     private let instantiatedHoverRowViews = NSHashTable<SidebarHoverRowView>.weakObjects()
 
+    /// The one row currently wearing the activity beam, kept so moving the beam clears the old
+    /// wearer in O(1) rather than by asking every mounted row. Weak because AppKit discards row
+    /// views with their rows; `didRemove` also drops it so a recycled view cannot be cleared late.
+    private weak var activityBeamRow: SidebarHoverRowView?
+
     #if DEBUG
     private(set) var lastReloadPerformance = ProjectSidebarReloadPerformance()
     private(set) var lastProjectStructureNanoseconds: UInt64 = 0
@@ -1545,6 +1550,13 @@ extension ProjectSidebarViewController {
 
     /// Refreshes a single session's row, used for frequent updates such as title changes.
     func refreshRow(sessionID: SessionID) {
+        // Loading raises and activity edges both funnel through here, and the selected
+        // session's beam is a fact derived from exactly those two — restated even when the
+        // row itself has no live view, because a beam can need clearing after its wearer left.
+        defer {
+            if sessionID == selectedSessionID { refreshSelectedSessionBeam() }
+        }
+
         guard let node = sessionNode(for: sessionID) else { return }
 
         let row = outlineView.row(forItem: node)
@@ -1552,6 +1564,46 @@ extension ProjectSidebarViewController {
 
         reconfigureRow(at: row)
         outlineView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
+    }
+
+    /// Keeps the activity beam on exactly one row: the selected session's, while that session
+    /// is loading or working. Selection is what scopes it — the beam says "the chat you are
+    /// looking at is busy", which is also the row whose status mark the pointer most often
+    /// covers, since hovering it is how its archive button is reached. Every input funnels
+    /// here (selection moves, loading raises, activity edges, the row view's own lifecycle),
+    /// and the answer is restated from current truth rather than diffed against events.
+    private func refreshSelectedSessionBeam() {
+        var wearer: SidebarHoverRowView?
+        defer {
+            if let activityBeamRow, activityBeamRow !== wearer {
+                activityBeamRow.setActivityBeam(workload: .none)
+            }
+            activityBeamRow = wearer
+        }
+
+        guard let sessionID = selectedSessionID,
+              loadingState.isLoading(sessionID)
+                || AgentRuntime.shared.activity(sessionID: sessionID) == .working,
+              let session = projectStore.session(withID: sessionID),
+              let node = sessionNode(for: sessionID)
+        else { return }
+
+        let row = outlineView.row(forItem: node)
+        guard row >= 0,
+              let rowView = outlineView.rowView(atRow: row, makeIfNecessary: false)
+                  as? SidebarHoverRowView
+        else { return }
+
+        // One session's workload, measured by the same rule as the composer's aggregate:
+        // the ring escalates to colorful only when *this* chat runs at the top of its
+        // provider's ladder. Account discovery behind this is cached, and the beam ignores
+        // equal restatements, so title-churn reconfigures cost a lookup and no drawing.
+        rowView.setActivityBeam(
+            workload: AgentWorkload.measure(workingSessions: [session]) {
+                AgentAccountDiscovery.account(for: $0, handle: $1)
+            }
+        )
+        wearer = rowView
     }
 
     func refreshRow(terminalID: TerminalID) {
@@ -2725,6 +2777,12 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         guard let rowView = rowView as? SidebarHoverRowView else { return }
         instantiatedHoverRowViews.add(rowView)
         rowView.showsGroupRule = showsGroupRule(forRow: row)
+
+        // A selected working row that scrolled away and back arrives as a *new* row view,
+        // which owes its beam a restamp nothing else would deliver.
+        if row == outlineView.selectedRow {
+            refreshSelectedSessionBeam()
+        }
     }
 
     func outlineView(
@@ -2734,6 +2792,11 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     ) {
         guard let rowView = rowView as? SidebarHoverRowView else { return }
         instantiatedHoverRowViews.remove(rowView)
+        // The discarded view dies with its beam; forgetting it here keeps a later clear from
+        // reaching a view AppKit has already handed to another row.
+        if rowView === activityBeamRow {
+            activityBeamRow = nil
+        }
     }
 
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
@@ -2770,6 +2833,10 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
+        // Before the suppression gate: the beam follows the selection itself, and a
+        // programmatic re-select moves the selection exactly as a click does.
+        refreshSelectedSessionBeam()
+
         guard !suppressSelectionCallback else { return }
 
         let item = outlineView.item(atRow: outlineView.selectedRow)
