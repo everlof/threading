@@ -36,8 +36,8 @@ extension ConversationViewController {
             case .whenConversationFinishes:
                 self.presentScheduledFinishPicker(candidates: finishCandidates)
             case .custom:
-                ScheduleMessageAlert.present(
-                    over: self.view.window,
+                ScheduleMomentPickerViewController.present(
+                    over: self,
                     title: L10n.string("Schedule message")
                 ) { [weak self] date in
                     guard let self, let date else { return }
@@ -207,6 +207,32 @@ enum ScheduledTiming {
             UsageFormat.absolute(date, from: now),
             UsageFormat.remaining(until: date, from: now)
         )
+    }
+
+    /// The stronger receipt for a session that does not exist yet.
+    ///
+    /// A conversation row only has to say when its already-known message sends. On the draft
+    /// surface, the primary button still says "Start session", so a bare "When … finishes"
+    /// looks like a condition waiting for that button rather than confirmation that Threading
+    /// will create the session itself. State both facts in one line.
+    static func automaticStartSentence(
+        for message: ScheduledMessage,
+        from now: Date = Date()
+    ) -> String {
+        switch message.trigger {
+        case .time(let time):
+            return L10n.format(
+                "Scheduled · starts automatically %@",
+                sentence(for: time.dueAt, from: now)
+            )
+        case .sessionFinished(let sessionID):
+            let title = ProjectStore.shared.session(withID: sessionID)?.displayTitle
+                ?? L10n.string("Conversation")
+            return L10n.format(
+                "Scheduled · starts automatically when “%@” finishes",
+                title
+            )
+        }
     }
 
     /// The sentence that replaces the timing when the clock is no longer the thing to say.

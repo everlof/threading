@@ -645,6 +645,27 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(observedDrafts.last, "draft", "Redo has to persist the restored draft too")
     }
 
+    /// The app menu does not target `UndoManager` directly: its registry-backed item reaches the
+    /// host command plane first. Calling the manager in the test above therefore missed the bug
+    /// where the second responder-chain send found no action and ⌘Z did nothing in the app.
+    func testHostUndoRouteInvokesTheFocusedDraftsUndoManager() throws {
+        let prompt = PromptView()
+        let window = makeWindow(hosting: prompt)
+        let textView = try promptTextView(in: prompt)
+        var observedDrafts: [String] = []
+        prompt.onChange = { observedDrafts.append($0) }
+
+        XCTAssertTrue(window.makeFirstResponder(textView))
+        type("draft", in: window)
+
+        XCTAssertTrue(
+            FirstResponderUndo.perform(in: window),
+            "the host route did not find the focused editor's pending operation"
+        )
+        XCTAssertEqual(prompt.stringValue, "")
+        XCTAssertEqual(observedDrafts.last, "", "host-routed undo did not persist the draft")
+    }
+
     /// The prompt sizes itself to its text through the layout manager, so a missing network
     /// also froze the box at one line no matter how much was typed into it.
     func testPromptGrowsWithItsText() throws {

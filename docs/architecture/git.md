@@ -350,6 +350,12 @@ A manual close is an `expansionOverride` and survives watched refreshes. The mod
 (`PersistedTab.mode`); restore builds the controller but runs no git until the tab is actually
 shown, the browser's deferred-load rule.
 
+Opening or closing a materialized row swaps its header/body constraints **before** invalidating
+the table's estimated height. Reversing that order briefly asks the still-collapsed header to fill
+the expanded model height, stretching its labels out of the viewport until the exact TextKit
+measurement arrives. The model override and table estimate therefore change only through the
+row's post-geometry callback; the later exact-height callback remains a separate pass.
+
 The collapsed body rule does **not** by itself make the file index cheap. Measurement showed
 `NSStackView` eagerly laying out 1,000 collapsed headers took about 94 seconds. Progressive
 20-row materialization reduced the first viewport to about 29 ms, but a deep walk still became
@@ -498,6 +504,16 @@ both gates are the model's — a nil URL, or `.deleted` — never a `FileManager
 because rows materialize mid-scroll; the open button resolves its app icon and name from the
 launcher's cached registry on first reveal only, and a press on a file deleted behind the
 model's back beeps inside the launcher rather than promising.
+
+When the real heading scrolls above the clip, Review retains one **header-only
+`GitReviewFileRow`**, not a visual copy. This keeps file actions, staging, accessibility, theme
+response and geometry identical in the sticky state. Its height is measured from that row itself:
+measuring the host while its hidden bootstrap constraint is still zero produces a one-point strip
+that updates the current path but shows no heading. The sticky host passes its non-control ground
+through to the scroller, while descendants of `ThemedControl` retain hit testing so Copy Path,
+Finder and staging remain usable. The row keeps its ordinary translucent control wash; its host
+adds the opaque `elevated` surface required of content floating over scrolling source, so lines do
+not remain legible through the retained heading.
 
 **Staging is offered by two modes of six**, and the rule is not a UI preference: a patch
 applies to the index only when the index is what the diff was measured *from*. Unstaged

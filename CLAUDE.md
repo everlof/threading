@@ -496,11 +496,16 @@ insets its content, since a control aligned by ink reaches past the margin its g
 
 **Rendered-state tests are how appearance is reviewed here.** `ConversationRenderTests`,
 `GitReviewRenderTests`, `ThemeSettingsRenderTests`, `CodeStatsRenderTests`,
-`ToolbarChromeRenderTests` and `SessionAttachmentComparisonTests/testRendersTheDropAffordance`
+`ToolbarChromeRenderTests`, `AccountLimitsSectionTests/testRendersTheLimitsSectionToImages` and
+`SessionAttachmentComparisonTests/testRendersTheDropAffordance`
 draw real fixtures to PNGs, light and dark (`THREADING_RENDER_OUT` redirects the output). Several
 bugs in this codebase were visible in a picture and in no assertion anyone would have written —
 including a drop affordance whose every assertion passed while it drew a saturated plate over the
-row it was naming, louder than the window's own selection.
+row it was naming, louder than the window's own selection, and a settings section whose cards sat
+at a third of the pane while every assertion about its width passed, because a vertical
+`NSStackView` aligned `.leading` gives each arranged view its *fitting* width. **What a render
+finds becomes an assertion**: both are now tested for directly, so the picture is where a defect
+is *noticed* rather than where it is remembered.
 
 ## Documentation
 

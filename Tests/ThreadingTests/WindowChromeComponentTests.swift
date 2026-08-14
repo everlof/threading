@@ -976,6 +976,34 @@ final class WindowChromeComponentTests: XCTestCase {
         )
     }
 
+    /// TUI is one box-drawing language: the title seam, control rules, and window frame all
+    /// state the same border ink. The generic flat-frame fallback used to replace only the last
+    /// of those with tertiary text. Its bright straight run then faded toward the authored rule
+    /// as the rounded corner antialiased, leaving a visible hook at the join.
+    func testTextModeFrameContinuesItsAuthoredRuleAroundTheWindow() throws {
+        AppThemePalette.set(AppThemeStyles.tui)
+        let chrome = try XCTUnwrap(takeoverChrome(of: AppThemeStyles.tui))
+        let frame = WindowChromeFrameView()
+        frame.fixtureStyle = WindowChromeAppearance.resolved(from: chrome)
+        let rep = try XCTUnwrap(NSBitmapImageRep(data: try renderedPixels(
+            of: frame,
+            size: NSSize(width: 40, height: 40)
+        )))
+        let bottomRule = try XCTUnwrap(rep.colorAt(x: rep.pixelsWide / 2, y: 0))
+        let sideRule = try XCTUnwrap(rep.colorAt(x: 0, y: rep.pixelsHigh / 2))
+
+        assertSameInk(
+            bottomRule,
+            Design.Surface.border,
+            "the text-mode frame replaced its authored bottom rule"
+        )
+        assertSameInk(
+            sideRule,
+            Design.Surface.border,
+            "the text-mode frame replaced its authored side rule"
+        )
+    }
+
     func testGalleryTellsTheirStories() {
         for name in [
             "WindowTitleBandView", "WindowChromeButton", "WindowCommandBandView",

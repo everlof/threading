@@ -286,9 +286,6 @@ final class GitReviewViewController: NSViewController {
     )
     private lazy var stickyFileHeaderHeight: NSLayoutConstraint = {
         let height = stickyFileHeaderHost.heightAnchor.constraint(equalToConstant: 0)
-        // The retained labels have an intrinsic minimum before any file is sticky. Its hidden
-        // bootstrap height must yield until the first update installs the exact fitted value.
-        height.priority = .init(999)
         return height
     }()
     private var stickyFileHeaderSignature: String?
@@ -315,6 +312,10 @@ final class GitReviewViewController: NSViewController {
 
     var fileNavigatorVisibleForTesting: Bool { showsFileNavigator }
     var fileNavigatorWidthForTesting: CGFloat { fileNavigatorWidth.constant }
+    var stickyFileHeaderHeightForTesting: CGFloat { stickyFileHeaderHeight.constant }
+    var stickyFileHeaderRowForTesting: GitReviewFileRow? {
+        stickyFileHeaderHost.installedHeader
+    }
     lazy var findBar = BrowserFindBar(
         placeholder: L10n.string("Find in diff"),
         closeAccessibility: L10n.string("Close Find in Diff")
@@ -865,25 +866,32 @@ final class GitReviewViewController: NSViewController {
         }
 
         let file = renderedFiles[tableRow - filePreludeViews.count]
-        let expanded = expansionOverrides[file.path]
-            ?? bulkExpansionOverride
-            ?? (pendingDiffIndexPaths.contains(file.path)
-                ? true
-                : GitReviewFileRow.expandsByDefault(file))
         let isPending = pendingDiffIndexPaths.contains(file.path)
         let didFail = failedDiffHydrationPaths.contains(file.path)
-        let signature = "\(file.path)\u{0}\(file.added)\u{0}\(file.removed)\u{0}\(expanded)"
-            + "\u{0}\(isPending)\u{0}\(didFail)"
+        let attribution = turnAttribution?.mark(for: file.path) ?? .none
+        // Expansion does not change a file heading. Keeping it out of the signature preserves
+        // the retained header and any pointer press while the real row changes its body height.
+        let signature = "\(file.path)\u{0}\(file.change)\u{0}\(file.added)\u{0}\(file.removed)"
+            + "\u{0}\(isPending)\u{0}\(didFail)\u{0}\(mode)\u{0}\(attribution)"
+            + "\u{0}\(renderedFileRoot?.path ?? "")"
         if signature != stickyFileHeaderSignature {
-            let verticalLayoutChanged = stickyFileHeaderHost.update(
+            let header = GitReviewFileRow(
                 file: file,
+                expanded: false,
                 contentIsPending: isPending,
-                contentLoadFailed: didFail
+                contentLoadFailed: didFail,
+                attribution: attribution,
+                staging: isPending ? nil : staging,
+                fileURL: renderedFileRoot?.appendingPathComponent(file.path),
+                headerOnly: true
             )
-            if stickyFileHeaderHeight.constant <= 0 || verticalLayoutChanged {
-                stickyFileHeaderHost.layoutSubtreeIfNeeded()
-                stickyFileHeaderHeight.constant = max(stickyFileHeaderHost.fittingSize.height, 1)
-            }
+            header.onStageFile = { [weak self] in self?.stageFile(file) }
+            // Measure the real header, not the host whose active bootstrap height is zero. The
+            // old measurement therefore returned zero and left a one-point "sticky" strip.
+            // Adopt that height before installing the row, or Auto Layout briefly tries to pin
+            // a complete heading into the bootstrap's zero-height host.
+            stickyFileHeaderHeight.constant = max(header.fittingSize.height, 1)
+            stickyFileHeaderHost.install(header)
             stickyFileHeaderSignature = signature
         }
 
@@ -1495,160 +1503,50 @@ final class GitReviewViewController: NSViewController {
     }
 }
 
-// MARK: - Window Awareness
+// MARK: - Sticky File Header
 
-/// Reports when it lands in, or leaves, a window. The display pane parents a live tab's *view*
-/// without adopting its controller, so `viewDidAppear` never fires for one — this is the signal
-/// that stands in for it.
+/// Keeps one real file-header row above the scrolling document. Reusing `GitReviewFileRow` is
+/// deliberate: the retained heading must have the same geometry, hover actions, staging action,
+/// theme response and accessibility controls as the row it stands in for.
 final class GitReviewStickyHeaderHost: NSView {
-    private let glyphLabel = NSTextField(labelWithString: "")
-    private let nameLabel = NSTextField(labelWithString: "")
-    private let directoryLabel = NSTextField(labelWithString: "")
-    private let metaLabel = NSTextField.label(attributed: NSAttributedString())
-    private lazy var nameBottom = nameLabel.bottomAnchor.constraint(
-        equalTo: bottomAnchor,
-        constant: -Design.Spacing.small
-    )
-    private lazy var directoryTop = directoryLabel.topAnchor.constraint(
-        equalTo: nameLabel.bottomAnchor,
-        constant: Design.Spacing.hairline
-    )
-    private lazy var directoryBottom = directoryLabel.bottomAnchor.constraint(
-        equalTo: bottomAnchor,
-        constant: -Design.Spacing.small
-    )
+    private(set) weak var installedHeader: GitReviewFileRow?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        applySurface(fill: Design.Surface.controlResting, radius: .control)
+        // A retained heading floats above source text. The ordinary row's quiet translucent
+        // control wash is correct inside its card but cannot occlude content scrolling beneath
+        // an overlay, so the host supplies the design system's opaque floating-card surface.
+        applySurface(fill: Design.Surface.elevated, radius: .control)
+    }
 
-        glyphLabel.applyFont(.code(weight: .medium))
-        glyphLabel.textColor = Design.Text.secondary
-        glyphLabel.alignment = .center
-
-        nameLabel.applyFont(.control)
-        nameLabel.textColor = Design.Text.label
-        nameLabel.lineBreakMode = .byTruncatingMiddle
-        nameLabel.usesSingleLineMode = true
-        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        directoryLabel.applyFont(.detail())
-        directoryLabel.textColor = Design.Text.tertiary
-        directoryLabel.lineBreakMode = .byTruncatingMiddle
-        directoryLabel.usesSingleLineMode = true
-        directoryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        directoryLabel.isHidden = true
-        metaLabel.setContentHuggingPriority(.required, for: .horizontal)
-
-        [glyphLabel, nameLabel, directoryLabel, metaLabel].forEach {
-            $0.translatesAutoresizingMaskIntoConstraints = false
-            addSubview($0)
-        }
-        let inset = Design.Spacing.small
+    func install(_ header: GitReviewFileRow) {
+        subviews.forEach { $0.removeFromSuperview() }
+        installedHeader = header
+        header.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(header)
         NSLayoutConstraint.activate([
-            glyphLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            glyphLabel.topAnchor.constraint(equalTo: topAnchor, constant: inset),
-            glyphLabel.widthAnchor.constraint(equalToConstant: Design.Chat.toolIconWidth),
-            nameLabel.leadingAnchor.constraint(
-                equalTo: glyphLabel.trailingAnchor,
-                constant: inset
-            ),
-            nameLabel.firstBaselineAnchor.constraint(equalTo: glyphLabel.firstBaselineAnchor),
-            metaLabel.leadingAnchor.constraint(
-                greaterThanOrEqualTo: nameLabel.trailingAnchor,
-                constant: Design.Spacing.medium
-            ),
-            metaLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
-            metaLabel.firstBaselineAnchor.constraint(equalTo: glyphLabel.firstBaselineAnchor),
-            directoryLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
-            directoryLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: metaLabel.leadingAnchor,
-                constant: -Design.Spacing.small
-            ),
-            nameBottom
+            header.topAnchor.constraint(equalTo: topAnchor),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: trailingAnchor),
+            header.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(
-        file: GitFileDiff,
-        contentIsPending: Bool,
-        contentLoadFailed: Bool
-    ) -> Bool {
-        glyphLabel.stringValue = switch file.change {
-        case .modified, .binary: "±"
-        case .added, .untracked: "+"
-        case .deleted: "−"
-        case .renamed: "→"
+    /// The header's ground remains transparent to pointer routing so trackpad and wheel scrolling
+    /// continue in the document beneath it. Its controls are the exception: a visible Copy,
+    /// Finder or staging button owns its press instead of becoming decorative chrome.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        var candidate: NSView? = hit
+        while let view = candidate, view !== self {
+            if view is ThemedControl { return hit }
+            candidate = view.superview
         }
-        let path: String
-        if case .renamed(let from) = file.change {
-            path = "\(from) → \(file.path)"
-            let renamedName = "\((from as NSString).lastPathComponent) → \(file.fileName)"
-            nameLabel.stringValue = renamedName
-        } else {
-            path = file.path
-            nameLabel.stringValue = file.fileName
-        }
-        nameLabel.toolTip = path
-        directoryLabel.stringValue = file.directory
-        directoryLabel.toolTip = path
-
-        let showsDirectory = !file.directory.isEmpty
-        let verticalLayoutChanged = showsDirectory != !directoryLabel.isHidden
-        if verticalLayoutChanged {
-            directoryLabel.isHidden = !showsDirectory
-            nameBottom.isActive = !showsDirectory
-            directoryTop.isActive = showsDirectory
-            directoryBottom.isActive = showsDirectory
-        }
-        metaLabel.attributedStringValue = Self.metaText(
-            for: file,
-            contentIsPending: contentIsPending,
-            contentLoadFailed: contentLoadFailed
-        )
-        return verticalLayoutChanged
+        return nil
     }
-
-    private static func metaText(
-        for file: GitFileDiff,
-        contentIsPending: Bool,
-        contentLoadFailed: Bool
-    ) -> NSAttributedString {
-        if contentIsPending {
-            return NSAttributedString(string: L10n.string("Loading…"), attributes: [
-                .foregroundColor: Design.Text.quaternary,
-                .font: Design.Typography.caption(),
-            ])
-        }
-        if contentLoadFailed {
-            return NSAttributedString(string: "preview unavailable", attributes: [
-                .foregroundColor: Design.Status.negative,
-                .font: Design.Typography.caption(),
-            ])
-        }
-        if file.change == .binary {
-            return NSAttributedString(string: "binary", attributes: [
-                .foregroundColor: Design.Text.tertiary,
-                .font: Design.Typography.caption(),
-            ])
-        }
-        let result = NSMutableAttributedString(string: "+\(file.added)", attributes: [
-            .foregroundColor: Design.Diff.added,
-            .font: Design.Typography.caption(),
-        ])
-        result.append(NSAttributedString(string: " −\(file.removed)", attributes: [
-            .foregroundColor: Design.Diff.removed,
-            .font: Design.Typography.caption(),
-        ]))
-        return result
-    }
-
-    /// The retained header is visual context. Pointer input continues to the real row below it,
-    /// so scrolling and selection do not acquire a dead strip at the top of the viewport.
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 // MARK: - Defaults

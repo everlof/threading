@@ -159,6 +159,15 @@ final class PromptView: NSView, ThemedComponent {
     /// app, rather than only in this field.
     var onChange: ((String) -> Void)?
 
+    /// Mirrors whether the prompt can be submitted for an owner whose primary action lives
+    /// outside the box.
+    ///
+    /// `PromptView` owns more than text: an image or a context reference is submittable content
+    /// too, and either can change without `onChange` firing. An outside button that inferred its
+    /// state from the string therefore disagreed with the box. This callback is emitted from the
+    /// same calculation that drives the built-in send, so both actions keep one answer.
+    var onSubmissionAvailabilityChange: ((Bool) -> Void)?
+
     /// Context has draft semantics too. Keeping this separate from `onChange` lets an owner
     /// persist a chip removal even when no editable character changed.
     var onContextAttachmentsChange: (([ConversationContextAttachment]) -> Void)?
@@ -303,6 +312,11 @@ final class PromptView: NSView, ThemedComponent {
     /// ordinary text while the CLI still gets the only form of an image it can open.
     var submissionValue: String {
         appending(paths: attachmentPaths, to: textView.string)
+    }
+
+    /// The answer used by both an in-box submit and an owner-provided outside action.
+    var isSubmissionAvailable: Bool {
+        hasSubmittableContent && isSubmissionEnabled
     }
 
     // MARK: - Initialization
@@ -1216,6 +1230,7 @@ final class PromptView: NSView, ThemedComponent {
     private func updateSubmitState() {
         let hasContent = hasSubmittableContent
         let isStop = composerMode.canStop
+        let canSubmit = isSubmissionAvailable
 
         submitButton.image = NSImage(
             systemSymbolName: isStop ? DesignSymbols.stop : DesignSymbols.submit,
@@ -1223,12 +1238,13 @@ final class PromptView: NSView, ThemedComponent {
                 ? L10n.string("Stop")
                 : L10n.string("Start session")
         )
-        submitButton.isEnabled = isStop || (hasContent && isSubmissionEnabled)
-        submitButton.contentTintColor = isStop || (hasContent && isSubmissionEnabled)
+        submitButton.isEnabled = isStop || canSubmit
+        submitButton.contentTintColor = isStop || canSubmit
             ? Design.Surface.accent
             : Design.Text.tertiary
         refreshSubmitTitle()
         updateScheduleChevron(hasContent: hasContent, isStop: isStop)
+        onSubmissionAvailabilityChange?(canSubmit)
     }
 
     /// Shows the chevron only where scheduling is both offered and meaningful.

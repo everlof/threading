@@ -254,6 +254,27 @@ stored projects once; expected scale is 2–12 live turns against the sidebar's 
 stress case. The table creates only viewport rows, and filtering a large live set runs away from
 the main actor before the value model is replaced.
 
+**“Custom time…” is a sheet with two lists, and used to be an alert with two pop-ups.**
+`ScheduleMomentPickerViewController` replaced `ScheduleMessageAlert` because the dropdown could
+not work where that alert put it: `ThemedMenuPresenter` draws its panel *inside the window it was
+opened from*, and a `ThemedAlert` is a borderless panel sized to its own two lines of text — so a
+day's ninety-six quarter hours opened with room for **one and a half rows**, and the sheet under
+them was barely wider than the two buttons. Growing the alert does not fix it; no dialog a
+dropdown opens inside is tall enough for that list. Lists that *are* the sheet scroll rather than
+open, keep type-to-select (`typeSelectStringFor`), and show fifteen answers at once.
+
+Two rules live in `ScheduleMomentOptions`, which is pure so both are arithmetic rather than
+something only a screenshot disproves. **A moment already gone is not offered** — the store
+refuses `dueAt <= now` with `.inThePast`, so today's spent quarter hours are dropped and a today
+with none left leaves the day list rather than sitting there selected beside an empty column.
+**`Calendar` places the wall-clock hour**, via `date(bySettingHour:minute:second:of:)`: minutes
+added to midnight put nine o'clock at ten on the Sunday the clocks move forward, which is the
+same trap the presets document one section up. The sheet opens on nine o'clock where the nearest
+day still has it and on that day's next quarter hour otherwise; the list's highlighted row is
+that moment, which is why the lists do *not* set `allowsEmptySelection = false` — a list that
+refuses an empty selection re-picks its first row after a reload and posts it late enough to
+overwrite the sheet's own choice.
+
 **`ScheduledMessageStripView`, above the composer** — and deliberately *not* rows in
 `ConversationOutboxRailView`. That rail computes a drag's index across every pending row and hands
 it to `ConversationOutbox.movePending`, which counts in outbox terms, so scheduled rows mixed in
@@ -267,6 +288,15 @@ pull the draft view's column off the pane's width — which
 `ComposerWindowFitTests.testTheColumnFillsThePaneUpToItsCap` caught. A view with nothing to say
 leaves the room.
 
+**A scheduled start says that it starts automatically.** The generic timing sentence is enough
+above a conversation composer, where the destination already exists and the verb is “send.” On
+the draft surface the still-visible primary action says “Start session,” so a receipt that only
+said “When … finishes” looked like a condition waiting for that button. Draft rows use
+`ScheduledTiming.automaticStartSentence`; once scheduling clears the brief, the outside Start
+button follows `PromptView.isSubmissionAvailable` and becomes disabled. The receipt and the
+action therefore agree: Threading will create this one automatically, while Start is only for a
+new brief typed into the now-empty box.
+
 **A row states its height; a floor alone is not a height.** The row stated only `height ≥ 26`,
 and the draft view's column has a second free height above it — the hero region soaks up
 whatever the pane does not need. Two free heights is an ambiguous layout, and the engine parked
@@ -275,6 +305,9 @@ row's labels over the chip row while its remove button floated forty points belo
 now prefers exactly `rowHeight` at `.defaultHigh` over the required floor, with required `≥` top
 pins on its members so genuinely taller content still grows it honestly — stretching the row
 costs something, growing the hero costs nothing, and the slack has one home.
+The remove button is aligned to the summary label's ink, not to the abstract row bounds: the
+xmark's square image is geometrically centred inside its target, while the type's visible weight
+sits above its frame centre, and equal frame centres left the x visibly below the item it removes.
 `ComposerWindowFitTests.testAScheduledRowStaysOneLineRatherThanAbsorbingThePanesSlack` holds it.
 
 ## What this deliberately does not do

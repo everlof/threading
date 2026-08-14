@@ -508,6 +508,23 @@ final class GitReviewViewTests: XCTestCase {
             row.gestureRecognizer(recognizer, shouldAttemptToRecognizeWith: click),
             "the revealed action owns its click"
         )
+
+        var copiedURL: URL?
+        row.copyPathHandler = { copiedURL = $0 }
+        let release = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseUp,
+            location: click.locationInWindow,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 0
+        ))
+        copy.mouseDown(with: click)
+        copy.mouseUp(with: release)
+        XCTAssertEqual(copiedURL?.path, "/tmp/Sources/Foo.swift")
     }
 
     /// Nothing on disk, nothing offered: a row without a URL and a file this comparison
@@ -745,16 +762,24 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertEqual(controller.fileNavigatorWidthForTesting, 0)
     }
 
-    func testFileHeadingSticksAfterItsRealHeaderScrollsAway() {
+    func testFileHeadingSticksAfterItsRealHeaderScrollsAway() throws {
         let files = Self.stressDenseFiles(count: 2, linesPerFile: 100)
         let controller = GitReviewViewController(
             sessionID: SessionID(),
             folderPath: NSTemporaryDirectory(),
             mode: .uncommitted
         )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 240),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = controller
         _ = controller.view
         controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 240)
         controller.show(.files(files))
+        controller.renderedFileRoot = URL(fileURLWithPath: "/tmp")
         controller.view.layoutSubtreeIfNeeded()
 
         controller.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 80))
@@ -762,11 +787,121 @@ final class GitReviewViewTests: XCTestCase {
         controller.updateScrollControls()
         controller.view.layoutSubtreeIfNeeded()
         XCTAssertEqual(controller.stickyFileHeaderPathForTesting, files[0].path)
+        XCTAssertGreaterThan(
+            controller.stickyFileHeaderHeightForTesting,
+            30,
+            "a retained file heading must be visible, not merely update its model path"
+        )
+        let stickyRow = try XCTUnwrap(controller.stickyFileHeaderRowForTesting)
+        let actions = stickyRow.subviews.compactMap { $0 as? ThemedIconButton }
+        XCTAssertEqual(actions.count, 2, "the retained heading keeps Copy Path and Finder")
+        let enter = try XCTUnwrap(NSEvent.enterExitEvent(
+            with: .mouseEntered,
+            location: stickyRow.convert(
+                NSPoint(x: stickyRow.bounds.midX, y: stickyRow.bounds.midY),
+                to: nil
+            ),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            trackingNumber: 0,
+            userData: nil
+        ))
+        stickyRow.mouseEntered(with: enter)
+        let copy = try XCTUnwrap(actions.first {
+            $0.accessibilityIdentifier() == "git-review.file.copy-path"
+        })
+        XCTAssertFalse(copy.isHidden)
+        XCTAssertEqual(copy.alphaValue, 1, accuracy: 0.01)
+        controller.view.layoutSubtreeIfNeeded()
+        let copyPoint = copy.convert(
+            NSPoint(x: copy.bounds.midX, y: copy.bounds.midY),
+            to: controller.view
+        )
+        let hit = controller.view.hitTest(copyPoint)
+        XCTAssertTrue(hit === copy || hit?.isDescendant(of: copy) == true)
+
+        var copiedURL: URL?
+        stickyRow.copyPathHandler = { copiedURL = $0 }
+        let press = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: copy.convert(
+                NSPoint(x: copy.bounds.midX, y: copy.bounds.midY),
+                to: nil
+            ),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 0
+        ))
+        let release = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseUp,
+            location: press.locationInWindow,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 2,
+            clickCount: 1,
+            pressure: 0
+        ))
+        copy.mouseDown(with: press)
+        copy.mouseUp(with: release)
+        XCTAssertEqual(copiedURL?.path, "/tmp/\(files[0].path)")
 
         controller.scrollView.contentView.scroll(to: .zero)
         controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
         controller.updateScrollControls()
         XCTAssertNil(controller.stickyFileHeaderPathForTesting)
+    }
+
+    func testExpandedHeightInvalidationNeverStretchesTheCollapsedHeader() throws {
+        let file = try XCTUnwrap(Self.stressDenseFiles(count: 1, linesPerFile: 120).first)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 360)
+        controller.expansionOverrides[file.path] = false
+        controller.show(.files([file]))
+        controller.view.layoutSubtreeIfNeeded()
+
+        let host = try XCTUnwrap(
+            controller.fileTableView.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        )
+        let row = try XCTUnwrap(host.subviews.first as? GitReviewFileRow)
+        let name = try XCTUnwrap(
+            Self.descendants(of: NSTextField.self, in: row).first {
+                $0.accessibilityIdentifier() == "git-review.file.name"
+            }
+        )
+        var nameHeightDuringInvalidation: CGFloat?
+        row.onExpansionGeometryChange = { expanded in
+            controller.expansionOverrides[file.path] = expanded
+            controller.measuredFileRowHeights[file.path] = nil
+            controller.fileTableView.noteHeightOfRows(
+                withIndexesChanged: IndexSet(integer: 0)
+            )
+            controller.view.layoutSubtreeIfNeeded()
+            nameHeightDuringInvalidation = name.frame.height
+        }
+
+        row.setExpanded(true)
+
+        XCTAssertTrue(row.isOpen)
+        XCTAssertLessThan(
+            try XCTUnwrap(nameHeightDuringInvalidation),
+            40,
+            "the old header-only constraints must not span the expanded table estimate"
+        )
+        XCTAssertFalse(name.isHidden)
     }
 
     func testProgressiveFileIndexReconcilesIntoFullRowsInPlace() {

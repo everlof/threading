@@ -1862,6 +1862,18 @@ by the viewport's exact width delta and leave no second visible layout frame pen
 pre-fix 8.483 ms p95 / 11.584 ms maximum. Both recorded `max_width_delta_drift=0.000` and
 `pending_layout_frames=0`.
 
+The interaction follow-up later that day replaced the retained header's decorative copy with one
+real header-only `GitReviewFileRow` and moved disclosure height invalidation after its constraint
+swap. The first canonical sample ran immediately after a long cold build and was not repeatable
+(16.151 ms resize p95). Three direct warm repeats from the same built bundle measured resize p95
+at **10.920, 10.170 and 8.782 ms**; the last two maxima were **12.885 and 12.581 ms**, and every
+sample kept `max_width_delta_drift=0.000` and `pending_layout_frames=0`. The same repeats put the
+massive fixture's continuous-scroll p95 at 27.480–42.076 ms and full-index seek p95 at
+26.354–46.979 ms; those Debug drawing tails remain noisy, so the retained-header contract stays
+one bounded view and the load-bearing resize claim is geometry coherence plus the repeated warm
+frame result, not the post-build outlier. The ordinary 174-file/400-line workload measured
+18.220 ms per forced-scroll frame.
+
 The generated workload is the regression boundary, but it cannot reproduce the object database,
 index and history shape of Linux-scale repositories. `git-repository-stress` accepts an existing
 checkout and runs three complementary layers without modifying it:

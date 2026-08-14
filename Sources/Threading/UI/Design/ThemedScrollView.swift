@@ -76,6 +76,21 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
         needsDisplay = true
     }
 
+    /// A period scrollbar is drawn as one control, so it needs the one drawing pass AppKit only
+    /// gives a scroller that does not update its layer.
+    ///
+    /// Modern `NSScroller` is layer-backed and repaints by calling the old part hooks — and only
+    /// those — each behind a clip of *its* idea of that part. Ours are different rectangles: the
+    /// slot runs to the ends because the arrows are furniture we place, and the thumb has a
+    /// minimum length. Every point of ours outside AppKit's was therefore cut, which is why the
+    /// gel's rounded cap came out square at either end of its travel and the trough stopped three
+    /// points short of the arrows. Declining the layer path puts `draw(_:)` back in the loop,
+    /// where the clip is the whole view and the control is drawn once, exactly as the archived
+    /// reference reproductions draw it.
+    override var wantsUpdateLayer: Bool {
+        scrollerAppearance.usesLegacyPresentation ? false : super.wantsUpdateLayer
+    }
+
     // MARK: - Standing Alone
 
     /// Whether nothing but this view decides when the scrollbar is on screen.
@@ -238,6 +253,16 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
     /// one rule covers a hosted scroller and that one alike.
     private var hasScrollableRange: Bool {
         isEnabled && knobProportion > 0
+    }
+
+    /// How far a measured arrow plate's ink is lifted toward the plate when there is nowhere to
+    /// go. The vector glyphs take the app's ordinary disabled recipe; a plate whose glyph is part
+    /// of an indexed bitmap cannot be faded without taking the furniture with it, so its ink is
+    /// raised instead — which is what these systems drew, a pale triangle on the same plate.
+    private static let disabledGlyphLift: CGFloat = 0.55
+
+    private func quieted(_ channel: CGFloat) -> CGFloat {
+        hasScrollableRange ? channel : channel + (1 - channel) * Self.disabledGlyphLift
     }
 
     override func rect(for part: NSScroller.Part) -> NSRect {
@@ -1412,7 +1437,7 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
                 : rect.maxY - CGFloat(row + 1) * pixelHeight
             for column in 0..<columns {
                 let measured = CGFloat(samples[row * columns + column])
-                let value = max(0, measured - (pressed ? 24 : 0)) / 255
+                let value = quieted(max(0, measured - (pressed ? 24 : 0)) / 255)
                 NSColor(srgbRed: value, green: value, blue: value, alpha: 1).setFill()
                 NSRect(
                     x: rect.minX + CGFloat(column) * pixelWidth,
@@ -1491,7 +1516,7 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
                 : rect.maxY - CGFloat(row + 1) * pixelHeight
             for column in 0..<columns {
                 let measured = CGFloat(samples[row * columns + column])
-                let value = max(0, measured - (pressed ? 24 : 0)) / 255
+                let value = quieted(max(0, measured - (pressed ? 24 : 0)) / 255)
                 NSColor(srgbRed: value, green: value, blue: value, alpha: 1).setFill()
                 NSRect(
                     x: rect.minX + CGFloat(column) * pixelWidth,

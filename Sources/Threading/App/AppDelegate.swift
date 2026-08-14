@@ -82,6 +82,25 @@ private struct StartupProfileMeasurement: Sendable {
     }
 }
 
+/// The app's command plane is one responder hop outside AppKit's ordinary Edit menu.
+///
+/// Cut, Copy and Paste are actions implemented by the text responder itself. Undo is different:
+/// the operation lives on that responder's undo manager. Re-sending `undo` into the responder
+/// chain therefore found no action even though the focused editor's manager had work waiting —
+/// which is why calling the manager directly in a component test passed while the real ⌘Z did
+/// nothing. Resolve the focused responder first and invoke the manager it owns.
+@MainActor
+enum FirstResponderUndo {
+    @discardableResult
+    static func perform(in window: NSWindow?) -> Bool {
+        guard let manager = window?.firstResponder?.undoManager, manager.canUndo else {
+            return false
+        }
+        manager.undo()
+        return true
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
 
@@ -568,6 +587,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // only exists if the setting was on at launch, which is the version where turning it on
         // does nothing until the next restart.
         UsageWindowPoker.shared.start()
+
+        // Tells the user when one of their own limits crosses a line they asked about. Started
+        // unconditionally for the same reason as the two services around it: the rules are read
+        // at the moment a reading arrives, so adding one needs no restart. It refuses under a
+        // test bundle on its own account.
+        UsageAlertCenter.shared.start()
 
         // Watches live sessions for a usage-limit refusal and carries out the user's chosen
         // recovery. Started unconditionally for the poker's reason — the policy is read at the
@@ -2242,7 +2267,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case "system.preferences": mainWindowController?.toggleSettingsFromCommand()
         case "system.hide": NSApp.hide(nil)
         case "system.quit": NSApp.terminate(nil)
-        case "system.undo": NSApp.sendAction(#selector(UndoManager.undo), to: nil, from: nil)
+        case "system.undo":
+            let window = NSApp.keyWindow ?? mainWindowController?.window
+            if !FirstResponderUndo.perform(in: window) {
+                // Preserve the platform route for an unusual responder whose undo target is
+                // supplied dynamically rather than through `NSResponder.undoManager`.
+                NSApp.sendAction(#selector(UndoManager.undo), to: nil, from: nil)
+            }
         case "system.cut": NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil)
         case "system.copy": NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
         case "system.paste": NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)

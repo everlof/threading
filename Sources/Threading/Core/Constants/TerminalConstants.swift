@@ -1296,6 +1296,13 @@ struct UsageLimitHistoryDidChange: AppEvent {
     static let name = Notification.Name.usageLimitHistoryDidChange
 }
 
+/// A user-authored limit was added, edited or removed, app-wide or on one account — the signal
+/// the settings page and the alert center re-evaluate on, since a rule created now must be able
+/// to speak before the next reading arrives.
+struct CustomLimitsDidChange: AppEvent {
+    static let name = Notification.Name("ThreadingCustomLimitsDidChange")
+}
+
 /// The usage-window poke's schedule was edited.
 struct UsageWindowScheduleDidChange: AppEvent {
     static let name = Notification.Name("ThreadingUsageWindowScheduleDidChange")

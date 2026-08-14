@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import XCTest
 
 @testable import Threading
@@ -370,7 +371,122 @@ final class CompareExportTests: XCTestCase {
         XCTAssertTrue(controller.canExportComparison)
     }
 
+    // MARK: - The save panel's accessory
+
+    /// The format row is inside the system panel rather than beside it, so it is built from the
+    /// panel's own kind of control. A themed one there could not even open its list — see the
+    /// geometry test below.
+    @MainActor
+    func testTheFormatRowIsBuiltFromTheSystemPanelsOwnControls() throws {
+        let session = CompareExportPanel(suggestedName: "Untitled")
+        session.configure()
+
+        let accessory = try XCTUnwrap(session.panel.accessoryView)
+        XCTAssertTrue(session.chooser.isDescendant(of: accessory))
+        XCTAssertEqual(session.chooser.itemTitles, CompareExportFormat.allCases.map(\.title))
+        XCTAssertNil(
+            Self.themedComponent(in: accessory),
+            "an app-owned control inside a save panel's accessory window cannot open its menu"
+        )
+    }
+
+    @MainActor
+    func testChoosingTheArchiveRetypesBothTheNameAndWhatThePanelAccepts() throws {
+        let session = CompareExportPanel(suggestedName: "Report")
+        session.configure()
+        XCTAssertEqual(session.panel.nameFieldStringValue, "Report.html")
+        XCTAssertEqual(session.panel.allowedContentTypes, [.html])
+
+        let archive = try XCTUnwrap(CompareExportFormat.allCases.firstIndex(of: .archive))
+        session.chooser.selectItem(at: archive)
+        XCTAssertTrue(
+            NSApp.sendAction(
+                try XCTUnwrap(session.chooser.action),
+                to: session.chooser.target,
+                from: session.chooser
+            ),
+            "the chooser reaches the session through the target and action it was given"
+        )
+
+        XCTAssertEqual(session.format, .archive)
+        XCTAssertEqual(session.panel.nameFieldStringValue, "Report.zip")
+        XCTAssertEqual(session.panel.allowedContentTypes, [.zip])
+    }
+
+    /// The panel opens on the comparison's own name. AppKit hands out a save panel that is
+    /// already called Untitled, and the name the export suggested was being dropped on the floor
+    /// — every comparison was offered as `Untitled.html`.
+    @MainActor
+    func testThePanelOpensOnTheNameTheComparisonSuggested() {
+        let session = CompareExportPanel(suggestedName: "one-vs-two")
+        session.configure()
+
+        XCTAssertEqual(session.panel.nameFieldStringValue, "one-vs-two.html")
+    }
+
+    /// A retype takes off the extension this panel wrote, not whatever follows the last dot in
+    /// the name the user typed.
+    @MainActor
+    func testARetypeKeepsADottedNameWhole() throws {
+        let session = CompareExportPanel(suggestedName: "one-vs-two")
+        session.configure()
+        session.panel.nameFieldStringValue = "v1.2.html"
+
+        session.chooseFormat(at: try XCTUnwrap(CompareExportFormat.allCases.firstIndex(of: .archive)))
+
+        XCTAssertEqual(session.panel.nameFieldStringValue, "v1.2.zip")
+    }
+
+    /// Why that row cannot be a `ThemedPopUp`: an app-owned dropdown is a view inside its source
+    /// window, and AppKit gives an accessory a window exactly as tall as the accessory. Laid out
+    /// in that strip the menu has room for none of its rows — what shipped was a two-point sliver
+    /// of the panel's own border sitting under the closed control.
+    @MainActor
+    func testAnAppOwnedDropdownWouldHaveNoRoomInTheAccessoryStrip() throws {
+        let session = CompareExportPanel(suggestedName: "Untitled")
+        session.configure()
+        let accessory = try XCTUnwrap(session.panel.accessoryView)
+        accessory.layoutSubtreeIfNeeded()
+
+        let strip = NSRect(origin: .zero, size: accessory.frame.size)
+        let control = session.chooser.convert(session.chooser.bounds, to: accessory)
+        let entries = CompareExportFormat.allCases.map {
+            ThemedMenuEntry.item(ThemedMenuItem(title: $0.title))
+        }
+        let wanted = NSSize(
+            width: ThemedMenuMetrics.width(
+                for: entries, minimum: control.width, selectedEntryIndex: 0
+            ),
+            height: ThemedMenuMetrics.height(for: entries)
+        )
+
+        let frame = ThemedMenuLayout.frame(
+            anchor: control,
+            desiredSize: wanted,
+            in: strip,
+            flipped: accessory.isFlipped,
+            whenClipped: { ThemedMenuMetrics.clippedHeight(for: entries, atMost: $0) }
+        )
+
+        XCTAssertTrue(
+            strip.contains(frame),
+            "the overlay is a view in the window, so the list cannot reach past the strip"
+        )
+        let firstRow = ThemedMenuMetrics.verticalOuterInset * 2
+            + (ThemedMenuMetrics.heights(for: entries).first ?? 0)
+        XCTAssertLessThan(frame.height, firstRow, "not even the first row fits in the strip")
+    }
+
     // MARK: - Helpers
+
+    @MainActor
+    private static func themedComponent(in view: NSView) -> NSView? {
+        if view is ThemedComponent { return view }
+        for subview in view.subviews {
+            if let found = themedComponent(in: subview) { return found }
+        }
+        return nil
+    }
 
     @discardableResult
     private func write(_ name: String, _ data: Data) throws -> URL {

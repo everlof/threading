@@ -1180,13 +1180,15 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
                 return dimmed(secondaryFill)
             }
             if buttonStyle.primaryTreatment == .outlined {
-                return isPressed || isHovered
+                let fill = isPressed || isHovered
                     ? primaryColor.withAlphaComponent(1 - Layout.pressedDim)
                     : .clear
+                return dimmed(fill)
             }
-            return isPressed || isHovered
+            let fill = isPressed || isHovered
                 ? primaryColor.withAlphaComponent(Layout.pressedDim)
                 : primaryColor
+            return dimmed(fill)
         }
         return dimmed(secondaryFill)
     }
@@ -1202,8 +1204,8 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
     private var surfaceBorder: NSColor? {
         guard isProminent else { return Design.Surface.border }
         if buttonStyle.primaryTreatment == .raised { return nil }
-        if buttonStyle.primaryTreatment == .outlined { return primaryColor }
-        return buttonStyle.primaryBorderRole.map(AppThemePalette.color)
+        if buttonStyle.primaryTreatment == .outlined { return dimmed(primaryColor) }
+        return buttonStyle.primaryBorderRole.map { dimmed(AppThemePalette.color($0)) }
     }
 
     private var primaryColor: NSColor {

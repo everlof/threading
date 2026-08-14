@@ -795,6 +795,19 @@ The same transparent-backing path is used when `chrome.frame.corner_radius` is n
 permanent content root receives the radius and clips the workspace, while `WindowChromeFrameView`
 clears and strokes the matching rounded outline. A zero radius remains the backwards-compatible
 square default for existing theme documents.
+
+**The backing is stated at birth as well as at the flip.** A shaped theme active at launch never
+runs `enterTakeover` — `createWindow` builds the window frameless already and the coordinator
+only reads that mask back — so for as long as the surface was set from the exchange alone, a
+window born shaped kept the opaque backing and painted the part of its rectangle the frame had
+just cleared. Measured under Tiger, launched with the theme on: the seven-point corner cleared
+and stroked correctly, and the window's own backing filled the quarter behind it, so every corner
+wore a white wedge inside a square outline; the same launch under BeOS left the shoulders beside
+the title tab filled. It reads as a drawing bug in the corner and is not one — nothing above the
+backing is wrong. The coordinator's initializer therefore captures `isOpaque`/`backgroundColor`
+and applies the takeover surface when it finds itself already frameless, which is also what makes
+a later theme change out of takeover hand the native frame the surface the window started with.
+
 `WindowChromeButton` (window menu/close/minimize/zoom/depth) calls the **semantic**
 operations — `zoom(nil)`, `miniaturize(nil)`, `orderBack(nil)`, delegate-consulted `close()` — because the
 `perform*` forms animate a standard button a frameless window does not have and refuse outright
@@ -931,6 +944,12 @@ to its single one-point seat instead of the raised two-ring edge, which is the e
 difference between a drawn box and a moulded one. The frame keeps a small corner radius, the
 one concession to the platform — a hard rectangle is right on a text console and wrong floating
 over a desktop where every neighbour is rounded.
+
+That seat keeps the theme's `border` ink wherever it already registers against the ground, so
+TUI's title seam, control rules, straight frame runs, and antialiased corner remain one drawing.
+Only an authored border below the frame's measured visibility floor is raised to the generic
+tertiary-ink fallback; replacing every flat frame unconditionally made TUI's straight edge much
+brighter than the corner it turned through, which read as a hook at the join.
 
 **Its archive entry records every component as `not_applicable`, not `missing`.** The ledger's
 job is to say what evidence exists, and "none, by construction" has to be an answer it can

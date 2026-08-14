@@ -41,8 +41,8 @@ extension SessionComposerViewController {
             case .whenConversationFinishes:
                 self.presentScheduledFinishPicker(candidates: finishCandidates)
             case .custom:
-                ScheduleMessageAlert.present(
-                    over: self.view.window,
+                ScheduleMomentPickerViewController.present(
+                    over: self,
                     title: L10n.string("Schedule session")
                 ) { [weak self] date in
                     guard let self, let date else { return }
@@ -211,7 +211,7 @@ extension SessionComposerViewController {
                 ScheduledMessageStripView.Row(
                     id: message.id,
                     summary: message.summary,
-                    timing: ScheduledTiming.sentence(for: message, from: now),
+                    timing: ScheduledTiming.automaticStartSentence(for: message, from: now),
                     problem: ScheduledTiming.problem(for: message.state)
                 )
             }

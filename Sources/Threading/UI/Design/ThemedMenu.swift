@@ -543,6 +543,21 @@ enum ThemedMenuLayout {
         max(maximumHeightFloor, bounds.height * maximumHeightRatio)
     }
 
+    /// How few rows a panel may be squeezed to before it stops being a list at all.
+    ///
+    /// The room beside a control is the room its window has, and a small window has almost
+    /// none: a pop-up in a dialog sized to its own two lines of text opened a list of
+    /// ninety-six quarter hours **one and a half rows tall**, which says "there is more here"
+    /// and nothing else — not one answer the user could have been looking for was on screen.
+    /// Four rows is where a dropdown starts reading as a list; below that the panel stops
+    /// respecting the control's edge and takes the window instead (see `frame`), which is what
+    /// a platform menu does on a screen too short to hold it.
+    static let minimumVisibleRows: CGFloat = 4
+
+    static var minimumUsefulHeight: CGFloat {
+        ThemedMenuMetrics.verticalOuterInset * 2 + ThemedMenuMetrics.rowHeight * minimumVisibleRows
+    }
+
     /// `whenClipped` is given the clamped height and answers with the one to use, which is how
     /// a panel that cannot show every row ends on half a row instead of on a clean edge. It is
     /// passed in rather than read from the entries so this stays plain geometry a test can call;
@@ -576,14 +591,29 @@ enum ThemedMenuLayout {
         let available = max(0, opensAfter ? roomAfter : roomBefore)
         // The side is chosen against the clamped height, then the peek is taken out of it:
         // shortening a panel never changes which side it had room on.
-        let clamped = min(desiredSize.height, maximumHeight(in: bounds), available)
+        let ceiling = min(desiredSize.height, maximumHeight(in: bounds))
+        // Neither side of the control can hold a readable list, so the panel stops clearing the
+        // control and lies over it instead — every row the window can show, rather than the
+        // sliver the gap below the control left. See `minimumUsefulHeight`.
+        let overlapsAnchor = min(ceiling, available) < min(ceiling, minimumUsefulHeight)
+        let clamped = overlapsAnchor
+            ? min(ceiling, max(0, bounds.height - screenInset * 2))
+            : min(ceiling, available)
         let height = clamped < desiredSize.height ? whenClipped(clamped) : clamped
 
-        let y: CGFloat
+        var y: CGFloat
         if flipped {
             y = opensAfter ? anchor.maxY + gap : anchor.minY - gap - height
         } else {
             y = opensAfter ? anchor.minY - gap - height : anchor.maxY + gap
+        }
+        if overlapsAnchor {
+            // Slid back inside the window from wherever the control put it, so the panel keeps
+            // the edge it was opened from while staying whole.
+            y = min(
+                max(y, bounds.minY + screenInset),
+                max(bounds.minY + screenInset, bounds.maxY - screenInset - height)
+            )
         }
         return NSRect(x: x, y: y, width: width, height: height)
     }

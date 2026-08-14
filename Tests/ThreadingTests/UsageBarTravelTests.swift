@@ -165,8 +165,11 @@ final class UsageBarTravelTests: XCTestCase {
     }
 
     /// The fill is the first subview the bar adds, under the pace mark.
+    /// Asked of the bar by name rather than by subview index: the fill stopped being
+    /// `subviews.first` the day the capped track was inserted below it, and this helper reported
+    /// zero for a bar that was drawing perfectly well.
     private func drawnFillWidth(of bar: UsageBarView) -> CGFloat {
-        bar.subviews.first?.frame.width ?? 0
+        bar.drawnFillWidth
     }
 
 }

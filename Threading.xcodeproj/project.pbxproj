@@ -398,6 +398,12 @@
 		484855E1A2E2956788C83F7C /* AquaChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EA8034DA3D02FDE9CA92D28 /* AquaChromeTests.swift */; };
 		13484E568C56C1B0CBA17F1C /* PanelContentInsetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E82844241F22CED920B3927 /* PanelContentInsetTests.swift */; };
 		CBD4029357E1F8CD97AE6862 /* SidebarWidthDensityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46CCD6310B7AC3DE03A3AB5E /* SidebarWidthDensityTests.swift */; };
+		E33C012C48DFD36637553A5D /* CustomLimitEvaluatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DABDD663A0167DB319287236 /* CustomLimitEvaluatorTests.swift */; };
+		D640DEAD3BB6E3D3DDDD6A0D /* UsageAlertLedgerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B31BC838261E52489979E405 /* UsageAlertLedgerTests.swift */; };
+		BFD442F982A8DAC776B3AAFC /* CustomLimitSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7220E5AB83A7FF375242EC2E /* CustomLimitSettingsTests.swift */; };
+		A45463FE3A3936631EF61830 /* AccountLimitsSectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05B45AAE14BB4A93E16E000C /* AccountLimitsSectionTests.swift */; };
+		00CE24E37C075012D7B1F961 /* ScheduleMomentPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 840D05A7F2901A34BDA301B3 /* ScheduleMomentPickerTests.swift */; };
+		36C4064351F16FA00A993BE1 /* CustomLimitShowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1C727C22391340876F040 /* CustomLimitShowTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -851,6 +857,12 @@
 		8EA8034DA3D02FDE9CA92D28 /* AquaChromeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AquaChromeTests.swift; sourceTree = "<group>"; };
 		5E82844241F22CED920B3927 /* PanelContentInsetTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PanelContentInsetTests.swift; sourceTree = "<group>"; };
 		46CCD6310B7AC3DE03A3AB5E /* SidebarWidthDensityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarWidthDensityTests.swift; sourceTree = "<group>"; };
+		DABDD663A0167DB319287236 /* CustomLimitEvaluatorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CustomLimitEvaluatorTests.swift; sourceTree = "<group>"; };
+		B31BC838261E52489979E405 /* UsageAlertLedgerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageAlertLedgerTests.swift; sourceTree = "<group>"; };
+		7220E5AB83A7FF375242EC2E /* CustomLimitSettingsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CustomLimitSettingsTests.swift; sourceTree = "<group>"; };
+		05B45AAE14BB4A93E16E000C /* AccountLimitsSectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccountLimitsSectionTests.swift; sourceTree = "<group>"; };
+		840D05A7F2901A34BDA301B3 /* ScheduleMomentPickerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScheduleMomentPickerTests.swift; sourceTree = "<group>"; };
+		FEA1C727C22391340876F040 /* CustomLimitShowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CustomLimitShowTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1390,6 +1402,12 @@
 				8EA8034DA3D02FDE9CA92D28 /* AquaChromeTests.swift */,
 				5E82844241F22CED920B3927 /* PanelContentInsetTests.swift */,
 				46CCD6310B7AC3DE03A3AB5E /* SidebarWidthDensityTests.swift */,
+				DABDD663A0167DB319287236 /* CustomLimitEvaluatorTests.swift */,
+				B31BC838261E52489979E405 /* UsageAlertLedgerTests.swift */,
+				7220E5AB83A7FF375242EC2E /* CustomLimitSettingsTests.swift */,
+				05B45AAE14BB4A93E16E000C /* AccountLimitsSectionTests.swift */,
+				840D05A7F2901A34BDA301B3 /* ScheduleMomentPickerTests.swift */,
+				FEA1C727C22391340876F040 /* CustomLimitShowTests.swift */,
 			);
 			name = Tests;
 			path = Tests/ThreadingTests;
@@ -2294,6 +2312,12 @@
 				484855E1A2E2956788C83F7C /* AquaChromeTests.swift in Sources */,
 				13484E568C56C1B0CBA17F1C /* PanelContentInsetTests.swift in Sources */,
 				CBD4029357E1F8CD97AE6862 /* SidebarWidthDensityTests.swift in Sources */,
+				E33C012C48DFD36637553A5D /* CustomLimitEvaluatorTests.swift in Sources */,
+				D640DEAD3BB6E3D3DDDD6A0D /* UsageAlertLedgerTests.swift in Sources */,
+				BFD442F982A8DAC776B3AAFC /* CustomLimitSettingsTests.swift in Sources */,
+				A45463FE3A3936631EF61830 /* AccountLimitsSectionTests.swift in Sources */,
+				00CE24E37C075012D7B1F961 /* ScheduleMomentPickerTests.swift in Sources */,
+				36C4064351F16FA00A993BE1 /* CustomLimitShowTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

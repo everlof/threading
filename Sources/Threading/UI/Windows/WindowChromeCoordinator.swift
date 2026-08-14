@@ -84,6 +84,22 @@ final class WindowChromeCoordinator {
         self.callbacks = callbacks
         isTakeoverActive = !window.styleMask.contains(.titled)
 
+        // A window born frameless never runs `enterTakeover`, so the backing the exchange
+        // would have made transparent is still the opaque one `createWindow` left — and a
+        // shaped theme then draws over its own silhouette. Measured under Tiger, launched
+        // with the theme already on: the frame's seven-point corner cleared and stroked as it
+        // should, and the window's opaque backing painted the quarter it had just given up,
+        // so each corner wore a white wedge inside a square outline. The same launch under
+        // BeOS left the shoulders beside the title tab opaque. The surface is therefore
+        // stated here as well as in the flip, and the values `exitTakeover` puts back are
+        // captured with it — otherwise a theme change later in that launch hands a native
+        // frame a transparent backing.
+        if isTakeoverActive {
+            savedIsOpaque = window.isOpaque
+            savedBackgroundColor = window.backgroundColor
+            applyTakeoverSurface(to: window)
+        }
+
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             self?.applyCurrentTheme()
         }

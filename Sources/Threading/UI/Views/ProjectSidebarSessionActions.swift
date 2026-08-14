@@ -788,8 +788,8 @@ extension ProjectSidebarViewController {
         submenu.append(.separator)
         submenu.append(action(L10n.string("Custom time…"), symbol: "calendar") { [weak self] in
             guard let self else { return }
-            ScheduleMessageAlert.present(
-                over: view.window,
+            ScheduleMomentPickerViewController.present(
+                over: self,
                 title: L10n.string("Snooze session"),
                 informativeText: L10n.string("The session keeps running while snoozed."),
                 confirmTitle: L10n.string("Snooze")

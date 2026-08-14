@@ -1206,7 +1206,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         row.onToggle = { [weak self] expanded in
             self?.expansionOverrides[file.path] = expanded
         }
-        row.onWillToggle = { [weak self, weak row] expanded in
+        row.onExpansionGeometryChange = { [weak self, weak row] expanded in
             guard let self, let row else { return }
             self.expansionOverrides[file.path] = expanded
             self.measuredFileRowHeights[file.path] = nil

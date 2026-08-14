@@ -208,14 +208,30 @@ final class AccountUsageItemView: BackdropOverlay {
         // routinely the binding limit and was the one number the pill used to leave out. The
         // text beside it names every window, which is where the insight lives: a spent 5-hour
         // window, a spent week and a spent model mean three different things.
-        let binding = usage?.bindingWindow(metering: model)
-        let severity = UsageSeverity.from(fraction: binding?.fraction)
+        //
+        // A user-authored limit joins that comparison, but only from a rule that asked to be
+        // here: this is the surface that cannot be dismissed, and it must not acquire a new red
+        // state because somebody made a rule to fire one quiet 50% alert.
+        let rules = CustomLimitBounds.toolbarRules(
+            CustomLimitSettings.shared.rules(for: account.id)
+        )
+        let metered = usage?.windows(metering: model) ?? []
+        let binding = CustomLimitBounds.bindingWindow(among: metered, in: rules)
+        let severity = CustomLimitBounds.severity(
+            of: binding?.fraction,
+            on: binding?.id ?? "",
+            in: rules
+        )
 
+        // The gauge still draws the provider's own figure. A ring filled to consumed-of-bound
+        // would be reporting a level the account never reached, on the one control whose whole
+        // job is to say how much is left; what the line moves is the colour.
         ringView.fraction = binding?.fraction
         ringView.tint = severity.glyphColor
 
+        let readings = usage?.readings(metering: model) ?? []
         summaryLabel.attributedStringValue = Self.summary(
-            readings: usage?.readings(metering: model) ?? [],
+            readings: CustomLimitBounds.retinted(readings, of: metered, in: rules),
             ink: ink
         )
     }

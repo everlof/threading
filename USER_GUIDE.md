@@ -1256,7 +1256,11 @@ sits beside **Start session**. Both open the same offers:
   one and the message is sent when that conversation's current turn, including any background
   work the agent reports, is finished. Only conversations that report reliable turn boundaries
   are offered; Threading never schedules unattended work by guessing that a terminal looks quiet.
-- **Custom time…**, a day and a quarter-hour from two menus. The sheet names your time zone.
+- **Custom time…** opens a sheet with two lists side by side: the next fortnight of days, and
+  every quarter hour of the chosen one. Both scroll, both take a typed `14` to jump, and the line
+  under them states the moment you have picked and how far away it is. Times that have already
+  gone today are not offered, and a today with nothing left in it drops out of the day list. The
+  sheet names your time zone.
 
 What is waiting appears in a strip above the box — in a chat, above the queue of messages waiting
 for the current turn to finish. Click a row to open it back up in the composer, ✕ to unschedule
@@ -1563,6 +1567,67 @@ Where the numbers come from, per agent:
 
 Threading never stores or refreshes a login itself — it reads what the official CLI keeps, and
 if a token has expired the tooltip says so and the CLI is the place to sign in again.
+
+### Your own limits
+
+**Settings ▸ Accounts ▸ Your Own Limits.** No limits until you draw one.
+
+The provider's limit is the only line the readings carry, and it only speaks at the end. A limit
+you draw here is your own, ahead of it: pick a window on one account, pick a percentage, and
+Threading tells you when you reach it.
+
+Open a login's fold and choose **Add Limit…**. The menu offers the windows that login actually
+reports — `5-hour`, `Weekly`, and any window your plan meters per model — and, under each, the
+line you want:
+
+- **It reaches 50% / 75% / 90%** — one notification, once, when that window gets there.
+- **Every 10%** — a notification at each tenth of the way up.
+
+A line is announced **once per window**, and everything re-arms when the window resets. If a
+reading jumps past two of your lines at once — 48% to 61% with lines at 50% and 60% — you get one
+notification naming 60%, not two. A later line on the same window replaces the earlier
+notification rather than stacking under it.
+
+**Tell me when I reach my own limits** is the switch above the list, and it is separate from the
+session notifications under **Settings ▸ General**: silencing your sessions does not silence your
+quota, and the reverse. Switching it off takes down anything it had already posted.
+
+**Where a limit shows.** Open the usage pill's popover and a window you have drawn a line on has
+its bar **shaded past the line**: full strength up to your percentage, quiet beyond it. The bar's
+length and the percentage beside it stay the provider's own figure — what changes is the colour,
+which is read against *your* line rather than the provider's. A weekly at 47% under a 50% limit
+prints 47% in red, because the number is the fact and the colour is the pressure. Hover the row
+to see which limit it is.
+
+That is a different mark from the thin **time mark** on the same bar: the tick is where the clock
+has reached in the window, the shading is where you said to stop. The account menus colour their
+usage columns the same way, so a login you have fenced off reads as pressured at the moment you
+are choosing which account to use.
+
+The always-visible **usage pill** in the toolbar stays out of it unless you ask. Switch
+**Toolbar** on beside a limit and that limit may colour the pill and its ring — including turning
+it red over your own line rather than the provider's. It is off by default, because the one
+control you cannot dismiss should not go red because you asked for one quiet notification. The
+pill's number and its ring's fill stay the provider's own figure either way.
+
+Three things it deliberately does not do, this version:
+
+- It does not stop anything. Nothing is held back, no session is paused, and typing into a
+  session spends whatever you type. The limit is a line and a notification.
+- It never guesses. If Threading has no reading for that window — never fetched, or the window's
+  reset has just passed — the row says so and nothing is announced. A percentage you were never
+  shown is not a percentage you should be alerted about.
+- The percentage you are told is always the one the **window** reads. A limit at 50% of the
+  weekly announces "Weekly has reached 50%", not a fraction of your own line.
+
+**All Accounts** is the first fold. A limit set there applies to every login that has none of its
+own, which is how you say "tell me at 90% of the weekly, whichever account I am on" once. A login
+inheriting one shows it on its own row marked *from All Accounts* — and you can remove it there
+without touching the others, which quietly makes that login answer for itself from then on. Adding
+a limit to a login keeps whatever it was already inheriting.
+
+Remove a limit with **Remove** on its row. Clearing every limit on an account is remembered as a
+choice: that account stays at none rather than picking the All Accounts list back up.
 
 ### Opening the day's window on time
 
@@ -3647,7 +3712,8 @@ Threading runs without the App Sandbox. A terminal that cannot open a pseudo-ter
 your shell is not a terminal, and that is the trade the app makes.
 
 ### Accounts
-Per-account icons and names. See [Accounts](#accounts).
+Per-account icons and names, and the limits you draw on your own quota. See
+[Accounts](#accounts) and [Your own limits](#your-own-limits).
 
 ### GitHub
 

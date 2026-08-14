@@ -1,9 +1,24 @@
 # Limit management: your own limits, ahead of the provider's
 
-**Status: draft.** Nothing here is implemented. Re-check it against the code before starting,
-and move the decisions that survive into `docs/architecture/` — most likely
-[`accounts.md`](../architecture/accounts.md), [`limit-recovery.md`](../architecture/limit-recovery.md)
-and [`usage-dashboard.md`](../architecture/usage-dashboard.md) — rather than leaving them here.
+**Status: partly shipped.** Sequencing step 1 — *alerts on provider windows* — shipped
+2026-08-14: the rule record, the two storage scopes, `CustomLimitEvaluator`, window-instance
+identity, the fired-state ledger, `UsageAlertCenter` and the Accounts page's Limits section. Step
+2's *bar* half shipped 2026-08-15 — `CustomLimitBounds`, the capped track on `UsageBarView`,
+effective-bound tinting on `UsageWindowRow`, the identity menu's metric columns and the
+always-visible pill. Its
+durable decisions now live in
+[`accounts.md § Your own limits, ahead of the provider's`](../architecture/accounts.md#your-own-limits-ahead-of-the-providers);
+**that file is authoritative for what exists**, and this one remains the plan for steps 2–6.
+Re-check the rest against the code before starting, and move the decisions that survive into
+`docs/architecture/` — most likely [`accounts.md`](../architecture/accounts.md),
+[`limit-recovery.md`](../architecture/limit-recovery.md) and
+[`usage-dashboard.md`](../architecture/usage-dashboard.md) — rather than leaving them here.
+
+What the shipped slice settled, so the sections below are read against it: thresholds are
+fractions of the bound and a sentence always names the percentage the *window* reads; the
+consequence ladder is one ordered enum clamped to what the build implements, so a rule stored at
+a later tier evaluates rather than being dropped; and the metric enum declares `paceShare` and
+`syntheticWindow` already, so steps 4's arrival changes no stored shape.
 
 Sibling of [usage-aware-accounts.md](usage-aware-accounts.md): that draft tells the *agent* its
 budget and moves work when an account is spent; this one lets the *user* draw the line the
@@ -260,10 +275,10 @@ Two extensions fall out nearly free, and one is deliberately deferred:
 | Guard-table hold shape for automated spend | exists (`UsageWindowPlan`) |
 | Escape strip, ranking, eligibility filters | exists (`LimitEscapeSuggestion`) |
 | Pace `timeMark` on usage bars; chart marker kinds | exists |
-| **Rule record + `AccountPreferencesStore` surface** | new, small |
-| **`CustomLimitEvaluator`** | new — pure policy over data that exists |
-| **`UsageAlertCenter` + fired-state store** | new |
-| **Effective-bound tinting + cap ticks** | new, additive to existing components |
+| **Rule record + `AccountPreferencesStore` surface** | **shipped** (`CustomLimit`, `AccountPreference.customLimits`, `CustomLimitSettings`) |
+| **`CustomLimitEvaluator`** | **shipped** for `fixedCap`; the two other metrics are declared and refused |
+| **`UsageAlertCenter` + fired-state store** | **shipped** (`UsageAlertLedger`, keyed by account + rule + window instance) |
+| **Effective-bound tinting + cap ticks** | **shipped on the bar** (`CustomLimitBounds`, `UsageBarView.capMark`); the pill, the menus and the charts still read the provider's 100% |
 | **Hold seam extensions (sends, poke, ranking, plane)** | new — one comparison at each existing seam |
 | **Tier-4 park + conduct mark + strip variant** | new |
 
@@ -303,9 +318,16 @@ Two extensions fall out nearly free, and one is deliberately deferred:
 
 ## Sequencing
 
-1. **Alerts on provider windows.** Smallest slice, immediately useful, and it builds the
-   evaluator, instance identity, fired-state store and `UsageAlertCenter` everything else rides.
-2. **Show:** cap ticks and effective-bound tinting.
+1. ~~**Alerts on provider windows.**~~ **Shipped 2026-08-14.** Smallest slice, immediately
+   useful, and it built the evaluator, instance identity, fired-state store and
+   `UsageAlertCenter` everything else rides.
+2. **Show:** ~~cap ticks and effective-bound tinting~~ — **the bar shipped 2026-08-15**
+   (`CustomLimitBounds`, `UsageBarView.capMark`, `UsageWindowRow`). The line turned out not to be
+   a tick: it is a change in the *track*, because a pace mark and a cap mark on a 6pt bar are two
+   different kinds of thing and cannot share one vocabulary. What remains of this step is the
+   *model* menu's scoped columns and the cap-line marker on the Limit History charts. The bar,
+   the identity menu's columns and the always-visible pill — segments, ring and the per-rule
+   `showsInToolbar` switch — all shipped.
 3. **Holds:** the three existing seams plus the plane's refusal sentence.
 4. **The two new metrics:** pace share, then synthetic windows (fraction-delta first, ledger
    funding second).

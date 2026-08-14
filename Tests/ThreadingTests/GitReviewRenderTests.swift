@@ -665,6 +665,48 @@ final class GitReviewRenderTests: XCTestCase {
                 .write(to: directory.appendingPathComponent("git-review-pane-\(name).png"))
         }
 
+        // One canonical interaction state proves the retained heading is a real file header,
+        // rather than a path-only model update or a decorative clone with dead controls.
+        let stickyAppearance = NSAppearance(named: .darkAqua)
+        var stickyData: Data?
+        let renderSticky = {
+            let pane = self.laidOutPane(files, appearance: stickyAppearance)
+            pane.controller.renderedFileRoot = URL(fileURLWithPath: "/tmp")
+            pane.controller.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 100))
+            pane.controller.scrollView.reflectScrolledClipView(
+                pane.controller.scrollView.contentView
+            )
+            pane.controller.updateScrollControls()
+            pane.view.layoutSubtreeIfNeeded()
+
+            guard let header = pane.controller.stickyFileHeaderRowForTesting,
+                  let event = NSEvent.enterExitEvent(
+                    with: .mouseEntered,
+                    location: header.convert(
+                        NSPoint(x: header.bounds.midX, y: header.bounds.midY),
+                        to: nil
+                    ),
+                    modifierFlags: [],
+                    timestamp: 0,
+                    windowNumber: header.window?.windowNumber ?? 0,
+                    context: nil,
+                    eventNumber: 0,
+                    trackingNumber: 0,
+                    userData: nil
+                  ) else { return }
+            header.mouseEntered(with: event)
+            pane.view.layoutSubtreeIfNeeded()
+            XCTAssertGreaterThan(pane.controller.stickyFileHeaderHeightForTesting, 30)
+            let visibleActions = header.subviews.compactMap { $0 as? ThemedIconButton }.filter {
+                !$0.isHidden && $0.alphaValue > 0.99
+            }
+            XCTAssertEqual(visibleActions.count, 2)
+            stickyData = self.png(of: pane.view)
+        }
+        stickyAppearance?.performAsCurrentDrawingAppearance(renderSticky)
+        try XCTUnwrap(stickyData, "failed to render sticky heading actions")
+            .write(to: directory.appendingPathComponent("git-review-pane-sticky-dark.png"))
+
         print("Rendered the review pane to \(directory.path)")
     }
 

@@ -25,11 +25,22 @@ struct AccountPreference: Codable, Equatable {
     /// running the user's explicit pick says nothing about what the default would have been.
     var lastReportedModel: String?
 
+    /// The user's own limits on this account — the lines their quota is measured against, ahead
+    /// of the provider's.
+    ///
+    /// **Absent means inherit**, which is why this is optional rather than an empty array: the
+    /// app-wide defaults in `CustomLimitSettings` apply until an account answers for itself, and
+    /// an empty array is the distinct, deliberate answer "this account has no limits, whatever
+    /// the app-wide default says". A plain `[CustomLimit]` could not express the second, and the
+    /// account whose owner cleared its rules would silently pick the app default back up.
+    var customLimits: [CustomLimit]?
+
     var isEmpty: Bool {
         emoji == nil
             && displayNameOverride == nil
             && isDisabled == nil
             && lastReportedModel == nil
+            && customLimits == nil
     }
 }
 
@@ -56,7 +67,13 @@ final class AccountPreferencesStore {
 
     /// Not private so a test can stand one up over its own suite: the app uses `shared`, and
     /// the alternative is a test that writes account state into the user's real defaults.
-    init(defaults: UserDefaults = .standard) {
+    ///
+    /// The default is `PreferenceStore.shared` rather than `.standard` because everything in this
+    /// blob is a **choice** — an icon, a name, a login switched off, and now the lines a user drew
+    /// on their own quota. The tests are hosted in the app, so `.standard` here was the
+    /// developer's own account preferences; a suite that adds a limit rule must not be able to
+    /// leave one standing on the login they are actually working with.
+    init(defaults: UserDefaults = PreferenceStore.shared) {
         self.persistence = RecoverableDefaultsStore(
             defaults: defaults,
             key: Keys.accountPreferences,
@@ -112,6 +129,37 @@ final class AccountPreferencesStore {
         let normalisedModel = normalized(model)
         guard normalisedModel != preferences[accountID.rawValue]?.lastReportedModel else { return }
         update(accountID) { $0.lastReportedModel = normalisedModel }
+    }
+
+    // MARK: - Custom Limits
+
+    /// The limits stored *on this account*, or nil when it has never answered and inherits the
+    /// app-wide defaults. Callers that want the rules actually in force ask
+    /// `CustomLimitSettings.rules(for:)`, which resolves the two scopes.
+    func customLimits(for accountID: AccountID) -> [CustomLimit]? {
+        preferences[accountID.rawValue]?.customLimits
+    }
+
+    /// Replaces this account's limits. Pass nil to hand the account back to the app-wide
+    /// defaults — which is a different instruction from passing `[]`, and the only way to undo
+    /// "this account has none".
+    func setCustomLimits(_ limits: [CustomLimit]?, for accountID: AccountID) {
+        update(accountID) {
+            $0.customLimits = limits.map { Array($0.prefix(CustomLimitDefaults.maximumRulesPerAccount)) }
+        }
+    }
+
+    /// Appends one rule to this account's **own** list, leaving the two-scope question alone.
+    ///
+    /// Deliberately low-level: whether an account that has answered nothing yet should start from
+    /// the app-wide defaults or from nothing is a resolution question, and it is answered once in
+    /// `CustomLimitSettings.add(_:for:)` rather than here, where this store would have to learn
+    /// about a scope above it.
+    func appendCustomLimit(_ limit: CustomLimit, for accountID: AccountID) {
+        var limits = customLimits(for: accountID) ?? []
+        guard limits.count < CustomLimitDefaults.maximumRulesPerAccount else { return }
+        limits.append(limit)
+        setCustomLimits(limits, for: accountID)
     }
 
     /// Restores the discovered icon and name, leaving the account switched however it is.

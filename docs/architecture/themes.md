@@ -1361,9 +1361,9 @@ ids, rule-ink budget, the settings-page renders — picked the five up by their 
 
 ## 2026-08-14 — a period control ends where its own silhouette does
 
-Four reports against Tiger, one shape between them: a drawing that belonged to a control took the
-control's *box* for its *outline*, and every one of them was plainly visible in a screenshot while
-every assertion around it passed.
+Five reports against Tiger, one shape between them: a drawing that belonged to a control took some
+other rectangle for the control's outline — its own box, or AppKit's idea of it — and every one of
+them was plainly visible in a screenshot while every assertion around it passed.
 
 **A scrollbar with nothing left to scroll shows an empty trough.** AppKit disables a legacy
 scroller once its scroll view has nowhere to go, but it keeps the `knobProportion` that view last
@@ -1376,9 +1376,24 @@ knobProportion > 0` — is now the single gate on the thumb, replacing the Windo
 `knobProportion <= 0` special case that had been the one appearance to get this right. The
 proportion is read alongside `isEnabled` because a scroll view states the empty case that way
 first, and because the terminal's standalone scroller is driven by hand: SwiftTerm sets
-`isEnabled` from its own `canScroll`, so one rule covers both. The arrows stay and their glyphs
-go through `DisabledControlDrawing` — the plate is period furniture and stays lit, since dimming
-it would leave the trough's end brighter than the trough.
+`isEnabled` from its own `canScroll`, so one rule covers both. The arrows stay and go quiet: a
+vector glyph through `DisabledControlDrawing`, a measured plate by lifting its ink toward the
+plate (`quieted`), because a bitmap whose glyph is part of the sample table cannot be faded
+without taking the furniture with it. Either way the plate stays lit — dimming it would leave the
+trough's end brighter than the trough.
+
+**And a period scrollbar declines the layer path.** Modern `NSScroller` is layer-backed: it
+repaints by calling the old part hooks — and *only* those, never `draw(_:)` — each behind a clip
+of AppKit's own idea of that part. Ours are deliberately different rectangles: the slot runs to
+the ends because the arrows are furniture this component places, and the thumb carries a period
+minimum length. Everything of ours outside AppKit's rectangles was therefore cut. Parked at the
+top of its travel the gel lost the entire curve of its cap and started mid-capsule at full width —
+the flat-topped thumb this was reported as — while the trough and arrow plates stopped three
+points short of the control's own edges, and the gel's trailing column was shaved. Nothing in the
+geometry was wrong, which is why `rect(for:)` looked innocent and the archived reference
+reproductions (drawn straight through `draw(_:)` into a bitmap) looked perfect the whole time.
+`ThemedScroller.wantsUpdateLayer` returns false under any period appearance, which puts that
+single pass back in the loop with the whole view as its clip.
 
 **The Aqua pop-up's gel well is clipped to the button's face.** `drawAquaArrowWell` filled a
 rectangle from the arrow rect to `bounds.maxX`, which painted over both trailing corners and the

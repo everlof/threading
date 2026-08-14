@@ -144,7 +144,10 @@ final class AccountUsagePopoverViewController: NSViewController {
     /// One window, drawn by the shared row so the popover and the composer's usage panel
     /// stay the same thing seen twice.
     private func row(for window: AccountUsage.Window) -> NSView {
-        UsageWindowRow(window: window)
+        UsageWindowRow(
+            window: window,
+            limits: CustomLimitSettings.shared.rules(for: account.id)
+        )
     }
 
     /// The freshness line, with the source named when the reading is second-hand — a cached

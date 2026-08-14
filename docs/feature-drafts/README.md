@@ -33,8 +33,13 @@ reshuffling it is a line move.
 
 - [Limit management](limit-management.md) — user-authored limits ahead of the provider's:
   recreate a window the provider removed, pace-share caps that keep slack on a shared login,
-  threshold alerts, and holds on Threading-initiated spend at the user's own line. Its own
-  sequencing starts with the threshold alerts.
+  threshold alerts, and holds on Threading-initiated spend at the user's own line. **The
+  threshold alerts shipped 2026-08-14** — the rule record, the pure evaluator, window-instance
+  identity, the fired-state ledger and the Accounts page's Limits section, with the durable
+  decisions moved to [`accounts.md`](../architecture/accounts.md). It stays first here because
+  everything above it now rides machinery that exists: showing the line on the bars and the
+  charts is the next slice, and it is surfaces reading `CustomLimitEvaluation.severity` rather
+  than new policy.
 - [Usage-aware accounts](usage-aware-accounts.md) — tell an agent what its budget is, let the user
   rank which logins may be spent automatically, move work to the next best one before a
   weekly window strands it, and keep a drained fleet's anchored windows cycling at reset. The

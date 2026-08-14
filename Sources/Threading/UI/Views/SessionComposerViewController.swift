@@ -595,6 +595,15 @@ final class SessionComposerViewController: NSViewController {
             self.refreshScheduleChip()
         }
 
+        // The primary action is outside the box, but its state still belongs to the box's
+        // submission contract. In particular, scheduling clears the brief: leaving a bright
+        // "Start session" beside that empty editor made the scheduled receipt look like only
+        // half an operation, as though Start still had to be pressed as well.
+        promptView.onSubmissionAvailabilityChange = { [weak self] canSubmit in
+            self?.refreshStartButton(canSubmit: canSubmit)
+        }
+        refreshStartButton()
+
         wireScheduledStrip()
         appEvents.observe(ScheduledMessagesDidChange.self) { [weak self] _ in
             self?.refreshScheduledStrip()
@@ -617,6 +626,23 @@ final class SessionComposerViewController: NSViewController {
     /// a pointer that pauses on it, for the reading that costs no press at all.
     func refreshScheduleChip() {
         scheduleButton.toolTip = scheduleRefusalReason() ?? L10n.string("Start this session later")
+    }
+
+    /// Keeps the outside primary action on the prompt's own submission answer.
+    ///
+    /// Empty is a real disabled state, not only a no-op inside `PromptView.submit()`: after a
+    /// successful scheduled start the empty box sits directly beside this action, and a bright
+    /// Start button there implies that scheduling still needs a second confirmation.
+    private func refreshStartButton(canSubmit: Bool? = nil) {
+        let canSubmit = canSubmit ?? promptView.isSubmissionAvailable
+        startButton.isEnabled = canSubmit
+        if projectID == nil {
+            startButton.toolTip = ComposerDefaults.chooseProjectFirstReason
+        } else if !canSubmit {
+            startButton.toolTip = L10n.string("Write the brief first.")
+        } else {
+            startButton.toolTip = nil
+        }
     }
 
     /// Each chip rebuilds its menu when opened, so a change of agent is reflected everywhere.
@@ -929,8 +955,7 @@ final class SessionComposerViewController: NSViewController {
         promptView.placeholder = project == nil
             ? ComposerDefaults.chooseProjectFirstReason
             : ComposerDefaults.promptPlaceholder
-        startButton.isEnabled = project != nil
-        startButton.toolTip = project == nil ? ComposerDefaults.chooseProjectFirstReason : nil
+        refreshStartButton()
 
         let accounts = availableAccounts
         let account = selectedAgent.supportsAccounts

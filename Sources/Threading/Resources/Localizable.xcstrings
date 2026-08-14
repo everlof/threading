@@ -1465,6 +1465,12 @@
     "When “%@” finishes": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "När ”%@” blir klar" } } }
     },
+    "Scheduled · starts automatically %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Schemalagd · startar automatiskt %@" } } }
+    },
+    "Scheduled · starts automatically when “%@” finishes": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Schemalagd · startar automatiskt när ”%@” blir klar" } } }
+    },
     "The conversation this was waiting for was deleted.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Konversationen som det här väntade på togs bort." } } }
     },
@@ -1488,6 +1494,15 @@
     },
     "Tomorrow": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "I morgon" } } }
+    },
+    "Day": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dag" } } }
+    },
+    "Time": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tid" } } }
+    },
+    "No time left today.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen tid kvar i dag." } } }
     },
     "Send now": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skicka nu" } } }
@@ -28164,7 +28179,40 @@
     "Copy image": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kopiera bild"}}}},
     "Remove attachment": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ta bort bilaga"}}}},
     "The pointer is elsewhere": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Pekaren är någon annanstans"}}}},
-    "The pointer is on this surface": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Pekaren är på den här ytan"}}}}
+    "The pointer is on this surface": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Pekaren är på den här ytan"}}}},
+    "Watch %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Bevaka %@"}}}},
+    "Keep %1$@ under %2$@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Håll %1$@ under %2$@"}}}},
+    "%1$@ has reached %2$@.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%1$@ har nått %2$@."}}}},
+    "%1$@ has reached %2$@, the limit you set for this account.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%1$@ har nått %2$@, gränsen du satt för det här kontot."}}}},
+    "%1$@ has reached %2$@, on the way to your %3$@ limit.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%1$@ har nått %2$@, på väg mot din gräns på %3$@."}}}},
+    "No %@ reading yet.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ingen avläsning av %@ ännu."}}}},
+    "This limit was made in a newer version of Threading.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här gränsen skapades i en nyare version av Threading."}}}},
+    "%1$@ is at %2$@.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%1$@ ligger på %2$@."}}}},
+    "%1$@ is at %2$@ of your %3$@ limit.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%1$@ ligger på %2$@ av din gräns på %3$@."}}}},
+    "Your Own Limits": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dina egna gränser"}}}},
+    "Tell me when I reach my own limits": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Säg till när jag når mina egna gränser"}}}},
+    "A notification when one of your accounts reaches a line you drew. Separate from session notifications, and switched on or off on its own.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En avisering när ett av dina konton når en gräns du dragit. Skild från aviseringar om chattar och slås på eller av för sig."}}}},
+    "Notify me about my own usage limits": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Avisera mig om mina egna användningsgränser"}}}},
+    "Add Limit…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lägg till gräns…"}}}},
+    "Draw a line on this account": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dra en gräns på det här kontot"}}}},
+    "Pick a window and the percentage you want to hear about.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj ett fönster och den procentandel du vill höra om."}}}},
+    "Tell me when…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Säg till när…"}}}},
+    "No limits": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inga gränser"}}}},
+    "1 limit": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "1 gräns"}}}},
+    "%lld limits": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld gränser"}}}},
+    "This account runs on the provider's own limits.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det här kontot går på leverantörens egna gränser."}}}},
+    "You cleared this account's limits.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Du rensade det här kontots gränser."}}}},
+    "It reaches %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det når %@"}}}},
+    "Every %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Var %@"}}}},
+    "A limit here is yours, ahead of the provider's. Today it tells you when a window reaches the line you set — nothing is held back and no session is stopped, and the percentage you are told about is always the one the window itself reads.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En gräns här är din, före leverantörens. I dag säger den till när ett fönster når gränsen du satt – inget hålls tillbaka och ingen chatt stoppas, och procentandelen du får höra är alltid den som fönstret självt visar."}}}},
+    "All Accounts": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Alla konton"}}}},
+    "Applies to every login that has no limits of its own": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Gäller varje inloggning som saknar egna gränser"}}}},
+    "Set one here and every login without its own limits takes it.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sätt en här så tar varje inloggning utan egna gränser den."}}}},
+    "from All Accounts": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "från Alla konton"}}}},
+    "Draw a line on every account": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dra en gräns på alla konton"}}}},
+    "Let this limit colour the usage pill in the toolbar": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Låt den här gränsen färga användningsknappen i verktygsfältet"}}}},
+    "Show this limit on the toolbar pill": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa den här gränsen på verktygsfältets användningsknapp"}}}},
+    "Toolbar": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Verktygsfält"}}}}
   },
   "version": "1.0"
 }

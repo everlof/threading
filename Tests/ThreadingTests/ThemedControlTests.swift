@@ -1186,6 +1186,56 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertGreaterThanOrEqual(above.minX, bounds.minX + ThemedMenuLayout.screenInset)
     }
 
+    /// The room beside a control is only the room its window has, and a dialog sized to its own
+    /// two lines of text has almost none: a pop-up in one opened a list a row and a half tall,
+    /// which is a scroller and no answers. Below four rows the panel stops clearing the control
+    /// and takes the window instead, the way a platform menu does on a short screen.
+    func testADropdownWithNoRoomBesideItsControlTakesTheWindowRatherThanASliver() {
+        // A dialog: two lines of text, a row of controls, a row of buttons.
+        let bounds = NSRect(x: 0, y: 0, width: 360, height: 180)
+        let anchor = NSRect(x: 20, y: 60, width: 120, height: Design.Size.chipHeight)
+        let entries = (0..<96).map { ThemedMenuEntry.item(ThemedMenuItem(title: "Row \($0)")) }
+        let natural = ThemedMenuMetrics.height(for: entries)
+
+        let panel = ThemedMenuLayout.frame(
+            anchor: anchor,
+            desiredSize: NSSize(width: 200, height: natural),
+            in: bounds,
+            flipped: false,
+            whenClipped: { ThemedMenuMetrics.clippedHeight(for: entries, atMost: $0) }
+        )
+
+        XCTAssertGreaterThanOrEqual(
+            panel.height,
+            ThemedMenuLayout.minimumUsefulHeight,
+            "the dropdown opened as a sliver rather than as a list"
+        )
+        XCTAssertGreaterThanOrEqual(panel.minY, bounds.minY + ThemedMenuLayout.screenInset)
+        XCTAssertLessThanOrEqual(panel.maxY, bounds.maxY - ThemedMenuLayout.screenInset)
+        XCTAssertTrue(
+            panel.intersects(anchor),
+            "a panel with nowhere else to go has to lie over the control that opened it"
+        )
+    }
+
+    /// The overlap is the last resort, not the rule: a window with room keeps the dropdown off
+    /// the control it belongs to.
+    func testADropdownWithRoomStillClearsItsControl() {
+        let bounds = NSRect(x: 0, y: 0, width: 400, height: 900)
+        let anchor = NSRect(x: 40, y: 700, width: 120, height: Design.Size.chipHeight)
+        let entries = (0..<8).map { ThemedMenuEntry.item(ThemedMenuItem(title: "Row \($0)")) }
+
+        let panel = ThemedMenuLayout.frame(
+            anchor: anchor,
+            desiredSize: NSSize(width: 200, height: ThemedMenuMetrics.height(for: entries)),
+            in: bounds,
+            flipped: false
+        )
+
+        XCTAssertLessThanOrEqual(panel.maxY, anchor.minY)
+        XCTAssertFalse(panel.intersects(anchor))
+    }
+
     /// A clamped panel that happens to end on a row boundary looks like the whole menu. The
     /// session row's menu grew past the maximum and did exactly that, so Copy Session ID and
     /// Delete Session were invisible until something scrolled — which nothing invited.
@@ -5353,16 +5403,35 @@ final class ThemedControlTests: HostedStoreTestCase {
     func testADisabledButtonIsQuieterThanAnEnabledOne() {
         AppThemePalette.set(AppThemeStyles.cyberpunk)
 
-        func fillAlpha(enabled: Bool) -> CGFloat {
+        func alpha(
+            enabled: Bool,
+            prominent: Bool = false,
+            at point: NSPoint = NSPoint(x: 40, y: 13)
+        ) -> CGFloat {
             let button = ThemedButton(frame: NSRect(x: 0, y: 0, width: 80, height: 26))
+            button.isProminent = prominent
             button.isEnabled = enabled
             let rep = button.bitmapImageRepForCachingDisplay(in: button.bounds)!
             button.cacheDisplay(in: button.bounds, to: rep)
-            return rep.colorAt(x: 40, y: 13)!.alphaComponent
+            return rep.colorAt(x: Int(point.x), y: Int(point.y))!.alphaComponent
         }
 
-        XCTAssertLessThan(fillAlpha(enabled: false), fillAlpha(enabled: true),
+        XCTAssertLessThan(alpha(enabled: false), alpha(enabled: true),
                           "a disabled button drew a louder surface than an enabled one")
+        XCTAssertLessThan(
+            alpha(enabled: false, prominent: true, at: NSPoint(x: 1, y: 13)),
+            alpha(enabled: true, prominent: true, at: NSPoint(x: 1, y: 13)),
+            "a disabled outlined primary kept its full accent edge and still looked pressable"
+        )
+
+        // Cyberpunk's primary is outlined, so its centre is transparent by design. System is
+        // the filled-primary case that exposed the scheduled composer's active-looking Start.
+        AppThemePalette.set(.system)
+        XCTAssertLessThan(
+            alpha(enabled: false, prominent: true),
+            alpha(enabled: true, prominent: true),
+            "a disabled primary kept the full accent face and still looked pressable"
+        )
     }
 
     /// A translucent Bauhaus secondary showed its title twice: once on the face and once in the

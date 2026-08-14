@@ -83,8 +83,16 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         XCTAssertTrue(prompt.isSubmissionEnabled)
         XCTAssertNil(prompt.submissionDisabledReason, "the reason outlived the reason")
         XCTAssertEqual(prompt.placeholder, "Describe a task or ask a question")
+        XCTAssertFalse(start.isEnabled, "an empty brief cannot start a session")
+        XCTAssertEqual(
+            start.toolTip,
+            "Write the brief first.",
+            "the empty action has to say what makes it live"
+        )
+
+        prompt.stringValue = "Trace the launch path"
         XCTAssertTrue(start.isEnabled)
-        XCTAssertNil(start.toolTip, "with nothing left to explain, the button says its own title")
+        XCTAssertNil(start.toolTip, "with something to send, the button says its own title")
         XCTAssertEqual(
             start.shortcut,
             ComposerDefaults.startShortcut,
@@ -1055,6 +1063,38 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         XCTAssertEqual(composer.scheduleButton.toolTip, "Start this session later")
     }
 
+    func testSchedulingAStartClearsTheBriefAndDisablesImmediateStart() throws {
+        let composer = SessionComposerViewController()
+        _ = composer.view
+
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
+        defer { store.removeProject(id: project.id) }
+        composer.show(projectID: project.id)
+
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+        let start = try startButton(in: composer.view)
+        prompt.stringValue = "Finish the release notes"
+        XCTAssertTrue(start.isEnabled)
+
+        composer.scheduleStart(
+            at: Date().addingTimeInterval(60 * 60),
+            anchor: .wallClock
+        )
+
+        XCTAssertEqual(
+            ScheduledMessageStore.shared.sessionStarts(in: project.id).count,
+            1,
+            "the receipt appeared without a scheduled start behind it"
+        )
+        XCTAssertEqual(prompt.stringValue, "")
+        XCTAssertFalse(
+            start.isEnabled,
+            "scheduling left Start active and implied that a second press was required"
+        )
+        XCTAssertEqual(start.toolTip, "Write the brief first.")
+    }
+
     func testWordsTypedBeforeChoosingAProjectFollowIntoIt() throws {
         let composer = SessionComposerViewController()
         _ = composer.view
@@ -1165,6 +1205,8 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         )
         XCTAssertEqual(prompt.stringValue, "")
         XCTAssertTrue(prompt.attachmentPaths.isEmpty)
+        XCTAssertFalse(send.isEnabled, "the cleared composer left an active-looking Start button")
+        XCTAssertEqual(send.toolTip, "Write the brief first.")
 
         // And it stays empty when the project is selected again.
         composer.show(projectID: project.id)
@@ -1335,19 +1377,27 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
             // A fixed theme is one authored appearance. Calling Swiss's paper-white palette
             // “dark” produced a byte-for-byte duplicate in the catalogue and implied a state the
             // product cannot enter; adaptive themes alone owe the reviewer both appearances.
-            expected += appearances.count * 3
+            expected += appearances.count * 4
             for (suffix, appearanceName) in appearances {
                 let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
-                for (label, size, projectID, promptText) in [
+                for (label, size, projectID, promptText, scheduled) in [
                     (
                         "tall",
                         Render.tall,
                         project.id as ProjectID?,
                         "Review the session restoration path and preserve every changed-file card.\n"
-                            + "Add a regression test for relaunching after an interrupted turn."
+                            + "Add a regression test for relaunching after an interrupted turn.",
+                        false
                     ),
-                    ("short", Render.short, project.id as ProjectID?, "Audit session restoration."),
-                    ("empty", Render.tall, nil, nil)
+                    (
+                        "short",
+                        Render.short,
+                        project.id as ProjectID?,
+                        "Audit session restoration.",
+                        false
+                    ),
+                    ("scheduled", Render.short, project.id as ProjectID?, nil, true),
+                    ("empty", Render.tall, nil, nil, false)
                 ] {
                     var data: Data?
                     appearance.performAsCurrentDrawingAppearance {
@@ -1356,7 +1406,8 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
                             appearance: appearance,
                             theme: theme,
                             projectID: projectID,
-                            promptText: promptText
+                            promptText: promptText,
+                            scheduled: scheduled
                         )
                     }
                     let url = directory.appendingPathComponent(
@@ -1457,7 +1508,8 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         appearance: NSAppearance,
         theme: AppTheme,
         projectID: ProjectID?,
-        promptText: String?
+        promptText: String?,
+        scheduled: Bool
     ) -> Data? {
         let composer = SessionComposerViewController()
         let renderHost = host(composer, size: size)
@@ -1471,6 +1523,17 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         composer.show(projectID: projectID)
         if let promptText, let prompt = promptView(in: composer.view) {
             prompt.stringValue = promptText
+        }
+        if scheduled {
+            composer.scheduledStrip.setRows([
+                ScheduledMessageStripView.Row(
+                    id: ScheduledMessageID(),
+                    summary: "/goal Finish this plan:",
+                    timing: "Scheduled · starts automatically when “Fix UI and prepare release” finishes",
+                    problem: nil
+                )
+            ])
+            composer.setScheduledStripAttached(true)
         }
         renderHost.layoutSubtreeIfNeeded()
 

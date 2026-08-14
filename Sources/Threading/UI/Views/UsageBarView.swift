@@ -41,9 +41,34 @@ final class UsageBarView: NSView {
     /// would be claiming a movement that did not happen in the second it took to draw.
     var timeMark: Double? { didSet { landUnlessApplying() } }
 
+    /// The user's own line within the window, 0…1. Nil when no rule of theirs binds this window.
+    ///
+    /// **Drawn as a change in the track rather than as a second mark.** A pace mark and a cap
+    /// mark are not the same kind of thing — one is where the clock stands, the other is where
+    /// the user said to stop — and two identical ticks on a 6pt bar would be a puzzle rather than
+    /// a reading. So the track past the line goes quiet and the part before it keeps its full
+    /// strength: the boundary *is* the line, and the fenced-off remainder reads as unavailable
+    /// without borrowing the mark vocabulary.
+    ///
+    /// The **fill** is untouched by it. A bar's length and the percentage beside it stay the raw
+    /// provider fraction, so consumption past the user's line still draws past it — that spend
+    /// really happened, and a gauge may not quieten a number the account actually reached.
+    ///
+    /// Never travels, for `timeMark`'s reason: the line is where the user put it.
+    var capMark: Double? { didSet { landUnlessApplying() } }
+
     /// What is actually drawn — `fraction` while idle, a point along the travel while in
     /// flight. Exposed so a test can read the gauge rather than the request.
     private(set) var displayedFraction: Double = 0
+
+    /// The fill's drawn width, and the capped track's.
+    ///
+    /// Named rather than left to be reached for by subview *order*, which is how a test came to
+    /// report a fill of zero on a bar that was drawing correctly: the capped track was inserted
+    /// below the fill, and `subviews.first` quietly became a different view. A gauge that a test
+    /// has to index into is a gauge whose tests break on layering.
+    var drawnFillWidth: CGFloat { fillView.isHidden ? 0 : fillView.frame.width }
+    var drawnCapTrackWidth: CGFloat { capTrackView.isHidden ? 0 : capTrackView.frame.width }
 
     /// How far the fill's colour has crossfaded, 0 = `tintFrom` → 1 = `tint`. Held as a phase
     /// rather than a blended colour because a theme colour resolves against an appearance, and
@@ -69,6 +94,11 @@ final class UsageBarView: NSView {
     private let fillView = NSView()
     private let markView = NSView()
 
+    /// The stretch of track up to the user's own line, drawn at the track's full strength while
+    /// the view's own layer goes quiet behind it. Hidden when no rule binds this window, in which
+    /// case the view's layer is the whole track exactly as before.
+    private let capTrackView = NSView()
+
     /// The colours are resolved in `layout()`, which a theme change does not otherwise trigger —
     /// so the bar would keep the previous theme's accent until something else moved it.
     private var themeRedraw: ThemeRedraw?
@@ -81,6 +111,10 @@ final class UsageBarView: NSView {
         wantsLayer = true
         fillView.wantsLayer = true
         markView.wantsLayer = true
+        capTrackView.wantsLayer = true
+        // Below the fill: the user's line describes the *track*, and shading over real spend
+        // would quieten consumption that actually happened.
+        addSubview(capTrackView)
         addSubview(fillView)
         // Above the fill, so the pace line stays visible even where usage has passed it.
         addSubview(markView)
@@ -118,7 +152,13 @@ final class UsageBarView: NSView {
     ///
     /// One call rather than three assignments, because the fill and its severity colour change
     /// together and two of them animating from separate starts would cross.
-    func apply(fraction newFraction: Double, tint newTint: NSColor, timeMark newMark: Double?, animated: Bool) {
+    func apply(
+        fraction newFraction: Double,
+        tint newTint: NSColor,
+        timeMark newMark: Double?,
+        capMark newCapMark: Double? = nil,
+        animated: Bool
+    ) {
         let from = displayedFraction
         // The colour actually on screen, which mid-crossfade is the blend rather than either
         // end of it: restarting from `tintFrom` would step the fill back to a colour it had
@@ -129,6 +169,7 @@ final class UsageBarView: NSView {
         fraction = newFraction
         tint = newTint
         timeMark = newMark
+        capMark = newCapMark
         isApplying = false
 
         stopDriver()
@@ -249,6 +290,7 @@ final class UsageBarView: NSView {
             layoutContinuousFill()
         }
 
+        layoutCapTrack()
         layoutTimeMark()
     }
 
@@ -278,7 +320,15 @@ final class UsageBarView: NSView {
         let radius = bounds.height / 2
         layer?.cornerCurve = .continuous
         layer?.cornerRadius = radius
-        applyLayerBackground(Design.Surface.controlResting)
+        // With a line drawn, the view's own layer becomes the *quiet* remainder and
+        // `capTrackView` carries the full-strength part. Reducing this layer's alpha rather than
+        // painting a shade over it is what keeps the compositing honest under every theme: the
+        // quiet stretch is the same colour, thinner, over whatever the row's own ground is.
+        applyLayerBackground(
+            capMark == nil
+                ? Design.Surface.controlResting
+                : Design.Surface.controlResting.withAlphaComponent(UsageBarDefaults.cappedTrackAlpha)
+        )
 
         let width = bounds.width * min(max(displayedFraction, 0), 1)
         fillView.frame = NSRect(x: 0, y: 0, width: width, height: bounds.height)
@@ -286,6 +336,26 @@ final class UsageBarView: NSView {
         fillView.layer?.cornerRadius = radius
         fillView.applyLayerBackground(fillColor())
         fillView.isHidden = width <= 0
+    }
+
+    /// The stretch of track the user has left themselves, ending at their line.
+    ///
+    /// Skipped under the historical progress styles: those draw their own trough in `draw(_:)`,
+    /// and a translucent overlay on a bevelled or segmented gauge would read as a rendering
+    /// fault rather than as a limit.
+    private func layoutCapTrack() {
+        guard let capMark, !usesHistoricalProgress else {
+            capTrackView.isHidden = true
+            return
+        }
+
+        let radius = bounds.height / 2
+        let width = bounds.width * min(max(capMark, 0), 1)
+        capTrackView.frame = NSRect(x: 0, y: 0, width: width, height: bounds.height)
+        capTrackView.layer?.cornerCurve = .continuous
+        capTrackView.layer?.cornerRadius = radius
+        capTrackView.applyLayerBackground(Design.Surface.controlResting)
+        capTrackView.isHidden = width <= 0
     }
 
     private func layoutTimeMark() {
@@ -359,4 +429,11 @@ enum UsageBarDefaults {
     static let height: CGFloat = 6
     static let timeMarkWidth: CGFloat = 2
     static let timeMarkAlpha: CGFloat = 0.85
+
+    /// How much of the track survives past the user's own line.
+    ///
+    /// Quiet enough to read as fenced off at a glance, present enough that the window's full
+    /// length is still legible — the bar is still a gauge of the *provider's* window, and a
+    /// remainder drawn to nothing would say the window ends where the user's line does.
+    static let cappedTrackAlpha: CGFloat = 0.35
 }

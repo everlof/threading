@@ -121,6 +121,94 @@ final class AquaChromeTests: XCTestCase {
         )
     }
 
+    /// A thumb parked at either end of its travel keeps its round cap, and the control paints to
+    /// its own edges.
+    ///
+    /// Modern `NSScroller` is layer-backed: it repaints by calling the old part hooks, each behind
+    /// a clip of *its* idea of that part, and never calls `draw(_:)` at all. Ours are different
+    /// rectangles — the slot runs to the ends because the arrows are furniture this component
+    /// places, and the thumb has a period minimum length — so every point of ours outside
+    /// AppKit's was cut. Parked at the top, the gel lost the whole curve of its cap and began
+    /// mid-capsule at full width, which is the flat-topped thumb this was reported as; the trough
+    /// stopped three points short at each end for the same reason. Measured on the drawn pixels,
+    /// because the geometry was always right — `rect(for: .knob)` never moved.
+    func testAThumbParkedAtTheEndKeepsItsCap() throws {
+        AppThemePalette.set(AppThemeStyles.aquaTiger)
+        let scroll = ThemedScrollView(frame: NSRect(x: 0, y: 0, width: 60, height: 120))
+        scroll.hasVerticalScroller = true
+        scroll.documentView = SettingsFlippedView(frame: NSRect(x: 0, y: 0, width: 40, height: 600))
+        scroll.layoutSubtreeIfNeeded()
+        let scroller = try XCTUnwrap(scroll.verticalScroller as? ThemedScroller)
+        scroll.contentView.scroll(to: .zero)
+        scroll.reflectScrolledClipView(scroll.contentView)
+        XCTAssertEqual(scroller.rect(for: .knob).minY, scroller.rect(for: .knobSlot).minY)
+
+        let raster = try XCTUnwrap(
+            scroller.bitmapImageRepForCachingDisplay(in: scroller.bounds)
+        )
+        scroller.cacheDisplay(in: scroller.bounds, to: raster)
+        let runs = (0..<raster.pixelsHigh).map { row in
+            (0..<raster.pixelsWide).filter { column in
+                guard let pixel = raster.colorAt(x: column, y: row) else { return false }
+                return isAccentInk(pixel)
+            }
+        }
+        let thumb = runs.filter { !$0.isEmpty }
+        let widest = try XCTUnwrap(thumb.map(\.count).max())
+        let first = try XCTUnwrap(thumb.first?.count)
+        let last = try XCTUnwrap(thumb.last?.count)
+        XCTAssertLessThan(
+            first,
+            widest,
+            "a parked thumb drew its first row at full width — the cap was cut square"
+        )
+        XCTAssertLessThan(last, widest, "and the far cap rounds the same way")
+        XCTAssertEqual(
+            runs.firstIndex(where: { !$0.isEmpty }),
+            0,
+            "the thumb starts at the top of the control it is parked in"
+        )
+    }
+
+    /// The same fact from the other side: with the layer path in force the whole control was
+    /// inset, so the trough and the arrows stopped short of the scroller's own edges.
+    func testAPeriodScrollbarPaintsToItsOwnEdges() throws {
+        AppThemePalette.set(AppThemeStyles.aquaTiger)
+        let canvas = NSView(frame: NSRect(x: 0, y: 0, width: 17, height: 120))
+        canvas.wantsLayer = true
+        canvas.appearance = NSAppearance(named: .aqua)
+        let scroller = ThemedScroller(frame: .zero)
+        scroller.scrollerStyle = .legacy
+        scroller.frame = canvas.bounds
+        canvas.addSubview(scroller)
+        canvas.layoutSubtreeIfNeeded()
+        scroller.isEnabled = true
+        scroller.doubleValue = 0.5
+        scroller.knobProportion = 0.2
+        scroller.needsDisplay = true
+
+        XCTAssertFalse(
+            scroller.wantsUpdateLayer,
+            "a period scrollbar needs the draw(_:) pass, not the part-by-part layer path"
+        )
+        let raster = try XCTUnwrap(canvas.bitmapImageRepForCachingDisplay(in: canvas.bounds))
+        canvas.cacheDisplay(in: canvas.bounds, to: raster)
+        var painted = NSRect.zero
+        for row in 0..<raster.pixelsHigh {
+            for column in 0..<raster.pixelsWide {
+                guard let pixel = raster.colorAt(x: column, y: row),
+                      pixel.alphaComponent > 0.05 else { continue }
+                painted = painted.isEmpty
+                    ? NSRect(x: CGFloat(column), y: CGFloat(row), width: 1, height: 1)
+                    : painted.union(NSRect(x: CGFloat(column), y: CGFloat(row), width: 1, height: 1))
+            }
+        }
+        XCTAssertEqual(painted.minX, 0, "the trough stopped short of the leading edge")
+        XCTAssertEqual(painted.minY, 0, "the control stopped short of the top")
+        XCTAssertEqual(painted.maxX, CGFloat(raster.pixelsWide))
+        XCTAssertEqual(painted.maxY, CGFloat(raster.pixelsHigh))
+    }
+
     // MARK: - Pop-ups
 
     /// The well is the pop-up's trailing end, and the curve there belongs to the button. Filled as

@@ -84,6 +84,44 @@ final class WindowChromeTakeoverTests: XCTestCase {
                        "the coordinator initialises its record from the mask it finds")
     }
 
+    /// The same launch, for the window's *backing*. A theme whose silhouette is smaller than
+    /// the window's rectangle — Tiger's rounded frame, BeOS's leading tab — clears the part it
+    /// gives up, so an opaque backing simply paints it again: launched under Tiger the drawn
+    /// corner wore a white wedge inside a square outline, and under BeOS the shoulders beside
+    /// the tab were filled. Birth has to state the surface the flip states.
+    func testAWindowBornUnderAShapedThemeIsTransparentBehindIt() throws {
+        for theme in [AppThemeStyles.aquaTiger, AppThemeStyles.beOS] {
+            AppThemePalette.set(theme)
+            let controller = MainWindowController()
+            self.controller = controller
+            let window = try window(of: controller)
+
+            XCTAssertFalse(window.isOpaque, "\(theme.id) gives up part of its rectangle")
+            XCTAssertEqual(window.backgroundColor.alphaComponent, 0, accuracy: 0.001,
+                           "\(theme.id) must have nothing painted behind the shape it drew")
+        }
+    }
+
+    /// And the square takeover keeps the opaque backing it was born with — the transparency is
+    /// for the shapes that need it, not for every app-drawn frame — while a theme change out of
+    /// takeover still hands the native frame the surface the window started with.
+    func testAWindowBornUnderASquareTakeoverKeepsItsBackingAndRestoresIt() throws {
+        AppThemePalette.set(try makeTakeoverTheme())
+        let controller = MainWindowController()
+        self.controller = controller
+        let window = try window(of: controller)
+        let coordinator = try XCTUnwrap(controller.chromeCoordinator)
+
+        XCTAssertTrue(window.isOpaque)
+        let bornBackground = window.backgroundColor
+
+        AppThemePalette.set(.system)
+        coordinator.applyCurrentTheme()
+        XCTAssertEqual(window.styleMask, WindowChromeCoordinator.nativeMask)
+        XCTAssertTrue(window.isOpaque)
+        XCTAssertEqual(window.backgroundColor, bornBackground)
+    }
+
     // MARK: - The Exchange
 
     func testAThemeChangeExchangesTheFrameBothWaysPreservingTheWindow() throws {

@@ -18,6 +18,11 @@ final class AccountsPreferencesViewController: NSViewController {
     /// The open icon picker, retained so it survives until dismissed.
     private var iconPopover: ThemedPopover?
 
+    /// The limits half of the page. Retained across rebuilds because it holds which folds are
+    /// open, and a fold that closed every time a rule was added would be the page arguing with
+    /// the person using it.
+    private let limits = AccountLimitsSectionController()
+
     // MARK: - Lifecycle
 
     override func loadView() {
@@ -54,10 +59,13 @@ final class AccountsPreferencesViewController: NSViewController {
             : accounts.enumerated().map { makeAccountRow(for: $1, row: $0) }
 
         let card = SettingsCard(rows: rows)
+        limits.onChange = { [weak self] in self?.notifyAccountsChanged() }
+        limits.reload(accounts: accounts)
 
         let page = SettingsUI.page(title: "Accounts", sections: [
             SettingsUI.section("Agent Accounts", card),
-            SettingsUI.note(AccountsPreferencesStrings.explanation)
+            SettingsUI.note(AccountsPreferencesStrings.explanation),
+            limits.view
         ], hostPage: .accounts)
 
         page.translatesAutoresizingMaskIntoConstraints = false

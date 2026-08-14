@@ -404,6 +404,22 @@ enum UsageDefaults {
         }
     }
 
+    /// The spacious name for a window identifier, for a surface naming a window **no reading has
+    /// arrived for yet**.
+    ///
+    /// A user-authored limit can be drawn before its account has ever been read, and until the
+    /// reading lands there is no `Window` to take a `label` from. Printing the raw identifier
+    /// there put `Watch 7d` and `No 7d reading yet.` on a settings page whose every other line
+    /// says `Weekly` — the identifier is a key, and a key on screen reads as a leak. Anything
+    /// this table does not know keeps its identifier, which is then genuinely all that is known.
+    static func label(forWindowID id: String) -> String {
+        switch id {
+        case fiveHourWindowID: return fiveHourLabel
+        case weeklyWindowID: return weeklyLabel
+        default: return id
+        }
+    }
+
     /// The identifier for a window of this length — the inverse of `duration(forWindowID:)`.
     ///
     /// A model-scoped window is identified by its *model* rather than by its length, so

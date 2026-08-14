@@ -71,7 +71,12 @@ enum AccountUsageMenu {
         }
 
         guard let usage else { return }
-        apply(usage, to: &item, metering: model)
+        apply(
+            usage,
+            to: &item,
+            metering: model,
+            limits: CustomLimitSettings.shared.rules(for: account.id)
+        )
     }
 
     /// The reading half of `decorate`, with the account lookup taken out.
@@ -83,10 +88,11 @@ enum AccountUsageMenu {
         _ usage: AccountUsage,
         to item: inout ThemedMenuItem,
         metering model: String? = nil,
-        at now: Date = Date()
+        at now: Date = Date(),
+        limits: [CustomLimit] = []
     ) {
         item.titleDetail = usage.planLabel?.isEmpty == false ? usage.planLabel : nil
-        item.metrics = identityMetrics(for: usage, at: now)
+        item.metrics = identityMetrics(for: usage, at: now, limits: limits)
         item.trailingDetail = resetColumn(for: usage, metering: model, at: now)
 
         let scoped = scopedSegments(for: usage, at: now)
@@ -100,11 +106,26 @@ enum AccountUsageMenu {
     /// (`7d Fable`), so giving each one a column would add a wide, permanently empty column to
     /// every login that does not meter that model — and most do not. Those go on the row's own
     /// second line instead, where they cost nothing to the rows without them.
+    /// A user-authored limit moves the **tone** of a column and nothing else about it. The label
+    /// is the window, the value is the provider's own percentage and the bar is that percentage's
+    /// length — a column that shortened or renumbered itself under a rule would be answering a
+    /// different question from the one the other logins' columns answer, on the one surface where
+    /// two logins are read side by side.
+    ///
+    /// This is where a fenced-off login has to read as pressured, because it is the moment an
+    /// account is being *chosen*: a shared login at 47% of a 50% share is nearly spent, and a
+    /// menu that drew it in the same quiet ink as a free login at 47% would be handing the user
+    /// the wrong one.
     static func identityMetrics(
         for usage: AccountUsage,
-        at now: Date = Date()
+        at now: Date = Date(),
+        limits: [CustomLimit] = []
     ) -> [ThemedMenuMetric] {
-        usage.readings(of: usage.windows, at: now).map { reading in
+        CustomLimitBounds.retinted(
+            usage.readings(of: usage.windows, at: now),
+            of: usage.windows,
+            in: limits
+        ).map { reading in
             ThemedMenuMetric(
                 label: reading.name,
                 value: reading.value,

@@ -19,6 +19,16 @@ the invisible `NSColorWell` inside `ThemeSwatchView`, the private field editor i
 disclosure buttons, the application menu bar, toolbars, and open/save panels. The system object
 must not leak out as the component callers build against.
 
+**A save panel's `accessoryView` is inside that boundary, not beside it.** AppKit does not put an
+accessory into the panel's content: it hangs the view off the panel in an `NSAccessoryViewWindow`
+of its own, exactly as tall as the accessory and clipping at its frame view. An app-owned
+dropdown opened from in there has nowhere to open — `ThemedMenuPresenter` lays its overlay out in
+`source.window!.contentView!.bounds`, which is that 44-point strip, so a `ThemedPopUp`'s list
+arrives clamped to a two-pixel sliver of its own top border and the user can neither read it nor
+pick from it. It shipped that way in `CompareExportPanel`. Controls in an accessory are AppKit's
+own, down to the label colour the panel gives its own field labels, and each one is a narrow
+exception in `scripts/config/theme-boundary.json` naming the panel it belongs to.
+
 App-owned alerts and anchored popovers are not system-owned chrome: callers use `ThemedAlert`
 and `ThemedPopover`, which own their visible surfaces, focus return, Escape handling, and live
 theme response. **Menus inside the window — dropdowns and right-click/context menus alike — are

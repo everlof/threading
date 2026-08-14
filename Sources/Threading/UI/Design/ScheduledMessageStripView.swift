@@ -216,6 +216,7 @@ final class ScheduledMessageRowView: ThemedControl {
             equalToConstant: ScheduledStripDefaults.rowHeight
         )
         preferredHeight.priority = .defaultHigh
+        let summaryInkCenterFromBaseline = (summaryLabel.font?.capHeight ?? 0) / 2
 
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.small),
@@ -225,7 +226,14 @@ final class ScheduledMessageRowView: ThemedControl {
                 lessThanOrEqualTo: trailing.leadingAnchor,
                 constant: -Design.Spacing.small
             ),
-            removeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            // Align the mark with the body text's ink rather than either view's abstract frame.
+            // A label frame includes the font's descender and line-leading space, so its centre
+            // is not the centre of the letters the user sees. The first baseline plus half the
+            // cap height is that visible centre and remains correct when a theme changes fonts.
+            removeButton.centerYAnchor.constraint(
+                equalTo: summaryLabel.firstBaselineAnchor,
+                constant: -summaryInkCenterFromBaseline
+            ),
             removeButton.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
             removeButton.trailingAnchor.constraint(
                 equalTo: trailingAnchor,

@@ -675,3 +675,214 @@ Three things the renders caught that no assertion would have.
 
 The accessibility label states both lanes' window counts and totals outright, because the whole
 argument is carried by fill and by one extra break, and neither survives being read aloud.
+
+## Your own limits, ahead of the provider's
+
+The provider's limit used to be the only limit Threading knew: every consumer of pressure — the
+pill's tints, `LimitEscapeRanking`'s eligibility, the scheduled-send headroom check, the
+usage-window poke's guards — read a provider window against 100% of itself. A **custom limit**
+(`CustomLimit`) is a line the *user* draws on one account, evaluated locally, feeding the same
+consumers. Today it can tell you when you reach it; the rest of the ladder is
+[the draft](../feature-drafts/limit-management.md).
+
+A rule has three parts: a **metric** (what is measured), a **bound** (where the line is), and
+**consequences** (what happens on approach and at the line).
+
+- `CustomLimitMetric` declares three shapes and implements one. `fixedCap` reads a provider
+  window's own `fraction` against a constant. `paceShare` and `syntheticWindow` are named in the
+  stored enum so the record does not have to change shape when they arrive, and
+  `CustomLimit.isSupported` is what stops a rule written by a later build being evaluated as
+  though it were a fixed cap — a pace share's bound is a share of *elapsed time*, and reading it
+  as a fixed cap would fire alerts at a line the user never drew.
+- `CustomLimitTier` is the consequence ladder — `show`, `notify`, `hold`, `park` — ordered, so a
+  higher tier implies the ones above it rather than being a separate list of opt-ins.
+  `effectiveTier` clamps to what the build implements: a rule stored at `park` still evaluates,
+  at `notify`, because a limit that decodes and then does nothing is the silent forgetting the
+  stored raw values exist to prevent.
+
+**Thresholds are fractions of the bound, not of the window**, and the direction is stated once
+because the two halves disagreeing is how a notification ends up naming a number nothing else on
+screen shows. "Tell me at 50% of the weekly" is a bound at `0.5` with one threshold at `1.0`;
+"keep this under 80%, warn me on the way" is a bound at `0.8` with thresholds `[0.75, 1.0]`. What
+a *sentence* names is always the percentage the **window** reads (`threshold × bound`), since
+that is the number printed everywhere else — a receipt quoting a fraction of a bound would be the
+only place in the app where "60%" meant something other than 60% of the window.
+
+### The evaluator
+
+`CustomLimitEvaluator` is pure, in `UsageWindowPlan`'s shape and for its reason: a rule standing
+between a person and their own quota has to be arguable from a table, because every failure it
+can have is a quiet one. An alert that did not fire and a hold that engaged on nothing look
+identical from outside the app.
+
+It takes the rules, the account's last `AccountUsage`, the thresholds already announced, and
+`now`. It returns, per rule: consumed-of-bound, the raw provider fraction, the state, a
+structured reason, and the thresholds newly crossed. The sentence a receipt prints is
+`CustomLimitReceipt`'s job — keeping `L10n` out of the judgement is what lets the tests assert on
+the answer rather than on this month's wording.
+
+Two rules the assertions exist for:
+
+- **A sparse jump fires once.** A reading that steps from 48% to 61% past lines at 50% and 60%
+  names 60% and marks both. Announcing every line in between is the alert fatigue this feature is
+  supposed to be careful about; marking only the highest would make the skipped line arrive one
+  reading late.
+- **An unknown reading is a missing reading, never headroom and never spend.** `notify` goes
+  silent on it — an alert derived from a guess is noise — while `hold` and `park`, when they
+  arrive, engage, and the receipt names the missing reading as the reason. "Over your line" and
+  "cannot see" have opposite remedies. An **expired** window is an unknown reading: its
+  percentage describes the turn before this one, and reading it as consumption would fire this
+  instance's alerts off the last instance's spend.
+
+**Severity is computed against the effective bound**, reusing `warningFraction`/`criticalFraction`
+rather than inventing a second vocabulary. An account at 47% raw under a 50% line tints critical
+while printing 47%: the number is the fact, the tint is the pressure. Nothing about a rule changes
+a bar's length or its printed percentage — a bar drawing full at 40% would lie about the figure
+beside it.
+
+### Drawing the line where the reading is
+
+`CustomLimitBounds` answers the question every surface that *draws* a window has and none of them
+should compute for itself — a pill, a bar and a menu column disagreeing about which of two rules
+binds a window would be three readings of one fact. It reports the tightest **supported** rule on
+a window, the effective bound, and the severity that follows.
+
+Two rules draw nothing. A rule at the provider's own line has no line of its own — a tick at 100%
+would mark the end of the bar as though the user had put it there, and an alert-only rule made to
+fire one notification must not add furniture to a gauge. And a metric this build cannot evaluate
+cannot be drawn either, for the reason it is not evaluated.
+
+**The line is a change in the track, not a second mark.** `UsageBarView.capMark` quietens the
+track past the line and leaves the stretch before it at full strength; the boundary *is* the line.
+A pace mark and a cap mark are not the same kind of thing — one is where the clock stands, the
+other is where the user said to stop — and two identical 2pt ticks on a 6pt bar would be a puzzle
+rather than a reading. The remainder keeps `cappedTrackAlpha` of its colour rather than vanishing,
+because the bar is still a gauge of the *provider's* window and a remainder drawn to nothing would
+say the window ends where the user's line does. The historical progress styles draw their own
+trough and are left alone.
+
+**Three things the line does not touch**: the fill's length, the printed percentage, and
+consumption past the line — which still draws at full strength, because that spend really
+happened. What moves is the tint, computed against the effective bound. A row reading 47% under a
+50% line prints `47%` in the critical tint: the number is the fact, the tint is the pressure.
+
+A quieter stretch of a 6pt bar reaches nobody who is not looking at it, so the rule also names
+itself in the row's tooltip and in what the row is read out as.
+
+**The identity menu's metric columns take the same tone**, and nothing else about them changes.
+That is where a fenced-off login has to read as pressured, because it is the moment an account is
+being *chosen*: a shared login at 47% of a 50% share is nearly spent, and a menu drawing it in the
+same quiet ink as a free login at 47% hands the user the wrong one. The label, the value and the
+bar's length stay the provider's, since a column that shortened or renumbered itself under a rule
+would be answering a different question from the one the other logins' columns answer — on the one
+surface where two logins are read side by side.
+
+**The always-visible pill is opt-in per rule** (`showsInToolbar`, switched on the rule's own row).
+That is the one surface a user cannot dismiss, and it must not acquire a new red state because
+somebody made a rule to fire one quiet 50% alert; every other surface reads every rule, because
+they asked to be there. An opted-in rule does two things and adds no segment — its window is
+already printed. The segment keeps its raw number and takes the effective tint, and
+consumed-of-bound joins the comparison the **ring** gauges: `CustomLimitBounds.bindingWindow` is
+the fullest share of its bound rather than the fullest window, which is the shipped rule exactly
+when no line is drawn. The ring's *fill* stays the provider's figure — a ring filled to
+consumed-of-bound would report a level the account never reached, on the one control whose whole
+job is to say how much is left.
+
+Still reading the provider's 100%: the model menu's scoped columns and the Limit History charts.
+
+`UsageBarView.drawnFillWidth` and `drawnCapTrackWidth` exist because a test reached the fill
+through `subviews.first`, and the capped track inserted below it quietly made that a different
+view — the test then reported a fill of zero for a bar drawing correctly. A gauge a test has to
+index into is a gauge whose tests break on layering.
+
+### Window instances, and why a rule re-arms
+
+A rule re-arms when its window does, and "when its window does" cannot be read from the
+identifier: `7d` is the same window all year. `CustomLimitWindowInstance` is the window's id
+**plus its reset moment**, and that pair is what tells this week's weekly from last week's.
+`UsageAlertLedger` keys its fired thresholds by account, rule and instance — the account is part
+of the key because a rule inherited from the app-wide defaults is the *same rule id* on every
+login, and without it the first account to cross 50% would silence the other four.
+
+Pruning is what re-arms: a record whose `resetsAt` has passed is dropped, and the dropped key is
+returned so the notification it posted is withdrawn. **The ledger key is the notification's own
+request identifier**, which is what lets a relaunch take down what the run before it delivered; an
+in-memory set of delivered ids would have left last night's "weekly reached 50%" sitting over this
+morning's fresh window. A window the provider reports without a reset never prunes on time, so the
+map is bounded by count as well.
+
+### Not an attention alert
+
+`UsageAlertCenter` is deliberately **not** a fourth `AttentionAlert` case. That family is
+session-scoped and every case in it is a change the user can act on *in that session* — which is
+why a provider limit stop posts nothing at all. A usage alert is account-scoped, explicitly
+subscribed to by the rule that fires it, and actionable at the account level: slow down, switch
+login, change model. So it has its own switch, and the session-attention master switch does not
+gate it — someone who silenced their sessions has not thereby said they no longer want to hear
+about their quota.
+
+Evaluation is **edge-driven, never polled**: a new reading (`AccountUsageDidChange`), and a rule
+being edited. A fixed cap moves only when the reading does, so those are the complete set of
+moments its answer can change; the armed wakeup the draft describes belongs to the pace-share
+metric, whose bound rises with the clock, and arrives with it.
+
+A later line on the same rule **replaces** the earlier banner rather than stacking beneath it,
+because the request identifier is the rule's turn of the window. "Every 10%" on a busy account is
+the user's explicit choice; five banners about one window is not what they chose. Switching alerts
+off withdraws what they said and **keeps the ledger**: clearing it would make switching back on
+inside the same window announce every line already crossed, in one burst.
+
+Two locks keep this out of a test run, the convention the poke set: `CustomLimitSettings` and
+`UsageAlertLedger` write through `PreferenceStore`, which redirects to a scratch suite under a
+hosted test bundle, and `UsageAlertCenter.start()` refuses outright when `XCTestCase` exists.
+
+### Where a rule is stored
+
+Two scopes, not three. Per-account rules live in `AccountPreference.customLimits`, app-wide
+defaults in `CustomLimitSettings`, and **absent means inherit while empty means none** — which is
+why the account-level field is optional. An account whose owner cleared its rules must keep having
+none rather than quietly picking the app default back up, and a plain array could not say so.
+Project and session scopes are deliberately not offered: a limit is an account fact, and a
+per-session budget is an *authority* that belongs to the control plane's grants.
+
+Resolution is one seam (`CustomLimitSettings`), and the two editing verbs live there rather than
+on the account store, because both are resolution questions:
+
+- **Adding** a rule to an account still on the defaults **materializes what it had** and appends.
+  The other reading — a first rule replacing the inherited ones — is surprising in the direction
+  that silently stops telling somebody about their quota.
+- **Removing** an inherited rule materializes the same list minus that rule. A Remove button that
+  did nothing because the list it was drawn from belongs to another scope is the quietest kind of
+  broken, so an inherited row is drawn like an owned one, marked `from All Accounts`, and works.
+
+`AccountPreferencesStore` moved to `PreferenceStore` with this. Everything in that blob is a
+choice — an icon, a name, a login switched off, and now a line drawn on a quota — and the tests
+are hosted in the app, so `.standard` there was the developer's own account preferences.
+
+### The page
+
+`AccountLimitsSectionController` is the "Your Own Limits" half of the Accounts page: the switch,
+an **All Accounts** fold, one fold per login, and a note that says what this slice does *not* do.
+The app-wide fold comes first because it is the one that explains the others — a login's rule
+reading `from All Accounts` is only legible beside the place those were set. It is its own controller
+because it holds state the rest of that page does not — which folds are open — and the page
+rebuilds itself wholesale on every edit; a fold that closed each time a rule was added would be
+the page arguing with the person using it. Its stores are injectable, so its tests drive it over
+their own suite rather than leaving rules in whatever the next test reads.
+
+The templates are named in the user's terms — *Tell me when… Weekly… it reaches 75%* — and the
+windows offered come from what the account's reading actually reports, so the menu never offers a
+limit on a window this login does not have. With no reading yet, the two lengths both providers
+normalize to are offered, and the resulting rule reads "No Weekly reading yet" until one
+arrives — which is the honest state, and visibly so. Naming a window with no reading is what
+`UsageDefaults.label(forWindowID:)` exists for: there is no `Window` to take a `label` from until
+one lands, and the identifier is a key — a key on screen reads as a leak.
+
+Two defects the render caught and no assertion would have, both now asserted directly:
+
+- the cards sat at about a third of the pane while every assertion about the section's width
+  passed, because a vertical `NSStackView` aligned `.leading` gives each arranged view its
+  *fitting* width. `SettingsUI.page` states the same rule for its own sections and for the same
+  failure; a view that *is* one section has to restate it internally.
+- with the label column cut to that width, a one-line caption wrapped into five lines and
+  `Claude Code` truncated to `Clau`.

@@ -518,6 +518,19 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
 @MainActor
 final class ScheduledFinishPickerTests: XCTestCase {
 
+    func testScheduledStartReceiptSaysItWillStartAutomatically() {
+        let message = ScheduledMessage(
+            whenSessionFinishes: SessionID(),
+            target: .session(SessionID()),
+            text: "Finish the release"
+        )
+
+        XCTAssertEqual(
+            ScheduledTiming.automaticStartSentence(for: message),
+            "Scheduled · starts automatically when “Conversation” finishes"
+        )
+    }
+
     func testScheduleMenuOffersTheFinishPickerOnlyWhenItHasAReliableCandidate() throws {
         var choseFinish = false
         let enabled = ScheduleMenu.entries(canWaitForConversation: true) { choice in

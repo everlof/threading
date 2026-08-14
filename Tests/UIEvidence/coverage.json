@@ -55,8 +55,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Session composer",
-      "description": "The opening composer at full and constrained heights, including its empty-project refusal state and deliberately dissimilar themes.",
-      "states": ["Tall", "Short", "No project selected"],
+      "description": "The opening composer at full and constrained heights, including its scheduled automatic-start receipt, empty-project refusal state, and deliberately dissimilar themes.",
+      "states": ["Tall", "Short", "Scheduled automatic start", "No project selected"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist", "Hard-retro family"],
         "appearances": ["Light", "Dark"],
@@ -98,7 +98,7 @@
       "priority": "critical",
       "title": "Git Review pane",
       "description": "The real virtualized Git Review pane after a diff arrives, proving file cards fill the pane rather than rendering only isolated row fixtures.",
-      "states": ["Changed files loaded", "Find in diff open"],
+      "states": ["Changed files loaded", "Find in diff open", "Sticky heading actions"],
       "matrix": {
         "themes": ["System"],
         "appearances": ["Light", "Dark"],

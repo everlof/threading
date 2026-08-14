@@ -294,6 +294,27 @@ final class ComposerWindowFitTests: XCTestCase {
             )
         }
 
+        let summary = try XCTUnwrap(
+            descendants(of: row).compactMap { $0 as? NSTextField }.first {
+                $0.stringValue == "Pick the importer back up where we left it."
+            }
+        )
+        let remove = try XCTUnwrap(
+            descendants(of: row).compactMap { $0 as? ThemedIconButton }.first {
+                $0.accessibilityTitle() == L10n.string("Unschedule this message")
+            }
+        )
+        let summaryFrame = row.convert(summary.bounds, from: summary)
+        let summaryBaseline = summaryFrame.maxY - summary.firstBaselineOffsetFromTop
+        let summaryFont = try XCTUnwrap(summary.font)
+        let summaryInkCenter = summaryBaseline + summaryFont.capHeight / 2
+        XCTAssertEqual(
+            row.convert(remove.bounds, from: remove).midY,
+            summaryInkCenter,
+            accuracy: 0.5,
+            "the remove mark is not aligned with the item it removes"
+        )
+
         let chips = try XCTUnwrap(descendants(of: root).first { $0 is ChipView }?.superview)
         let chipsFrame = root.convert(chips.bounds, from: chips)
         XCTAssertFalse(

@@ -365,6 +365,18 @@
       "kind": "interactiveComponent",
       "symbol": "ToastView",
       "reason": "The press carries the band sideways and throws it away, which is a notification's swipe rather than an activation: it targets nothing, has no pressed state, and a press that goes nowhere leaves the receipt exactly where it was. Subclassing ThemedControl would give a transient card a focus ring, an enabled state and a press action for a gesture that is none of those. Nothing here is mouse-only, which is the rule's actual concern: the throw does exactly what the band's own ✕ does, and that ✕ is a ThemedIconButton with the full keyboard and accessibility contract, beside the ThemedButton carrying the way back. The mouseDown is also what stops a click falling through a card floating over the very list it reports on."
+    },
+    {
+      "path": "Sources/Threading/UI/Views/CompareExportPanel.swift",
+      "kind": "construct",
+      "symbol": "NSPopUpButton",
+      "reason": "The format chooser sits in a save panel's accessory, which is inside the system panel boundary rather than beside it: AppKit hangs an accessory off the panel in an NSAccessoryViewWindow of its own, as tall as the accessory and clipping at its frame, so a ThemedPopUp there cannot open — ThemedMenuPresenter lays its overlay out in that 44-point content view and the list arrives clamped to a two-pixel sliver of its own border. A stock pop-up's menu is a window the panel does not contain, and it is also the only styling that matches the name field above it."
+    },
+    {
+      "path": "Sources/Threading/UI/Views/CompareExportPanel.swift",
+      "kind": "systemColor",
+      "symbol": "secondaryLabelColor",
+      "reason": "The accessory's label stands in the save panel's own label column, under Save As:, Tags: and Where:, which AppKit draws in secondaryLabelColor. Design.Text.secondary answers to the app theme, so the one row Threading contributes to a system panel would be the one row lit differently from the three above it."
     }
   ]
 }

@@ -44,10 +44,11 @@ final class GitReviewFileRow: NSView {
     /// chose, not the row's default-expanded state.
     var onToggle: ((Bool) -> Void)?
 
-    /// Gives the virtual table the target state before hidden-body constraints change. It can
-    /// swap the collapsed height for its expanded estimate first, avoiding one compressed
-    /// AppKit layout pass on a large or multi-hunk body.
-    var onWillToggle: ((Bool) -> Void)?
+    /// Gives the virtual table the target state after this row has swapped its header/body
+    /// constraints, but before exact height measurement arrives. Invalidating while the old
+    /// constraints are still active stretches a collapsed header through the expanded estimate
+    /// and makes its text disappear until the second pass.
+    var onExpansionGeometryChange: ((Bool) -> Void)?
 
     /// A reusable table needs an explicit invalidation when this view changes its fitted height.
     /// A stack observes the constraint change directly; the virtual table caches it by path.
@@ -830,12 +831,18 @@ final class GitReviewFileRow: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         // Not through whatever floats over the pane — see `NSView.isPointerCovered(at:)`.
-        guard hasHoverActions, !isPointerCovered(at: event.locationInWindow) else { return }
-        setHeaderActionsRevealed(true, animated: true)
+        // A retained header deliberately lets its non-control ground hit the scrolling content
+        // beneath it. It is itself the topmost visual context, so that pass-through must not be
+        // mistaken for another view covering its hover tracking area.
+        guard hasHoverActions,
+              headerOnly || !isPointerCovered(at: event.locationInWindow) else { return }
+        // A retained row is already an overlay transition; its controls must become hittable in
+        // the same event that reveals them rather than spending that event at alpha zero.
+        setHeaderActionsRevealed(true, animated: !headerOnly)
     }
 
     override func mouseExited(with event: NSEvent) {
-        setHeaderActionsRevealed(false, animated: true)
+        setHeaderActionsRevealed(false, animated: !headerOnly)
     }
 
     /// The sidebar rows' reveal, applied to the header line. Hiding waits for the fade out so
@@ -989,7 +996,6 @@ final class GitReviewFileRow: NSView {
         if !bodyBuilt { buildBody() }
 
         let targetExpanded = !isExpanded
-        onWillToggle?(targetExpanded)
         isExpanded = targetExpanded
         if isExpanded {
             // Remove the collapsed edge before making the body participate in stack layout.
@@ -1008,6 +1014,9 @@ final class GitReviewFileRow: NSView {
             systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
             accessibilityDescription: nil
         )
+        // The table may now adopt its model estimate: the row already describes the same state,
+        // so Auto Layout cannot stretch the old header-only constraints across that new height.
+        onExpansionGeometryChange?(targetExpanded)
         onHeightChange?()
 
         // The header's hover rect ends where the body begins, and the body just moved.
