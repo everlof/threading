@@ -35,6 +35,10 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
     /// still put back exactly as it was found.
     private var lastActionBeforeTest: String?
 
+    /// The fold lives in the same scratch suite, and the same sentence applies twice over: a
+    /// test that drags it decides where every *later* test in the process opens its pane.
+    private var foldBeforeTest: CGFloat?
+
     override func setUpWithError() throws {
         try super.setUpWithError()
         root = FileManager.default.temporaryDirectory
@@ -45,9 +49,16 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             forKey: SessionAttachmentsDefaults.lastActionKey
         )
         PreferenceStore.shared.removeObject(forKey: SessionAttachmentsDefaults.lastActionKey)
+        foldBeforeTest = AttachmentsListHeight.stored
+        AttachmentsListHeight.reset()
     }
 
     override func tearDownWithError() throws {
+        if let foldBeforeTest {
+            AttachmentsListHeight.record(foldBeforeTest)
+        } else {
+            AttachmentsListHeight.reset()
+        }
         AppSettings.shared.includesAttachmentsOutsideProject = scopeBeforeTest
         if let lastActionBeforeTest {
             PreferenceStore.shared.set(
@@ -961,6 +972,261 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             height * SessionAttachmentsDefaults.listShareOfPane,
             accuracy: 1,
             "the list gave up its share to the preview rather than the other way round"
+        )
+    }
+
+    // MARK: - The Fold
+
+    /// Half the pane is the right *opening* answer and the wrong permanent one. A session with
+    /// eighteen attachments fills that cap, and the report a row is pointing at then gets half a
+    /// pane to be read in however long it is — which is where this came from.
+    func testDraggingTheFoldDownGivesTheListTheRoomThePreviewHad() throws {
+        let height: CGFloat = 420
+        let pane = try laidOutPane(
+            showing: try writePNGs(count: 20, size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: height)
+        )
+        let list = try list(in: pane.view)
+        let preview = try previewHost(in: pane.view)
+        let opened = list.frame.height
+        let openedPreview = preview.frame.height
+
+        pane.foldDragged(by: 60)
+        pane.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(list.frame.height, opened + 60, accuracy: 1, "the fold did not travel")
+        XCTAssertEqual(
+            preview.frame.height,
+            openedPreview - 60,
+            accuracy: 1,
+            "the list grew into something other than the preview"
+        )
+    }
+
+    /// And back the other way, which is the same gesture asked of a session whose pictures matter
+    /// less than the page one of them is pointing at.
+    func testDraggingTheFoldUpGivesThePreviewTheRoomTheListHad() throws {
+        let height: CGFloat = 420
+        let pane = try laidOutPane(
+            showing: try writePNGs(count: 20, size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: height)
+        )
+        let list = try list(in: pane.view)
+        let preview = try previewHost(in: pane.view)
+        let openedPreview = preview.frame.height
+
+        pane.foldDragged(by: -80)
+        pane.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            preview.frame.height,
+            openedPreview + 80,
+            accuracy: 1,
+            "the preview did not take the room the list gave up"
+        )
+        XCTAssertGreaterThan(
+            try lastRowOverflow(in: pane.view),
+            0,
+            "the rows the shrunken list left out cannot be scrolled to"
+        )
+    }
+
+    /// The two limits the pane keeps for itself. A list dragged to nothing is a scroller with
+    /// nothing legible beside it, and a list dragged over the whole pane leaves a preview that
+    /// can no longer show what a row is about — neither is a reading choice.
+    ///
+    /// In a pane tall enough to deliver that ceiling: a share is a fraction, and four fifths of a
+    /// *short* pane is more than what is left after the header, the fold and the footer, so there
+    /// the list constraint gives way first and lands below its own ceiling. The case below covers
+    /// that end.
+    func testTheFoldStopsAtOneRowAndAtTheListsMaximumShare() throws {
+        let height: CGFloat = 900
+        let pane = try laidOutPane(
+            showing: try writePNGs(count: 30, size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: height)
+        )
+        let list = try list(in: pane.view)
+
+        pane.foldDragged(by: -1_000)
+        pane.view.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThanOrEqual(
+            list.frame.height,
+            SessionAttachmentsDefaults.rowHeight,
+            "the fold shrank the list past the one row it must always show"
+        )
+        XCTAssertLessThan(
+            list.frame.height,
+            SessionAttachmentsDefaults.rowHeight * 2,
+            "the fold stopped short of the floor it is allowed to reach"
+        )
+
+        pane.foldDragged(by: 1_000)
+        pane.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            list.frame.height,
+            height * SessionAttachmentsDefaults.maximumListShareOfPane,
+            accuracy: 1,
+            "the list took more of the pane than a fold may give it"
+        )
+    }
+
+    /// The same drag in a pane too short to give that ceiling away. The list asks for four fifths
+    /// and the layout answers with what is left after the footer, whose band height is `required`
+    /// while the list's is not — the pane's own compression order, which a fold cannot reverse.
+    func testAFoldDraggedToTheFloorOfAShortPaneStillLeavesTheFooterWhole() throws {
+        let height: CGFloat = 420
+        let pane = try laidOutPane(
+            showing: try writePNGs(count: 20, size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: height)
+        )
+        let list = try list(in: pane.view)
+        let footer = try footerBand(in: pane.view)
+
+        pane.foldDragged(by: 1_000)
+        pane.view.layoutSubtreeIfNeeded()
+
+        XCTAssertLessThanOrEqual(
+            list.frame.height,
+            height * SessionAttachmentsDefaults.maximumListShareOfPane + 1,
+            "the list took more of a short pane than a fold may ask for"
+        )
+        XCTAssertEqual(footer.frame.minY, 0, accuracy: 0.5, "the fold pushed the footer out")
+        XCTAssertEqual(
+            footer.frame.height,
+            Design.Size.footerHeight,
+            accuracy: 0.5,
+            "the fold compressed the footer instead of stopping at what was left"
+        )
+    }
+
+    /// Past the last row there is nothing more to show, so the travel stops there rather than
+    /// running on. An overshoot the fold cannot express is a dead zone the drag back has to cross
+    /// before anything moves again.
+    func testTheFoldCannotBeDraggedPastTheRowsThereAre() throws {
+        let pane = try laidOutPane(
+            showing: try writePNGs(count: 3, size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: 900)
+        )
+        let list = try list(in: pane.view)
+        let rows = list.frame.height
+
+        pane.foldDragged(by: 400)
+        pane.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(list.frame.height, rows, accuracy: 1, "the list grew past its own rows")
+
+        pane.foldDragged(by: -40)
+        pane.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            list.frame.height,
+            rows - 40,
+            accuracy: 1,
+            "the drag back had to cross an overshoot that was never on screen"
+        )
+    }
+
+    /// A fold is how someone wants to *read* their attachments, which does not change between two
+    /// conversations — so the next pane opens where the last one was left.
+    func testThePaneOpensWhereTheFoldWasLeft() throws {
+        let size = NSSize(width: 353, height: 420)
+        let first = try laidOutPane(
+            showing: try writePNGs(count: 20, size: NSSize(width: 40, height: 40)),
+            size: size
+        )
+        first.foldDragged(by: -70)
+        first.view.layoutSubtreeIfNeeded()
+        let chosen = try list(in: first.view).frame.height
+
+        let second = try laidOutPane(
+            showing: try writePNGs(count: 20, size: NSSize(width: 40, height: 40)),
+            size: size
+        )
+
+        XCTAssertEqual(
+            try list(in: second.view).frame.height,
+            chosen,
+            accuracy: 1,
+            "the second pane opened on its own share rather than on the fold's"
+        )
+    }
+
+    /// A remembered fold is still a *ceiling*: the list is as tall as its rows, and a session
+    /// with one attachment is a one-row list however much room the last one was given.
+    func testARememberedFoldNeverGivesAListMoreThanItsRows() throws {
+        AttachmentsListHeight.record(300)
+
+        let pane = try laidOutPane(
+            showing: try writePNG(size: NSSize(width: 400, height: 400)),
+            size: NSSize(width: 353, height: 900)
+        )
+
+        XCTAssertLessThan(
+            try list(in: pane.view).frame.height,
+            SessionAttachmentsDefaults.rowHeight * 2,
+            "a one-row list was given the height a longer session's fold was left at"
+        )
+    }
+
+    /// The way out of a fold left somewhere unhelpful, without having to find the original
+    /// position by hand: the same double-click `NSSplitView` answers.
+    func testDoubleClickingTheFoldPutsThePaneBackOnItsOwnShare() throws {
+        let height: CGFloat = 420
+        let pane = try laidOutPane(
+            showing: try writePNGs(count: 20, size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: height)
+        )
+        let list = try list(in: pane.view)
+
+        pane.foldDragged(by: -90)
+        pane.view.layoutSubtreeIfNeeded()
+        XCTAssertNotEqual(
+            list.frame.height,
+            height * SessionAttachmentsDefaults.listShareOfPane,
+            accuracy: 1
+        )
+
+        pane.foldDidReset()
+        pane.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            list.frame.height,
+            height * SessionAttachmentsDefaults.listShareOfPane,
+            accuracy: 1,
+            "the pane did not place the fold again"
+        )
+        XCTAssertNil(AttachmentsListHeight.stored, "the reset left the chosen height behind")
+    }
+
+    /// The seam is also the grip, and the pane's own gap under it is what makes it one: a fold
+    /// that became draggable by growing its own strip would have moved everything below it.
+    func testTheFoldIsAGripWithoutHavingMovedThePreviewDown() throws {
+        let pane = try laidOutPane(
+            showing: try writePNGs(count: 8, size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: 900)
+        )
+        let fold = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? PaneFoldDivider }.first,
+            "the pane grew no fold"
+        )
+        let list = try list(in: pane.view)
+        let preview = try previewHost(in: pane.view)
+
+        XCTAssertEqual(
+            fold.frame.height,
+            Design.Radius.border + PaneFoldDivider.Layout.grip,
+            accuracy: 0.5,
+            "the fold is a hairline again, which is a one-point drag target"
+        )
+        XCTAssertEqual(
+            fold.frame.maxY,
+            list.frame.minY,
+            accuracy: 0.5,
+            "the fold floats below the list it ends"
+        )
+        XCTAssertEqual(
+            preview.frame.maxY,
+            fold.frame.minY,
+            accuracy: 0.5,
+            "the preview left a second gap under the fold's own band"
         )
     }
 

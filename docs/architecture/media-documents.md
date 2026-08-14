@@ -320,6 +320,35 @@ that. The teardown path is split (`hideInstalledPreviews` versus `hideNativePrev
 because an accepted body replaces the fallback while the offer that won is still current —
 clearing the offer there would revoke the handle the winner is about to resolve.
 
+### The fold between the two halves is the reader's
+
+The pane is a chronology above a preview, and the list asks for its rows' height up to a share of
+the pane. Half was the opening answer and stayed the permanent one, which is a different claim: a
+session with eighteen attachments *fills* that cap, and the HTML report the selected row is
+pointing at then has half a pane to be read in however long it is. Nothing in the pane can know
+which half a reader needs, so the fold between them moved (`PaneFoldDivider`).
+
+Three decisions hold it together.
+
+- **A drag moves the list's ceiling, not a position.** The list is content-sized — it is as tall as
+  its rows — so a session with one attachment stays a one-row list whatever the fold was left at,
+  and the height the pane resolves is still `min(rows, cap)`. That is also why this is not an
+  `NSSplitView`: a split view places two flexible panes, and one of these two states its own
+  height.
+- **The travel is clamped to what the fold can express.** Past the last row there is nothing more
+  to show, so a downward drag stops there rather than accumulating into a stored value nothing on
+  screen reflects. The alternative is a dead zone: the drag back has to cross the overshoot before
+  anything moves. (The shell drawer keeps its overshoot deliberately, because *there* the travel
+  past the floor is the answer — it shuts the drawer.)
+- **The pane keeps two limits the user cannot see past.** Never below one row, and never past
+  `maximumListShareOfPane`, because a stored height is a point value read back in a pane that may
+  be much shorter than the one it was chosen in. A double-click on the fold hands the position back
+  to the pane, and `WindowLayoutReset` clears it with the window's other geometry.
+
+`AttachmentsListHeight` keeps one value app-wide, in `PreferenceStore` — a fold is how someone
+wants to read their attachments rather than a fact about one conversation, and the scratch suite is
+what stops a hosted test's drag from moving the divider in the pane the developer is looking at.
+
 ### Two places that are easy to miss
 
 - `mediaInspectorSelection(forRow:)` needed a `.media` case. A row missing from the rail has **no

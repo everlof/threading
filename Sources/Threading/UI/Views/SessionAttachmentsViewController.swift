@@ -97,8 +97,13 @@ final class SessionAttachmentsViewController: NSViewController {
     /// element, so a pane too short for everything gives way in one order: the preview first,
     /// the list after it (`listHeightPriority` is below `required`), and the footer — whose
     /// band height and edges are required — never. The cap is what makes that safe: a list that
-    /// can only ever ask for half the pane cannot be what pushes the footer's actions out of
-    /// reach.
+    /// can only ever ask for its share of the pane cannot be what pushes the footer's actions
+    /// out of reach.
+    ///
+    /// The share is half the pane until the user moves the fold, and theirs afterwards
+    /// (`AttachmentsListHeight`). Half is the right *opening* answer and the wrong permanent
+    /// one: a session with eighteen attachments fills that cap, and the report the row is
+    /// pointing at then gets half a pane to be read in whatever it is worth.
     private var listHeightConstraint: NSLayoutConstraint?
 
     private lazy var countLabel: NSTextField = {
@@ -178,8 +183,15 @@ final class SessionAttachmentsViewController: NSViewController {
     private var documentView: MediaInspectorDocumentView?
 
     /// The fold between the two panes: the chronology ends here, and what its selected row
-    /// holds begins.
-    private lazy var listFold = SeparatorView()
+    /// holds begins. Draggable, because which half a reader needs is not something the pane can
+    /// know — see `listHeightConstraint`.
+    private lazy var listFold: PaneFoldDivider = {
+        let fold = PaneFoldDivider()
+        fold.setAccessibilityLabel(L10n.string("Attachments list height"))
+        fold.onDrag = { [weak self] travel in self?.foldDragged(by: travel) }
+        fold.onReset = { [weak self] in self?.foldDidReset() }
+        return fold
+    }()
     private var htmlView: WKWebView?
     private struct PendingHTMLNavigation {
         let token: UUID
@@ -491,10 +503,11 @@ final class SessionAttachmentsViewController: NSViewController {
             // rather than a stack of bands with the slack pooling under them. Nothing here
             // states a content height, so nothing here can grow the window (the trap
             // `listHeightPriority`'s comment records).
-            previewHost.topAnchor.constraint(
-                equalTo: listFold.bottomAnchor,
-                constant: Design.Spacing.small
-            ),
+            //
+            // Flush against the fold, with no gap of its own: the divider's band *is* the gap
+            // the pane used to hold here, which is what let the seam become a grip without
+            // anything below it moving.
+            previewHost.topAnchor.constraint(equalTo: listFold.bottomAnchor),
             previewHost.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
             previewHost.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
             previewHost.bottomAnchor.constraint(
@@ -558,7 +571,22 @@ final class SessionAttachmentsViewController: NSViewController {
     /// rows in a short one are the cap, scrolled.
     private func updateListHeight() {
         guard let constraint = listHeightConstraint else { return }
+        let target = resolvedListHeight()
+        if constraint.constant != target { constraint.constant = target }
+    }
 
+    /// The list's rows, under whichever cap is in force.
+    private func resolvedListHeight() -> CGFloat {
+        let rows = listRowHeights()
+        // Before the pane has a height there is nothing to take a share of, so the content
+        // stands in and `viewDidLayout` corrects it the moment the height is real.
+        guard view.bounds.height > 0 else { return rows.content }
+        return min(rows.content, listCap(noSmallerThan: rows.oneRow))
+    }
+
+    /// What the rows ask for, and what one of them costs — the two numbers every cap here is
+    /// answered against.
+    private func listRowHeights() -> (content: CGFloat, oneRow: CGFloat) {
         let rows = tableView.numberOfRows
         // The table's own row rects rather than rows × `rowHeight`: intercell spacing and the
         // padding the inset style puts above the first row — and, mirrored, below the last — are
@@ -571,16 +599,63 @@ final class SessionAttachmentsViewController: NSViewController {
         let oneRow = rows > 0
             ? tableView.rect(ofRow: 0).maxY + padding + listChromeHeight
             : SessionAttachmentsDefaults.rowHeight + listChromeHeight
-        // Before the pane has a height there is nothing to take a share of, so the content
-        // stands in and `viewDidLayout` corrects it the moment the height is real.
-        let paneHeight = view.bounds.height
-        // Never below a single row: a list capped into a sliver is a scroller with nothing
-        // legible beside it, and the pane has already lost by then.
-        let cap = paneHeight > 0
-            ? max(paneHeight * SessionAttachmentsDefaults.listShareOfPane, oneRow)
-            : content
-        let target = min(content, cap)
-        if constraint.constant != target { constraint.constant = target }
+        return (content, oneRow)
+    }
+
+    /// The two limits the pane keeps whoever is placing the fold — its own opening answer as much
+    /// as the user's drag.
+    ///
+    /// Never below a single row: a list capped into a sliver is a scroller with nothing legible
+    /// beside it, and the pane has already lost by then. Never past `maximumListShareOfPane`,
+    /// because a stored height is a point value and the pane it was chosen in is not the pane it
+    /// is read back in — a fold left at 600 in a tall window would otherwise arrive in a short one
+    /// as a list with the preview crushed underneath it.
+    private func listLimits(oneRow: CGFloat) -> (floor: CGFloat, ceiling: CGFloat) {
+        let ceiling = view.bounds.height * SessionAttachmentsDefaults.maximumListShareOfPane
+        return (oneRow, max(ceiling, oneRow))
+    }
+
+    /// The tallest the list may stand: the fold where the user left it, or half the pane while
+    /// they have never moved it, held between those limits either way.
+    private func listCap(noSmallerThan oneRow: CGFloat) -> CGFloat {
+        let limits = listLimits(oneRow: oneRow)
+        let chosen = AttachmentsListHeight.stored
+            ?? view.bounds.height * SessionAttachmentsDefaults.listShareOfPane
+        return min(max(chosen, limits.floor), limits.ceiling)
+    }
+
+    // MARK: - The Fold
+
+    /// The fold under the hand, travelling down as the pointer does.
+    ///
+    /// The list is content-sized, so what a drag moves is the *ceiling* on it rather than a
+    /// position between two panes — and the running total is clamped to what the fold can
+    /// actually express rather than carried on past it. An overshoot the fold cannot show is a
+    /// dead zone the drag back has to cross before anything moves again, which is the shell
+    /// drawer's overshoot problem inverted: there the travel past the floor is the answer, here
+    /// there is nothing below the last row for it to mean.
+    ///
+    /// Internal rather than private, like `TerminalContainerViewController`'s pair and for the
+    /// same reason: a synthesized `NSEvent` carries no `deltaY`, so the fold's own tests drive
+    /// this seam rather than a drag nobody can fabricate.
+    func foldDragged(by travel: CGFloat) {
+        guard view.bounds.height > 0 else { return }
+        let rows = listRowHeights()
+        // Against the pane's *limits*, not against the cap in force: the cap is what the fold is
+        // currently at, and a travel clamped to where it already stands is a fold that cannot
+        // move at all.
+        let limits = listLimits(oneRow: rows.oneRow)
+        let proposed = (listHeightConstraint?.constant ?? rows.content) + travel
+        AttachmentsListHeight.record(
+            min(max(proposed, limits.floor), min(rows.content, limits.ceiling))
+        )
+        updateListHeight()
+    }
+
+    /// A double-click on the fold: the pane places it again.
+    func foldDidReset() {
+        AttachmentsListHeight.reset()
+        updateListHeight()
     }
 
     /// What the scroll view costs above its document — a border, a themed inset. Zero in this
@@ -2310,10 +2385,24 @@ enum SessionAttachmentsDefaults {
     /// between two conversations re-decodes neither of them.
     static let thumbnailCacheCount = SessionAttachmentDefaults.maximumPerSession * 2
 
-    /// How much of the pane the list may take before it starts scrolling. Half: the rows and
-    /// what they are describing are two halves of the same pane, and neither may swallow the
-    /// other on the way to the footer.
+    /// How much of the pane the list may take before it starts scrolling, until the user says
+    /// otherwise. Half: the rows and what they are describing are two halves of the same pane,
+    /// and neither may swallow the other on the way to the footer.
     static let listShareOfPane: CGFloat = 0.5
+
+    /// How much of the pane the list may take once the user *has* said otherwise.
+    ///
+    /// A fold is theirs to place, and this is the part of the bargain the pane keeps: past here,
+    /// moving it further is not a reading choice — it is the list becoming the whole pane by
+    /// accident.
+    ///
+    /// An upper bound on the *ask*, not a promise about the result. A share is a fraction, and
+    /// four fifths of a short pane is more than what is left after the header, the fold and the
+    /// footer — so in a cramped pane the list constraint (`listHeightPriority`, below `required`)
+    /// gives way before the footer does and the list lands short of its own ceiling. That is the
+    /// order the pane already compresses in; the ceiling only has to stop a *tall* pane from
+    /// being handed over whole.
+    static let maximumListShareOfPane: CGFloat = 0.8
 
     /// Below `windowSizeStayPut` (500), and that line is the whole point: AppKit reads a
     /// window's minimum size out of every constraint it finds at 500 and above, so a
@@ -2330,4 +2419,43 @@ enum SessionAttachmentsDefaults {
     /// Where the footer's remembered action lives. `PreferenceStore`, not `.standard`: it
     /// records a choice the user made, and the hosted test suite runs inside the shipping app.
     static let lastActionKey = "attachments.lastAction"
+}
+
+// MARK: - Fold Persistence
+
+/// Where the user left the fold between the chronology and what it is pointing at.
+///
+/// Through `PreferenceStore` for `DisplayPaneWidth`'s reason, and with this bundle's own hazard
+/// behind it: a hosted test that drags a divider writes to the shipping app's defaults, so a
+/// fixture would otherwise move the fold in the pane the developer is looking at.
+///
+/// One value app-wide rather than one per session. A fold is how someone wants to *read* their
+/// attachments — rows enough to navigate by, room enough for the page a row is pointing at — and
+/// that does not change between two conversations. The shell drawer's height makes the same call.
+///
+/// The stored value is a height in points and is clamped where it is read, never on the way in:
+/// see `SessionAttachmentsViewController.listCap(noSmallerThan:)`, which knows the pane it is
+/// being read back into.
+@MainActor
+enum AttachmentsListHeight {
+    private static let key = "attachments.listHeight"
+
+    /// The height the user left the list at, or nil while they have never moved the fold — which
+    /// is what puts the pane back on its own share of itself.
+    static var stored: CGFloat? {
+        let saved = PreferenceStore.shared.double(forKey: key)
+        guard saved > 0 else { return nil }
+        return CGFloat(saved)
+    }
+
+    static func record(_ height: CGFloat) {
+        PreferenceStore.shared.set(Double(height), forKey: key)
+    }
+
+    /// Forgets the fold, so the pane places it again. Called by the double-click on the divider
+    /// itself and by `WindowLayoutReset`, which is what makes a window laid out unusably
+    /// recoverable without hunting through defaults.
+    static func reset() {
+        PreferenceStore.shared.removeObject(forKey: key)
+    }
 }

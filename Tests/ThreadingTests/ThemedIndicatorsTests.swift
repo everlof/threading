@@ -187,6 +187,262 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertEqual(stack.customSpacing(after: separator), inkGap, accuracy: 0.001)
     }
 
+    // MARK: - Pane Fold
+
+    /// The rule keeps the theme's weight and the band adds the pane's own gap under it. Both
+    /// halves of that are the point: a fold drawn as a hairline is a one-point drag target, and a
+    /// fold given a strip of its own moves everything below it the day it becomes draggable.
+    func testTheFoldIsARuleWithThePanesOwnGapUnderItAsTheGrip() {
+        let fold = PaneFoldDivider()
+
+        XCTAssertEqual(
+            fold.intrinsicContentSize.height,
+            Design.Radius.border + PaneFoldDivider.Layout.grip
+        )
+        XCTAssertEqual(
+            fold.intrinsicContentSize.width,
+            NSView.noIntrinsicMetric,
+            "a fold fixed the width of the pane it divides"
+        )
+    }
+
+    /// The seam takes the accent wherever a drag would attach to it, which is what the accent
+    /// already means on `ThemedSplitView`'s divider — and the only thing that can say a hairline
+    /// is draggable before it has been dragged.
+    func testTheFoldLightsItsSeamUnderThePointer() throws {
+        let fold = PaneFoldDivider()
+        fold.frame = NSRect(x: 0, y: 0, width: 40, height: fold.intrinsicContentSize.height)
+        _ = hosted(fold)
+
+        let rest = try colour(of: fold, atPointX: 20, y: 0.5)
+        fold.mouseEntered(with: enterEvent(in: fold))
+        let lit = try colour(of: fold, atPointX: 20, y: 0.5)
+
+        XCTAssertNotEqual(
+            rest.hexString,
+            lit.hexString,
+            "the seam reads the same under the pointer as at rest"
+        )
+    }
+
+    /// A drag reports travel, and the release does not: only the pane knows what floor and
+    /// ceiling the travel has to be answered against, so the fold hands over points and stops.
+    /// The keyboard reports the same points, because a key press moving nothing is a control a
+    /// pointer is required for.
+    func testTheFoldReportsItsTravelToWhoeverOwnsTheLimits() {
+        let fold = PaneFoldDivider()
+        var travel: [CGFloat] = []
+        fold.onDrag = { travel.append($0) }
+
+        fold.keyDown(with: arrowEvent(down: true, fine: false))
+        fold.keyDown(with: arrowEvent(down: false, fine: false))
+        fold.keyDown(with: arrowEvent(down: true, fine: true))
+
+        XCTAssertEqual(travel, [
+            PaneFoldDivider.Layout.coarseStep,
+            -PaneFoldDivider.Layout.coarseStep,
+            PaneFoldDivider.Layout.fineStep
+        ])
+    }
+
+    /// The way out of a fold dragged somewhere unhelpful, and the gesture `NSSplitView` has
+    /// answered that way for as long as it has had dividers.
+    func testDoubleClickingTheFoldAsksForItToBePlacedAgain() throws {
+        let fold = PaneFoldDivider()
+        fold.frame = NSRect(x: 0, y: 0, width: 40, height: fold.intrinsicContentSize.height)
+        _ = hosted(fold)
+
+        var travel: [CGFloat] = []
+        var resets = 0
+        fold.onDrag = { travel.append($0) }
+        fold.onReset = { resets += 1 }
+
+        fold.mouseDown(with: try clickEvent(in: fold, clicks: 1))
+        XCTAssertEqual(resets, 0, "a single press asked for the fold to be placed again")
+
+        fold.mouseDown(with: try clickEvent(in: fold, clicks: 2))
+        XCTAssertEqual(resets, 1, "a double-click did not reach the pane")
+        XCTAssertEqual(travel, [], "a press moved the fold before the pointer had travelled")
+    }
+
+    /// A drawn control has no cell to route VoiceOver through, so a fold that did not say what it
+    /// is would be a divider nobody without a pointer could move.
+    func testTheFoldIsASplitterAVoiceOverUserCanMove() {
+        let fold = PaneFoldDivider()
+        var travel: [CGFloat] = []
+        fold.onDrag = { travel.append($0) }
+
+        XCTAssertEqual(fold.accessibilityRole(), .splitter)
+        XCTAssertEqual(fold.accessibilityOrientation(), .horizontal)
+        XCTAssertFalse(
+            fold.accessibilityPerformPress(),
+            "a fold answered for a press it cannot have"
+        )
+
+        XCTAssertTrue(fold.accessibilityPerformIncrement())
+        XCTAssertTrue(fold.accessibilityPerformDecrement())
+        XCTAssertEqual(travel, [
+            PaneFoldDivider.Layout.coarseStep,
+            -PaneFoldDivider.Layout.coarseStep
+        ])
+    }
+
+    /// A fold already on screen follows a live theme switch, since both its ink and its weight
+    /// come from the theme — `ThemeRedraw`'s job, and the reason it invalidates the intrinsic
+    /// size as well as the drawing.
+    func testTheFoldRedrawsOnAThemeChange() {
+        AppThemePalette.set(.system)
+        let fold = PaneFoldDivider()
+        fold.frame = NSRect(x: 0, y: 0, width: 40, height: fold.intrinsicContentSize.height)
+        _ = hosted(fold)
+        fold.needsDisplay = false
+
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeStyles.cyberpunk.id))
+
+        XCTAssertTrue(fold.needsDisplay, "a theme change left the fold undrawn")
+    }
+
+    /// Draws the fold between two halves at rest and under the pointer, light and dark.
+    ///
+    /// The assertions above pin the seam's ink apart; this is what says whether it reads apart. A
+    /// one-point rule with a six-point band under it is exactly the size where "the pointer can
+    /// see this is draggable" can be true in an assertion and invisible on screen.
+    func testRendersTheFoldAtRestAndUnderThePointer() throws {
+        let directory: URL = {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+                return URL(fileURLWithPath: override)
+            }
+            return URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("ThreadingRenders", isDirectory: true)
+        }()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        // Stated rather than inherited: the palette is global, so a picture of "light and dark"
+        // taken after whichever test ran last is a picture of that test's theme.
+        AppThemePalette.set(.system)
+
+        let width: CGFloat = 260
+        let half: CGFloat = 44
+
+        var written = 0
+        for (appearanceName, appearanceID) in [("light", NSAppearance.Name.aqua),
+                                               ("dark", NSAppearance.Name.darkAqua)] {
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceID))
+            var data: Data?
+
+            appearance.performAsCurrentDrawingAppearance {
+                MainActor.assumeIsolated {
+                    let folds = [PaneFoldDivider(), PaneFoldDivider()]
+                    let band = folds[0].intrinsicContentSize.height
+                    let host = NSView(frame: NSRect(
+                        x: 0,
+                        y: 0,
+                        width: width,
+                        height: (half * 2 + band) * 2 + Design.Spacing.large
+                    ))
+                    host.appearance = appearance
+                    host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+
+                    for (index, fold) in folds.enumerated() {
+                        let block = (half * 2 + band)
+                        let bottom = CGFloat(index) * (block + Design.Spacing.large)
+                        // One surface on both sides, so the only thing between the halves is the
+                        // seam itself — two different fills would read as a boundary whether the
+                        // rule drew anything or not.
+                        for offset in [bottom, bottom + half + band] {
+                            let pane = NSView(frame: NSRect(
+                                x: 0, y: offset, width: width, height: half
+                            ))
+                            pane.applySurface(fill: Design.Surface.panel, radius: .fixed(0))
+                            host.addSubview(pane)
+                        }
+                        fold.frame = NSRect(
+                            x: 0, y: bottom + half, width: width, height: band
+                        )
+                        host.addSubview(fold)
+                    }
+                    // The upper block is the one under the pointer, so both readings stand in one
+                    // picture rather than in two that have to be held side by side.
+                    folds[1].mouseEntered(with: NSEvent.enterExitEvent(
+                        with: .mouseEntered,
+                        location: .zero,
+                        modifierFlags: [],
+                        timestamp: 0,
+                        windowNumber: 0,
+                        context: nil,
+                        eventNumber: 0,
+                        trackingNumber: 0,
+                        userData: nil
+                    )!)
+
+                    host.layoutSubtreeIfNeeded()
+                    guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+                        return
+                    }
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    data = rep.representation(using: .png, properties: [:])
+                }
+            }
+
+            try XCTUnwrap(data).write(
+                to: directory.appendingPathComponent("pane-fold-\(appearanceName).png")
+            )
+            written += 1
+        }
+
+        XCTAssertEqual(written, 2)
+        print("Rendered the pane fold to \(directory.path)")
+    }
+
+    private func enterEvent(in view: NSView) -> NSEvent {
+        NSEvent.enterExitEvent(
+            with: .mouseEntered,
+            location: NSPoint(x: view.bounds.midX, y: view.bounds.midY),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: view.window?.windowNumber ?? 0,
+            context: nil,
+            eventNumber: 0,
+            trackingNumber: 0,
+            userData: nil
+        )!
+    }
+
+    /// A press at the fold's own centre. `clickCount` is the one part of a drag a synthesized
+    /// event can carry — `deltaY` is not, which is why the travel above is driven through the
+    /// keyboard and the pane's own seam.
+    private func clickEvent(in view: NSView, clicks: Int) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: view.window?.windowNumber ?? 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: clicks,
+            pressure: 1
+        ))
+    }
+
+    private func arrowEvent(down: Bool, fine: Bool) -> NSEvent {
+        let key = String(
+            UnicodeScalar(down ? NSDownArrowFunctionKey : NSUpArrowFunctionKey)!
+        )
+        return NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: fine ? [.shift] : [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: key,
+            charactersIgnoringModifiers: key,
+            isARepeat: false,
+            keyCode: 0
+        )!
+    }
+
     // MARK: - Status Progress Ring
 
     func testStatusProgressRingKeepsEveryCheckSlice() {

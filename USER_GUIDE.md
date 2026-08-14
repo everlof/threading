@@ -2369,6 +2369,12 @@ images and PDFs inline (click an image to enter the same collection-aware media 
 archives and documents through the same Quick Look preview the space bar shows in Finder, and
 diagram files as their own source text, ready to read or drag into a chat.
 
+**Drag the line between them** to decide how the pane is split. The list grows only as far as the
+rows it actually has, so a short session keeps a short list either way; a long one stops where you
+leave the divider instead of at half the pane, which is what gives a long report room to be read.
+Click it and the arrow keys move it too (Shift for a finer step). Double-click puts it back where
+Threading would have placed it. Where you leave it is remembered for every session.
+
 **Space previews the selected row**, the way it does in Finder — with Threading's own inspector
 rather than the system panel. An image or a PDF opens on the rail with every other image and PDF
 in the session beside it, so the arrow keys and the thumbnail strip walk the list without closing

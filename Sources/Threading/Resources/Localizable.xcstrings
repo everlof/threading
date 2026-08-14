@@ -1186,6 +1186,10 @@
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Så namnger innehållspanelen det som visas: ett märke, sidans namn och den enda meny som verkar på den. Ren text tills pekaren är på den — det är en etikett som svarar på ett tryck, inte en flik." } } }
     },
+    "Attachments list height": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Bilagelistans höjd"}}}},
+    "PaneFoldDivider": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "PaneFoldDivider"}}}},
+    "Pane divider": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Panelavdelare"}}}},
+    "The fold between a pane's two halves, and the grip that moves it. Drag it: the seam takes the accent wherever a drag would attach, the band under the rule is the part the pointer can hold, and the arrow keys move it too. Double-click hands the position back to the pane.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Vecket mellan panelens två halvor, och greppet som flyttar det. Dra i det: fogen tar accentfärgen där ett drag skulle fästa, bandet under linjen är den del pekaren kan hålla i, och piltangenterna flyttar det också. Dubbelklick lämnar tillbaka placeringen till panelen."}}}},
     "PaneNoticeView": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "PaneNoticeView" } } }

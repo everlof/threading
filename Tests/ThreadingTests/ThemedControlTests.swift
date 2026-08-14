@@ -6903,6 +6903,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "MorphingTitleLabel",
                 "NavigatorGridItemView",
                 "PageTitleView",
+                "PaneFoldDivider",
                 "PaneFooterView",
                 "PaneHeaderView",
                 "PaneNoticeView",

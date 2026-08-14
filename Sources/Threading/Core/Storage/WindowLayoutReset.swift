@@ -11,9 +11,9 @@ import AppKit
 /// surface offers this because a window that comes up somewhere unusable is indistinguishable,
 /// from the outside, from an app that will not start.
 ///
-/// Each value is cleared by the type that owns its key rather than by a list of strings here: two
-/// of them live in `PreferenceStore` and two do not, and a second spelling of a key is how a reset
-/// silently stops resetting something.
+/// Each value is cleared by the type that owns its key rather than by a list of strings here:
+/// most live in `PreferenceStore` and the drawer's height does not, and a second spelling of a key
+/// is how a reset silently stops resetting something.
 @MainActor
 enum WindowLayoutReset {
 
@@ -25,5 +25,6 @@ enum WindowLayoutReset {
         DisplayPaneWidth.reset()
         StatusCardVisibility.reset()
         ShellDrawerHeight.reset()
+        AttachmentsListHeight.reset()
     }
 }

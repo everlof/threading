@@ -120,6 +120,7 @@ final class ComponentGalleryViewController: NSViewController {
         "MorphingTitleLabel",
         "NavigatorGridItemView",
         "PageTitleView",
+        "PaneFoldDivider",
         "PaneFooterView",
         "PaneHeaderView",
         "PaneNoticeView",
@@ -2806,6 +2807,14 @@ final class ComponentGalleryViewController: NSViewController {
                     makePaneHeaderSample()
                 ),
                 story(
+                    "PaneFoldDivider",
+                    "The fold between a pane's two halves, and the grip that moves it. Drag it: "
+                        + "the seam takes the accent wherever a drag would attach, the band under "
+                        + "the rule is the part the pointer can hold, and the arrow keys move it "
+                        + "too. Double-click hands the position back to the pane.",
+                    makePaneFoldDividerSample()
+                ),
+                story(
                     "PaneNoticeView",
                     "The pane's third band: a standing condition it found on its own, with the "
                         + "ways to answer it and the way out on the same line. Press Show to put "
@@ -3779,6 +3788,54 @@ final class ComponentGalleryViewController: NSViewController {
         ])
 
         return split
+    }
+
+    /// Two halves and the fold between them, wired the way a pane wires it: the travel moves the
+    /// upper half's height constraint between a floor and a ceiling, and the double-click puts it
+    /// back where the sample opened.
+    private func makePaneFoldDividerSample() -> NSView {
+        let opening: CGFloat = 36
+        let floor: CGFloat = 12
+        let ceiling: CGFloat = 108
+
+        let upper = NSView()
+        upper.applySurface(fill: Design.Surface.panel, radius: .fixed(0))
+        upper.translatesAutoresizingMaskIntoConstraints = false
+        let lower = NSView()
+        lower.applySurface(fill: Design.Surface.elevated, radius: .fixed(0))
+        lower.translatesAutoresizingMaskIntoConstraints = false
+
+        let upperHeight = upper.heightAnchor.constraint(equalToConstant: opening)
+        let fold = PaneFoldDivider()
+        fold.onDrag = { travel in
+            upperHeight.constant = min(max(upperHeight.constant + travel, floor), ceiling)
+        }
+        fold.onReset = { upperHeight.constant = opening }
+
+        let host = NSView()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        for half in [upper, fold, lower] { host.addSubview(half) }
+
+        NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: 260),
+            host.heightAnchor.constraint(equalToConstant: ceiling + Design.Spacing.large),
+
+            upper.topAnchor.constraint(equalTo: host.topAnchor),
+            upper.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            upper.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            upperHeight,
+
+            fold.topAnchor.constraint(equalTo: upper.bottomAnchor),
+            fold.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            fold.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+
+            lower.topAnchor.constraint(equalTo: fold.bottomAnchor),
+            lower.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            lower.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            lower.bottomAnchor.constraint(equalTo: host.bottomAnchor)
+        ])
+
+        return host
     }
 
     /// The three components that dress a live web view.
