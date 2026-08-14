@@ -26,6 +26,10 @@ final class GitReviewFileRow: NSView {
     private let contentIsPending: Bool
     private let contentLoadFailed: Bool
 
+    /// What a contested turn can honestly say about who wrote this file. `.none` on every other
+    /// turn and every other mode, which is how the row renders when nothing is known.
+    private let attribution: TurnAttributionMark
+
     /// Where this file lives, when it still does. See `init`.
     private let fileURL: URL?
 
@@ -279,6 +283,7 @@ final class GitReviewFileRow: NSView {
         defersExpandedBody: Bool = false,
         contentIsPending: Bool = false,
         contentLoadFailed: Bool = false,
+        attribution: TurnAttributionMark = .none,
         staging: GitStaging? = nil,
         wraps: Bool = true,
         textSize: Design.CodeTextScale = .standard,
@@ -293,6 +298,7 @@ final class GitReviewFileRow: NSView {
         self.defersExpandedBody = defersExpandedBody
         self.contentIsPending = contentIsPending
         self.contentLoadFailed = contentLoadFailed
+        self.attribution = attribution
         self.fileURL = fileURL
         super.init(frame: .zero)
         setupViews()
@@ -1266,9 +1272,27 @@ final class GitReviewFileRow: NSView {
         file.directory
     }
 
+    /// The row's trailing summary, plus what a contested turn can say about who wrote this file.
+    ///
+    /// The note follows whatever the summary is — counts, `binary`, `no preview` — because the
+    /// question it answers ("who wrote this?") is independent of whether the body can be
+    /// rendered.
+    private var metaText: NSAttributedString {
+        guard let note = attribution.note else { return metaSummaryText }
+        let text = NSMutableAttributedString(attributedString: metaSummaryText)
+        text.append(NSAttributedString(
+            string: GitReviewUIDefaults.subtitleSeparator + note,
+            attributes: [
+                .foregroundColor: Design.Text.tertiary,
+                .font: Design.Typography.caption()
+            ]
+        ))
+        return text
+    }
+
     /// `+A −R` with each count in its own colour, or what stands in for a body that cannot
     /// be shown.
-    private var metaText: NSAttributedString {
+    private var metaSummaryText: NSAttributedString {
         if contentIsPending {
             return NSAttributedString(string: "loading…", attributes: [
                 .foregroundColor: Design.Text.quaternary,
@@ -1310,6 +1334,22 @@ final class GitReviewFileRow: NSView {
             .font: Design.Typography.caption()
         ]))
         return text
+    }
+}
+
+// MARK: - Attribution Copy
+
+extension TurnAttributionMark {
+
+    /// The note a row appends to its summary, or nil where the row says nothing extra. Each one
+    /// states only what is provable: that a chat's edit tools named the file, or that none did.
+    var note: String? {
+        switch self {
+        case .none: return nil
+        case .unclaimed: return L10n.string("not claimed")
+        case .otherChat: return L10n.string("claimed by another chat")
+        case .shared: return L10n.string("also claimed by another chat")
+        }
     }
 }
 

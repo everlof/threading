@@ -22354,6 +22354,17 @@
         }
       }
     },
+    "also claimed by another chat": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "även tillskriven en annan chatt"
+          }
+        }
+      }
+    },
     "animation": {
       "extractionState": "stale",
       "localizations": {
@@ -22634,6 +22645,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "checks"
+          }
+        }
+      }
+    },
+    "claimed by another chat": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tillskriven en annan chatt"
           }
         }
       }
@@ -23473,6 +23495,28 @@
         }
       }
     },
+    "may include changes from %lld other chats": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "kan innehålla ändringar från %lld andra chattar"
+          }
+        }
+      }
+    },
+    "may include changes from 1 other chat": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "kan innehålla ändringar från 1 annan chatt"
+          }
+        }
+      }
+    },
     "model": {
       "extractionState": "stale",
       "localizations": {
@@ -23546,6 +23590,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "inga ytor"
+          }
+        }
+      }
+    },
+    "not claimed": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "obekräftad"
           }
         }
       }

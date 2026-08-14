@@ -250,6 +250,14 @@ final class GitTurnBaselineStore {
         let project = context == nil
             ? ProjectStore.shared.project(forSessionID: sessionID)
             : nil
+        // Contention is observed, never prevented: nothing below waits on another chat and no
+        // git work is added. Both sides are stamped at this one moment because a second chat can
+        // start *and* finish entirely inside this turn — by the time this turn ends, its record
+        // is already out of the in-flight sets and unobservable.
+        let contenders = contendingTurns(
+            excluding: sessionID,
+            worktreeIdentity: context?.worktreeIdentity
+        )
         let record = GitTurnCheckpoint(
             id: checkpointID,
             projectID: context?.projectID ?? project?.id,
@@ -271,16 +279,29 @@ final class GitTurnBaselineStore {
             beforeCapturedAt: nil,
             finalRequestedAt: nil,
             completedAt: nil,
-            failureDescription: nil
+            failureDescription: nil,
+            overlappingSessionIDs: Self.mergedOverlap(nil, adding: contenders.map(\.sessionID))
         )
         archive.checkpoints.append(record)
+        for contender in contenders {
+            update(contender.checkpointID) {
+                $0.overlappingSessionIDs = Self.mergedOverlap(
+                    $0.overlappingSessionIDs,
+                    adding: [sessionID]
+                )
+            }
+        }
         preparingCheckpointIDs[sessionID] = checkpointID
         preparationWaiters[checkpointID] = [completion]
         if expectsActivityEdge {
             preparingActivityEdges.insert(sessionID)
             preparedActivityEdges.remove(sessionID)
         }
-        let initialMetadataStored = saveAndNotify(sessionID)
+        // One write covers both sides of the stamp; each contender's review surface still hears
+        // about its own record changing.
+        let initialMetadataStored = saveAndNotify(
+            Set(contenders.map(\.sessionID)).union([sessionID])
+        )
 
         guard let context else {
             failBeforeCapture(
@@ -383,6 +404,15 @@ final class GitTurnBaselineStore {
         checkpoint.finalRequestedAt = Date()
         if let assistantTurnID { checkpoint.assistantTurnID = assistantTurnID }
         if let providerTurnID { checkpoint.providerTurnID = providerTurnID }
+        // A chat that began working after this turn was admitted is contention too, and no
+        // stamping happened on this record when it did.
+        checkpoint.overlappingSessionIDs = Self.mergedOverlap(
+            checkpoint.overlappingSessionIDs,
+            adding: contendingTurns(
+                excluding: sessionID,
+                worktreeIdentity: checkpoint.worktreeIdentity
+            ).map(\.sessionID)
+        )
         replace(checkpoint)
         guard saveAndNotify(sessionID) else {
             failFinalCapture(
@@ -473,6 +503,104 @@ final class GitTurnBaselineStore {
         }
         _ = saveAndNotify(sessionID)
         discard(checkpointIDs: [checkpointID])
+    }
+
+    // MARK: - Claimed Edits
+
+    /// Records the files this session's structured edit tools named inside its open turn.
+    ///
+    /// Calling with no paths is meaningful: it marks the turn as *tracked*, which is what
+    /// separates "this chat's edit tools claimed nothing" from "nobody was watching". A session
+    /// whose runtime has no live per-tool feed never calls this and keeps nil.
+    ///
+    /// Deliberately not persisted per call. A fifty-edit turn would otherwise rewrite the whole
+    /// archive fifty times to store advisory metadata; the accumulated claims ride out on the
+    /// ordinary completion and failure saves instead. Losing them to a crash costs nothing that
+    /// matters, because the same crash leaves the turn incomplete, and an incomplete turn presents
+    /// no diff to annotate. Replay and transcript seeding reach this method with no turn in
+    /// flight, so the checkpoint binding below is also what keeps historical events out.
+    func recordClaimedEdits(sessionID: SessionID, paths: [String]) {
+        guard let checkpointID = preparingCheckpointIDs[sessionID]
+                ?? activeCheckpointIDs[sessionID],
+              let checkoutPath = checkpoint(id: checkpointID)?.executionCheckoutPath else {
+            return
+        }
+        update(checkpointID) { record in
+            var claimed = record.claimedEditPaths ?? []
+            var overflowed = record.claimedEditsOverflowed ?? false
+            for path in paths {
+                guard let relative = Self.checkoutRelativePath(path, in: checkoutPath),
+                      !claimed.contains(relative) else { continue }
+                guard claimed.count < GitTurnCheckpointDefaults.maximumClaimedEditPaths else {
+                    overflowed = true
+                    break
+                }
+                claimed.append(relative)
+            }
+            record.claimedEditPaths = claimed
+            record.claimedEditsOverflowed = overflowed
+        }
+    }
+
+    /// A claim names the file the provider wrote; a diff row names a path relative to the
+    /// checkout. Anything that cannot be inside the checkout is dropped rather than stamped: a
+    /// claim that no diff row can ever match could only mislead the surface reading it.
+    private static func checkoutRelativePath(_ path: String, in checkoutPath: String) -> String? {
+        guard !path.isEmpty else { return nil }
+        let root = canonicalPath(URL(fileURLWithPath: checkoutPath))
+        let candidate = path.hasPrefix("/")
+            ? canonicalPath(URL(fileURLWithPath: path))
+            : canonicalPath(URL(fileURLWithPath: checkoutPath).appendingPathComponent(path))
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        guard candidate.hasPrefix(prefix) else { return nil }
+        let relative = String(candidate.dropFirst(prefix.count))
+        return relative.isEmpty ? nil : relative
+    }
+
+    /// `/var` and `/private/var` name one directory on every Mac, but Foundation strips the
+    /// `/private` spelling only when the result already exists — so a file the agent is creating
+    /// for the first time would fail to match the checkout it is being created in. Fold both
+    /// sides the same way regardless of what is on disk yet.
+    private static func canonicalPath(_ url: URL) -> String {
+        let resolved = url.standardizedFileURL.resolvingSymlinksInPath().path
+        guard resolved.hasPrefix("/private/") else { return resolved }
+        return String(resolved.dropFirst("/private".count))
+    }
+
+    /// What the chats that contended for this checkout claimed while this turn was open.
+    ///
+    /// Only turns whose own window overlaps this one count, and only where their claims can be
+    /// trusted: an untracked or overflowed contender contributes nothing rather than a partial
+    /// list, because absence from a partial list is exactly the inference this must not enable.
+    /// Paths are already checkout-relative, so they compare directly — the worktree identity is
+    /// checked anyway, since two checkouts of one repository share path spellings but not files.
+    ///
+    /// One pass over the archive (≤ `maximumTotal` records), no git and no filesystem work, and
+    /// resolved once per review load rather than per row.
+    func otherChatsClaimedPaths(overlapping checkpoint: GitTurnCheckpoint) -> Set<String> {
+        guard let overlapping = checkpoint.overlappingSessionIDs, !overlapping.isEmpty,
+              let worktreeIdentity = checkpoint.worktreeIdentity else { return [] }
+        let contenders = Set(overlapping)
+        var paths: Set<String> = []
+        for other in archive.checkpoints
+        where contenders.contains(other.sessionID)
+            && other.worktreeIdentity == worktreeIdentity
+            && other.hasUsableEditClaims
+            && Self.windowsOverlap(checkpoint, other) {
+            paths.formUnion(other.claimedEditPaths ?? [])
+        }
+        return paths
+    }
+
+    /// A turn with no recorded end has not been observed ending, so it is treated as still open.
+    /// Erring towards overlap can only add another chat's claims, and a claim is a positive fact
+    /// that stands on its own; erring the other way would silently drop true attribution.
+    private static func windowsOverlap(
+        _ first: GitTurnCheckpoint,
+        _ second: GitTurnCheckpoint
+    ) -> Bool {
+        first.requestedAt <= (second.completedAt ?? .distantFuture)
+            && second.requestedAt <= (first.completedAt ?? .distantFuture)
     }
 
     // MARK: - Reads
@@ -808,6 +936,52 @@ final class GitTurnBaselineStore {
         }
     }
 
+    // MARK: - Observed Contention
+
+    /// The other sessions whose turn is plausibly open in the same worktree right now, each with
+    /// the record it would be stamped on.
+    ///
+    /// Bounded by the sessions holding an active or preparing checkpoint — a handful even in a
+    /// busy window — and deliberately free of git and filesystem work, because this runs inside
+    /// the admission path. A record still mid-capture counts: its turn is in flight by
+    /// definition, whatever activity the tracker has published so far.
+    private func contendingTurns(
+        excluding sessionID: SessionID,
+        worktreeIdentity: String?
+    ) -> [(sessionID: SessionID, checkpointID: GitTurnCheckpointID)] {
+        guard let worktreeIdentity else { return [] }
+        var seen: Set<SessionID> = [sessionID]
+        var contenders: [(sessionID: SessionID, checkpointID: GitTurnCheckpointID)] = []
+        for (otherSessionID, checkpointID) in Array(activeCheckpointIDs)
+            + Array(preparingCheckpointIDs) {
+            guard !seen.contains(otherSessionID),
+                  let record = checkpoint(id: checkpointID),
+                  let otherWorktree = record.worktreeIdentity,
+                  otherWorktree == worktreeIdentity,
+                  lastActivity[otherSessionID]?.hasTurnInFlight == true
+                      || record.status.isTransitional else { continue }
+            seen.insert(otherSessionID)
+            contenders.append((otherSessionID, checkpointID))
+        }
+        // Dictionary iteration order is not stable across runs; a stamp a person reads and a
+        // test asserts should be.
+        return contenders.sorted { $0.sessionID.uuidString < $1.sessionID.uuidString }
+    }
+
+    /// Union in stable order. A stamp is only ever added to, so the same contender observed at
+    /// admission and again at completion stays one entry, and nil keeps meaning "none observed".
+    private static func mergedOverlap(
+        _ existing: [SessionID]?,
+        adding additions: [SessionID]
+    ) -> [SessionID]? {
+        guard !additions.isEmpty else { return existing }
+        var merged = existing ?? []
+        for sessionID in additions where !merged.contains(sessionID) {
+            merged.append(sessionID)
+        }
+        return merged.isEmpty ? nil : merged
+    }
+
     // MARK: - Retention and Garbage Collection
 
     private func pruneIfNeeded() {
@@ -963,6 +1137,12 @@ enum GitTurnCheckpointDefaults {
     static let fileName = "git-turn-checkpoints.json"
     static let maximumPerSession = 50
     static let maximumTotal = 1_000
+
+    /// A turn's claimed-path list is advisory metadata inside a record that is already capped at
+    /// ~900 bytes of prose; a refactoring turn that rewrites more files than this is exactly the
+    /// case where per-file attribution stops being worth stating, so it says so instead of
+    /// growing.
+    static let maximumClaimedEditPaths = 256
 }
 
 private enum GitTurnCheckpointStoreError: LocalizedError {

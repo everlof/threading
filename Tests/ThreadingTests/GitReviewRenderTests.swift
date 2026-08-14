@@ -412,6 +412,68 @@ final class GitReviewRenderTests: XCTestCase {
         XCTAssertEqual(plain.arrangedSubviews.count, highlighted.arrangedSubviews.count)
     }
 
+    // MARK: - Contested Attribution
+
+    /// On a contested turn the pane can prove a file was this chat's, never that it was not — so
+    /// an unclaimed file says only that, after the counts it already shows, and a claimed file is
+    /// left exactly as it renders on any other turn.
+    func testUnclaimedFileRowMarksItsSummaryWithoutDisturbingClaimedRows() throws {
+        let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+
+        let unclaimed = GitReviewFileRow(file: file, expanded: false, attribution: .unclaimed)
+        let claimed = GitReviewFileRow(file: file, expanded: false)
+
+        let mark = L10n.string("not claimed")
+        XCTAssertTrue(statsText(in: unclaimed).hasSuffix(mark))
+        XCTAssertTrue(
+            statsText(in: unclaimed).hasPrefix("+"),
+            "the file's own counts still lead its summary"
+        )
+        XCTAssertEqual(
+            statsText(in: unclaimed).replacingOccurrences(
+                of: GitReviewUIDefaults.subtitleSeparator + mark,
+                with: ""
+            ),
+            statsText(in: claimed),
+            "the mark is appended to the ordinary summary, not a replacement for it"
+        )
+        XCTAssertFalse(statsText(in: claimed).contains(mark))
+    }
+
+    /// The other two answers a contested turn can give. Each names the other chat rather than
+    /// implying the file is a problem, and both sit in the same tertiary caption as the counts.
+    func testRowsNameAnotherChatsClaimAndASharedOne() throws {
+        let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+
+        let other = GitReviewFileRow(file: file, expanded: false, attribution: .otherChat)
+        let shared = GitReviewFileRow(file: file, expanded: false, attribution: .shared)
+        let plain = GitReviewFileRow(file: file, expanded: false)
+
+        let summary = statsText(in: plain)
+        XCTAssertEqual(
+            statsText(in: other),
+            summary + GitReviewUIDefaults.subtitleSeparator + L10n.string("claimed by another chat")
+        )
+        XCTAssertEqual(
+            statsText(in: shared),
+            summary + GitReviewUIDefaults.subtitleSeparator
+                + L10n.string("also claimed by another chat")
+        )
+        for row in [other, shared] {
+            XCTAssertFalse(
+                statsText(in: row).contains(L10n.string("not claimed")),
+                "a file somebody claimed is never also called unclaimed"
+            )
+        }
+    }
+
+    private func statsText(in row: NSView) -> String {
+        descendants(in: row)
+            .compactMap { $0 as? NSTextField }
+            .first { $0.accessibilityIdentifier() == "git-review.file.stats" }?
+            .stringValue ?? ""
+    }
+
     // MARK: - Building
 
     private func laidOut(_ files: [GitFileDiff], wraps: Bool = true) -> NSView {

@@ -50,6 +50,40 @@ enum AgentFileActivityClassifier {
     }
 }
 
+// MARK: - Live edit claims
+
+extension AgentFileActivityClassifier {
+
+    /// The files one live tool call claims to have written, or nil when the event is not a
+    /// structured tool call at all.
+    ///
+    /// The empty array is a real answer — "a tool ran and named no file" — and is what lets a turn
+    /// record that its claims were tracked rather than unobserved. These belong only to a live
+    /// in-flight turn: a replay or transcript scan describes work whose checkpoint is long closed.
+    static func claimedEditPaths(in event: ProviderExecutionEvent) -> [String]? {
+        guard event.phase == .requested, let input = event.input?.objectValue else { return nil }
+        return editPaths(tool: ToolIdentity(event.operation ?? ""), input: input)
+    }
+
+    static func claimedEditPaths(in event: StreamEvent) -> [String]? {
+        guard case .assistantMessage(let blocks) = event else { return nil }
+        var paths: [String] = []
+        var sawToolCall = false
+        for block in blocks {
+            guard case .toolUse(_, let tool, let input) = block else { continue }
+            sawToolCall = true
+            paths.append(contentsOf: editPaths(tool: tool, input: input))
+        }
+        return sawToolCall ? paths : nil
+    }
+
+    private static func editPaths(tool: ToolIdentity, input: [String: JSONValue]) -> [String] {
+        signals(tool: tool, input: input)
+            .filter { $0.kind == .edit }
+            .map(\.path)
+    }
+}
+
 // MARK: - Sparse observed work
 
 /// A bounded chronological fact used by the non-file activity ribbon.
@@ -117,6 +151,19 @@ struct AgentSessionWorkTrace: Codable, Equatable, Sendable {
     var categoryCounts: [ExecutionAuditRecord.Category: Int] = [:]
     var recentActions: [AgentWorkAction] = []
     var lastActivity: Date?
+
+    /// How far this session's own transcript has been folded in, in bytes.
+    ///
+    /// Only a session Threading does not render itself is read this way — a rendered conversation
+    /// records each call as it happens — so nil means one of two different things, and they are
+    /// told apart by whether any work is recorded beside it. Nil on an empty trace is a session
+    /// never hydrated; nil on a trace that already holds live-recorded work is a conversation that
+    /// changed surface, whose transcript must be adopted at its current end rather than counted
+    /// again from the top. `AgentWorkTraceStore` owns both rules.
+    ///
+    /// Optional and additive on purpose: an older cache file decodes with it absent, which is
+    /// exactly "never hydrated", so no format version has to move.
+    var transcriptOffset: UInt64?
 
     var touchedFileCount: Int { files.count }
     var totalActionCount: Int { categoryCounts.values.reduce(0, +) }

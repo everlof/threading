@@ -2805,7 +2805,14 @@ The chip at the top picks what is compared:
 - **Staged** — what `git commit` would take right now.
 - **Last Turn** — what changed since the agent most recently started working. The baseline
   is captured automatically each time a session goes busy; before the first turn of a launch
-  the mode reports that no turn has been recorded yet.
+  the mode reports that no turn has been recorded yet. If another chat was also working in the
+  same folder while that turn ran, the turn's entry says the diff may include changes from it —
+  the comparison is still the two points in time, so both chats' edits land inside it. On such a
+  turn, each changed file says what can be shown: a file the other chat's edit tools named is
+  **claimed by another chat**, one both chats named is **also claimed by another chat**, and one
+  nobody's edit tools named is **not claimed** — which may still be an edit either chat made
+  through a shell command, since those name no file. Files only this chat claimed are left
+  unmarked, and a chat whose runtime reports no per-file edits simply marks less.
 - **Branch** — the whole branch against the repository's default branch (where it forked
   from `main`), including uncommitted work.
 - **Commits** — the history: a scrolling list of commits with their `+/−` weight, drawn with

@@ -314,6 +314,11 @@ final class GitReviewViewController: NSViewController {
     /// deep indexes superlinear. The table owns all model rows while creating views only around
     /// the viewport.
     var renderedFiles: [GitFileDiff] = []
+
+    /// What the turn being shown can say about who wrote each file, or nil where no row may be
+    /// marked at all — every mode but a turn checkpoint, and an uncontested turn. Resolved once
+    /// per load rather than per row, because both halves of it scan the checkpoint archive.
+    var turnAttribution: TurnAttribution?
     var pendingDiffIndexPaths: Set<String> = []
     var failedDiffHydrationPaths: Set<String> = []
     var deferredHydratedFiles: [String: GitFileDiff] = [:]
@@ -734,6 +739,10 @@ final class GitReviewViewController: NSViewController {
             root = repositoryRoot
         }
 
+        // Every load decides attribution marking again from scratch; only the turn branch below
+        // can turn it back on.
+        turnAttribution = nil
+
         guard let root else {
             setChangeRequestBarVisible(false)
             if mode == .lastTurn,
@@ -769,6 +778,14 @@ final class GitReviewViewController: NSViewController {
                 ))
                 return
             }
+            // Nil keeps every row exactly as it renders on an uncontested turn; the rule itself
+            // lives beside the fields it reads.
+            turnAttribution = TurnAttribution(
+                checkpoint: checkpoint,
+                claimedByOtherChats: GitTurnBaselineStore.shared.otherChatsClaimedPaths(
+                    overlapping: checkpoint
+                )
+            )
             loadDiff(.turnCheckpoint(checkpoint), in: root)
 
         case .uncommitted: loadDiff(.uncommitted, in: root)
@@ -1067,9 +1084,9 @@ final class GitReviewViewController: NSViewController {
     private func turnSubtitle(_ checkpoint: GitTurnCheckpoint) -> String {
         switch checkpoint.status {
         case .complete:
-            return L10n.string("Turn Start → Turn End")
+            return hedgingObservedOverlap(L10n.string("Turn Start → Turn End"), in: checkpoint)
         case .inProgress, .capturingAfter:
-            return L10n.string("Turn Start → Working Tree")
+            return hedgingObservedOverlap(L10n.string("Turn Start → Working Tree"), in: checkpoint)
         case .capturingBefore:
             return L10n.string("Capturing turn start…")
         case .beforeCaptureFailed, .finalCaptureFailed, .incomplete:
@@ -1077,6 +1094,21 @@ final class GitReviewViewController: NSViewController {
         case .notAdmitted:
             return L10n.string("Turn not admitted")
         }
+    }
+
+    /// The checkpoint recorded another chat working in this checkout while the turn was open, so
+    /// its two trees can hold that chat's edits as well. The comparison stays exactly what was
+    /// captured; the subtitle is where that uncertainty is allowed to show.
+    private func hedgingObservedOverlap(
+        _ subtitle: String,
+        in checkpoint: GitTurnCheckpoint
+    ) -> String {
+        let others = checkpoint.overlappingSessionIDs?.count ?? 0
+        guard others > 0 else { return subtitle }
+        let note = others == 1
+            ? L10n.string("may include changes from 1 other chat")
+            : L10n.format("may include changes from %lld other chats", Int64(others))
+        return subtitle + GitReviewUIDefaults.subtitleSeparator + note
     }
 
     /// Switches the comparison from outside — the changed-files card's View diff lands on the
@@ -1168,6 +1200,10 @@ enum GitReviewUIDefaults {
     static let historyTableColumnIdentifier = NSUserInterfaceItemIdentifier("GitReviewCommit")
 
     static var commitPlaceholder: String { L10n.string("Commit staged changes…") }
+
+    /// Joins secondary text — a menu subtitle, a file row's trailing summary — to a qualifier
+    /// about the same comparison.
+    static let subtitleSeparator = " · "
 
     /// Delimits the patch in the copied `git apply` heredoc. Distinctive enough that a diff
     /// containing the word cannot close it early.

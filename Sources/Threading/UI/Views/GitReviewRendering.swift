@@ -1160,6 +1160,9 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             defersExpandedBody: defersExpandedBody,
             contentIsPending: contentIsPending,
             contentLoadFailed: contentLoadFailed,
+            // No attribution means the pane knows nothing, which is not the same as knowing the
+            // file was this chat's — so no row is marked at all in that case.
+            attribution: turnAttribution?.mark(for: file.path) ?? .none,
             staging: contentIsPending ? nil : staging,
             wraps: wrapsDiffLines,
             textSize: reviewTextSize,

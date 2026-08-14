@@ -243,6 +243,57 @@ replaced ref is an explicit unavailable checkpoint — the loose object hash is 
 fallback. Any current checkout of the same repository can read the pair, which is why a managed
 worktree's history remains readable through the logical checkout after disposal.
 
+**Contention is observed and recorded, never prevented.** Two chats can run overlapping turns in
+one checkout, and when they do, each turn's tree→tree diff contains the other chat's writes —
+that is what comparing two points in time means, not a bug in the capture. The store therefore
+records it instead of arbitrating it: at admission a turn names every other session holding an
+active or preparing checkpoint on the same **worktree** identity, and stamps its own id onto those
+records in return. That mutual stamp is what catches a chat that starts *and* finishes inside
+another's turn, since by then it is out of the in-flight sets; completion recomputes the set once
+more for a chat that began working mid-turn. Same repository but a different worktree is not
+contention and is not recorded. Nothing here delays admission, orders the turns, or runs git — the
+observation is a bounded pass over the handful of sessions with a turn open. `overlappingSessionIDs`
+is optional, so an archive written before it existed loads as "no contention observed", and the
+comparison itself is unchanged. Attribution stays best effort by construction; what changes is that
+surfaces can now say so, which is why the Git Review turn menu hedges a turn's subtitle with
+"may include changes from N other chats" rather than presenting shared work as exclusively this
+chat's.
+
+**Claims narrow the contested case by crossing two incomplete sources.** The tree pair is complete
+but attributes nothing; the provider's structured edit tools attribute exactly but see nothing an
+agent does through a shell. So a turn also records `claimedEditPaths`: the checkout-relative files
+this chat's `Edit`/`Write`/`MultiEdit`/`apply_patch` calls named while the turn was open, fed from
+the same live tool stream the work trace already consumes, normalized against the checkpoint's own
+checkout and dropped when they fall outside it. The cross is sound in one direction only — a
+claimed path is certainly this chat's, an unclaimed one is merely unproven — so Git Review marks
+unclaimed rows only on a contested turn, and only with `not claimed`. Nil and empty are different
+answers: nil is "not tracked" (an older archive, or a terminal session, which has no live
+per-tool-call feed and gets no fabricated one), empty is "tracked and nothing claimed", and only
+the second lets a row say anything. Past `maximumClaimedEditPaths` the list is a prefix,
+`claimedEditsOverflowed` says so, and per-file marks stop entirely. Claims are **not** persisted
+per call: a fifty-edit turn would otherwise rewrite the archive fifty times for advisory metadata,
+so they accumulate in memory and ride out on the ordinary completion and failure saves — losing
+them to a crash costs nothing, because the same crash leaves the turn incomplete and an incomplete
+turn presents no diff to annotate. Replay and transcript seeding reach the recorder with no turn in
+flight, which is what keeps historical events out of a live turn's claims.
+
+**On a contested turn the cross runs both ways, under a monotone-certainty rule.** A turn also
+reads what the chats named in its `overlappingSessionIDs` claimed, from their own checkpoints whose
+window overlaps this one in the same worktree — one bounded pass over the archive, no git, resolved
+once per review load. That splits every changed file four ways: claimed by this chat alone (no
+mark), claimed by both (`also claimed by another chat`, so the row may be merged work), claimed
+only by the other chat (`claimed by another chat`), and claimed by nobody (`not claimed`). The rule
+is monotone — another chat's claims may only *add* certainty. Their claim on a path is a positive
+fact and stands alone; their silence about a path proves nothing and never strengthens a statement,
+which is why a contender whose claims are untracked or overflowed contributes nothing at all rather
+than a partial list. That also makes the two sides deliberately **asymmetric**: this chat's claims
+must be usable before absence from them may be read as "not claimed", while another chat's usable
+claims license naming them even when this chat's own claims were never tracked. A terminal turn
+contested by a native chat is exactly that case — nothing can be said about our own files, and
+their files are still theirs. A turn where neither side has usable claims marks nothing, and an
+uncontested turn is untouched. Window overlap treats a turn with no recorded end as still open,
+since erring towards overlap can only surface a claim that was really made.
+
 Ref publication and collection are serialized per repository identity, not globally: two sessions
 sharing a repository have ordered ref transactions, while unrelated repositories never wait on one
 another. Retention keeps 50 records per session and 1,000 total. Overflow and permanent deletion

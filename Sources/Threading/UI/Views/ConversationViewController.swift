@@ -1289,6 +1289,16 @@ final class ConversationViewController: NSViewController {
                     sessionID: self.sessionID,
                     provider: self.agentSession.kind
                 )
+                // The tool call is exactly attributed but blind to shell edits; the turn's tree
+                // pair is complete but attributes nothing. Recording what this chat's edit tools
+                // named lets Git Review cross the two. Only a live turn reaches here — the store
+                // ignores claims with no checkpoint in flight.
+                if let claimed = AgentFileActivityClassifier.claimedEditPaths(in: event) {
+                    GitTurnBaselineStore.shared.recordClaimedEdits(
+                        sessionID: self.sessionID,
+                        paths: claimed
+                    )
+                }
             }
         }
 
@@ -1305,6 +1315,14 @@ final class ConversationViewController: NSViewController {
                 sessionID: self.sessionID,
                 provider: self.agentSession.kind
             )
+            // The same claims through the transport that reports tool calls in its stream rather
+            // than through a provider callback. Recording a path twice is idempotent.
+            if let claimed = AgentFileActivityClassifier.claimedEditPaths(in: event) {
+                GitTurnBaselineStore.shared.recordClaimedEdits(
+                    sessionID: self.sessionID,
+                    paths: claimed
+                )
+            }
             self.handle(event)
         }
         stream.onExit = { [weak self] status in self?.handleExit(status) }

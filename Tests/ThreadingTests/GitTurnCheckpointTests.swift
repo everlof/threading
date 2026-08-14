@@ -395,6 +395,413 @@ final class GitTurnCheckpointTests: XCTestCase {
         XCTAssertTrue(try rawDiff(checkpoint, in: root).contains("managed.txt"))
     }
 
+    // MARK: - Observed Contention
+
+    /// Two chats editing one checkout is not prevented, so the record has to admit it happened.
+    /// The second chat here opens *and* closes entirely inside the first one's turn: by the time
+    /// the first turn ends there is nothing in flight left for it to notice, which is why both
+    /// sides are stamped at admission rather than at completion.
+    func testOverlappingTurnsInOneCheckoutRecordEachOther() throws {
+        let first = SessionID()
+        let second = SessionID()
+        let store = makeStore()
+
+        _ = try prepare(store, session: first)
+        _ = try prepare(store, session: second)
+        try write("second chat change\n", to: "second-chat.txt")
+        let secondTurn = try finish(store, session: second)
+        try write("first chat change\n", to: "first-chat.txt")
+        let firstTurn = try finish(store, session: first)
+
+        XCTAssertEqual(firstTurn.overlappingSessionIDs, [second])
+        XCTAssertEqual(secondTurn.overlappingSessionIDs, [first])
+        // Attribution stays best effort and the comparison stays exact: the first turn's tree
+        // pair still contains the other chat's file. Naming the contention is the whole fix.
+        XCTAssertTrue(try rawDiff(firstTurn, in: root).contains("second-chat.txt"))
+        XCTAssertEqual(
+            makeStore().checkpoint(id: firstTurn.id)?.overlappingSessionIDs,
+            [second],
+            "an observed overlap is durable, not just in-memory"
+        )
+    }
+
+    func testSequentialTurnsInOneCheckoutRecordNoOverlap() throws {
+        let first = SessionID()
+        let second = SessionID()
+        let store = makeStore()
+
+        _ = try prepare(store, session: first)
+        try write("first chat change\n", to: "first-chat.txt")
+        let firstTurn = try finish(store, session: first)
+        _ = try prepare(store, session: second)
+        try write("second chat change\n", to: "second-chat.txt")
+        let secondTurn = try finish(store, session: second)
+
+        XCTAssertNil(firstTurn.overlappingSessionIDs)
+        XCTAssertNil(secondTurn.overlappingSessionIDs)
+    }
+
+    /// Same repository, different checkouts: neither turn's tree pair can contain the other's
+    /// writes, so hedging there would be noise rather than honesty.
+    func testOverlappingTurnsInSeparateWorktreesRecordNoOverlap() throws {
+        let worktree = container.appendingPathComponent("second-worktree", isDirectory: true)
+        try git("worktree", "add", "--quiet", "--detach", worktree.path, "HEAD")
+        let mainContext = captureContext(for: root)
+        let worktreeContext = captureContext(for: worktree, logicalRoot: root)
+        XCTAssertEqual(mainContext.repositoryIdentity, worktreeContext.repositoryIdentity)
+        XCTAssertNotEqual(mainContext.worktreeIdentity, worktreeContext.worktreeIdentity)
+
+        let mainSession = SessionID()
+        let worktreeSession = SessionID()
+        let store = GitTurnBaselineStore(directory: metadata) { session in
+            session == worktreeSession ? worktreeContext : mainContext
+        }
+
+        _ = try prepare(store, session: mainSession)
+        _ = try prepare(store, session: worktreeSession)
+        try write("main checkout change\n", to: "main-turn.txt")
+        try "second checkout change\n".write(
+            to: worktree.appendingPathComponent("worktree-turn.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let worktreeTurn = try finish(store, session: worktreeSession)
+        let mainTurn = try finish(store, session: mainSession)
+
+        XCTAssertNil(mainTurn.overlappingSessionIDs)
+        XCTAssertNil(worktreeTurn.overlappingSessionIDs)
+    }
+
+    /// The field is additive, so a history written before it existed must still load — including
+    /// the completed records `validate` holds to the strictest invariants.
+    func testArchiveWrittenWithoutOverlapFieldLoadsAsNoObservedOverlap() throws {
+        let first = SessionID()
+        let second = SessionID()
+        let store = makeStore()
+        _ = try prepare(store, session: first)
+        _ = try prepare(store, session: second)
+        try write("shared\n", to: "shared.txt")
+        let secondTurn = try finish(store, session: second)
+        let firstTurn = try finish(store, session: first)
+        XCTAssertNotNil(firstTurn.overlappingSessionIDs)
+
+        try rewriteArchive(dropping: ["overlappingSessionIDs"])
+
+        let relaunched = makeStore()
+        XCTAssertEqual(relaunched.checkpoint(id: firstTurn.id)?.status, .complete)
+        XCTAssertEqual(relaunched.checkpoint(id: secondTurn.id)?.status, .complete)
+        XCTAssertNil(relaunched.checkpoint(id: firstTurn.id)?.overlappingSessionIDs)
+        XCTAssertNil(relaunched.checkpoint(id: secondTurn.id)?.overlappingSessionIDs)
+        XCTAssertTrue(try rawDiff(try XCTUnwrap(relaunched.checkpoint(id: firstTurn.id)), in: root)
+            .contains("shared.txt"))
+    }
+
+    // MARK: - Claimed Edits
+
+    /// Claims arrive one tool call at a time while the turn is open, and must survive the turn
+    /// without the store rewriting the archive once per edit.
+    func testClaimsRecordedDuringATurnPersistInOrderWithoutDuplicates() throws {
+        let session = SessionID()
+        let store = makeStore()
+        _ = try prepare(store, session: session)
+
+        store.recordClaimedEdits(sessionID: session, paths: [root.appendingPathComponent("a.txt").path])
+        store.recordClaimedEdits(sessionID: session, paths: ["b.txt", "a.txt"])
+        try write("one\n", to: "a.txt")
+        try write("two\n", to: "b.txt")
+        let completed = try finish(store, session: session)
+
+        XCTAssertEqual(completed.claimedEditPaths, ["a.txt", "b.txt"])
+        XCTAssertEqual(completed.claimedEditsOverflowed, false)
+        XCTAssertEqual(
+            makeStore().checkpoint(id: completed.id)?.claimedEditPaths,
+            ["a.txt", "b.txt"],
+            "claims ride out on the completion save, not a save per edit"
+        )
+    }
+
+    /// The two empty answers are not the same answer, and the difference is what a surface is
+    /// allowed to say about a file it cannot find in the list.
+    func testUntrackedClaimsStayNilWhileATrackedTurnWithNoEditsIsEmpty() throws {
+        let unfed = SessionID()
+        let fed = SessionID()
+        let store = makeStore()
+
+        _ = try prepare(store, session: unfed)
+        try write("shell edit\n", to: "shell.txt")
+        let unfedTurn = try finish(store, session: unfed)
+
+        _ = try prepare(store, session: fed)
+        // A read-only tool call: the feed ran and named no edited file.
+        store.recordClaimedEdits(sessionID: fed, paths: [])
+        let fedTurn = try finish(store, session: fed)
+
+        XCTAssertNil(unfedTurn.claimedEditPaths)
+        XCTAssertNil(unfedTurn.claimedEditsOverflowed)
+        XCTAssertFalse(unfedTurn.hasUsableEditClaims)
+        XCTAssertEqual(fedTurn.claimedEditPaths, [])
+        XCTAssertTrue(fedTurn.hasUsableEditClaims)
+    }
+
+    func testClaimsStopGrowingAtTheCapAndSayThatTheyDid() throws {
+        let session = SessionID()
+        let store = makeStore()
+        _ = try prepare(store, session: session)
+
+        let cap = GitTurnCheckpointDefaults.maximumClaimedEditPaths
+        store.recordClaimedEdits(
+            sessionID: session,
+            paths: (0..<(cap + 20)).map { "file-\($0).txt" }
+        )
+        let completed = try finish(store, session: session)
+
+        XCTAssertEqual(completed.claimedEditPaths?.count, cap)
+        XCTAssertEqual(completed.claimedEditsOverflowed, true)
+        XCTAssertFalse(completed.hasUsableEditClaims, "a prefix cannot license per-file marks")
+        XCTAssertNil(
+            TurnAttribution(checkpoint: completed, claimedByOtherChats: []),
+            "an overflowed list with nothing from anyone else can mark no row"
+        )
+    }
+
+    /// A claim that no diff row could ever match is worse than no claim, so it is dropped rather
+    /// than stamped.
+    func testClaimsAreStoredCheckoutRelativeAndPathsOutsideTheCheckoutAreDropped() throws {
+        let session = SessionID()
+        let store = makeStore()
+        _ = try prepare(store, session: session)
+
+        store.recordClaimedEdits(sessionID: session, paths: [
+            root.appendingPathComponent("nested/deep.txt").path,
+            "relative.txt",
+            container.appendingPathComponent("outside.txt").path,
+            "/etc/hosts",
+            ""
+        ])
+        let completed = try finish(store, session: session)
+
+        XCTAssertEqual(completed.claimedEditPaths, ["nested/deep.txt", "relative.txt"])
+    }
+
+    func testMarkingRuleNeedsContentionAndWholeClaims() throws {
+        let first = SessionID()
+        let second = SessionID()
+        let store = makeStore()
+
+        _ = try prepare(store, session: first)
+        store.recordClaimedEdits(sessionID: first, paths: ["mine.txt"])
+        let uncontested = try finish(store, session: first)
+        XCTAssertNil(
+            TurnAttribution(checkpoint: uncontested, claimedByOtherChats: []),
+            "with nobody else in the checkout there is nothing to mark against"
+        )
+
+        _ = try prepare(store, session: first)
+        _ = try prepare(store, session: second)
+        store.recordClaimedEdits(sessionID: first, paths: ["mine.txt"])
+        _ = try finish(store, session: second)
+        let contested = try finish(store, session: first)
+
+        XCTAssertEqual(contested.overlappingSessionIDs, [second])
+        let attribution = try XCTUnwrap(
+            TurnAttribution(checkpoint: contested, claimedByOtherChats: [])
+        )
+        XCTAssertEqual(attribution.mark(for: "mine.txt"), .none)
+        XCTAssertEqual(attribution.mark(for: "somebody-elses.txt"), .unclaimed)
+    }
+
+    func testArchiveWrittenWithoutClaimFieldsLoadsAsUntracked() throws {
+        let session = SessionID()
+        let store = makeStore()
+        _ = try prepare(store, session: session)
+        store.recordClaimedEdits(sessionID: session, paths: ["claimed.txt"])
+        try write("claimed\n", to: "claimed.txt")
+        let completed = try finish(store, session: session)
+        XCTAssertNotNil(completed.claimedEditPaths)
+
+        try rewriteArchive(dropping: ["claimedEditPaths", "claimedEditsOverflowed"])
+
+        let relaunched = makeStore()
+        let restored = try XCTUnwrap(relaunched.checkpoint(id: completed.id))
+        XCTAssertEqual(restored.status, .complete)
+        XCTAssertNil(restored.claimedEditPaths)
+        XCTAssertNil(restored.claimedEditsOverflowed)
+        XCTAssertFalse(restored.hasUsableEditClaims)
+    }
+
+    // MARK: - Cross-Chat Attribution
+
+    /// Two fed chats in one checkout can each say what the other named, which is what turns a
+    /// binary "claimed or not" into an honest split.
+    func testOverlappingChatsSeeEachOthersClaims() throws {
+        let mine = SessionID()
+        let theirs = SessionID()
+        let store = makeStore()
+
+        _ = try prepare(store, session: mine)
+        _ = try prepare(store, session: theirs)
+        store.recordClaimedEdits(sessionID: mine, paths: ["mine.txt", "shared.txt"])
+        store.recordClaimedEdits(sessionID: theirs, paths: ["theirs.txt", "shared.txt"])
+        let theirTurn = try finish(store, session: theirs)
+        let myTurn = try finish(store, session: mine)
+
+        XCTAssertEqual(
+            store.otherChatsClaimedPaths(overlapping: myTurn),
+            ["theirs.txt", "shared.txt"]
+        )
+        XCTAssertEqual(
+            store.otherChatsClaimedPaths(overlapping: theirTurn),
+            ["mine.txt", "shared.txt"]
+        )
+    }
+
+    func testSequentialTurnsSeeNoOtherChatsClaims() throws {
+        let first = SessionID()
+        let second = SessionID()
+        let store = makeStore()
+
+        _ = try prepare(store, session: first)
+        store.recordClaimedEdits(sessionID: first, paths: ["first.txt"])
+        let firstTurn = try finish(store, session: first)
+        _ = try prepare(store, session: second)
+        store.recordClaimedEdits(sessionID: second, paths: ["second.txt"])
+        let secondTurn = try finish(store, session: second)
+
+        XCTAssertTrue(store.otherChatsClaimedPaths(overlapping: firstTurn).isEmpty)
+        XCTAssertTrue(store.otherChatsClaimedPaths(overlapping: secondTurn).isEmpty)
+    }
+
+    /// A contender whose own list is a prefix contributes nothing at all. Half a list would let a
+    /// file it did write read as unclaimed, which is the inference this must never enable.
+    func testOverflowedContenderContributesNoClaims() throws {
+        let mine = SessionID()
+        let theirs = SessionID()
+        let store = makeStore()
+
+        _ = try prepare(store, session: mine)
+        _ = try prepare(store, session: theirs)
+        store.recordClaimedEdits(sessionID: mine, paths: ["mine.txt"])
+        store.recordClaimedEdits(
+            sessionID: theirs,
+            paths: (0...GitTurnCheckpointDefaults.maximumClaimedEditPaths).map { "theirs-\($0).txt" }
+        )
+        _ = try finish(store, session: theirs)
+        let myTurn = try finish(store, session: mine)
+
+        XCTAssertTrue(store.otherChatsClaimedPaths(overlapping: myTurn).isEmpty)
+        let attribution = try XCTUnwrap(
+            TurnAttribution(
+                checkpoint: myTurn,
+                claimedByOtherChats: store.otherChatsClaimedPaths(overlapping: myTurn)
+            )
+        )
+        XCTAssertEqual(
+            attribution.mark(for: "theirs-0.txt"),
+            .unclaimed,
+            "their unusable list leaves the honest weaker statement standing"
+        )
+    }
+
+    /// Fix 3 never stamps contention across worktrees, but the read guards on identity anyway:
+    /// two checkouts of one repository share path spellings without sharing files.
+    func testContenderInAnotherWorktreeContributesNoClaims() throws {
+        let worktree = container.appendingPathComponent("second-worktree", isDirectory: true)
+        try git("worktree", "add", "--quiet", "--detach", worktree.path, "HEAD")
+        let mainContext = captureContext(for: root)
+        let worktreeContext = captureContext(for: worktree, logicalRoot: root)
+
+        let mine = SessionID()
+        let elsewhere = SessionID()
+        let store = GitTurnBaselineStore(directory: metadata) { session in
+            session == elsewhere ? worktreeContext : mainContext
+        }
+
+        _ = try prepare(store, session: mine)
+        _ = try prepare(store, session: elsewhere)
+        store.recordClaimedEdits(sessionID: elsewhere, paths: ["tracked.txt"])
+        _ = try finish(store, session: elsewhere)
+        var myTurn = try finish(store, session: mine)
+        XCTAssertNil(myTurn.overlappingSessionIDs)
+
+        // Fabricate the contention fix 3 refuses to record, so only the identity guard can
+        // reject it.
+        myTurn.overlappingSessionIDs = [elsewhere]
+        XCTAssertTrue(store.otherChatsClaimedPaths(overlapping: myTurn).isEmpty)
+    }
+
+    func testAttributionSplitsMineTheirsSharedAndUnproven() throws {
+        let mine = SessionID()
+        let theirs = SessionID()
+        let store = makeStore()
+
+        _ = try prepare(store, session: mine)
+        _ = try prepare(store, session: theirs)
+        store.recordClaimedEdits(sessionID: mine, paths: ["mine.txt", "shared.txt"])
+        store.recordClaimedEdits(sessionID: theirs, paths: ["theirs.txt", "shared.txt"])
+        _ = try finish(store, session: theirs)
+        let myTurn = try finish(store, session: mine)
+
+        let attribution = try XCTUnwrap(
+            TurnAttribution(
+                checkpoint: myTurn,
+                claimedByOtherChats: store.otherChatsClaimedPaths(overlapping: myTurn)
+            )
+        )
+        XCTAssertEqual(attribution.mark(for: "mine.txt"), .none)
+        XCTAssertEqual(attribution.mark(for: "theirs.txt"), .otherChat)
+        XCTAssertEqual(attribution.mark(for: "shared.txt"), .shared)
+        XCTAssertEqual(attribution.mark(for: "shell-edit.txt"), .unclaimed)
+    }
+
+    /// The asymmetry, which is the whole point of keeping the rule monotone: their claims are a
+    /// positive fact that survives our own claims being unavailable, and our silence still buys
+    /// no statement about anything else.
+    func testAnotherChatsClaimsSurviveOurOwnClaimsBeingUntracked() throws {
+        let terminalLike = SessionID()
+        let native = SessionID()
+        let store = makeStore()
+
+        _ = try prepare(store, session: terminalLike)
+        _ = try prepare(store, session: native)
+        store.recordClaimedEdits(sessionID: native, paths: ["theirs.txt"])
+        _ = try finish(store, session: native)
+        let myTurn = try finish(store, session: terminalLike)
+        XCTAssertNil(myTurn.claimedEditPaths, "a runtime with no live feed claims nothing")
+
+        let attribution = try XCTUnwrap(
+            TurnAttribution(
+                checkpoint: myTurn,
+                claimedByOtherChats: store.otherChatsClaimedPaths(overlapping: myTurn)
+            )
+        )
+        XCTAssertEqual(attribution.mark(for: "theirs.txt"), .otherChat)
+        XCTAssertEqual(
+            attribution.mark(for: "anything-else.txt"),
+            .none,
+            "without claims of our own, absence from theirs proves nothing"
+        )
+    }
+
+    func testNeitherSideHavingUsableClaimsMarksNothing() throws {
+        let first = SessionID()
+        let second = SessionID()
+        let store = makeStore()
+
+        _ = try prepare(store, session: first)
+        _ = try prepare(store, session: second)
+        _ = try finish(store, session: second)
+        let contested = try finish(store, session: first)
+
+        XCTAssertEqual(contested.overlappingSessionIDs, [second])
+        XCTAssertNil(
+            TurnAttribution(
+                checkpoint: contested,
+                claimedByOtherChats: store.otherChatsClaimedPaths(overlapping: contested)
+            ),
+            "a contested turn nobody could attribute renders exactly as it always did"
+        )
+    }
+
     // MARK: - Bounded, Namespaced Cleanup
 
     func testRetentionAndPermanentDeletionRemoveOnlyOwnedRefs() throws {
@@ -597,6 +1004,28 @@ final class GitTurnCheckpointTests: XCTestCase {
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
         XCTAssertTrue(condition(), "timed out waiting for \(description)")
+    }
+
+    /// Rewrites the stored archive the way a build that predates these fields wrote it: the same
+    /// records, with the keys absent rather than null.
+    private func rewriteArchive(dropping keys: [String]) throws {
+        let archiveURL = metadata.appendingPathComponent(GitTurnCheckpointDefaults.fileName)
+        var envelope = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try Data(contentsOf: archiveURL)) as? [String: Any]
+        )
+        var archive = try XCTUnwrap(envelope["value"] as? [String: Any])
+        let records = try XCTUnwrap(archive["checkpoints"] as? [[String: Any]])
+        XCTAssertTrue(
+            records.contains { record in keys.contains { record[$0] != nil } },
+            "the fixture must contain the fields this removes, or it proves nothing"
+        )
+        archive["checkpoints"] = records.map { record -> [String: Any] in
+            var legacy = record
+            for key in keys { legacy.removeValue(forKey: key) }
+            return legacy
+        }
+        envelope["value"] = archive
+        try JSONSerialization.data(withJSONObject: envelope).write(to: archiveURL)
     }
 
     private func ownedRefs() throws -> [String] {

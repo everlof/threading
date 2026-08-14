@@ -295,6 +295,39 @@ struct GitTurnCheckpoint: Codable, Equatable, Sendable {
     var completedAt: Date?
     var failureDescription: String?
 
+    /// Other sessions that had a turn in flight in this worktree at any point inside this turn's
+    /// window.
+    ///
+    /// Attribution here is best effort by construction: the comparison is the recorded tree pair,
+    /// so a second chat editing the same checkout lands inside it. Naming who else was working is
+    /// what lets a surface hedge instead of presenting shared work as exclusively this chat's.
+    /// Nil means no contention was observed — and an archive written before the field existed
+    /// decodes to exactly that.
+    var overlappingSessionIDs: [SessionID]?
+
+    /// Checkout-relative paths this session's structured edit tools named during the turn.
+    ///
+    /// The tree pair is complete but unattributed; the provider's tool calls are exactly
+    /// attributed but incomplete, because an edit made through a shell command names no file.
+    /// Crossing them is only sound in one direction: a claimed path is certainly this chat's,
+    /// while an unclaimed path is merely unproven.
+    ///
+    /// Nil and empty are different answers and both are load-bearing. Nil is "claims were not
+    /// tracked for this turn" — an archive from before the field, or a runtime with no live
+    /// per-tool feed — and licenses no conclusion at all. Empty is "tracked, and this chat's edit
+    /// tools claimed nothing".
+    var claimedEditPaths: [String]?
+
+    /// True once `GitTurnCheckpointDefaults.maximumClaimedEditPaths` was reached. The list is then
+    /// a prefix rather than the whole set, so absence from it stops meaning anything and per-file
+    /// marks must be suppressed.
+    var claimedEditsOverflowed: Bool?
+
+    /// Whether a surface may reason about an individual path's absence from `claimedEditPaths`.
+    var hasUsableEditClaims: Bool {
+        claimedEditPaths != nil && claimedEditsOverflowed != true
+    }
+
     var canPresentDiff: Bool {
         switch status {
         case .inProgress, .capturingAfter:
@@ -309,6 +342,64 @@ struct GitTurnCheckpoint: Codable, Equatable, Sendable {
     }
 
     var isComplete: Bool { status == .complete }
+}
+
+// MARK: - Contested Turn Attribution
+
+/// What a contested turn can honestly say about one changed file.
+enum TurnAttributionMark: Equatable, Sendable {
+    /// Either this chat's alone, or nothing is known well enough to say anything.
+    case none
+    /// No chat's edit tools named it. It may be a shell edit by anyone standing in this checkout.
+    case unclaimed
+    /// Another chat that was working here named it.
+    case otherChat
+    /// Both this chat and another named it, so the row's content may be merged work.
+    case shared
+}
+
+/// The claims a contested turn is judged against, resolved once per review load.
+///
+/// The rule is deliberately monotone: another chat's claims may only *add* certainty. Their claim
+/// on a path is a positive fact, so it stands on its own; their *silence* about a path proves
+/// nothing and never strengthens a statement. That asymmetry is also why the two sides are not
+/// gated alike — this chat's claims must be usable before absence from them may be read as
+/// "unclaimed", while another chat's usable claims license naming them even when this chat's own
+/// claims were never tracked. A terminal turn contested by a native chat is exactly that case:
+/// nothing can be said about our files, and their files are still theirs.
+struct TurnAttribution: Equatable {
+
+    /// This chat's claims, or nil where they may not be reasoned from — untracked or overflowed.
+    let ownClaims: Set<String>?
+
+    /// The union of the overlapping chats' usable claims. Empty means none of them could be
+    /// trusted, not that they wrote nothing.
+    let otherChatClaims: Set<String>
+
+    /// Nil where no row may be marked at all: an uncontested turn, or a contested one where
+    /// neither side's claims can carry a statement.
+    init?(checkpoint: GitTurnCheckpoint, claimedByOtherChats: Set<String>) {
+        guard checkpoint.overlappingSessionIDs?.isEmpty == false else { return nil }
+        let ownClaims = checkpoint.hasUsableEditClaims
+            ? checkpoint.claimedEditPaths.map(Set.init)
+            : nil
+        guard ownClaims != nil || !claimedByOtherChats.isEmpty else { return nil }
+        self.ownClaims = ownClaims
+        self.otherChatClaims = claimedByOtherChats
+    }
+
+    func mark(for path: String) -> TurnAttributionMark {
+        let theirs = otherChatClaims.contains(path)
+        // Without usable claims of our own we cannot say a file is not ours — only that someone
+        // else did name it.
+        guard let ownClaims else { return theirs ? .otherChat : .none }
+        switch (ownClaims.contains(path), theirs) {
+        case (true, true): return .shared
+        case (true, false): return .none
+        case (false, true): return .otherChat
+        case (false, false): return .unclaimed
+        }
+    }
 }
 
 /// A narrow notification for review surfaces. Checkpoint writes are per session, so refreshing
