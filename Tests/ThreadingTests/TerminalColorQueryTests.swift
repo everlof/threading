@@ -753,7 +753,7 @@ final class TerminalColorQueryTests: XCTestCase {
         XCTAssertEqual(sent.text, "", "an unfocused terminal claimed the user was looking at it")
 
         session.terminalView.hasFocus = true
-        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: nil)
+        postKeyWindow()
 
         let delivered = await promptDelivered(to: sent)
         XCTAssertEqual(
@@ -774,13 +774,13 @@ final class TerminalColorQueryTests: XCTestCase {
         session.updateProfile(profile)
 
         session.terminalView.hasFocus = true
-        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: nil)
+        postKeyWindow()
 
         let delivered = await promptDelivered(to: sent)
         XCTAssertEqual(delivered, "\u{1b}[I", "nothing was carried, so this proves nothing below")
         sent.bytes.removeAll()
 
-        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: nil)
+        postKeyWindow()
         await settleMainQueue()
 
         XCTAssertEqual(sent.text, "", "every window activation turned into a synthetic focus")
@@ -795,10 +795,29 @@ final class TerminalColorQueryTests: XCTestCase {
         session.terminalView.getTerminal().feed(text: "\u{1b}[?1004h")
         session.terminalView.hasFocus = true
 
-        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: nil)
+        postKeyWindow()
         await settleMainQueue()
 
         XCTAssertEqual(sent.text, "", "a session prompted a re-read of the palette it started on")
+    }
+
+    /// Says a window became key, *naming one*.
+    ///
+    /// AppKit never posts this with no object, and its own machinery is entitled to assume one.
+    /// Broadcasting it with `nil` reached whatever was live in a full run and aborted the test
+    /// host inside the next async teardown, while passing for this class on its own — the shape
+    /// of a fixture that only misbehaves once the process has a window in it. The window is
+    /// never ordered on screen and is held for the length of the post, which is all the
+    /// notification needs it for.
+    private func postKeyWindow() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: true
+        )
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+        withExtendedLifetime(window) {}
     }
 
     /// The observer runs on the main queue, so a post is not yet a delivery — and under a full
