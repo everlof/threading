@@ -1874,6 +1874,17 @@ one bounded view and the load-bearing resize claim is geometry coherence plus th
 frame result, not the post-build outlier. The ordinary 174-file/400-line workload measured
 18.220 ms per forced-scroll frame.
 
+The 2026-08-15 context-anchor and header-alignment follow-up preserves that boundary. Context
+expansion reloads only its materialized row, restores an adjacent changed source line to the same
+window coordinate, and defers the replacement during live momentum; it does not construct an
+offscreen row to find the anchor. One clean warm standard run measured the 174-file/400-line forced
+scroll at **18.376 ms/frame**. Two warm 8,985-file repeats measured resize p95 at **8.869 and
+11.077 ms** (max **12.215 and 13.659 ms**), continuous-scroll p95 at **46.458 and 28.977 ms**, and
+full-index p95 at **27.614 and 35.636 ms**. Every resize sample retained
+`max_width_delta_drift=0.000` and `pending_layout_frames=0`; both opt-in stress workloads passed.
+The spread in forced bitmap drawing remains the already-recorded Debug tail, while resize geometry
+and the ordinary workload remain coherent with the established warm range.
+
 The generated workload is the regression boundary, but it cannot reproduce the object database,
 index and history shape of Linux-scale repositories. `git-repository-stress` accepts an existing
 checkout and runs three complementary layers without modifying it:

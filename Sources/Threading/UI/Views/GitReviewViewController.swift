@@ -395,6 +395,10 @@ final class GitReviewViewController: NSViewController {
     var contextLinesByPath: [String: Int] = [:]
     var contextExpansionInFlightPaths: Set<String> = []
     var contextExpansionExhaustedPaths: Set<String> = []
+    /// A context read may finish after the reader has started a trackpad or scroller-thumb
+    /// gesture. Keep its one-row geometry replacement out of that transaction, just like a
+    /// watched checkout refresh; the durable source-line anchor is resolved when scrolling ends.
+    var deferredContextExpansionReloads: [String: GitReviewSourceLineAnchor?] = [:]
 
     /// File comparisons use a reusable table. `NSStackView` eagerly solves constraints for
     /// every arranged child, which made both the original eager list and progressively appended
@@ -1489,6 +1493,7 @@ final class GitReviewViewController: NSViewController {
         contextLinesByPath.removeAll(keepingCapacity: false)
         contextExpansionInFlightPaths.removeAll(keepingCapacity: false)
         contextExpansionExhaustedPaths.removeAll(keepingCapacity: false)
+        deferredContextExpansionReloads.removeAll(keepingCapacity: false)
     }
 
     // MARK: - Actions

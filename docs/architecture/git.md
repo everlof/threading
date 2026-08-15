@@ -356,6 +356,15 @@ the expanded model height, stretching its labels out of the viewport until the e
 measurement arrives. The model override and table estimate therefore change only through the
 row's post-geometry callback; the later exact-height callback remains a separate pass.
 
+Expanding an omitted-context control is also a row replacement, not a local insertion: neighbouring
+hunks can merge and every later display offset can change. The control therefore names the adjacent
+changed source line by its old/new pair before requesting more context. After replacing and measuring
+that one materialized row, Review returns the same source line to the same window y position. The
+first-visible file path plus within-row offset is only the fallback when that line is no longer in
+the returned model. A context request made during wheel momentum is held until `didEndLiveScroll`,
+so the table never changes height between momentum events and the reader does not lose the line that
+gave the expansion meaning.
+
 The collapsed body rule does **not** by itself make the file index cheap. Measurement showed
 `NSStackView` eagerly laying out 1,000 collapsed headers took about 94 seconds. Progressive
 20-row materialization reduced the first viewport to about 29 ms, but a deep walk still became
@@ -514,6 +523,12 @@ through to the scroller, while descendants of `ThemedControl` retain hit testing
 Finder and staging remain usable. The row keeps its ordinary translucent control wash; its host
 adds the opaque `elevated` surface required of content floating over scrolling source, so lines do
 not remain legible through the retained heading.
+
+A two-line path makes the file name and directory one visual identity. The trailing change counts,
+staging action and disclosure therefore centre on that identity's complete height in both ordinary
+and sticky rows. The count and bordered action share a visual centre rather than AppKit baseline
+anchors: a bordered `NSButton` reports its cell baseline, which is not the pixel baseline of its
+title and visibly lifted the count above the button despite a satisfied constraint.
 
 **Staging is offered by two modes of six**, and the rule is not a UI preference: a patch
 applies to the index only when the index is what the diff was measured *from*. Unstaged

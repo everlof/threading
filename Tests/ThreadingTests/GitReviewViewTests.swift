@@ -565,7 +565,11 @@ final class GitReviewViewTests: XCTestCase {
         let files = GitDiffParser.files(fromUnifiedDiff: fixture)
         let row = GitReviewFileRow(file: files[0], expanded: true)
         var expansionRequests = 0
-        row.onExpandContext = { expansionRequests += 1 }
+        var preservedAnchor: GitReviewSourceLineAnchor?
+        row.onExpandContext = {
+            expansionRequests += 1
+            preservedAnchor = $0
+        }
 
         // Force layout to surface any conflicting constraints as a crash/log here, not in the app.
         row.layoutSubtreeIfNeeded()
@@ -579,6 +583,148 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertNotNil(expand)
         XCTAssertTrue(expand?.performPrimaryAction() == true)
         XCTAssertEqual(expansionRequests, 1)
+        XCTAssertEqual(
+            preservedAnchor,
+            GitReviewSourceLineAnchor(files[0].hunks[1].lines[0])
+        )
+    }
+
+    func testTwoLineFileHeaderCentersStatsAndStageActionOnTheWholeIdentity() throws {
+        let file = GitFileDiff(
+            path: "Sources/Threading/Core/Agent/UsageHistoryStore.swift",
+            change: .modified,
+            hunks: [],
+            added: 28,
+            removed: 4
+        )
+        let row = GitReviewFileRow(
+            file: file,
+            expanded: false,
+            staging: GitStaging.capability(for: .uncommitted)
+        )
+        row.frame = NSRect(x: 0, y: 0, width: 900, height: 48)
+        row.layoutSubtreeIfNeeded()
+
+        let name = try XCTUnwrap(Self.descendants(of: NSTextField.self, in: row).first {
+            $0.accessibilityIdentifier() == "git-review.file.name"
+        })
+        let directory = try XCTUnwrap(Self.descendants(of: NSTextField.self, in: row).first {
+            $0.stringValue == "Sources/Threading/Core/Agent"
+        })
+        let stats = try XCTUnwrap(Self.descendants(of: NSTextField.self, in: row).first {
+            $0.accessibilityIdentifier() == "git-review.file.stats"
+        })
+        let stage = try XCTUnwrap(Self.descendants(of: ThemedButton.self, in: row).first {
+            $0.title == L10n.string("Stage File")
+        })
+        let identityCenter = NSUnionRect(name.frame, directory.frame).midY
+
+        XCTAssertEqual(stage.frame.midY, identityCenter, accuracy: 1)
+        XCTAssertEqual(stats.frame.midY, stage.frame.midY, accuracy: 0.5)
+    }
+
+    func testContextExpansionKeepsTheAdjacentChangedLineAtTheSameWindowPosition() throws {
+        let original = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+        let sourceLine = GitReviewSourceLineAnchor(original.hunks[1].lines[0])
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 220)
+        controller.show(.files([original]))
+        controller.view.layoutSubtreeIfNeeded()
+
+        let originalHost = try XCTUnwrap(controller.fileTableView.view(
+            atColumn: 0,
+            row: 0,
+            makeIfNecessary: true
+        ))
+        let originalRow = try XCTUnwrap(
+            Self.firstDescendant(of: GitReviewFileRow.self, in: originalHost)
+        )
+        let expand = try XCTUnwrap(Self.descendants(of: ThemedButton.self, in: originalRow).first {
+            $0.title.contains("7")
+        })
+        _ = expand.scrollToVisible(expand.bounds)
+        controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+        controller.view.layoutSubtreeIfNeeded()
+        let oldY = try XCTUnwrap(originalRow.yPosition(of: sourceLine))
+        let oldWindowY = originalRow.convert(NSPoint(x: 0, y: oldY), to: nil).y
+
+        let bridge = (3...9).map { number in
+            GitDiffLine(
+                kind: .context,
+                text: "unchanged line \(number)",
+                oldNumber: number,
+                newNumber: number
+            )
+        }
+        let expanded = GitFileDiff(
+            path: original.path,
+            change: original.change,
+            hunks: [GitHunk(
+                header: "@@ -1,11 +1,11 @@",
+                lines: original.hunks[0].lines + bridge + original.hunks[1].lines
+            )],
+            added: original.added,
+            removed: original.removed
+        )
+        controller.renderedFiles[0] = expanded
+        controller.reloadContextExpansionRow(
+            path: original.path,
+            preserving: sourceLine,
+            expectedRow: originalRow
+        )
+        controller.view.layoutSubtreeIfNeeded()
+
+        let replacementHost = try XCTUnwrap(controller.fileTableView.view(
+            atColumn: 0,
+            row: 0,
+            makeIfNecessary: false
+        ))
+        let replacementRow = try XCTUnwrap(
+            Self.firstDescendant(of: GitReviewFileRow.self, in: replacementHost)
+        )
+        let newY = try XCTUnwrap(replacementRow.yPosition(of: sourceLine))
+        let newWindowY = replacementRow.convert(NSPoint(x: 0, y: newY), to: nil).y
+
+        XCTAssertEqual(newWindowY, oldWindowY, accuracy: 0.5)
+    }
+
+    func testContextExpansionDefersItsRowReplacementDuringLiveScrolling() throws {
+        let original = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+        let sourceLine = GitReviewSourceLineAnchor(original.hunks[1].lines[0])
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 220)
+        controller.show(.files([original]))
+        controller.view.layoutSubtreeIfNeeded()
+
+        let originalHost = try XCTUnwrap(controller.fileTableView.view(
+            atColumn: 0,
+            row: 0,
+            makeIfNecessary: true
+        ))
+        controller.isFileLiveScrolling = true
+        controller.reloadContextExpansionRow(path: original.path, preserving: sourceLine)
+
+        XCTAssertTrue(controller.fileTableView.view(
+            atColumn: 0,
+            row: 0,
+            makeIfNecessary: false
+        ) === originalHost)
+        XCTAssertEqual(controller.deferredContextExpansionReloads.count, 1)
+
+        controller.finishFileLiveScrolling()
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(controller.deferredContextExpansionReloads.isEmpty)
     }
 
     func testDirectDiffLayoutToggleBuildsTwoAlignedTextDocuments() throws {

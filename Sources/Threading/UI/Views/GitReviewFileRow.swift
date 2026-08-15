@@ -62,7 +62,7 @@ final class GitReviewFileRow: NSView {
 
     /// Requests a larger, path-scoped git context read. One callback serves every omitted range;
     /// Git merges neighbouring hunks and remains the source of truth for line numbering.
-    var onExpandContext: (() -> Void)?
+    var onExpandContext: ((GitReviewSourceLineAnchor?) -> Void)?
 
     /// Provider-neutral chat context. Assignments also reach a body built during `init` for a
     /// row restored expanded, matching the image-provider handoff below.
@@ -75,6 +75,7 @@ final class GitReviewFileRow: NSView {
     private var contextDiffs: [GitReviewDiffTextView] = []
     private var splitContextDiffs: [GitReviewSplitDiffView] = []
     private var findHunkHeaders: [Int: NSView] = [:]
+    private var contextExpansionAnchorByButton: [ObjectIdentifier: GitReviewSourceLineAnchor] = [:]
 
     /// Fetches the file's bytes at the mode's two endpoints, for an image row's body. Wired by
     /// the pane, which knows the mode and the checkout; the row only knows it has a picture.
@@ -482,6 +483,8 @@ final class GitReviewFileRow: NSView {
         let headerContentBottom = directoryText.isEmpty
             ? nameLabel.bottomAnchor
             : directoryLabel.bottomAnchor
+        let headerAccessoryGuide = NSLayoutGuide()
+        addLayoutGuide(headerAccessoryGuide)
         headerBottom = headerContentBottom.constraint(equalTo: bottomAnchor, constant: -inset)
         headerBottom?.isActive = true
         bodyBottom = bodyContainer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
@@ -502,14 +505,20 @@ final class GitReviewFileRow: NSView {
                     ?? nameLabel.trailingAnchor,
                 constant: Design.Spacing.medium
             ),
-            metaLabel.firstBaselineAnchor.constraint(equalTo: glyphLabel.firstBaselineAnchor),
+
+            // A directory makes the file identity two lines. The stats and staging action
+            // belong to that whole identity, not only to its first line: centring them on the
+            // glyph left the cluster visibly pressed against the card's top. This guide spans
+            // the same header on both the collapsed and expanded constraint paths.
+            headerAccessoryGuide.topAnchor.constraint(equalTo: topAnchor),
+            headerAccessoryGuide.bottomAnchor.constraint(equalTo: bodyContainer.topAnchor),
 
             chevron.leadingAnchor.constraint(
                 equalTo: (stageButton ?? metaLabel).trailingAnchor,
                 constant: Design.Spacing.small
             ),
             chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
-            chevron.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor),
+            chevron.centerYAnchor.constraint(equalTo: headerAccessoryGuide.centerYAnchor),
 
             bodyContainer.topAnchor.constraint(equalTo: headerContentBottom, constant: inset),
             // The header content owns the card inset; the diff wash itself is full-bleed so its
@@ -538,8 +547,17 @@ final class GitReviewFileRow: NSView {
                     equalTo: metaLabel.trailingAnchor,
                     constant: Design.Spacing.medium
                 ),
-                stageButton.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor)
+                stageButton.centerYAnchor.constraint(equalTo: headerAccessoryGuide.centerYAnchor),
+                // A bordered NSButton's reported baseline describes its cell, not the pixels
+                // of its title. Baseline-aligning the label therefore left the counters one
+                // text row too high even though Auto Layout considered the anchors equal.
+                // Centre the two visible controls as one accessory cluster instead.
+                metaLabel.centerYAnchor.constraint(equalTo: stageButton.centerYAnchor)
             ])
+        } else {
+            metaLabel.centerYAnchor.constraint(
+                equalTo: headerAccessoryGuide.centerYAnchor
+            ).isActive = true
         }
 
         if let copyPathButton, let revealInFinderButton {
@@ -976,6 +994,23 @@ final class GitReviewFileRow: NSView {
         )
     }
 
+    /// Locates a durable source line inside whichever unified or split TextKit hunk now owns
+    /// it. A larger-context read may merge hunks, so the viewport anchor cannot be a hunk index.
+    func yPosition(of anchor: GitReviewSourceLineAnchor) -> CGFloat? {
+        layoutSubtreeIfNeeded()
+        for diff in contextDiffs {
+            if let y = diff.yPosition(of: anchor) {
+                return convert(NSPoint(x: 0, y: y), from: diff).y
+            }
+        }
+        for diff in splitContextDiffs {
+            if let y = diff.yPosition(of: anchor) {
+                return convert(NSPoint(x: 0, y: y), from: diff).y
+            }
+        }
+        return nil
+    }
+
     private func flashFindReveal(in target: NSView?) {
         let host = target ?? self
         let frame = target == nil ? headerRegion : host.bounds
@@ -1044,13 +1079,15 @@ final class GitReviewFileRow: NSView {
 
             if index == 0, hasUnmodifiedLinesBefore(hunk) {
                 addBodyRow(makeContextExpansionControl(
-                    L10n.string("Show earlier unmodified lines")
+                    L10n.string("Show earlier unmodified lines"),
+                    preserving: leadingChangedLine(in: hunk)
                 ))
             } else if index > 0 {
                 let count = unmodifiedLineCount(between: file.hunks[index - 1], and: hunk)
                 if count > 0 {
                     addBodyRow(makeContextExpansionControl(
-                        L10n.format("Expand %lld unmodified lines", Int64(count))
+                        L10n.format("Expand %lld unmodified lines", Int64(count)),
+                        preserving: leadingChangedLine(in: hunk)
                     ))
                 }
             }
@@ -1093,7 +1130,8 @@ final class GitReviewFileRow: NSView {
 
         if shouldOfferLaterContext {
             addBodyRow(makeContextExpansionControl(
-                L10n.string("Show later unmodified lines")
+                L10n.string("Show later unmodified lines"),
+                preserving: file.hunks.last.flatMap { trailingChangedLine(in: $0) }
             ))
         }
 
@@ -1154,7 +1192,20 @@ final class GitReviewFileRow: NSView {
         }
     }
 
-    private func makeContextExpansionControl(_ title: String) -> NSView {
+    private func leadingChangedLine(in hunk: GitHunk) -> GitReviewSourceLineAnchor? {
+        let line = hunk.lines.first(where: { $0.kind != .context }) ?? hunk.lines.first
+        return line.map(GitReviewSourceLineAnchor.init)
+    }
+
+    private func trailingChangedLine(in hunk: GitHunk) -> GitReviewSourceLineAnchor? {
+        let line = hunk.lines.last(where: { $0.kind != .context }) ?? hunk.lines.last
+        return line.map(GitReviewSourceLineAnchor.init)
+    }
+
+    private func makeContextExpansionControl(
+        _ title: String,
+        preserving anchor: GitReviewSourceLineAnchor?
+    ) -> NSView {
         let surface = ThemedSurfaceView()
         surface.translatesAutoresizingMaskIntoConstraints = false
         surface.applySurface(fill: Design.Surface.controlResting, radius: .control)
@@ -1162,13 +1213,16 @@ final class GitReviewFileRow: NSView {
         let button = ThemedButton(
             title: contextExpansionIsPending ? L10n.string("Expanding…") : "↕  " + title,
             target: self,
-            action: #selector(expandContextClicked)
+            action: #selector(expandContextClicked(_:))
         )
         button.isBordered = false
         button.applyFont(.caption)
         button.contentTintColor = Design.Text.secondary
         button.isEnabled = !contextExpansionIsPending
         button.translatesAutoresizingMaskIntoConstraints = false
+        if let anchor {
+            contextExpansionAnchorByButton[ObjectIdentifier(button)] = anchor
+        }
         surface.addSubview(button)
         NSLayoutConstraint.activate([
             button.topAnchor.constraint(equalTo: surface.topAnchor),
@@ -1180,9 +1234,9 @@ final class GitReviewFileRow: NSView {
         return surface
     }
 
-    @objc private func expandContextClicked() {
+    @objc private func expandContextClicked(_ sender: ThemedButton) {
         guard !contextExpansionIsPending else { return }
-        onExpandContext?()
+        onExpandContext?(contextExpansionAnchorByButton[ObjectIdentifier(sender)])
     }
 
     /// The compare surface, fed with the file's bytes at the mode's two endpoints. Fetched on

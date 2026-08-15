@@ -7,6 +7,11 @@ private struct GitReviewFileScrollAnchor {
     let offsetWithinRow: CGFloat
 }
 
+private struct GitReviewVisibleSourceLineAnchor {
+    let sourceLine: GitReviewSourceLineAnchor
+    let windowY: CGFloat
+}
+
 /// Turning a loaded phase into the pane's view tree, split from the controller that drives it.
 /// Same type, separate file for length — `ConversationRendering`'s arrangement, for the same
 /// reason.
@@ -265,6 +270,15 @@ extension GitReviewViewController {
         }
 
         applyPendingReviewTextSizeIfNeeded()
+
+        // A larger-context read replaces one complete virtual row. If its git callback landed
+        // during momentum, do the replacement only now; otherwise AppKit retiled the document
+        // between wheel events and the viewport appeared to jump even with a semantic anchor.
+        let deferredContextReloads = deferredContextExpansionReloads
+        deferredContextExpansionReloads.removeAll(keepingCapacity: true)
+        for (path, sourceLine) in deferredContextReloads {
+            reloadContextExpansionRow(path: path, preserving: sourceLine)
+        }
 
         if wasScrollerSeeking {
             rematerializeVisibleFilesAfterScrollerSeek()
@@ -1222,7 +1236,9 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
         row.onStageFile = { [weak self] in self?.stageFile(file) }
         row.onStageHunk = { [weak self] index in self?.stageHunk(at: index, of: file) }
-        row.onExpandContext = { [weak self] in self?.expandContext(for: file) }
+        row.onExpandContext = { [weak self, weak row] sourceLine in
+            self?.expandContext(for: file, from: row, preserving: sourceLine)
+        }
         // Asked of the handoff rather than of the runtime's conversation cache: Git Review is a
         // pane, and a pane is open beside terminal sessions too. Resolved per row build so a
         // session that launches while the pane is up gains the actions on its next refresh.
@@ -1268,7 +1284,11 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         return row
     }
 
-    private func expandContext(for file: GitFileDiff) {
+    private func expandContext(
+        for file: GitFileDiff,
+        from row: GitReviewFileRow?,
+        preserving sourceLine: GitReviewSourceLineAnchor?
+    ) {
         guard !contextExpansionInFlightPaths.contains(file.path),
               !contextExpansionExhaustedPaths.contains(file.path),
               let root = loadedDiffRoot ?? repositoryRoot else { return }
@@ -1281,13 +1301,13 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         )
         guard requested > current else {
             contextExpansionExhaustedPaths.insert(file.path)
-            reloadContextExpansionRow(path: file.path)
+            reloadContextExpansionRow(path: file.path, preserving: sourceLine)
             return
         }
 
         let expectedGeneration = generation
         contextExpansionInFlightPaths.insert(file.path)
-        reloadContextExpansionRow(path: file.path)
+        reloadContextExpansionRow(path: file.path, preserving: sourceLine, expectedRow: row)
 
         let completion: @MainActor @Sendable (Result<[GitFileDiff], GitFailure>) -> Void = {
             [weak self] result in
@@ -1298,7 +1318,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
                 guard let expanded = files.first(where: { $0.path == file.path }) ?? files.first,
                       let index = self.renderedFiles.firstIndex(where: { $0.path == file.path }) else {
                     self.contextExpansionExhaustedPaths.insert(file.path)
-                    self.reloadContextExpansionRow(path: file.path)
+                    self.reloadContextExpansionRow(path: file.path, preserving: sourceLine)
                     return
                 }
                 self.contextLinesByPath[file.path] = requested
@@ -1307,7 +1327,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
                 } else {
                     self.renderedFiles[index] = expanded
                 }
-                self.reloadContextExpansionRow(path: file.path)
+                self.reloadContextExpansionRow(path: file.path, preserving: sourceLine)
             case .failure(let failure):
                 self.notice = (failure.localizedDescription, true)
                 self.show(self.phase, forceRebuild: true)
@@ -1328,7 +1348,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
         guard let request = currentDiffRequest else {
             contextExpansionInFlightPaths.remove(file.path)
-            reloadContextExpansionRow(path: file.path)
+            reloadContextExpansionRow(path: file.path, preserving: sourceLine)
             return
         }
         GitReviewReader.diffFile(
@@ -1342,17 +1362,85 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
     }
 
-    private func reloadContextExpansionRow(path: String) {
+    func reloadContextExpansionRow(
+        path: String,
+        preserving sourceLine: GitReviewSourceLineAnchor? = nil,
+        expectedRow: GitReviewFileRow? = nil
+    ) {
+        guard !isFileLiveScrolling else {
+            // The dictionary's value is itself optional, so wrap it once to retain a reload
+            // whose best available anchor is nil rather than treating that assignment as remove.
+            deferredContextExpansionReloads[path] = .some(sourceLine)
+            return
+        }
         guard let index = renderedFiles.firstIndex(where: { $0.path == path }) else { return }
+        let fallbackY = scrollView.contentView.bounds.origin.y
+        let fileAnchor = currentFileScrollAnchor()
         measuredFileRowHeights[path] = nil
         let tableRow = filePreludeViews.count + index
         guard tableRow < fileTableView.numberOfRows else { return }
+        let visibleSourceAnchor = sourceLine.flatMap {
+            visibleSourceLineAnchor($0, at: tableRow, expectedRow: expectedRow)
+        }
         let rows = IndexSet(integer: tableRow)
         fileTableView.noteHeightOfRows(withIndexesChanged: rows)
         fileTableView.reloadData(
             forRowIndexes: rows,
             columnIndexes: IndexSet(integer: 0)
         )
+        view.layoutSubtreeIfNeeded()
+
+        if let visibleSourceAnchor,
+           restoreVisibleSourceLineAnchor(visibleSourceAnchor, at: tableRow) {
+            return
+        }
+        restoreScroll(to: fileAnchor, fallbackY: fallbackY)
+    }
+
+    private func visibleSourceLineAnchor(
+        _ sourceLine: GitReviewSourceLineAnchor,
+        at tableRow: Int,
+        expectedRow: GitReviewFileRow? = nil
+    ) -> GitReviewVisibleSourceLineAnchor? {
+        let row: GitReviewFileRow?
+        if let expectedRow, fileTableView.row(for: expectedRow) == tableRow {
+            row = expectedRow
+        } else {
+            row = materializedFileRow(at: tableRow)
+        }
+        guard let row,
+              let y = row.yPosition(of: sourceLine) else { return nil }
+        return GitReviewVisibleSourceLineAnchor(
+            sourceLine: sourceLine,
+            windowY: row.convert(NSPoint(x: 0, y: y), to: nil).y
+        )
+    }
+
+    private func restoreVisibleSourceLineAnchor(
+        _ anchor: GitReviewVisibleSourceLineAnchor,
+        at tableRow: Int
+    ) -> Bool {
+        guard let row = materializedFileRow(at: tableRow),
+              let y = row.yPosition(of: anchor.sourceLine) else { return false }
+        let replacementWindowY = row.convert(NSPoint(x: 0, y: y), to: nil).y
+        let currentY = scrollView.contentView.bounds.origin.y
+        let targetY = min(
+            max(currentY + anchor.windowY - replacementWindowY, 0),
+            maximumScrollOffsetY()
+        )
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: targetY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        return true
+    }
+
+    private func materializedFileRow(at tableRow: Int) -> GitReviewFileRow? {
+        guard let host = fileTableView.view(
+            atColumn: 0,
+            row: tableRow,
+            makeIfNecessary: false
+        ) else { return nil }
+        if let row = host as? GitReviewFileRow { return row }
+        return host.subviews.first { $0 is GitReviewFileRow } as? GitReviewFileRow
     }
 
     /// Hydrates and materializes only the destination selected by Find. The background index

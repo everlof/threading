@@ -2,6 +2,25 @@ import AppKit
 import NativeDiffAppKit
 import NativeDiffCore
 
+/// One source line that survives a larger-context read even when Git merges the hunks around it.
+///
+/// Context expansion replaces the complete file row. A hunk index or a row-relative pixel does
+/// not survive that replacement, while the old/new line-number pair does. Expansion controls
+/// therefore name the nearest changed line and the pane keeps that line at the same window Y.
+struct GitReviewSourceLineAnchor: Equatable {
+    let oldNumber: Int?
+    let newNumber: Int?
+
+    init(_ line: GitDiffLine) {
+        oldNumber = line.oldNumber
+        newNumber = line.newNumber
+    }
+
+    func matches(_ line: GitDiffLine) -> Bool {
+        oldNumber == line.oldNumber && newNumber == line.newNumber
+    }
+}
+
 enum GitReviewDiffLayout: Equatable {
     case unified
     case split
@@ -781,6 +800,26 @@ final class GitReviewDiffTextView: ThemedTextView {
         lineActionRect(for: index)
     }
 
+    /// The top of a durable source line in this document's coordinates. Used to preserve the
+    /// reader's visual position while a larger-context result replaces the enclosing row.
+    func yPosition(of anchor: GitReviewSourceLineAnchor) -> CGFloat? {
+        guard let index = renderedLines.firstIndex(where: { anchor.matches($0.source) }),
+              lineRanges.indices.contains(index),
+              let textContainer,
+              let layoutManager else { return nil }
+        layoutManager.ensureLayout(for: textContainer)
+        let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: lineRanges[index],
+            actualCharacterRange: nil
+        )
+        guard glyphRange.length > 0 else { return nil }
+        let fragment = layoutManager.lineFragmentRect(
+            forGlyphAt: glyphRange.location,
+            effectiveRange: nil
+        )
+        return fragment.minY + textContainerOrigin.y
+    }
+
     private func lineIndex(at point: NSPoint) -> Int? {
         guard let textContainer, let layoutManager, !lineRanges.isEmpty else { return nil }
         let origin = textContainerOrigin
@@ -1138,6 +1177,14 @@ final class GitReviewSplitDiffView: NSView {
         } else if let paired = oldIndexBySource[index] {
             oldView.revealFindOccurrence(line: paired, range: range)
         }
+    }
+
+    func yPosition(of anchor: GitReviewSourceLineAnchor) -> CGFloat? {
+        if let y = newView.yPosition(of: anchor) {
+            return convert(NSPoint(x: 0, y: y), from: newView).y
+        }
+        guard let y = oldView.yPosition(of: anchor) else { return nil }
+        return convert(NSPoint(x: 0, y: y), from: oldView).y
     }
 
     private static func horizontalScroll(for diff: GitReviewDiffTextView) -> ThemedScrollView {
