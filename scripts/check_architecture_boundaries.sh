@@ -55,12 +55,21 @@ component_gallery_controller="${repository_directory}/Sources/Threading/UI/Windo
 mcp_tools="${repository_directory}/Sources/Threading/Core/MCP/MCPTools.swift"
 mcp_catalog="${repository_directory}/Sources/Threading/Core/MCP/MCPToolCatalog.swift"
 mcp_handler="${repository_directory}/Sources/Threading/UI/Windows/MainWindowMCPTools.swift"
+app_settings="${repository_directory}/Sources/Threading/Core/Settings/AppSettings.swift"
+settings_pages="${repository_directory}/Sources/Threading/UI/Preferences/SettingsPages.swift"
 
 if rg -n 'enum AgentCommand\b|func decodeArguments\s*\(' "${mcp_tools}" \
   || rg -n 'tool:\s*\.[A-Za-z]' "${mcp_catalog}" \
   || rg -n 'switch\s+call\b' "${mcp_handler}"; then
   echo "architecture-boundary: built-in MCP identity, decoding, catalogue metadata, and" >&2
   echo "  execution routing must stay in the single typed declaration inventory" >&2
+  failed=1
+fi
+
+if rg -n 'private\s+enum\s+Keys\b|forKey:\s*"' "${app_settings}" \
+  || rg -n '\bentry\s*\(' "${settings_pages}"; then
+  echo "architecture-boundary: setting keys, defaults, validation, row anchors, and remote" >&2
+  echo "  metadata must stay in AppSettingDefinitions" >&2
   failed=1
 fi
 

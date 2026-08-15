@@ -305,7 +305,7 @@ final class SoundResolutionTests: XCTestCase {
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
 
         // Written past the typed accessor deliberately: an unknown key is exactly what no API
-        // here can produce. The literal mirrors `AppSettings.Keys.soundEventChoices`, which is
+        // here can produce. The literal is pinned by `AppSettingDefinitions`, which is
         // private for the same reason every other key there is.
         defaults.set(
             ["alert.somethingLater": "file:Hero.aiff", "alert.finished": "file:Purr.aiff"],

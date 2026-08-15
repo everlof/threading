@@ -98,7 +98,7 @@ Inventories are projections of code-owned registries, not Markdown lists updated
 | Inventory | Source of truth | Projections and proof |
 |---|---|---|
 | Built-in MCP tools | `MCPBuiltInToolRegistry.descriptors` | MCP `tools/list`, Tools settings, scoped catalogs, and routing derive from descriptors; `MCPWireTests` enforces identity/decoder/schema/annotation/group/binding parity. |
-| Settings | `SettingsPages.all` plus the extension settings registry | Navigation, both search paths, and `list_settings` consume the same pages; `SettingsAnchorResolutionTests` builds indexed pages and resolves their row anchors. |
+| Settings | `AppSettingDefinitions.all`, projected through `SettingsPages.all`, plus the extension settings registry | Each built-in definition owns its stable identity, current or migration persistence key and value shape, absence/default semantics, validation, notification policy, page/row/search metadata, and remote policy. `AppSettings`, navigation, both search paths, and `list_settings` project from it; definition completeness and anchor-resolution tests prove key, order, and row parity. |
 | Commands and shortcuts | `AppCommands.all`, then `CommandRegistry` for extensions, project scripts, and overrides | Menus, Keyboard settings, the command palette, and host command plane consume registry descriptors; shortcut and command-policy tests enumerate them. |
 | Public extension components | `ThreadingComponentCatalog.document` | `ThreadingComponentCatalogGenerator` writes committed Markdown, JSON, and schemas under `docs/extensions/generated`; CI runs it with `--check`. |
 

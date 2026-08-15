@@ -94,6 +94,7 @@ enum SettingsPages {
         let width: SettingsPageWidth
         let make: () -> NSViewController
 
+        @MainActor
         init(
             id: String,
             hostPage: ExtensionHostSettingsPage?,
@@ -101,7 +102,7 @@ enum SettingsPages {
             symbol: String,
             group: String,
             searchTerms: [String],
-            entries: [SettingsEntry] = [],
+            entries: [SettingsEntry]? = nil,
             width: SettingsPageWidth = .readable,
             make: @escaping () -> NSViewController
         ) {
@@ -111,7 +112,7 @@ enum SettingsPages {
             self.symbol = symbol
             self.group = group
             self.searchTerms = searchTerms
-            self.entries = entries
+            self.entries = entries ?? SettingsPages.entries(for: id)
             self.width = width
             self.make = make
         }
@@ -216,55 +217,10 @@ enum SettingsPages {
                 // sees, and none of the terms above lead to the setting that decides it.
                 "dormant", "recently used", "restore window", "restore limit", "days"
             ),
-            // The static rows, so a result can name the setting itself. Dynamic runs — the
-            // per-agent attachment toggles, the per-prompt confirmations, the per-alert
-            // notification list, the custom-sound audit — stay page-level: their titles are
-            // minted at build time and a stale anchor is worse than none.
-            entries: [
-                entry("Sessions", "New sessions use", "agent", "Claude Code", "Codex"),
-                entry("Sessions", "Name sessions after the agent's own title", "naming", "rename"),
-                entry("Sessions", "Group sessions by branch", "branch"),
-                entry("Sessions", "Compact tree", "indentation", "sidebar density"),
-                entry("Sessions", "Follow the checkout's branch", "branch", "checkout"),
-                entry("Sessions", "Discover project icons", "project icons", "favicon"),
-                entry("Sessions", "Discover account avatars", "account avatars", "Gravatar"),
-                entry("Conversation Speed", "Claude sessions start in",
-                      "fast mode", "standard mode", "credits", "conversation speed"),
-                entry("Conversation Speed", "Codex sessions start in",
-                      "service tier", "credits", "conversation speed"),
-                entry("Opening Message", "Add to every new chat",
-                      "first message", "instructions", "opening message"),
-                entry("Attachments", "Include files outside the project", "attachments"),
-                entry("Attachments", "Keep the page as it was before each agent action",
-                      "attachments", "browser"),
-                entry("Startup", "Reopen the last session at launch",
-                      "relaunch", "restore", "startup"),
-                entry("Startup", "Bring back at launch",
-                      "reopen", "resume automatically", "running at quit", "restore"),
-                entry("Startup", "Counts as recently used", "recently used", "days", "dormant"),
-                entry("Startup", "Sessions brought back", "restore limit"),
-                entry("Confirmations", "Hidden extension messages", "notices"),
-                entry("Notifications", "Notify when a session needs you",
-                      "notifications", "alerts", "needs attention"),
-                entry("Notifications", "Alert sound", "sound", "alerts", "notifications"),
-                entry("Notifications", "Sounds for each alert",
-                      "custom sounds", "per-event sounds", "customize events", "override"),
-                entry("Terminal Bell", "Bell sound", "bell", "beep", "terminal bell", "alert sound"),
-                entry("Terminal Bell", "Sounds for each bell", "custom sounds", "beep", "override"),
-                entry("Silence", "Silence every sound", "silence", "silence sounds", "mute"),
-                // No entry for the Custom Sounds card: its rows (the audit list and its
-                // Reset All tail) arrive only after an async scan answers, so an anchor
-                // there is a scroll the reveal usually cannot perform on a fresh page.
-                entry("Permission Mode", "New sessions start in", "permission mode", "ask before"),
-                entry("Claude Remote Control", "Remote Control for new Claude sessions",
-                      "Claude Remote Control", "claude.ai", "mobile"),
-                entry("Claude Hooks", "Report Claude turn and subagent activity", "hooks"),
-                entry("Claude Hooks", "Hide Claude's status line in Threading terminals",
-                      "status line"),
-                entry("Codex Hooks", "Report Codex turn boundaries", "Codex hooks", "hooks.json"),
-                entry("Codex Hooks", "Skip Codex hook review", "hooks"),
-                entry("Software Updates", "Check for updates automatically", "updates", "Sparkle")
-            ]
+            // Static rows are projected from `AppSettingDefinitions`. Dynamic runs — the
+            // per-agent attachment toggles, per-prompt confirmations, per-alert notification
+            // list and custom-sound audit — stay page-level because a stale anchor is worse
+            // than none.
         ) { GeneralPreferencesViewController() },
         Page(
             id: keyboardID,
@@ -278,11 +234,6 @@ enum SettingsPages {
             ),
             // The two standing decisions. The command inventories are dynamic disclosure
             // cards, so they stay page-level.
-            entries: [
-                entry("Composer", "When writing a prompt, press Return to",
-                      "return", "enter", "send", "new line"),
-                entry(nil, "Reset Shortcuts", "reset", "defaults")
-            ]
         ) { KeyboardPreferencesViewController() },
         // MARK: Appearance
         Page(
@@ -297,14 +248,6 @@ enum SettingsPages {
             ),
             // The theme list, preview and colour editor are their own surfaces rather than
             // rows; only the App and Fonts cards are addressable.
-            entries: [
-                entry("App", "App theme", "appearance", "chrome"),
-                entry("App", "Custom themes", "duplicate", "edit"),
-                entry("App", "Classic skins", "Winamp", "import", "skin"),
-                entry("Fonts", "Text size", "large text", "text size"),
-                entry("Fonts", "App font", "typeface", "font"),
-                entry("Fonts", "Conversation font", "typeface", "font", "chat")
-            ]
         ) { ThemePreferencesViewController() },
         Page(
             id: profilesID,
@@ -319,18 +262,6 @@ enum SettingsPages {
                 "terminal font", "terminal size", "terminal selection", "copy on select",
                 "clipboard", "cursor", "scrollback", "colour", "background", "dropped images"
             ),
-            entries: [
-                entry("Text", "Font", "terminal font", "terminal size"),
-                entry("Cursor", "Style", "cursor", "block", "underline", "bar"),
-                entry("Cursor", "Blinking cursor", "cursor", "blink"),
-                entry("Colour", "Keep backgrounds in tune with the theme",
-                      "background", "colour", "colors"),
-                entry("Scrollback", "Lines kept", "scrollback", "history"),
-                entry("Selection", "Copy selected text to the clipboard",
-                      "copy on select", "clipboard", "terminal selection"),
-                entry("Dropped files", "Convert dropped images agents can't open",
-                      "dropped images", "HEIC", "TIFF")
-            ]
         ) { ProfilePreferencesViewController() },
         Page(
             id: motionID,
@@ -339,10 +270,6 @@ enum SettingsPages {
             symbol: "sparkles",
             group: appearanceGroup,
             searchTerms: terms("animation", "working indicator", "orb", "chat names", "transition"),
-            entries: [
-                entry("Working", "Working indicator", "orb", "animation", "spinner"),
-                entry("Chat names", "Chat name transition", "transition", "animation", "morph")
-            ]
         ) { MotionPreferencesViewController() },
         // MARK: Agents
         Page(
@@ -386,15 +313,6 @@ enum SettingsPages {
             ),
             // The schedule and the two policies. The per-account rows and the poke ledger are
             // dynamic.
-            entries: [
-                entry("Schedule", "Open a window before I start", "poke", "schedule"),
-                entry("Schedule", "I start at", "working hours", "workday"),
-                entry("Schedule", "I stop at", "working hours", "workday"),
-                entry("Schedule", "Days", "weekdays", "schedule"),
-                entry("Scheduled sends", "If the window has not reset", "reset", "scheduled"),
-                entry("Limit recovery", "When a session hits its usage limit",
-                      "rate limit", "session limit")
-            ]
         ) { UsageWindowPreferencesViewController() },
         // MARK: Access
         Page(
@@ -406,15 +324,6 @@ enum SettingsPages {
             searchTerms: terms("iPhone", "pair", "QR code", "remote", "device", "security"),
             // The pairing card's headings are runtime state, and the paired-device rows are
             // dynamic; the standing switches are what a search can promise.
-            entries: [
-                entry("Connection", "Remote Access", "iPhone", "remote", "sharing"),
-                entry("Connection", "Connection", "relay", "Tailscale"),
-                entry("Connection", "Hosted Direct", "direct", "introduce"),
-                entry("Connection", "Owner Relay Fallback", "relay", "fallback"),
-                entry("Connection", "Keep Sharing Relay Ready", "relay", "share links"),
-                entry("Sharing & Security", "New shared chats",
-                      "security", "collaborative", "focused", "share")
-            ]
         ) { RemoteAccessPreferencesViewController() },
         Page(
             id: githubID,
@@ -426,11 +335,6 @@ enum SettingsPages {
                 "checks", "credentials", "device flow", "gh", "token", "connect",
                 "private repositories", "client ID", "app"
             ),
-            entries: [
-                entry("GitHub App", "Client ID", "client ID", "device flow", "connect", "app"),
-                entry("Command-Line Fallbacks", "gh CLI", "gh", "token", "credentials"),
-                entry("Command-Line Fallbacks", "Git credential helper", "credentials", "token")
-            ]
         ) { GitHubPreferencesViewController() },
         Page(
             id: privacyID,
@@ -442,14 +346,6 @@ enum SettingsPages {
                 "permissions", "accessibility", "screen recording", "notifications",
                 "files and folders", "keychain", "sandbox", "TCC", "security"
             ),
-            entries: [
-                entry("System Permissions", "Files & Folders", "permissions", "TCC", "grant"),
-                entry("System Permissions", "Notifications", "permissions", "TCC", "grant"),
-                entry("System Permissions", "Accessibility", "permissions", "TCC", "grant"),
-                entry("System Permissions", "Screen Recording", "permissions", "TCC", "grant"),
-                entry("Stored Credentials", "Live usage from your Claude login",
-                      "keychain", "usage")
-            ]
         ) { PrivacyPreferencesViewController() },
         // MARK: Data
         Page(
@@ -484,15 +380,6 @@ enum SettingsPages {
                 "reset", "start over", "fresh", "erase", "corrupt", "preferences file",
                 "application support", "where", "location", "reveal", "backup", "restart"
             ),
-            entries: [
-                entry("Locations", "Settings", "preferences file", "where", "location", "reveal"),
-                entry("Locations", "Projects, sessions and caches",
-                      "application support", "location", "reveal"),
-                entry("Welcome Tour", "First-launch walkthrough", "onboarding", "welcome tour"),
-                entry("Welcome Tour", "Run at next launch", "onboarding", "flag"),
-                entry("Start Over", "Reset settings", "reset", "start over", "fresh"),
-                entry("Start Over", "Reset everything", "erase", "corrupt", "start over")
-            ]
         ) { AdvancedPreferencesViewController() },
         // MARK: Extensions
         Page(
@@ -558,6 +445,22 @@ enum SettingsPages {
         }
     }
 
+    /// Built-in row metadata is authored with its persistence and remote contract. Localisation
+    /// remains a UI projection, so the Foundation-only definition model never imports AppKit.
+    private static func entries(for pageID: String) -> [SettingsEntry] {
+        let rows = AppSettingDefinitions.all
+            .filter { $0.remotePolicy != .hidden }
+            .flatMap(\.presentations)
+            .filter { $0.pageID == pageID }
+        return rows.sorted { $0.catalogueOrder < $1.catalogueOrder }.map { presentation in
+            SettingsEntry(
+                title: L10n.string(presentation.rowAnchor),
+                section: presentation.section.map { L10n.string($0) },
+                terms: presentation.searchTerms.flatMap(expanded(_:))
+            )
+        }
+    }
+
     private static func terms(_ values: String...) -> [String] {
         values.flatMap(expanded(_:))
     }
@@ -574,17 +477,4 @@ enum SettingsPages {
         return terms
     }
 
-    /// One indexed row: the section caption and row title exactly as the page builds them
-    /// (both localized here the way `SettingsUI` localizes them there), plus extra vocabulary.
-    private static func entry(
-        _ section: String?,
-        _ title: String,
-        _ extraTerms: String...
-    ) -> SettingsEntry {
-        SettingsEntry(
-            title: L10n.string(title),
-            section: section.map { L10n.string($0) },
-            terms: extraTerms.flatMap(expanded(_:))
-        )
-    }
 }

@@ -205,8 +205,9 @@ lets the Ask AI affordance hide by asking `SettingsSearchResearch.provider` inst
 runtime.
 
 `list_settings` itself answers with page ids, titles, groups, each page's search vocabulary,
-and the individual settings a page holds (title plus section, from `SettingsEntry`) —
-`SettingsPages.all`, the same catalogue both search paths read. It holds no values: which
+and the individual settings a page holds (title plus section). Built-in rows are projected from
+`AppSettingDefinitions.all` through `SettingsPages.all`, the same catalogue both search paths
+read; extension pages join at that projection. It holds no values: which
 pages exist is not a secret, what is set on them stays behind the pages. The helper's reply is
 JSON naming page ids and optionally a setting's title; `SettingsSearchResearch.validated` lets
 through only destinations the catalogue vouches for (an unknown page id gets one second chance
