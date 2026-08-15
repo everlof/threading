@@ -125,14 +125,27 @@ final class AccountLimitsSectionTests: XCTestCase {
         XCTAssertEqual(AccountLimitsStrings.summary(count: 3), "3 limits")
     }
 
-    /// The copy must not promise what this slice does not do. A limit sold as a stop that a
-    /// keystroke walks through would be the feature's version of a confident lie.
-    func testTheExplanationDoesNotPromiseToStopAnything() {
+    /// **The honesty boundary, in the page's own words.**
+    ///
+    /// Threading can guarantee its own conduct and cannot stop the keyboard, so the copy has to
+    /// say both. This assertion exists because the first version of this page said "nothing is
+    /// held back and no session is stopped" — true when the only tier was a notification, and a
+    /// confident lie the day holds shipped. The render is what caught it; this is what keeps it
+    /// caught.
+    func testTheExplanationStatesTheHonestyBoundary() {
         let text = AccountLimitsStrings.explanation
-        XCTAssertTrue(text.contains("nothing is held back"), text)
+
+        XCTAssertTrue(
+            text.localizedCaseInsensitiveContains("never stops the keyboard"),
+            "the copy stopped saying the one thing a limit cannot do: \(text)"
+        )
         XCTAssertTrue(
             text.localizedCaseInsensitiveContains("yours"),
             "the copy has stopped saying whose line this is"
+        )
+        XCTAssertFalse(
+            text.localizedCaseInsensitiveContains("nothing is held back"),
+            "the copy still claims nothing is held back, which stopped being true at tier 3"
         )
     }
 

@@ -513,7 +513,7 @@ enum AccountLimitsStrings {
     static var addRowTitle: String { L10n.string("Draw a line on this account") }
     static var addRowTitleForAll: String { L10n.string("Draw a line on every account") }
     static var addRowSubtitle: String {
-        L10n.string("Pick a window and the percentage you want to hear about.")
+        L10n.string("Pick a window, then what should happen when it gets there.")
     }
 
     static var removeButton: String { L10n.string("Remove") }
@@ -549,9 +549,11 @@ enum AccountLimitsStrings {
 
     static var explanation: String {
         L10n.string("""
-            A limit here is yours, ahead of the provider's. Today it tells you when a window \
-            reaches the line you set — nothing is held back and no session is stopped, and the \
-            percentage you are told about is always the one the window itself reads.
+            A limit here is yours, ahead of the provider's. Depending on the one you pick it \
+            tells you, holds back what Threading would send on its own, or parks sessions on \
+            that account at their next turn. It never stops the keyboard: a turn you type and \
+            send goes, whatever your limits say. The percentage you are told about is always \
+            the one the window itself reads.
             """)
     }
 
