@@ -568,26 +568,6 @@ enum BrowserHistoryAction: String {
     }
 }
 
-/// The point in a document navigation at which an agent action may continue. Full load remains
-/// the default, while the earlier states let an agent inspect or explicitly wait on streaming and
-/// resource-heavy pages without confusing "HTML is usable" with "every subresource finished."
-enum BrowserNavigationReadiness: String {
-    case commit
-    case domContentLoaded = "domcontentloaded"
-    case load
-
-    var completionMessage: String {
-        switch self {
-        case .commit:
-            return "Navigation committed; the document and subresources may still be loading."
-        case .domContentLoaded:
-            return "DOMContentLoaded fired; subresources may still be loading."
-        case .load:
-            return ""
-        }
-    }
-}
-
 /// URLs are page-controlled data too. User-info, fragments, and common credential-bearing query
 /// values never belong in model-visible snapshots, console locations, or navigation receipts.
 enum BrowserURLRedactor {

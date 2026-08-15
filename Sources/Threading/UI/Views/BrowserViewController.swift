@@ -619,12 +619,7 @@ final class BrowserViewController: NSViewController {
 
     /// Fired when the page a caller asked for finishes (or fails, or times out), so an agent's
     /// navigate tool can wait for the page before querying it.
-    private var loadCompletion: ((Bool, String) -> Void)?
-    private var loadReadiness: BrowserNavigationReadiness = .load
-    private var trackedLoadHasCommitted = false
-    private var trackedDocumentReadinessToken: String?
-    private var observedDOMContentLoadedTokens: Set<String> = []
-    private var navigationToken = 0
+    private let navigationCoordinator = BrowserNavigationCoordinator()
 
     // MARK: - Lifecycle
 
@@ -1176,31 +1171,21 @@ final class BrowserViewController: NSViewController {
         waitUntil: BrowserNavigationReadiness,
         _ onLoad: @escaping (_ success: Bool, _ message: String) -> Void
     ) {
-        loadCompletion?(false, "Superseded by a newer navigation.")
-        loadCompletion = onLoad
-        loadReadiness = waitUntil
-        trackedLoadHasCommitted = false
-        trackedDocumentReadinessToken = nil
-        observedDOMContentLoadedTokens.removeAll(keepingCapacity: true)
-        navigationToken += 1
-        let token = navigationToken
+        let navigationID = navigationCoordinator.begin(
+            waitUntil: waitUntil,
+            completion: onLoad
+        )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + BrowserDefaults.loadTimeout) { [weak self] in
-            guard let self, self.navigationToken == token, self.loadCompletion != nil else { return }
-            self.finishLoad(
-                true,
-                """
-                Did not reach \(waitUntil.rawValue) after \
-                \(Int(BrowserDefaults.loadTimeout))s; returning what has rendered.
-                """
+            self?.navigationCoordinator.timeout(
+                navigationID,
+                after: BrowserDefaults.loadTimeout
             )
         }
     }
 
     private func finishLoad(_ success: Bool, _ message: String) {
-        let completion = loadCompletion
-        loadCompletion = nil
-        completion?(success, message)
+        navigationCoordinator.finish(success, message)
     }
 
     // Load-safe, or persisting a restored tab that was never shown crashes: the deferred-load
@@ -3502,18 +3487,13 @@ extension BrowserViewController: WKNavigationDelegate {
                 forgetFilledSecrets()
             }
         }
-        guard webView === self.webView, loadCompletion != nil else { return }
-        trackedLoadHasCommitted = true
-        if loadReadiness == .commit {
-            finishLoad(true, loadReadiness.completionMessage)
-            return
-        }
-        guard loadReadiness == .domContentLoaded else { return }
+        guard webView === self.webView,
+              case .readDocumentToken(let navigationID) = navigationCoordinator.didCommit()
+        else { return }
 
         // Tie the isolated-world DOM event to this exact committed document. A stopped document
         // can deliver its queued message after a same-URL reload starts, so URL equality alone is
         // not a sufficient freshness check.
-        let token = navigationToken
         webView.callAsyncJavaScript(
             "return String(globalThis.__threadingNavigationReadinessToken || '');",
             arguments: [:],
@@ -3523,16 +3503,13 @@ extension BrowserViewController: WKNavigationDelegate {
                 guard let self,
                       let webView,
                       webView === self.webView,
-                      self.navigationToken == token,
-                      self.loadCompletion != nil,
-                      self.loadReadiness == .domContentLoaded,
                       case .success(let value) = result,
                       let documentToken = value as? String,
                       !documentToken.isEmpty else { return }
-                self.trackedDocumentReadinessToken = documentToken
-                if self.observedDOMContentLoadedTokens.contains(documentToken) {
-                    self.finishLoad(true, self.loadReadiness.completionMessage)
-                }
+                self.navigationCoordinator.recordDocumentToken(
+                    documentToken,
+                    for: navigationID
+                )
             }
         )
     }
@@ -3543,7 +3520,7 @@ extension BrowserViewController: WKNavigationDelegate {
         syncAddress()
         updateNavButtons()
         // `didFinish` is also a safe fallback if an earlier readiness callback was unavailable.
-        finishLoad(true, loadReadiness.completionMessage)
+        navigationCoordinator.didFinishLoading()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -4043,16 +4020,8 @@ extension BrowserViewController: WKScriptMessageHandler {
                   payload["state"] as? String
                     == BrowserNavigationReadiness.domContentLoaded.rawValue,
                   let documentToken = payload["document_token"] as? String,
-                  !documentToken.isEmpty,
-                  loadCompletion != nil,
-                  loadReadiness == .domContentLoaded else { return }
-            observedDOMContentLoadedTokens.insert(documentToken)
-            if observedDOMContentLoadedTokens.count > 8 {
-                observedDOMContentLoadedTokens = [documentToken]
-            }
-            guard trackedLoadHasCommitted,
-                  trackedDocumentReadinessToken == documentToken else { return }
-            finishLoad(true, loadReadiness.completionMessage)
+                  !documentToken.isEmpty else { return }
+            navigationCoordinator.observedDOMContentLoaded(documentToken)
             return
         }
         if message.name == BrowserDefaults.passwordFocusMessageHandler {
