@@ -46,6 +46,10 @@ project_model_files=(
 )
 main_window_controller="${repository_directory}/Sources/Threading/UI/Windows/MainWindowController.swift"
 window_navigation_coordinator="${repository_directory}/Sources/Threading/Application/Navigation/WindowNavigationCoordinator.swift"
+extension_command_adapter="${repository_directory}/Sources/Threading/UI/Windows/AgentToolCoordinator+ExtensionCommands.swift"
+extension_authoring_service="${repository_directory}/Sources/Threading/Application/Extensions/ExtensionAuthoringCommandService.swift"
+extension_authoring_catalog="${repository_directory}/Sources/Threading/Application/Extensions/ExtensionComponentAuthoringCatalog.swift"
+extension_preview_service="${repository_directory}/Sources/Threading/UI/Extensions/ExtensionComponentAuthoringService.swift"
 
 if rg -n \
   '(ProjectStore|AgentRuntime|AppSettings|EventLog)\.shared\b' \
@@ -64,6 +68,26 @@ fi
 
 if rg -n '^import (AppKit|WebKit)\b' "${window_navigation_coordinator}"; then
   echo "architecture-boundary: WindowNavigationCoordinator must remain Foundation-only" >&2
+  failed=1
+fi
+
+if rg -n \
+  'ExtensionProjectScaffolder|ExtensionComponentAuthoringCatalog|dependencies\.projects|Bundle\.main\.resourceURL' \
+  "${extension_command_adapter}"; then
+  echo "architecture-boundary: extension authoring handlers are transport/UI adapters;" >&2
+  echo "  catalog validation and scaffolding belong to ExtensionAuthoringCommandService" >&2
+  failed=1
+fi
+
+if rg -n '^import (AppKit|WebKit)\b' \
+  "${extension_authoring_service}" "${extension_authoring_catalog}"; then
+  echo "architecture-boundary: extension authoring application services must remain UI-free" >&2
+  failed=1
+fi
+
+if rg -n 'static func (listJSON|describeJSON|validateJSON)' "${extension_preview_service}"; then
+  echo "architecture-boundary: component identity/schema validation belongs to the catalog;" >&2
+  echo "  the UI service owns preview rendering only" >&2
   failed=1
 fi
 

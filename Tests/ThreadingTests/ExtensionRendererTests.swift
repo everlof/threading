@@ -4701,11 +4701,11 @@ final class ExtensionRendererTests: XCTestCase {
   }
 
   func testComponentAuthoringServiceListsDescribesAndValidatesFromOneCatalogue() throws {
-    let list = try ExtensionComponentAuthoringService.listJSON()
+    let list = try ExtensionComponentAuthoringCatalog.listJSON()
     XCTAssertTrue(list.contains(#""sidebar.session-row""#))
     XCTAssertTrue(list.contains(#""sidebar.session-identity""#))
 
-    let description = try ExtensionComponentAuthoringService.describeJSON(
+    let description = try ExtensionComponentAuthoringCatalog.describeJSON(
       componentID: "sidebar.session-identity",
       version: 1
     )
@@ -4719,7 +4719,7 @@ final class ExtensionRendererTests: XCTestCase {
       decoding: try JSONEncoder().encode(patch),
       as: UTF8.self
     )
-    let validation = try ExtensionComponentAuthoringService.validateJSON(patchJSON)
+    let validation = try ExtensionComponentAuthoringCatalog.validateJSON(patchJSON)
     XCTAssertTrue(validation.contains(#""valid" : true"#))
     XCTAssertTrue(validation.contains(#""two-part-session-identity""#))
   }
@@ -4745,7 +4745,7 @@ final class ExtensionRendererTests: XCTestCase {
       as: UTF8.self
     )
     XCTAssertThrowsError(
-      try ExtensionComponentAuthoringService.validateJSON(invalidJSON)
+      try ExtensionComponentAuthoringCatalog.validateJSON(invalidJSON)
     )
     XCTAssertThrowsError(
       try ExtensionComponentAuthoringService.preview(invalidJSON)

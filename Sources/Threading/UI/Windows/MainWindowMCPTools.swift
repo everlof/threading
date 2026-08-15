@@ -152,6 +152,7 @@ struct AgentToolDependencies {
   let notificationTargets: NotificationTargetRegistry
   let archiveScheduler: SessionArchiveScheduler
   let sessionCommands: AgentSessionCommandService
+  let extensionAuthoring: ExtensionAuthoringCommandService
   /// The typed session control plane — scope and refusal rules for every cross-session
   /// operation, whoever the caller is. Handlers own wording only.
   let control: WorkspaceControlPlane
@@ -174,6 +175,15 @@ struct AgentToolDependencies {
       projects: .shared,
       archiveScheduler: .shared,
       usesAgentTitleInSidebar: { AppSettings.usesAgentTitleInSidebar }
+    ),
+    extensionAuthoring: ExtensionAuthoringCommandService(
+      projects: .shared,
+      sdkSnapshotURL: {
+        Bundle.main.resourceURL?.appendingPathComponent(
+          "ExtensionSDK/ThreadingExtensionKit",
+          isDirectory: true
+        )
+      }
     ),
     control: .live,
     baselines: .shared

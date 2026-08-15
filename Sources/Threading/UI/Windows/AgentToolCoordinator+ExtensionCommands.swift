@@ -5,63 +5,13 @@ extension AgentToolCoordinator {
     // MARK: Tools
 
     func extensionListComponents() -> MCPToolResult {
-        do {
-            return .success(try ExtensionComponentAuthoringService.listJSON())
-        } catch {
-            return .failure(
-                ExtensionComponentAuthoringService.validationMessage(for: error)
-            )
-        }
+        dependencies.extensionAuthoring.listComponents()
     }
 
     func extensionScaffoldProject(
         _ arguments: ExtensionScaffoldProjectArguments
     ) -> MCPToolResult {
-        guard let name = arguments.name?.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        ), !name.isEmpty else {
-            return .failure("Missing required argument: name")
-        }
-        guard let identifier = arguments.identifier, !identifier.isEmpty else {
-            return .failure("Missing required argument: identifier")
-        }
-        guard let directory = arguments.directory, !directory.isEmpty else {
-            return .failure("Missing required argument: directory")
-        }
-        guard NSString(string: directory).isAbsolutePath else {
-            return .failure("directory must be an absolute path")
-        }
-        guard let sdk = Bundle.main.resourceURL?.appendingPathComponent(
-            "ExtensionSDK/ThreadingExtensionKit",
-            isDirectory: true
-        ) else {
-            return .failure("This Threading build does not contain its extension SDK snapshot.")
-        }
-
-        do {
-            let project = try ExtensionProjectScaffolder.scaffold(
-                name: name,
-                identifier: identifier,
-                at: URL(fileURLWithPath: directory, isDirectory: true),
-                sdkSnapshotURL: sdk
-            )
-            guard dependencies.projects.addProject(folderURL: project.directoryURL) != nil else {
-                return .failure(
-                    "Created \(project.manifest.name) at \(project.directoryURL.path), but the "
-                        + "new Threading project could not be saved."
-                )
-            }
-            return .success(
-                "Created \(project.manifest.name) at \(project.directoryURL.path), vendored "
-                    + "ThreadingExtensionKit SDK \(project.sdkVersion) with its offline authoring "
-                    + "contract, and added it as a Threading project. Start with "
-                    + "Vendor/docs/extensions/AGENT_AUTHORING.md. It is source only: build its "
-                    + "WebAssembly module, assemble a .threadingextension, then propose "
-                    + "installation for capability approval."
-            )
-        } catch {
-            return .failure(error.localizedDescription)
-        }
+        dependencies.extensionAuthoring.scaffoldProject(arguments)
     }
 
     func extensionProposeInstall(
@@ -191,38 +141,13 @@ extension AgentToolCoordinator {
     func extensionDescribeComponent(
         _ arguments: ExtensionComponentReferenceArguments
     ) -> MCPToolResult {
-        guard let component = arguments.component, !component.isEmpty else {
-            return .failure("Missing required argument: component")
-        }
-        do {
-            return .success(
-                try ExtensionComponentAuthoringService.describeJSON(
-                    componentID: component,
-                    version: arguments.version
-                )
-            )
-        } catch {
-            return .failure(
-                ExtensionComponentAuthoringService.validationMessage(for: error)
-            )
-        }
+        dependencies.extensionAuthoring.describeComponent(arguments)
     }
 
     func extensionValidateComponentPatch(
         _ arguments: ExtensionComponentPatchArguments
     ) -> MCPToolResult {
-        guard let patch = arguments.patch, !patch.isEmpty else {
-            return .failure("Missing required argument: patch")
-        }
-        do {
-            return .success(
-                try ExtensionComponentAuthoringService.validateJSON(patch)
-            )
-        } catch {
-            return .failure(
-                ExtensionComponentAuthoringService.validationMessage(for: error)
-            )
-        }
+        dependencies.extensionAuthoring.validateComponentPatch(arguments)
     }
 
     func extensionPreviewComponentPatch(
