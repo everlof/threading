@@ -72,6 +72,23 @@ final class AppDelegateTests: XCTestCase {
         )
     }
 
+    func testFastPlanExcludesTestsThatRequireAVisibleWindow() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let planURL = repositoryRoot.appendingPathComponent("TestPlans/Threading-Fast.xctestplan")
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+
+        for testCase in ["BrowserCaptureGeometryTests", "BrowserOffScreenCaptureTests"] {
+            XCTAssertTrue(
+                plan.contains("\"\(testCase)\""),
+                "\(testCase) orders a real window on screen and must stay outside the hosted "
+                    + "fast runner"
+            )
+        }
+    }
+
     func testReopenWithoutAWindowControllerDoesNotCrash() {
         let delegate = AppDelegate()
 

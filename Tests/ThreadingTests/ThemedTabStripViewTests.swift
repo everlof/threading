@@ -290,6 +290,45 @@ final class ThemedTabStripViewTests: XCTestCase {
         XCTAssertEqual(ThemedTabStripView.bandHeight, PaneHeaderView.bandHeight)
     }
 
+    /// A strip embedded in a pane header takes the header's required height. Its own preferred
+    /// band height is intrinsic: making both dimensions required caused a transient 42-versus-41
+    /// conflict while theme observers remeasured the nested views in sequence.
+    func testAHostCanOwnTheStripBandAcrossALiveThemeSwitch() throws {
+        AppThemePalette.set(.system)
+        let strip = ThemedTabStripView(inkSource: .chrome)
+        let header = PaneHeaderView(margin: .paneEdge)
+        header.addSubview(strip)
+        NSLayoutConstraint.activate([
+            strip.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            strip.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            strip.topAnchor.constraint(equalTo: header.topAnchor),
+            strip.bottomAnchor.constraint(equalTo: header.bottomAnchor)
+        ])
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 80),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        self.window = window
+        let content = try XCTUnwrap(window.contentView)
+        content.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            header.topAnchor.constraint(equalTo: content.topAnchor)
+        ])
+        content.layoutSubtreeIfNeeded()
+
+        for theme in [AppThemeStyles.bauhaus, AppThemeStyles.cyberpunk, AppTheme.system] {
+            AppThemePalette.set(theme)
+            NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id))
+            header.superview?.layoutSubtreeIfNeeded()
+            XCTAssertEqual(strip.frame.height, header.frame.height, accuracy: 0.5)
+            XCTAssertEqual(header.frame.height, PaneHeaderView.bandHeight, accuracy: 0.5)
+        }
+    }
+
     /// The visible regression: Bauhaus's four-point rule sat inside a band sized only for the
     /// tab and its two margins, leaving two points below the selected plate and six above it.
     /// The strip already on screen must grow with the rule and keep both margins at the token.

@@ -102,10 +102,31 @@ final class ThemedChartPlaceholderView: NSView, ThemedComponent {
         band.translatesAutoresizingMaskIntoConstraints = false
         addSubview(band)
         addSubview(message)
-        // A preferred width the block keeps in a wide dashboard, and a hard ceiling that lets a
-        // narrow chart shrink it rather than push the paragraph past the axes.
+        // A preferred width the block keeps in a wide dashboard, and hard non-negative ceilings
+        // that let a chart shrink all the way through its temporary zero-width construction
+        // pass. Encoding the inset as a negative constant on the only required ceiling made
+        // `width == 0` demand `message.width <= -20`, which no layout can satisfy. The inset is a
+        // preference; staying inside the component is the invariant.
         let preferredWidth = message.widthAnchor.constraint(equalToConstant: Layout.messageWidth)
-        preferredWidth.priority = .defaultHigh
+        preferredWidth.priority = NSLayoutConstraint.Priority(749)
+        preferredWidth.identifier = "chartPlaceholder.preferredMessageWidth"
+        let insetWidth = message.widthAnchor.constraint(
+            lessThanOrEqualTo: widthAnchor,
+            constant: -Design.Spacing.medium * 2
+        )
+        insetWidth.priority = .defaultHigh
+        insetWidth.identifier = "chartPlaceholder.preferredInsetWidth"
+        let hardWidthCeiling = message.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor)
+        hardWidthCeiling.identifier = "chartPlaceholder.hardWidthCeiling"
+        let preferredProgressWidth = progressBar.widthAnchor.constraint(
+            equalToConstant: Layout.progressWidth
+        )
+        preferredProgressWidth.priority = NSLayoutConstraint.Priority(749)
+        preferredProgressWidth.identifier = "chartPlaceholder.preferredProgressWidth"
+        let progressHardCeiling = progressBar.widthAnchor.constraint(
+            lessThanOrEqualTo: message.widthAnchor
+        )
+        progressHardCeiling.identifier = "chartPlaceholder.progressHardCeiling"
         NSLayoutConstraint.activate([
             band.leadingAnchor.constraint(equalTo: leadingAnchor),
             band.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -114,13 +135,12 @@ final class ThemedChartPlaceholderView: NSView, ThemedComponent {
             message.centerXAnchor.constraint(equalTo: centerXAnchor),
             message.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Layout.messageRise),
             preferredWidth,
-            message.widthAnchor.constraint(
-                lessThanOrEqualTo: widthAnchor,
-                constant: -Design.Spacing.medium * 2
-            ),
+            insetWidth,
+            hardWidthCeiling,
             titleField.widthAnchor.constraint(equalTo: message.widthAnchor),
             detailField.widthAnchor.constraint(equalTo: message.widthAnchor),
-            progressBar.widthAnchor.constraint(equalToConstant: Layout.progressWidth)
+            preferredProgressWidth,
+            progressHardCeiling
         ])
 
         applyInk()

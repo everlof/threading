@@ -794,7 +794,7 @@ final class GitReviewRenderTests: XCTestCase {
         window.setContentSize(size)
         window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
         window.orderFront(nil)
-        defer { window.close() }
+        defer { window.orderOut(nil) }
 
         host.setTitle("Threading")
         host.setTakeoverActive(true)

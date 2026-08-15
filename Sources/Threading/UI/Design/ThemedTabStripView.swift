@@ -149,9 +149,6 @@ final class ThemedTabStripView: NSView {
     /// rule cannot pull the tab and its neighbouring actions onto different centrelines.
     var contentCenterYAnchor: NSLayoutYAxisAnchor { contentAreaGuide.centerYAnchor }
 
-    private lazy var bandHeightConstraint = heightAnchor.constraint(
-        equalToConstant: Self.bandHeight
-    )
     private lazy var contentBottomConstraint = contentAreaGuide.bottomAnchor.constraint(
         equalTo: bottomAnchor,
         constant: -Design.Radius.border
@@ -245,8 +242,6 @@ final class ThemedTabStripView: NSView {
         )
 
         NSLayoutConstraint.activate([
-            bandHeightConstraint,
-
             contentAreaGuide.topAnchor.constraint(equalTo: topAnchor),
             contentBottomConstraint,
             contentAreaGuide.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -552,7 +547,6 @@ final class ThemedTabStripView: NSView {
         let height = Self.bandHeight
         guard appliedBandHeight != height else { return }
         appliedBandHeight = height
-        bandHeightConstraint.constant = height
         contentBottomConstraint.constant = -Design.Radius.border
         invalidateIntrinsicContentSize()
         needsLayout = true

@@ -151,6 +151,47 @@ final class ThemedChartPlaceholderTests: XCTestCase {
         XCTAssertEqual(bar.progress, 1, accuracy: 0.001)
     }
 
+    /// The component gallery constructs the complete retained catalogue before its document has
+    /// a viewport. A chart therefore owns a real zero-width placeholder for one layout pass.
+    /// Required negative-width constraints used to make every gallery test emit AppKit's
+    /// unsatisfiable-constraints warning before settling at its final width.
+    func testAZeroWidthConstructionPassHasNoImpossibleRequiredWidthsAndRecovers() throws {
+        let placeholder = ThemedChartPlaceholderView(frame: .zero)
+        placeholder.show(.loading(progress: 0.5), title: "Reading usage", detail: "Claude Code")
+
+        placeholder.layoutSubtreeIfNeeded()
+        let progress = try XCTUnwrap(placeholder.progressBarForTesting)
+        func constraints(in view: NSView) -> [NSLayoutConstraint] {
+            view.constraints + view.subviews.flatMap { constraints(in: $0) }
+        }
+        let authored: [String: NSLayoutConstraint] = Dictionary(
+            uniqueKeysWithValues: constraints(in: placeholder).compactMap {
+                constraint -> (String, NSLayoutConstraint)? in
+                guard let identifier = constraint.identifier,
+                      identifier.hasPrefix("chartPlaceholder.") else { return nil }
+                return (identifier, constraint)
+            }
+        )
+        XCTAssertEqual(authored["chartPlaceholder.preferredInsetWidth"]?.priority, .defaultHigh)
+        XCTAssertEqual(
+            authored["chartPlaceholder.hardWidthCeiling"]?.constant,
+            0,
+            "the required ceiling must remain satisfiable while the owner is zero wide"
+        )
+        XCTAssertEqual(authored["chartPlaceholder.hardWidthCeiling"]?.priority, .required)
+        XCTAssertLessThan(
+            authored["chartPlaceholder.preferredProgressWidth"]?.priority.rawValue ?? .infinity,
+            NSLayoutConstraint.Priority.required.rawValue,
+            "the progress bar's preferred width must be allowed to collapse"
+        )
+        XCTAssertEqual(authored["chartPlaceholder.progressHardCeiling"]?.priority, .required)
+
+        placeholder.frame.size = NSSize(width: 420, height: 180)
+        placeholder.layoutSubtreeIfNeeded()
+        XCTAssertEqual(progress.frame.width, 132, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(progress.frame.maxX, placeholder.bounds.maxX)
+    }
+
     func testTheGhostBreathesOnlyWhileWorkIsInFlight() throws {
         Design.Motion.reduceMotionOverrideForTesting = false
         let window = NSWindow(

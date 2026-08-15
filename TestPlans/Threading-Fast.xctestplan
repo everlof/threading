@@ -38,6 +38,7 @@
       "skippedTests" : [
         "BrowserAgentBridgeIntegrationTests",
         "BrowserCaptureGeometryTests",
+        "BrowserOffScreenCaptureTests",
         "ThemedControlTests\/testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()",
         "ThemedControlTests\/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()"
       ],
