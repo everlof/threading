@@ -880,12 +880,12 @@ final class ComponentGalleryViewController: NSViewController {
                 story(
                     "ExecutionAuditEventView",
                     "One audit row per source, resting and selected: the ledger's fixed grid of category, phase, operation and fidelity.",
-                    makeExecutionAuditStory()
+                    ExecutionAuditEventGalleryStory.makeView()
                 ),
                 story(
                     "ConversationHandoffView",
                     "A continuation path across runtimes: the direct source is offered as an action, the older stops stay as provenance.",
-                    makeConversationHandoffStory()
+                    ConversationHandoffGalleryStory.makeView()
                 )
             ]
         )
@@ -903,117 +903,6 @@ final class ComponentGalleryViewController: NSViewController {
     private enum GalleryNotice {
         static let paneWidth: CGFloat = 560
         @MainActor static var paneHeight: CGFloat { PaneHeaderView.bandHeight * 3 }
-    }
-
-    /// The audit story's own measurements. The row is given a width because the ledger's grid is
-    /// the thing being shown: at the story stack's natural width the four columns would be spaced
-    /// by whatever this fixture's longest summary happens to be.
-    private enum AuditStory {
-        static let rowWidth: CGFloat = 460
-        static let durationMilliseconds = 128
-    }
-
-    /// The two states a reader has to tell apart at a glance — resting and selected — across the
-    /// sources the ledger carries. The records are stated here rather than read from a live
-    /// ledger: a story is a fixture, and a row that needed a running audit store to draw would
-    /// make this window depend on a session.
-    private func makeExecutionAuditStory() -> NSView {
-        let rows: [NSView] = [
-            (ExecutionAuditRecord.Source.providerStream, false),
-            (ExecutionAuditRecord.Source.threadingMCP, false),
-            (ExecutionAuditRecord.Source.permissionBroker, true)
-        ].map { source, isSelected in
-            let view = ExecutionAuditEventView()
-            view.configure(
-                record: Self.auditStoryRecord(source: source),
-                isSelected: isSelected
-            )
-            view.widthAnchor.constraint(
-                equalToConstant: AuditStory.rowWidth
-            ).isActive = true
-            return view
-        }
-
-        let stack = NSStackView(views: rows)
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.hairline
-        return stack
-    }
-
-    private static func auditStoryRecord(
-        source: ExecutionAuditRecord.Source
-    ) -> ExecutionAuditRecord {
-        let shape: (
-            category: ExecutionAuditRecord.Category,
-            phase: ExecutionAuditRecord.Phase,
-            operation: String,
-            summary: String,
-            fidelity: ExecutionAuditRecord.Fidelity
-        )
-        switch source {
-        case .providerStream:
-            shape = (.tool, .completed, "Edit", "Design.swift, 2 hunks", .exact)
-        case .threadingMCP:
-            shape = (.browser, .progressed, "browser_click", "Sign in, #submit", .canonicalized)
-        case .permissionBroker:
-            shape = (.permission, .allowed, "Bash", "git status", .exactWithRedactions)
-        }
-
-        return ExecutionAuditRecord(
-            id: UUID(),
-            sessionID: SessionID(),
-            sequence: 1,
-            timestamp: Date(timeIntervalSince1970: 0),
-            source: source,
-            provider: nil,
-            category: shape.category,
-            phase: shape.phase,
-            operation: shape.operation,
-            callID: nil,
-            summary: shape.summary,
-            input: nil,
-            output: nil,
-            durationMilliseconds: AuditStory.durationMilliseconds,
-            fidelity: shape.fidelity,
-            redactions: [],
-            previousDigest: nil,
-            digest: ""
-        )
-    }
-
-    /// A three-stop path, the shortest one that shows everything the view says at once: where the
-    /// conversation started, the direct source it offers to open, and that the middle of a longer
-    /// path can have been compacted away.
-    private func makeConversationHandoffStory() -> NSView {
-        let endpoints = [
-            ConversationHandoffEndpoint(
-                sessionID: SessionID(),
-                kind: .claude,
-                model: "claude-opus-4-1",
-                title: nil
-            ),
-            ConversationHandoffEndpoint(
-                sessionID: SessionID(),
-                kind: .codex,
-                model: "gpt-5",
-                title: nil
-            ),
-            ConversationHandoffEndpoint(
-                sessionID: SessionID(),
-                kind: .claude,
-                model: "claude-opus-4-1",
-                title: nil
-            )
-        ]
-        guard let handoff = ConversationHandoff(endpoints: endpoints, omittedEndpointCount: 1)
-        else { return NSView() }
-
-        return ConversationHandoffView(
-            handoff: handoff,
-            canOpenSource: true,
-            onOpenSource: nil
-        )
     }
 
     /// The strip wired to its live model: every gesture mutates `stripTabs` and re-renders,
@@ -1776,7 +1665,7 @@ final class ComponentGalleryViewController: NSViewController {
                     "The bounded Activity overview above the filesystem tree: the "
                         + "repository atlas, action ribbon, counts, and recent agents share one "
                         + "stable file axis even when the checkout has thousands of files.",
-                    makeAgentWorkSummarySample()
+                    AgentWorkSummaryGalleryStory.makeView()
                 ),
                 story(
                     "AgentActivityBeamView",
@@ -2958,81 +2847,6 @@ final class ComponentGalleryViewController: NSViewController {
             availableWidth: 520,
             minimumColumnWidth: 120
         )
-    }
-
-    private func makeAgentWorkSummarySample() -> NSView {
-        // A fixed moment, not `Date()`: heat decay and action retention are measured against
-        // the clock, and a wall-clock fixture rendered the light and dark evidence captures
-        // as two different components — different marks, different label wraps.
-        let now = Date(timeIntervalSinceReferenceDate: 776_000_000)
-        let files = (0..<2_400).map { index in
-            "Sources/Feature\(index / 120)/Area\(index / 24)/file-\(index).swift"
-        }
-        let atlas = RepositoryFileAtlas(files: files)
-        let firstID = SessionID()
-        let secondID = SessionID()
-        var first = AgentSessionWorkTrace()
-        first.sessionTitle = L10n.string("Refactor sidebar")
-        first.agentLabel = "Codex"
-        var second = AgentSessionWorkTrace()
-        second.sessionTitle = L10n.string("Harden tests")
-        second.agentLabel = "Claude"
-
-        for index in stride(from: 90, through: 1_080, by: 19) {
-            _ = first.recordFile(
-                .read,
-                path: files[index],
-                root: nil,
-                at: now.addingTimeInterval(-TimeInterval(index % 70))
-            )
-            if index.isMultiple(of: 3) {
-                _ = first.recordFile(
-                    .edit,
-                    path: files[index],
-                    root: nil,
-                    at: now.addingTimeInterval(-TimeInterval(index % 35))
-                )
-            }
-        }
-        for index in stride(from: 720, through: 1_900, by: 29) {
-            _ = second.recordFile(
-                .edit,
-                path: files[index],
-                root: nil,
-                at: now.addingTimeInterval(-TimeInterval(index % 60))
-            )
-        }
-        for index in 0..<12 {
-            first.recordAction(
-                category: index.isMultiple(of: 3) ? .shell : .filesystem,
-                operation: index.isMultiple(of: 3) ? "exec" : "Read",
-                at: now.addingTimeInterval(-TimeInterval(index * 3)),
-                sessionID: firstID
-            )
-            second.recordAction(
-                category: index.isMultiple(of: 4) ? .subagent : .network,
-                operation: index.isMultiple(of: 4) ? "Agent" : "WebSearch",
-                at: now.addingTimeInterval(-TimeInterval(index * 4 + 1)),
-                sessionID: secondID
-            )
-        }
-
-        let traces = [firstID: first, secondID: second]
-        let presentation = AgentWorkPresentation.project(
-            AgentProjectWorkAggregate(traces: traces),
-            traces: traces,
-            projectID: ProjectID(),
-            atlas: atlas,
-            detailed: true
-        )
-        let summary = AgentWorkSummaryView()
-        summary.setClock { now }
-        summary.setPresentation(presentation)
-        // The gallery is evidence, not a fitting-size benchmark. Pin this sidebar-shaped
-        // component to one realistic review width so light and dark captures prove the same
-        // layout instead of inheriting appearance-dependent text fitting from the host stack.
-        summary.widthAnchor.constraint(equalToConstant: 520).isActive = true
-        return summary
     }
 
     private func makeAgentActivityBeamSample() -> NSView {

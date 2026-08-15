@@ -51,6 +51,7 @@ extension_command_adapter="${repository_directory}/Sources/Threading/UI/Windows/
 extension_authoring_service="${repository_directory}/Sources/Threading/Application/Extensions/ExtensionAuthoringCommandService.swift"
 extension_authoring_catalog="${repository_directory}/Sources/Threading/Application/Extensions/ExtensionComponentAuthoringCatalog.swift"
 extension_preview_service="${repository_directory}/Sources/Threading/UI/Extensions/ExtensionComponentAuthoringService.swift"
+component_gallery_controller="${repository_directory}/Sources/Threading/UI/Windows/ComponentGalleryWindowController.swift"
 
 if rg -n \
   '(ProjectStore|AgentRuntime|AppSettings|EventLog)\.shared\b' \
@@ -89,6 +90,14 @@ fi
 if rg -n 'static func (listJSON|describeJSON|validateJSON)' "${extension_preview_service}"; then
   echo "architecture-boundary: component identity/schema validation belongs to the catalog;" >&2
   echo "  the UI service owns preview rendering only" >&2
+  failed=1
+fi
+
+if rg -n \
+  'makeExecutionAuditStory|auditStoryRecord|makeConversationHandoffStory|makeAgentWorkSummarySample|private enum AuditStory' \
+  "${component_gallery_controller}"; then
+  echo "architecture-boundary: deterministic component stories belong beside their" >&2
+  echo "  design components, not in ComponentGalleryWindowController" >&2
   failed=1
 fi
 
