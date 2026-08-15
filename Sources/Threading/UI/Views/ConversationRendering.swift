@@ -142,7 +142,7 @@ extension ConversationViewController {
         case .adoptedSessionID(let agentSessionID):
             // The CLI's own identifier wins: a resume can settle on one other than the
             // identifier we asked for, and resuming again must use what it actually used.
-            ProjectStore.shared.update(sessionID: agentSession.id) {
+            ProjectStore.shared.update(sessionID: sessionID) {
                 $0.resumeState = .resumable(agentSessionID)
             }
         }
@@ -543,7 +543,7 @@ extension ConversationViewController {
     func componentTarget(
         for row: ConversationTimeline.Row
     ) -> ExtensionComponentTarget? {
-        let sessionID = agentSession.id.uuidString.lowercased()
+        let sessionID = self.sessionID.uuidString.lowercased()
         switch row {
         case .userMessage:
             return .conversationUserMessage(sessionID: sessionID)
@@ -1182,7 +1182,7 @@ extension ConversationViewController {
             summary: pending.request.summary
         )
         let target = ExtensionComponentTarget.conversationPermissionCard(
-            sessionID: agentSession.id.uuidString.lowercased()
+            sessionID: sessionID.uuidString.lowercased()
         )
         activeToolGroupIndices.removeAll(keepingCapacity: true)
         appendPresentationItem(PresentationItem(

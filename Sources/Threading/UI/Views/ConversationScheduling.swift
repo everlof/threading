@@ -17,16 +17,17 @@ extension ConversationViewController {
     /// Built fresh on every open, so a window that reset in the last five minutes is not still
     /// being offered as a moment to aim at.
     func scheduleMenuEntries() -> [ThemedMenuEntry] {
+        guard let session = currentSession else { return [] }
         let finishCandidates = ScheduledFinishCandidates.current()
         let account = AgentAccountDiscovery.account(
-            for: agentSession.kind,
-            handle: agentSession.accountHandle
+            for: session.kind,
+            handle: session.accountHandle
         )
         if let account { AccountUsageService.shared.refresh(account) }
 
         return ScheduleMenu.entries(
             usage: account.flatMap { AccountUsageService.shared.usage(for: $0) },
-            metering: agentSession.model,
+            metering: session.model,
             canWaitForConversation: !finishCandidates.isEmpty
         ) { [weak self] choice in
             guard let self else { return }

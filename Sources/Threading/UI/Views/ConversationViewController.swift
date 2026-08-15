@@ -189,8 +189,10 @@ final class ConversationViewController: NSViewController {
 
     // MARK: - Properties
 
-    let agentSession: AgentSession
+    let sessionID: SessionID
+    let agentKind: AgentKind
     private let project: Project
+    private let currentSessionProjection: CurrentSessionProjection
 
     let stream: ConversationStreamSession
 
@@ -299,9 +301,9 @@ final class ConversationViewController: NSViewController {
         // The model, effort and speed a reply is sent with live on the box's own bottom row —
         // see `PromptView.SubmitPlacement.footer`.
         prompt.submitPlacement = .footer
-        prompt.placeholder = L10n.format("Reply to %@", agentSession.kind.displayName)
+        prompt.placeholder = L10n.format("Reply to %@", agentKind.displayName)
         prompt.onSubmit = { [weak self] text in
-            guard let self else { return }
+            guard let self, let session = self.currentSession else { return }
             // Read before submitting, which is what clears the strip. Recorded here rather than
             // when the image was attached: an attachment removed before sending was never handed
             // over, and listing it would be the pane reporting an intention.
@@ -309,14 +311,14 @@ final class ConversationViewController: NSViewController {
                 paths: self.promptView.attachmentPaths,
                 sessionID: self.sessionID,
                 projectRoot: URL(
-                    fileURLWithPath: self.agentSession.workingDirectory(in: self.project),
+                    fileURLWithPath: session.workingDirectory(in: self.project),
                     isDirectory: true
                 )
             )
             _ = self.submit(text, context: self.promptView.contextAttachments)
         }
         prompt.onSteer = { [weak self] text in
-            guard let self else { return }
+            guard let self, let session = self.currentSession else { return }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             let context = self.promptView.contextAttachments
             guard !trimmed.isEmpty || !context.isEmpty else { return }
@@ -324,7 +326,7 @@ final class ConversationViewController: NSViewController {
                 paths: self.promptView.attachmentPaths,
                 sessionID: self.sessionID,
                 projectRoot: URL(
-                    fileURLWithPath: self.agentSession.workingDirectory(in: self.project),
+                    fileURLWithPath: session.workingDirectory(in: self.project),
                     isDirectory: true
                 )
             )
@@ -390,7 +392,7 @@ final class ConversationViewController: NSViewController {
 
     private lazy var promptCustomizationHost = ComponentCustomizationHost(
         target: .conversationReplyComposer(
-            sessionID: agentSession.id.uuidString.lowercased()
+            sessionID: sessionID.uuidString.lowercased()
         ),
         contentContainer: promptContentContainer,
         lookup: customizationLookup,
@@ -741,7 +743,6 @@ final class ConversationViewController: NSViewController {
 
     weak var delegate: ConversationViewControllerDelegate?
 
-    var sessionID: SessionID { agentSession.id }
     var isRunning: Bool { stream.isRunning }
 
     /// Whether this session is the one on screen, tracked so it only raises the sidebar's
@@ -783,6 +784,7 @@ final class ConversationViewController: NSViewController {
     init?(
         agentSession: AgentSession,
         project: Project,
+        currentSessionProjection: CurrentSessionProjection,
         subagentState: SubagentSessionState? = nil,
         launchPlanProvider: AgentLaunchPlanProvider? = nil,
         customizationLookup: @escaping ComponentCustomizationHost.Lookup = {
@@ -793,12 +795,15 @@ final class ConversationViewController: NSViewController {
         // by runtime coordination and tests. Refuse at the object boundary so a future caller
         // cannot turn an ordinary unsupported session into a process-ending switch case.
         guard agentSession.kind.supportsNativeUI else { return nil }
-        self.agentSession = agentSession
+        let sessionID = agentSession.id
+        self.sessionID = sessionID
+        self.agentKind = agentSession.kind
         self.project = project
+        self.currentSessionProjection = currentSessionProjection
         self.customizationLookup = customizationLookup
-        self.timeline = ConversationTimeline(sessionID: agentSession.id)
+        self.timeline = ConversationTimeline(sessionID: sessionID)
         self.subagentState = subagentState
-            ?? SubagentSessionState(sessionID: agentSession.id)
+            ?? SubagentSessionState(sessionID: sessionID)
         let account = AgentAccountDiscovery.account(
             for: agentSession.kind,
             handle: agentSession.accountHandle
@@ -816,7 +821,7 @@ final class ConversationViewController: NSViewController {
         // resolved at launch time so account routing and a newly stored resume identifier are
         // current when a dormant native conversation is reopened.
         let plan = {
-            let current = ProjectStore.shared.session(withID: agentSession.id) ?? agentSession
+            let current = try currentSessionProjection.requireSession(for: sessionID)
             if let launchPlanProvider {
                 return try launchPlanProvider(current, project, nil)
             }
@@ -826,12 +831,11 @@ final class ConversationViewController: NSViewController {
         switch agentSession.kind {
         case .claude:
             self.stream = ClaudeStreamSession(
-                sessionID: agentSession.id,
+                sessionID: sessionID,
                 effort: launchEffort,
                 subagentTranscriptPlan: {
-                    let current = ProjectStore.shared.session(withID: agentSession.id)
-                        ?? agentSession
-                    guard let transcriptID = current.resumeState.transcriptID,
+                    guard let current = currentSessionProjection.session(for: sessionID),
+                          let transcriptID = current.resumeState.transcriptID,
                           let transcriptAccount = AgentAccountDiscovery.account(
                               for: current.kind,
                               handle: current.accountHandle
@@ -849,11 +853,11 @@ final class ConversationViewController: NSViewController {
             )
         case .codex:
             self.stream = CodexStreamSession(
-                sessionID: agentSession.id,
+                sessionID: sessionID,
                 workingDirectory: agentSession.workingDirectory(in: project),
                 configurationProvider: {
-                    let current = ProjectStore.shared.session(withID: agentSession.id)
-                        ?? agentSession
+                    guard let current = currentSessionProjection.session(for: sessionID)
+                    else { return .inherited }
                     let model = current.model
                         ?? AgentModels.defaultModel(for: current.kind, account: account)
                     let effort = AgentModels.effectiveEffort(
@@ -885,7 +889,7 @@ final class ConversationViewController: NSViewController {
             )
         case .grok:
             self.stream = ACPStreamSession(
-                sessionID: agentSession.id,
+                sessionID: sessionID,
                 workingDirectory: agentSession.workingDirectory(in: project),
                 profile: .grok,
                 plan: plan
@@ -896,7 +900,7 @@ final class ConversationViewController: NSViewController {
             // because `session/load` accepts any cwd and silently rebinds the live session to
             // whatever it is handed (§10.4) — nothing on the agent side will catch a mismatch.
             self.stream = ACPStreamSession(
-                sessionID: agentSession.id,
+                sessionID: sessionID,
                 workingDirectory: agentSession.workingDirectory(in: project),
                 profile: .cursor,
                 plan: plan
@@ -907,7 +911,7 @@ final class ConversationViewController: NSViewController {
         super.init(nibName: nil, bundle: nil)
         if let handoff = agentSession.handoff {
             let canOpenSource = handoff.source.flatMap {
-                ProjectStore.shared.session(withID: $0.sessionID)
+                currentSessionProjection.session(for: $0.sessionID)
             } != nil
             let handoffView = ConversationHandoffView(
                 handoff: handoff,
@@ -1277,17 +1281,17 @@ final class ConversationViewController: NSViewController {
 
         if let reporting = stream as? ProviderExecutionReportingConversation {
             reporting.onProviderExecution = { [weak self] event in
-                guard let self else { return }
+                guard let self, let session = self.currentSession else { return }
                 AgentWorkTraceStore.shared.record(
                     providerEvent: event,
                     projectID: self.project.id,
-                    session: self.agentSession,
+                    session: session,
                     rootPath: self.project.folderPath
                 )
                 ExecutionAuditStore.shared.record(
                     providerEvent: event,
                     sessionID: self.sessionID,
-                    provider: self.agentSession.kind
+                    provider: self.agentKind
                 )
                 // The tool call is exactly attributed but blind to shell edits; the turn's tree
                 // pair is complete but attributes nothing. Recording what this chat's edit tools
@@ -1303,17 +1307,17 @@ final class ConversationViewController: NSViewController {
         }
 
         stream.onEvent = { [weak self] event in
-            guard let self else { return }
+            guard let self, let session = self.currentSession else { return }
             AgentWorkTraceStore.shared.record(
                 streamEvent: event,
                 projectID: self.project.id,
-                session: self.agentSession,
+                session: session,
                 rootPath: self.project.folderPath
             )
             ExecutionAuditStore.shared.record(
                 streamEvent: event,
                 sessionID: self.sessionID,
-                provider: self.agentSession.kind
+                provider: self.agentKind
             )
             // The same claims through the transport that reports tool calls in its stream rather
             // than through a provider callback. Recording a path twice is idempotent.
@@ -1800,7 +1804,12 @@ final class ConversationViewController: NSViewController {
             return
         }
 
-        let launchRecord = ProjectStore.shared.update(sessionID: agentSession.id) {
+        guard let session = currentSession else {
+            appendNotice("Could not start the conversation: the session no longer exists.", kind: .error)
+            return
+        }
+
+        let launchRecord = ProjectStore.shared.update(sessionID: sessionID) {
             $0.hasLaunched = true
         }
         guard launchRecord.succeeded else {
@@ -1814,13 +1823,13 @@ final class ConversationViewController: NSViewController {
         // Replay before starting, so past turns cannot interleave with new ones. The read is
         // off the main thread, and costs less than the CLI takes to boot.
         apply(.status(.loading))
-        TranscriptReplay.load(for: agentSession, in: project) { [weak self] events, isTruncated in
+        TranscriptReplay.load(for: session, in: project) { [weak self] events, isTruncated in
             guard let self else { return }
 
             AgentWorkTraceStore.shared.seedReplayIfEmpty(
                 events,
                 projectID: self.project.id,
-                session: self.agentSession,
+                session: session,
                 rootPath: self.project.folderPath
             )
 
@@ -2115,8 +2124,11 @@ final class ConversationViewController: NSViewController {
     }
 
     private func projectRelativePath(for path: String) -> String {
+        guard let session = currentSession else {
+            return URL(fileURLWithPath: path).lastPathComponent
+        }
         let root = URL(
-            fileURLWithPath: agentSession.workingDirectory(in: project),
+            fileURLWithPath: session.workingDirectory(in: project),
             isDirectory: true
         )
             .standardizedFileURL.path
@@ -2137,6 +2149,7 @@ final class ConversationViewController: NSViewController {
         authorization: RemoteAuthorization? = nil,
         workspaceFilesValidated: Bool = false
     ) -> Bool {
+        guard currentSession != nil else { return false }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let context = ConversationContextPolicy.normalized(context)
         guard !trimmed.isEmpty || !context.isEmpty else { return false }
@@ -2233,7 +2246,7 @@ final class ConversationViewController: NSViewController {
             transportedText = ConversationTransportText.message(
                 localPrompt.visibleText,
                 participantDisplayName: member.displayName,
-                preservesLeadingSlash: agentSession.kind.supports(.slashCommandPrefix)
+                preservesLeadingSlash: agentKind.supports(.slashCommandPrefix)
             )
         } else {
             RemoteNotificationService.shared.recordOwnerInteraction(sessionID: sessionID)
@@ -2418,7 +2431,7 @@ final class ConversationViewController: NSViewController {
         } ?? L10n.string("Context not reported yet")
         return L10n.format(
             "Native Chat status · %@ · %@ · %@ · %@",
-            agentSession.kind.displayName,
+            agentKind.displayName,
             model,
             activity,
             context
@@ -2498,14 +2511,14 @@ final class ConversationViewController: NSViewController {
     private func applyHandledEvent(_ event: StreamEvent) {
         if case .initialised(_, let model) = event, let model {
             reportedModel = model
-            if storedSession.isCrossProviderContinuation {
+            if currentSession?.isCrossProviderContinuation == true {
                 ProjectStore.shared.update(sessionID: sessionID) {
                     $0.recordHandoffTargetModel(model)
                 }
             }
             // Only an unpinned session speaks for the account: one running an explicit choice
             // reports that choice, which says nothing about what "no model chosen" resolves to.
-            if storedSession.model == nil, let account {
+            if currentSession?.model == nil, let account {
                 AccountPreferencesStore.shared.setLastReportedModel(model, for: account.id)
             }
         }
@@ -2674,7 +2687,7 @@ final class ConversationViewController: NSViewController {
         } else {
             SubagentTranscriptLoader.load(
                 descriptor: agent.descriptor,
-                kind: agentSession.kind,
+                kind: agentKind,
                 completion: completion
             )
         }
@@ -2716,7 +2729,8 @@ final class ConversationViewController: NSViewController {
     /// Tool output and thinking may contain hundreds of incidental asset paths and are not the
     /// agent telling the user that a visual deliverable exists.
     private func recordAttachments(in event: StreamEvent) {
-        guard AppSettings.shared.detectsAttachmentReferences(for: agentSession.kind) else {
+        guard let session = currentSession,
+              AppSettings.shared.detectsAttachmentReferences(for: session.kind) else {
             return
         }
 
@@ -2734,12 +2748,12 @@ final class ConversationViewController: NSViewController {
         }
 
         let root = URL(
-            fileURLWithPath: agentSession.workingDirectory(in: project),
+            fileURLWithPath: session.workingDirectory(in: project),
             isDirectory: true
         )
         let scanned = texts.joined(separator: "\n")
         let sessionID = sessionID
-        let agentKindRawValue = agentSession.kind.rawValue
+        let agentKindRawValue = session.kind.rawValue
         Task.detached(priority: .userInitiated) {
             let resolution = AttachmentReferenceDetector.resolve(
                 text: scanned,
@@ -2773,15 +2787,17 @@ final class ConversationViewController: NSViewController {
 
     // MARK: - Mid-conversation Configuration
 
-    private var storedSession: AgentSession {
-        ProjectStore.shared.session(withID: agentSession.id) ?? agentSession
+    /// Mutable session state comes from the application boundary, never from the construction
+    /// snapshot. Tests exercise this directly so a future convenience fallback cannot quietly
+    /// reintroduce the stale-record ownership bug.
+    var currentSession: AgentSession? {
+        currentSessionProjection.session(for: sessionID)
     }
 
     private var activeModel: String? {
-        let session = storedSession
-        return session.model
+        currentSession?.model
             ?? reportedModel
-            ?? AgentModels.defaultModel(for: session.kind, account: account)
+            ?? AgentModels.defaultModel(for: currentSession?.kind ?? agentKind, account: account)
     }
 
     /// What the menu's "leave it to the CLI" row names, and where that name came from.
@@ -2792,11 +2808,12 @@ final class ConversationViewController: NSViewController {
     /// started — above a row still reading "Default model". Same question, two answers, one
     /// click apart. The rule itself lives in `AgentModels` and is tested there.
     private var resolvedDefaultModel: ResolvedDefaultModel {
-        AgentModels.resolvedDefault(
-            sessionModel: storedSession.model,
+        let session = currentSession
+        return AgentModels.resolvedDefault(
+            sessionModel: session?.model,
             reportedModel: reportedModel,
             configuredModel: AgentModels.defaultModel(
-                for: storedSession.kind,
+                for: session?.kind ?? agentKind,
                 account: account
             ),
             rememberedModel: account.flatMap {
@@ -2809,8 +2826,9 @@ final class ConversationViewController: NSViewController {
     /// Read at the point a turn starts, so changing effort while idle updates both the launch
     /// plan and the working/last-turn status for that turn.
     var effectiveEffort: String? {
-        AgentModels.effectiveEffort(
-            for: storedSession,
+        guard let session = currentSession else { return nil }
+        return AgentModels.effectiveEffort(
+            for: session,
             model: activeModel,
             account: account
         )
@@ -2822,7 +2840,13 @@ final class ConversationViewController: NSViewController {
         // the wire protocol carrying it. See `ConversationStreamSession`.
         let canConfigure = stream.acceptsConfigurationChange
 
-        let session = storedSession
+        guard let session = currentSession else {
+            modeChip.isHidden = true
+            modelChip.isHidden = true
+            effortChip.isHidden = true
+            speedChip.isHidden = true
+            return
+        }
 
         // Configured before the catalog guard below, because the permission posture is not a
         // property of the model: a runtime that publishes no model catalog still has one.
@@ -2926,7 +2950,7 @@ final class ConversationViewController: NSViewController {
     }
 
     private func modelItems() -> [ThemedMenuEntry] {
-        let session = storedSession
+        guard let session = currentSession else { return [] }
         let resolved = resolvedDefaultModel
 
         // The same readings the composer's model menu carries. Switching model mid-conversation
@@ -3005,10 +3029,11 @@ final class ConversationViewController: NSViewController {
     /// three menus for one setting could otherwise disagree about what the app-wide default is
     /// called. Only the timing is this surface's own.
     private func permissionModeItems() -> [ThemedMenuEntry] {
-        PermissionModePresentation.rows(
-            for: storedSession.kind,
-            selected: storedSession.permissionMode,
-            inherited: inheritedPermissionMode(for: storedSession),
+        guard let session = currentSession else { return [] }
+        return PermissionModePresentation.rows(
+            for: session.kind,
+            selected: session.permissionMode,
+            inherited: inheritedPermissionMode(for: session),
             timing: permissionModeTiming
         )
     }
@@ -3051,7 +3076,7 @@ final class ConversationViewController: NSViewController {
     }
 
     private func effortItems() -> [ThemedMenuEntry] {
-        let session = storedSession
+        guard let session = currentSession else { return [] }
         return ReasoningEffortPresentation.rows(
             selected: session.reasoningEffort,
             kind: session.kind,
@@ -3061,9 +3086,10 @@ final class ConversationViewController: NSViewController {
     }
 
     private func speedItems() -> [ThemedMenuEntry] {
-        ConversationSpeedPresentation.rows(
-            selected: storedSession.fastMode,
-            kind: storedSession.kind,
+        guard let session = currentSession else { return [] }
+        return ConversationSpeedPresentation.rows(
+            selected: session.fastMode,
+            kind: session.kind,
             timing: .whileRunning
         )
     }
@@ -3072,15 +3098,16 @@ final class ConversationViewController: NSViewController {
         guard !isChangingConversationConfiguration,
               stream.canSend,
               stream is ReasoningEffortConfigurableConversation,
+              let session = currentSession,
               let option = AgentModels.option(
                 identifier: activeModel,
-                for: storedSession.kind,
+                for: session.kind,
                 account: account
               ),
               effort == nil || option.supports(reasoningEffort: effort)
         else { return }
 
-        let mutation = ProjectStore.shared.update(sessionID: agentSession.id) {
+        let mutation = ProjectStore.shared.update(sessionID: sessionID) {
             $0.setReasoningEffort(effort)
         }
         guard mutation.succeeded else {
@@ -3105,11 +3132,12 @@ final class ConversationViewController: NSViewController {
     /// that now reads Agent's Setting.
     private func selectPermissionMode(_ mode: AgentPermissionMode?) {
         guard !isChangingConversationConfiguration,
-              storedSession.kind.supportsPermissionModes else { return }
+              let session = currentSession,
+              session.kind.supportsPermissionModes else { return }
 
         let persist = { [weak self] (changedLiveAgent: Bool) in
             guard let self else { return }
-            let result = ProjectStore.shared.setPermissionMode(mode, for: self.agentSession.id)
+            let result = ProjectStore.shared.setPermissionMode(mode, for: self.sessionID)
             guard result.succeeded else {
                 self.configurationChangeFailed(self.projectPersistenceFailure(
                     changedLiveAgent: changedLiveAgent
@@ -3146,9 +3174,8 @@ final class ConversationViewController: NSViewController {
     }
 
     private func selectModel(_ model: String?) {
-        guard !isChangingConversationConfiguration else { return }
-
-        let session = storedSession
+        guard !isChangingConversationConfiguration,
+              let session = currentSession else { return }
         let resolved = model ?? AgentModels.defaultModel(for: session.kind, account: account)
         let supportsFast = AgentModels.supportsFastMode(
             kind: session.kind,
@@ -3161,7 +3188,7 @@ final class ConversationViewController: NSViewController {
             account: account
         )
         let wasFast = AgentModels.effectiveFastMode(
-            for: storedSession,
+            for: session,
             model: activeModel,
             account: account,
             startupSpeed: AppSettings.shared.startupSpeed(for: session.kind)
@@ -3169,7 +3196,7 @@ final class ConversationViewController: NSViewController {
 
         let persist = { [weak self] (changedLiveAgent: Bool) in
             guard let self else { return }
-            let mutation = ProjectStore.shared.update(sessionID: self.agentSession.id) {
+            let mutation = ProjectStore.shared.update(sessionID: self.sessionID) {
                 $0.model = model
                 // Both provider pickers turn Fast off when the newly selected model cannot
                 // run it. For Codex, explicit Standard also overrides an account Fast default.
@@ -3216,7 +3243,7 @@ final class ConversationViewController: NSViewController {
                                 // failure.
                                 guard let self else { return }
                                 let mutation = ProjectStore.shared.update(
-                                    sessionID: self.agentSession.id
+                                    sessionID: self.sessionID
                                 ) {
                                     $0.model = model
                                 }
@@ -3253,11 +3280,12 @@ final class ConversationViewController: NSViewController {
     }
 
     private func selectFastMode(_ fast: Bool?) {
-        guard !isChangingConversationConfiguration else { return }
+        guard !isChangingConversationConfiguration,
+              let session = currentSession else { return }
 
         let persist = { [weak self] (changedLiveAgent: Bool) in
             guard let self else { return }
-            let mutation = ProjectStore.shared.update(sessionID: self.agentSession.id) {
+            let mutation = ProjectStore.shared.update(sessionID: self.sessionID) {
                 $0.fastMode = fast
             }
             guard mutation.succeeded else {
@@ -3274,14 +3302,14 @@ final class ConversationViewController: NSViewController {
         // resolves to one of those too. Agent's Setting has no generic "restore provider
         // config" control request, so only the record changes until the next launch.
         guard let resolved = fast
-            ?? AppSettings.shared.startupSpeed(for: storedSession.kind).fastModeOverride
+            ?? AppSettings.shared.startupSpeed(for: session.kind).fastModeOverride
         else {
             persist(false)
             appendNotice(ConversationSpeedPresentation.inheritRecordedOnly, kind: .muted)
             return
         }
 
-        switch storedSession.kind {
+        switch session.kind {
         case .claude:
             guard let switcher = stream as? FastModeConversation else { return }
             isChangingConversationConfiguration = true
@@ -3318,7 +3346,8 @@ final class ConversationViewController: NSViewController {
     /// The transport's own conformance is the test, not the runtime's name: a transport that
     /// cannot be asked mid-conversation does not conform, and one that can needs no entry here.
     private func restoreConversationConfiguration() {
-        guard let fast = AgentLauncher.fastModeAtStartup(for: storedSession),
+        guard let session = currentSession,
+              let fast = AgentLauncher.fastModeAtStartup(for: session),
               let switcher = stream as? FastModeConversation
         else { return }
 

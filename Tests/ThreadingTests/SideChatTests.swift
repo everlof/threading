@@ -717,7 +717,9 @@ final class SessionCoordinatorTests: XCTestCase {
         let projectStore = ProjectStore(
             stateManager: StateManager(appSupportDirectory: directory)
         )
-        let agentRuntime = AgentRuntime()
+        let agentRuntime = AgentRuntime(
+            currentSessionProjection: CurrentSessionProjection { _ in nil }
+        )
         let settings = AppSettings(defaults: defaults)
         let eventLog = EventLog(directory: directory.appendingPathComponent("Logs"))
         let environment = AppEnvironment(

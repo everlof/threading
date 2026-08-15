@@ -38,7 +38,7 @@ extension ConversationViewController {
     private func placeholder(for mode: PromptComposerMode) -> String {
         switch mode {
         case .ready:
-            L10n.format("Reply to %@", agentSession.kind.displayName)
+            L10n.format("Reply to %@", agentKind.displayName)
         case .working(_, let canSteer) where canSteer:
             L10n.string("Queue a message, or ⌘Return to add it to this turn")
         case .working:

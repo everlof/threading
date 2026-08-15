@@ -30,6 +30,8 @@ session_coordinators=(
   "${repository_directory}"/Sources/Threading/UI/Windows/SessionCoordinator*.swift
 )
 
+conversation_controller="${repository_directory}/Sources/Threading/UI/Views/ConversationViewController.swift"
+
 if rg -n \
   '(ProjectStore|AgentRuntime|AppSettings|EventLog)\.shared\b' \
   "${session_coordinators[@]}"; then
@@ -41,6 +43,18 @@ if rg -n \
   '(ProjectStore|SessionAttachmentStore|DisplayPaneStore|ExtensionManager|MCPExternalToolRegistry|RemoteSessionMirrorRegistry|AppSettings|RemoteNotificationService)\.shared\b' \
   "${tool_handlers[@]}"; then
   echo "architecture-boundary: agent command handlers must use AgentToolDependencies" >&2
+  failed=1
+fi
+
+# A cached native conversation outlives the record that first constructed it. Retaining that
+# `AgentSession` made every later settings read a choice between current persistence and a stale
+# fallback, and deletion silently selected the stale value. The controller now owns only the
+# stable identity and reads mutable state through `CurrentSessionProjection`.
+if rg -n \
+  '\b(let|var)\s+agentSession\s*:\s*AgentSession\b|ProjectStore\.shared\.session\s*\(' \
+  "${conversation_controller}"; then
+  echo "architecture-boundary: ConversationViewController retains SessionID and reads the" >&2
+  echo "  current AgentSession through its injected CurrentSessionProjection" >&2
   failed=1
 fi
 
@@ -164,7 +178,7 @@ fi
 # Typed events belong beside the subsystem that owns their payload and behavior. Keeping the
 # declarations in TerminalConstants.swift made every event change touch a shared grab bag and
 # let AppKit-only lifetime helpers leak into Core. The generic event transport lives in
-# Core/Events; UI lifetime helpers live in UI/Design.
+# Core/Events; UI lifetime helpers live in UI/Infrastructure.
 terminal_constants="${repository_directory}/Sources/Threading/Core/Constants/TerminalConstants.swift"
 if rg -n \
   '^(protocol AppEvent\b|(final )?class (LocalEventMonitor|MainRunLoopTimer)\b|enum (AgentDefaults|AgentEnvironment|MCPDefaults)\b|struct [A-Za-z_][A-Za-z0-9_]*: AppEvent\b)' \

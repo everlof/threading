@@ -555,7 +555,11 @@ final class AgentLaunchQuotingTests: XCTestCase {
             folderURL: URL(fileURLWithPath: "/tmp/terminal-only")
         )
 
-        XCTAssertNil(ConversationViewController(agentSession: session, project: project))
+        XCTAssertNil(ConversationViewController(
+            agentSession: session,
+            project: project,
+            currentSessionProjection: CurrentSessionProjection { _ in session }
+        ))
         XCTAssertThrowsError(try AgentLauncher.streamPlan(for: session, in: project)) { error in
             XCTAssertEqual(
                 error as? AgentLaunchPlanningError,

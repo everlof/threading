@@ -18,6 +18,9 @@ func requireConversationViewController(
     guard let controller = ConversationViewController(
         agentSession: agentSession,
         project: project,
+        currentSessionProjection: CurrentSessionProjection { sessionID in
+            sessionID == agentSession.id ? agentSession : nil
+        },
         subagentState: subagentState,
         customizationLookup: customizationLookup
     ) else {

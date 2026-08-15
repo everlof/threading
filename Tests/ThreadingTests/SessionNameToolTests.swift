@@ -349,7 +349,9 @@ final class SessionNameToolTests: XCTestCase {
         let (_, session) = try makeSessionInProject(named: "app")
         XCTAssertFalse(SessionCoordinator.canAskAgentToRename(
             session.id,
-            agentRuntime: AgentRuntime()
+            agentRuntime: AgentRuntime(
+                currentSessionProjection: CurrentSessionProjection { _ in nil }
+            )
         ))
     }
 

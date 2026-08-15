@@ -10,8 +10,15 @@ final class AgentRuntime {
 
     // MARK: - Singleton
 
-    static let shared = AgentRuntime()
-    init() {}
+    static let shared = AgentRuntime(
+        currentSessionProjection: .projectStore(ProjectStore.shared)
+    )
+
+    private let currentSessionProjection: CurrentSessionProjection
+
+    init(currentSessionProjection: CurrentSessionProjection) {
+        self.currentSessionProjection = currentSessionProjection
+    }
 
     // MARK: - Properties
 
@@ -489,6 +496,7 @@ final class AgentRuntime {
         guard let conversation = ConversationViewController(
             agentSession: agentSession,
             project: project,
+            currentSessionProjection: currentSessionProjection,
             subagentState: subagentState(for: agentSession.id),
             launchPlanProvider: fixtureLaunchPlanProvider
         ) else { return nil }
