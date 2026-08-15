@@ -24,13 +24,18 @@ enum TailscaleReadiness: Equatable, Sendable {
     case checking
     case publishing
     case ready(URL)
-    case actionRequired(TailscaleReadinessIssue)
+    /// `actionURL`, when present, is the tailnet approval page the CLI asked the user to visit —
+    /// the one actionable thing in an otherwise dead-ended setup. It rides beside the issue
+    /// rather than inside it so the issue keeps its `String` raw value, which is the
+    /// content-free code the diagnostics report.
+    case actionRequired(TailscaleReadinessIssue, actionURL: URL?)
 }
 
 enum TailscaleReadinessIssue: String, Equatable, Sendable {
     case notInstalled
     case signedOut
     case stopped
+    case serveNotEnabled
     case httpsRequired
     case permissionDenied
     case statusUnavailable
@@ -45,6 +50,8 @@ enum TailscaleReadinessIssue: String, Equatable, Sendable {
             return L10n.string("Sign in to Tailscale on this Mac, then retry.")
         case .stopped:
             return L10n.string("Turn on Tailscale on this Mac, then retry.")
+        case .serveNotEnabled:
+            return L10n.string("Enable Tailscale Serve for this tailnet, then retry.")
         case .httpsRequired:
             return L10n.string("Enable Tailscale HTTPS for this tailnet, then retry.")
         case .permissionDenied:

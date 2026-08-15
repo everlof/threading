@@ -10,7 +10,24 @@ import Foundation
 final class TailscaleRemoteTransport: RemoteAccessTransport {
 
     private(set) var state: RemoteTransportState = .stopped
-    private(set) var readiness: TailscaleReadiness = .notChecked
+
+    /// Setup progress is finer-grained than `state`: the readiness steps advance while the
+    /// transport state sits on `.starting` for the whole of three sequential CLI commands, so a
+    /// state observer alone shows the *first* step's copy until the outcome. The readiness card
+    /// froze on "Checked when Remote Access turns on." for up to half a minute this way.
+    private(set) var readiness: TailscaleReadiness = .notChecked {
+        didSet {
+            guard readiness != oldValue else { return }
+            onReadinessChange?()
+        }
+    }
+
+    var onReadinessChange: (@MainActor () -> Void)?
+
+    /// Injectable for tests, which must not depend on whether the machine running them has the
+    /// Tailscale CLI installed.
+    private let locateExecutable: () -> URL?
+
     private var command: SpawnedChildProcess?
     private var cleanupCommand: SpawnedChildProcess?
     private var outputHandle: FileHandle?
@@ -27,6 +44,10 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         onStateChange: @MainActor @Sendable (RemoteTransportState) -> Void
     )?
 
+    init(locateExecutable: @escaping () -> URL? = { TailscaleRemoteTransport.executableURL() }) {
+        self.locateExecutable = locateExecutable
+    }
+
     func start(
         port: UInt16,
         onStateChange: @escaping @MainActor @Sendable (RemoteTransportState) -> Void
@@ -34,6 +55,10 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         cancelActiveCommand()
         self.onStateChange = onStateChange
         pendingStart = nil
+        // The check begins with the request, not with the first command: a start deferred
+        // behind cleanup would otherwise still read "checked when Remote Access turns on"
+        // while Remote Access is on.
+        readiness = .checking
 
         // `serve ... off` and a new `serve --bg` must not race: a rapid off/on could otherwise
         // let the older cleanup arrive last and erase the handler that was just installed.
@@ -47,7 +72,7 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
 
     private func beginStart(port: UInt16) {
 
-        guard let executable = Self.executableURL() else {
+        guard let executable = locateExecutable() else {
             ThreadingLogger.remote.notice("Tailscale transport is unavailable because the CLI is not installed")
             finishUnavailable(.notInstalled)
             return
@@ -107,7 +132,8 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
                         self.readiness = .ready(origin)
                         self.finish(.connected(origin))
                     } else {
-                        self.finishUnavailable(Self.serveFailureIssue(from: serveData))
+                        let failure = Self.serveFailureIssue(from: serveData)
+                        self.finishUnavailable(failure.issue, actionURL: failure.actionURL)
                     }
                 }
             }
@@ -115,7 +141,7 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
     }
 
     func stop() {
-        let executable = Self.executableURL()
+        let executable = locateExecutable()
         cancelCommands()
         onStateChange = nil
         state = .stopped
@@ -321,8 +347,8 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         setState(state)
     }
 
-    private func finishUnavailable(_ issue: TailscaleReadinessIssue) {
-        readiness = .actionRequired(issue)
+    private func finishUnavailable(_ issue: TailscaleReadinessIssue, actionURL: URL? = nil) {
+        readiness = .actionRequired(issue, actionURL: actionURL)
         finish(.unavailable(issue.message))
     }
 
@@ -450,17 +476,47 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         return .statusUnavailable
     }
 
+    /// When the tailnet has not approved Serve (or HTTPS certificates), the CLI does not fail:
+    /// it prints an approval URL and polls until an admin visits it, so this output usually
+    /// arrives through the command deadline killing the poll. The URL check must come first —
+    /// every approval URL contains the substring "https", so the certificate wording check
+    /// would otherwise swallow it and discard the one actionable thing in the output.
     nonisolated static func serveFailureIssue(
         from data: Data
-    ) -> TailscaleReadinessIssue {
-        let output = String(decoding: data, as: UTF8.self).lowercased()
-        if output.contains("https") || output.contains("certificate") {
-            return .httpsRequired
+    ) -> (issue: TailscaleReadinessIssue, actionURL: URL?) {
+        let output = String(decoding: data, as: UTF8.self)
+        let lowered = output.lowercased()
+        if let url = approvalURL(in: output) {
+            let issue: TailscaleReadinessIssue = url.path.lowercased().contains("https")
+                ? .httpsRequired
+                : .serveNotEnabled
+            return (issue, url)
         }
-        if output.contains("permission") || output.contains("access denied") {
-            return .permissionDenied
+        if lowered.contains("not enabled on your tailnet") {
+            return (.serveNotEnabled, nil)
         }
-        return .serveFailed
+        if lowered.contains("https") || lowered.contains("certificate") {
+            return (.httpsRequired, nil)
+        }
+        if lowered.contains("permission") || lowered.contains("access denied") {
+            return (.permissionDenied, nil)
+        }
+        return (.serveFailed, nil)
+    }
+
+    /// The admin-console approval page the CLI asks the user to visit, e.g.
+    /// `https://login.tailscale.com/f/serve?node=…`. Only that host is ever offered to open,
+    /// so arbitrary text in command output cannot steer the user's browser anywhere else.
+    nonisolated static func approvalURL(in output: String) -> URL? {
+        guard let range = output.range(
+            of: #"https://login\.tailscale\.com/\S+"#,
+            options: .regularExpression
+        ) else { return nil }
+        var candidate = String(output[range])
+        while let last = candidate.last, ".,;:)]".contains(last) {
+            candidate.removeLast()
+        }
+        return URL(string: candidate)
     }
 }
 

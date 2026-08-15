@@ -135,6 +135,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             self?.refreshHostedPairingLink()
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         }
+        // Readiness steps advance while `tailscaleStatus` sits on `.starting`, so without this
+        // the settings page's readiness card renders whichever step was current at the last
+        // state change and freezes there until the transport connects or fails.
+        tailscale.onReadinessChange = {
+            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+        }
         restoreGuestShares()
     }
 
@@ -1415,7 +1421,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
                 .reason: Self.diagnosticReason(reason),
             ]
             if kind == .tailscale,
-               case .actionRequired(let issue) = tailscale.readiness {
+               case .actionRequired(let issue, _) = tailscale.readiness {
                 fields[.code] = issue.rawValue
             }
             MacRemoteDiagnostics.record(

@@ -2006,7 +2006,9 @@ Sharing uses Tailscale for owner pairing and starts the relay when you create a 
 **Owner Relay Fallback** separately lets your own devices use that relay if Tailscale is
 unreachable; **Keep Sharing Relay Ready** starts it immediately. Both are off by default. The
 Tailscale readiness card tells you whether installation, sign-in/running, or private HTTPS Serve
-needs attention. **Open in Browser** tests the
+needs attention. If your tailnet has not approved Tailscale Serve (or HTTPS certificates) yet,
+the card's endpoint row offers an **Enable Tailscale Serve…** / **Enable HTTPS…** button that
+opens the tailnet's approval page; approve there, then **Retry Connection**. **Open in Browser** tests the
 client on the Mac, and the page shows an owner-device QR code for the native app. Pairing is for
 your own
 trusted devices: a paired owner can see your unarchived chats, manage them, and approve bounded

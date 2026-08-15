@@ -3564,6 +3564,15 @@
     "Enable Tailscale HTTPS for this tailnet, then retry.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivera Tailscale HTTPS för detta tailnet och försök sedan igen." } } }
     },
+    "Enable HTTPS…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivera HTTPS…" } } }
+    },
+    "Enable Tailscale Serve for this tailnet, then retry.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivera Tailscale Serve för detta tailnet och försök sedan igen." } } }
+    },
+    "Enable Tailscale Serve…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivera Tailscale Serve…" } } }
+    },
     "Grants a grace to cross the gap, and holds while the pointer rests here.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ger en frist att korsa glappet och håller kvar medan pekaren vilar här." } } }
     },
@@ -3807,6 +3816,11 @@
     "The QR code appears here as soon as the selected connection is ready.": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "QR-koden visas här så snart den valda anslutningen är redo." } }
+      }
+    },
+    "The local mirror is ready on 127.0.0.1:%@. Waiting for %@…": {
+      "localizations": {
+        "sv": { "stringUnit": { "state": "translated", "value": "Den lokala speglingen är redo på 127.0.0.1:%1$@. Väntar på %2$@…" } }
       }
     },
     "The local mirror is ready on 127.0.0.1:%lld. Waiting for %@…": {

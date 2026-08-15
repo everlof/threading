@@ -25,17 +25,26 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private let pairedDevicesStack = NSStackView()
 
     private let statusGlyph = NSTextField(labelWithString: "●")
+    private let statusSpinner = ThemedSpinner()
     private let statusTitle = NSTextField(labelWithString: "")
     private let statusDetail = NSTextField(wrappingLabelWithString: "")
 
     private let pairingSymbol = NSImageView()
     private let pairingTitle = NSTextField(labelWithString: "")
+    private let pairingSpinner = ThemedSpinner()
     private let pairingDetail = NSTextField(wrappingLabelWithString: "")
     private let pairingCode = NSImageView()
     private let pairingInstruction = NSTextField(wrappingLabelWithString: "")
+    private let hostedSpinner = ThemedSpinner()
     private var tailscaleStepGlyphs: [NSTextField] = []
+    private var tailscaleStepSpinners: [ThemedSpinner] = []
     private var tailscaleStepDetails: [NSTextField] = []
+    private var tailscaleStepActions: [ThemedButton] = []
     private var tailscaleReadinessSection: NSView?
+    /// The tailnet approval page behind the readiness card's action button, held here because
+    /// the button's target-action carries no payload. Cleared on every readiness update so a
+    /// stale URL can never outlive the issue that offered it.
+    private var tailscaleActionURL: URL?
 
     private var copiedReset: DispatchWorkItem?
     private var pairedDeviceIDs: [String] = []
@@ -112,9 +121,11 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         )
         hostedStatusLabel.applyFont(.subheading)
         hostedStatusLabel.textColor = Design.Text.secondary
+        hostedSpinner.setAccessibilityLabel(L10n.string("Connecting…"))
         hostedAccountControls.orientation = .horizontal
         hostedAccountControls.alignment = .centerY
         hostedAccountControls.spacing = Design.Spacing.small
+        hostedAccountControls.addArrangedSubview(hostedSpinner)
         hostedAccountControls.addArrangedSubview(hostedStatusLabel)
         hostedAccountControls.addArrangedSubview(hostedSignInButton)
         hostedAccountControls.addArrangedSubview(hostedSignOutButton)
@@ -272,6 +283,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             let glyph = NSTextField(labelWithString: "–")
             glyph.applyFont(.body)
             glyph.setContentHuggingPriority(.required, for: .horizontal)
+            let spinner = ThemedSpinner()
 
             let titleLabel = NSTextField(labelWithString: title)
             titleLabel.applyFont(.body)
@@ -284,10 +296,23 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             labels.orientation = .vertical
             labels.alignment = .leading
             labels.spacing = Design.Spacing.hairline
-            let row = NSStackView(views: [glyph, labels])
+            let action = ThemedButton(
+                title: "",
+                target: self,
+                action: #selector(openTailscaleAction)
+            )
+            action.isHidden = true
+            action.setContentHuggingPriority(.required, for: .horizontal)
+            action.setContentCompressionResistancePriority(.required, for: .horizontal)
+            let row = NSStackView(views: [markSlot(glyph: glyph, spinner: spinner), labels, action])
             row.orientation = .horizontal
             row.alignment = .centerY
             row.spacing = Design.Spacing.medium
+            // `.fill` plus the low-hugging label column pushes the action button to the
+            // trailing edge; without it the gravity-area default parks the button beside
+            // whichever detail sentence is shortest.
+            row.distribution = .fill
+            labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
             row.edgeInsets = NSEdgeInsets(
                 top: Design.Spacing.medium,
                 left: Design.Spacing.inset,
@@ -296,9 +321,35 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             )
             rows.append(row)
             tailscaleStepGlyphs.append(glyph)
+            tailscaleStepSpinners.append(spinner)
             tailscaleStepDetails.append(detail)
+            tailscaleStepActions.append(action)
         }
         return SettingsCard(rows: rows)
+    }
+
+    /// One fixed-width slot holding a step's glyph and its in-flight spinner, so swapping the
+    /// mark never shifts the text beside it — `SessionStatusIndicator`'s reserved-slot rule.
+    /// The spinner hides itself while it is not animating; the glyph is hidden by the state
+    /// that animates the spinner.
+    private func markSlot(glyph: NSTextField, spinner: ThemedSpinner) -> NSView {
+        let slot = NSView()
+        slot.translatesAutoresizingMaskIntoConstraints = false
+        glyph.translatesAutoresizingMaskIntoConstraints = false
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        slot.addSubview(glyph)
+        slot.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            slot.widthAnchor.constraint(
+                equalToConstant: spinner.intrinsicContentSize.width
+            ),
+            glyph.topAnchor.constraint(equalTo: slot.topAnchor),
+            glyph.bottomAnchor.constraint(equalTo: slot.bottomAnchor),
+            glyph.centerXAnchor.constraint(equalTo: slot.centerXAnchor),
+            spinner.centerXAnchor.constraint(equalTo: slot.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: slot.centerYAnchor)
+        ])
+        return slot
     }
 
     private func connectionStatusRow() -> NSView {
@@ -308,7 +359,11 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         labels.spacing = Design.Spacing.hairline
         labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let row = NSStackView(views: [statusGlyph, labels, openLocallyButton])
+        let row = NSStackView(views: [
+            markSlot(glyph: statusGlyph, spinner: statusSpinner),
+            labels,
+            openLocallyButton
+        ])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = Design.Spacing.medium
@@ -318,7 +373,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private func pairingCard() -> SettingsCard {
         pairingSymbol.image = symbol("iphone")
 
-        let heading = NSStackView(views: [pairingSymbol, pairingTitle])
+        let heading = NSStackView(views: [pairingSymbol, pairingTitle, pairingSpinner])
         heading.orientation = .horizontal
         heading.alignment = .centerY
         heading.spacing = Design.Spacing.small
@@ -437,14 +492,16 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             updateConnection(
                 title: L10n.string("Starting"),
                 detail: L10n.string("Preparing the private listener on this Mac…"),
-                color: Design.Status.warning
+                color: Design.Status.warning,
+                busy: true
             )
             updatePairing(
                 title: L10n.string("Preparing your connection"),
                 detail: L10n.string("This usually takes only a few seconds."),
                 action: L10n.string("Starting…"),
                 actionEnabled: false,
-                prominent: false
+                prominent: false,
+                busy: true
             )
 
         case .listening(let port):
@@ -470,6 +527,11 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     }
 
     private func updateHostedAccount(_ coordinator: RemoteAccessCoordinator) {
+        // A running account task is the sign-in/out exchange; `.connecting` is the service
+        // itself coming up. Both are work in progress the row would otherwise state as text
+        // beside controls that merely went quiet.
+        hostedSpinner.isAnimating = hostedAccountTask != nil
+            || coordinator.hostedServiceState == .connecting
         hostedSignInButton.isHidden = true
         hostedSignOutButton.isHidden = true
         hostedDeleteAccountButton.isHidden = true
@@ -658,12 +720,15 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         case .stopped, .starting:
             updateConnection(
                 title: L10n.string("Connecting securely"),
+                // The port is an address, not a quantity: formatted through the locale it
+                // grew a grouping separator ("127.0.0.1:53,651"), so it crosses as a string.
                 detail: L10n.format(
-                    "The local mirror is ready on 127.0.0.1:%lld. Waiting for %@…",
-                    Int64(localPort),
+                    "The local mirror is ready on 127.0.0.1:%@. Waiting for %@…",
+                    String(localPort),
                     mode == .relay ? L10n.string("the relay") : L10n.string("Tailscale")
                 ),
-                color: Design.Status.warning
+                color: Design.Status.warning,
+                busy: true
             )
 
         case .unavailable(let reason):
@@ -725,27 +790,56 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 ),
                 action: L10n.string("Connecting…"),
                 actionEnabled: false,
-                prominent: false
+                prominent: false,
+                busy: true
             )
         }
     }
 
-    private func updateConnection(title: String, detail: String, color: NSColor) {
+    private func updateConnection(
+        title: String,
+        detail: String,
+        color: NSColor,
+        busy: Bool = false
+    ) {
         statusTitle.stringValue = title
         statusDetail.stringValue = detail
         statusGlyph.textColor = color
+        statusGlyph.isHidden = busy
+        statusSpinner.setAccessibilityLabel(title)
+        statusSpinner.isAnimating = busy
     }
 
     private func updateTailscaleReadiness(_ readiness: TailscaleReadiness) {
-        guard tailscaleStepGlyphs.count == 3, tailscaleStepDetails.count == 3 else { return }
+        guard tailscaleStepGlyphs.count == 3,
+              tailscaleStepSpinners.count == 3,
+              tailscaleStepDetails.count == 3,
+              tailscaleStepActions.count == 3 else { return }
+
+        tailscaleActionURL = nil
+        tailscaleStepActions.forEach { $0.isHidden = true }
 
         func setStep(_ index: Int, glyph: String, color: NSColor, detail: String) {
             tailscaleStepGlyphs[index].stringValue = glyph
             tailscaleStepGlyphs[index].textColor = color
+            tailscaleStepGlyphs[index].isHidden = false
+            tailscaleStepSpinners[index].isAnimating = false
             tailscaleStepDetails[index].stringValue = detail
+        }
+        func offerAction(_ index: Int, title: String, url: URL) {
+            tailscaleActionURL = url
+            tailscaleStepActions[index].title = title
+            tailscaleStepActions[index].setAccessibilityLabel(title)
+            tailscaleStepActions[index].isHidden = false
         }
         func pending(_ index: Int, _ detail: String) {
             setStep(index, glyph: "–", color: Design.Text.tertiary, detail: detail)
+        }
+        func working(_ index: Int, _ detail: String) {
+            tailscaleStepGlyphs[index].isHidden = true
+            tailscaleStepSpinners[index].setAccessibilityLabel(detail)
+            tailscaleStepSpinners[index].isAnimating = true
+            tailscaleStepDetails[index].stringValue = detail
         }
         func ready(_ index: Int, _ detail: String) {
             setStep(index, glyph: "✓", color: Design.Status.positive, detail: detail)
@@ -760,13 +854,15 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             pending(1, L10n.string("Waiting for the installation check."))
             pending(2, L10n.string("Waiting for Tailscale."))
         case .checking:
-            pending(0, L10n.string("Looking for Tailscale…"))
-            pending(1, L10n.string("Checking your tailnet status…"))
+            // One `tailscale status` answers both installation and the tailnet, so the two
+            // steps are genuinely in flight together.
+            working(0, L10n.string("Looking for Tailscale…"))
+            working(1, L10n.string("Checking your tailnet status…"))
             pending(2, L10n.string("Waiting for Tailscale."))
         case .publishing:
             ready(0, L10n.string("Tailscale is installed."))
             ready(1, L10n.string("This Mac is connected to your tailnet."))
-            pending(2, L10n.string("Publishing Threading privately…"))
+            working(2, L10n.string("Publishing Threading privately…"))
         case .ready(let origin):
             ready(0, L10n.string("Tailscale is installed."))
             ready(1, L10n.string("This Mac is connected to your tailnet."))
@@ -776,7 +872,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 color: Design.Status.positive,
                 detail: L10n.format("Ready at %@.", origin.host ?? origin.absoluteString)
             )
-        case .actionRequired(let issue):
+        case .actionRequired(let issue, let actionURL):
             switch issue {
             case .notInstalled:
                 attention(0, L10n.string("Install Tailscale on this Mac, then retry."))
@@ -794,10 +890,20 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 ready(0, L10n.string("Tailscale is installed."))
                 attention(1, L10n.string("Threading could not read Tailscale’s status."))
                 pending(2, L10n.string("Waiting for Tailscale."))
+            case .serveNotEnabled:
+                ready(0, L10n.string("Tailscale is installed."))
+                ready(1, L10n.string("This Mac is connected to your tailnet."))
+                attention(2, L10n.string("Enable Tailscale Serve for this tailnet, then retry."))
+                if let actionURL {
+                    offerAction(2, title: L10n.string("Enable Tailscale Serve…"), url: actionURL)
+                }
             case .httpsRequired:
                 ready(0, L10n.string("Tailscale is installed."))
                 ready(1, L10n.string("This Mac is connected to your tailnet."))
                 attention(2, L10n.string("Enable Tailscale HTTPS for this tailnet, then retry."))
+                if let actionURL {
+                    offerAction(2, title: L10n.string("Enable HTTPS…"), url: actionURL)
+                }
             case .permissionDenied:
                 ready(0, L10n.string("Tailscale is installed."))
                 ready(1, L10n.string("This Mac is connected to your tailnet."))
@@ -898,9 +1004,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         action: String,
         actionEnabled: Bool,
         prominent: Bool,
+        busy: Bool = false,
         pairingPayload: String? = nil
     ) {
         pairingTitle.stringValue = title
+        pairingSpinner.setAccessibilityLabel(title)
+        pairingSpinner.isAnimating = busy
         pairingDetail.stringValue = detail
         pairingActionButton.title = action
         pairingActionButton.isEnabled = actionEnabled
@@ -941,6 +1050,11 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     @objc private func openLocally() {
         guard let url = RemoteAccessCoordinator.shared.localURL else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    @objc private func openTailscaleAction() {
+        guard let tailscaleActionURL else { return }
+        NSWorkspace.shared.open(tailscaleActionURL)
     }
 
     @objc private func pairingAction() {
