@@ -57,20 +57,6 @@ enum BrowserMediaType: String {
     }
 }
 
-/// Chooses whether a live browser participates in Threading's signed-in browser state.
-///
-/// A private context owns one non-persistent WebKit data store. It is deliberately per tab rather
-/// than shared between all private tabs, so "private" also means isolated from another agent test.
-enum BrowserContextKind: String {
-    case shared
-    case `private`
-}
-
-struct BrowserSiteDataClearReport: Equatable {
-    let recordsRemoved: Int?
-    let context: BrowserContextKind
-}
-
 /// Identifies the exact live document an agent has been authorized to inspect or mutate.
 ///
 /// URL alone is insufficient: a same-URL reload replaces the document, while the active WKWebView

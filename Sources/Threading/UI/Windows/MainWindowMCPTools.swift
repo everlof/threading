@@ -153,6 +153,7 @@ struct AgentToolDependencies {
   let archiveScheduler: SessionArchiveScheduler
   let sessionCommands: AgentSessionCommandService
   let extensionAuthoring: ExtensionAuthoringCommandService
+  let browserStorage: BrowserStorageCommandService
   /// The typed session control plane — scope and refusal rules for every cross-session
   /// operation, whoever the caller is. Handlers own wording only.
   let control: WorkspaceControlPlane
@@ -185,6 +186,7 @@ struct AgentToolDependencies {
         )
       }
     ),
+    browserStorage: BrowserStorageCommandService(),
     control: .live,
     baselines: .shared
   )

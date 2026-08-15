@@ -35,6 +35,7 @@ browser_controller="${repository_directory}/Sources/Threading/UI/Views/BrowserVi
 browser_download_coordinator="${repository_directory}/Sources/Threading/Application/Browser/BrowserDownloadCoordinator.swift"
 browser_navigation_coordinator="${repository_directory}/Sources/Threading/Application/Browser/BrowserNavigationCoordinator.swift"
 browser_agent_navigation_policy="${repository_directory}/Sources/Threading/Application/Browser/BrowserAgentNavigationPolicy.swift"
+browser_storage_command_service="${repository_directory}/Sources/Threading/Application/Browser/BrowserStorageCommandService.swift"
 agent_session_command_adapter="${repository_directory}/Sources/Threading/UI/Windows/AgentToolCoordinator+SessionCommands.swift"
 agent_session_command_service="${repository_directory}/Sources/Threading/Application/Sessions/AgentSessionCommandService.swift"
 project_model="${repository_directory}/Sources/Threading/Models/Project.swift"
@@ -160,6 +161,19 @@ fi
 
 if rg -n '^import (AppKit|WebKit)\b' "${browser_agent_navigation_policy}"; then
   echo "architecture-boundary: BrowserAgentNavigationPolicy must remain Foundation-only" >&2
+  failed=1
+fi
+
+if rg -n \
+  'action must be clear_site_data|page or tab changed before site data|recordsRemoved' \
+  "${repository_directory}/Sources/Threading/UI/Windows/AgentToolCoordinator+BrowserCommands.swift"; then
+  echo "architecture-boundary: browser storage command behavior belongs to" >&2
+  echo "  BrowserStorageCommandService; the coordinator is a UI/WebKit adapter" >&2
+  failed=1
+fi
+
+if rg -n '^import (AppKit|WebKit)\b' "${browser_storage_command_service}"; then
+  echo "architecture-boundary: BrowserStorageCommandService must remain Foundation-only" >&2
   failed=1
 fi
 

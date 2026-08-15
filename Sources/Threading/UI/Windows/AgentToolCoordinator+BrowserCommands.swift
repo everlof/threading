@@ -264,83 +264,50 @@ extension AgentToolCoordinator {
         for sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
-        guard arguments.action?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased() == "clear_site_data" else {
-            completion(.failure("action must be clear_site_data."))
-            return
-        }
-        guard let lease = currentBrowserPageLease(for: sessionID),
-              let url = URL(string: lease.page.url),
-              let origin = BrowserOrigin(url: url),
-              !origin.host.isEmpty else {
-            completion(.failure(
-                "Open an http or https page before clearing browser site data."
-            ))
-            return
-        }
-
-        authorizeBrowserAccess(
-            to: url,
-            for: sessionID,
-            purpose: "clear cookies and other stored site data for"
-        ) { [weak self] allowed in
-            guard let self else { return }
-            guard allowed else {
-                completion(.failure(
-                    "The user did not allow browser access to \(origin.displayName)."
-                ))
-                return
-            }
-            guard self.browserPageLeaseIsCurrent(lease, for: sessionID) else {
-                completion(.failure(
-                    "The shared browser page changed while access was being decided; retry "
-                        + "against the site now on screen."
-                ))
-                return
-            }
-
-            self.confirmBrowserSiteDataClear(
-                origin: origin,
-                context: lease.browser.contextKind,
-                for: sessionID
-            ) { [weak self] confirmed in
-                guard let self else { return }
-                guard confirmed else {
-                    completion(.failure("The user cancelled clearing browser site data."))
-                    return
-                }
-                guard self.browserPageLeaseIsCurrent(lease, for: sessionID) else {
-                    completion(.failure(
-                        "The browser page or tab changed before site data could be cleared; "
-                            + "nothing was removed."
-                    ))
-                    return
-                }
-
-                lease.browser.clearSiteData(for: origin) { report in
-                    let detail: String
-                    if report.context == .private {
-                        detail = """
-                            Cleared the active tab's unique private WebKit data store.
-                            """
-                    } else if let count = report.recordsRemoved, count > 0 {
-                        detail = """
-                            Cleared \(count) WebKit website data \
-                            \(count == 1 ? "record" : "records") for \(origin.displayName).
-                            """
-                    } else {
-                        detail = """
-                            WebKit reported no stored website data records for \
-                            \(origin.displayName); nothing needed removal.
-                            """
+        dependencies.browserStorage.execute(
+            action: arguments.action,
+            context: { [weak self] in
+                guard let self,
+                      let lease = self.currentBrowserPageLease(for: sessionID),
+                      let url = URL(string: lease.page.url),
+                      let origin = BrowserOrigin(url: url),
+                      !origin.host.isEmpty else { return nil }
+                return BrowserStorageCommandContext(
+                    origin: origin,
+                    authorize: { [weak self] decide in
+                        guard let self else {
+                            decide(false)
+                            return
+                        }
+                        self.authorizeBrowserAccess(
+                            to: url,
+                            for: sessionID,
+                            purpose: "clear cookies and other stored site data for",
+                            completion: decide
+                        )
+                    },
+                    confirmClear: { [weak self] decide in
+                        guard let self else {
+                            decide(false)
+                            return
+                        }
+                        self.confirmBrowserSiteDataClear(
+                            origin: origin,
+                            context: lease.browser.contextKind,
+                            for: sessionID,
+                            completion: decide
+                        )
+                    },
+                    isCurrent: { [weak self] in
+                        self?.browserPageLeaseIsCurrent(lease, for: sessionID) == true
+                    },
+                    clearSiteData: { report in
+                        lease.browser.clearSiteData(for: origin, completion: report)
                     }
-                    completion(.success(
-                        detail + "\nThe current document stayed loaded. Reload it explicitly "
-                            + "to fetch server-side signed-out state."
-                    ))
-                }
+                )
             }
+        ) { result in
+            completion(result.succeeded ? .success(result.message) : .failure(result.message))
         }
     }
 

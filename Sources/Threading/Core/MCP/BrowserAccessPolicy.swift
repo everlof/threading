@@ -1,5 +1,14 @@
 import Foundation
 
+/// Chooses whether a live browser participates in Threading's signed-in browser state.
+///
+/// A private context owns one non-persistent WebKit data store. It is deliberately per tab rather
+/// than shared between all private tabs, so "private" also means isolated from another agent test.
+enum BrowserContextKind: String {
+    case shared
+    case `private`
+}
+
 enum BrowserGrantPromptDefaults {
     /// Long enough for an ordinary page URL, short enough that a padded one cannot push an
     /// alert's buttons off a small screen.
