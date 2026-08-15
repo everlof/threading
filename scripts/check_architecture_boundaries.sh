@@ -161,6 +161,17 @@ if rg -n '\.(color|resolved)\(\s*\.selection\b' \
   failed=1
 fi
 
+# Typed events belong beside the subsystem that owns their payload and behavior. Keeping the
+# declarations in TerminalConstants.swift made every event change touch a shared grab bag and
+# let AppKit-only lifetime helpers leak into Core. The generic event transport lives in
+# Core/Events; UI lifetime helpers live in UI/Design.
+terminal_constants="${repository_directory}/Sources/Threading/Core/Constants/TerminalConstants.swift"
+if rg -n '\b(AppEvent|LocalEventMonitor|MainRunLoopTimer)\b' "${terminal_constants}"; then
+  echo "architecture-boundary: typed events and UI lifetime helpers do not belong in" >&2
+  echo "  Core/Constants/TerminalConstants.swift — place them beside their owning subsystem" >&2
+  failed=1
+fi
+
 if (( failed )); then
   exit 1
 fi
