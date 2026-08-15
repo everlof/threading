@@ -11,7 +11,7 @@ final class AgentRuntime {
     // MARK: - Singleton
 
     static let shared = AgentRuntime()
-    private init() {}
+    init() {}
 
     // MARK: - Properties
 

@@ -704,6 +704,43 @@ final class SideChatTests: XCTestCase {
 @MainActor
 final class SessionCoordinatorTests: XCTestCase {
 
+    func testRetainsTheApplicationServicesInjectedAtItsOwnershipBoundary() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SessionCoordinatorTests.\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+
+        let suite = "SessionCoordinatorTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+
+        let projectStore = ProjectStore(
+            stateManager: StateManager(appSupportDirectory: directory)
+        )
+        let agentRuntime = AgentRuntime()
+        let settings = AppSettings(defaults: defaults)
+        let eventLog = EventLog(directory: directory.appendingPathComponent("Logs"))
+        let environment = AppEnvironment(
+            projectStore: projectStore,
+            agentRuntime: agentRuntime,
+            settings: settings,
+            eventLog: eventLog
+        )
+        let sidebar = ProjectSidebarViewController(projectStore: projectStore)
+        let coordinator = SessionCoordinator(
+            sidebar: sidebar,
+            container: TerminalContainerViewController(recovery: false),
+            environment: environment,
+            onPresentationChanged: {}
+        )
+
+        XCTAssertTrue(coordinator.environment.projectStore === projectStore)
+        XCTAssertTrue(coordinator.environment.agentRuntime === agentRuntime)
+        XCTAssertTrue(coordinator.environment.settings === settings)
+        XCTAssertTrue(coordinator.environment.eventLog === eventLog)
+        XCTAssertTrue(coordinator.sidebar.projectStore === projectStore)
+    }
+
     func testReusableOpeningMessageFollowsThePerChatTask() {
         XCTAssertEqual(
             NewChatOpeningMessage.compose(

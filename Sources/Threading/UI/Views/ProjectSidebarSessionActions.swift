@@ -696,7 +696,7 @@ extension ProjectSidebarViewController {
         // Absent rather than disabled when the agent is mid-turn or has no naming tool: a
         // greyed row here would be one more thing to read in a menu that already reads long,
         // and the reason it is unavailable is not something a disabled item could say.
-        if SessionCoordinator.canAskAgentToRename(sessionID) {
+        if canAskAgentToRename(sessionID) {
             entries.append(action(L10n.string("Rename with Agent"), symbol: "sparkles") {
                 [weak self] in
                 self?.askAgentToRenameClicked()
@@ -1000,7 +1000,7 @@ extension ProjectSidebarViewController {
         // to the session it was forked from. Absent rather than disabled when it cannot —
         // not a side chat, parent archived, agent mid-turn or dormant, workspace tools off —
         // for the same reason Rename with Agent is: none of those reasons fits a greyed row.
-        if SessionCoordinator.canAskForReportBack(session.id) {
+        if canAskForReportBack(session.id) {
             entries.append(action(
                 L10n.string("Send Result to Parent"),
                 symbol: "arrowshape.turn.up.left"

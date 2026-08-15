@@ -129,6 +129,7 @@ final class ManagedWorkspaceLifecycleE2ETests: HostedStoreTestCase {
         let sessionCoordinator = SessionCoordinator(
             sidebar: sidebar,
             container: container,
+            environment: .live,
             onPresentationChanged: {}
         )
         let toolCoordinator = AgentToolCoordinator(

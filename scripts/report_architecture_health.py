@@ -105,6 +105,18 @@ def render(root: Path) -> str:
         source_files,
         re.compile(r"\bProjectStore\.shared\b"),
     )
+    agent_runtime_count, agent_runtime_files = matching_files(
+        source_files,
+        re.compile(r"\bAgentRuntime\.shared\b"),
+    )
+    app_settings_count, app_settings_files = matching_files(
+        source_files,
+        re.compile(r"\bAppSettings\.shared\b"),
+    )
+    event_log_count, event_log_files = matching_files(
+        source_files,
+        re.compile(r"\bEventLog\.shared\b"),
+    )
     app_delegate_count, app_delegate_files = matching_files(
         core_files,
         re.compile(r"\bAppDelegate\.shared\b"),
@@ -127,6 +139,21 @@ def render(root: Path) -> str:
             "ProjectStore.shared references",
             project_store_count,
             f"across {project_store_files} files",
+        ),
+        (
+            "AgentRuntime.shared references",
+            agent_runtime_count,
+            f"across {agent_runtime_files} files",
+        ),
+        (
+            "AppSettings.shared references",
+            app_settings_count,
+            f"across {app_settings_files} files",
+        ),
+        (
+            "EventLog.shared references",
+            event_log_count,
+            f"across {event_log_files} files",
         ),
         (
             "Core AppDelegate.shared references",

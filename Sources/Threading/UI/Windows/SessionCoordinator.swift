@@ -13,6 +13,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// reached for its own sidebar would be a second answer to "where does a session appear".
     let sidebar: ProjectSidebarViewController
     let container: TerminalContainerViewController
+    let environment: AppEnvironment
     private let onPresentationChanged: () -> Void
 
     /// Consumed by the next selected session exactly once.
@@ -29,10 +30,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     init(
         sidebar: ProjectSidebarViewController,
         container: TerminalContainerViewController,
+        environment: AppEnvironment,
         onPresentationChanged: @escaping () -> Void
     ) {
         self.sidebar = sidebar
         self.container = container
+        self.environment = environment
         self.onPresentationChanged = onPresentationChanged
 
         // An agent asked to be done with its session, and its turn has now ended. It arrives as
@@ -75,9 +78,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     func newSession() {
         let projectID: ProjectID?
         if let sessionID = container.currentSessionID {
-            projectID = ProjectStore.shared.project(forSessionID: sessionID)?.id
+            projectID = environment.projectStore.project(forSessionID: sessionID)?.id
         } else {
-            projectID = ProjectStore.shared.projects.first?.id
+            projectID = environment.projectStore.projects.first?.id
         }
 
         guard let projectID else {
@@ -102,7 +105,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     }
 
     private func adoptProject(at url: URL) {
-        guard let project = ProjectStore.shared.addProject(folderURL: url) else { return }
+        guard let project = environment.projectStore.addProject(folderURL: url) else { return }
         sidebar.reload()
         sidebar.select(projectID: project.id)
     }
@@ -145,9 +148,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         // A person filing an unfinished managed session is not the finish handshake. Preserve
         // its checkout explicitly; only the agent's post-turn archive route validates, merges
         // and removes it.
-        if let workspace = ProjectStore.shared.session(withID: sessionID)?.managedWorkspace,
+        if let workspace = environment.projectStore.session(withID: sessionID)?.managedWorkspace,
            workspace.state == .active {
-            ProjectStore.shared.update(sessionID: sessionID) {
+            environment.projectStore.update(sessionID: sessionID) {
                 $0.managedWorkspace = ManagedGitWorkspace.keepForReview(workspace)
             }
         }
@@ -168,7 +171,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// Arriving here at all means the request already waited for the turn to end
     /// (`SessionArchiveScheduler`); this is only the archive.
     func archiveAtAgentRequest(_ sessionID: SessionID, reason: String?) {
-        if let workspace = ProjectStore.shared.session(withID: sessionID)?.managedWorkspace {
+        if let workspace = environment.projectStore.session(withID: sessionID)?.managedWorkspace {
             if workspace.publication != nil {
                 publishManagedWorkspaceAndArchive(
                     workspace,
@@ -179,14 +182,14 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             }
             switch ManagedGitWorkspace.finishLocalDelivery(workspace) {
             case .completed(let completed):
-                ProjectStore.shared.update(sessionID: sessionID) {
+                environment.projectStore.update(sessionID: sessionID) {
                     $0.managedWorkspace = completed
                 }
 
             case .needsAttention(let failed):
                 let message = failed.lastError
                     ?? L10n.string("Managed workspace needs attention")
-                ProjectStore.shared.update(sessionID: sessionID) {
+                environment.projectStore.update(sessionID: sessionID) {
                     $0.managedWorkspace = failed
                 }
                 sidebar.presentToast(ToastRequest(
@@ -194,7 +197,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                     detail: message,
                     identifier: "sidebar.toast.managed-workspace.failed"
                 ))
-                EventLog.shared.record(.session, "Managed workspace integration refused", [
+                environment.eventLog.record(.session, "Managed workspace integration refused", [
                     "session": sessionID.uuidString,
                     "reason": message
                 ])
@@ -220,7 +223,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 // The band is on screen for fourteen seconds and then the row is simply gone. A
                 // session filed away by something other than a click is exactly the change the
                 // durable journal exists to answer for afterwards.
-                EventLog.shared.record(.session, "Session archived by its agent", [
+                self.environment.eventLog.record(.session, "Session archived by its agent", [
                     "session": sessionID.uuidString,
                     "reason": reason ?? "none"
                 ])
@@ -247,7 +250,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             defer { self.managedWorkspacePublications.remove(sessionID) }
             do {
                 let result = try await publisher.publish(workspace)
-                guard let session = ProjectStore.shared.session(withID: sessionID),
+                guard let session = environment.projectStore.session(withID: sessionID),
                       var recorded = session.managedWorkspace,
                       recorded.worktreeRoot == workspace.worktreeRoot else { return }
 
@@ -255,7 +258,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 recorded.changeRequest = result.changeRequest
                 recorded.remoteBranchState = .awaitingReviewCompletion
                 recorded.lastError = nil
-                ProjectStore.shared.update(sessionID: sessionID) {
+                environment.projectStore.update(sessionID: sessionID) {
                     $0.managedWorkspace = recorded
                 }
 
@@ -276,7 +279,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 guard !session.isArchived, recorded.state != .kept else { return }
 
                 let completed = try ManagedGitWorkspace.cleanPublished(recorded)
-                ProjectStore.shared.update(sessionID: sessionID) {
+                environment.projectStore.update(sessionID: sessionID) {
                     $0.managedWorkspace = completed
                 }
                 self.finishAgentRequestedArchive(sessionID, reason: reason)
@@ -296,7 +299,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         event: String
     ) {
         var shouldPresent = false
-        ProjectStore.shared.update(sessionID: sessionID) {
+        environment.projectStore.update(sessionID: sessionID) {
             guard var failed = $0.managedWorkspace,
                   failed.state != .kept,
                   failed.state != .published else { return }
@@ -311,7 +314,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             detail: message,
             identifier: "sidebar.toast.managed-workspace.failed"
         ))
-        EventLog.shared.record(.session, event, [
+        environment.eventLog.record(.session, event, [
             "session": sessionID.uuidString,
             "reason": message
         ])
@@ -330,10 +333,10 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         onArchived: @escaping () -> Void = {},
         onArchiveFailed: @escaping () -> Void = {}
     ) -> Bool {
-        guard let session = ProjectStore.shared.session(withID: sessionID),
+        guard let session = environment.projectStore.session(withID: sessionID),
               !session.isArchived else { return false }
 
-        let wasRunning = AgentRuntime.shared.isRunning(sessionID: sessionID)
+        let wasRunning = environment.agentRuntime.isRunning(sessionID: sessionID)
         let wasShowing = sessionID == container.currentSessionID
 
         ProviderArchiveSync.shared.setArchived(true, for: sessionID) { [weak self] result in
@@ -360,16 +363,16 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// its final turn before repository state moves. If provider filing then refuses, put the
     /// removed cwd back so the still-visible session remains launchable.
     private func recoverManagedWorkspaceAfterArchiveFailure(_ sessionID: SessionID) {
-        guard let workspace = ProjectStore.shared.session(withID: sessionID)?.managedWorkspace
+        guard let workspace = environment.projectStore.session(withID: sessionID)?.managedWorkspace
         else { return }
         do {
             let active = try ManagedGitWorkspace.restore(workspace)
-            ProjectStore.shared.update(sessionID: sessionID) {
+            environment.projectStore.update(sessionID: sessionID) {
                 $0.managedWorkspace = active
             }
         } catch {
             let message = error.localizedDescription
-            ProjectStore.shared.update(sessionID: sessionID) {
+            environment.projectStore.update(sessionID: sessionID) {
                 guard var failed = $0.managedWorkspace else { return }
                 failed.state = .needsAttention
                 failed.lastError = message
@@ -395,7 +398,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// the session opens on its dormant placeholder with Resume on it; relaunching a process
     /// behind an undo would be a heavier thing than the click being taken back.
     private func restore(_ sessionID: SessionID, reselecting: Bool) {
-        let session = ProjectStore.shared.session(withID: sessionID)
+        let session = environment.projectStore.session(withID: sessionID)
 
         if let workspace = session?.managedWorkspace,
            workspace.state == .integrated
@@ -403,7 +406,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             || workspace.state == .kept {
             do {
                 let restored = try ManagedGitWorkspace.restore(workspace)
-                ProjectStore.shared.update(sessionID: sessionID) {
+                environment.projectStore.update(sessionID: sessionID) {
                     $0.managedWorkspace = restored
                 }
             } catch {
@@ -439,9 +442,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// Three conditions, and the third is the one that is easy to miss: with the session tool
     /// group switched off on the Tools page the agent has no `set_session_name` to call, so the
     /// request would spend a turn on an instruction it cannot carry out.
-    static func canAskAgentToRename(_ sessionID: SessionID) -> Bool {
-        AgentRuntime.shared.isRunning(sessionID: sessionID)
-            && !AgentRuntime.shared.activity(sessionID: sessionID).hasTurnInFlight
+    static func canAskAgentToRename(
+        _ sessionID: SessionID,
+        agentRuntime: AgentRuntime
+    ) -> Bool {
+        agentRuntime.isRunning(sessionID: sessionID)
+            && !agentRuntime.activity(sessionID: sessionID).hasTurnInFlight
             && MCPToolCatalog.isEnabled(MCPToolCatalog.session)
     }
 
@@ -457,14 +463,17 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// in whatever it has on screen — a permission prompt, a half-typed composer line — so the
     /// item is absent rather than disabled while a turn is in flight.
     func askAgentToRename(_ sessionID: SessionID) {
-        guard Self.canAskAgentToRename(sessionID) else { return }
+        guard Self.canAskAgentToRename(
+            sessionID,
+            agentRuntime: environment.agentRuntime
+        ) else { return }
 
         let prompt = L10n.string(SessionRenameRequest.promptKey)
 
         // Both caches can hold the same session — a surface switch leaves the old renderer
         // behind — so each candidate is asked whether it is the one still running rather than
         // native being assumed to win. Its stream applies the same validation the composer does.
-        if let conversation = AgentRuntime.shared.conversation(for: sessionID),
+        if let conversation = environment.agentRuntime.conversation(for: sessionID),
            conversation.isRunning {
             conversation.sendAppPrompt(prompt)
             return
@@ -475,13 +484,13 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         // arriving in the same chunk as the text, the return is part of what the CLI's paste
         // heuristic treats as pasted content, and Claude Code inserts it as a line break with
         // the request left sitting unsent in its composer. A beat later it is a keypress.
-        guard let controller = AgentRuntime.shared.controller(for: sessionID),
+        guard let controller = environment.agentRuntime.controller(for: sessionID),
               controller.isRunning else { return }
         controller.session.insertText(prompt)
         DispatchQueue.main.asyncAfter(
             deadline: .now() + SessionRenameRequest.submitDelay
-        ) {
-            guard let controller = AgentRuntime.shared.controller(for: sessionID),
+        ) { [weak self] in
+            guard let controller = self?.environment.agentRuntime.controller(for: sessionID),
                   controller.isRunning else { return }
             controller.session.insertText(SessionRenameRequest.submitKey)
         }
@@ -497,12 +506,16 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// has no `send_to_session` to call, and the request would spend a turn on an instruction
     /// it cannot carry out. Readiness is `SessionMessageDelivery`'s own answer, so the item
     /// cannot offer a send the delivery would then refuse (a booting terminal, most narrowly).
-    static func canAskForReportBack(_ sessionID: SessionID) -> Bool {
+    static func canAskForReportBack(
+        _ sessionID: SessionID,
+        projectStore: ProjectStore,
+        agentRuntime: AgentRuntime
+    ) -> Bool {
         SessionReportBackRequest.hasReportableParent(
-            of: ProjectStore.shared.session(withID: sessionID),
-            parent: { ProjectStore.shared.session(withID: $0) }
+            of: projectStore.session(withID: sessionID),
+            parent: { projectStore.session(withID: $0) }
         )
-            && !AgentRuntime.shared.activity(sessionID: sessionID).hasTurnInFlight
+            && !agentRuntime.activity(sessionID: sessionID).hasTurnInFlight
             && SessionMessageDelivery.isReadyForDelivery(sessionID)
             && MCPToolCatalog.isEnabled(MCPToolCatalog.workspace)
     }
@@ -521,8 +534,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// outcome discarded — left the user believing they had asked for something that was never
     /// asked. Success stays silent because the transcript shows it; only a failure needs words.
     func askAgentToReportBack(_ sessionID: SessionID) {
-        guard Self.canAskForReportBack(sessionID),
-              let session = ProjectStore.shared.session(withID: sessionID),
+        guard Self.canAskForReportBack(
+            sessionID,
+            projectStore: environment.projectStore,
+            agentRuntime: environment.agentRuntime
+        ),
+              let session = environment.projectStore.session(withID: sessionID),
               let parentID = session.forkedFrom
         else { return }
 
@@ -558,12 +575,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             return
         }
 
-        let result = ProjectStore.shared.setUsesNativeUI(usesNative, for: sessionID)
+        let result = environment.projectStore.setUsesNativeUI(usesNative, for: sessionID)
         guard result == .applied else { return }
 
         // The old process remains authoritative until the surface choice is durable. Stopping it
         // first turns a refused SQLite write into a dead session whose stored surface never moved.
-        AgentRuntime.shared.discard(sessionID: sessionID)
+        environment.agentRuntime.discard(sessionID: sessionID)
         container.reopenIfShowing(sessionID: sessionID)
         sidebar.reload()
         onPresentationChanged()
@@ -627,7 +644,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             case .success(let session):
                 self.pendingPrompt = NewChatOpeningMessage.compose(
                     prompt: ConversationContinuation.openingPrompt(for: session),
-                    reusableMessage: AppSettings.shared.newChatOpeningMessage
+                    reusableMessage: environment.settings.newChatOpeningMessage
                 )
                 self.sidebar.reload()
                 self.sidebar.select(sessionID: session.id)
@@ -651,12 +668,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         let title = prompt.flatMap(SessionNaming.promptTitle(from:))
         let opening = NewChatOpeningMessage.compose(
             prompt: prompt,
-            reusableMessage: AppSettings.shared.newChatOpeningMessage
+            reusableMessage: environment.settings.newChatOpeningMessage
         )
-        guard let session = ProjectStore.shared.addSideChat(of: sessionID, title: title)
+        guard let session = environment.projectStore.addSideChat(of: sessionID, title: title)
         else { return }
 
-        EventLog.shared.record(.composer, "Side chat forked", [
+        environment.eventLog.record(.composer, "Side chat forked", [
             "session": session.id.uuidString,
             "parent": sessionID.uuidString,
             "prompt": opening ?? ""
@@ -688,13 +705,13 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         let targetProjectID = Self.targetProjectID(
             startingAt: projectID,
             branch: branch,
-            checkout: ProjectStore.shared.checkout(onBranch:inRepositoryOf:)
+            checkout: environment.projectStore.checkout(onBranch:inRepositoryOf:)
         )
 
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         var opening = NewChatOpeningMessage.compose(
             prompt: task,
-            reusableMessage: AppSettings.shared.newChatOpeningMessage
+            reusableMessage: environment.settings.newChatOpeningMessage
         )
 
         let sessionID = SessionID()
@@ -717,7 +734,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 }
                 return false
             }
-            guard let targetProject = ProjectStore.shared.project(withID: targetProjectID) else {
+            guard let targetProject = environment.projectStore.project(withID: targetProjectID) else {
                 return false
             }
             do {
@@ -746,7 +763,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             managedWorkspace = nil
         }
 
-        guard let session = ProjectStore.shared.addSession(
+        guard let session = environment.projectStore.addSession(
             to: targetProjectID,
             kind: kind,
             accountHandle: accountHandle,
@@ -768,7 +785,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         // The mode is recorded as chosen — nil included, which reads as "inherit" rather than
         // as a mode. Reading the resolved flag back belongs to the "Launching agent" entry,
         // which carries the whole command line.
-        EventLog.shared.record(.composer, "Session started from composer", [
+        environment.eventLog.record(.composer, "Session started from composer", [
             "session": session.id.uuidString,
             "project": targetProjectID.uuidString,
             "agent": kind.rawValue,
@@ -784,7 +801,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         // recorded nothing: the opening prompt's images were the only ones a session could never
         // show back, and the temporary file the path points at outlives the turn by nothing.
         if !attachmentPaths.isEmpty,
-           let folder = ProjectStore.shared.workingDirectory(forSessionID: session.id) {
+           let folder = environment.projectStore.workingDirectory(forSessionID: session.id) {
             PromptAttachment.record(
                 paths: attachmentPaths,
                 sessionID: session.id,
@@ -827,10 +844,10 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let opening = NewChatOpeningMessage.compose(
             prompt: task,
-            reusableMessage: AppSettings.shared.newChatOpeningMessage
+            reusableMessage: environment.settings.newChatOpeningMessage
         )
         guard !task.isEmpty,
-              let session = ProjectStore.shared.addSession(
+              let session = environment.projectStore.addSession(
                 to: projectID,
                 kind: kind,
                 accountHandle: accountHandle,
@@ -842,7 +859,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 title: SessionNaming.promptTitle(from: task)
               ) else { return nil }
 
-        EventLog.shared.record(.remote, "Session started remotely", [
+        environment.eventLog.record(.remote, "Session started remotely", [
             "session": session.id.uuidString,
             "project": projectID.uuidString,
             "agent": kind.rawValue,
@@ -868,9 +885,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         let targetProjectID = Self.targetProjectID(
             startingAt: plan.projectID,
             branch: plan.branch,
-            checkout: ProjectStore.shared.checkout(onBranch:inRepositoryOf:)
+            checkout: environment.projectStore.checkout(onBranch:inRepositoryOf:)
         )
-        guard let targetProject = ProjectStore.shared.project(withID: targetProjectID) else {
+        guard let targetProject = environment.projectStore.project(withID: targetProjectID) else {
             return nil
         }
 
@@ -891,7 +908,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             workspace = nil
         }
 
-        let session = ProjectStore.shared.addSession(
+        let session = environment.projectStore.addSession(
             to: targetProjectID,
             kind: plan.kind,
             accountHandle: plan.accountHandle,
@@ -918,7 +935,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         // One write and one notification however many were chosen, and the newest is selected:
         // it is the row at the top of the sheet, and the one somebody adopting a single
         // conversation asked for.
-        let adopted = ProjectStore.shared.importSessions(sessions, into: projectID)
+        let adopted = environment.projectStore.importSessions(sessions, into: projectID)
         guard let first = adopted.first else { return }
 
         sidebar.reload()
@@ -930,7 +947,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         didCreateWorktreeAt url: URL,
         branch: String
     ) {
-        guard let project = ProjectStore.shared.addProject(folderURL: url) else { return }
+        guard let project = environment.projectStore.addProject(folderURL: url) else { return }
         sidebar.reload()
         container.showComposer(projectID: project.id)
     }
@@ -965,8 +982,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     // MARK: - Confirmation
 
     private func confirmCloseIfRunning(sessionID: SessionID) -> Bool {
-        guard AgentRuntime.shared.isRunning(sessionID: sessionID),
-              let session = ProjectStore.shared.session(withID: sessionID) else { return true }
+        guard environment.agentRuntime.isRunning(sessionID: sessionID),
+              let session = environment.projectStore.session(withID: sessionID) else { return true }
 
         return ConfirmationAlert.ask(Self.closeConfirmation(for: session))
     }
@@ -1106,8 +1123,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// A move interrupts a running agent exactly as a surface switch does, and each carries its
     /// own registered prompt for the same reason close and archive do.
     private func confirmMoveIfRunning(sessionID: SessionID, to account: AgentAccount) -> Bool {
-        guard AgentRuntime.shared.isRunning(sessionID: sessionID),
-              let session = ProjectStore.shared.session(withID: sessionID) else { return true }
+        guard environment.agentRuntime.isRunning(sessionID: sessionID),
+              let session = environment.projectStore.session(withID: sessionID) else { return true }
 
         return ConfirmationAlert.ask(ConfirmationRequest(
             prompt: .moveRunningSessionToAccount,
@@ -1128,8 +1145,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         sessionID: SessionID,
         with account: AgentAccount
     ) -> Bool {
-        guard AgentRuntime.shared.isRunning(sessionID: sessionID),
-              let session = ProjectStore.shared.session(withID: sessionID) else { return true }
+        guard environment.agentRuntime.isRunning(sessionID: sessionID),
+              let session = environment.projectStore.session(withID: sessionID) else { return true }
 
         return ConfirmationAlert.ask(Self.continuationConfirmation(
             for: session,
@@ -1159,8 +1176,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     }
 
     private func confirmSurfaceSwitchIfRunning(sessionID: SessionID, toNative: Bool) -> Bool {
-        guard AgentRuntime.shared.isRunning(sessionID: sessionID),
-              let session = ProjectStore.shared.session(withID: sessionID) else { return true }
+        guard environment.agentRuntime.isRunning(sessionID: sessionID),
+              let session = environment.projectStore.session(withID: sessionID) else { return true }
 
         let surface = toNative ? L10n.string("Native UI") : session.kind.originalUITitle
         return ConfirmationAlert.ask(ConfirmationRequest(

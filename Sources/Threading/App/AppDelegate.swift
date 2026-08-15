@@ -112,15 +112,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     private let processMainEntryNanoseconds: UInt64
+    private let environment: AppEnvironment
     private var runsStartupProfile = false
 
     override init() {
         processMainEntryNanoseconds = DispatchTime.now().uptimeNanoseconds
+        environment = .live
         super.init()
     }
 
     init(processMainEntryNanoseconds: UInt64) {
         self.processMainEntryNanoseconds = processMainEntryNanoseconds
+        environment = .live
         super.init()
     }
 
@@ -428,7 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 ExtensionIdentityResolverRegistry.shared
         }
 
-        let mainWindowController = MainWindowController()
+        let mainWindowController = MainWindowController(environment: environment)
         mainWindowController.issueReportSubmitter = MacIssueReportSubmitter(
             diagnosticsProvider: { [weak self] in
                 guard let self else { throw MacIssueReportError.invalidPackage }

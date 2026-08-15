@@ -347,7 +347,10 @@ final class SessionNameToolTests: XCTestCase {
     /// the item is absent rather than present and inert.
     func testADormantSessionIsNotOfferedTheAgentRename() throws {
         let (_, session) = try makeSessionInProject(named: "app")
-        XCTAssertFalse(SessionCoordinator.canAskAgentToRename(session.id))
+        XCTAssertFalse(SessionCoordinator.canAskAgentToRename(
+            session.id,
+            agentRuntime: AgentRuntime()
+        ))
     }
 
     // MARK: - The Line That Gets Sent

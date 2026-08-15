@@ -26,6 +26,17 @@ tool_handlers=(
   "${repository_directory}"/Sources/Threading/UI/Windows/AgentToolCoordinator+*.swift
 )
 
+session_coordinators=(
+  "${repository_directory}"/Sources/Threading/UI/Windows/SessionCoordinator*.swift
+)
+
+if rg -n \
+  '(ProjectStore|AgentRuntime|AppSettings|EventLog)\.shared\b' \
+  "${session_coordinators[@]}"; then
+  echo "architecture-boundary: SessionCoordinator must use its injected AppEnvironment" >&2
+  failed=1
+fi
+
 if rg -n \
   '(ProjectStore|SessionAttachmentStore|DisplayPaneStore|ExtensionManager|MCPExternalToolRegistry|RemoteSessionMirrorRegistry|AppSettings|RemoteNotificationService)\.shared\b' \
   "${tool_handlers[@]}"; then

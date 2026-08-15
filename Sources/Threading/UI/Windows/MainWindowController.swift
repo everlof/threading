@@ -41,6 +41,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     private(set) var startupPerformance = MainWindowStartupPerformance()
     private var isMeasuringStartupToolbarItems = false
+    private let environment: AppEnvironment
 
     /// Installed by the application composition root. Sheets inject this further into their
     /// submission closures, so neither UI surface reaches into account or diagnostic state.
@@ -52,6 +53,22 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Not private: the toolbar delegate needs the split view for its tracking separator.
     private(set) lazy var splitViewController = SidebarSplitViewController()
     private lazy var sidebarViewController = ProjectSidebarViewController(
+        projectStore: environment.projectStore,
+        canAskAgentToRename: { [weak self] sessionID in
+            guard let self else { return false }
+            return SessionCoordinator.canAskAgentToRename(
+                sessionID,
+                agentRuntime: environment.agentRuntime
+            )
+        },
+        canAskForReportBack: { [weak self] sessionID in
+            guard let self else { return false }
+            return SessionCoordinator.canAskForReportBack(
+                sessionID,
+                projectStore: environment.projectStore,
+                agentRuntime: environment.agentRuntime
+            )
+        },
         defersInitialTreeMount: true
     )
     private lazy var workspaceSidebarViewController = WorkspaceSidebarContainerViewController(
@@ -91,6 +108,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private lazy var sessionCoordinator = SessionCoordinator(
         sidebar: sidebarViewController,
         container: containerViewController,
+        environment: environment,
         onPresentationChanged: { [weak self] in self?.updateSessionTitleItem() }
     )
 
@@ -409,6 +427,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     // MARK: - Initialization
 
     override init(window: NSWindow?) {
+        environment = .live
+        super.init(window: window)
+    }
+
+    private init(window: NSWindow?, environment: AppEnvironment) {
+        self.environment = environment
         super.init(window: window)
     }
 
@@ -417,10 +441,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     convenience init() {
+        self.init(environment: .live)
+    }
+
+    convenience init(environment: AppEnvironment) {
         let constructionStarted = DispatchTime.now().uptimeNanoseconds
         let createdWindow = Self.createWindow()
         let windowCreated = DispatchTime.now().uptimeNanoseconds
-        self.init(window: createdWindow)
+        self.init(window: createdWindow, environment: environment)
         let baseInitialized = DispatchTime.now().uptimeNanoseconds
         startupPerformance.createWindowNanoseconds = windowCreated - constructionStarted
         startupPerformance.baseInitializationNanoseconds = baseInitialized - windowCreated

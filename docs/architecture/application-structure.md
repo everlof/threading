@@ -136,3 +136,29 @@ The package test suite pins the existing single-value Codable shapes, path-compo
 terminal history namespaces, and account-handle persistence semantics. Existing application tests
 continue through source-compatible aliases. This establishes a compiler boundary without claiming
 that persistence, runtime, application, or UI have already been extracted.
+
+### Milestone 3 — application environment and one injected ownership boundary
+
+`AppDelegate` now owns an `AppEnvironment` and passes it through `MainWindowController` to the
+`SessionCoordinator` family. The live environment is the only new composition point that names the
+legacy `ProjectStore`, `AgentRuntime`, `AppSettings`, and `EventLog` singletons. The coordinator's
+session creation, archive, scheduled-message, limit-escape, and developer-report paths use the
+injected instances instead. The sidebar receives only the two runtime-backed availability
+projections it needs for menu construction, rather than locating the runtime itself through this
+new boundary.
+
+| Metric | Milestone 2 | Milestone 3 | Change |
+|---|---:|---:|---:|
+| Threading application Swift files / lines | 750 / 321,993 | 751 / 322,070 | +1 environment file / +77 net wiring and test-support lines |
+| `ProjectStore.shared` | 345 / 68 files | 299 / 64 files | −46 / −4 files |
+| `AgentRuntime.shared` | 130 / 34 files | 116 / 32 files | −14 / −2 files |
+| `AppSettings.shared` | 230 / 43 files | 223 / 40 files | −7 / −3 files |
+| `EventLog.shared` | 112 / 31 files | 94 / 27 files | −18 / −4 files |
+| `static … shared` declarations | 87 / 85 files | 87 / 85 files | unchanged; the environment is not another singleton |
+| `MainWindowController` authority | 5,070 / 4 files | 5,098 / 4 files | +28 composition lines for explicit wiring |
+
+`SessionCoordinatorTests` constructs all four services independently and proves that the
+coordinator and its sidebar retain the injected instances. The architecture gate rejects future
+singleton lookups anywhere in the four `SessionCoordinator` files. This is intentionally one
+ownership-boundary migration; remaining leaf consumers stay in the measured queue rather than
+being rewritten mechanically.

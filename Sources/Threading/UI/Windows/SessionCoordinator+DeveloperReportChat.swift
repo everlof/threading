@@ -29,24 +29,24 @@ extension SessionCoordinator {
         fallbackProjectID: ProjectID?
     ) -> DeveloperReportChatOutcome {
         guard let projectID = DeveloperReportChat.targetProjectID(
-            projects: ProjectStore.shared.projects,
+            projects: environment.projectStore.projects,
             sourceRoot: DeveloperReportChat.sourceRoot,
             fallback: fallbackProjectID
-        ), let project = ProjectStore.shared.project(withID: projectID) else {
+        ), let project = environment.projectStore.project(withID: projectID) else {
             return .failed(message: DeveloperReportChatStrings.noProject)
         }
 
         let plan = DeveloperReportChat.plan(
             projectID: project.id,
             sessions: project.sessions,
-            defaultKind: AppSettings.shared.defaultAgentKind
+            defaultKind: environment.settings.defaultAgentKind
         )
 
         // Through the same composer every other new chat uses, so a report chat is not the one
         // chat in the app that ignores the user's standing opening message.
         let opening = NewChatOpeningMessage.compose(
             prompt: DeveloperReportChat.framedReport(request.report),
-            reusableMessage: AppSettings.shared.newChatOpeningMessage
+            reusableMessage: environment.settings.newChatOpeningMessage
         )
 
         guard let session = startSessionUnattended(plan: plan, title: request.title) else {
@@ -56,7 +56,7 @@ extension SessionCoordinator {
             return .failed(message: DeveloperReportChatStrings.notStarted)
         }
 
-        EventLog.shared.record(.session, "Report sent to a new chat", [
+        environment.eventLog.record(.session, "Report sent to a new chat", [
             "session": session.id.uuidString,
             "project": project.id.uuidString,
             "agent": plan.kind.rawValue,

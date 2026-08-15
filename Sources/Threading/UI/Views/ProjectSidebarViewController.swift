@@ -90,6 +90,8 @@ final class ProjectSidebarViewController: NSViewController {
     /// injected store lets deterministic UI workloads exercise the real outline controller
     /// without reading or mutating the user's projects.
     let projectStore: ProjectStore
+    let canAskAgentToRename: (SessionID) -> Bool
+    let canAskForReportBack: (SessionID) -> Bool
 
     /// Whether the first tree waits for its host to finish establishing window geometry.
     ///
@@ -326,9 +328,13 @@ final class ProjectSidebarViewController: NSViewController {
 
     init(
         projectStore: ProjectStore = .shared,
+        canAskAgentToRename: @escaping (SessionID) -> Bool = { _ in false },
+        canAskForReportBack: @escaping (SessionID) -> Bool = { _ in false },
         defersInitialTreeMount: Bool = false
     ) {
         self.projectStore = projectStore
+        self.canAskAgentToRename = canAskAgentToRename
+        self.canAskForReportBack = canAskForReportBack
         self.defersInitialTreeMount = defersInitialTreeMount
         super.init(nibName: nil, bundle: nil)
     }

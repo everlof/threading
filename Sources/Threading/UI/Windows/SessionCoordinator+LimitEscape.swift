@@ -31,7 +31,7 @@ extension SessionCoordinator {
         // draw the account control for one, so reaching here means the offer changed under the
         // press, and the answer is the same as a login that has since gone.
         guard let offeredAccountID = offer.accountID,
-              let session = ProjectStore.shared.session(withID: sessionID),
+              let session = environment.projectStore.session(withID: sessionID),
               let account = AgentAccountDiscovery.account(
                 for: session.kind,
                 handle: offeredAccountID.handle
@@ -40,7 +40,7 @@ extension SessionCoordinator {
                 problem: L10n.string("That login could not be found."),
                 for: sessionID
             )
-            EventLog.shared.record(.limitRecovery, "Escape refused, the login is gone", [
+            environment.eventLog.record(.limitRecovery, "Escape refused, the login is gone", [
                 "session": sessionID.uuidString,
                 "account": offer.accountID?.description ?? ""
             ])
@@ -48,7 +48,7 @@ extension SessionCoordinator {
         }
 
         store.setBusy(.moveAccount, for: sessionID)
-        EventLog.shared.record(.limitRecovery, "Escape pressed", [
+        environment.eventLog.record(.limitRecovery, "Escape pressed", [
             "session": sessionID.uuidString,
             "account": account.id.description
         ])
@@ -87,7 +87,7 @@ extension SessionCoordinator {
                 reading: usage?.compactSummary(metering: model),
                 for: sessionID
             )
-            EventLog.shared.record(.limitRecovery, "Escape stood down, the target has no room", [
+            environment.eventLog.record(.limitRecovery, "Escape stood down, the target has no room", [
                 "session": sessionID.uuidString,
                 "account": account.id.description,
                 "reading": usage?.compactSummary(metering: model) ?? ""
@@ -102,7 +102,7 @@ extension SessionCoordinator {
                 problem: L10n.string("The conversation could not be moved."),
                 for: sessionID
             )
-            EventLog.shared.record(.limitRecovery, "Escape failed, the move was refused", [
+            environment.eventLog.record(.limitRecovery, "Escape failed, the move was refused", [
                 "session": sessionID.uuidString,
                 "account": account.id.description
             ])
@@ -131,7 +131,7 @@ extension SessionCoordinator {
         switch ScheduledMessageStore.shared.add(message) {
         case .success:
             store.clear(sessionID)
-            EventLog.shared.record(.limitRecovery, "Escape taken, continuation scheduled", [
+            environment.eventLog.record(.limitRecovery, "Escape taken, continuation scheduled", [
                 "session": sessionID.uuidString,
                 "account": account.id.description,
                 "text": message.text
@@ -150,7 +150,7 @@ extension SessionCoordinator {
                 problem: ScheduledRefusalText.sentence(for: refusal),
                 for: sessionID
             )
-            EventLog.shared.record(.limitRecovery, "Escape moved but the continuation was refused", [
+            environment.eventLog.record(.limitRecovery, "Escape moved but the continuation was refused", [
                 "session": sessionID.uuidString,
                 "account": account.id.description,
                 "refusal": String(describing: refusal)

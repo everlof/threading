@@ -67,7 +67,7 @@ extension SessionCoordinator {
             )
         )
         ScheduledMessageStore.shared.relinquish(message.id)
-        EventLog.shared.record(.composer, "Scheduled send stood aside for its usage window", [
+        environment.eventLog.record(.composer, "Scheduled send stood aside for its usage window", [
             "window": windowID,
             "resetsAt": ISO8601DateFormatter().string(from: resetsAt)
         ])
@@ -77,7 +77,7 @@ extension SessionCoordinator {
     private func accountFor(_ target: ScheduledMessage.Target) -> AgentAccount? {
         switch target {
         case .session(let sessionID):
-            guard let session = ProjectStore.shared.session(withID: sessionID) else { return nil }
+            guard let session = environment.projectStore.session(withID: sessionID) else { return nil }
             return AgentAccountDiscovery.account(
                 for: session.kind,
                 handle: session.accountHandle
@@ -90,7 +90,7 @@ extension SessionCoordinator {
     // MARK: - A Reply To A Session That Exists
 
     private func deliverScheduled(_ message: ScheduledMessage, to sessionID: SessionID) {
-        guard let session = ProjectStore.shared.session(withID: sessionID) else {
+        guard let session = environment.projectStore.session(withID: sessionID) else {
             return finish(message, failedBecause: L10n.string(
                 "That session is no longer in Threading's sidebar."
             ))
@@ -163,11 +163,11 @@ extension SessionCoordinator {
         // A conversation kept after its agent exited still occupies the runtime's slot, and
         // `launchInBackground` refuses a session that already has one. Discarding first is what
         // the dormant placeholder's own Resume button does.
-        if AgentRuntime.shared.hasTerminal(sessionID: session.id) {
-            AgentRuntime.shared.discard(sessionID: session.id)
+        if environment.agentRuntime.hasTerminal(sessionID: session.id) {
+            environment.agentRuntime.discard(sessionID: session.id)
         }
 
-        EventLog.shared.record(.composer, "Waking a session for a scheduled message", [
+        environment.eventLog.record(.composer, "Waking a session for a scheduled message", [
             "session": session.id.uuidString
         ])
 
@@ -192,7 +192,7 @@ extension SessionCoordinator {
     /// at and wrong for an unattended start that would then run in the wrong folder. A project,
     /// branch or login that has since disappeared fails the send visibly instead.
     private func startScheduledSession(_ message: ScheduledMessage, plan: ScheduledSessionPlan) {
-        guard let project = ProjectStore.shared.project(withID: plan.projectID) else {
+        guard let project = environment.projectStore.project(withID: plan.projectID) else {
             return finish(message, failedBecause: L10n.string(
                 "Its project is no longer in Threading."
             ))
@@ -203,7 +203,7 @@ extension SessionCoordinator {
             ))
         }
         if let branch = plan.branch,
-           ProjectStore.shared.checkout(onBranch: branch, inRepositoryOf: plan.projectID) == nil {
+           environment.projectStore.checkout(onBranch: branch, inRepositoryOf: plan.projectID) == nil {
             return finish(message, failedBecause: L10n.format(
                 "Its checkout for %@ is gone.", branch
             ))
@@ -221,9 +221,9 @@ extension SessionCoordinator {
             let targetProjectID = Self.targetProjectID(
                 startingAt: plan.projectID,
                 branch: plan.branch,
-                checkout: ProjectStore.shared.checkout(onBranch:inRepositoryOf:)
+                checkout: environment.projectStore.checkout(onBranch:inRepositoryOf:)
             )
-            guard let targetProject = ProjectStore.shared.project(withID: targetProjectID),
+            guard let targetProject = environment.projectStore.project(withID: targetProjectID),
                   ManagedWorkspaceEligibility.supportsPublication(from: targetProject) else {
                 return finish(message, failedBecause: L10n.string(
                     "Its checkout no longer has a supported change-request remote."
@@ -233,7 +233,7 @@ extension SessionCoordinator {
 
         var opening = NewChatOpeningMessage.compose(
             prompt: message.text,
-            reusableMessage: AppSettings.shared.newChatOpeningMessage
+            reusableMessage: environment.settings.newChatOpeningMessage
         )
         if let managedPlan = plan.managedWorkspacePlan {
             opening = ManagedWorkspaceInstructions.append(
@@ -247,7 +247,7 @@ extension SessionCoordinator {
             ))
         }
 
-        EventLog.shared.record(.composer, "Session started from a schedule", [
+        environment.eventLog.record(.composer, "Session started from a schedule", [
             "session": session.id.uuidString,
             "project": plan.projectID.uuidString,
             "agent": plan.kind.rawValue,
@@ -272,7 +272,7 @@ extension SessionCoordinator {
     ) {
         ScheduledMessageStore.shared.complete(message.id)
         ScheduledMessageScheduler.shared.forgetWaiting(message.id)
-        EventLog.shared.record(.composer, "Scheduled message delivered", [
+        environment.eventLog.record(.composer, "Scheduled message delivered", [
             "session": sessionID.uuidString,
             "wokeTheAgent": wokeTheAgent ? "yes" : "no",
             "prompt": message.text
@@ -288,7 +288,7 @@ extension SessionCoordinator {
     private func finish(_ message: ScheduledMessage, failedBecause reason: String) {
         ScheduledMessageStore.shared.fail(message.id, reason: reason)
         ScheduledMessageScheduler.shared.forgetWaiting(message.id)
-        EventLog.shared.record(.composer, "Scheduled message failed", [
+        environment.eventLog.record(.composer, "Scheduled message failed", [
             "reason": reason,
             "prompt": message.text
         ])
