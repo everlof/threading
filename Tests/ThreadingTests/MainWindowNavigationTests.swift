@@ -18,6 +18,12 @@ final class MainWindowNavigationTests: HostedStoreTestCase {
     private var controller: MainWindowController?
 
     override func tearDown() {
+        if let window = controller?.window {
+            window.orderOut(nil)
+            window.delegate = nil
+            window.contentView = nil
+            controller?.window = nil
+        }
         controller = nil
         super.tearDown()
     }

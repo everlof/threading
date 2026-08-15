@@ -11,6 +11,12 @@ import XCTest
 final class ThemedIndicatorsTests: XCTestCase {
 
     override func tearDown() {
+        for window in windows {
+            window.orderOut(nil)
+            window.contentView = nil
+            window.close()
+        }
+        windows.removeAll()
         Design.Motion.reduceMotionOverrideForTesting = nil
         Design.Accessibility.increaseContrastOverrideForTesting = nil
         Design.Accessibility.differentiateWithoutColorOverrideForTesting = nil

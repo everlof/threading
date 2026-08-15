@@ -30,24 +30,22 @@ final class TitlebarDoubleClickTests: XCTestCase {
     /// Every fixture window this class made in the running test.
     private var windows: [NSWindow] = []
 
-    /// Zoomed windows, parked for the life of the process — see `tearDown`.
-    private static var parkedWindows: [NSWindow] = []
-
     override func tearDown() {
-        // A zoom queues AppKit's `_NSWindowTransformAnimation`, which holds its window
-        // unretained and commits on a Core Animation transaction of its own choosing. A
-        // window freed first turns that commit into a use-after-free that detonates in
-        // whichever later test pumps the run loop — found as a crash two suites away in
-        // `ToastTests`, with nothing of its own on the stack. Spinning the loop here was
-        // tried and is not enough: the animation may outlive any turn this class could
-        // wait. The only deterministic defuse is for the window to outlive the animation,
-        // so the fixtures are parked for the process's lifetime instead of released —
-        // nine small unshown windows, bytes traded for a segfault. The controller itself
-        // still dies normally; only the window it owned is kept.
-        Self.parkedWindows.append(contentsOf: windows)
+        // Every fixture disables AppKit window animation at creation, so it owns no deferred
+        // transform to outlive teardown. Detach it from its view/controller graph before the
+        // XCTest autorelease pool drains; parking these windows for the whole process was the
+        // largest late-suite contribution to AppKit's live-window threshold.
+        for window in windows {
+            window.orderOut(nil)
+            window.delegate = nil
+            window.contentView = nil
+        }
         windows.removeAll()
         if let window = controller?.window {
-            Self.parkedWindows.append(window)
+            window.orderOut(nil)
+            window.delegate = nil
+            window.contentView = nil
+            controller?.window = nil
         }
         controller = nil
         super.tearDown()

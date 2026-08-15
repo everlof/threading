@@ -71,7 +71,6 @@ final class ExecutionAuditRenderTests: XCTestCase {
                     windowController = controller
                 }
                 let window = makeWindow(controller: windowController, appearance: appearance)
-                defer { window.close() }
 
                 let categoryFilter = try XCTUnwrap(view(
                     withIdentifier: "executionAudit.categoryFilter",
@@ -131,6 +130,15 @@ final class ExecutionAuditRenderTests: XCTestCase {
                     named: "execution-audit-browser-split-\(themeName)-\(appearanceName).png"
                 )
                 written += 1
+
+                // A `defer` here used to retain every window until the complete fourteen-cell
+                // sweep returned. Close each cell at its ownership boundary instead, after
+                // detaching the controller so neither AppKit nor WebKit can keep its window
+                // registered through the next cell's autorelease pool.
+                browser.webView.stopLoading()
+                window.orderOut(nil)
+                window.contentViewController = nil
+                window.close()
             }
         }
 

@@ -293,8 +293,14 @@ The six findings closed as ownership changes, not documentation exceptions:
    drained the case's autorelease pool: the privacy assertion had not failed, but earlier AppKit
    menu/window state outlived its owning fixture. Motion and Privacy now use one bounded unshown
    host each with fresh per-test controller state; menus dismiss synchronously, while ordinary
-   render owners retire windows only at component-safe points. Repeated theme opens cannot retain
-   16pt and 20pt menu-preview constraints because the owning row now owns those constraints.
+   render owners retire windows only at component-safe points. A full-plan population probe then
+   found the remaining threshold growth at its owners: the audit sweep stacked 14 loop-scoped
+   defers, git-review retained seven attached render roots, media-player tests retained 11 host
+   windows, navigation retained five controller windows, and titlebar tests parked 11 windows even
+   after disabling their animations. Those owners now detach and retire each fixture at the
+   boundary where its asynchronous work is quiescent; no test-host-wide window sweep was added.
+   Repeated theme opens cannot retain 16pt and 20pt menu-preview constraints because the owning
+   row now owns those constraints.
    Zero-width chart layout uses a satisfiable owner-defined constraint model, and tab-strip height
    has one owner.
 2. Domain and Application imports are checked recursively. Application permits Foundation and the

@@ -16,6 +16,12 @@ final class MediaDocumentSeamTests: XCTestCase {
     }
 
     override func tearDown() {
+        for window in retainedWindows {
+            window.orderOut(nil)
+            window.contentView = nil
+            window.close()
+        }
+        retainedWindows.removeAll()
         Design.Motion.reduceMotionOverrideForTesting = nil
         if let restoreRenderer {
             MediaDocumentRendererRegistry.setRendererForTesting(restoreRenderer, for: .lottie)
