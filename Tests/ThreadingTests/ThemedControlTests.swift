@@ -5709,6 +5709,44 @@ final class ThemedControlTests: HostedStoreTestCase {
         )
     }
 
+    /// A wrapping field editor is not confined to the field it belongs to.
+    ///
+    /// `init(frame:)` builds a *wrapping* cell — `wraps` on, `isScrollable` off — and only the
+    /// `NSTextField(string:)` factory hands back the scrolling one, which `cellClass` rules out
+    /// here. A wrapping cell grows the editor instead of scrolling it, past the well the field
+    /// draws: Settings' opening message shipped on that, and a sentence longer than the row came
+    /// out as two lines, the first struck through by the field's own top border and drawn over
+    /// the description above it, with only the tail of what was typed left inside.
+    func testALongValueStaysOnTheOneLineTheFieldDraws() throws {
+        let field = ThemedTextField()
+        field.frame = NSRect(x: 20, y: 20, width: 220, height: Design.Size.fieldHeight)
+
+        XCTAssertEqual(field.cell?.wraps, false, "the cell wraps where it should scroll")
+        XCTAssertEqual(field.cell?.isScrollable, true, "a long value has nowhere to scroll")
+
+        // Built, never shown: the field editor is installed by taking first responder, which does
+        // not need the window on screen.
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 80),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView?.addSubview(field)
+        XCTAssertTrue(window.makeFirstResponder(field))
+        field.stringValue = String(repeating: "opening message ", count: 12)
+
+        let editor = try XCTUnwrap(
+            field.currentEditor() as? NSTextView,
+            "the field never took an editor, so this proves nothing"
+        )
+        XCTAssertLessThanOrEqual(
+            editor.frame.height,
+            field.bounds.height,
+            "the editor grew past the well the field draws, over whatever sits above it"
+        )
+    }
+
     /// An address is useful content even when nobody is editing it, so its resting state is the
     /// URL rather than a permanent input silhouette. The hit target and layout remain present;
     /// only the plate answers the pointer.

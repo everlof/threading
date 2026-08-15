@@ -95,6 +95,18 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
         isBezeled = false
         // The surface is ours; leaving AppKit's on would paint a system rectangle under it.
         drawsBackground = false
+        // A field is one line that scrolls — and AppKit only configures it that way through the
+        // `NSTextField(string:)` *factory*, which `cellClass` rules out here (see `init(string:)`
+        // below). A cell built by `init(frame:)` arrives wrapping instead: `wraps` true,
+        // `isScrollable` false. A wrapping cell grows its **field editor** rather than scrolling
+        // it, and the editor is not confined to the control — measured, a `fieldHeight` well
+        // holding one long sentence took a 128pt editor, so the caret's line was the only one
+        // left inside the drawn well and the lines above it were struck through by the border and
+        // spilled over the row above. Settings' opening message shipped like that. These two are
+        // exactly what AppKit's own editable field carries; `wraps` also moves the cell to
+        // `.byClipping`.
+        cell?.wraps = false
+        cell?.isScrollable = true
         // Likewise the focus ring: the system's is drawn outside the control's bounds and in the
         // system accent, which is the one colour a themed page has already replaced.
         focusRingType = .none
@@ -478,7 +490,7 @@ private final class ThemedSecureFieldCell: NSSecureTextFieldCell, ThemedFieldCel
 final class ThemedSearchField: ThemedTextField {
 
     private enum Layout {
-        static let glyphSize: CGFloat = Design.Symbol.control
+        static var glyphSize: CGFloat { Design.Symbol.control }
         static let glyphLeading: CGFloat = Design.Spacing.small
         static let glyphGap: CGFloat = Design.Spacing.small
         /// Air between the trailing controls and the field's own border.
