@@ -31,6 +31,8 @@ session_coordinators=(
 )
 
 conversation_controller="${repository_directory}/Sources/Threading/UI/Views/ConversationViewController.swift"
+browser_controller="${repository_directory}/Sources/Threading/UI/Views/BrowserViewController.swift"
+browser_download_coordinator="${repository_directory}/Sources/Threading/Application/Browser/BrowserDownloadCoordinator.swift"
 
 if rg -n \
   '(ProjectStore|AgentRuntime|AppSettings|EventLog)\.shared\b' \
@@ -55,6 +57,23 @@ if rg -n \
   "${conversation_controller}"; then
   echo "architecture-boundary: ConversationViewController retains SessionID and reads the" >&2
   echo "  current AgentSession through its injected CurrentSessionProjection" >&2
+  failed=1
+fi
+
+# WebKit callbacks and native presentation belong in the browser controller; download request,
+# destination, completion, and bounded-history state belong to the application coordinator.
+# Keeping that state out of the view controller makes the consent lifecycle testable without
+# constructing WebKit or a window.
+if rg -n \
+  '\b(downloadDestinations|agentDownloadRequests|pendingAgentDownload)\b|\b(var|let)\s+recentDownloads\s*:' \
+  "${browser_controller}"; then
+  echo "architecture-boundary: BrowserViewController adapts WebKit downloads but download" >&2
+  echo "  lifecycle state belongs to BrowserDownloadCoordinator" >&2
+  failed=1
+fi
+
+if rg -n '^import (AppKit|WebKit)\b' "${browser_download_coordinator}"; then
+  echo "architecture-boundary: BrowserDownloadCoordinator must remain Foundation-only" >&2
   failed=1
 fi
 

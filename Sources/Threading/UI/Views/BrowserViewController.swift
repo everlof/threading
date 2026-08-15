@@ -585,11 +585,8 @@ final class BrowserViewController: NSViewController {
     var capturedConsoleMessages: [BrowserConsoleMessage] { consoleMessages }
     var capturedNetworkEntries: [BrowserNetworkEntry] { networkEntries }
     private var scriptMessageProxy: WeakBrowserScriptMessageHandler?
-    private var downloadDestinations: [ObjectIdentifier: URL] = [:]
-    private var recentDownloads: [URL] = []
+    private let downloadCoordinator = BrowserDownloadCoordinator()
     private var pendingAgentFileSelection: BrowserAgentFileSelectionRequest?
-    private var pendingAgentDownload: BrowserAgentDownloadRequest?
-    private var agentDownloadRequests: [ObjectIdentifier: BrowserAgentDownloadRequest] = [:]
     private var pendingNavigationMethods: [String: String] = [:]
     private var pendingNavigationStarts: [String: Date] = [:]
     private let urlSchemeHandlers: [String: WKURLSchemeHandler]
@@ -1713,12 +1710,13 @@ final class BrowserViewController: NSViewController {
         selector: String?,
         locator: BrowserSemanticLocator?
     ) async throws -> BrowserActionOutcome {
-        guard pendingAgentDownload == nil else {
+        guard let request = downloadCoordinator.beginAgentRequest() else {
             return BrowserActionOutcome(
                 ok: false,
                 message: "Another agent-requested download is already pending in this tab."
             )
         }
+        defer { downloadCoordinator.endAgentRequest(request) }
         let target = try await describeTarget(ref: ref, selector: selector, locator: locator)
         guard target.ok else {
             return BrowserActionOutcome(ok: false, message: target.message)
@@ -1729,9 +1727,6 @@ final class BrowserViewController: NSViewController {
                 message: "Use browser_upload for a file input."
             )
         }
-
-        let request = BrowserAgentDownloadRequest()
-        pendingAgentDownload = request
         agentActionSequence += 1
         let sequence = agentActionSequence
         activeAgentNavigationGuard = AgentNavigationGuard(
@@ -1741,9 +1736,6 @@ final class BrowserViewController: NSViewController {
             blockedFormSubmission: false
         )
         defer {
-            if pendingAgentDownload === request {
-                pendingAgentDownload = nil
-            }
             if activeAgentNavigationGuard?.sequence == sequence {
                 activeAgentNavigationGuard = nil
             }
@@ -1761,13 +1753,12 @@ final class BrowserViewController: NSViewController {
             return click
         }
         DispatchQueue.main.asyncAfter(
-            deadline: .now() + BrowserDefaults.agentDownloadStartTimeout
+            deadline: .now() + BrowserDownloadCoordinator.agentStartTimeout
         ) { [weak request] in
-            guard let request, !request.isAttached else { return }
-            request.finish(.failure(
+            request?.failIfUnattached(
                 "The target did not start a download within "
-                    + "\(Int(BrowserDefaults.agentDownloadStartTimeout)) seconds."
-            ))
+                    + "\(Int(BrowserDownloadCoordinator.agentStartTimeout)) seconds."
+            )
         }
 
         let result = await request.wait()
@@ -2883,13 +2874,13 @@ final class BrowserViewController: NSViewController {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let entries: [ThemedMenuEntry]
-            if self.recentDownloads.isEmpty {
+            if self.downloadCoordinator.recentDownloads.isEmpty {
                 entries = [.item(ThemedMenuItem(
                     title: L10n.string("No Downloads Yet"),
                     isEnabled: false
                 ))]
             } else {
-                entries = self.recentDownloads.reversed().map { url in
+                entries = self.downloadCoordinator.recentDownloads.reversed().map { url in
                     .item(ThemedMenuItem(
                         title: url.lastPathComponent,
                         subtitle: url.deletingLastPathComponent().path,
@@ -3152,9 +3143,12 @@ final class BrowserViewController: NSViewController {
         entries.append(.separator)
         entries.append(.item(ThemedMenuItem(
             title: L10n.string("Downloads"),
-            subtitle: recentDownloads.isEmpty
+            subtitle: downloadCoordinator.recentDownloads.isEmpty
                 ? L10n.string("No downloads yet")
-                : L10n.format("%lld recent downloads", Int64(recentDownloads.count)),
+                : L10n.format(
+                    "%lld recent downloads",
+                    Int64(downloadCoordinator.recentDownloads.count)
+                ),
             image: BrowserChromeBar.image(
                 "arrow.down.circle",
                 accessibility: L10n.string("Downloads")
@@ -3612,12 +3606,8 @@ extension BrowserViewController: WKNavigationDelegate {
     }
 
     private func attachPendingAgentDownload(_ download: WKDownload, from webView: WKWebView) {
-        guard webView === self.webView,
-              let request = pendingAgentDownload,
-              !request.isAttached else { return }
-        request.attach()
-        let identifier = ObjectIdentifier(download)
-        agentDownloadRequests[identifier] = request
+        guard webView === self.webView else { return }
+        downloadCoordinator.attachPendingAgentRequest(to: BrowserDownloadID(download))
     }
 }
 
@@ -3811,9 +3801,9 @@ extension BrowserViewController: WKDownloadDelegate {
         suggestedFilename: String,
         completionHandler: @escaping @MainActor @Sendable (URL?) -> Void
     ) {
-        let identifier = ObjectIdentifier(download)
-        let agentRequest = agentDownloadRequests[identifier]
-        let message = agentRequest == nil
+        let downloadID = BrowserDownloadID(download)
+        let isAgentRequested = downloadCoordinator.isAgentRequested(downloadID)
+        let message = !isAgentRequested
             ? L10n.string("Choose where to save this download.")
             : L10n.string("""
                 The agent requested this download. Review the filename and destination before \
@@ -3824,25 +3814,13 @@ extension BrowserViewController: WKDownloadDelegate {
                 completionHandler(nil)
                 return
             }
-            guard let destination else {
-                self.agentDownloadRequests.removeValue(forKey: identifier)?
-                    .finish(.failure("The user cancelled the native download save panel."))
-                completionHandler(nil)
-                return
-            }
-            do {
-                if FileManager.default.fileExists(atPath: destination.path) {
-                    try FileManager.default.removeItem(at: destination)
-                }
-                self.downloadDestinations[identifier] = destination
+            switch self.downloadCoordinator.decideDestination(destination, for: downloadID) {
+            case .approved(let destination):
                 completionHandler(destination)
-            } catch {
-                self.agentDownloadRequests.removeValue(forKey: identifier)?
-                    .finish(.failure(
-                        "Could not use the user-approved download destination: "
-                            + error.localizedDescription
-                    ))
-                self.showDownloadFailure(error.localizedDescription)
+            case .cancelled:
+                completionHandler(nil)
+            case .rejected(let message):
+                self.showDownloadFailure(message)
                 completionHandler(nil)
             }
         }
@@ -3850,7 +3828,7 @@ extension BrowserViewController: WKDownloadDelegate {
         if let savePanelProvider {
             savePanelProvider(
                 suggestedFilename,
-                agentRequest != nil,
+                isAgentRequested,
                 message,
                 decidedURL
             )
@@ -3873,19 +3851,12 @@ extension BrowserViewController: WKDownloadDelegate {
     }
 
     func downloadDidFinish(_ download: WKDownload) {
-        let identifier = ObjectIdentifier(download)
-        guard let destination = downloadDestinations.removeValue(forKey: identifier) else {
-            agentDownloadRequests.removeValue(forKey: identifier)?
-                .finish(.failure("WebKit completed a download without a destination."))
+        let destination: URL
+        switch downloadCoordinator.finish(BrowserDownloadID(download)) {
+        case .completed(let approvedDestination):
+            destination = approvedDestination
+        case .missingDestination:
             return
-        }
-        agentDownloadRequests.removeValue(forKey: identifier)?
-            .finish(.success(destination))
-        recentDownloads.append(destination)
-        if recentDownloads.count > BrowserDefaults.maximumRecentDownloads {
-            recentDownloads.removeFirst(
-                recentDownloads.count - BrowserDefaults.maximumRecentDownloads
-            )
         }
 
         let alert = ThemedAlert()
@@ -3909,10 +3880,10 @@ extension BrowserViewController: WKDownloadDelegate {
         didFailWithError error: Error,
         resumeData: Data?
     ) {
-        let identifier = ObjectIdentifier(download)
-        downloadDestinations.removeValue(forKey: identifier)
-        agentDownloadRequests.removeValue(forKey: identifier)?
-            .finish(.failure("Download failed: \(error.localizedDescription)"))
+        downloadCoordinator.fail(
+            BrowserDownloadID(download),
+            message: error.localizedDescription
+        )
         showDownloadFailure(error.localizedDescription)
     }
 
@@ -4011,41 +3982,6 @@ private final class BrowserAgentFileSelectionRequest {
     }
 }
 
-private enum BrowserAgentDownloadResult {
-    case success(URL)
-    case failure(String)
-}
-
-@MainActor
-private final class BrowserAgentDownloadRequest {
-    private(set) var isAttached = false
-    private var result: BrowserAgentDownloadResult?
-    private var continuation: CheckedContinuation<BrowserAgentDownloadResult, Never>?
-
-    func attach() {
-        guard result == nil else { return }
-        isAttached = true
-    }
-
-    func wait() async -> BrowserAgentDownloadResult {
-        if let result { return result }
-        return await withCheckedContinuation { continuation in
-            if let result {
-                continuation.resume(returning: result)
-            } else {
-                self.continuation = continuation
-            }
-        }
-    }
-
-    func finish(_ result: BrowserAgentDownloadResult) {
-        guard self.result == nil else { return }
-        self.result = result
-        continuation?.resume(returning: result)
-        continuation = nil
-    }
-}
-
 enum BrowserDefaults {
     static var addressPlaceholder: String { L10n.string("Search or enter address") }
     static let searchPrefix = "https://duckduckgo.com/?q="
@@ -4070,13 +4006,11 @@ enum BrowserDefaults {
     static let maximumPageZoom = 2.0
     static let pageZoomStep = 0.1
     static let screenshotFilename = "Threading Browser.png"
-    static let maximumRecentDownloads = 20
     static let maximumUserAgentLength = 512
     static let userAgentTooltipLength = 96
     static let maximumTraceEvents = 500
     static let maximumTraceDetailLength = 500
     static let maximumAgentUploadPaths = 10
-    static let agentDownloadStartTimeout: TimeInterval = 5
     static let agentNavigationGuardNanoseconds: UInt64 = 150_000_000
     static let blockedAgentFormSubmissionMessage = """
         The page attempted to submit a form without an app-owned approval, so Threading blocked it.
