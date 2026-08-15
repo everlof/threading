@@ -17,7 +17,6 @@ ALLOWED_CORE_UI_REFERENCES = {
     ("Core/Agent/AgentRuntime.swift", "AgentSessionViewController"): 4,
     ("Core/Agent/AgentRuntime.swift", "ConversationViewController"): 4,
     ("Core/Agent/LimitRecoveryCoordinator.swift", "AgentSessionViewController"): 5,
-    ("Core/Agent/SessionContextHandoff.swift", "ConversationViewController"): 1,
     ("Core/Remote/RemoteSessionMirrorRegistry.swift", "ConversationViewController"): 1,
     ("Core/Session/ProjectTerminalRuntime.swift", "ProjectTerminalViewController"): 4,
 }

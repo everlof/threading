@@ -381,7 +381,71 @@ final class ContextHandoffTests: XCTestCase {
         )
     }
 
+    func testNativeDestinationStagesAndSendsThroughTheTypedReceiver() {
+        let sessionID = SessionID()
+        let receiver = RecordingContextReceiver()
+        let destinations = ContextDestinations(receiver: receiver)
+
+        SessionContextHandoff.stage(
+            Self.attachmentReference,
+            for: sessionID,
+            querying: destinations
+        )
+        SessionContextHandoff.send(
+            Self.codeReference,
+            for: sessionID,
+            querying: destinations
+        )
+
+        XCTAssertEqual(destinations.queriedSessionIDs, [sessionID, sessionID])
+        XCTAssertEqual(receiver.staged, [Self.attachmentReference])
+        XCTAssertEqual(receiver.sent, [Self.codeReference])
+        XCTAssertTrue(destinations.terminalQueries.isEmpty)
+    }
+
+    func testDestinationQueryFallsThroughToATerminalOnlyWithoutANativeReceiver() {
+        let sessionID = SessionID()
+        let destinations = ContextDestinations(receiver: nil)
+
+        XCTAssertNil(SessionContextHandoff.destination(for: sessionID, querying: destinations))
+        XCTAssertEqual(destinations.queriedSessionIDs, [sessionID])
+        XCTAssertEqual(destinations.terminalQueries, [sessionID])
+    }
+
     // MARK: - Fixtures
+
+    private final class RecordingContextReceiver: SessionContextReceiving {
+        var staged: [ConversationContextAttachment] = []
+        var sent: [ConversationContextAttachment] = []
+
+        func stageContextAttachment(_ attachment: ConversationContextAttachment) {
+            staged.append(attachment)
+        }
+
+        func sendContextAttachment(_ attachment: ConversationContextAttachment) {
+            sent.append(attachment)
+        }
+    }
+
+    private final class ContextDestinations: SessionContextDestinationQuerying {
+        let receiver: RecordingContextReceiver?
+        var queriedSessionIDs: [SessionID] = []
+        var terminalQueries: [SessionID] = []
+
+        init(receiver: RecordingContextReceiver?) {
+            self.receiver = receiver
+        }
+
+        func contextReceiver(for sessionID: SessionID) -> (any SessionContextReceiving)? {
+            queriedSessionIDs.append(sessionID)
+            return receiver
+        }
+
+        func runningTerminalSession(for sessionID: SessionID) -> TerminalSession? {
+            terminalQueries.append(sessionID)
+            return nil
+        }
+    }
 
     private static let attachmentReference = ConversationContextAttachment(
         kind: .reference,

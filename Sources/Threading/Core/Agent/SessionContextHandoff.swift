@@ -6,7 +6,7 @@ import Foundation
 /// happens to be running on.
 ///
 /// The staging vocabulary — `ConversationContextAttachment`, the composer's receipt rail, the
-/// typed envelope every native transport carries — was built on `ConversationViewController`,
+/// typed envelope every native transport carries — was built for a native conversation surface,
 /// which exists only for a session rendered natively. That is three of the four runtimes, and
 /// only when the user has native Chat turned on for that session; everything else runs the
 /// agent's own TUI in a PTY. So the Attachments pane's chat actions, the Git Review row's
@@ -21,7 +21,37 @@ import Foundation
 /// the JSON envelope, and `TerminalDrop` for why an attachment's real path goes over first, alone,
 /// in its own bracketed paste.
 @MainActor
+protocol SessionContextReceiving: AnyObject {
+    func stageContextAttachment(_ attachment: ConversationContextAttachment)
+    func sendContextAttachment(_ attachment: ConversationContextAttachment)
+}
+
+/// The smallest live-session projection the handoff policy needs. Keeping lookup behind this
+/// boundary makes the routing independently testable and keeps Core unaware of the UI controller
+/// that happens to render a native conversation.
+@MainActor
+protocol SessionContextDestinationQuerying {
+    func contextReceiver(for sessionID: SessionID) -> (any SessionContextReceiving)?
+    func runningTerminalSession(for sessionID: SessionID) -> TerminalSession?
+}
+
+extension AgentRuntime: SessionContextDestinationQuerying {
+    func contextReceiver(for sessionID: SessionID) -> (any SessionContextReceiving)? {
+        conversation(for: sessionID)
+    }
+
+    func runningTerminalSession(for sessionID: SessionID) -> TerminalSession? {
+        guard let controller = controller(for: sessionID), controller.isRunning else { return nil }
+        return controller.session
+    }
+}
+
+@MainActor
 enum SessionContextHandoff {
+
+    private static var liveDestinations: any SessionContextDestinationQuerying {
+        AgentRuntime.shared
+    }
 
     /// Which surface is holding this session's input right now.
     ///
@@ -29,21 +59,27 @@ enum SessionContextHandoff {
     /// conversation and a terminal across relaunches, and a pane that remembered the answer
     /// would keep offering the door that closed.
     enum Destination {
-        case conversation(ConversationViewController)
+        case conversation(any SessionContextReceiving)
         case terminal(TerminalSession)
     }
 
     // MARK: - Routing
 
     static func destination(for sessionID: SessionID) -> Destination? {
-        if let conversation = AgentRuntime.shared.conversation(for: sessionID) {
-            return .conversation(conversation)
+        destination(for: sessionID, querying: liveDestinations)
+    }
+
+    static func destination(
+        for sessionID: SessionID,
+        querying destinations: any SessionContextDestinationQuerying
+    ) -> Destination? {
+        if let receiver = destinations.contextReceiver(for: sessionID) {
+            return .conversation(receiver)
         }
         // A dead PTY swallows a paste without a trace, so a terminal is a destination only
         // while its agent is actually there to read one.
-        guard let controller = AgentRuntime.shared.controller(for: sessionID),
-              controller.isRunning else { return nil }
-        return .terminal(controller.session)
+        guard let terminal = destinations.runningTerminalSession(for: sessionID) else { return nil }
+        return .terminal(terminal)
     }
 
     /// Whether this session can be handed context at all — the one question a pane asks before
@@ -64,7 +100,21 @@ enum SessionContextHandoff {
         fileURL: URL? = nil,
         for sessionID: SessionID
     ) {
-        switch destination(for: sessionID) {
+        stage(
+            attachment,
+            fileURL: fileURL,
+            for: sessionID,
+            querying: liveDestinations
+        )
+    }
+
+    static func stage(
+        _ attachment: ConversationContextAttachment,
+        fileURL: URL? = nil,
+        for sessionID: SessionID,
+        querying destinations: any SessionContextDestinationQuerying
+    ) {
+        switch destination(for: sessionID, querying: destinations) {
         case .conversation(let conversation):
             conversation.stageContextAttachment(attachment)
         case .terminal(let session):
@@ -80,7 +130,21 @@ enum SessionContextHandoff {
         fileURL: URL? = nil,
         for sessionID: SessionID
     ) {
-        switch destination(for: sessionID) {
+        send(
+            attachment,
+            fileURL: fileURL,
+            for: sessionID,
+            querying: liveDestinations
+        )
+    }
+
+    static func send(
+        _ attachment: ConversationContextAttachment,
+        fileURL: URL? = nil,
+        for sessionID: SessionID,
+        querying destinations: any SessionContextDestinationQuerying
+    ) {
+        switch destination(for: sessionID, querying: destinations) {
         case .conversation(let conversation):
             conversation.sendContextAttachment(attachment)
         case .terminal(let session):
