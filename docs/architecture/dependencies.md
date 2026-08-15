@@ -4,6 +4,15 @@ The application dependency boundaries and the seams in each that are ours.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+- **ThreadingDomain** (local, ours): the Foundation-only identity kernel shared by future
+  persistence, runtime, application, and UI modules.
+  - Location: `./Packages/ThreadingDomain/`; it has no package dependencies.
+  - The public types preserve the application's established single-value Codable shapes and typed
+    identity domains. `Sources/Threading/Models/Identifiers.swift` contains temporary migration
+    aliases, not a second implementation.
+  - `scripts/check_module_boundaries.py` rejects UI or system-framework imports. Add only stable
+    records, capabilities, and outcomes that can remain Foundation-only.
+
 - **WebRTC** (remote, prebuilt): native ICE/STUN/TURN, DTLS/SCTP and ordered data channels for
   hosted Mac-to-iOS remote access.
   - Location: exact SwiftPM version `151.0.0`, package revision

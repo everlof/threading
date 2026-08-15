@@ -17,6 +17,11 @@ if ! python3 "${script_directory}/check_dependency_boundaries.py" "${repository_
   failed=1
 fi
 
+if ! python3 "${script_directory}/check_module_boundaries.py" "${repository_directory}"; then
+  echo "architecture-boundary: compiler-layer modules may import only lower-level contracts" >&2
+  failed=1
+fi
+
 tool_handlers=(
   "${repository_directory}"/Sources/Threading/UI/Windows/AgentToolCoordinator+*.swift
 )

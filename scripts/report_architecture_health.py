@@ -89,7 +89,9 @@ def authority_files(paths: list[Path], type_name: str) -> list[Path]:
 
 def render(root: Path) -> str:
     source_root = root / "Sources" / "Threading"
+    domain_root = root / "Packages" / "ThreadingDomain" / "Sources" / "ThreadingDomain"
     source_files = swift_files(source_root)
+    domain_files = swift_files(domain_root)
     core_files = swift_files(source_root / "Core")
     model_files = swift_files(source_root / "Models")
     ui_files = swift_files(source_root / "UI")
@@ -118,6 +120,8 @@ def render(root: Path) -> str:
     rows = [
         ("Threading Swift files", len(source_files), "files"),
         ("Threading Swift lines", line_count(source_files), "lines"),
+        ("ThreadingDomain Swift files", len(domain_files), "Foundation-only files"),
+        ("ThreadingDomain Swift lines", line_count(domain_files), "compiler-isolated lines"),
         ("Shared declarations", shared_count, f"across {shared_files} files"),
         (
             "ProjectStore.shared references",

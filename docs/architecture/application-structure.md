@@ -1,8 +1,10 @@
 # Application structure and health
 
-Threading is still one application target, so directory names alone do not enforce dependency
-direction. This document names the current product boundary, the intended direction of knowledge,
-and the small health ledger used to tell whether structural work has reduced change amplification.
+Most Threading code is still one application target, so directory names alone do not enforce
+dependency direction. The stable identity kernel now lives in the compiler-isolated
+`ThreadingDomain` package. This document names the current product boundary, the intended direction
+of knowledge, and the small health ledger used to tell whether structural work has reduced change
+amplification.
 Run `scripts/report_architecture_health.py` to refresh the measurements; do not hand-count a new
 baseline with a different definition.
 
@@ -39,6 +41,12 @@ Composition roots may construct a higher layer from lower-layer implementations.
 never locates an application delegate, window, or concrete view controller. Cross-cutting wire
 contracts remain in the existing Foundation-only `ThreadingRemoteKit` and
 `ThreadingExtensionKit` packages rather than being copied into an application layer.
+
+`ThreadingDomain` is the first extracted layer. It owns the typed project, session, terminal,
+transcript, and account identities plus their storage-safe encoding behavior. Its Swift package has
+no dependencies and `scripts/check_module_boundaries.py` rejects any import other than Foundation.
+The application target currently exposes migration aliases so the extraction changes ownership
+without forcing a repository-wide import rewrite.
 
 The current source tree only approximates these responsibilities:
 
@@ -111,3 +119,20 @@ refresh through a recording capability without constructing `AppDelegate` or a w
 capability fails a dormant resume closed with HTTP 503. `scripts/check_dependency_boundaries.py`
 prevents the removed upward edge from returning and makes every remaining controller edge an
 explicit debt reduction.
+
+### Milestone 2 — compiler-enforced domain identities
+
+The first stable contracts now compile and test without the application target:
+
+| Metric | Milestone 1 | Milestone 2 | Change |
+|---|---:|---:|---:|
+| Threading application Swift files / lines | 750 / 322,177 | 750 / 321,993 | 184 identity lines moved out of the app target |
+| `ThreadingDomain` Swift files / lines | 0 / 0 | 1 / 197 | one Foundation-only compiler boundary |
+| UI-framework imports in Core/Models | 63 / 61 files | 63 / 61 files | unchanged; new domain module has zero |
+| Concrete UI-controller references in Core | 19 / 5 files | 19 / 5 files | unchanged; still ratcheted |
+| `ProjectStore.shared` | 345 / 68 files | 345 / 68 files | unchanged in this slice |
+
+The package test suite pins the existing single-value Codable shapes, path-component refusal,
+terminal history namespaces, and account-handle persistence semantics. Existing application tests
+continue through source-compatible aliases. This establishes a compiler boundary without claiming
+that persistence, runtime, application, or UI have already been extracted.

@@ -94,6 +94,7 @@
 		F1000001000000000000042 /* BorderBeamKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000011 /* BorderBeamKit */; };
 		F1000001000000000000039 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
 		F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000009 /* ThreadingRemoteKit */; };
+		D0A100010000000000000001 /* ThreadingDomain in Frameworks */ = {isa = PBXBuildFile; productRef = D0A100010000000000000003 /* ThreadingDomain */; };
 		D3EE00010000000000000001 /* ThreadingPeerTransport in Frameworks */ = {isa = PBXBuildFile; productRef = D3EE00010000000000000004 /* ThreadingPeerTransport */; };
 		F1000001000000000000040 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
 		A20000010000000000000012 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000010 /* SwiftTerm */; };
@@ -974,6 +975,7 @@
 				F1000001000000000000042 /* BorderBeamKit in Frameworks */,
 				F1000001000000000000039 /* ThreadingExtensionKit in Frameworks */,
 				F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */,
+				D0A100010000000000000001 /* ThreadingDomain in Frameworks */,
 				D3EE00010000000000000001 /* ThreadingPeerTransport in Frameworks */,
 				D1FF00010000000000000011 /* NativeDiffCore in Frameworks */,
 				D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */,
@@ -1618,6 +1620,7 @@
 				F4000001000000000000011 /* BorderBeamKit */,
 				F4000001000000000000007 /* ThreadingExtensionKit */,
 				F4000001000000000000009 /* ThreadingRemoteKit */,
+				D0A100010000000000000003 /* ThreadingDomain */,
 				D3EE00010000000000000004 /* ThreadingPeerTransport */,
 				D1FF00010000000000000001 /* NativeDiffCore */,
 				D1FF00010000000000000002 /* NativeDiffAppKit */,
@@ -1752,6 +1755,7 @@
 				F4000001000000000000012 /* XCLocalSwiftPackageReference "BorderBeamKit" */,
 				F4000001000000000000008 /* XCLocalSwiftPackageReference "ThreadingExtensionKit" */,
 				F4000001000000000000010 /* XCLocalSwiftPackageReference "ThreadingRemoteKit" */,
+				D0A100010000000000000002 /* XCLocalSwiftPackageReference "ThreadingDomain" */,
 				D3EE00010000000000000003 /* XCLocalSwiftPackageReference "ThreadingPeerTransport" */,
 				D1FF00010000000000000020 /* XCRemoteSwiftPackageReference "NativeDiffKit" */,
 				5AAA00010000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */,
@@ -3271,6 +3275,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingRemoteKit;
 		};
+		D0A100010000000000000002 /* XCLocalSwiftPackageReference "ThreadingDomain" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ThreadingDomain;
+		};
 		D3EE00010000000000000003 /* XCLocalSwiftPackageReference "ThreadingPeerTransport" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingPeerTransport;
@@ -3329,6 +3337,10 @@
 		F4000001000000000000009 /* ThreadingRemoteKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ThreadingRemoteKit;
+		};
+		D0A100010000000000000003 /* ThreadingDomain */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingDomain;
 		};
 		A20000010000000000000010 /* SwiftTerm */ = {
 			isa = XCSwiftPackageProductDependency;
