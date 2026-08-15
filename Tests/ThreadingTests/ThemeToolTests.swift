@@ -815,7 +815,11 @@ final class ThemeToolTests: XCTestCase {
                         "height": 30,
                         "button_glyph_style": "squares"
                       },
-                      "frame": {"width": 4, "corner_radius": 6}
+                      "frame": {
+                        "width": 4,
+                        "corner_radius": 6,
+                        "antialiases_corners": false
+                      }
                     }
                   }
                 }
@@ -835,6 +839,7 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertEqual(chrome.titleBar?.buttonGlyphStyle, "squares")
         XCTAssertEqual(chrome.frame?.width, 4)
         XCTAssertEqual(chrome.frame?.cornerRadius, 6)
+        XCTAssertEqual(chrome.frame?.antialiasesCorners, false)
         XCTAssertEqual(variant.material?.bevel?.width, 2)
         XCTAssertEqual(variant.material?.bevel?.style, "soft")
     }
@@ -863,7 +868,11 @@ final class ThemeToolTests: XCTestCase {
                 height: 30,
                 buttonGlyphStyle: "squares"
             ),
-            frame: AppThemeChromeFrameArguments(width: 4, cornerRadius: 6),
+            frame: AppThemeChromeFrameArguments(
+                width: 4,
+                cornerRadius: 6,
+                antialiasesCorners: false
+            ),
             removeFrame: nil,
             remove: nil
         )
@@ -906,6 +915,7 @@ final class ThemeToolTests: XCTestCase {
         let frame = try XCTUnwrap(chromeDocument["frame"] as? [String: Any])
         XCTAssertEqual(frame["width"] as? Double, 4)
         XCTAssertEqual(frame["corner_radius"] as? Double, 6)
+        XCTAssertEqual(frame["antialiases_corners"] as? Bool, false)
 
         // An unrelated patch says nothing about chrome, so the frame stays taken over —
         // the inherit rule the ChromeChange type exists for.
@@ -1012,6 +1022,12 @@ final class ThemeToolTests: XCTestCase {
         for field in ["title_bar", "frame", "remove_frame", "remove"] {
             XCTAssertNotNil(chromeProperties[field], "chrome schema lost \(field)")
         }
+        let frame = try XCTUnwrap(chromeProperties["frame"] as? [String: Any])
+        let frameProperties = try XCTUnwrap(frame["properties"] as? [String: Any])
+        XCTAssertNotNil(
+            frameProperties["antialiases_corners"],
+            "frame schema lost its rasterization choice"
+        )
         let material = try XCTUnwrap(lightProperties["material"] as? [String: Any])
         let materialProperties = try XCTUnwrap(material["properties"] as? [String: Any])
         let bevel = try XCTUnwrap(materialProperties["bevel"] as? [String: Any])

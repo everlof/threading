@@ -59,6 +59,7 @@ enum WindowChromeAppearance {
         let classicSkin: ClassicSkin?
         let frameWidth: CGFloat
         let frameCornerRadius: CGFloat
+        let frameAntialiasesCorners: Bool
     }
 
     /// What the current theme asks the frame to draw, or nil while the window is native —
@@ -117,7 +118,8 @@ enum WindowChromeAppearance {
             frameCornerRadius: CGFloat(
                 chrome.frame?.cornerRadius
                     ?? WindowChromeStyleLimits.defaultFrameCornerRadius
-            )
+            ),
+            frameAntialiasesCorners: chrome.frame?.antialiasesCorners ?? true
         )
     }
 

@@ -644,7 +644,8 @@ extension AgentToolCoordinator {
             )
             style.frame = WindowChromeStyle.Frame(
                 width: frame.width ?? base.width,
-                cornerRadius: frame.cornerRadius ?? base.cornerRadius
+                cornerRadius: frame.cornerRadius ?? base.cornerRadius,
+                antialiasesCorners: frame.antialiasesCorners ?? base.antialiasesCorners
             )
         }
 
@@ -1666,7 +1667,8 @@ extension AgentToolCoordinator {
         if let frame = chrome.frame {
             document["frame"] = [
                 "width": frame.width,
-                "corner_radius": frame.cornerRadius
+                "corner_radius": frame.cornerRadius,
+                "antialiases_corners": frame.antialiasesCorners
             ]
         }
         return document

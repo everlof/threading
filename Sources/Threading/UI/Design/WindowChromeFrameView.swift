@@ -60,6 +60,14 @@ final class WindowChromeFrameView: NSView, ThemedComponent {
             xRadius: cornerRadius,
             yRadius: cornerRadius
         )
+
+        // A pixel grammar still needs the transparent silhouette supplied by a radius, but its
+        // pen has no partial coverage. Keep fill and seat under one rasterization rule: hardening
+        // only the stroke leaves the ground fill's antialiased skirt visible as a dark halo.
+        NSGraphicsContext.current?.saveGraphicsState()
+        defer { NSGraphicsContext.current?.restoreGraphicsState() }
+        NSGraphicsContext.current?.shouldAntialias = resolved.frameAntialiasesCorners
+
         if cornerRadius > 0 {
             // The untitled window mask is rectangular. Clear the four outer corner pixels so
             // the nonopaque window and its shadow follow the authored Aqua curve.
@@ -104,8 +112,6 @@ final class WindowChromeFrameView: NSView, ThemedComponent {
         // Hard lines, never smoothed — the rule for every bevelled edge; see
         // `ThemedSurface.drawBevelled`. The construction itself is the shared
         // `WindowChromeBevelEdge`, the same rings the BeOS tab wears.
-        NSGraphicsContext.current?.saveGraphicsState()
-        defer { NSGraphicsContext.current?.restoreGraphicsState() }
         NSGraphicsContext.current?.shouldAntialias = false
 
         WindowChromeBevelEdge.drawRaisedRings(around: frameRect)

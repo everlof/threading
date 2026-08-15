@@ -1236,10 +1236,12 @@ struct AppThemeChromeTextureArguments: Decodable, Sendable {
 struct AppThemeChromeFrameArguments: Decodable, Sendable {
   let width: Double?
   let cornerRadius: Double?
+  let antialiasesCorners: Bool?
 
   private enum CodingKeys: String, CodingKey {
     case width
     case cornerRadius = "corner_radius"
+    case antialiasesCorners = "antialiases_corners"
   }
 }
 
@@ -6120,6 +6122,11 @@ enum MCPTools {
           "corner_radius": MCPPropertySchema(
             type: .number,
             description: "Outer frame corner radius, 0–16 points. Default 0."
+          ),
+          "antialiases_corners": MCPPropertySchema(
+            type: .boolean,
+            description: "Whether rounded turns use smooth partial-coverage pixels. Default true; "
+              + "false gives pixel grammars a one-bit stepped curve."
           )
         ]
       ),

@@ -88,12 +88,22 @@ final class WindowChromeStyleTests: XCTestCase {
                 visibleButtons: [.close, .zoom, .depth],
                 classicSkin: .init(titleBarAsset: "classic-titlebar.png")
             ),
-            frame: .init(width: 4, cornerRadius: 6)
+            frame: .init(width: 4, cornerRadius: 6, antialiasesCorners: false)
         )
 
         let data = try JSONEncoder().encode(style)
         let decoded = try JSONDecoder().decode(WindowChromeStyle.self, from: data)
         XCTAssertEqual(decoded, style)
+        XCTAssertFalse(try XCTUnwrap(decoded.frame).antialiasesCorners)
+    }
+
+    func testAnOlderFrameDocumentKeepsSmoothCorners() throws {
+        let frame = try JSONDecoder().decode(
+            WindowChromeStyle.Frame.self,
+            from: Data(#"{"width":1,"cornerRadius":6}"#.utf8)
+        )
+
+        XCTAssertTrue(frame.antialiasesCorners)
     }
 
     func testTigerBrushedMetalTextureRoundTripsByItsStableWireName() throws {

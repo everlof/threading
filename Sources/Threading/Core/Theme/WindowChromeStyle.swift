@@ -293,13 +293,22 @@ struct WindowChromeStyle: Codable, Equatable {
         /// longer supplies for a takeover window.
         var cornerRadius: Double
 
-        init(width: Double, cornerRadius: Double = 0) {
+        /// Whether AppKit may distribute the rounded turn over partial-coverage pixels. Pixel
+        /// grammars turn this off so a curved silhouette is still made from their one-bit pen.
+        var antialiasesCorners: Bool
+
+        init(
+            width: Double,
+            cornerRadius: Double = 0,
+            antialiasesCorners: Bool = true
+        ) {
             self.width = width
             self.cornerRadius = cornerRadius
+            self.antialiasesCorners = antialiasesCorners
         }
 
         private enum CodingKeys: String, CodingKey {
-            case width, cornerRadius
+            case width, cornerRadius, antialiasesCorners
         }
 
         init(from decoder: Decoder) throws {
@@ -308,6 +317,10 @@ struct WindowChromeStyle: Codable, Equatable {
                 ?? WindowChromeStyleLimits.defaultFrameWidth
             cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
                 ?? WindowChromeStyleLimits.defaultFrameCornerRadius
+            antialiasesCorners = try container.decodeIfPresent(
+                Bool.self,
+                forKey: .antialiasesCorners
+            ) ?? true
         }
     }
 }

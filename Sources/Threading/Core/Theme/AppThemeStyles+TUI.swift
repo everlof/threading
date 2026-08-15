@@ -172,11 +172,10 @@ extension AppThemeStyles {
                     inactiveTexture: .init(kind: .rule, color: hex("#252E39")),
                     visibleButtons: [.windowMenu, .minimize, .zoom, .close]
                 ),
-                // One point, and a small curve. The rule character is one cell wide however
-                // wide the cell is, and the curve is the single concession to the platform:
-                // a hard-cornered rectangle is right for a window drawn on a text console and
-                // wrong for one floating over a desktop, where every neighbour is rounded.
-                frame: .init(width: 1, cornerRadius: 6)
+                // One point, and a small curve. The radius is the concession to the platform;
+                // the rasterization is not. Its stepped turn uses the same one-bit pen as every
+                // rule inside the text console instead of inventing a soft coverage gradient.
+                frame: .init(width: 1, cornerRadius: 6, antialiasesCorners: false)
             )
         )]
     )

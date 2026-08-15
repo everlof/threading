@@ -793,8 +793,9 @@ draws the rectangular application body below it, and `WindowChromeCoordinator` m
 window backing nonopaque only for that shape so the system shadow follows the silhouette.
 The same transparent-backing path is used when `chrome.frame.corner_radius` is nonzero: the
 permanent content root receives the radius and clips the workspace, while `WindowChromeFrameView`
-clears and strokes the matching rounded outline. A zero radius remains the backwards-compatible
-square default for existing theme documents.
+clears and strokes the matching rounded outline. `chrome.frame.antialiases_corners` controls
+whether that outline has smooth coverage or a one-bit stepped turn; older documents default to
+smooth, and a zero radius remains the backwards-compatible square default.
 
 **The backing is stated at birth as well as at the flip.** A shaped theme active at launch never
 runs `enterTakeover` — `createWindow` builds the window frameless already and the coordinator
@@ -941,12 +942,12 @@ beside it — correct shapes, wrong voice.
 
 `bevel: nil` is load-bearing rather than an omission: it is what routes `WindowChromeFrameView`
 to its single one-point seat instead of the raised two-ring edge, which is the entire
-difference between a drawn box and a moulded one. The frame keeps a small corner radius, the
-one concession to the platform — a hard rectangle is right on a text console and wrong floating
-over a desktop where every neighbour is rounded.
+difference between a drawn box and a moulded one. The frame keeps a small corner radius as its
+one concession to the platform, but states `antialiases_corners: false`: its silhouette turns
+in deliberate one-bit steps rather than AppKit's generic coverage ramp.
 
 That seat keeps the theme's `border` ink wherever it already registers against the ground, so
-TUI's title seam, control rules, straight frame runs, and antialiased corner remain one drawing.
+TUI's title seam, control rules, straight frame runs, and stepped corner remain one drawing.
 Only an authored border below the frame's measured visibility floor is raised to the generic
 tertiary-ink fallback; replacing every flat frame unconditionally made TUI's straight edge much
 brighter than the corner it turned through, which read as a hook at the join.

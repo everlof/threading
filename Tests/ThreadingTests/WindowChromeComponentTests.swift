@@ -978,8 +978,8 @@ final class WindowChromeComponentTests: XCTestCase {
 
     /// TUI is one box-drawing language: the title seam, control rules, and window frame all
     /// state the same border ink. The generic flat-frame fallback used to replace only the last
-    /// of those with tertiary text. Its bright straight run then faded toward the authored rule
-    /// as the rounded corner antialiased, leaving a visible hook at the join.
+    /// of those with tertiary text, then AppKit spread the turn across five un-authored coverage
+    /// colours. A text-mode curve is still a one-bit drawing.
     func testTextModeFrameContinuesItsAuthoredRuleAroundTheWindow() throws {
         AppThemePalette.set(AppThemeStyles.tui)
         let chrome = try XCTUnwrap(takeoverChrome(of: AppThemeStyles.tui))
@@ -1001,6 +1001,28 @@ final class WindowChromeComponentTests: XCTestCase {
             sideRule,
             Design.Surface.border,
             "the text-mode frame replaced its authored side rule"
+        )
+
+        var cornerColours = Set<String>()
+        let span = min(16, min(rep.pixelsWide, rep.pixelsHigh))
+        for y in 0..<span {
+            for x in (rep.pixelsWide - span)..<rep.pixelsWide {
+                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
+                    continue
+                }
+                let bytes = [
+                    color.redComponent,
+                    color.greenComponent,
+                    color.blueComponent,
+                    color.alphaComponent
+                ].map { Int(($0 * 255).rounded()) }
+                cornerColours.insert(bytes.map(String.init).joined(separator: ","))
+            }
+        }
+        XCTAssertLessThanOrEqual(
+            cornerColours.count,
+            3,
+            "the text-mode turn introduced coverage-gradient colours: \(cornerColours.sorted())"
         )
     }
 
