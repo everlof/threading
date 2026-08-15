@@ -40,6 +40,13 @@ for package in ThreadingExtensionKit ThreadingRemoteKit ThreadingWasmRuntime Thr
     swift test --package-path "${repository_directory}/Packages/${package}"
 done
 
+say "Checking generated component inventory"
+swift run \
+    --package-path "${repository_directory}/Packages/ThreadingExtensionKit" \
+    ThreadingComponentCatalogGenerator \
+    --check \
+    "${repository_directory}/docs/extensions/generated"
+
 say "Validating recorded agent scenarios"
 "${script_directory}/check_agent_scenarios.sh"
 
