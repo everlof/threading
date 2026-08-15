@@ -143,9 +143,9 @@ Components so far:
 | `ThemedIconButton` | **Every** icon-only button: toolbar actions, a tab's `×`, a sidebar row's `⋯`. The role states a *slot* (layout: what the padding is measured from) and a *point size* (optics: what the symbol is configured at) — see the 2026-07-31 note for why those are two numbers. `setImage` is its one documented exception to "a symbol": artwork whose silhouette is not ours — an installed application's own icon, which is what the header's Open in control wears (see [`external-apps.md`](external-apps.md)). Foreign artwork is capped to the slot (`GlyphView.slot`); `setSymbol` clears the cap and configures to fit. A hidden but pointerless-accessible control may request deferred glyph materialization: its real geometry, action and accessibility shell remain installed, while CoreUI resolves only the latest symbol or image at first draw/reveal. |
 | `GlyphView` | A tinted glyph on the device pixel grid — `NSImageView` minus the fractional placement, inside `ThemedIconButton`, `ThemedTabItemView` and `PageTitleView`. A symbol's natural size is fractional by design, so an image view centres it at a half-point offset: slight softness at 2×, a smeared stroke at 1×. This view centres the same rect and then `backingAlignedRect`s it (inward — nearest can push an edge past `bounds`, and a view clips its own drawing) before handing it to `TemplateImageDrawing`. Decorative; the control around it carries the name. |
 | `ThemedFileIconView` | The File pane's one icon renderer. System keeps the path's native Finder artwork; authored themes use a semantic SF Symbol and theme roles, without paying LaunchServices for artwork they will not draw. It classifies from path metadata only, aligns either renderer to the device pixel grid, and switches live between them. |
-| `PaneFooterView` | The bottom band of a pane: hairline, band height, corner-aware insets, controls aligned by their ink (`OpticalInsetProviding`). |
+| `PaneFooterView` | The bottom band of a pane: hairline, band height, corner-aware insets, controls aligned by their ink (`OpticalInsetProviding`) horizontally and — for loose text — vertically: a bare label sits on the first titled control's baseline (`TextBaselineProviding`, `PaneBandTextAlignment`) rather than on its own centre, because two point sizes centred never share one. See [2026-08-15 below](#2026-08-15--a-band-centred-its-text-and-centring-is-not-a-line). |
 | `PaneFoldDivider` | The fold *inside* a pane, where the two halves are not both flexible — the attachments chronology above its preview. The rule keeps the theme's weight at the top edge and the band under it is the pane's own gap made hittable, so a seam becomes a grip without anything below it moving. It reports travel in points and nothing else: only the host knows what floor and ceiling the travel is answered against, and the host is also where a stored position is clamped. The seam takes the accent wherever a drag would attach — pointer, hand or keyboard focus — which is `ThemedSplitView`'s answer, and the reason focus is shown that way rather than as a ring around a 7pt band. Arrow keys and the splitter role's increment/decrement move it too; a double-click asks the host to place it again. Not `NSSplitView`: one of the halves states a content-derived height, which a split view has nowhere to say. |
-| `PaneHeaderView` | The footer's mirror at a pane's top. Its live height is the content pane's header-strip measure (`PaneHeaderDefaults.height` reads it): row, equal top and bottom air, then the theme's rule. It remeasures on a theme change, so the two panes' separators land on one line without using their ink as spacing. |
+| `PaneHeaderView` | The footer's mirror at a pane's top. Its live height is the content pane's header-strip measure (`PaneHeaderDefaults.height` reads it): row, equal top and bottom air, then the theme's rule. It remeasures on a theme change, so the two panes' separators land on one line without using their ink as spacing. It states the footer's text-baseline rule too. |
 | `ControlRowView` | Those two bands' rule for a row that belongs to **content** rather than to chrome: a leading run, a trailing run, one shared centreline, and one shared height. The height is the row's to state and the members' to take — every `ControlRowMember` (`ChipView`, `ThemedButton`, `ThemedIconButton`, `ThemedSegmentedControl`) is handed a `ControlRowMetrics` and resizes to it, glyph included, and only a row can make one. `.compact` resolves to the material's `choiceHeight`, so a style switch relevels the whole row rather than half of it. The runs are pinned to opposite edges with a real inequality between them, and the outermost **visible** control on each side is aligned by ink. See [2026-08-05 below](#2026-08-05--a-row-of-controls-had-no-owner). |
 | `WindowTitleBandView` | The title band a chrome-takeover theme draws across the window's top (`WindowChromeStyle`, see [`window-chrome.md`](window-chrome.md)): active/inactive gradients and texture, full-width or compact leading-tab shape, optional app icon, leading or centred upright/italic title, trailing/split/bookended authored caption controls, and the titlebar's own gestures — a press drags the window, a double-click performs the user's System Settings choice. Application commands stay in `WindowCommandBandView` below. Not a control (its `interactiveComponent` exception records why); its buttons are. |
 | `WindowCommandBandView` | The button-face row beneath an app-drawn title bar, hosting the sidebar/history controls the native toolbar held. It keeps application commands out of title-bar geometry and uses ordinary chrome ink. Collapses with the title band in native dress. |
@@ -2574,3 +2574,45 @@ edges, in every direction, and anything drawn to a fixed margin has to be told w
 finishes.** Text asks it as a diagonal clearance (`Spacing.inset(inside:)`), a fill asks it as an
 edge reach (`Radius.edgeReach(of:clearing:)`), and a shape asks it as a fitted corner
 (`ThemedSurface.Shape`, `Radius.control(fitting:)`).
+
+## 2026-08-15 — a band centred its text, and centring is not a line
+
+Reported from a screenshot of the sidebar's footer: the DEV build mark "doesn't align" with the
+Settings button beside it. Measured off the screenshot, the mark's baseline sat two device pixels
+above the title's, and its cap tops poked past the taller font's ascenders — small enough that no
+frame assertion would ever have said so, large enough that the eye read the badge as floating.
+
+The cause was structural, in two layers. `PaneFooterView` centred every band item on
+`centerYAnchor`, which is exactly right for icon buttons and plates and never right for two runs
+of *text at different sizes*: the Settings title is 12pt `controlRegular`, the badge 11pt
+`detail`, and centring two line boxes aligns their middles, not their baselines. Under SF the
+error is a fraction of a point; a theme family widens it, the same arithmetic `lineHeight(of:)`
+and the chord's drop already record. The attachments pane's scope band wore the identical bug —
+an 11pt caption centred against a titled toggle.
+
+And the call site could not have fixed it, because `ThemedButton` draws its title by hand and
+never told Auto Layout where that title sits: `NSView`'s default first baseline is a frame edge,
+so a `firstBaselineAnchor` constraint against the button aligned text to its bottom. The button
+had already solved this exact problem *internally* — its shortcut chord centres its ink band on
+the title's ink band — without exposing any of it to a sibling.
+
+Two seams, both now stated:
+
+- **`ThemedButton` reports its title's baseline** (`firstBaselineOffsetFromTop`, and the last
+  baseline from the other edge), computed from its intrinsic height with the same numbers
+  `drawContent` lays the title out with — every host gives this control its intrinsic measure,
+  and a value read from the solved frame would be a moving target while the engine is solving
+  it. The pixel-title path answers too, from the cell's own ink rows. The conformance that
+  advertises this is `TextBaselineProviding`: a marker whose whole contract is "my baseline
+  anchor is the drawn line, not a frame edge".
+- **The bands align loose text by baseline** (`PaneBandTextAlignment`, used by both
+  `PaneFooterView` and `PaneHeaderView`): controls keep the band's centre — their plates set the
+  band's rhythm, and tilting a hover surface to serve its title would move every control in the
+  chrome — while a bare `NSTextField` joins the first titled control's line instead of centring
+  itself. A band with no titled control centres everything, as before.
+
+What a render found became assertions: `PaneFooterTests` pins the constraint (including across
+the two runs, which is the scope band's shape, and across a live font change),
+`PaneFooterRenderTests.testBandTextSharesOneDrawnBaseline` renders the band at 2× and requires
+the title's and the badge's most common bottom-ink rows to land on one device pixel — the
+non-circular half, proving the *reported* baseline is the *drawn* one.

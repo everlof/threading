@@ -131,6 +131,117 @@ final class PaneFooterRenderTests: XCTestCase {
         print("Rendered silence-gate footer storybook to \(directory.path)")
     }
 
+    /// The drawn proof behind `PaneFooterTests`'s baseline assertions: the baseline the button
+    /// *reports* has to be the line its title is actually inked on, or the band's constraint
+    /// aligns text to a fiction while both reported numbers agree. Rendered at 2×, the title's
+    /// and the badge's most common bottom-ink rows must land on the same device pixel row —
+    /// one of tolerance for antialiasing. Before the band aligned by baseline, this font pair
+    /// put the smaller text about three device pixels above the line.
+    func testBandTextSharesOneDrawnBaseline() throws {
+        defer { AppThemePalette.set(.system) }
+        AppThemePalette.set(.system)
+        let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+
+        var measured: (title: Int, badge: Int)?
+        appearance.performAsCurrentDrawingAppearance {
+            MainActor.assumeIsolated {
+                let button = ThemedButton()
+                // No descenders, so the ink's bottom row is the baseline.
+                button.title = "Handle"
+                button.isBordered = false
+                button.font = .systemFont(ofSize: 14)
+                let label = NSTextField(labelWithString: "DEV")
+                label.font = .systemFont(ofSize: 10)
+                label.textColor = Design.Text.secondary
+
+                let footer = PaneFooterView(leading: [button, label], margin: .paneEdge)
+                let host = ThemedSurfaceView()
+                host.frame = NSRect(
+                    x: 0,
+                    y: 0,
+                    width: SidebarDefaults.defaultWidth,
+                    height: Design.Size.footerHeight * 2
+                )
+                host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+                host.appearance = NSAppearance(named: .aqua)
+                host.addSubview(footer)
+                NSLayoutConstraint.activate([
+                    footer.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                    footer.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+                    footer.bottomAnchor.constraint(equalTo: host.bottomAnchor)
+                ])
+                host.layoutSubtreeIfNeeded()
+
+                guard let rep = NSBitmapImageRep(
+                    bitmapDataPlanes: nil,
+                    pixelsWide: Int(host.bounds.width * Ink.scale),
+                    pixelsHigh: Int(host.bounds.height * Ink.scale),
+                    bitsPerSample: 8,
+                    samplesPerPixel: 4,
+                    hasAlpha: true,
+                    isPlanar: false,
+                    colorSpaceName: .calibratedRGB,
+                    bytesPerRow: 0,
+                    bitsPerPixel: 0
+                ) else { return }
+                rep.size = host.bounds.size
+                host.cacheDisplay(in: host.bounds, to: rep)
+
+                guard let title = Self.dominantBottomInkRow(of: button, in: host, from: rep),
+                      let badge = Self.dominantBottomInkRow(of: label, in: host, from: rep)
+                else { return }
+                measured = (title, badge)
+            }
+        }
+
+        let rows = try XCTUnwrap(measured, "found no ink to measure")
+        XCTAssertLessThanOrEqual(
+            abs(rows.title - rows.badge),
+            1,
+            "the badge's drawn baseline (row \(rows.badge)) left the title's (row \(rows.title))"
+        )
+    }
+
+    // MARK: - Ink measurement
+
+    private enum Ink {
+        /// Rendered at Retina scale so a half-point drift is a whole measured pixel.
+        static let scale: CGFloat = 2
+        /// How far a channel-weighted luminance must sit from the ground to count as ink.
+        static let threshold: CGFloat = 0.15
+    }
+
+    /// The most common bottom-ink pixel row across `view`'s columns — the drawn baseline, for
+    /// text whose glyphs bottom out on it. The mode rather than the maximum, so a rounded
+    /// glyph's one-pixel overshoot cannot speak for the string.
+    private static func dominantBottomInkRow(
+        of view: NSView,
+        in host: NSView,
+        from rep: NSBitmapImageRep
+    ) -> Int? {
+        let rect = view.convert(view.bounds, to: host)
+        let ground = luminance(rep, 1, 1)
+
+        var counts: [Int: Int] = [:]
+        for x in Int(rect.minX * Ink.scale)..<Int(rect.maxX * Ink.scale) {
+            // Unflipped view coordinates against a top-down bitmap: the frame's maxY is the
+            // pixel range's top.
+            let top = Int((host.bounds.height - rect.maxY) * Ink.scale)
+            let bottom = Int((host.bounds.height - rect.minY) * Ink.scale)
+            let inked = (top..<bottom).filter { abs(luminance(rep, x, $0) - ground) > Ink.threshold }
+            if let lowest = inked.max() {
+                counts[lowest, default: 0] += 1
+            }
+        }
+        return counts.max(by: { $0.value < $1.value || ($0.value == $1.value && $0.key < $1.key) })?.key
+    }
+
+    private static func luminance(_ rep: NSBitmapImageRep, _ x: Int, _ y: Int) -> CGFloat {
+        guard let color = rep.colorAt(x: x, y: y) else { return 0 }
+        return 0.299 * color.redComponent + 0.587 * color.greenComponent
+            + 0.114 * color.blueComponent
+    }
+
     // MARK: - Helpers
 
     /// The sidebar footer's exact shape: the band at the pane's bottom on the pane's own

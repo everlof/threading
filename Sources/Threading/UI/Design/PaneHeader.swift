@@ -125,9 +125,23 @@ final class PaneHeaderView: NSView {
     }
 
     private func install(leading: [NSView], trailing: [NSView]) {
+        // One text line per band: controls are centred, and loose text sits on the first
+        // titled control's baseline rather than on its own centre — the footer's rule,
+        // mirrored, including mounting every view before constraining any: a follower may
+        // precede its anchor, and a baseline constraint against a view not yet in the
+        // hierarchy has no common ancestor. See `PaneBandTextAlignment`.
+        let baselineAnchor = PaneBandTextAlignment.anchor(among: leading + trailing)
         for view in leading + trailing {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
+        }
+        for view in leading + trailing {
+            if let baselineAnchor, PaneBandTextAlignment.joins(view, anchoredBy: baselineAnchor) {
+                view.firstBaselineAnchor.constraint(
+                    equalTo: baselineAnchor.firstBaselineAnchor
+                ).isActive = true
+                continue
+            }
             // Centred above the rule rather than across it, so the air above the row and the
             // air below it are the same air at every authored rule weight.
             view.centerYAnchor.constraint(equalTo: contentCenterYAnchor).isActive = true

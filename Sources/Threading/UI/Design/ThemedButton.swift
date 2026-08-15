@@ -26,7 +26,7 @@ import CoreText
 /// should read as a mark. The flags stay because the call sites already say them; a new screen
 /// should say `emphasis` instead, because "which of the three is this" is the question being
 /// answered and `isBordered = false` is not an answer to it.
-final class ThemedButton: ThemedControl, OpticalInsetProviding {
+final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProviding {
 
     // MARK: - Geometry
 
@@ -477,6 +477,34 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
     /// and stopped being right when the chooser's height became the theme's. A bordered button
     /// beside a chip under Platinum stood ten points taller than it.
     private var rowHeight: CGFloat?
+
+    /// Where the title's baseline sits, stated to Auto Layout — the `TextBaselineProviding`
+    /// promise. `NSView`'s default answer is a frame edge, so a bare label baseline-constrained
+    /// to this button hung from its bottom; centring the label instead misaligned by half the
+    /// difference in the two fonts' metrics, which is the bug the pane bands wore (a point
+    /// under SF, more under a theme family — the story `lineHeight(of:)` and the chord's drop
+    /// already tell).
+    ///
+    /// Computed from the *intrinsic* height rather than `bounds`: every host gives this control
+    /// its intrinsic measure (the bands centre it unconstrained, and a `ControlRowView`'s
+    /// promotion feeds `rowHeight` back into that measure), and a value read from the solved
+    /// frame would be a moving target while the engine is still solving it. The arithmetic is
+    /// `drawContent`'s, read in reverse: the line box is centred in the face, and `draw(in:)`
+    /// sets the baseline down from the box's top by the layout manager's own offset.
+    override var firstBaselineOffsetFromTop: CGFloat {
+        let height = intrinsicContentSize.height
+        if usesPixelTitle {
+            return (height - PixelTitleArtwork.cellHeight) / 2
+                + CGFloat(PixelTitleArtwork.inkRows)
+        }
+        return (height - titleLineHeight) / 2
+            + NSLayoutManager().defaultBaselineOffset(for: titleFont)
+    }
+
+    /// One line of text, so the last baseline is the first, measured from the other edge.
+    override var lastBaselineOffsetFromBottom: CGFloat {
+        intrinsicContentSize.height - firstBaselineOffsetFromTop
+    }
 
     // MARK: - Interaction
 
@@ -942,7 +970,9 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
     enum PixelTitleArtwork {
         static let cellWidth: CGFloat = 5
         static let cellHeight: CGFloat = 6
-        private static let glyphHeight = 5
+        /// The rows of ink above the sixth-row baseline/spacing cell — which is also where the
+        /// baseline sits, measured from the cell's top. `firstBaselineOffsetFromTop` reads it.
+        static let inkRows = 5
 
         static func canDraw(_ title: String) -> Bool {
             title.allSatisfy { glyphs[$0] != nil }
@@ -985,7 +1015,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
                 for (rowIndex, row) in rows.enumerated() {
                     let y = isFlipped
                         ? originY + CGFloat(rowIndex)
-                        : originY + CGFloat(glyphHeight - rowIndex)
+                        : originY + CGFloat(inkRows - rowIndex)
                     for (column, pixel) in row.enumerated() where pixel == "#" {
                         NSRect(
                             x: originX + CGFloat(column),
@@ -999,7 +1029,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding {
                 if mnemonic == String(character).uppercased() {
                     NSRect(
                         x: originX,
-                        y: isFlipped ? originY + CGFloat(glyphHeight) : originY,
+                        y: isFlipped ? originY + CGFloat(inkRows) : originY,
                         width: cellWidth - 1,
                         height: 1
                     ).fill()

@@ -114,9 +114,24 @@ final class PaneFooterView: NSView {
     }
 
     private func install(leading: [NSView], trailing: [NSView]) {
+        // One text line per band: controls are centred, and loose text sits on the first
+        // titled control's baseline rather than on its own centre — two point sizes centred
+        // never share one. See `PaneBandTextAlignment` for the rule and the marks that wore
+        // the bug. Every view is mounted before any is constrained: the scope band's label
+        // *leads* the control whose line it joins, and a baseline constraint activated
+        // against a view not yet in the hierarchy has no common ancestor to hang from.
+        let baselineAnchor = PaneBandTextAlignment.anchor(among: leading + trailing)
         for view in leading + trailing {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
+        }
+        for view in leading + trailing {
+            if let baselineAnchor, PaneBandTextAlignment.joins(view, anchoredBy: baselineAnchor) {
+                view.firstBaselineAnchor.constraint(
+                    equalTo: baselineAnchor.firstBaselineAnchor
+                ).isActive = true
+                continue
+            }
             // Centred in the band rather than pinned to the bottom, so the air above the row
             // and the air below it are the same air — and both are the band's, stated once.
             view.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true

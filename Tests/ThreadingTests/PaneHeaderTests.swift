@@ -155,6 +155,27 @@ final class PaneHeaderTests: XCTestCase {
         XCTAssertEqual(second.frame.minX - first.frame.maxX, Design.Spacing.small)
     }
 
+    // MARK: - Baseline alignment
+
+    /// The footer's text rule, mirrored — see `PaneFooterTests` for the full set; this pins
+    /// that the header states the same one.
+    func testLooseTextSitsOnTheTitledControlsBaseline() {
+        let button = ThemedButton()
+        button.title = "Projects"
+        button.isBordered = false
+        button.font = .systemFont(ofSize: 14)
+        let label = NSTextField(labelWithString: "DEV")
+        label.font = .systemFont(ofSize: 10)
+        let header = PaneHeaderView(leading: [button, label])
+        _ = host(header)
+
+        XCTAssertEqual(
+            label.frame.maxY - label.firstBaselineOffsetFromTop,
+            button.frame.maxY - button.firstBaselineOffsetFromTop,
+            accuracy: 0.5
+        )
+    }
+
     // MARK: - Margin
 
     /// The reason `PaneBandMargin` exists, stated as a number.

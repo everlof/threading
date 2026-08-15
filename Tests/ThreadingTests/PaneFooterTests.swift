@@ -98,6 +98,82 @@ final class PaneFooterTests: XCTestCase {
         XCTAssertEqual(second.frame.minX - first.frame.maxX, Design.Spacing.small)
     }
 
+    // MARK: - Baseline alignment
+
+    /// Where a view's first baseline landed in its superview, from AppKit's own report.
+    /// Unflipped coordinates: the frame's top is `maxY`, and the offset is measured down
+    /// from it.
+    private func baselineY(of view: NSView) -> CGFloat {
+        view.frame.maxY - view.firstBaselineOffsetFromTop
+    }
+
+    /// A bare label beside a titled button sits on the button's baseline, not on its own
+    /// centre — centred, the two fonts' metrics put the smaller text visibly above the line
+    /// (the DEV build mark beside Settings). The fonts here are further apart than the
+    /// product's so a regression to centring is a point and a half, not a rounding error.
+    func testLooseTextSitsOnTheTitledControlsBaseline() {
+        let button = ThemedButton()
+        button.title = "Settings"
+        button.isBordered = false
+        button.font = .systemFont(ofSize: 14)
+        let label = NSTextField(labelWithString: "DEV")
+        label.font = .systemFont(ofSize: 10)
+        let footer = PaneFooterView(leading: [button, label])
+        _ = host(footer)
+
+        XCTAssertEqual(baselineY(of: label), baselineY(of: button), accuracy: 0.5)
+        // The anchor is still the band's: the control keeps the centre, the text joins it.
+        XCTAssertEqual(button.frame.midY, footer.bounds.midY, accuracy: 0.5)
+    }
+
+    /// The attachments scope band's exact shape — the label leads, the titled control trails —
+    /// so the line is the band's, not the leading run's.
+    func testTextJoinsTheBaselineAcrossTheTwoRuns() {
+        let label = NSTextField(labelWithString: "3 files outside the project")
+        label.font = .systemFont(ofSize: 10)
+        let button = ThemedButton()
+        button.title = "Allow"
+        button.isBordered = false
+        button.font = .systemFont(ofSize: 14)
+        let footer = PaneFooterView(leading: [label], trailing: [button])
+        _ = host(footer)
+
+        XCTAssertEqual(baselineY(of: label), baselineY(of: button), accuracy: 0.5)
+    }
+
+    /// An icon-only control never leaves the band's centre for a text line it has no text on.
+    func testAnIconOnlyControlStaysCentredBesideTheTextLine() {
+        let button = ThemedButton()
+        button.title = "Settings"
+        button.isBordered = false
+        let label = NSTextField(labelWithString: "DEV")
+        label.font = Design.Typography.detail()
+        let gate = ThemedIconButton(symbolName: "speaker.slash", accessibility: "Silence", target: .inline)
+        let footer = PaneFooterView(leading: [button, label], trailing: [gate])
+        _ = host(footer)
+
+        XCTAssertEqual(gate.frame.midY, footer.bounds.midY, accuracy: 0.5)
+    }
+
+    /// A theme may retitle and re-size the band's text live; the line has to follow the new
+    /// font rather than stay where the old one was reported. This is the assertion that the
+    /// baseline `ThemedButton` states is re-read after `invalidateIntrinsicContentSize`.
+    func testTheBaselineFollowsAFontChange() {
+        let button = ThemedButton()
+        button.title = "Settings"
+        button.isBordered = false
+        button.font = .systemFont(ofSize: 12)
+        let label = NSTextField(labelWithString: "DEV")
+        label.font = .systemFont(ofSize: 10)
+        let footer = PaneFooterView(leading: [button, label])
+        let container = host(footer)
+
+        button.font = .systemFont(ofSize: 16)
+        container.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(baselineY(of: label), baselineY(of: button), accuracy: 0.5)
+    }
+
     // MARK: - Margin
 
     /// `.paneEdge` measures from the band itself — see `PaneBandMargin`, and `PaneHeaderTests`
