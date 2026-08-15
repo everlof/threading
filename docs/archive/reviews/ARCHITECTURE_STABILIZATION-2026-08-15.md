@@ -273,7 +273,7 @@ The follow-up review began at `d0351b1a^` with this common report definition:
 
 | Metric | Review baseline | Closure | Change |
 |---|---:|---:|---:|
-| Threading Swift files / lines | 788 / 327,076 | 793 / 328,641 | +5 / +1,565 for typed declarations, application interfaces and proofs |
+| Threading Swift files / lines | 788 / 327,076 | 793 / 328,643 | +5 / +1,567 for typed declarations, application interfaces and proofs |
 | `static … shared` declarations | 89 / 87 files | 89 / 87 files | unchanged; no service locator added |
 | `ProjectStore.shared` | 302 / 66 files | 247 / 63 files | −55 / −3 files |
 | `AgentRuntime.shared` | 116 / 32 files | 102 / 31 files | −14 / −1 file |
