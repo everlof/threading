@@ -14,6 +14,10 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
     private var server: RemoteAccessServer!
     private var authority: RemoteAuthorityStore!
     private var sessionCommands: RecordingRemoteSessionCommands!
+    private var sessionAccess: RecordingRemoteSessionAccess!
+    private var runtimeStatus: RecordingRemoteRuntimeStatus!
+    private var settingsMutator: RecordingRemoteSettingsMutator!
+    private var eventRecorder: RecordingRemoteEventRecorder!
     private var port: UInt16!
 
     override func setUp() {
@@ -23,7 +27,26 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             RemoteAuthorization(shareID: "test", capability: .interact, scope: .allSessions),
             forToken: "goodtoken"
         )
-        server = RemoteAccessServer()
+        let live = RemoteAccessCoordinator.makeServerServices()
+        sessionAccess = RecordingRemoteSessionAccess(store: .shared)
+        runtimeStatus = RecordingRemoteRuntimeStatus(runtime: .shared)
+        settingsMutator = RecordingRemoteSettingsMutator()
+        eventRecorder = RecordingRemoteEventRecorder()
+        server = RemoteAccessServer(services: RemoteAccessServerServices(
+            sessionQueries: sessionAccess,
+            sessionMutations: sessionAccess,
+            runtimeStatus: runtimeStatus,
+            settings: settingsMutator,
+            eventLog: eventRecorder,
+            mirrors: live.mirrors,
+            notifications: live.notifications,
+            archiveSync: live.archiveSync,
+            snoozeCenter: live.snoozeCenter,
+            attachments: live.attachments,
+            extensions: live.extensions,
+            usageDashboard: live.usageDashboard,
+            usageLimit: live.usageLimit
+        ))
         server.authorizer = authority
         sessionCommands = RecordingRemoteSessionCommands()
         server.sessionCommands = sessionCommands
@@ -1056,6 +1079,9 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         ))
         XCTAssertEqual(resumeProbe.status, 202)
         XCTAssertEqual(sessionCommands.resumedSessionIDs, [dormant.id])
+        XCTAssertTrue(sessionAccess.queriedProjectIDs.contains(project.id))
+        XCTAssertTrue(sessionAccess.queriedSessionIDs.contains(dormant.id))
+        XCTAssertTrue(runtimeStatus.runningSessionIDs.contains(dormant.id))
     }
 
     func testSessionRefreshesRouteThroughInjectedApplicationCommands() throws {
@@ -1085,6 +1111,8 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(sessionCommands.sessionRefreshes.count, 1)
         XCTAssertEqual(sessionCommands.sessionRefreshes.first?.sessionID, session.id)
         XCTAssertEqual(sessionCommands.sessionRefreshes.first?.archived, false)
+        XCTAssertEqual(sessionAccess.pinnedMutations.last?.sessionID, session.id)
+        XCTAssertEqual(sessionAccess.pinnedMutations.last?.isPinned, true)
 
         let surface = try JSONEncoder().encode(
             RemoteSetSessionSurfaceRequestDTO(surface: "conversation")
@@ -1098,6 +1126,8 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             200
         )
         XCTAssertEqual(sessionCommands.surfaceRefreshes, [session.id])
+        XCTAssertEqual(sessionAccess.surfaceMutations.last?.sessionID, session.id)
+        XCTAssertEqual(sessionAccess.surfaceMutations.last?.usesNativeUI, true)
         XCTAssertTrue(try XCTUnwrap(ProjectStore.shared.session(withID: session.id)).usesNativeUI)
     }
 
@@ -1174,6 +1204,13 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             try XCTUnwrap(post("/api/theme", bearer: "viewtoken", body: body)).status,
             403
         )
+        XCTAssertTrue(settingsMutator.appThemeIDs.isEmpty)
+        XCTAssertEqual(
+            try XCTUnwrap(post("/api/theme", bearer: "goodtoken", body: body)).status,
+            200
+        )
+        XCTAssertEqual(settingsMutator.appThemeIDs, [AppThemeID("system")])
+        XCTAssertTrue(eventRecorder.messages.contains("App theme changed remotely"))
         let create = try JSONEncoder().encode(RemoteCreateSessionRequestDTO(
             projectID: UUID().uuidString,
             agentKind: "codex",
@@ -2727,6 +2764,126 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         let received = recv(fd, &buffer, buffer.count, 0)
         guard received > 0 else { return "" }
         return String(decoding: buffer[0..<received], as: UTF8.self)
+    }
+}
+
+@MainActor
+private final class RecordingRemoteSessionAccess: RemoteSessionQuerying, RemoteSessionMutating {
+    struct PinnedMutation: Equatable {
+        let sessionID: SessionID
+        let isPinned: Bool
+    }
+
+    struct SurfaceMutation: Equatable {
+        let sessionID: SessionID
+        let usesNativeUI: Bool
+    }
+
+    private let store: ProjectStore
+    private(set) var queriedSessionIDs: [SessionID] = []
+    private(set) var queriedProjectIDs: [ProjectID] = []
+    private(set) var pinnedMutations: [PinnedMutation] = []
+    private(set) var surfaceMutations: [SurfaceMutation] = []
+
+    init(store: ProjectStore) {
+        self.store = store
+    }
+
+    func session(withID sessionID: SessionID) -> AgentSession? {
+        queriedSessionIDs.append(sessionID)
+        return store.session(withID: sessionID)
+    }
+
+    func project(withID projectID: ProjectID) -> Project? {
+        queriedProjectIDs.append(projectID)
+        return store.project(withID: projectID)
+    }
+
+    func project(forSessionID sessionID: SessionID) -> Project? {
+        store.project(forSessionID: sessionID)
+    }
+
+    func renameSession(id sessionID: SessionID, to title: String?) -> ProjectMutationResult {
+        store.renameSession(id: sessionID, to: title)
+    }
+
+    func setPinned(_ pinned: Bool, for sessionID: SessionID) -> ProjectMutationResult {
+        pinnedMutations.append(PinnedMutation(sessionID: sessionID, isPinned: pinned))
+        return store.setPinned(pinned, for: sessionID)
+    }
+
+    func setUsesNativeUI(
+        _ usesNativeUI: Bool,
+        for sessionID: SessionID
+    ) -> ProjectMutationResult {
+        surfaceMutations.append(SurfaceMutation(
+            sessionID: sessionID,
+            usesNativeUI: usesNativeUI
+        ))
+        return store.setUsesNativeUI(usesNativeUI, for: sessionID)
+    }
+}
+
+@MainActor
+private final class RecordingRemoteRuntimeStatus: RemoteRuntimeStatus {
+    private let runtime: AgentRuntime
+    private(set) var runningSessionIDs: [SessionID] = []
+
+    init(runtime: AgentRuntime) {
+        self.runtime = runtime
+    }
+
+    func isRunning(sessionID: SessionID) -> Bool {
+        runningSessionIDs.append(sessionID)
+        return runtime.isRunning(sessionID: sessionID)
+    }
+
+    func discard(sessionID: SessionID, preservingViewport: Bool) {
+        runtime.discard(sessionID: sessionID, preservingViewport: preservingViewport)
+    }
+
+    func resolveRemotePermission(
+        sessionID: SessionID,
+        id: String,
+        decision: String
+    ) -> Bool {
+        runtime.resolveRemotePermission(sessionID: sessionID, id: id, decision: decision)
+    }
+}
+
+@MainActor
+private final class RecordingRemoteSettingsMutator: RemoteSettingsMutating {
+    private(set) var appThemeIDs: [AppThemeID] = []
+
+    func applyAppTheme(id: AppThemeID) -> RemoteAppThemeMutationResult {
+        appThemeIDs.append(id)
+        return AppThemeLibrary.theme(withID: id) == nil ? .unknownTheme : .applied(id)
+    }
+
+    func setSessionTheme(
+        id: TerminalThemeID?,
+        for sessionID: SessionID
+    ) -> ProjectMutationResult {
+        if let id, ThemeAssignments.selectableTheme(withID: id) == nil {
+            return .unsupportedValue
+        }
+        return .unchanged
+    }
+}
+
+private final class RecordingRemoteEventRecorder: @unchecked Sendable, RemoteEventRecording {
+    private let lock = NSLock()
+    private var recordedMessages: [String] = []
+
+    var messages: [String] {
+        lock.withLock { recordedMessages }
+    }
+
+    func recordRemoteEvent(
+        _ message: String,
+        _ detail: [String: String]
+    ) {
+        lock.withLock { recordedMessages.append(message) }
     }
 }
 

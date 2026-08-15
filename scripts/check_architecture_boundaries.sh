@@ -37,6 +37,7 @@ session_coordinators=(
 
 conversation_controller="${repository_directory}/Sources/Threading/UI/Views/ConversationViewController.swift"
 conversation_scheduling="${repository_directory}/Sources/Threading/UI/Views/ConversationScheduling.swift"
+remote_access_server="${repository_directory}/Sources/Threading/Core/Remote/RemoteAccessServer.swift"
 browser_controller="${repository_directory}/Sources/Threading/UI/Views/BrowserViewController.swift"
 agent_session_command_adapter="${repository_directory}/Sources/Threading/UI/Windows/AgentToolCoordinator+SessionCommands.swift"
 project_model="${repository_directory}/Sources/Threading/Models/Project.swift"
@@ -68,6 +69,12 @@ fi
 
 if rg -n 'ProjectStore\.shared\b' "${conversation_scheduling}"; then
   echo "architecture-boundary: conversation scheduling must use its injected current-session projection" >&2
+  failed=1
+fi
+
+if rg -n '\b[A-Za-z][A-Za-z0-9_]*\.shared\b|\b(AppThemeLibrary|ThemeAssignments)\.' \
+  "${remote_access_server}"; then
+  echo "architecture-boundary: RemoteAccessServer must use its injected application interfaces" >&2
   failed=1
 fi
 

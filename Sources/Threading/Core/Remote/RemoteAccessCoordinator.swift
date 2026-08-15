@@ -59,10 +59,33 @@ protocol RemoteInvitationRedeeming: AnyObject, Sendable {
     ) -> RemoteInvitationRedemption?
 }
 
+struct RemoteCreatedShare {
+    let url: URL
+    let expiresAt: Date
+    let canApprovePermissions: Bool
+}
+
+enum RemoteSharePreparationError: LocalizedError {
+    case remoteAccessUnavailable
+    case relayUnavailable(String)
+    case tooManyRequests
+
+    var errorDescription: String? {
+        switch self {
+        case .remoteAccessUnavailable:
+            return L10n.string("Remote Access is not ready.")
+        case .relayUnavailable(let reason):
+            return reason
+        case .tooManyRequests:
+            return L10n.string("Too many share links are being prepared. Try again shortly.")
+        }
+    }
+}
+
 /// The one facade the app and UI talk to for remote access: a master switch that owns the
 /// server and its selected HTTPS transports, and publishes statuses other views can render.
 @MainActor
-final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
+final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostCommanding {
 
     static let shared = RemoteAccessCoordinator(ownerDeviceStore: defaultOwnerDeviceStore())
 
@@ -97,7 +120,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         }
     }
 
-    private let server = RemoteAccessServer()
+    private let server: RemoteAccessServer
     private let tunnel = RemoteTunnel()
     private let tailscale = TailscaleRemoteTransport()
     private let hostedService: RemoteHostedServiceController
@@ -124,13 +147,18 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     init(
         ownerDeviceStore: RemoteOwnerDevicePersisting,
         guestShareStore: RemoteGuestSharePersisting? = nil,
-        hostedService: RemoteHostedServiceController? = nil
+        hostedService: RemoteHostedServiceController? = nil,
+        serverServices: RemoteAccessServerServices? = nil
     ) {
+        server = RemoteAccessServer(
+            services: serverServices ?? Self.makeServerServices()
+        )
         ownerDevices = RemoteOwnerDeviceRegistry(store: ownerDeviceStore)
         self.guestShareStore = guestShareStore ?? Self.defaultGuestShareStore()
         self.hostedService = hostedService ?? RemoteHostedServiceController()
         server.authorizer = authority
         server.invitationRedeemer = self
+        server.hostCommands = self
         self.hostedService.onStateChange = { [weak self] in
             self?.refreshHostedPairingLink()
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
@@ -142,6 +170,70 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         }
         restoreGuestShares()
+    }
+
+    /// The remote transport's live composition root. No route may recover one of these process
+    /// services on demand; tests replace the narrow interfaces while keeping the real socket.
+    static func makeServerServices() -> RemoteAccessServerServices {
+        let sessionStore = ProjectStore.shared
+        let runtime = AgentRuntime.shared
+        let eventLog = EventLog.shared
+        let transcriptUsage = TranscriptUsageService.shared
+        let usageHistory = UsageHistoryStore.shared
+
+        return RemoteAccessServerServices(
+            sessionQueries: sessionStore,
+            sessionMutations: sessionStore,
+            runtimeStatus: runtime,
+            settings: LiveRemoteSettingsMutator(),
+            eventLog: eventLog,
+            mirrors: .shared,
+            notifications: .shared,
+            archiveSync: .shared,
+            snoozeCenter: .shared,
+            attachments: .shared,
+            extensions: .shared,
+            usageDashboard: { offset, count in
+                let now = Date()
+                transcriptUsage.refresh()
+                let report = transcriptUsage.report
+                let isBuilding = transcriptUsage.isBuilding
+                let snapshot = await usageHistory.loadSnapshot(
+                    since: now.addingTimeInterval(-90 * 86_400),
+                    now: now
+                )
+                let preparation = Task.detached(priority: .utility) {
+                    let overview = report.flatMap {
+                        UsageDashboardProjector.overview(report: $0, now: now)
+                    }
+                    let index = UsageDashboardProjector.limitIndex(from: snapshot, now: now)
+                    return RemoteUsageBridge.dashboard(
+                        overview: overview,
+                        limitIndex: index,
+                        isBuilding: isBuilding,
+                        limitOffset: offset,
+                        limitCount: count
+                    )
+                }
+                return await preparation.value
+            },
+            usageLimit: { seriesID, days in
+                let now = Date()
+                let snapshot = await usageHistory.loadSnapshot(
+                    since: now.addingTimeInterval(-90 * 86_400),
+                    now: now
+                )
+                let preparation = Task.detached(priority: .utility) {
+                    guard let series = UsageDashboardProjector.limitSeries(
+                        from: snapshot,
+                        seriesID: seriesID,
+                        now: now
+                    ) else { return nil as RemoteUsageLimitDTO? }
+                    return RemoteUsageBridge.limit(series: series, days: days, preparedAt: now)
+                }
+                return await preparation.value
+            }
+        )
     }
 
     private static func defaultOwnerDeviceStore() -> RemoteOwnerDevicePersisting {
@@ -187,24 +279,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         let sessionID: SessionID
         let capability: RemoteCapability
         let canApprovePermissions: Bool
-        let completion: @MainActor (Result<CreatedShare, RemoteSharePreparationError>) -> Void
-    }
-
-    enum RemoteSharePreparationError: LocalizedError {
-        case remoteAccessUnavailable
-        case relayUnavailable(String)
-        case tooManyRequests
-
-        var errorDescription: String? {
-            switch self {
-            case .remoteAccessUnavailable:
-                return L10n.string("Remote Access is not ready.")
-            case .relayUnavailable(let reason):
-                return reason
-            case .tooManyRequests:
-                return L10n.string("Too many share links are being prepared. Try again shortly.")
-            }
-        }
+        let completion: @MainActor (
+            Result<RemoteCreatedShare, RemoteSharePreparationError>
+        ) -> Void
     }
 
     var tailscaleReadiness: TailscaleReadiness { tailscale.readiness }
@@ -303,12 +380,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
             endpoints: endpoints,
             connectionPolicy: policy
         )
-    }
-
-    struct CreatedShare {
-        let url: URL
-        let expiresAt: Date
-        let canApprovePermissions: Bool
     }
 
     struct PairedOwnerDevice: Equatable, Identifiable {
@@ -448,7 +519,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         capability: RemoteCapability,
         canApprovePermissions requestedPermissionApproval: Bool = false,
         completion: @escaping @MainActor (
-            Result<CreatedShare, RemoteSharePreparationError>
+            Result<RemoteCreatedShare, RemoteSharePreparationError>
         ) -> Void
     ) {
         guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
@@ -501,7 +572,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         for sessionID: SessionID,
         capability: RemoteCapability,
         canApprovePermissions requestedPermissionApproval: Bool
-    ) -> CreatedShare? {
+    ) -> RemoteCreatedShare? {
         guard invitationOrigin != nil else { return nil }
 
         guard let invitationToken = Self.randomToken() else {
@@ -540,7 +611,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
         ThreadingLogger.remote.info(
             "Remote guest invitation created session=\(sessionID.rawValue, privacy: .public) capability=\(capability.rawValue, privacy: .public) permission_approval=\(canApprovePermissions, privacy: .public)"
         )
-        return CreatedShare(
+        return RemoteCreatedShare(
             url: url,
             expiresAt: expiresAt,
             canApprovePermissions: canApprovePermissions

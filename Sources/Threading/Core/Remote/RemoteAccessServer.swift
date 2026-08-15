@@ -27,6 +27,7 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
     private weak var authorizerStorage: (any RemoteAuthorizing)?
     private weak var invitationRedeemerStorage: (any RemoteInvitationRedeeming)?
     private weak var sessionCommandsStorage: (any RemoteSessionCommands)?
+    private weak var hostCommandsStorage: (any RemoteHostCommanding)?
     private var diagnosticsReceiverStorage: RemoteClientDiagnosticsReceiver = {
         records, source, deviceID in
         MacRemoteDiagnostics.receive(records, source: source, deviceID: deviceID)
@@ -47,6 +48,11 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
     var sessionCommands: (any RemoteSessionCommands)? {
         get { lock.withLock { sessionCommandsStorage } }
         set { lock.withLock { sessionCommandsStorage = newValue } }
+    }
+
+    var hostCommands: (any RemoteHostCommanding)? {
+        get { lock.withLock { hostCommandsStorage } }
+        set { lock.withLock { hostCommandsStorage = newValue } }
     }
 
     var diagnosticsReceiver: RemoteClientDiagnosticsReceiver {
@@ -93,6 +99,10 @@ final class RemoteAccessServer: @unchecked Sendable {
         get { dependencies.sessionCommands }
         set { dependencies.sessionCommands = newValue }
     }
+    var hostCommands: (any RemoteHostCommanding)? {
+        get { dependencies.hostCommands }
+        set { dependencies.hostCommands = newValue }
+    }
 
     /// Injectable so integration tests never append to the developer's real support journal.
     var receiveClientDiagnostics: RemoteClientDiagnosticsReceiver {
@@ -134,9 +144,14 @@ final class RemoteAccessServer: @unchecked Sendable {
     }
 
     private let dependencies = RemoteAccessServerDependencies()
+    private let services: RemoteAccessServerServices
     private let portStorage = OSAllocatedUnfairLock<UInt16?>(initialState: nil)
     private let queue = DispatchQueue(label: RemoteAccessDefaults.queueLabel, qos: .userInitiated)
     private let router = RemoteRouter()
+
+    init(services: RemoteAccessServerServices) {
+        self.services = services
+    }
 
     // MARK: - Lifecycle
 
@@ -616,7 +631,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         // permanently made the 33rd browser visit fail even when every earlier tab was gone.
         connectionsByID.removeValue(forKey: ObjectIdentifier(connection))
         DispatchQueue.main.async {
-            RemoteSessionMirrorRegistry.shared.detach(connection)
+            self.services.mirrors.detach(connection)
         }
     }
 
@@ -626,7 +641,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         guard let authorization = authorizeREST(request, respond: respond) else { return }
 
         DispatchQueue.main.async {
-            let payload = RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+            let payload = self.services.mirrors.meResponse(for: authorization)
             respond(.respond(RemoteRouter.json(payload)))
         }
     }
@@ -664,40 +679,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             count = RemoteUsageBridge.defaultLimitPageSize
         }
 
-        if let loader = usageDashboardLoader {
-            Task { @MainActor in
-                let payload = await loader(offset, count)
-                respond(.respond(RemoteRouter.json(
-                    payload,
-                    maximumBytes: RemoteUsageBridge.maximumOverviewResponseBytes
-                )))
-            }
-            return
-        }
-
+        let loader = usageDashboardLoader ?? self.services.usageDashboard
         Task { @MainActor in
-            let now = Date()
-            TranscriptUsageService.shared.refresh()
-            let report = TranscriptUsageService.shared.report
-            let isBuilding = TranscriptUsageService.shared.isBuilding
-            let snapshot = await UsageHistoryStore.shared.loadSnapshot(
-                since: now.addingTimeInterval(-90 * 86_400),
-                now: now
-            )
-            let preparation = Task.detached(priority: .utility) {
-                let overview = report.flatMap {
-                    UsageDashboardProjector.overview(report: $0, now: now)
-                }
-                let index = UsageDashboardProjector.limitIndex(from: snapshot, now: now)
-                return RemoteUsageBridge.dashboard(
-                    overview: overview,
-                    limitIndex: index,
-                    isBuilding: isBuilding,
-                    limitOffset: offset,
-                    limitCount: count
-                )
-            }
-            let payload = await preparation.value
+            let payload = await loader(offset, count)
             respond(.respond(RemoteRouter.json(
                 payload,
                 maximumBytes: RemoteUsageBridge.maximumOverviewResponseBytes
@@ -723,35 +707,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
-        if let loader = usageLimitLoader {
-            Task { @MainActor in
-                guard let payload = await loader(seriesID, days) else {
-                    respond(.respond(RemoteRouter.error(404, "Not Found")))
-                    return
-                }
-                respond(.respond(RemoteRouter.json(
-                    payload,
-                    maximumBytes: RemoteUsageBridge.maximumLimitResponseBytes
-                )))
-            }
-            return
-        }
-
+        let loader = usageLimitLoader ?? self.services.usageLimit
         Task { @MainActor in
-            let now = Date()
-            let snapshot = await UsageHistoryStore.shared.loadSnapshot(
-                since: now.addingTimeInterval(-90 * 86_400),
-                now: now
-            )
-            let preparation = Task.detached(priority: .utility) {
-                guard let series = UsageDashboardProjector.limitSeries(
-                    from: snapshot,
-                    seriesID: seriesID,
-                    now: now
-                ) else { return nil as RemoteUsageLimitDTO? }
-                return RemoteUsageBridge.limit(series: series, days: days, preparedAt: now)
-            }
-            guard let payload = await preparation.value else {
+            guard let payload = await loader(seriesID, days) else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
@@ -780,13 +738,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard RemoteSessionAccess.isVisible(
-                ProjectStore.shared.session(withID: sessionID)
+                self.services.sessionQueries.session(withID: sessionID)
             ) else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
 
-            if !AgentRuntime.shared.isRunning(sessionID: sessionID) {
+            if !self.services.runtimeStatus.isRunning(sessionID: sessionID) {
                 guard let sessionCommands = self.sessionCommands,
                       sessionCommands.resumeRemoteSession(sessionID) else {
                     respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
@@ -794,7 +752,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 }
             }
             respond(.respond(RemoteRouter.json(
-                ["state": AgentRuntime.shared.isRunning(sessionID: sessionID) ? "ready" : "starting"],
+                ["state": self.services.runtimeStatus.isRunning(sessionID: sessionID) ? "ready" : "starting"],
                 status: 202,
                 reason: "Accepted"
             )))
@@ -833,7 +791,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let projectID = ProjectID(uuidString: creation.projectID),
-                  ProjectStore.shared.project(withID: projectID) != nil,
+                  self.services.sessionQueries.project(withID: projectID) != nil,
                   let kind = AgentKind(rawValue: creation.agentKind) else {
                 respond(.respond(RemoteRouter.error(422, "Unknown Launch Choice")))
                 return
@@ -907,7 +865,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             respond(.respond(RemoteRouter.json(
                 RemoteCreateSessionResponseDTO(
                     sessionID: sessionID.uuidString,
-                    me: RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+                    me: self.services.mirrors.meResponse(for: authorization)
                 ),
                 status: 201,
                 reason: "Created"
@@ -931,7 +889,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         DispatchQueue.main.async {
-            guard let result = RemoteNotificationService.shared.register(
+            guard let result = self.services.notifications.register(
                 registration,
                 deviceID: deviceID,
                 authorization: authorization
@@ -939,7 +897,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(422, "Invalid Device Token")))
                 return
             }
-            EventLog.shared.record(.remote, "Remote notifications registered", [
+            self.services.eventLog.recordRemoteEvent("Remote notifications registered", [
                 "share": authorization.shareID,
                 "device": deviceID,
                 "delivery": result.delivery,
@@ -984,7 +942,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         let peer = MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device")
-        EventLog.shared.record(.remote, "Remote diagnostics received", [
+        self.services.eventLog.recordRemoteEvent("Remote diagnostics received", [
             "source": upload.source.rawValue,
             "records": String(upload.records.count),
             "peer": peer,
@@ -1044,7 +1002,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.json(
                     RemoteAcceptInvitationResponseDTO(
                         accessToken: token,
-                        me: RemoteSessionMirrorRegistry.shared.meResponse(for: existing)
+                        me: self.services.mirrors.meResponse(for: existing)
                     )
                 )))
             }
@@ -1078,7 +1036,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             respond(.respond(RemoteRouter.json(
                 RemoteAcceptInvitationResponseDTO(
                     accessToken: redemption.accessToken,
-                    me: RemoteSessionMirrorRegistry.shared.meResponse(
+                    me: self.services.mirrors.meResponse(
                         for: redemption.authorization
                     )
                 ),
@@ -1105,15 +1063,20 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
         Task { @MainActor in
             do {
-                let credential = try await RemoteAccessCoordinator.shared
-                    .issueHostedDeviceCredential(deviceID: deviceID)
+                guard let hostCommands = self.hostCommands else {
+                    respond(.respond(RemoteRouter.error(503, "Hosted service unavailable")))
+                    return
+                }
+                let credential = try await hostCommands.issueHostedDeviceCredential(
+                    deviceID: deviceID
+                )
                 respond(.respond(RemoteRouter.json(
                     credential,
                     status: 201,
                     reason: "Created",
                     maximumBytes: 16 * 1024
                 )))
-                RemoteAccessCoordinator.shared.completeHostedPairingBootstrap()
+                hostCommands.completeHostedPairingBootstrap()
             } catch {
                 ThreadingLogger.remote.error(
                     "Hosted device credential issue failed code=service"
@@ -1141,17 +1104,20 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         DispatchQueue.main.async {
-            guard let theme = AppThemeLibrary.theme(withID: AppThemeID(choice.themeID)) else {
+            let appliedThemeID: AppThemeID
+            switch self.services.settings.applyAppTheme(id: AppThemeID(choice.themeID)) {
+            case .applied(let themeID):
+                appliedThemeID = themeID
+            case .unknownTheme:
                 respond(.respond(RemoteRouter.error(422, "Unknown Theme")))
                 return
             }
-            AppThemeLibrary.apply(theme)
-            EventLog.shared.record(.remote, "App theme changed remotely", [
-                "theme": theme.id.rawValue,
+            self.services.eventLog.recordRemoteEvent("App theme changed remotely", [
+                "theme": appliedThemeID.rawValue,
                 "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
             respond(.respond(RemoteRouter.json(
-                RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+                self.services.mirrors.meResponse(for: authorization)
             )))
         }
     }
@@ -1180,16 +1146,17 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         DispatchQueue.main.async {
-            guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)) else {
+            guard RemoteSessionAccess.isVisible(
+                self.services.sessionQueries.session(withID: sessionID)
+            ) else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
             let themeID = choice.themeID.map { TerminalThemeID($0) }
-            if let themeID, ThemeAssignments.selectableTheme(withID: themeID) == nil {
-                respond(.respond(RemoteRouter.error(422, "Unknown Theme")))
-                return
-            }
-            let result = ThemeAssignments.setTheme(id: themeID, forSession: sessionID)
+            let result = self.services.settings.setSessionTheme(
+                id: themeID,
+                for: sessionID
+            )
             switch result {
             case .applied, .unchanged:
                 break
@@ -1203,13 +1170,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(422, "Unsupported Value")))
                 return
             }
-            EventLog.shared.record(.remote, "Session theme changed remotely", [
+            self.services.eventLog.recordRemoteEvent("Session theme changed remotely", [
                 "session": sessionID.uuidString,
                 "theme": themeID?.rawValue ?? "inherit",
                 "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
             respond(.respond(RemoteRouter.json(
-                RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+                self.services.mirrors.meResponse(for: authorization)
             )))
         }
     }
@@ -1234,11 +1201,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let sessionID = SessionID(uuidString: rawSessionID),
-                  ProjectStore.shared.session(withID: sessionID) != nil else {
+                  self.services.sessionQueries.session(withID: sessionID) != nil else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
-            let result = ProjectStore.shared.renameSession(id: sessionID, to: choice.title)
+            let result = self.services.sessionMutations.renameSession(
+                id: sessionID,
+                to: choice.title
+            )
             switch result {
             case .applied, .unchanged:
                 break
@@ -1252,12 +1222,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(422, "Unsupported Value")))
                 return
             }
-            EventLog.shared.record(.remote, "Session renamed remotely", [
+            self.services.eventLog.recordRemoteEvent("Session renamed remotely", [
                 "session": sessionID.uuidString,
                 "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
             respond(.respond(RemoteRouter.json(
-                RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+                self.services.mirrors.meResponse(for: authorization)
             )))
         }
     }
@@ -1282,11 +1252,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let sessionID = SessionID(uuidString: rawSessionID),
-                  ProjectStore.shared.session(withID: sessionID) != nil else {
+                  self.services.sessionQueries.session(withID: sessionID) != nil else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
-            let result = ProjectStore.shared.setPinned(choice.isPinned, for: sessionID)
+            let result = self.services.sessionMutations.setPinned(
+                choice.isPinned,
+                for: sessionID
+            )
             switch result {
             case .applied, .unchanged:
                 break
@@ -1305,7 +1278,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 archived: false
             )
             respond(.respond(RemoteRouter.json(
-                RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+                self.services.mirrors.meResponse(for: authorization)
             )))
         }
     }
@@ -1330,24 +1303,24 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let sessionID = SessionID(uuidString: rawSessionID),
-                  ProjectStore.shared.session(withID: sessionID) != nil else {
+                  self.services.sessionQueries.session(withID: sessionID) != nil else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
-            ProviderArchiveSync.shared.setArchived(
+            self.services.archiveSync.setArchived(
                 choice.isArchived,
                 for: sessionID
             ) { result in
                 switch result {
                 case .success:
-                    EventLog.shared.record(.remote, choice.isArchived
+                    self.services.eventLog.recordRemoteEvent(choice.isArchived
                         ? "Session archived remotely"
                         : "Session restored remotely", [
                             "session": sessionID.uuidString,
                             "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
                         ])
                     respond(.respond(RemoteRouter.json(
-                        RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+                        self.services.mirrors.meResponse(for: authorization)
                     )))
                 case .failure(let failure):
                     let status: Int
@@ -1386,7 +1359,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let sessionID = SessionID(uuidString: rawSessionID),
-                  let session = ProjectStore.shared.session(withID: sessionID),
+                  let session = self.services.sessionQueries.session(withID: sessionID),
                   !session.isArchived else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
@@ -1397,12 +1370,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     respond(.respond(RemoteRouter.error(422, "Invalid snooze deadline")))
                     return
                 }
-                SessionSnoozeCenter.shared.snooze(sessionID, until: deadline)
+                self.services.snoozeCenter.snooze(sessionID, until: deadline)
             } else {
-                SessionSnoozeCenter.shared.unsnooze(sessionID)
+                self.services.snoozeCenter.unsnooze(sessionID)
             }
             respond(.respond(RemoteRouter.json(
-                RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+                self.services.mirrors.meResponse(for: authorization)
             )))
         }
     }
@@ -1427,7 +1400,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let sessionID = SessionID(uuidString: rawSessionID),
-                  let session = ProjectStore.shared.session(withID: sessionID) else {
+                  let session = self.services.sessionQueries.session(withID: sessionID) else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
@@ -1437,12 +1410,18 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
 
-            let result = ProjectStore.shared.setUsesNativeUI(usesNativeUI, for: sessionID)
+            let result = self.services.sessionMutations.setUsesNativeUI(
+                usesNativeUI,
+                for: sessionID
+            )
             switch result {
             case .applied:
                 // A live process belongs to the standing surface until its replacement is
                 // durable. A database refusal must leave that process and surface untouched.
-                AgentRuntime.shared.discard(sessionID: sessionID)
+                self.services.runtimeStatus.discard(
+                    sessionID: sessionID,
+                    preservingViewport: true
+                )
                 self.sessionCommands?.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
             case .unchanged:
                 break
@@ -1456,13 +1435,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(503, "Persistence Unavailable")))
                 return
             }
-            EventLog.shared.record(.remote, "Session UI changed remotely", [
+            self.services.eventLog.recordRemoteEvent("Session UI changed remotely", [
                 "session": sessionID.uuidString,
                 "surface": choice.surface,
                 "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
             respond(.respond(RemoteRouter.json(
-                RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+                self.services.mirrors.meResponse(for: authorization)
             )))
         }
     }
@@ -1490,7 +1469,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         DispatchQueue.main.async {
-            RemoteAccessCoordinator.shared.createSessionShare(
+            guard let hostCommands = self.hostCommands else {
+                respond(.respond(RemoteRouter.error(503, "Secure Relay Not Ready")))
+                return
+            }
+            hostCommands.createSessionShare(
                 for: sessionID,
                 capability: capability,
                 canApprovePermissions: choice.canApprovePermissions
@@ -1502,7 +1485,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                         capability: capability.rawValue,
                         canApprovePermissions: created.canApprovePermissions,
                         expiresAt: created.expiresAt.timeIntervalSince1970,
-                        me: RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+                        me: self.services.mirrors.meResponse(for: authorization)
                     ))))
                 case .failure:
                     respond(.respond(RemoteRouter.error(503, "Secure Relay Not Ready")))
@@ -1530,9 +1513,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         DispatchQueue.main.async {
-            RemoteAccessCoordinator.shared.revokeSessionShares(sessionID)
+            guard let hostCommands = self.hostCommands else {
+                respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+                return
+            }
+            hostCommands.revokeSessionShares(sessionID)
             respond(.respond(RemoteRouter.json(
-                RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
+                self.services.mirrors.meResponse(for: authorization)
             )))
         }
     }
@@ -1550,7 +1537,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         ) else { return }
 
         DispatchQueue.main.async {
-            guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)) else {
+            guard RemoteSessionAccess.isVisible(
+                self.services.sessionQueries.session(withID: sessionID)
+            ) else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
@@ -1627,13 +1616,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard RemoteSessionAccess.isVisible(
-                ProjectStore.shared.session(withID: sessionID)
+                self.services.sessionQueries.session(withID: sessionID)
             ) else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
 
-            let attachments = SessionAttachmentStore.shared.attachments(for: sessionID).compactMap {
+            let attachments = self.services.attachments.attachments(for: sessionID).compactMap {
                 attachment -> RemoteAttachmentDTO? in
                 guard let values = try? attachment.url.resourceValues(
                     forKeys: [.fileSizeKey, .contentModificationDateKey]
@@ -1671,7 +1660,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         DispatchQueue.main.async {
             guard let workspace = RemoteWorkspaceBridge.workspace(
                 for: sessionID,
-                latestActivityID: RemoteSessionMirrorRegistry.shared
+                latestActivityID: self.services.mirrors
                     .latestWorkspaceActivityID(for: sessionID)
             ) else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
@@ -1727,8 +1716,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard RemoteSessionAccess.isVisible(
-                ProjectStore.shared.session(withID: sessionID)
-            ), let attachment = SessionAttachmentStore.shared.attachment(
+                self.services.sessionQueries.session(withID: sessionID)
+            ), let attachment = self.services.attachments.attachment(
                 for: sessionID,
                 id: attachmentID
             ), let values = try? attachment.url.resourceValues(forKeys: [.fileSizeKey]),
@@ -1773,8 +1762,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard RemoteSessionAccess.isVisible(
-                ProjectStore.shared.session(withID: sessionID)
-            ), let item = ExtensionManager.shared.registeredPanel(
+                self.services.sessionQueries.session(withID: sessionID)
+            ), let item = self.services.extensions.registeredPanel(
                 extensionIdentifier: reference.extensionIdentifier,
                 panelID: reference.panelID
             ) else {
@@ -1814,8 +1803,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard RemoteSessionAccess.isVisible(
-                ProjectStore.shared.session(withID: sessionID)
-            ), let item = ExtensionManager.shared.registeredPanel(
+                self.services.sessionQueries.session(withID: sessionID)
+            ), let item = self.services.extensions.registeredPanel(
                 extensionIdentifier: reference.extensionIdentifier,
                 panelID: reference.panelID
             ) else {
@@ -1830,9 +1819,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
 
-            let projectID = ProjectStore.shared.project(forSessionID: sessionID)?
+            let projectID = self.services.sessionQueries.project(forSessionID: sessionID)?
                 .id.uuidString.lowercased()
-            _ = ExtensionManager.shared.invokePanelAction(
+            _ = self.services.extensions.invokePanelAction(
                 extensionIdentifier: reference.extensionIdentifier,
                 panelID: reference.panelID,
                 actionID: action.actionID,
@@ -1883,12 +1872,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard RemoteSessionAccess.isVisible(
-                ProjectStore.shared.session(withID: sessionID)
-            ), ExtensionManager.shared.registeredPanel(
+                self.services.sessionQueries.session(withID: sessionID)
+            ), self.services.extensions.registeredPanel(
                 extensionIdentifier: reference.extensionIdentifier,
                 panelID: reference.panelID
             ) != nil,
-            let url = ExtensionManager.shared.extensionImageResourceURL(
+            let url = self.services.extensions.extensionImageResourceURL(
                 extensionIdentifier: reference.extensionIdentifier,
                 relativePath: path
             ) else {
@@ -2072,7 +2061,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 deviceName: deviceName
             ) else { return }
             DispatchQueue.main.async {
-                RemoteSessionMirrorRegistry.shared.attachThemeEvents(connection)
+                self.services.mirrors.attachThemeEvents(connection)
             }
             return
         }
@@ -2099,13 +2088,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 connection.sendClose(code: 4003, reason: "Share revoked")
                 return
             }
-            let attached = RemoteSessionMirrorRegistry.shared.attach(
+            let attached = self.services.mirrors.attach(
                 connection,
                 to: sessionID,
                 authorization: authorization
             )
             if attached {
-                EventLog.shared.record(.remote, "Remote client connected", [
+                self.services.eventLog.recordRemoteEvent("Remote client connected", [
                     "session": sessionID.uuidString,
                     "capability": authorization.capability.rawValue,
                     "device": device ?? "unknown",
@@ -2134,7 +2123,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleInput(_ connection: RemoteConnection, data: String?) {
         guard let authorization = connection.authorization, authorization.capability == .interact else {
             connection.sendText(#"{"type":"error","code":"forbidden"}"#)
-            EventLog.shared.record(.remote, "Remote input refused", ["reason": "view-only"])
+            self.services.eventLog.recordRemoteEvent("Remote input refused", ["reason": "view-only"])
             return
         }
         guard let data, let routed = connection.routedSessionID, let sessionID = SessionID(uuidString: routed) else {
@@ -2152,7 +2141,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
                 return
             }
-            let accepted = RemoteSessionMirrorRegistry.shared.sendInput(
+            let accepted = self.services.mirrors.sendInput(
                 bytes,
                 to: sessionID,
                 device: device,
@@ -2182,7 +2171,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
                 return
             }
-            RemoteSessionMirrorRegistry.shared.requestViewport(
+            self.services.mirrors.requestViewport(
                 from: connection,
                 sessionID: sessionID,
                 cols: cols,
@@ -2200,7 +2189,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
         DispatchQueue.main.async {
             guard self.authorizer?.isCurrent(authorization) == true else { return }
-            RemoteSessionMirrorRegistry.shared.releaseViewport(
+            self.services.mirrors.releaseViewport(
                 from: connection,
                 sessionID: sessionID
             )
@@ -2226,7 +2215,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
                 return
             }
-            RemoteSessionMirrorRegistry.shared.requestConversationPage(
+            self.services.mirrors.requestConversationPage(
                 from: connection,
                 sessionID: sessionID,
                 beforeRowID: beforeRowID,
@@ -2243,7 +2232,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
         DispatchQueue.main.async {
             guard self.authorizer?.isCurrent(authorization) == true else { return }
-            RemoteSessionMirrorRegistry.shared.resyncConversation(
+            self.services.mirrors.resyncConversation(
                 for: connection,
                 sessionID: sessionID
             )
@@ -2282,7 +2271,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
                 return
             }
-            let status = RemoteSessionMirrorRegistry.shared.submitPrompt(
+            let status = self.services.mirrors.submitPrompt(
                 text,
                 contextAttachments: contextAttachments,
                 to: sessionID,
@@ -2331,7 +2320,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
                 return
             }
-            let status = RemoteSessionMirrorRegistry.shared.submitTerminalLine(
+            let status = self.services.mirrors.submitTerminalLine(
                 text,
                 to: sessionID,
                 device: device,
@@ -2370,13 +2359,17 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
                 return
             }
-            guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
-                  let conversation = AgentRuntime.shared.conversation(for: sessionID),
-                  conversation.resolveRemotePermission(id: id, decision: decision) else {
+            guard RemoteSessionAccess.isVisible(
+                self.services.sessionQueries.session(withID: sessionID)
+            ), self.services.runtimeStatus.resolveRemotePermission(
+                sessionID: sessionID,
+                id: id,
+                decision: decision
+            ) else {
                 connection.sendText(notPending)
                 return
             }
-            EventLog.shared.record(.remote, "Remote permission decision", [
+            self.services.eventLog.recordRemoteEvent("Remote permission decision", [
                 "session": sessionID.uuidString,
                 "decision": decision,
                 "device": connection.deviceID ?? "unknown",
@@ -2426,7 +2419,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
                 return
             }
-            let status = RemoteSessionMirrorRegistry.shared.requestAttention(
+            let status = self.services.mirrors.requestAttention(
                 from: connection,
                 sessionID: sessionID,
                 recipientID: recipientID,
@@ -2466,7 +2459,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
                 return
             }
-            let status = RemoteSessionMirrorRegistry.shared.updateInputControl(
+            let status = self.services.mirrors.updateInputControl(
                 from: connection,
                 sessionID: sessionID,
                 action: action,
@@ -2490,7 +2483,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
         DispatchQueue.main.async {
             guard self.authorizer?.isCurrent(authorization) == true else { return }
-            RemoteSessionMirrorRegistry.shared.updatePresence(
+            self.services.mirrors.updatePresence(
                 state,
                 from: connection,
                 sessionID: sessionID
@@ -2501,7 +2494,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func recordFailedAuth(reason: String, device: String?) {
         authLimiter.recordFailure(device: device)
         ThreadingLogger.remote.warning("Remote auth denied: \(reason, privacy: .public)")
-        EventLog.shared.record(.remote, "Remote auth denied", ["reason": reason])
+        self.services.eventLog.recordRemoteEvent("Remote auth denied", ["reason": reason])
         var fields: [RemoteDiagnosticField: String] = [.reason: reason]
         if let device {
             fields[.peer] = MacRemoteDiagnostics.pseudonym(device, prefix: "device")
@@ -2557,7 +2550,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         ThreadingLogger.remote.warning(
             "Remote protocol mismatch, update needed on: \(update.rawValue, privacy: .public)"
         )
-        EventLog.shared.record(.remote, "Remote protocol mismatch", ["update": update.rawValue])
+        self.services.eventLog.recordRemoteEvent("Remote protocol mismatch", ["update": update.rawValue])
         return RemoteUpgradeRequiredDTO(update: update, message: message)
     }
 

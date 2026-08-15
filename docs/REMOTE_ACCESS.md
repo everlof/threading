@@ -574,11 +574,14 @@ device id, display name and authentication time become visible together. Main-ac
 notification code reads that snapshot once per decision; it never assembles an identity from
 independently mutable connection fields.
 
-The loopback transport does not locate `AppDelegate` or a window. The application composition
-root injects `RemoteSessionCommands`, the narrow main-actor capability for creating or resuming a
-session and reconciling navigation after durable metadata, archive, or surface changes. This is
-also the integration-test seam: the real HTTP server can prove routing and refusal behavior with
-no AppKit window graph.
+The loopback transport does not locate `AppDelegate`, a window, or a process singleton. Its
+composition root supplies separate typed capabilities for session queries, durable mutations,
+runtime status, settings mutations, and structured logging, together with its remote-specific
+mirror, notification, archive, attachment, and extension collaborators. `RemoteSessionCommands`
+remains the narrow main-actor capability for creating or resuming a session and reconciling
+navigation after durable metadata, archive, or surface changes. These are also integration-test
+seams: the real HTTP server proves routing and refusal behavior through recording capabilities
+with no AppKit window graph or ambient project/runtime lookup.
 
 ## Implementation map
 

@@ -468,6 +468,14 @@ final class AgentRuntime {
         conversations[sessionID]
     }
 
+    func resolveRemotePermission(
+        sessionID: SessionID,
+        id: String,
+        decision: String
+    ) -> Bool {
+        conversation(for: sessionID)?.resolveRemotePermission(id: id, decision: decision) == true
+    }
+
     func subagentState(for sessionID: SessionID) -> SubagentSessionState {
         if let existing = subagentStates[sessionID] { return existing }
 
