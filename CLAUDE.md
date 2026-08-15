@@ -441,14 +441,18 @@ the following cases genuinely need to be visible, and they are skipped by name i
 `TestPlans/Threading-Fast.xctestplan` and say why here. Anything that can be asserted against an
 unshown window belongs in `fast` — reach for `orderFront` only when the framework forces it.
 
-**A fixture window is built, never shown.** `AppDelegate.applicationShouldTerminateAfterLastWindowClosed`
-is `true`, which is right for the app and a trap for the test host: a window ordered on screen
-and then released queues that decision, and AppKit acts on it the next time *anything* spins the
-run loop. The host then exits cleanly inside a later, unrelated test — no crash report, no failing
-assertion, and `xcodebuild` reporting "unexpected exit" against whichever test happened to pump.
-Found by a menu test that ran the run loop for a second, which made a latent version of this
-land in `SessionImportBelongingTests`. An unshown window still lays out, still draws through
-`cacheDisplay`, and still takes a first responder, which is everything these tests need.
+**A fast fixture window is built, never shown, and has bounded ownership.** An unshown window still
+lays out, draws through `cacheDisplay`, and takes a first responder, which is everything these
+tests need. `AppDelegate.applicationShouldTerminateAfterLastWindowClosed` returns `false` in a
+hosted XCTest process, but that does not make `close()` a universal teardown: AppKit can retain
+private autoreleased tracking, animation, or view state until XCTest drains the current case, and
+closing the window in that same pool is a reproducible `objc_release` crash. A local unshown
+fixture may simply leave scope; a shown fixture is ordered out first. If a controller or other
+owner retains repeated fixtures, it must either close them at a component-defined safe point or
+reuse a bounded host. The Motion menu tests take the latter path: they dismiss menu tracking
+synchronously and reuse one unshown window with fresh per-test controllers. Never solve a
+lifetime race by accumulating one ordered-out window per test, and never mechanically replace
+`orderOut` with `close` without a lifecycle-sequence test.
 
 **A hosted test writes to the developer's own preferences.** The bundle is hosted in the app, so
 `UserDefaults.standard` inside a test is the real app's `UserDefaults` — a test that records a

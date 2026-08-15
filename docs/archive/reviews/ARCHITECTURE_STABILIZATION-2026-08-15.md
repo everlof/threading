@@ -273,7 +273,7 @@ The follow-up review began at `d0351b1a^` with this common report definition:
 
 | Metric | Review baseline | Closure | Change |
 |---|---:|---:|---:|
-| Threading Swift files / lines | 788 / 327,076 | 793 / 328,627 | +5 / +1,551 for typed declarations, application interfaces and proofs |
+| Threading Swift files / lines | 788 / 327,076 | 793 / 328,641 | +5 / +1,565 for typed declarations, application interfaces and proofs |
 | `static … shared` declarations | 89 / 87 files | 89 / 87 files | unchanged; no service locator added |
 | `ProjectStore.shared` | 302 / 66 files | 247 / 63 files | −55 / −3 files |
 | `AgentRuntime.shared` | 116 / 32 files | 102 / 31 files | −14 / −1 file |
@@ -289,10 +289,14 @@ The follow-up review began at `d0351b1a^` with this common report definition:
 The six findings closed as ownership changes, not documentation exceptions:
 
 1. The fast plan no longer includes the two tests that deliberately order real browser windows.
-   AppKit render fixtures leave the last-window lifecycle alone, zero-width chart layout uses a
-   satisfiable owner-defined constraint model, and tab-strip height has one owner. The formerly
-   reported privacy test never failed in its xcresult; the host was terminated by window lifecycle
-   work left behind by a different test class.
+   The xcresult's crash attachment identified `EXC_BAD_ACCESS` in `objc_release` while XCTest
+   drained the case's autorelease pool: the privacy assertion had not failed, but earlier AppKit
+   menu/window state outlived its owning fixture. Motion and Privacy now use one bounded unshown
+   host each with fresh per-test controller state; menus dismiss synchronously, while ordinary
+   render owners retire windows only at component-safe points. Repeated theme opens cannot retain
+   16pt and 20pt menu-preview constraints because the owning row now owns those constraints.
+   Zero-width chart layout uses a satisfiable owner-defined constraint model, and tab-strip height
+   has one owner.
 2. Domain and Application imports are checked recursively. Application permits Foundation and the
    explicitly approved lower-level contract modules only; synthetic nested violations prove the
    checker fails closed. Redundant per-filename UI-import checks were removed.

@@ -278,6 +278,15 @@ final class ThemedPopUp: ThemedControl {
         }
     }
 
+    /// Ends an open dropdown before its containing fixture or product surface is retired.
+    /// `viewWillMove(toWindow:)` remains the automatic safety net, but owners that are about to
+    /// close the whole window must dismiss first: tearing the window down while the overlay still
+    /// owns responder and tracking state can end a hosted AppKit process before XCTest records the
+    /// current case's result.
+    func dismissMenu() {
+        ThemedMenuPresenter.dismiss(menuSession)
+    }
+
     override func accessibilityRole() -> NSAccessibility.Role? { .popUpButton }
     override func accessibilityValue() -> Any? { displayedItem?.title }
     override func accessibilityTitle() -> String? {

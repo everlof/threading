@@ -439,11 +439,10 @@ final class WindowChromeComponentTests: XCTestCase {
         XCTAssertEqual(button.accessibilityLabel(), L10n.string("Send to Back"))
     }
 
-    /// Asserted through a refusing delegate rather than a real close: closing a key-capable
-    /// window queues AppKit's terminate-after-last-window-closed decision against the test
-    /// host, which then exits inside whichever later test pumps the run loop (the CLAUDE.md
-    /// trap). The button's contract is exactly "ask `windowShouldClose`, honour the answer" —
-    /// so the refusal *is* the assertion.
+    /// Asserted through a refusing delegate because the button's contract is exactly "ask
+    /// `windowShouldClose`, honour the answer". The hosted runner now refuses last-window
+    /// termination globally, but allowing this particular close would no longer prove the
+    /// delegate's refusal was honoured.
     func testTheCloseButtonAsksTheDelegateAndHonoursARefusal() {
         final class Doorman: NSObject, NSWindowDelegate {
             var asked = false

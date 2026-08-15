@@ -71,7 +71,7 @@ final class ExecutionAuditRenderTests: XCTestCase {
                     windowController = controller
                 }
                 let window = makeWindow(controller: windowController, appearance: appearance)
-                defer { window.orderOut(nil) }
+                defer { window.close() }
 
                 let categoryFilter = try XCTUnwrap(view(
                     withIdentifier: "executionAudit.categoryFilter",

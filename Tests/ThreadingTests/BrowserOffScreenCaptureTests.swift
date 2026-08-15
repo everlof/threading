@@ -35,9 +35,9 @@ final class BrowserOffScreenCaptureTests: XCTestCase {
     private var browser: BrowserViewController?
 
     override func tearDown() {
-        // Ordered out before release: a window left on screen and then freed queues
-        // `applicationShouldTerminateAfterLastWindowClosed`, which AppKit acts on the next time
-        // anything spins the run loop — inside whichever later test happens to pump it.
+        // Ordered out before release. Closing a live WKWebView window synchronously can retire
+        // WebKit/AppKit state while XCTest is still draining the case's autorelease pool; the
+        // all-plan tripwire owns only one fixture at a time, so it needs no shared host.
         window?.orderOut(nil)
         window = nil
         browser = nil

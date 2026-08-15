@@ -851,10 +851,10 @@ final class ThemedPresentationTests: XCTestCase {
     /// another test file.
     private static let animationSettleInterval: TimeInterval = 0.35
 
-    /// A window that is never ordered on screen and never closed: none of the
-    /// popover-versus-dropdown behaviour needs to be visible, and neither ordering a window in
-    /// nor closing the last one goes near the host's termination trap (see CLAUDE.md). The
-    /// window is simply released with the test.
+    /// A window that is never ordered on screen and never explicitly closed: none of the
+    /// popover-versus-dropdown behaviour needs to be visible, and synchronous close can race the
+    /// presentation's private autoreleased state (see CLAUDE.md). The window is simply released
+    /// with the test.
     private func offscreenWindow() -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 120, y: 120, width: 420, height: 260),

@@ -3152,7 +3152,12 @@ private final class ThemedMenuRowView: ThemedControl {
 
         switch preview.placement {
         case .leading:
-            NSLayoutConstraint.activate([
+            // Own every constraint at the row, including the two single-item size constraints.
+            // `activate` would otherwise install those two on the caller-owned preview itself.
+            // Motion previews are intentionally reused when the menu reopens; a 16pt classic
+            // row followed by a 20pt modern row would then leave both required sizes attached to
+            // the orb. Removing the old row must remove the whole placement model with it.
+            addConstraints([
                 preview.view.leadingAnchor.constraint(
                     equalTo: leadingAnchor,
                     constant: ThemedMenuMetrics.previewInset(

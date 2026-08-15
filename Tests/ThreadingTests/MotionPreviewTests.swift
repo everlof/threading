@@ -27,11 +27,21 @@ final class MotionPreviewTests: XCTestCase {
     }
 
     private var window: NSWindow?
+    private var hostedController: MotionPreferencesViewController?
+    private static let hostedWindow: NSWindow = {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: Render.width, height: Render.height),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        return window
+    }()
 
     override func tearDown() {
         Design.Motion.reduceMotionOverrideForTesting = nil
         AppThemePalette.set(.system)
-        window = nil
+        retireFixtureWindow()
         super.tearDown()
     }
 
@@ -383,6 +393,14 @@ final class MotionPreviewTests: XCTestCase {
         )
         XCTAssertEqual(orb.frame.midY, row.bounds.midY, accuracy: 0.5)
         XCTAssertEqual(orb.frame.width, ThemedMenuMetrics.previewSize, accuracy: 0.5)
+        XCTAssertTrue(
+            orb.constraints.filter {
+                $0.priority == .required
+                    && $0.secondItem == nil
+                    && ($0.firstAttribute == .width || $0.firstAttribute == .height)
+            }.isEmpty,
+            "the row left its theme-specific size constraints on a reusable preview"
+        )
 
         XCTAssertEqual(row.accessibilityRole(), .menuItem)
         XCTAssertEqual(row.accessibilityTitle(), WorkingOrbStyle.allCases[0].displayName)
@@ -407,7 +425,7 @@ final class MotionPreviewTests: XCTestCase {
                 ThemeBoundaryAudit.violations(in: window), [],
                 "\(identifier) opened a dropdown containing system chrome"
             )
-            self.window = nil
+            retireFixtureWindow()
         }
     }
 
@@ -442,7 +460,7 @@ final class MotionPreviewTests: XCTestCase {
                 let png = try capture(named: name)
                 try png.write(to: directory.appendingPathComponent("\(name).png"))
 
-                window = nil
+                retireFixtureWindow()
             }
         }
     }
@@ -464,22 +482,26 @@ final class MotionPreviewTests: XCTestCase {
     /// The dropdown presents itself into the source's window, so anything that opens one needs
     /// a real window rather than a detached view.
     ///
-    /// Deliberately **not** ordered on screen. `AppDelegate` terminates the app after its last
-    /// window closes, which is right for the app and a trap for a test host: a fixture window
-    /// shown and then released queues that decision, and AppKit acts on it the next time
-    /// anything spins the run loop — ending the test host inside whichever *later* test happens
-    /// to do so, with no crash report and no failing assertion to point at. An unshown window
-    /// still lays out, draws through `cacheDisplay`, and takes a first responder, which is all
-    /// of what these tests need.
+    /// Deliberately **not** ordered on screen. The window is shared by every test in this class,
+    /// while each test receives a fresh controller and therefore fresh settings-page state.
+    /// AppKit's
+    /// custom-menu teardown leaves private autoreleased collections referring to its host
+    /// window; releasing that window while XCTest drains the same case's pool crashes in
+    /// `objc_release`. One stable unshown host avoids both that lifetime race and the live-window
+    /// accumulation caused by creating and merely ordering out a new host for every theme.
     private func popUpInWindow(_ identifier: String) throws -> ThemedPopUp {
-        let controller = MotionPreferencesViewController()
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: Render.width, height: Render.height),
-            styleMask: [.titled],
-            backing: .buffered,
-            defer: false
-        )
-        window.contentViewController = controller
+        retireFixtureWindow()
+        let window = Self.hostedWindow
+        let controller: MotionPreferencesViewController
+        if let hostedController {
+            controller = hostedController
+        } else {
+            controller = MotionPreferencesViewController()
+            hostedController = controller
+            // Replacing the previous test's controller happens in the next test's autorelease
+            // pool, after AppKit has finished draining the menu session that used it.
+            window.contentViewController = controller
+        }
         // Assigning a content view controller sizes the window to its view's fitting size, and
         // a settings page's height comes from its scroll view — which fits in nothing.
         window.setContentSize(NSSize(width: Render.width, height: Render.height))
@@ -506,6 +528,19 @@ final class MotionPreviewTests: XCTestCase {
 
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews + view.subviews.flatMap(descendants(of:))
+    }
+
+    /// A custom dropdown is an in-window overlay with responder and event-tracking ownership.
+    /// Retire that session synchronously, then keep the class's one unshown host alive for reuse.
+    private func retireFixtureWindow() {
+        guard let window else { return }
+        if let content = window.contentView {
+            for popUp in descendants(of: content).compactMap({ $0 as? ThemedPopUp }) {
+                popUp.dismissMenu()
+            }
+        }
+        window.orderOut(nil)
+        self.window = nil
     }
 
     /// Runs the main run loop past the dwell a demonstration holds its own name for, plus room

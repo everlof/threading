@@ -46,6 +46,17 @@ final class PrivacyPreferencesTests: XCTestCase {
     /// render test would keep passing on a picture missing its newest rows.
     /// `testTheRenderCoversTheWholePage` is what stops that happening again.
     private static let fixtureHeight: CGFloat = 1800
+    private static let hostedWindow = NSWindow(
+        contentRect: NSRect(
+            x: 0,
+            y: 0,
+            width: SettingsUIDefaults.pageWidth,
+            height: fixtureHeight
+        ),
+        styleMask: [.titled],
+        backing: .buffered,
+        defer: true
+    )
 
     private func page(
         _ reader: SystemPrivacyStatusReader,
@@ -69,15 +80,23 @@ final class PrivacyPreferencesTests: XCTestCase {
     /// A window the page can be *in* without being on anyone's screen — the same fixture the
     /// rest of this target uses, and never ordered front. The page only re-reads a grant while
     /// it is in a window, so the watching tests need one; nothing about them needs it visible.
+    /// The host itself is reused so AppKit never has to retire it while XCTest is draining the
+    /// case's autorelease pool. Its page is replaced per test, preserving state isolation while
+    /// bounding the live fixture count at one.
     private func hosted(_ controller: NSViewController) -> NSWindow {
-        let window = NSWindow(
-            contentRect: controller.view.frame,
-            styleMask: [.titled],
-            backing: .buffered,
-            defer: true
-        )
+        let window = Self.hostedWindow
+        window.contentView?.subviews.forEach { $0.removeFromSuperview() }
+        window.setContentSize(controller.view.frame.size)
         window.contentView?.addSubview(controller.view)
         return window
+    }
+
+    private func retireHosted(
+        _ controller: PrivacyPreferencesViewController,
+        from window: NSWindow
+    ) {
+        controller.viewWillDisappear()
+        window.orderOut(nil)
     }
 
     private func descendants(in root: NSView) -> [NSView] {
@@ -202,6 +221,7 @@ final class PrivacyPreferencesTests: XCTestCase {
         let grant = LiveGrant()
         let controller = page(liveReader(grant))
         let window = hosted(controller)
+        defer { retireHosted(controller, from: window) }
         controller.viewDidAppear()
 
         XCTAssertTrue(labels(in: try row(.accessibility, in: controller)).contains("Not allowed"))
@@ -226,6 +246,7 @@ final class PrivacyPreferencesTests: XCTestCase {
         let grant = LiveGrant()
         let controller = page(liveReader(grant), refreshInterval: 0.05)
         let window = hosted(controller)
+        defer { retireHosted(controller, from: window) }
         controller.viewDidAppear()
 
         let looked = expectation(description: "the page reads the grant again on its own")
@@ -249,6 +270,7 @@ final class PrivacyPreferencesTests: XCTestCase {
         let grant = LiveGrant()
         let controller = page(liveReader(grant), refreshInterval: 0.05)
         let window = hosted(controller)
+        defer { retireHosted(controller, from: window) }
         controller.viewDidAppear()
         controller.viewWillDisappear()
 
@@ -271,6 +293,7 @@ final class PrivacyPreferencesTests: XCTestCase {
         let grant = LiveGrant()
         let controller = page(liveReader(grant))
         let window = hosted(controller)
+        defer { retireHosted(controller, from: window) }
         controller.viewDidAppear()
 
         let label = try XCTUnwrap(
