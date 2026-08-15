@@ -151,6 +151,7 @@ struct AgentToolDependencies {
   let notifications: RemoteNotificationService
   let notificationTargets: NotificationTargetRegistry
   let archiveScheduler: SessionArchiveScheduler
+  let sessionCommands: AgentSessionCommandService
   /// The typed session control plane — scope and refusal rules for every cross-session
   /// operation, whoever the caller is. Handlers own wording only.
   let control: WorkspaceControlPlane
@@ -169,6 +170,11 @@ struct AgentToolDependencies {
     notifications: .shared,
     notificationTargets: .shared,
     archiveScheduler: .shared,
+    sessionCommands: AgentSessionCommandService(
+      projects: .shared,
+      archiveScheduler: .shared,
+      usesAgentTitleInSidebar: { AppSettings.usesAgentTitleInSidebar }
+    ),
     control: .live,
     baselines: .shared
   )

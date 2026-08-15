@@ -33,6 +33,8 @@ session_coordinators=(
 conversation_controller="${repository_directory}/Sources/Threading/UI/Views/ConversationViewController.swift"
 browser_controller="${repository_directory}/Sources/Threading/UI/Views/BrowserViewController.swift"
 browser_download_coordinator="${repository_directory}/Sources/Threading/Application/Browser/BrowserDownloadCoordinator.swift"
+agent_session_command_adapter="${repository_directory}/Sources/Threading/UI/Windows/AgentToolCoordinator+SessionCommands.swift"
+agent_session_command_service="${repository_directory}/Sources/Threading/Application/Sessions/AgentSessionCommandService.swift"
 
 if rg -n \
   '(ProjectStore|AgentRuntime|AppSettings|EventLog)\.shared\b' \
@@ -74,6 +76,18 @@ fi
 
 if rg -n '^import (AppKit|WebKit)\b' "${browser_download_coordinator}"; then
   echo "architecture-boundary: BrowserDownloadCoordinator must remain Foundation-only" >&2
+  failed=1
+fi
+
+if rg -n 'dependencies\.(projects|archiveScheduler)\b|\bAppSettings\b' \
+  "${agent_session_command_adapter}"; then
+  echo "architecture-boundary: AgentToolCoordinator session handlers are transport adapters;" >&2
+  echo "  session command behavior belongs to AgentSessionCommandService" >&2
+  failed=1
+fi
+
+if rg -n '^import (AppKit|WebKit)\b' "${agent_session_command_service}"; then
+  echo "architecture-boundary: AgentSessionCommandService must remain Foundation-only" >&2
   failed=1
 fi
 
