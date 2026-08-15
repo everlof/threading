@@ -166,9 +166,11 @@ fi
 # let AppKit-only lifetime helpers leak into Core. The generic event transport lives in
 # Core/Events; UI lifetime helpers live in UI/Design.
 terminal_constants="${repository_directory}/Sources/Threading/Core/Constants/TerminalConstants.swift"
-if rg -n '\b(AppEvent|LocalEventMonitor|MainRunLoopTimer)\b' "${terminal_constants}"; then
-  echo "architecture-boundary: typed events and UI lifetime helpers do not belong in" >&2
-  echo "  Core/Constants/TerminalConstants.swift — place them beside their owning subsystem" >&2
+if rg -n \
+  '^(protocol AppEvent\b|(final )?class (LocalEventMonitor|MainRunLoopTimer)\b|enum (AgentDefaults|AgentEnvironment|MCPDefaults)\b|struct [A-Za-z_][A-Za-z0-9_]*: AppEvent\b)' \
+  "${terminal_constants}"; then
+  echo "architecture-boundary: typed events, UI lifetime helpers, and subsystem defaults do" >&2
+  echo "  not belong in Core/Constants/TerminalConstants.swift — place them beside their owner" >&2
   failed=1
 fi
 
