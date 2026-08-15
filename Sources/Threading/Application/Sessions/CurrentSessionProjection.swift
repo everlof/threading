@@ -16,11 +16,22 @@ struct CurrentSessionUnavailableError: LocalizedError {
 @MainActor
 struct CurrentSessionProjection {
     typealias Resolve = @MainActor (SessionID) -> AgentSession?
+    typealias ResolveWorkingDirectory = @MainActor (SessionID) -> String?
 
     private let resolve: Resolve
+    private let resolveWorkingDirectory: ResolveWorkingDirectory
 
     init(resolve: @escaping Resolve) {
         self.resolve = resolve
+        resolveWorkingDirectory = { _ in nil }
+    }
+
+    init(
+        resolve: @escaping Resolve,
+        workingDirectory: @escaping ResolveWorkingDirectory
+    ) {
+        self.resolve = resolve
+        self.resolveWorkingDirectory = workingDirectory
     }
 
     func session(for sessionID: SessionID) -> AgentSession? {
@@ -34,9 +45,18 @@ struct CurrentSessionProjection {
         return session
     }
 
+    func workingDirectory(for sessionID: SessionID) -> String? {
+        resolveWorkingDirectory(sessionID)
+    }
+
     static func projectStore(_ store: ProjectStore) -> CurrentSessionProjection {
-        CurrentSessionProjection { sessionID in
-            store.session(withID: sessionID)
-        }
+        CurrentSessionProjection(
+            resolve: { sessionID in
+                store.session(withID: sessionID)
+            },
+            workingDirectory: { sessionID in
+                store.workingDirectory(forSessionID: sessionID)
+            }
+        )
     }
 }

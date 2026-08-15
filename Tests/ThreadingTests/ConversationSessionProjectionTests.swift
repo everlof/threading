@@ -44,4 +44,38 @@ final class ConversationSessionProjectionTests: XCTestCase {
             )
         }
     }
+
+    func testSchedulingQueriesTheInjectedWorkingDirectory() {
+        let sessionID = SessionID()
+        var requested: SessionID?
+        let projection = CurrentSessionProjection(
+            resolve: { _ in nil },
+            workingDirectory: { candidate in
+                requested = candidate
+                return "/tmp/injected-session-worktree"
+            }
+        )
+
+        XCTAssertEqual(
+            projection.workingDirectory(for: sessionID),
+            "/tmp/injected-session-worktree"
+        )
+        XCTAssertEqual(requested, sessionID)
+    }
+
+    func testScheduledTimingUsesTheProjectedWatchedSessionTitle() {
+        let message = ScheduledMessage(
+            whenSessionFinishes: SessionID(),
+            target: .session(SessionID()),
+            text: "Continue"
+        )
+
+        XCTAssertEqual(
+            ScheduledTiming.sentence(
+                for: message,
+                watchedSessionTitle: "Current projected title"
+            ),
+            "When “Current projected title” finishes"
+        )
+    }
 }

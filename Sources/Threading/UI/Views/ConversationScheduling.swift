@@ -166,7 +166,11 @@ extension ConversationViewController {
                 ScheduledMessageStripView.Row(
                     id: message.id,
                     summary: ScheduledTiming.summary(of: message),
-                    timing: ScheduledTiming.sentence(for: message, from: now),
+                    timing: ScheduledTiming.sentence(
+                        for: message,
+                        from: now,
+                        watchedSessionTitle: watchedSessionTitle(for: message)
+                    ),
                     problem: ScheduledTiming.problem(for: message.state)
                 )
             }
@@ -228,7 +232,7 @@ extension ConversationViewController {
         // is private to its file — and the store is the same answer the unattended delivery uses,
         // so a picture lands in the same place whichever route sent it.
         guard !paths.isEmpty,
-              let folder = ProjectStore.shared.workingDirectory(forSessionID: sessionID)
+              let folder = projectedWorkingDirectory(for: sessionID)
         else { return text }
 
         return PromptAttachment.appending(
@@ -239,6 +243,11 @@ extension ConversationViewController {
             ),
             to: text
         )
+    }
+
+    private func watchedSessionTitle(for message: ScheduledMessage) -> String? {
+        guard case .sessionFinished(let watchedSessionID) = message.trigger else { return nil }
+        return projectedSession(for: watchedSessionID)?.displayTitle
     }
 }
 
@@ -263,13 +272,16 @@ enum ScheduledTiming {
         return L10n.format("%@ · %@", words, note)
     }
 
-    static func sentence(for message: ScheduledMessage, from now: Date = Date()) -> String {
+    static func sentence(
+        for message: ScheduledMessage,
+        from now: Date = Date(),
+        watchedSessionTitle: String? = nil
+    ) -> String {
         switch message.trigger {
         case .time(let time):
             return sentence(for: time.dueAt, from: now)
-        case .sessionFinished(let sessionID):
-            let title = ProjectStore.shared.session(withID: sessionID)?.displayTitle
-                ?? L10n.string("Conversation")
+        case .sessionFinished:
+            let title = watchedSessionTitle ?? L10n.string("Conversation")
             return L10n.format("When “%@” finishes", title)
         }
     }
@@ -290,7 +302,8 @@ enum ScheduledTiming {
     /// will create the session itself. State both facts in one line.
     static func automaticStartSentence(
         for message: ScheduledMessage,
-        from now: Date = Date()
+        from now: Date = Date(),
+        watchedSessionTitle: String? = nil
     ) -> String {
         switch message.trigger {
         case .time(let time):
@@ -298,9 +311,8 @@ enum ScheduledTiming {
                 "Scheduled · starts automatically %@",
                 sentence(for: time.dueAt, from: now)
             )
-        case .sessionFinished(let sessionID):
-            let title = ProjectStore.shared.session(withID: sessionID)?.displayTitle
-                ?? L10n.string("Conversation")
+        case .sessionFinished:
+            let title = watchedSessionTitle ?? L10n.string("Conversation")
             return L10n.format(
                 "Scheduled · starts automatically when “%@” finishes",
                 title
@@ -314,7 +326,8 @@ enum ScheduledTiming {
     /// session starts. Naming both prevents the timestamp from making that dependency invisible.
     static func automaticStartCauseSentence(
         for message: ScheduledMessage,
-        from now: Date = Date()
+        from now: Date = Date(),
+        watchedSessionTitle: String? = nil
     ) -> String {
         switch message.trigger {
         case .time(let time):
@@ -330,9 +343,8 @@ enum ScheduledTiming {
                     sentence(for: time.dueAt, from: now)
                 )
             }
-        case .sessionFinished(let sessionID):
-            let title = ProjectStore.shared.session(withID: sessionID)?.displayTitle
-                ?? L10n.string("Conversation")
+        case .sessionFinished:
+            let title = watchedSessionTitle ?? L10n.string("Conversation")
             return L10n.format(
                 "Starts automatically when “%@” finishes",
                 title

@@ -257,7 +257,11 @@ extension SessionComposerViewController {
                 ScheduledMessageStripView.Row(
                     id: message.id,
                     summary: ScheduledTiming.summary(of: message),
-                    timing: ScheduledTiming.automaticStartSentence(for: message, from: now),
+                    timing: ScheduledTiming.automaticStartSentence(
+                        for: message,
+                        from: now,
+                        watchedSessionTitle: watchedSessionTitle(for: message)
+                    ),
                     problem: ScheduledTiming.problem(for: message.state)
                 )
             }
@@ -265,6 +269,11 @@ extension SessionComposerViewController {
 
         scheduledStrip.setRows(rows)
         setScheduledStripAttached(!rows.isEmpty)
+    }
+
+    private func watchedSessionTitle(for message: ScheduledMessage) -> String? {
+        guard case .sessionFinished(let watchedSessionID) = message.trigger else { return nil }
+        return ProjectStore.shared.session(withID: watchedSessionID)?.displayTitle
     }
 
     /// Puts a frozen plan back into the chips it came from, so editing a scheduled start reopens

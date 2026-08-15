@@ -142,6 +142,12 @@ keeps custody intact.
 attached image; chat read the text and the context, left the pictures in the box, and then cleared
 it — so a reply scheduled with a screenshot attached arrived without one and nothing said so.
 
+**Conversation scheduling reads the current session projection it was constructed with.** The
+destination worktree and the watched conversation's current title are mutable session facts; the
+conversation adapter never reloads either through the process-wide project store. This keeps a
+removed session unavailable and makes scheduled handover follow the same injected snapshot
+boundary as launching and mutable composer configuration.
+
 ## The scheduler announces; the coordinator performs
 
 `ScheduledMessageScheduler` is `SessionArchiveScheduler`'s shape one feature along: it announces

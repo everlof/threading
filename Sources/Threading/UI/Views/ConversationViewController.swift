@@ -194,6 +194,14 @@ final class ConversationViewController: NSViewController {
     private let project: Project
     private let currentSessionProjection: CurrentSessionProjection
 
+    func projectedSession(for sessionID: SessionID) -> AgentSession? {
+        currentSessionProjection.session(for: sessionID)
+    }
+
+    func projectedWorkingDirectory(for sessionID: SessionID) -> String? {
+        currentSessionProjection.workingDirectory(for: sessionID)
+    }
+
     let stream: ConversationStreamSession
 
     /// The one catalog consumed by the local composer and projected to remote clients. Provider

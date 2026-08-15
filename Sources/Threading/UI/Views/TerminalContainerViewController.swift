@@ -1536,7 +1536,10 @@ final class TerminalContainerViewController: NSViewController {
 
         scheduledView.configure(.init(
             title: session.displayTitle,
-            trigger: ScheduledTiming.automaticStartCauseSentence(for: message),
+            trigger: ScheduledTiming.automaticStartCauseSentence(
+                for: message,
+                watchedSessionTitle: watchedSessionTitle(for: message)
+            ),
             problem: ScheduledTiming.problem(for: message.state),
             brief: message.summary,
             configuration: scheduledConfiguration(plan)
@@ -1549,6 +1552,11 @@ final class TerminalContainerViewController: NSViewController {
             guard let self else { return }
             self.delegate?.terminalContainer(self, cancelScheduledMessage: message.id)
         }
+    }
+
+    private func watchedSessionTitle(for message: ScheduledMessage) -> String? {
+        guard case .sessionFinished(let watchedSessionID) = message.trigger else { return nil }
+        return ProjectStore.shared.session(withID: watchedSessionID)?.displayTitle
     }
 
     private func scheduledPlaceholderForPresentation() -> ScheduledSessionPlaceholderView {
