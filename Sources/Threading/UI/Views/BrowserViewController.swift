@@ -599,8 +599,7 @@ final class BrowserViewController: NSViewController {
     var agentTraceEvents: [BrowserTraceEvent] = []
     var agentTraceDroppedEvents = 0
     var agentTraceNextSequence = 1
-    private var agentActionSequence = 0
-    private var activeAgentNavigationGuard: AgentNavigationGuard?
+    private let agentNavigationPolicy = BrowserAgentNavigationPolicy()
 
     /// Fired when the page's title or address changes, so a host (the display pane's tab strip and
     /// header) can re-label the tab without polling. Not fired for progress, which ticks constantly.
@@ -1636,21 +1635,12 @@ final class BrowserViewController: NSViewController {
 
         let request = BrowserAgentFileSelectionRequest(suggestedURLs: suggestedURLs)
         pendingAgentFileSelection = request
-        agentActionSequence += 1
-        let sequence = agentActionSequence
-        activeAgentNavigationGuard = AgentNavigationGuard(
-            sequence: sequence,
-            allowsFormSubmission: false,
-            consumedFormSubmission: false,
-            blockedFormSubmission: false
-        )
+        let actionID = agentNavigationPolicy.beginAction(allowsFormSubmission: false)
         defer {
             if pendingAgentFileSelection === request {
                 pendingAgentFileSelection = nil
             }
-            if activeAgentNavigationGuard?.sequence == sequence {
-                activeAgentNavigationGuard = nil
-            }
+            agentNavigationPolicy.endAction(actionID)
         }
         var arguments = targetArguments(ref: ref, selector: selector, locator: locator)
         arguments["button"] = "left"
@@ -1666,8 +1656,7 @@ final class BrowserViewController: NSViewController {
 
         let result = await request.wait()
         try? await Task.sleep(nanoseconds: BrowserDefaults.agentNavigationGuardNanoseconds)
-        if activeAgentNavigationGuard?.sequence == sequence,
-           activeAgentNavigationGuard?.blockedFormSubmission == true {
+        if agentNavigationPolicy.wasFormSubmissionBlocked(during: actionID) {
             return BrowserActionOutcome(
                 ok: false,
                 message: BrowserDefaults.blockedAgentFormSubmissionMessage
@@ -1712,19 +1701,8 @@ final class BrowserViewController: NSViewController {
                 message: "Use browser_upload for a file input."
             )
         }
-        agentActionSequence += 1
-        let sequence = agentActionSequence
-        activeAgentNavigationGuard = AgentNavigationGuard(
-            sequence: sequence,
-            allowsFormSubmission: false,
-            consumedFormSubmission: false,
-            blockedFormSubmission: false
-        )
-        defer {
-            if activeAgentNavigationGuard?.sequence == sequence {
-                activeAgentNavigationGuard = nil
-            }
-        }
+        let actionID = agentNavigationPolicy.beginAction(allowsFormSubmission: false)
+        defer { agentNavigationPolicy.endAction(actionID) }
 
         var arguments = targetArguments(ref: ref, selector: selector, locator: locator)
         arguments["button"] = "left"
@@ -1748,8 +1726,7 @@ final class BrowserViewController: NSViewController {
 
         let result = await request.wait()
         try? await Task.sleep(nanoseconds: BrowserDefaults.agentNavigationGuardNanoseconds)
-        if activeAgentNavigationGuard?.sequence == sequence,
-           activeAgentNavigationGuard?.blockedFormSubmission == true {
+        if agentNavigationPolicy.wasFormSubmissionBlocked(during: actionID) {
             return BrowserActionOutcome(
                 ok: false,
                 message: BrowserDefaults.blockedAgentFormSubmissionMessage
@@ -2106,26 +2083,16 @@ final class BrowserViewController: NSViewController {
         arguments: [String: Any],
         allowsFormSubmission: Bool = false
     ) async throws -> BrowserActionOutcome {
-        agentActionSequence += 1
-        let sequence = agentActionSequence
-        activeAgentNavigationGuard = AgentNavigationGuard(
-            sequence: sequence,
-            allowsFormSubmission: allowsFormSubmission,
-            consumedFormSubmission: false,
-            blockedFormSubmission: false
+        let actionID = agentNavigationPolicy.beginAction(
+            allowsFormSubmission: allowsFormSubmission
         )
-        defer {
-            if activeAgentNavigationGuard?.sequence == sequence {
-                activeAgentNavigationGuard = nil
-            }
-        }
+        defer { agentNavigationPolicy.endAction(actionID) }
 
         let outcome: BrowserActionOutcome
         do {
             outcome = try await callAgentScript(script, arguments: arguments)
         } catch {
-            if activeAgentNavigationGuard?.sequence == sequence,
-               activeAgentNavigationGuard?.blockedFormSubmission == true {
+            if agentNavigationPolicy.wasFormSubmissionBlocked(during: actionID) {
                 return BrowserActionOutcome(
                     ok: false,
                     message: BrowserDefaults.blockedAgentFormSubmissionMessage
@@ -2137,8 +2104,7 @@ final class BrowserViewController: NSViewController {
         // Page handlers commonly defer requestSubmit() to the next task. Keep the guard alive
         // briefly without relying on requestAnimationFrame, which WebKit pauses in hidden tabs.
         try? await Task.sleep(nanoseconds: BrowserDefaults.agentNavigationGuardNanoseconds)
-        if activeAgentNavigationGuard?.sequence == sequence,
-           activeAgentNavigationGuard?.blockedFormSubmission == true {
+        if agentNavigationPolicy.wasFormSubmissionBlocked(during: actionID) {
             return BrowserActionOutcome(
                 ok: false,
                 message: BrowserDefaults.blockedAgentFormSubmissionMessage
@@ -2154,27 +2120,15 @@ final class BrowserViewController: NSViewController {
         message: String,
         mutation: () -> Void
     ) async -> BrowserActionOutcome {
-        agentActionSequence += 1
-        let sequence = agentActionSequence
-        activeAgentNavigationGuard = AgentNavigationGuard(
-            sequence: sequence,
-            allowsFormSubmission: false,
-            consumedFormSubmission: false,
-            blockedFormSubmission: false
-        )
-        defer {
-            if activeAgentNavigationGuard?.sequence == sequence {
-                activeAgentNavigationGuard = nil
-            }
-        }
+        let actionID = agentNavigationPolicy.beginAction(allowsFormSubmission: false)
+        defer { agentNavigationPolicy.endAction(actionID) }
 
         mutation()
 
         // WebKit dispatches media-query changes asynchronously. Keep the one-shot guard alive for
         // the same bounded interval as an agent DOM action without depending on animation frames.
         try? await Task.sleep(nanoseconds: BrowserDefaults.agentNavigationGuardNanoseconds)
-        if activeAgentNavigationGuard?.sequence == sequence,
-           activeAgentNavigationGuard?.blockedFormSubmission == true {
+        if agentNavigationPolicy.wasFormSubmissionBlocked(during: actionID) {
             return BrowserActionOutcome(
                 ok: false,
                 message: BrowserDefaults.blockedAgentFormSubmissionMessage
@@ -3414,16 +3368,9 @@ extension BrowserViewController: WKNavigationDelegate {
     ) {
         if navigationAction.navigationType == .formSubmitted
             || navigationAction.navigationType == .formResubmitted,
-           var guardState = activeAgentNavigationGuard {
-            if guardState.allowsFormSubmission && !guardState.consumedFormSubmission {
-                guardState.consumedFormSubmission = true
-                activeAgentNavigationGuard = guardState
-            } else {
-                guardState.blockedFormSubmission = true
-                activeAgentNavigationGuard = guardState
-                decisionHandler(.cancel)
-                return
-            }
+           agentNavigationPolicy.decideFormSubmission() == .cancel {
+            decisionHandler(.cancel)
+            return
         }
 
         if let url = navigationAction.request.url?.absoluteString {
@@ -3916,13 +3863,6 @@ private extension NSImage {
 }
 
 // MARK: - Browser Defaults
-
-private struct AgentNavigationGuard {
-    let sequence: Int
-    let allowsFormSubmission: Bool
-    var consumedFormSubmission: Bool
-    var blockedFormSubmission: Bool
-}
 
 private enum BrowserAgentFileSelectionResult {
     case selected(Int)

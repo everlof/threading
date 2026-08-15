@@ -34,6 +34,7 @@ conversation_controller="${repository_directory}/Sources/Threading/UI/Views/Conv
 browser_controller="${repository_directory}/Sources/Threading/UI/Views/BrowserViewController.swift"
 browser_download_coordinator="${repository_directory}/Sources/Threading/Application/Browser/BrowserDownloadCoordinator.swift"
 browser_navigation_coordinator="${repository_directory}/Sources/Threading/Application/Browser/BrowserNavigationCoordinator.swift"
+browser_agent_navigation_policy="${repository_directory}/Sources/Threading/Application/Browser/BrowserAgentNavigationPolicy.swift"
 agent_session_command_adapter="${repository_directory}/Sources/Threading/UI/Windows/AgentToolCoordinator+SessionCommands.swift"
 agent_session_command_service="${repository_directory}/Sources/Threading/Application/Sessions/AgentSessionCommandService.swift"
 project_model="${repository_directory}/Sources/Threading/Models/Project.swift"
@@ -137,6 +138,19 @@ fi
 
 if rg -n '^import (AppKit|WebKit)\b' "${browser_navigation_coordinator}"; then
   echo "architecture-boundary: BrowserNavigationCoordinator must remain Foundation-only" >&2
+  failed=1
+fi
+
+if rg -n \
+  'agentActionSequence|activeAgentNavigationGuard|AgentNavigationGuard' \
+  "${browser_controller}"; then
+  echo "architecture-boundary: BrowserViewController adapts WebKit form decisions;" >&2
+  echo "  agent form-submission policy belongs to BrowserAgentNavigationPolicy" >&2
+  failed=1
+fi
+
+if rg -n '^import (AppKit|WebKit)\b' "${browser_agent_navigation_policy}"; then
+  echo "architecture-boundary: BrowserAgentNavigationPolicy must remain Foundation-only" >&2
   failed=1
 fi
 
