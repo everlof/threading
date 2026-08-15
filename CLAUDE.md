@@ -523,10 +523,10 @@ durable decisions move into `docs/architecture/` and a pointer stays behind.
 
 ### IMPROVEMENTS.md
 
-The prioritized reliability/type-safety roadmap from the July 2026 architectural review,
-kept as a working checklist. When fixing anything it lists, check the item off there; when
-touching a subsystem it covers, read its entry first — several items (persistence
-quarantine, `@MainActor` adoption, typed IDs) change the rules new code should follow.
+The short active architecture-health ledger. It contains only current structural debt and points
+to the measurement command and closing rules. Completed reviews live under `docs/archive/reviews`;
+their findings are evidence, not current instructions. Load-bearing rules such as persistence
+quarantine, actor isolation, and typed IDs live in the owning `docs/architecture` file.
 
 ### USER_GUIDE.md
 

@@ -180,7 +180,7 @@ enum AgentLauncher {
     /// Throws for a runtime with no `.terminalUI`. There is a command line that would start
     /// Cursor's interactive TUI, and running it here is exactly the thing not to do: it would
     /// open a *different, empty* chat beside the conversation the row names, because its two
-    /// interfaces do not share a conversation store (§11 of `CURSOR_ACP_FINDINGS.md`). Refusing
+    /// interfaces do not share a conversation store (§11 of the archived Cursor ACP findings). Refusing
     /// is the honest answer, and the surface clamp in `AgentSession.resolvedNativeSurface`
     /// means no ordinary path reaches it.
     static func plan(

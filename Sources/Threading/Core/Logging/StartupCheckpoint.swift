@@ -5,7 +5,7 @@ import Foundation
 /// How far a launch got before it stopped being a launch.
 ///
 /// Nine facts, recorded and never acted on. The launch path deliberately keeps its
-/// force-unwraps (`IMPROVEMENTS.md` §3.2): there, a silent no-op would hide a real failure, so
+/// force-unwraps (archived reliability review §3.2): there, a silent no-op would hide a real failure, so
 /// nothing here guards anything — a checkpoint says only that the launch reached this line.
 /// What reads them is `CrashLoopPolicy`, after the fact and from the *next* launch.
 ///

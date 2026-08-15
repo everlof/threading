@@ -112,7 +112,7 @@ queue for the receipt.
 
 **t3code.** A hidden Git ref per turn (`apps/server/src/checkpointing/`), powering revert to any
 user message plus per-turn diff ranges, with the provider history rewound too via `rollbackThread`.
-[`T3CODE_FINDINGS.md`](../T3CODE_FINDINGS.md) §7 item 7 already records the storage idea as the
+[the archived t3code findings](../archive/research/T3CODE_FINDINGS.md) §7 item 7 already records the storage idea as the
 thing worth taking, and Threading took it. What t3code adds beyond that is the *write*, and they
 present it as one action across both halves.
 
@@ -448,7 +448,7 @@ which have been stable for two decades, and the retention and reconciliation rul
 **Conversation half: high, with high ongoing maintenance.** Two incompatible provider contracts, one
 already announced for removal, one reachable only through a control request read out of a compiled
 binary rather than from a published schema. Every CLI release is a re-measurement. This is precisely
-the shape [`T3CODE_FINDINGS.md`](../T3CODE_FINDINGS.md) §6 warns about — session durability is the
+the shape [the archived t3code findings](../archive/research/T3CODE_FINDINGS.md) §6 warns about — session durability is the
 product, and their top bug class is context going missing.
 
 ---

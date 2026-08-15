@@ -174,7 +174,7 @@ prompt), and deliberately claims no forking (`session/fork` is `-32601`), no per
 (its `agent`/`plan`/`ask` are a different axis from Threading's six), no preset session id, no
 accounts, and nothing about transcripts or usage — that protocol carries no usage notification of
 any kind. Every one of those rows cites its measurement in
-[`CURSOR_ACP_FINDINGS.md`](../CURSOR_ACP_FINDINGS.md); nothing ships from inference.
+[the archived Cursor ACP measurements](../archive/research/CURSOR_ACP_FINDINGS.md); nothing ships from inference.
 
 Two Cursor facts reach beyond the profile. Its CLI opens a browser when it decides it needs a
 login, so its plan carries `BROWSER=/usr/bin/true` and `NO_OPEN_BROWSER=1` through the new
@@ -937,7 +937,7 @@ Reordering and removal are operations on the **queue** only. A steered message i
 it is handed over, and there is nothing left to reorder.
 
 The measurements behind all of it — Claude 2.1.223 and Codex 0.145.0, probed rather than read —
-are in [`COMPOSER_QUEUE_FINDINGS.md`](../COMPOSER_QUEUE_FINDINGS.md).
+are in [the archived provider measurements](../archive/research/COMPOSER_QUEUE_FINDINGS.md).
 
 ### The transport boundary
 

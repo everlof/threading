@@ -582,10 +582,9 @@ nothing left to say must be indistinguishable from one that never said anything,
 build's key left behind would keep answering in the chain something the sheet did not show.
 Settings' **Custom sounds** section is the audit: a live scan of the store (no cache, capped
 before any view is built), one row per scope carrying an override, each a *Reset* and a door to
-its sheet. Project and standalone-terminal rows also name a non-inherited sound in their
-tooltip; **the session row deliberately does not yet** — it keeps no tooltip by design, its
-hover card is the right home, and that file was mid-refactor in another session when this
-landed. The affordance is owed; see IMPROVEMENTS.md.
+its sheet. Project and standalone-terminal rows name a non-inherited sound in their tooltip. A
+session row keeps no tooltip by design, so its hover card names the override beside the branch
+configuration. Absent overrides add no line.
 
 **The global silence gate is a gate, not a scope** (`AppSettings.silencesAllSounds`): it writes
 to no override map, so releasing it gives every scope back the answer it already had. The bell

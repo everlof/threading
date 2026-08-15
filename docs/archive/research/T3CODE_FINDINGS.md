@@ -1,4 +1,4 @@
-# t3code — Competitive Findings
+# Archived t3code competitive findings
 
 Researched 2026-07-25 against a clone of https://github.com/pingdotgg/t3code at commit
 `5719e8a` (v0.0.28, Jul 24 2026), plus an OSINT sweep of their issue tracker, Hacker News,
@@ -409,7 +409,7 @@ their decisions now live, and stay listed so the ranking's reasoning survives.
    Success stays quiet per the design language — the ✗ override is the only new per-row ink.
 6. **Settle/snooze + the recede rule** — §3.6. The biggest *idea* here, and the design pass it
    asked for is done: **decided 2026-08-12** →
-   [`docs/decisions/automatic-settling.md`](decisions/automatic-settling.md). **No-go** on a
+   [`automatic-settling.md`](../../decisions/automatic-settling.md). **No-go** on a
    settled/snoozed lifecycle state — the grouping (repo → checkout → branch → session) plus the
    four attention marks already carry what their flat inbox is compensating for — with a
    presentation-only **Needs Attention** view recommended instead and snooze deferred behind a
@@ -423,7 +423,7 @@ their decisions now live, and stay listed so the ranking's reasoning survives.
    opens its own exact checkpoint rather than redirecting to the newest. The capture goes past
    theirs in the way that matters later: the private alternate index admits non-ignored untracked
    files, which `stash create` cannot. The **revert** half stayed a separate question and is now
-   **decided 2026-08-12** → [`docs/decisions/revert-to-message.md`](decisions/revert-to-message.md):
+   **decided 2026-08-12** → [`revert-to-message.md`](../../decisions/revert-to-message.md):
    prototype a workspace-only restore, reject any claim that the conversation was reverted. The
    `rollbackThread` question this note wanted measured has been measured — §3 of that record has
    the numbers: Codex's `thread/rollback` is deprecated and reverts no files, Claude's
@@ -489,19 +489,19 @@ category differences rather than as borrowables. They were investigated in Augus
 record, so the reasoning does not have to be rebuilt the next time one is proposed:
 
 - **Editable file previews** (§2, *Files — browser + editable preview*) →
-  [`docs/decisions/editable-file-previews.md`](decisions/editable-file-previews.md). **Reject** on
+  [`editable-file-previews.md`](../../decisions/editable-file-previews.md). **Reject** on
   the Mac — Open In already wins on every axis — with the host write contract specified for the one
   slice that has no alternative, the iPhone's read-only Files browser. Their own implementation is
   debounced autosave with no expected-content precondition and no conflict surface, which is safe
   in a server-side product and a race here, where the agent writes the same bytes locally.
 - **`runOnWorktreeCreate` setup hooks** (§2, *Project scripts*) →
-  [`docs/decisions/repository-setup-hooks.md`](decisions/repository-setup-hooks.md). **Reject**
+  [`repository-setup-hooks.md`](../../decisions/repository-setup-hooks.md). **Reject**
   automatic execution; prototype an offer that still needs a press.
   `docs/architecture/project-scripts.md` already refused this in the abstract, and reading their
   188-line runner sharpened rather than softened the argument: no trust prompt, no content pinning,
   no timeout, no cancellation, no completion receipt.
 - **DOM element picking with component + `file:line`** (§1, *their distinctive category we don't
-  play in*) → [`docs/decisions/dom-source-attribution.md`](decisions/dom-source-attribution.md).
+  play in*) → [`dom-source-attribution.md`](../../decisions/dom-source-attribution.md).
   **Reject** a bundled framework provider; wait for demand on reading attribution a page already
   publishes. They do not implement it either — `react-grab@^0.1.32` does, through React's private
   development-build fiber internals and source maps, inside an Electron preload.

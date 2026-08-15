@@ -12,10 +12,10 @@ a product decision.
 | Product | Category | Why it matters | Research |
 |---|---|---|---|
 | **Threading** | Reference product | Native Mac workspace plus scoped remote collaboration, source review, browser automation, and a capability-governed extension host. | Current repository documentation |
-| **[omg.dev](https://github.com/BennyKok/omg.dev)** | Direct | Self-hosted web/PWA control plane for many coding-agent CLIs, with worktrees, delegation, automation, artifacts, and phone access. | [Detailed findings](OMG_DEV_FINDINGS.md), source snapshot `301e29f` on 2026-08-13 |
-| **[bb](https://github.com/get-bb/bb)** | Direct/strategic | Programmable agentic IDE with a shipped agent-authored plugin loop, broad backend/frontend extension APIs, durable threads, delegation, remote machines, and Git workflows. | [Detailed findings](BB_FINDINGS.md), source snapshot `5ecdd69` on 2026-08-14 |
-| **[t3code](https://github.com/pingdotgg/t3code)** | Direct | Web/Electron/mobile coding-agent client with normalized conversations, PTYs, worktrees, review, and remote access. | [Detailed findings](T3CODE_FINDINGS.md), researched 2026-07-25 |
-| **[Herdr](https://github.com/ogulcancelik/herdr)** | Adjacent/direct | Terminal-native multi-agent process manager with durable PTYs, worktrees, SSH access, and an executable plugin marketplace. | [Detailed findings](HERDR_FINDINGS.md), researched 2026-07-28 |
+| **[omg.dev](https://github.com/BennyKok/omg.dev)** | Direct | Self-hosted web/PWA control plane for many coding-agent CLIs, with worktrees, delegation, automation, artifacts, and phone access. | [Dated findings](archive/research/OMG_DEV_FINDINGS.md), source snapshot `301e29f` on 2026-08-13 |
+| **[bb](https://github.com/get-bb/bb)** | Direct/strategic | Programmable agentic IDE with a shipped agent-authored plugin loop, broad backend/frontend extension APIs, durable threads, delegation, remote machines, and Git workflows. | [Dated findings](archive/research/BB_FINDINGS.md), source snapshot `5ecdd69` on 2026-08-14 |
+| **[t3code](https://github.com/pingdotgg/t3code)** | Direct | Web/Electron/mobile coding-agent client with normalized conversations, PTYs, worktrees, review, and remote access. | [Dated findings](archive/research/T3CODE_FINDINGS.md), researched 2026-07-25 |
+| **[Herdr](https://github.com/ogulcancelik/herdr)** | Adjacent/direct | Terminal-native multi-agent process manager with durable PTYs, worktrees, SSH access, and an executable plugin marketplace. | [Dated findings](archive/research/HERDR_FINDINGS.md), researched 2026-07-28 |
 
 ## At-a-glance feature matrix
 

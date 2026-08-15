@@ -83,7 +83,8 @@ the Mac on home Wi-Fi and iPhone on cellular. It passed without any configured T
 remaining network gate is a production TURN configuration forced to relay-only, additional NATs,
 sleep/wake and repeated Wi-Fi/cellular handoff. Record selected-pair statistics before teardown,
 setup time, reconnect time and bytes relayed. The community binary is exact-version and checksum
-pinned with its upstream WebRTC source commit recorded in `docs/DEPENDENCY_AUDIT.md`; repeat that
+pinned with its upstream WebRTC source commit recorded in the
+[dated dependency audit](../archive/audits/DEPENDENCY_AUDIT-2026-08-12.md); repeat that
 provenance and advisory review on every update.
 
 ## Product contract

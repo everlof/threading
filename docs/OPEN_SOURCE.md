@@ -1,7 +1,7 @@
 # Open Source & Monetisation
 
 Analysis written 2026-07-25, alongside the t3code research (see
-[T3CODE_FINDINGS.md](T3CODE_FINDINGS.md)). The questions it answers, in order: can t3code
+[the archived t3code findings](archive/research/T3CODE_FINDINGS.md)). The questions it answers, in order: can t3code
 make money; what do they do right that preserves the ability to; and what Threading must
 decide *before* opening any source, given the working assumption that source availability
 is a trust requirement in this category — so revenue has to come from somewhere other than

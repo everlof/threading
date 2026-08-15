@@ -29,7 +29,7 @@ artefact.
 
 ## Records
 
-All five came out of the third [t3code mining trip](../T3CODE_FINDINGS.md) and were deliberately
+All five came out of the third [t3code mining trip](../archive/research/T3CODE_FINDINGS.md) and were deliberately
 kept apart. They are five independent product questions that happen to share a competitor, not one
 "advanced workflow" system, and three of them turn out to be mostly answered by machinery
 Threading already has.

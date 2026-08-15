@@ -666,7 +666,7 @@ command line that opens the wrong chat. Two smaller facts fell out of the same p
 launch in any directory stops on a modal workspace-trust gate that ACP never raises, and its
 prompt is an operand with the same leading-dash hazard as Claude's and Codex's
 (`error: unknown option '- item one'`, fixed by `--`). The full record is §11 of
-[`CURSOR_ACP_FINDINGS.md`](../CURSOR_ACP_FINDINGS.md).
+[the archived Cursor ACP measurements](../archive/research/CURSOR_ACP_FINDINGS.md).
 
 Grok's terminal contract was measured against 0.2.118. A fresh TUI launch is
 `grok --session-id <uuid> -- <opening>` and a later launch is `grok --resume <uuid>` with no

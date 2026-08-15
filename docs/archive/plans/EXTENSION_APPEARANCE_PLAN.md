@@ -1,7 +1,7 @@
-# Extension Appearance Plan — chromes and fonts as package data
+# Archived extension appearance plan — chromes and fonts as package data
 
 Status legend: `[ ]` open · `[x]` done · `[~]` in progress. Started and landed by Fable
-2026-07-27, after the chrome-typeface work (see `docs/TYPEFACE_PLAN.md`) made the resolution
+2026-07-27, after the chrome-typeface work (see `TYPEFACE_PLAN.md`) made the resolution
 side of this nearly free. `docs/architecture/themes.md` §2026-07-27 holds the architecture
 summary; this file records the decisions and what remains.
 
@@ -83,7 +83,7 @@ The third and fourth font assumptions in this codebase that were wrong until mea
       capability pairing, editing gates, symlink escape, font parse + families), library tier,
       the full selection-lifecycle arc, font bookkeeping with the seam, MCP origin, proposal
       disclosure. New file: the Tests group is filesystem-synchronized (see the obsolete-trap
-      note in `docs/TYPEFACE_PLAN.md`), so no pbxproj edits.
+      note in `TYPEFACE_PLAN.md`), so no pbxproj edits.
 - [x] Docs: `docs/extensions/README.md` (profile row + data-plane section), manifest schema,
       `AGENT_AUTHORING.md` forbidden-list amendment (node UI vs. sanctioned data plane),
       `USER_GUIDE.md` (Themes + Fonts), `docs/architecture/themes.md` dated subsection.

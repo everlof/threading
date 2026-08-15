@@ -4,7 +4,8 @@ import Foundation
 /// version 1.
 ///
 /// Every value below cites the measurement behind it in
-/// [`CURSOR_ACP_FINDINGS.md`](../../../../docs/CURSOR_ACP_FINDINGS.md). The second ACP provider
+/// The archived `docs/archive/research/CURSOR_ACP_FINDINGS.md` records every measurement behind
+/// these values. The second ACP provider
 /// was supposed to cost one value and a launch line, and it does — but only because each of these
 /// members was already the seam the runtime reads instead of asking who it is running.
 extension ACPProviderProfile {

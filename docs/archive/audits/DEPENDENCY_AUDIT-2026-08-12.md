@@ -1,4 +1,4 @@
-# Dependency and License Audit
+# Archived dependency and license audit
 
 - Audit date: 2026-08-12
 - Dependency baseline: `8360796d46742796646d38bc58e565fb1401688f`

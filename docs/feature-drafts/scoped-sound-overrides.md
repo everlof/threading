@@ -11,5 +11,6 @@
 > per-event terminus, the voiced/opt-in rule, the classification order and the
 > `bell.otherProgram` gating, `SoundOwner` and the `homeProject` decision, the nil-means-follow
 > writers, the sheet's `SoundScope` seam and its Reset-All contract, and the silence gate's
-> gate-not-scope design. One deferred item — the session row's own override affordance — is
-> recorded in `IMPROVEMENTS.md`. This pointer replaces the draft per this directory's rule.
+> gate-not-scope design. The initially deferred session-row affordance subsequently shipped in
+> the session hover card and is recorded in the current architecture document. This pointer
+> replaces the draft per this directory's rule.

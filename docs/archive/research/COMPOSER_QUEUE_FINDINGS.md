@@ -1,4 +1,4 @@
-# Queue, Steer, Stop — Provider Findings
+# Archived queue, steer, stop provider findings
 
 Researched 2026-08-06 to close item 10 of [`T3CODE_FINDINGS.md`](T3CODE_FINDINGS.md)
 ("Steering/queueing a message while the agent works … needs a probe").
@@ -512,7 +512,7 @@ between those two.
 ## 10. Built
 
 All of §8 shipped on 2026-08-06. The design as implemented is recorded in
-[`architecture/native-conversations.md`](architecture/native-conversations.md) under
+[`native-conversations.md`](../../architecture/native-conversations.md) under
 **Queue, Steer, Stop** — read that before changing any of it. This document stays as the
 measurement record behind those decisions.
 

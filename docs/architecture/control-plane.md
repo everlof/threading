@@ -169,7 +169,7 @@ and decides for itself — the "silently degraded to something else" failure thi
 keeps re-fixing, refused at the contract level this time. Steering is a stream operation, so
 a terminal or dormant target refuses with `steerNeedsLiveChat` whatever its activity says.
 The tool description and group instruction both carry the measured caveat from
-[`COMPOSER_QUEUE_FINDINGS.md`](../COMPOSER_QUEUE_FINDINGS.md) §2.4: steered text lands beside
+[the archived provider measurements](../archive/research/COMPOSER_QUEUE_FINDINGS.md) §2.4: steered text lands beside
 tool results, where models discard override-shaped instructions as injection — steer to add,
 never to countermand.
 

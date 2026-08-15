@@ -66,7 +66,7 @@ for the four that are not "nothing to see".
 side chat, each level earned rather than always drawn, with three sort orders (order added, recent
 activity, name) and pinned rows always first. t3code's Sidebar V2 *removes* project grouping and
 makes project a filter dropdown, because a flat list is what they have.
-[`T3CODE_FINDINGS.md`](../T3CODE_FINDINGS.md) §7 item 6 already says this out loud: "Threading's
+[the archived t3code findings](../archive/research/T3CODE_FINDINGS.md) §7 item 6 already says this out loud: "Threading's
 grouping carries information their flat inbox discards".
 
 **Archive is the filing action, and it is properly built.** It stops the agent, moves the row to
@@ -226,7 +226,7 @@ It would still need, all of which are why it is not proposed now:
   fires immediately → tight loop) — on AppKit that is a `Timer` with a far-future date, which has
   its own version of the same trap;
 - preset arithmetic worth taking verbatim from
-  [`T3CODE_FINDINGS.md`](../T3CODE_FINDINGS.md) §7 item 16: evening-suppression when the evening is
+  [the archived t3code findings](../archive/research/T3CODE_FINDINGS.md) §7 item 16: evening-suppression when the evening is
   less than an hour away, DST-safe day arithmetic, minutes ceiled so a snooze never reads "0m";
 - and an answer to "what does the notification do while snoozed", which is a fifth thing on top of
   the four-level notification settings that already exist.
@@ -245,7 +245,7 @@ output inference precisely because Threading does not rewrite their configuratio
 an inactivity settle would be least reliable exactly where the state is least reliable.
 
 **Privacy.** Nothing here leaves the machine, and nothing here may be measured by telemetry.
-[`T3CODE_FINDINGS.md`](../T3CODE_FINDINGS.md) §6 lesson 1 is that t3code's largest trust wound was
+[the archived t3code findings](../archive/research/T3CODE_FINDINGS.md) §6 lesson 1 is that t3code's largest trust wound was
 default-on PostHog; the "measurable success criteria" in §11 are therefore **local and
 user-readable** by construction — see below.
 

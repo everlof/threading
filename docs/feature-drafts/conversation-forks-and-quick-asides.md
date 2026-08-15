@@ -130,7 +130,7 @@ The implementation today has one durable Claude-only primitive:
   sends `/btw …` as an ordinary `session/prompt`. That path requires `canSend`, joins the main
   turn lifecycle, and cannot run while the parent works. It is command passthrough, not a
   Threading quick aside.
-- The Cursor ACP path measured in [`CURSOR_ACP_FINDINGS.md`](../CURSOR_ACP_FINDINGS.md) receives
+- The Cursor ACP path measured in [the archived provider investigation](../archive/research/CURSOR_ACP_FINDINGS.md) receives
   `-32601 Method not found` for `session/fork`; the Cursor application's separate side-chat UI is
   not available through that transport.
 
@@ -244,7 +244,7 @@ that can be revisited and referenced back into the parent. Semantically they are
 **Fork Conversation** than to this draft's **Ask Aside…** despite their command names.
 
 Threading embeds `cursor-agent` through ACP rather than through the Cursor application's chat
-panel. The authenticated probe in `CURSOR_ACP_FINDINGS.md` established durable create/load/prompt
+panel. The [archived authenticated probe](../archive/research/CURSOR_ACP_FINDINGS.md) established durable create/load/prompt
 behavior but measured `session/fork` as method-not-found. Do not copy Cursor's local session store
 or automate its UI. Recheck the ACP capability when the installed CLI changes; support becomes a
 normal provider-adapter addition once the wire exposes it.

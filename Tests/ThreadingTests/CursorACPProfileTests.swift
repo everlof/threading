@@ -3,7 +3,7 @@ import XCTest
 
 /// What is Cursor's after the ACP runtime was made provider-neutral: its profile, its launch
 /// line, its capability rows, and an end-to-end handshake built from the shapes measured on the
-/// wire in `docs/CURSOR_ACP_FINDINGS.md`.
+/// wire in `docs/archive/research/CURSOR_ACP_FINDINGS.md`.
 ///
 /// The fakes here quote §10 rather than inventing plausible JSON. That is the point of the whole
 /// exercise: the second ACP provider ships because those bytes were seen, so a test that made up

@@ -1,4 +1,4 @@
-# Cursor CLI over ACP — Provider Findings
+# Archived Cursor CLI over ACP provider findings
 
 Researched 2026-08-12 to answer one question: **can `cursor-agent` honestly back a native
 conversation in Threading** — launch, initialize, session create/load, prompt streaming,

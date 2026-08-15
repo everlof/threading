@@ -6,7 +6,8 @@ connectivity fails.
 
 It is linked into both shipping targets and runs in the default CI package loop. The community
 Google WebRTC M151 XCFramework is exact-version and checksum pinned; its upstream source commit,
-license inventory and update gate are recorded in `docs/DEPENDENCY_AUDIT.md` and
+license inventory and update gate are recorded in
+`docs/archive/audits/DEPENDENCY_AUDIT-2026-08-12.md` and
 `docs/architecture/dependencies.md`.
 
 Run the local host-candidate proof with:

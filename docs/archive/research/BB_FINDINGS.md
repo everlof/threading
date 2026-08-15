@@ -1,4 +1,4 @@
-# bb competitive findings
+# Archived bb competitive findings
 
 Researched 2026-08-14 against
 [get-bb/bb](https://github.com/get-bb/bb) at commit

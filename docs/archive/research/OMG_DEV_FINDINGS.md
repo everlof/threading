@@ -1,4 +1,4 @@
-# omg.dev — Competitive Findings
+# Archived omg.dev competitive findings
 
 Researched: 2026-08-13
 

@@ -222,7 +222,7 @@ struct AgentCapabilities: OptionSet {
   ///
   /// Claude, Codex, Grok and OpenCode: for each, the id Threading stores names one conversation
   /// that both surfaces resume. Cursor does not, and it is the reason this capability exists.
-  /// Measured 2026-08-12 (§11 of `CURSOR_ACP_FINDINGS.md`): `cursor-agent acp` writes its chats
+  /// Measured 2026-08-12 (§11 of `docs/archive/research/CURSOR_ACP_FINDINGS.md`): `cursor-agent acp` writes its chats
   /// to `~/.cursor/acp-sessions/<uuid>/`, while the interactive `cursor-agent` writes
   /// `~/.cursor/projects/<slug>/agent-transcripts/<uuid>/`, and **neither store can read the
   /// other's id**. ACP answers `session/load` for a TUI chat with
@@ -314,7 +314,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .transcriptUsageIndex
       ]
 
-    // Every row below cites the measurement that grants it, in `CURSOR_ACP_FINDINGS.md`. The
+    // Every row below cites the measurement that grants it in the archived Cursor ACP findings. The
     // absences are as deliberate as the claims and are listed after them.
     case .cursor:
       return [

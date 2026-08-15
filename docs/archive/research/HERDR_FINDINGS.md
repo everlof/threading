@@ -1,4 +1,4 @@
-# Herdr — Competitive Findings
+# Archived Herdr competitive findings
 
 Researched 2026-07-28 against https://herdr.dev, its public documentation and stats,
 the public repository at commit `e16d7d8c07a20f5ee0b4111808680bbcfd7df9ac`, the

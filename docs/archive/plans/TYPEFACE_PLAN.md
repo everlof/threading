@@ -1,4 +1,4 @@
-# Chrome Typeface Plan
+# Archived chrome typeface plan
 
 Status legend: `[ ]` open · `[x]` done · `[~]` in progress. Update the boxes as you land work —
 this document is the handoff between sessions (started by Fable, may be continued by Opus).
