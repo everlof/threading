@@ -25,9 +25,9 @@ scenario. This prevents the suite from becoming the cross-product of every featu
 ## Current foundation
 
 `ThreadingUITests` is a real UI-testing bundle with its own `ThreadingUI` scheme and
-`Threading-UI.xctestplan`. Its folder is an Xcode synchronized group, so a new source under
-`Tests/ThreadingUITests` is compiled automatically; this is intentionally different from the
-manually registered `Tests/ThreadingTests` target.
+`Threading-UI.xctestplan`. Both it and `ThreadingTests` use Xcode filesystem-synchronized groups,
+so a new source under either target's directory is compiled automatically without per-file
+project registration.
 
 Run it with:
 

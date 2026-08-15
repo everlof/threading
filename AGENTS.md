@@ -26,8 +26,8 @@ Five rules that are cheapest to learn before you start:
   processes, or provider data, apply its [scaling gate](CLAUDE.md#scaling-gate). Collapsed or
   hidden content is not lazy if its views were already built; the detailed rules and current audit
   live in [`performance.md`](docs/architecture/performance.md#implementation-time-scaling-gate).
-- **A new test file must be registered in `project.pbxproj` by hand**
-  (`scripts/add_test_file.py` does it). `Tests/ThreadingTests` is not a synchronized folder, and
-  an unregistered file fails silently — it builds nothing and reports "Executed 0 tests".
+- **Test sources are filesystem synchronized.** A new Swift file below `Tests/ThreadingTests`
+  or `Tests/ThreadingUITests` is compiled automatically; do not add per-file entries to
+  `project.pbxproj`.
 - **Before creating or changing an extension**, read `docs/extensions/AGENT_AUTHORING.md`
   completely rather than inferring the API from application internals.

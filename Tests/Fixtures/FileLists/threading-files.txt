@@ -432,7 +432,6 @@ Packages/Vendor/ThinkingOrbs
 USER_GUIDE.md
 scripts/config/theme-boundary.json
 docs/THEME_BOUNDARY.md
-scripts/add_test_file.py
 scripts/check_theme_boundaries.sh
 scripts/scrub_transcript.py
 scripts/theme_boundary_lint.swift

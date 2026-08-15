@@ -185,7 +185,7 @@ def render(root: Path) -> str:
             line_count(tool_extension_files),
             f"across {len(tool_extension_files)} files",
         ),
-        ("ThreadingTests Swift files", len(test_files), "manually registered"),
+        ("ThreadingTests Swift files", len(test_files), "filesystem synchronized"),
     ]
 
     width = max(len(label) for label, _, _ in rows)

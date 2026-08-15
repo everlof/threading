@@ -2187,12 +2187,11 @@ a plain `NSTableRowView` — and the two row classes are as provably total as th
 now swept for by `testEveryRowBuiltFromScratchInTheAppIsOneOfTheTwoThatRefuseTheDemotion`.
 Deriving from either inherits the refusal; building straight on `NSTableRowView` fails the sweep.
 
-**And `ListSelectionStrengthTests` had never run.** `Tests/ThreadingTests` is not a synchronized
-folder, and the file was never registered in `project.pbxproj` — so the suite guarding this rule
-compiled nowhere and reported nothing, for both of the sightings it was written after. That is the
-silent failure CLAUDE.md warns about, and it is why "the tests pass" was not evidence here.
-`ThemedTableRowSelectionTests` was in the same state and is now registered too. Fourteen other
-test files are still missing from the target.
+**And `ListSelectionStrengthTests` had never run.** At the time, `Tests/ThreadingTests` carried an
+explicit project-file list and the file was absent from it, so the suite guarding this rule
+compiled nowhere and reported nothing. `ThemedTableRowSelectionTests` was in the same state. The
+target is now a filesystem-synchronized group, so every Swift file below it is compiled without a
+second registration list.
 
 The new test is the one that fails on the old code: demote every row and assert the strength
 *immediately*, with no draw of any kind in between — which is the only form of the rule the

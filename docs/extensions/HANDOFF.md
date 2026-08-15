@@ -438,9 +438,8 @@ git diff --check
 
 Ten JSON files under `docs/extensions/schema` were also decoded successfully.
 
-`Tests/ThreadingTests` is not a synchronized Xcode group. If a new test file is created, register it
-in `Threading.xcodeproj/project.pbxproj` or use the existing `scripts/add_test_file.py` helper.
-Prefer adding tests to an existing registered test file when that produces a coherent suite.
+`Tests/ThreadingTests` is a filesystem-synchronized Xcode group. A new Swift file below that
+directory is compiled automatically; no per-file project registration is required.
 
 ## Worktree warning
 

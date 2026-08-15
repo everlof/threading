@@ -46,7 +46,6 @@ mkdir -p "${scenario_module_cache}"
 export CLANG_MODULE_CACHE_PATH="${scenario_module_cache}"
 export SWIFTPM_MODULECACHE_OVERRIDE="${scenario_module_cache}"
 
-python3 scripts/check_test_registration.py
 scripts/check_theme_boundaries.sh
 scripts/check_architecture_boundaries.sh
 scripts/check_agent_scenarios.sh

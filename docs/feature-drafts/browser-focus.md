@@ -330,9 +330,9 @@ Rendered-state fixtures should cover:
 - Increase Contrast and Reduce Motion.
 
 Add a visible `WKWebView` integration test proving that collapsing the sibling panes does not
-produce the never-shown blank-snapshot failure. Register every new test file with
-`scripts/add_test_file.py`, then run the theme and architecture boundary checks, the fast suite, and
-the complete visible-WebKit suite.
+produce the never-shown blank-snapshot failure. Put every new unit-test source below the
+filesystem-synchronized `Tests/ThreadingTests` directory, then run the theme and architecture
+boundary checks, the fast suite, and the complete visible-WebKit suite.
 
 ## Acceptance criteria
 

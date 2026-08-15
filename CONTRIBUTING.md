@@ -21,9 +21,8 @@ scripts/test.sh          # fast — run while iterating; no window is ordered on
 scripts/test.sh all      # the whole suite — run before proposing changes
 ```
 
-A new test file must be registered in the test target by hand;
-`scripts/add_test_file.py YourTests.swift` does the four project-file edits. An unregistered
-test file builds nothing and reports nothing, silently.
+Test source folders are filesystem synchronized. Add a Swift file below the appropriate test
+directory and Xcode compiles it automatically; do not add per-file project entries.
 
 ## The contributor license agreement
 

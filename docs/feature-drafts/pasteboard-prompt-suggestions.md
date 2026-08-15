@@ -430,8 +430,8 @@ clipboard-change channel.
   behavior.
 
 Use a uniquely named test pasteboard or an injected pasteboard interface. Tests must never spend
-the developer's general clipboard. A new test file must be registered in `project.pbxproj` through
-`scripts/add_test_file.py`.
+the developer's general clipboard. A new unit-test source below `Tests/ThreadingTests` is compiled
+automatically by the filesystem-synchronized target.
 
 ### Render and accessibility
 

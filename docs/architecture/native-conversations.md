@@ -1234,9 +1234,8 @@ recent transcripts here, of which 65 carried any text. Codex's `agent_reasoning`
 full. The asymmetry is the CLIs', not ours, and is pinned by a test so that a release which
 starts persisting the text fails loudly rather than going unnoticed.
 
-The test target is **not** a synchronized folder — it carries an explicit file list, so a new
-test file compiles nowhere and reports nothing unless added to it. `scripts/add_test_file.py`
-does the four edits.
+The test target is a filesystem-synchronized Xcode group. A new Swift file below
+`Tests/ThreadingTests` is compiled automatically, with no per-file project registration.
 
 The chat surface follows the shape of a modern chat client, not a log: the user's turns are
 right-aligned bubbles (`appendUserBubble`), the agent's are left-aligned markdown

@@ -748,7 +748,8 @@ the scaling bounds above. Update:
 
 Render under System plus two contrasting themes, with Increase Contrast, Reduce Motion, keyboard
 navigation, VoiceOver labels, long localized names, missing CCS, and the three-row onboarding cap.
-Register every new test file in `project.pbxproj` with `scripts/add_test_file.py`.
+Put every new unit-test source below `Tests/ThreadingTests`; the filesystem-synchronized target
+compiles it automatically.
 
 ### 5. Make models, capabilities, usage, and import route-aware
 

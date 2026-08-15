@@ -162,3 +162,20 @@ coordinator and its sidebar retain the injected instances. The architecture gate
 singleton lookups anywhere in the four `SessionCoordinator` files. This is intentionally one
 ownership-boundary migration; remaining leaf consumers stay in the measured queue rather than
 being rewritten mechanically.
+
+### Milestone 4 — filesystem-synchronized unit tests
+
+`Tests/ThreadingTests` is now a `PBXFileSystemSynchronizedRootGroup` owned by the unit-test target.
+The conversion removed 357 file references, 357 build-file objects, 357 group children, and 357
+Sources-phase entries. The obsolete registration helper and checker were removed from local, CI,
+UI, and app-build paths; test membership now has one source of truth: the filesystem.
+
+| Metric | Milestone 3 | Milestone 4 | Change |
+|---|---:|---:|---:|
+| `ThreadingTests` Swift files | 357 manually registered | 358 filesystem synchronized | +1 architecture proof test; −1,428 synchronized project entries |
+| `ThreadingTests` Sources-phase entries | 357 | 0 | compiler discovers the synchronized group |
+
+`FilesystemSynchronizedTestTargetTests.swift` is intentionally absent from `project.pbxproj` and
+executes through the focused Xcode test plan. It also asserts that its own name remains absent,
+so restoring per-file registration would fail the proof rather than quietly reintroducing a
+second list.
