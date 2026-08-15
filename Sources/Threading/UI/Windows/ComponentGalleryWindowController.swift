@@ -1272,6 +1272,7 @@ final class ComponentGalleryViewController: NSViewController {
         }
 
         let contextRail = ConversationContextRailView(mode: .composer)
+        let galleryProjectID = ProjectID()
         contextRail.setAttachments([
             ConversationContextAttachment(
                 kind: .reference,
@@ -1288,6 +1289,23 @@ final class ComponentGalleryViewController: NSViewController {
                 title: "layout.png",
                 comment: "Reduce the space above the toolbar.",
                 locator: "attachments/layout.png"
+            ),
+            // A sidebar session dropped on the composer: its own chip under the row's title,
+            // ahead of the count pills, with the Threading id under it in the menu.
+            SessionReferenceBrief.contextAttachment(
+                for: SessionReference(
+                    sessionID: SessionID(),
+                    title: "Fix parser crash",
+                    kind: .claude,
+                    projectID: galleryProjectID,
+                    projectName: "Threading",
+                    projectPath: "/Users/threading/repo/Threading"
+                ),
+                reader: SessionReferenceReader(
+                    sessionID: nil,
+                    projectID: galleryProjectID,
+                    hasSessionTools: true
+                )
             )
         ])
         contextRail.onComment = { [weak self] attachment in

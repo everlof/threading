@@ -214,7 +214,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         installScroller(ThemedScroller(frame: .zero, inkSource: .backdrop))
         configureForEmojiRendering()
         setupContextMenu()
-        registerForDraggedTypes([.fileURL, .png, .tiff])
+        registerForDraggedTypes([.fileURL, .png, .tiff, SessionReferencePasteboard.type])
     }
 
     // MARK: - Dropped Files
@@ -241,18 +241,31 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// pane refused every drop while the composer beside it accepted them — the one surface
     /// in the app where an image was most likely to be dropped.
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        PromptAttachment.canRead(sender.draggingPasteboard) ? .copy : []
+        canAccept(sender.draggingPasteboard) ? .copy : []
     }
 
     /// Answered again for every movement of the gesture. AppKit does not carry the entry
     /// answer forward, and a destination that says nothing here rejects the drop it just
     /// accepted.
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        PromptAttachment.canRead(sender.draggingPasteboard) ? .copy : []
+        canAccept(sender.draggingPasteboard) ? .copy : []
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         accept(sender.draggingPasteboard)
+    }
+
+    /// Files for every reader; a dragged sidebar session only for an agent's terminal.
+    ///
+    /// The reference is a brief written for an agent — which tools take which id — and a shell
+    /// has no agent to read it. Refused rather than pasted as some identifier: the sidebar's
+    /// Copy submenu retired the item that copied "whichever id existed" precisely because a
+    /// string that means different things on different rows is worse than none, and a drop
+    /// that quietly chose one would bring that back. `dropReader` rather than
+    /// `effectiveDropReader`: the image-conversion setting says nothing about who is reading.
+    private func canAccept(_ pasteboard: NSPasteboard) -> Bool {
+        if PromptAttachment.canRead(pasteboard) { return true }
+        return dropReader != .shell && SessionReferencePasteboard.canRead(pasteboard)
     }
 
     /// The drop itself, reachable without an `NSDraggingInfo` — what is worth testing here is
@@ -261,6 +274,25 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         guard acceptsLocalInput?() ?? true else {
             onLocalInputBlocked?()
             return false
+        }
+        if dropReader != .shell {
+            let referenced = SessionReferencePasteboard.sessionIDs(from: pasteboard)
+            if !referenced.isEmpty {
+                // Pasted, like a path, so the whole bracket arrives as one unit rather than
+                // as keystrokes a TUI's own key bindings get to read one by one — and framed by
+                // `SessionReferenceBrief`, which is where the words are decided.
+                let text = SessionReferenceHandoff.terminalText(
+                    referencing: referenced,
+                    readBy: owningSessionID()
+                )
+                guard !text.isEmpty else { return false }
+                pasteText(text)
+                // The caret follows the reference, as it does in the native composer: a drop
+                // is a deliberate act on this input, and what comes next is the sentence
+                // about it. Files are left alone — a path may be the whole of what was meant.
+                window?.makeFirstResponder(self)
+                return true
+            }
         }
         let paths = PromptAttachment.paths(from: pasteboard)
         guard !paths.isEmpty else { return false }

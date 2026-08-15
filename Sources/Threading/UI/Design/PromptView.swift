@@ -177,6 +177,14 @@ final class PromptView: NSView, ThemedComponent {
     var onRequestContextComment: ((ConversationContextAttachment) -> Void)?
     var onRequestImageComment: ((String) -> Void)?
 
+    /// Sidebar sessions dropped on the box, in drag order.
+    ///
+    /// The owner turns them into receipts (`SessionReferenceHandoff`) and stages them, because
+    /// what a reference says depends on which session is reading it and the prompt does not
+    /// know whose it is. Nil — a composer with no session behind it — refuses the drag
+    /// outright, so the pointer says no rather than the drop doing nothing.
+    var onSessionReferenceDrop: (([SessionID]) -> Void)?
+
     /// Disables only the send action. The editor remains live so a watcher can keep a private
     /// draft while somebody else controls the shared input stream.
     var isSubmissionEnabled = true {
@@ -669,7 +677,7 @@ final class PromptView: NSView, ThemedComponent {
             dismissCompletions()
             return
         }
-        registerForDraggedTypes([.fileURL, .png, .tiff])
+        registerForDraggedTypes([.fileURL, .png, .tiff, SessionReferencePasteboard.type])
     }
 
     // MARK: - Public Methods
@@ -1010,9 +1018,15 @@ final class PromptView: NSView, ThemedComponent {
     // MARK: - Dragging
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        let canRead = PromptAttachment.canRead(sender.draggingPasteboard)
+        let canRead = canAcceptDrop(sender.draggingPasteboard)
         isDropTarget = canRead
         return canRead ? .copy : []
+    }
+
+    /// Files always; a dragged sidebar session only when an owner is there to brief it.
+    private func canAcceptDrop(_ pasteboard: NSPasteboard) -> Bool {
+        if PromptAttachment.canRead(pasteboard) { return true }
+        return onSessionReferenceDrop != nil && SessionReferencePasteboard.canRead(pasteboard)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -1031,11 +1045,18 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        PromptAttachment.canRead(sender.draggingPasteboard)
+        canAcceptDrop(sender.draggingPasteboard)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         isDropTarget = false
+        if let onSessionReferenceDrop {
+            let sessions = SessionReferencePasteboard.sessionIDs(from: sender.draggingPasteboard)
+            if !sessions.isEmpty {
+                onSessionReferenceDrop(sessions)
+                return true
+            }
+        }
         let paths = PromptAttachment.paths(from: sender.draggingPasteboard)
         guard !paths.isEmpty else { return false }
         insertAttachments(paths)

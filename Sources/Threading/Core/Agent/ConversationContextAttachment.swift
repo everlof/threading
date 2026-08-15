@@ -20,6 +20,11 @@ struct ConversationContextAttachment: Codable, Equatable, Identifiable, Sendable
         /// A project-relative path in the session's execution checkout. Contents are resolved
         /// by the provider/tooling when needed; the composer never copies the file into prose.
         case workspaceFile
+        /// Another Threading session, dropped from the sidebar. `locator` is its Threading id —
+        /// the one `send_to_session` takes — and `excerpt` is the brief that says so, with the
+        /// runtime's own id and transcript beside it (`SessionReferenceBrief`). The title is the
+        /// session's, so the chip reads as the row that was dragged.
+        case session
     }
 
     let id: UUID
@@ -67,6 +72,9 @@ struct ConversationContextAttachment: Codable, Equatable, Identifiable, Sendable
 
     var presentationDetail: String {
         if let comment, !comment.isEmpty { return comment }
+        // A session's excerpt is the brief written for the agent — three sentences of tool
+        // names — and the person who dragged the row is better served by the id under it.
+        if source == .session { return locator ?? title }
         if let excerpt, !excerpt.isEmpty { return excerpt }
         return locator ?? title
     }
@@ -79,7 +87,7 @@ struct ConversationContextAttachment: Codable, Equatable, Identifiable, Sendable
     /// carries it in separate fields.
     var plainAnchor: String {
         switch source {
-        case .message:
+        case .message, .session:
             return title
         case .code, .attachment, .workspaceFile:
             guard let locator, !locator.isEmpty else { return title }
@@ -103,9 +111,15 @@ struct ConversationContextAttachment: Codable, Equatable, Identifiable, Sendable
     func plainText(omittingAnchor: Bool = false) -> String {
         var lines: [String] = []
         let anchor = plainAnchor
-        if !omittingAnchor { lines.append(anchor) }
-        if let excerpt, !excerpt.isEmpty, excerpt != anchor {
-            lines.append(contentsOf: excerpt.components(separatedBy: .newlines).map { "> \($0)" })
+        if source == .session {
+            // The brief is already the sentence — framed the way a terminal drop frames it, so
+            // a reference reads the same however it reached the TUI. See `SessionReferenceBrief`.
+            lines.append("[\(excerpt ?? anchor)]")
+        } else {
+            if !omittingAnchor { lines.append(anchor) }
+            if let excerpt, !excerpt.isEmpty, excerpt != anchor {
+                lines.append(contentsOf: excerpt.components(separatedBy: .newlines).map { "> \($0)" })
+            }
         }
         if let comment, !comment.isEmpty {
             if !lines.isEmpty { lines.append("") }

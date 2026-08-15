@@ -599,7 +599,7 @@ not a general XML stripper.
 
 Context attached to a Chat turn has one provider-neutral model:
 `ConversationContextAttachment` is either a reference or comment, sourced from a message, code
-line, or attachment. It carries a short title and bounded excerpt, an optional project-relative
+line, attachment, workspace file, or another session. It carries a short title and bounded excerpt, an optional project-relative
 locator and line range, and the human's comment when it is an instruction. The same value stages
 in `PromptView`, appears as a receipt on the sent message, crosses RemoteKit, and is recovered by
 transcript replay. Claude, Codex, and Grok therefore cannot drift into three UI or persistence
@@ -627,7 +627,14 @@ The entry points use the same staged receipt rail:
   are the lines the sheet and the excerpt will carry;
 - a Git Review file, including an image comparison, can be referenced or commented on as a file;
 - the Attachments pane can stage or comment on its selected item, and a composer image thumbnail
-  offers the comment action directly.
+  offers the comment action directly;
+- a sidebar session row dragged onto the composer stages a `.session` reference — the row's title,
+  its Threading id as the locator, and the brief telling the agent which tool takes which id as
+  the excerpt (`SessionReferenceBrief`, see [`control-plane.md`](control-plane.md)). The rail
+  draws it as its own named chip rather than folding it into the reference count, because it is
+  the one named thing the person just dropped; the same drop on a terminal pastes the brief as
+  one bracketed line. `PromptView.onSessionReferenceDrop` is the door — nil refuses the drag,
+  since a composer with no session behind it has nobody to brief the reference for.
 
 Code anchors use the rendered line's new number, falling back to its old number for deletions;
 a multi-line span anchors on its first and last displayed lines by the same rule, and its title

@@ -374,6 +374,9 @@ final class ConversationViewController: NSViewController {
                 completion: completion
             )
         }
+        prompt.onSessionReferenceDrop = { [weak self] sessionIDs in
+            self?.stageSessionReferences(sessionIDs)
+        }
         return prompt
     }()
     private lazy var promptContentContainer: ComponentContentContainer = {
@@ -2036,6 +2039,25 @@ final class ConversationViewController: NSViewController {
             context: promptView.contextAttachments,
             for: sessionID
         )
+    }
+
+    /// Sidebar sessions dropped on the composer, staged as reference receipts.
+    ///
+    /// Briefed for *this* session (`SessionReferenceHandoff`): the same row says "reach it with
+    /// send_to_session" here and "it is in another project" in a composer elsewhere. Through
+    /// `stageContextAttachment`, so a drop obeys the same write gate as every other door. The
+    /// caret then goes to the end of the box — a drop is a deliberate act on the composer, and
+    /// what follows a dropped reference is the sentence about it.
+    func stageSessionReferences(_ sessionIDs: [SessionID]) {
+        let attachments = SessionReferenceHandoff.contextAttachments(
+            referencing: sessionIDs,
+            readBy: sessionID
+        )
+        guard !attachments.isEmpty else { return }
+        for attachment in attachments {
+            stageContextAttachment(attachment)
+        }
+        promptView.focusAtEnd()
     }
 
     /// Stages the context and hands the turn over immediately — the ⌘Return half of the comment

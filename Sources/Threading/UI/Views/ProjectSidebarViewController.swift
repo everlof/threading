@@ -50,6 +50,10 @@ final class ProjectSidebarViewController: NSViewController {
             self?.presentRowContextMenu(row: row, anchor: anchor) ?? false
         }
         outline.registerForDraggedTypes([.fileURL])
+        // A session row drags out as a reference (`SessionReferencePasteboard`) — a copy of a
+        // name, never a move — and only within the app: nothing outside it reads the type.
+        outline.setDraggingSourceOperationMask(.copy, forLocal: true)
+        outline.setDraggingSourceOperationMask([], forLocal: false)
         let column = NSTableColumn(identifier: SidebarIdentifiers.mainColumn)
         column.resizingMask = .autoresizingMask
         outline.addTableColumn(column)

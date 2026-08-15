@@ -59,8 +59,22 @@ final class ConversationContextRailView: NSView {
             $0.removeFromSuperview()
         }
 
+        // A dropped session is a chip of its own, under the row's own name. The count pills
+        // exist to keep twenty line comments to two quiet words; a session reference is one
+        // named thing the person just dragged in, and "1 reference" would hide which one.
+        // Bounded by `ConversationContextPolicy.maximumAttachments`, like the rest of the rail.
+        for attachment in attachments where Self.standsAlone(attachment) {
+            let chip = ChipView()
+            chip.configure(symbolName: RailDefaults.sessionSymbol, title: attachment.title)
+            chip.setAccessibilityIdentifier(RailDefaults.sessionChipIdentifier)
+            chip.itemsProvider = { [weak self] in
+                self?.standaloneEntries(for: attachment) ?? []
+            }
+            stack.addArrangedSubview(chip)
+        }
+
         for kind in ConversationContextAttachment.Kind.allCases {
-            let values = attachments.filter { $0.kind == kind }
+            let values = attachments.filter { $0.kind == kind && !Self.standsAlone($0) }
             guard !values.isEmpty else { continue }
 
             let chip = ChipView()
@@ -71,6 +85,24 @@ final class ConversationContextRailView: NSView {
             stack.addArrangedSubview(chip)
         }
         isHidden = attachments.isEmpty
+    }
+
+    /// A session *reference* draws as its own chip; a comment on one is a comment like any
+    /// other and folds into the count, because what it says matters more than what it is on.
+    private static func standsAlone(_ attachment: ConversationContextAttachment) -> Bool {
+        attachment.source == .session && attachment.kind == .reference
+    }
+
+    /// One press deep: the chip already names the thing, so its menu is the id as a header and
+    /// the actions straight under it. The count pills need the extra level because they hold
+    /// many; a chip that holds one would only be making the person open a submenu to reach the
+    /// two rows they came for.
+    private func standaloneEntries(
+        for attachment: ConversationContextAttachment
+    ) -> [ThemedMenuEntry] {
+        let actions = actions(for: attachment)
+        guard !actions.isEmpty else { return entries(for: [attachment]) }
+        return [.header(attachment.presentationDetail)] + actions
     }
 
     private func entries(
@@ -144,4 +176,11 @@ final class ConversationContextRailView: NSView {
         case (.comment, _): return L10n.format("%lld comments", Int64(count))
         }
     }
+}
+
+private enum RailDefaults {
+    /// The "Other sessions" tool group's own mark, so the chip and the setting that governs
+    /// what the agent can do with it wear the same glyph.
+    static let sessionSymbol = "bubble.left.and.bubble.right"
+    static let sessionChipIdentifier = "conversation.context.session-reference"
 }

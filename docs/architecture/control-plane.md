@@ -219,6 +219,55 @@ Scope is the plane's, not the tool's: `WorkspaceControlPlane.watch` runs the sam
 self-target, membership and archived guards a send runs, minus the ones about a message, so a
 watch reaches exactly as far as a message does.
 
+## Handing an agent a session: the dragged row
+
+The user's side of the plane. The habit it replaces was **Copy ▸ Agent Session ID** followed
+by a sentence typed into another session's input saying what the id was and what to do with it
+— which id goes to which tool is exactly the thing a person gets wrong, since the runtime's own
+id and the Threading id are the same string for Claude and Grok and different for Codex and
+OpenCode. So a session row now **drags out of the sidebar** as a reference
+(`ProjectSidebarDragDrop.pasteboardWriterForItem`, one private pasteboard type
+`SessionReferencePasteboard.type` and no `.string` beside it — a plain-text flavour would make
+every text field in the app a destination for a paragraph of tool names), and the drop site
+turns it into the words for its surface.
+
+`SessionReference` (Core/Agent) is the **name card**: title (fenced with `safeHeaderTitle`, since
+a session names itself and `]` would close the terminal frame early), runtime, project name and
+execution path, the runtime's own id and its transcript path. Deliberately not the live state —
+a reference sits in a composer while the person keeps typing, and `working`/`idle` are
+`list_sessions`' to report when asked. Resolved at the drop, not the drag (`SessionReference.live`),
+so a row renamed mid-gesture lands under its new name.
+
+`SessionReferenceReader` is **who is reading**, reduced to what changes the words: the receiver's
+project (scope is per project, and out-of-scope answers as nonexistent, so a row from another
+project is told "cannot reach it from here" rather than handed a call that will be refused);
+whether its *surface* receives the bridge (`.terminalThreadingBridge` for a terminal drop,
+`.threadingBridge` for a composer drop — an OpenCode TUI has no tools and is told so) and the
+"Other sessions" group is on; and whether the row is the receiver itself ("it is you"). The
+drop site names the surface, because a session's stored preference and the surface in front of
+the user can differ.
+
+`SessionReferenceBrief` is **the words**, three sentences in a fixed order — what it is, how to
+reach it, what it is called elsewhere — and one text for both surfaces:
+
+- a terminal is pasted `terminalText`: one bracketed line, `[Threading session “…” — Claude
+  Code, Threading id …, in this project. Reach it with the Threading MCP tools: … ] `, through
+  `pasteText` so it arrives as one unit rather than as keystrokes. Bracketed because a TUI's
+  composer has no sidecar — the frame is what separates the reference from the sentence typed
+  after it, the same convention as the CLIs' own `[Image #1]` and `[Pasted text]` tokens; one
+  line because a multi-line paste is folded into a placeholder the person can no longer read.
+  A shell drawer refuses the drop (`dropReader == .shell`): a shell has no agent to brief, and
+  pasting "whichever id" would bring back the ambiguity the Copy submenu retired.
+- a native composer stages `contextAttachment`: a `ConversationContextAttachment` whose source
+  is `.session`, `locator` the Threading id and `excerpt` the brief — so it rides the existing
+  receipt chip, draft, queue, scheduled turn, transport envelope and replay with no second
+  shape. The rail draws it as its own chip under the row's title rather than folding it into
+  "1 reference", because it is the one named thing the person just dropped.
+  `presentationDetail` shows the id, not the brief: the sentences are for the agent.
+
+The third sentence always closes with the runtime's own id and transcript marked as *not*
+Threading ids — the whole reason a hand-typed version of this went wrong.
+
 ## What slice one deliberately does not do
 
 - **No auto-resume of dormant targets.** Booting an agent process is the user's decision;

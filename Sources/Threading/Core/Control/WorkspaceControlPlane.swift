@@ -230,7 +230,11 @@ final class WorkspaceControlPlane {
     }
 
     /// A session title, safe to interpolate into the one line Threading vouches for.
-    static func safeHeaderTitle(_ title: String) -> String {
+    ///
+    /// `nonisolated`, like `sanitized`: a pure function of its argument, and the session
+    /// reference a dragged sidebar row becomes (`SessionReference`) fences its title with the
+    /// same rule from a value type that has no actor.
+    nonisolated static func safeHeaderTitle(_ title: String) -> String {
         var safe = sanitized(title).replacingOccurrences(of: "\n", with: " ")
         for framing in ["[", "]", "“", "”"] {
             safe = safe.replacingOccurrences(of: framing, with: "'")
@@ -245,7 +249,7 @@ final class WorkspaceControlPlane {
     /// to the TUI as typed input, Returns and Ctrl-C included. Newlines and tabs stay; they
     /// are the message's own structure. The chat path never interprets these, but one rule
     /// for both surfaces means the answer cannot depend on where the target happens to live.
-    static func sanitized(_ message: String) -> String {
+    nonisolated static func sanitized(_ message: String) -> String {
         String(String.UnicodeScalarView(message.unicodeScalars.filter { scalar in
             scalar == "\n" || scalar == "\t"
                 || (scalar.value >= 0x20 && scalar.value != 0x7F

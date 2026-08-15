@@ -2201,7 +2201,7 @@ public struct RemoteConversationContextAttachmentDTO: Codable, Equatable, Identi
     public let id: String
     /// "reference" or "comment".
     public let kind: String
-    /// "message", "code", or "attachment".
+    /// "message", "code", "attachment", "workspaceFile", or "session".
     public let source: String
     public let title: String
     public let excerpt: String?

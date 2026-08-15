@@ -1135,6 +1135,34 @@ submenu:
 A standalone terminal carries the same **Copy ▸** submenu with its own **Threading ID** and
 the **Worktree Path** of the checkout it is currently standing in.
 
+### Referring one chat to another: drag the row
+If what you copy the id *for* is to tell another agent about that chat — "ask the one working
+on the parser how far it got", "pick up where this session stopped" — skip the clipboard and
+**drag the session's row out of the sidebar into the other session's input**. The row becomes
+a reference written for the agent reading it, in whichever form that input takes:
+
+- Dropped on a **terminal**, it is pasted as one bracketed line — `[Threading session
+  “Fix parser crash” — Claude Code, Threading id …, in this project. Reach it with the
+  Threading MCP tools: … send_to_session with session_id "…" …]` — and you type your sentence
+  after it. The bracket is where the reference stops and your words begin, the same way the
+  CLI's own `[Image #1]` token works.
+- Dropped on a native **Chat** composer, it becomes a receipt chip named after the row, beside
+  the message like a comment or an image, and the same words travel with your turn. Open the
+  chip's menu to see the id or to remove it.
+
+The words change with where the row lands. Dropped on a session in the same project, the
+reference tells the agent that `list_sessions` reports the session's state, that
+`send_to_session` with the Threading id hands it a message, and that `watch_session` waits for
+it. Dropped on a session in *another* project it says so, because those tools see only their
+own project. Dropped on a runtime whose surface has no Threading tools (an OpenCode or Grok
+TUI, or with **Settings ▸ Tools ▸ Other sessions** switched off) it says that too. Dropped on
+its own session it says "it is you". In every case the agent's own session id and the
+transcript's path follow, marked as *not* Threading ids, so nothing gets fed to the wrong tool.
+
+Only session rows drag; projects and branch groups stay put. A shell drawer refuses the drop —
+a shell has no agent to read a brief written for one — and so does every other text field, so
+the pointer's badge tells you where a reference can go before you let go.
+
 ### Permission mode
 How much a chat may do before it stops to ask. Claude Code and Codex support it, in one set of names:
 
