@@ -18,36 +18,73 @@ import AppKit
 /// dozen decisions rather than twenty-five.
 enum AppThemeStyles {
 
-    static let all: [AppTheme] = [
-        threading,
-        editorial,
-        cyberpunk,
-        swissMinimalist,
-        bauhaus,
-        artDeco,
-        neoBrutalism,
-        claymorphism,
-        vaporwave,
-        newsprint,
-        botanical,
-        industrial,
-        pureBlack,
-        cappuccino,
-        solarized,
-        nord,
-        dracula,
-        platinum,
-        aqua,
-        aquaTiger,
-        beOS,
-        openStep,
-        irix,
-        amiga,
-        classicPlayer,
-        win98,
-        tui,
-        christmas
+    /// The house group, which carries no head: a heading over the two entries the app ships
+    /// with would name a group nobody goes looking for, and the composer's identity menu already
+    /// learned that a head repeating its single row's own name is furniture. `AppThemeLibrary`
+    /// puts System at its front, being the one entry that is not a style at all.
+    static let house = AppThemeSection([threading])
+
+    /// The named families, in the order a picker shows them.
+    ///
+    /// Four kinds of thing were sitting in one twenty-eight-row list, and the list said so
+    /// nowhere: a design movement, a colour scheme, a reproduction of a shipped desktop, and a
+    /// reproduction of a piece of period software are chosen for entirely different reasons.
+    /// Filing them is what lets a reader skip the twenty rows they are not looking for.
+    static let styleFamilies: [AppThemeSection] = [
+        AppThemeSection(L10n.string("Design styles"), [
+            editorial,
+            cyberpunk,
+            swissMinimalist,
+            bauhaus,
+            artDeco,
+            neoBrutalism,
+            claymorphism,
+            vaporwave,
+            newsprint,
+            botanical,
+            industrial
+        ]),
+        // The palette-first family: a colour language rather than a chrome. See
+        // `docs/architecture/themes.md`.
+        AppThemeSection(L10n.string("Palettes"), [
+            pureBlack,
+            cappuccino,
+            solarized,
+            nord,
+            dracula
+        ]),
+        AppThemeSection(L10n.string("Classic desktops"), [
+            platinum,
+            aqua,
+            aquaTiger,
+            beOS,
+            openStep,
+            irix,
+            amiga,
+            win98
+        ]),
+        // Not desktops: a media player's compact chrome and a text-mode application's box
+        // drawing reproduce *software* of the same period, which is why Classic Player moved
+        // out from between Workbench and Windows 98.
+        AppThemeSection(L10n.string("Classic software"), [
+            classicPlayer,
+            tui
+        ]),
+        AppThemeSection(L10n.string("Seasonal"), [
+            christmas
+        ])
     ]
+
+    /// Every stock family, house first.
+    static var families: [AppThemeSection] { [house] + styleFamilies }
+
+    /// The stock catalogue, derived from the families rather than listed again beside them.
+    ///
+    /// Deriving it is the point: a style that is not filed under a family does not exist, so the
+    /// picker cannot fall out of step with the catalogue. The hand-maintained copy this replaces
+    /// had already drifted once — see `takeovers`, which learned the same lesson one property
+    /// along.
+    static let all: [AppTheme] = families.flatMap(\.themes)
 
     /// The stock themes that draw the window frame themselves, derived from the one fact
     /// that defines them (`takesOverWindowChrome`) rather than listed again by hand.

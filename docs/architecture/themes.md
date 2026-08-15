@@ -1469,3 +1469,54 @@ over an emptied source** releases the cells outright rather than queueing them. 
 what leaves a cell in the queue with nothing to take it. `ThemeLeakSweepTests` covers the seam
 directly and both list classes end to end; the end-to-end case asserts the parked cell really
 left the window and that no fresh cell was built, since either would make it pass for free.
+
+## 2026-08-15 — the picker files the catalogue
+
+The app-theme picker had grown to twenty-nine rows in one undifferentiated column, and the list
+said nothing about why any two of them were next to each other. Four different kinds of thing
+were in it — a design movement, a colour language, a reproduction of a shipped desktop, a
+novelty — chosen for entirely different reasons, and the only structure a row could carry was a
+suffix in its own title: `Aurora — Custom`, `Storm — Usage Rain`. That suffix is the longest
+segment on the line, and it repeats identically down a whole group.
+
+`ThemedMenuEntry.header` already existed for the composer's identity menu, so the fix was a
+filing system rather than a new control: `AppThemeSection` (a title and its themes),
+`AppThemeStyles.families`, and `ThemedPopUp.addHeader`. Sections, deliberately, not submenus —
+a head costs no trip through the menu, so a theme is still one press from the closed control,
+which is the property the identity menu flattened two sections to buy.
+
+The families, and why the two odd ones are their own group:
+
+| Head | What is in it |
+|---|---|
+| *(none)* | System and Threading — a head over the two entries the app ships with would name a group nobody browses to |
+| Design styles | The eleven movements and genres |
+| Palettes | The palette-first family: Pure Black, Cappuccino, Solarized, Nord, Dracula |
+| Classic desktops | The eight shipped desktops with a reference ledger under `docs/references/chrome/` |
+| Classic software | Classic Player and TUI, which reproduce *software* of the same period rather than a desktop — which is why Classic Player moved out from between Workbench and Windows 98 |
+| Seasonal | Christmas |
+| *extension name* | One section per contributing extension: where a user goes to update or remove it, and what tells two extensions shipping a "Storm" apart |
+| Custom | The user's own copies, the only editable tier |
+
+**`AppThemeStyles.all` is now the families flattened**, exactly as `takeovers` is `all` filtered:
+a style that is filed under no family does not exist, so the picker cannot drift from the
+catalogue the way the third hand-maintained copy of the stock list did (Aqua and Tiger were
+missing from the gallery within weeks of it being written).
+`AppThemeLibrary.sections` adds System, the contributed groups and the custom tier, in the same
+order `all` reports — `testSectionsAreTheWholeCatalogueInOrder` holds the two together.
+
+Two things a head breaks that had to be fixed with it, both in `ThemedPopUp`:
+
+- **A pop-up selects the first entry it is given**, which in a list that opens with a head was
+  the head: a button drawing an empty title and reporting no selection at all. It now records
+  the entry it just appended, which is the first *item* by construction.
+- **An entry index is not an item index.** Every caller looked its selection up in the model
+  list it had built the pop-up from — `AppThemeLibrary.all.firstIndex { … }` — which lands one
+  row lower per head above it, or on a head, and a picker showing the wrong theme is exactly
+  the failure the recovery-mode rule above exists to prevent. `indexOfItem(where:)` asks the
+  control instead, so the two lists no longer have to agree; the Component Gallery's picker,
+  which indexed `AppThemeLibrary.stock` positionally in two places, moved to the same lookup.
+
+Section titles are localized where they are stated (`L10n.string`), and `AppThemeSection.title`
+is therefore presentation-ready rather than a key — a section may be named after an extension,
+and an extension called "Custom" must not come out of a string table as something else.

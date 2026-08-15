@@ -25,6 +25,21 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
     /// reason the scheduled strip's `Row` is not a `ScheduledMessage`: a view holding the model
     /// would have to decide which of its states are the user's business.
     struct Offer: Equatable {
+
+        /// Who stopped this conversation, which decides the mark and the words.
+        ///
+        /// **The strip is shared and the mark is not.** `ThemedWarningMark` means "the provider
+        /// stopped this and you cannot answer it"; a line the user drew is conduct, not weather,
+        /// and wearing the triangle for it would teach the reader that the triangle is sometimes
+        /// negotiable. Same surface, same geometry, same two offers — a different mark, a
+        /// different sentence, and a Continue that says *Anyway*.
+        enum Source: Equatable {
+            case provider
+            case ownLimit
+        }
+
+        var source: Source = .provider
+
         /// The login the account button offers, named after the person. **Nil is the ordinary
         /// case for somebody with one login**, and it is not an empty strip: the wait offer needs
         /// no second account, so the row still stands and carries that alone.
@@ -55,6 +70,7 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
         var isBusy: Bool { busy != nil }
 
         init(
+            source: Source = .provider,
             accountName: String? = nil,
             reading: String? = nil,
             offersWaitForReset: Bool = false,
@@ -62,6 +78,7 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
             problem: String? = nil,
             busy: LimitEscapeAction? = nil
         ) {
+            self.source = source
             self.accountName = accountName
             self.reading = reading
             self.offersWaitForReset = offersWaitForReset
@@ -91,6 +108,11 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
     /// Put the offer away until the next refusal.
     var onDismiss: (() -> Void)?
 
+    /// Walk through a park by one of the user's own limits. Separate from `onContinue`, which
+    /// migrates the conversation to another login: these are different acts, and a park's Continue
+    /// keeps the session exactly where it is.
+    var onContinueAnyway: (() -> Void)?
+
     /// The offer currently drawn, or nil while the strip has nothing to say.
     private(set) var offer: Offer?
 
@@ -105,6 +127,10 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
     var dismissControl: ThemedIconButton { dismissButton }
 
     private let mark = ThemedWarningMark()
+
+    /// The park's mark: the same glyph the sidebar row wears for conduct, for the same reason —
+    /// a line the user drew is not weather.
+    private let conductMark = NSImageView()
     private let messageLabel = NSTextField(labelWithString: "")
     private lazy var continueButton = ThemedButton(
         title: L10n.string("Continue"),
@@ -159,6 +185,8 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
         }
 
         isHidden = false
+        mark.isHidden = offer.source == .ownLimit
+        conductMark.isHidden = offer.source != .ownLimit
         messageLabel.stringValue = Self.sentence(for: offer)
         messageLabel.toolTip = messageLabel.stringValue
         mark.setAccessibilityLabel(Self.sentence(for: offer))
@@ -171,8 +199,10 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
         // Absence is different from refusal, and the two are drawn differently on purpose: a
         // login that *cannot be moved to* is dimmed with its reason, while a login that does not
         // exist is not a dimmed button with nothing behind it — it is simply not on the row.
-        continueButton.isHidden = !offer.offersAccountEscape
-        if offer.offersAccountEscape {
+        // A park always offers its Continue Anyway, with or without a second login to move to:
+        // the rule is the user's own, so walking through it needs no destination.
+        continueButton.isHidden = !(offer.offersAccountEscape || offer.source == .ownLimit)
+        if !continueButton.isHidden {
             continueButton.title = Self.actionTitle(for: offer)
             continueButton.isEnabled = offer.offersContinuation && !offer.isBusy
             continueButton.toolTip = continueButton.title
@@ -245,6 +275,18 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
 
         dismissButton.translatesAutoresizingMaskIntoConstraints = false
 
+        conductMark.holdSymbol(
+            RowConductDefaults.symbol,
+            slot: Design.Size.inlineButtonGlyph
+        )
+        conductMark.imageScaling = .scaleProportionallyDown
+        conductMark.contentTintColor = Design.Text.secondary
+        conductMark.translatesAutoresizingMaskIntoConstraints = false
+        conductMark.isHidden = true
+        conductMark.setAccessibilityElement(true)
+        conductMark.setAccessibilityRole(.image)
+
+        addSubview(conductMark)
         addSubview(mark)
         addSubview(messageLabel)
         addSubview(actions)
@@ -260,6 +302,12 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
                 constant: LimitEscapeStripDefaults.contentInset
             ),
             mark.centerYAnchor.constraint(equalTo: centerYAnchor),
+            // Exactly on top of the warning mark: only one is ever visible, and two marks that
+            // sat in different places would move the sentence beside them between the two states.
+            conductMark.leadingAnchor.constraint(equalTo: mark.leadingAnchor),
+            conductMark.centerYAnchor.constraint(equalTo: mark.centerYAnchor),
+            conductMark.widthAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
+            conductMark.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
 
             messageLabel.leadingAnchor.constraint(
                 equalTo: mark.trailingAnchor,
@@ -331,13 +379,26 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
     private static func sentence(for offer: Offer) -> String {
         if let problem = offer.problem { return problem }
         guard let hint = offer.resetHint, !hint.isEmpty else {
-            return L10n.string("Limit reached")
+            return offer.source == .ownLimit
+                ? L10n.string("Held at your own limit")
+                : L10n.string("Limit reached")
         }
-        return L10n.format("Limit reached · resets %@", hint)
+        // Different words for a different fact. "Limit reached" is the provider's; a line of the
+        // user's is one they can move, and the sentence says whose it is before it says when the
+        // window comes back.
+        return offer.source == .ownLimit
+            ? L10n.format("Held at your own limit · resets %@", hint)
+            : L10n.format("Limit reached · resets %@", hint)
     }
 
     private static func actionTitle(for offer: Offer) -> String {
-        guard let accountName = offer.accountName else { return L10n.string("Continue") }
+        guard let accountName = offer.accountName else {
+            // **Anyway**, and the word is load-bearing: this button walks through a rule the
+            // reader wrote, so it has to read as an exception rather than as a resume.
+            return offer.source == .ownLimit
+                ? L10n.string("Continue Anyway")
+                : L10n.string("Continue")
+        }
         // Only when *this* button is what is running: a migration announced because somebody
         // pressed the one beside it would name a login change that is not happening.
         if offer.busy == .moveAccount { return L10n.string("Continuing…") }
@@ -360,7 +421,16 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
 
     // MARK: - Actions
 
-    @objc private func continuePressed() { onContinue?() }
+    /// One button, two acts, chosen by whose limit stopped this. A provider refusal's Continue
+    /// moves the conversation to another login; a park's Continue Anyway leaves it exactly where
+    /// it is and stands the user's own rule down for this turn of the window.
+    @objc private func continuePressed() {
+        if offer?.source == .ownLimit {
+            onContinueAnyway?()
+        } else {
+            onContinue?()
+        }
+    }
 
     @objc private func waitPressed() { onWaitForReset?() }
 

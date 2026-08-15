@@ -211,18 +211,19 @@ final class CustomLimitEvaluatorTests: XCTestCase {
         XCTAssertFalse(result.wantsNotification)
     }
 
-    /// A rule written by a later build is listed and not evaluated. Reading a pace share's bound
-    /// as a fixed cap would fire alerts at a line the user never drew.
+    /// A rule written by a later build is listed and not evaluated. Reading a synthetic window's
+    /// bound as a fixed cap would fire alerts at a line the user never drew — its bound is a
+    /// budget per trailing span, not a position on this window's bar.
     func testAMetricThisBuildDoesNotUnderstandIsNotGuessedAt() throws {
         let rule = CustomLimit(
             windowID: UsageDefaults.weeklyWindowID,
-            metric: .paceShare,
+            metric: .syntheticWindow,
             bound: 0.5
         )
         let result = try XCTUnwrap(evaluate([rule], usage([window(fraction: 0.9)])).first)
 
         XCTAssertEqual(result.state, .unsupported)
-        XCTAssertEqual(result.reason, .notEvaluated(.paceShare))
+        XCTAssertEqual(result.reason, .notEvaluated(.syntheticWindow))
         XCTAssertFalse(result.wantsNotification)
     }
 
@@ -261,21 +262,23 @@ final class CustomLimitEvaluatorTests: XCTestCase {
     /// A rule stored at a tier this build does not implement still evaluates, clamped to what can
     /// actually be done. A limit that decodes and then does nothing is the silent forgetting the
     /// stored raw values exist to prevent.
-    func testATierFromALaterBuildIsClampedRatherThanDropped() throws {
-        let rule = CustomLimit(
-            windowID: UsageDefaults.weeklyWindowID,
-            bound: 0.5,
-            tier: .park
-        )
-        let result = try XCTUnwrap(evaluate([rule], usage([window(fraction: 0.6)])).first)
+    ///
+    /// Asserted as the **invariant** rather than against one tier, because the ceiling moves as
+    /// the ladder is implemented: a test pinned to yesterday's ceiling fails the day the next
+    /// tier lands, and the thing worth protecting is that no rule ever acts *above* the ceiling.
+    func testATierIsNeverActedOnAboveWhatThisBuildImplements() throws {
+        for tier in CustomLimitTier.allCases {
+            let rule = CustomLimit(windowID: UsageDefaults.weeklyWindowID, bound: 0.5, tier: tier)
+            let result = try XCTUnwrap(evaluate([rule], usage([window(fraction: 0.6)])).first)
 
-        XCTAssertEqual(rule.effectiveTier, .notify)
-        XCTAssertEqual(
-            result.state,
-            .reached,
-            "this build must not claim to have parked anything"
-        )
-        XCTAssertTrue(result.wantsNotification)
+            XCTAssertLessThanOrEqual(
+                rule.effectiveTier,
+                CustomLimitDefaults.highestImplementedTier,
+                "a \(tier.rawValue) rule armed above what this build implements"
+            )
+            XCTAssertLessThanOrEqual(rule.effectiveTier, tier, "a rule was armed above its own tier")
+            XCTAssertTrue(result.state.isAtBound)
+        }
     }
 
     // MARK: - The Record

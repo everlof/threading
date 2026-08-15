@@ -184,7 +184,12 @@ final class UsageWindowPoker {
             shortWindow: usage?.anchoredWindow,
             weeklyWindow: usage?.longestWindow,
             isWorking: Self.isWorking(account: account),
-            pokesToday: pokes(on: now, accountID: key)
+            pokesToday: pokes(on: now, accountID: key),
+            customLimitHold: CustomLimitBounds.hold(
+                on: usage,
+                in: CustomLimitSettings.shared.rules(for: account.id),
+                at: now
+            )
         ))
     }
 

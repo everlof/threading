@@ -314,7 +314,23 @@ final class UsageHistoryStore {
     }
 
     private static func key(accountID: String, windowID: String) -> String {
-        "\(accountID)|\(windowID)"
+        "\(accountID)\(UsageHistoryKey.separator)\(windowID)"
+    }
+
+    /// The inverse of `key(accountID:windowID:)`.
+    ///
+    /// Named because a *second* place needs it — the Limit History chart, to ask which of the
+    /// user's own limits binds the series it is drawing — and the alternative was a second
+    /// hand-rolled `lastIndex(of: "|")` at that call site, which is how a key format comes to have
+    /// two readers and one writer. `lastIndex` rather than `firstIndex`: an `AccountID` is
+    /// `provider:handle` and a window id may not contain the separator, but the account half is
+    /// the one that could grow one.
+    nonisolated static func seriesKeyParts(_ key: String) -> (accountID: String, windowID: String)? {
+        guard let separator = key.lastIndex(of: UsageHistoryKey.separator) else { return nil }
+        let accountID = String(key[..<separator])
+        let windowID = String(key[key.index(after: separator)...])
+        guard !accountID.isEmpty, !windowID.isEmpty else { return nil }
+        return (accountID, windowID)
     }
 
     nonisolated static func prepareJournalSnapshot(
@@ -354,9 +370,8 @@ final class UsageHistoryStore {
         _ values: [String: [UsageSample]]
     ) -> [String: [UsageSample]] {
         Dictionary(uniqueKeysWithValues: values.map { key, series in
-            guard let separator = key.lastIndex(of: "|") else { return (key, series) }
-            let accountID = String(key[..<separator])
-            let windowID = String(key[key.index(after: separator)...])
+            guard let parts = seriesKeyParts(key) else { return (key, series) }
+            let (accountID, windowID) = parts
             let runtimeID = accountID.split(separator: ":", maxSplits: 1).first.map(String.init)
             let enriched = series.map {
                 UsageSample(
@@ -378,6 +393,15 @@ final class UsageHistoryStore {
 
 extension Notification.Name {
     static let usageLimitHistoryDidChange = Notification.Name("usageLimitHistoryDidChange")
+}
+
+/// How a history series names the account and window it belongs to.
+///
+/// Its own namespace because the format now has two readers — the store, and the Limit History
+/// chart resolving which of the user's limits binds the series it draws — and a separator spelled
+/// as a literal at each of them is a format with no owner.
+enum UsageHistoryKey {
+    static let separator: Character = "|"
 }
 
 enum UsageHistoryDefaults {

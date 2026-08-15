@@ -343,6 +343,46 @@ final class AccountLimitsSectionController {
                 }
             )))
 
+            // The two templates that *act*, kept under their own headers so the list never reads
+            // as one ladder of percentages with different consequences hidden in it.
+            entries.append(.header(AccountLimitsStrings.holdHeader))
+            entries += CustomLimitDefaults.offeredCapFractions.map { fraction in
+                .item(ThemedMenuItem(
+                    title: AccountLimitsStrings.keepUnder(CustomLimitReceipt.percent(fraction)),
+                    onChoose: { [weak self] in
+                        self?.add(.cap(windowID: window.id, at: fraction), to: scope)
+                    }
+                ))
+            }
+            entries.append(.header(AccountLimitsStrings.recreateHeader))
+            entries += CustomLimitDefaults.offeredSyntheticWindows.map { offer in
+                .item(ThemedMenuItem(
+                    title: AccountLimitsStrings.recreateWindow(
+                        span: UsageFormat.duration(offer.span),
+                        budget: CustomLimitReceipt.percent(offer.budget)
+                    ),
+                    onChoose: { [weak self] in
+                        self?.add(
+                            .syntheticWindow(
+                                windowID: window.id,
+                                budget: offer.budget,
+                                span: offer.span
+                            ),
+                            to: scope
+                        )
+                    }
+                ))
+            }
+            entries.append(.header(AccountLimitsStrings.shareHeader))
+            entries += CustomLimitDefaults.offeredPaceShares.map { share in
+                .item(ThemedMenuItem(
+                    title: AccountLimitsStrings.reserveShare(CustomLimitReceipt.percent(1 - share)),
+                    onChoose: { [weak self] in
+                        self?.add(.paceShare(windowID: window.id, share: share), to: scope)
+                    }
+                ))
+            }
+
             return .item(ThemedMenuItem(title: window.name, submenu: entries))
         }
     }
@@ -521,6 +561,22 @@ enum AccountLimitsStrings {
 
     static func everyStep(_ percent: String) -> String {
         L10n.format("Every %@", percent)
+    }
+
+    static var holdHeader: String { L10n.string("…and stop spending it for me") }
+    static var shareHeader: String { L10n.string("…and leave a share for its owner") }
+    static var recreateHeader: String { L10n.string("…and give it a shorter window back") }
+
+    static func recreateWindow(span: String, budget: String) -> String {
+        L10n.format("No more than %1$@ in any %2$@", budget, span)
+    }
+
+    static func keepUnder(_ percent: String) -> String {
+        L10n.format("Keep it under %@", percent)
+    }
+
+    static func reserveShare(_ percent: String) -> String {
+        L10n.format("Always leave them %@", percent)
     }
 
     /// What a closed fold says about a login.

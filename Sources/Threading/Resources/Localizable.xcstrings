@@ -1481,6 +1481,18 @@
     "Scheduled session": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Schemalagd session" } } }
     },
+    "Scheduled session cancelled.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den schemalagda sessionen avbröts." } } }
+    },
+    "Scheduled session started now.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den schemalagda sessionen startades nu." } } }
+    },
+    "ScheduledSessionPlaceholderView": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ScheduledSessionPlaceholderView" } } }
+    },
+    "The frozen brief and launch decisions for a conversation waiting on its trigger. Start now and Cancel schedule exercise the two exits.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det låsta uppdraget och startvalen för en konversation som väntar på sitt villkor. Starta nu och Avbryt schemaläggning provar de två utgångarna." } } }
+    },
     "Session is scheduled to start automatically": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionen är schemalagd att starta automatiskt" } } }
     },
@@ -6821,6 +6833,66 @@
           "stringUnit": {
             "state": "translated",
             "value": "Byggutdata som dina projekt kan skapa igen – byggkataloger för Rust och Swift, installerade paket och cachefiler. Worktrees ingår, eftersom det ofta är där det mesta finns."
+          }
+        }
+      }
+    },
+    "Design styles": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Designstilar"
+          }
+        }
+      }
+    },
+    "Palettes": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paletter"
+          }
+        }
+      }
+    },
+    "Classic desktops": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klassiska skrivbord"
+          }
+        }
+      }
+    },
+    "Classic software": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klassiska program"
+          }
+        }
+      }
+    },
+    "Seasonal": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Säsong"
+          }
+        }
+      }
+    },
+    "Extensions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillägg"
           }
         }
       }
@@ -25650,6 +25722,16 @@
         }
       }
     },
+    "New chat or terminal": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ny chatt eller terminal"
+          }
+        }
+      }
+    },
     "Rename Terminal": {
       "localizations": {
         "sv": {
@@ -28260,7 +28342,28 @@
     "Draw a line on every account": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dra en gräns på alla konton"}}}},
     "Let this limit colour the usage pill in the toolbar": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Låt den här gränsen färga användningsknappen i verktygsfältet"}}}},
     "Show this limit on the toolbar pill": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa den här gränsen på verktygsfältets användningsknapp"}}}},
-    "Toolbar": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Verktygsfält"}}}}
+    "Toolbar": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Verktygsfält"}}}},
+    "Your limit · %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Din gräns · %@"}}}},
+    "No limit of yours is holding this account.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ingen av dina gränser håller tillbaka det här kontot."}}}},
+    "%1$@ is at your %2$@ limit, so Threading is not spending this account on its own.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%1$@ har nått din gräns på %2$@, så Threading spenderar inte det här kontot på egen hand."}}}},
+    "Threading cannot read %@ right now, so it is not spending this account on its own.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading kan inte läsa %@ just nu, så det spenderar inte det här kontot på egen hand."}}}},
+    "Excluded by your limit": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Utesluten av din gräns"}}}},
+    "No reading for your limit": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ingen avläsning för din gräns"}}}},
+    "…and stop spending it for me": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "… och sluta spendera det åt mig"}}}},
+    "…and leave a share for its owner": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "… och lämna en andel till ägaren"}}}},
+    "Keep it under %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Håll det under %@"}}}},
+    "Always leave them %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lämna alltid %@ till dem"}}}},
+    "Held at your limit · %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hålls vid din gräns · %@"}}}},
+    "%1$@ at %2$@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%1$@ vid %2$@"}}}},
+    "no %@ reading": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ingen avläsning av %@"}}}},
+    "Held at your own limit": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hålls vid din egen gräns"}}}},
+    "Held at your own limit · resets %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hålls vid din egen gräns · återställs %@"}}}},
+    "Continue Anyway": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Fortsätt ändå"}}}},
+    "…and give it a shorter window back": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "… och ge det ett kortare fönster tillbaka"}}}},
+    "No more than %1$@ in any %2$@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Högst %1$@ under %2$@"}}}},
+    "No more than %1$@ of %2$@ in any %3$@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Högst %1$@ av %2$@ under %3$@"}}}},
+    "Leave %1$@ of %2$@ for its owner": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lämna %1$@ av %2$@ till ägaren"}}}},
+    "%1$@ spent in the last %2$@, of your %3$@ budget.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%1$@ spenderat de senaste %2$@, av din budget på %3$@."}}}}
   },
   "version": "1.0"
 }

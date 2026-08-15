@@ -21,6 +21,7 @@ extension SessionCoordinator {
     func performScheduledSend(_ id: ScheduledMessageID) {
         guard let message = ScheduledMessageStore.shared.claim(id) else { return }
         guard !standAsideForUnresetWindow(message) else { return }
+        guard !standAsideForCustomLimit(message) else { return }
 
         switch message.target {
         case .session(let sessionID):
@@ -76,7 +77,16 @@ extension SessionCoordinator {
         // when I have usage again", and `fraction` is the field that answers it. An unknown
         // fraction reads as room: refusing to send on a reading we do not have would strand the
         // message for a provider that simply reports less.
-        let hasRoom = (window.fraction ?? 0) < UsageDefaults.criticalFraction
+        //
+        // The user's own line joins the comparison: "I have usage again" means usage they are
+        // willing to spend, and on an account fenced at half, 60% is not room. With no line drawn
+        // the effective bound is 1 and this is the shipped formula exactly.
+        let bound = CustomLimitBounds.effectiveBound(
+            on: windowID,
+            in: CustomLimitSettings.shared.rules(for: account.id),
+            window: window
+        )
+        let hasRoom = (window.fraction ?? 0) / bound < UsageDefaults.criticalFraction
         guard ScheduledResetPolicy.current.shouldStandAside(
             alreadyRearmed: message.resetRearmCount,
             windowHasReset: hasRoom
@@ -92,6 +102,63 @@ extension SessionCoordinator {
         ScheduledMessageStore.shared.relinquish(message.id)
         environment.eventLog.record(.composer, "Scheduled send stood aside for its usage window", [
             "window": windowID,
+            "resetsAt": ISO8601DateFormatter().string(from: resetsAt)
+        ])
+        return true
+    }
+
+    // MARK: - A Line The User Drew
+
+    /// Stands a send aside because one of the user's own limits is holding this account.
+    ///
+    /// Unlike `standAsideForUnresetWindow`, this applies to **every** scheduled send rather than
+    /// only the reset-anchored ones: the user's line is a statement about spending, not about a
+    /// window's phase, and a send timed to a wall-clock moment spends exactly as much as one timed
+    /// to a reset. Threading can hold back what Threading starts, and a scheduled send is the
+    /// clearest case of that — nobody is at the keyboard when it fires.
+    ///
+    /// The send is **re-armed at the window's reset** rather than cancelled: the user asked for
+    /// this message to go, and a limit is a "not yet", not a "no". `ScheduledResetPolicy` owns how
+    /// many times that may happen, so a rule cannot silently defer a message forever.
+    private func standAsideForCustomLimit(_ message: ScheduledMessage) -> Bool {
+        guard let account = accountFor(message.target) else { return false }
+
+        let usage = AccountUsageService.shared.usage(for: account)
+        let hold = CustomLimitBounds.hold(
+            on: usage,
+            in: CustomLimitSettings.shared.rules(for: account.id)
+        )
+        guard hold.isHolding, let rule = hold.rule else { return false }
+
+        let resetsAt = usage?.allWindows
+            .first { $0.id == rule.windowID }?
+            .resetsAt
+
+        guard ScheduledResetPolicy.current.shouldStandAside(
+            alreadyRearmed: message.resetRearmCount,
+            windowHasReset: false
+        ), let resetsAt, resetsAt > Date() else {
+            // Nothing to wait for — no reset in the reading, or the policy is out of patience.
+            // The send goes, and the receipt says the line was reached: holding a message
+            // indefinitely with nowhere to re-arm to would be the feature quietly eating it.
+            environment.eventLog.record(.composer, "Scheduled send passed a limit with no reset to wait for", [
+                "rule": rule.windowID,
+                "reason": CustomLimitReceipt.holdReason(hold)
+            ])
+            return false
+        }
+
+        ScheduledMessageStore.shared.replace(
+            message.id,
+            with: message.rescheduled(
+                to: resetsAt.addingTimeInterval(PresetDefaults.resetPadding),
+                countingRearm: true
+            )
+        )
+        ScheduledMessageStore.shared.relinquish(message.id)
+        environment.eventLog.record(.composer, "Scheduled send held by one of your own limits", [
+            "rule": rule.windowID,
+            "reason": CustomLimitReceipt.holdReason(hold),
             "resetsAt": ISO8601DateFormatter().string(from: resetsAt)
         ])
         return true

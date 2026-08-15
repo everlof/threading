@@ -20,10 +20,32 @@ enum CustomLimitReceipt {
     /// from the window and the bound. A rule always has something to be called.
     static func name(for rule: CustomLimit, windowName: String) -> String {
         if let name = rule.name { return name }
-        guard rule.bound < CustomLimitDefaults.boundThreshold else {
-            return L10n.format("Watch %@", windowName)
+
+        switch rule.metric {
+        case .syntheticWindow:
+            guard let span = rule.trailingSpan else {
+                return L10n.format("Watch %@", windowName)
+            }
+            // Named after what it *is* — a window the user recreated — rather than after the
+            // provider window it is funded from, which is a denominator rather than a subject.
+            return L10n.format(
+                "No more than %1$@ of %2$@ in any %3$@",
+                percent(rule.bound),
+                windowName,
+                UsageFormat.duration(span)
+            )
+        case .paceShare:
+            return L10n.format(
+                "Leave %1$@ of %2$@ for its owner",
+                percent(1 - rule.bound),
+                windowName
+            )
+        case .fixedCap:
+            guard rule.bound < CustomLimitDefaults.boundThreshold else {
+                return L10n.format("Watch %@", windowName)
+            }
+            return L10n.format("Keep %1$@ under %2$@", windowName, percent(rule.bound))
         }
-        return L10n.format("Keep %1$@ under %2$@", windowName, percent(rule.bound))
     }
 
     // MARK: - Sentences
@@ -75,6 +97,16 @@ enum CustomLimitReceipt {
         case .notEvaluated:
             return L10n.string("This limit was made in a newer version of Threading.")
         case .underBound(let consumed), .atBound(let consumed):
+            // A synthetic rule's status is about the *span*, not about where the provider window
+            // stands: "62% of the weekly" would be a number this rule is not measuring.
+            if evaluation.rule.metric == .syntheticWindow, let span = evaluation.rule.trailingSpan {
+                return L10n.format(
+                    "%1$@ spent in the last %2$@, of your %3$@ budget.",
+                    percent(evaluation.windowFraction ?? 0),
+                    UsageFormat.duration(span),
+                    percent(evaluation.rule.bound)
+                )
+            }
             let atWindow = percent(consumed * evaluation.rule.bound)
             guard evaluation.rule.bound < CustomLimitDefaults.boundThreshold else {
                 return L10n.format("%1$@ is at %2$@.", windowName, atWindow)
@@ -85,6 +117,56 @@ enum CustomLimitReceipt {
                 atWindow,
                 percent(evaluation.rule.bound)
             )
+        }
+    }
+
+    // MARK: - Holds
+
+    /// The one sentence a hold's receipt prints.
+    ///
+    /// The two cases are worded to keep their remedies apart, which is the whole reason the hold
+    /// type has two cases: "over your line" is answered by raising the line or waiting for the
+    /// reset, "cannot see" by looking again. A receipt that said the first when it meant the
+    /// second would send the reader hunting for spend that never happened.
+    static func holdReason(_ hold: CustomLimitHold) -> String {
+        switch hold {
+        case .clear:
+            return L10n.string("No limit of yours is holding this account.")
+        case .overLine(let rule, let windowName):
+            return L10n.format(
+                "%1$@ is at your %2$@ limit, so Threading is not spending this account on its own.",
+                windowName,
+                percent(rule.bound)
+            )
+        case .cannotSee(_, let windowName):
+            return L10n.format(
+                "Threading cannot read %@ right now, so it is not spending this account on its own.",
+                windowName
+            )
+        }
+    }
+
+    /// The short form, for a place with one line and no room for a sentence — a menu receipt, a
+    /// ranking's exclusion note.
+    static func holdSummary(_ hold: CustomLimitHold) -> String? {
+        switch hold {
+        case .clear: return nil
+        case .overLine: return L10n.string("Excluded by your limit")
+        case .cannotSee: return L10n.string("No reading for your limit")
+        }
+    }
+
+    /// The compact form a row's mark carries — the window and the line, nothing else. A row has
+    /// no space for a sentence, and a mark that only said "held" would leave the reader guessing
+    /// which of their limits did it.
+    static func holdSummaryLine(_ hold: CustomLimitHold, rule: CustomLimit) -> String {
+        switch hold {
+        case .clear:
+            return ""
+        case .overLine(_, let windowName):
+            return L10n.format("%1$@ at %2$@", windowName, percent(rule.bound))
+        case .cannotSee(_, let windowName):
+            return L10n.format("no %@ reading", windowName)
         }
     }
 

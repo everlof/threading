@@ -564,6 +564,21 @@ final class ConversationViewController: NSViewController {
             guard let self else { return }
             LimitEscapeSuggestionStore.shared.dismiss(self.sessionID)
         }
+        // A park's own Continue Anyway. Routed here rather than into the escape store because a
+        // park is not a suggestion the store holds — it is a standing state of the account, and
+        // answering it writes an override scoped to this turn of the window.
+        limitEscapeStrip.onContinueAnyway = { [weak self] in
+            guard let self else { return }
+            CustomLimitParkPolicy.continueAnyway(sessionID: self.sessionID)
+            self.refreshLimitEscapeStrip()
+            self.flushOutboxIfReady()
+        }
+        appEvents.observe(CustomLimitsDidChange.self) { [weak self] _ in
+            self?.refreshLimitEscapeStrip()
+        }
+        appEvents.observe(AccountUsageDidChange.self) { [weak self] _ in
+            self?.refreshLimitEscapeStrip()
+        }
         appEvents.observe(LimitEscapeSuggestionDidChange.self) { [weak self] event in
             guard let self, event.sessionID == self.sessionID else { return }
             self.refreshLimitEscapeStrip()
@@ -573,10 +588,37 @@ final class ConversationViewController: NSViewController {
 
     func refreshLimitEscapeStrip() {
         guard isViewLoaded else { return }
-        limitEscapeStrip.setOffer(
-            LimitEscapeSuggestionStore.shared.offer(for: sessionID)
-                .map(LimitEscapeStripView.Offer.init)
-        )
+
+        // A provider refusal outranks a park, because it is the one the user cannot answer: with
+        // both standing, telling somebody about their own line while the provider has stopped
+        // them would be the smaller fact on top of the larger one.
+        if let offer = LimitEscapeSuggestionStore.shared.offer(for: sessionID) {
+            limitEscapeStrip.setOffer(LimitEscapeStripView.Offer(offer))
+            return
+        }
+
+        let park = CustomLimitParkPolicy.hold(sessionID: sessionID)
+        guard let rule = park.rule else {
+            limitEscapeStrip.setOffer(nil)
+            return
+        }
+        limitEscapeStrip.setOffer(LimitEscapeStripView.Offer(
+            source: .ownLimit,
+            resetHint: parkResetHint(for: rule)
+        ))
+    }
+
+    /// When the window a park is waiting on comes back, in the strip's own vocabulary.
+    private func parkResetHint(for rule: CustomLimit) -> String? {
+        guard let session = currentSession,
+              let account = AgentAccountDiscovery.account(
+                  for: session.kind,
+                  handle: session.accountHandle
+              ),
+              let resetsAt = AccountUsageService.shared.usage(for: account)?
+                  .allWindows.first(where: { $0.id == rule.windowID })?
+                  .resetsAt else { return nil }
+        return UsageFormat.remaining(until: resetsAt)
     }
 
     /// Batches replay-only UI work. Four hundred items must not each scroll, rebuild controls,

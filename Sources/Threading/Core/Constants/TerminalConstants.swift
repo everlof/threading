@@ -321,28 +321,39 @@ enum SidebarDefaults {
     /// itself to. Below it every gutter in `SidebarDensity` closes in step with the drag.
     static let relaxedDensityWidth: CGFloat = defaultWidth
 
-    /// The width at which the list has given up everything it will: the narrowest column the
-    /// split view allows. A runtime floor raised for the window controls only means the tightest
-    /// values are approached rather than reached, which is the honest answer to a column that
-    /// cannot actually get that narrow.
+    /// The width at which the list has given up everything it will, when nothing has said
+    /// otherwise: `minWidth`, the floor stated on the split item before the window controls are
+    /// measured.
+    ///
+    /// **The app does not use this number.** `MainWindowController.updateSidebarMinimumThickness`
+    /// raises the real floor to clear the toolbar buttons floating over the column — about 208pt
+    /// — and the first version of the band ran to this value anyway, so the narrowest column a
+    /// drag could reach was barely half way down it: the depth step bottomed out at 11 rather
+    /// than 6, and two of the four reclaimable trailing points were never taken. A band whose
+    /// tight end lies past the last reachable width is a set of values nobody ever sees. So the
+    /// window controller hands the sidebar the floor it actually enforces
+    /// (`ProjectSidebarViewController.densityFloor`) and this is the fallback for a list with no
+    /// window controller over it — the extensions navigator, a test fixture.
     static let tightDensityWidth: CGFloat = minWidth
 
-    /// `indentationPerLevel` at `tightDensityWidth`. Still a step the eye reads as a level — a
-    /// session under a branch under a project keeps two visible steps — while returning 12pt of
-    /// title to the deepest rows, which are the ones that truncate first.
-    static let tightIndentationPerLevel: CGFloat = 8
+    /// `indentationPerLevel` at the floor. Still a step the eye reads as a level — a session
+    /// under a branch under a project keeps two visible steps — while returning 16pt of title to
+    /// the deepest rows, which are the ones that truncate first. Type carries the rest of the
+    /// depth: emphasized projects, caption headings, regular sessions.
+    static let tightIndentationPerLevel: CGFloat = 6
 
     /// How much of the padding the `.inset` style keeps *outside* the cells goes back to the
-    /// content at `tightDensityWidth` — see `ThemedOutlineView.trailingCellReclaim`.
+    /// content at the floor — see `ThemedOutlineView.trailingCellReclaim`.
     ///
     /// Measured, and bounded by the selection capsule rather than chosen: the style holds 16pt
-    /// past every cell's trailing edge while the capsule this list draws is inset
-    /// `SidebarRowDefaults.hoverHighlightInsetX` (10). Content may move out into that band but
-    /// must stay inside the shape a selected row fills, so 4pt is what there is to take — it
-    /// leaves the cell ending 12pt from the column's edge, two points clear of the capsule.
-    /// `SidebarWidthDensityTests` holds that margin, because the number above is only safe as
-    /// long as it does.
-    static let tightTrailingCellReclaim: CGFloat = 4
+    /// past every cell's trailing edge, and the capsule this list draws closes to
+    /// `SidebarRowDefaults.tightHoverHighlightInsetX` (6) at the same end of the band. Content
+    /// may move out into that band but must stay inside the shape a selected row fills, so 8pt
+    /// is what there is to take — it leaves the cell ending 8pt from the column's edge, two
+    /// points clear of the capsule. The two close together, so the clearance falls from six
+    /// points to two and never below. `SidebarWidthDensityTests` holds that margin at both ends,
+    /// because the number above is only safe as long as it does.
+    static let tightTrailingCellReclaim: CGFloat = 8
 
     /// The compact tree's one content edge, measured from the column's leading side.
     ///
@@ -526,13 +537,31 @@ enum SidebarRowDefaults {
     /// same class of bug as the `⋯` the status dot used to swallow.
     static let projectTrailingSlotWidth: CGFloat = trailingSlotSize * 2 + hoverButtonSpacing
 
-    /// Matches the inset of the source list's own selection shape.
+    /// The selection and hover capsule's inset at the column's opening width.
+    ///
+    /// Measured off the source list's own shape, which this list drew inside for as long as it
+    /// let AppKit fill a selected row: `.inset` hangs a plain `NSView` in the row at exactly
+    /// (10, 0, width - 20, height) with an 8pt corner. The list now draws that shape itself in
+    /// every theme (`SidebarHoverRowView.drawSelection`), so the number is a starting point
+    /// rather than a constraint — see `tightHoverHighlightInsetX`.
     static let hoverHighlightInsetX: CGFloat = 10
+
+    /// The same capsule at the narrowest column — see `SidebarDensity`.
+    ///
+    /// The one metric here that is not about fitting more title in: at the width the column
+    /// stops at, ten points of ground between a selected row and the seam beside it reads as a
+    /// gap rather than as a margin. It closes with the drag like every other gutter, and stops
+    /// one step above the row gutters inside it so the capsule never meets its own content.
+    static let tightHoverHighlightInsetX: CGFloat = Design.Spacing.small
     static let hoverHighlightInsetY: CGFloat = 1
-    /// The hover corner under the **System** theme alone, measured against the stock source
-    /// list's selection. Every other theme draws its own selection, so hover takes that
-    /// theme's `Design.Radius.control` instead — see `SidebarHoverRowView.highlightRadius`.
-    static let systemHoverHighlightRadius: CGFloat = 5
+    /// The capsule's corner under the **System** theme alone, which has no `Design.Radius` of
+    /// its own to state one — every other theme does, and takes it. See
+    /// `SidebarHoverRowView.highlightRadius`.
+    ///
+    /// 8pt because that is what AppKit rounds its own source-list selection by: read off the
+    /// view `.inset` hangs in a selected row, rather than eyeballed from a screenshot the way
+    /// the 5 that stood here was.
+    static let systemHoverHighlightRadius: CGFloat = 8
     static let hoverHighlightAlpha: CGFloat = 0.06
 }
 

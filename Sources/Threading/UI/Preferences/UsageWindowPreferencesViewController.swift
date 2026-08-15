@@ -398,6 +398,10 @@ final class UsageWindowPreferencesViewController: NSViewController {
             return UsageWindowStrings.holdTailTooShort
         case .weeklyAheadOfPace(let fraction):
             return UsageWindowStrings.holdWeeklyAheadOfPace(Int((fraction * 100).rounded()))
+        case .customLimitReached(let reason):
+            // The rule's own sentence, not a paraphrase: the page that explains why nothing
+            // happened this morning should say it in the same words as everywhere else.
+            return reason
         }
     }
 

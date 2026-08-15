@@ -2407,6 +2407,66 @@ final class AppThemeTests: XCTestCase {
         XCTAssertEqual(ids.count, 29, "the curated stock catalogue unexpectedly changed size")
     }
 
+    // MARK: - Sections
+
+    /// A style that is filed nowhere does not exist: `AppThemeStyles.all` *is* the families
+    /// flattened, so the picker cannot show a catalogue the rest of the app does not have — the
+    /// drift a second hand-maintained list produces within weeks (see `takeovers`).
+    func testEveryStockStyleIsFiledUnderExactlyOneFamily() {
+        let filed = AppThemeStyles.families.flatMap(\.themes).map(\.id)
+        XCTAssertEqual(filed, AppThemeStyles.all.map(\.id),
+                       "the catalogue and its families disagree")
+        XCTAssertEqual(Set(filed).count, filed.count, "a style is filed under two families")
+        XCTAssertTrue(
+            AppThemeStyles.styleFamilies.allSatisfy { !($0.title ?? "").isEmpty },
+            "a named family lost its head"
+        )
+        XCTAssertNil(AppThemeStyles.house.title, "the house group grew a head")
+        XCTAssertTrue(
+            AppThemeStyles.families.allSatisfy { !$0.themes.isEmpty },
+            "an empty section would draw a head over nothing"
+        )
+    }
+
+    /// The sectioned catalogue is the flat one — every theme, exactly once — so a picker built
+    /// from `sections` and a caller reasoning about `all` name the same list. The stock tier
+    /// keeps the catalogue's order outright; the contributed tier groups by extension, which is
+    /// the one place the two may run in a different sequence.
+    func testSectionsAreTheWholeCatalogueInOrder() {
+        let filed = AppThemeLibrary.sections.flatMap(\.themes).map(\.id)
+        XCTAssertEqual(Set(filed), Set(AppThemeLibrary.all.map(\.id)))
+        XCTAssertEqual(Set(filed).count, filed.count, "a theme is filed under two sections")
+        XCTAssertEqual(
+            AppThemeLibrary.stockSections.flatMap(\.themes).map(\.id),
+            AppThemeLibrary.stock.map(\.id)
+        )
+        // System leads, under no head of its own: it is not a style, and a head over one row
+        // repeating its name is furniture.
+        let first = AppThemeLibrary.sections.first
+        XCTAssertNil(first?.title)
+        XCTAssertEqual(first?.themes.first?.id, .system)
+    }
+
+    /// The user's own themes are a section rather than a suffix on every row. Before this, each
+    /// custom row wrote `— Custom` into its own title — the same word, on every row, in the
+    /// widest column the menu has.
+    func testACustomThemeIsFiledUnderItsOwnSectionRatherThanLabelledPerRow() throws {
+        let name = "Section Fixture \(UUID().uuidString.prefix(8))"
+        let custom = try AppThemeLibrary.duplicate(AppThemeStyles.dracula, name: name)
+        defer { AppThemeLibrary.delete(custom) }
+
+        let section = try XCTUnwrap(
+            AppThemeLibrary.sections.last,
+            "the custom tier is filed nowhere"
+        )
+        XCTAssertEqual(section.title, L10n.string("Custom"))
+        XCTAssertTrue(section.themes.contains { $0.id == custom.id })
+        XCTAssertFalse(
+            section.themes.contains { $0.name.contains("—") },
+            "a row still carries its tier in its own title"
+        )
+    }
+
     /// A takeover chrome is not complete merely because its Swift document exists. Every stock
     /// frame must have the same component-by-component evidence ledger, and a deleted chrome must
     /// not leave a stale historical identity behind. This closes both directions of that drift.

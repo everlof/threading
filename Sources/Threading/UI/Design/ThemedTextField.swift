@@ -487,8 +487,9 @@ private final class ThemedSecureFieldCell: NSSecureTextFieldCell, ThemedFieldCel
 /// Its own class rather than a flag, because a search field is a *shape*: the magnifier is what
 /// says the field filters rather than accepts, and the find bar and the import sheet both rely
 /// on that being obvious at a glance.
-final class ThemedSearchField: ThemedTextField {
+final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
 
+    @MainActor
     private enum Layout {
         static var glyphSize: CGFloat { Design.Symbol.control }
         static let glyphLeading: CGFloat = Design.Spacing.small
@@ -636,6 +637,14 @@ final class ThemedSearchField: ThemedTextField {
     /// The magnifier's room, however the field was built.
     private func applyGlyphInset() {
         contentInset = Layout.glyphLeading + Layout.glyphSize + Layout.glyphGap
+    }
+
+    /// Both insets are cut from a mark's size, and a mark's optical size follows the chrome's
+    /// type scale — so a theme switch that redrew the query at 0.80× left it starting behind
+    /// the room the previous theme's magnifier had asked for. See `SymbolMetric`.
+    func rederiveThemedContent() {
+        applyGlyphInset()
+        refreshTrailingControls()
     }
 
     @available(*, unavailable)

@@ -184,11 +184,7 @@ final class ConversationOutboxRowView: ThemedControl {
         translatesAutoresizingMaskIntoConstraints = false
         isEnabled = row.state.isPending
 
-        handle.image = Design.Symbol.image(
-            OutboxRailDefaults.handleSymbol,
-            slot: Design.Symbol.control,
-            pointSize: Design.Symbol.control
-        )
+        handle.setSymbol(OutboxRailDefaults.handleSymbol)
         handle.setAccessibilityLabel(L10n.string("Reorder"))
         // Required, or `.fill` hands the row's slack to the glyph — a plain view hugs at 250,
         // the same as nothing, so the grip became a spacer and pushed the whole row right.

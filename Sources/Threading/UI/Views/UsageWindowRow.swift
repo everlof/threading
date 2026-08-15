@@ -89,9 +89,17 @@ final class UsageWindowRow: NSView {
     ) {
         let expired = window.isExpired(at: now)
         let live = expired ? nil : window.fraction
-        let severity = CustomLimitBounds.severity(of: live, on: window.id, in: limits)
-        let rule = CustomLimitBounds.tightest(on: window.id, in: limits)
-        let cap = rule?.bound
+        let severity = CustomLimitBounds.severity(
+            of: live,
+            on: window.id,
+            in: limits,
+            window: window,
+            at: now
+        )
+        let rule = CustomLimitBounds.tightest(on: window.id, in: limits, window: window, at: now)
+        let cap = rule.flatMap {
+            CustomLimitBounds.resolvedBound(of: $0, window: window, at: now)
+        }
 
         // The line is drawn as a change in the track, which says *that* there is one and not
         // whose or where. The rule names itself here — and in the accessibility label too, since
@@ -102,7 +110,7 @@ final class UsageWindowRow: NSView {
         nameLabel.stringValue = window.label
         valueLabel.stringValue = Self.value(for: window, expired: expired)
         valueLabel.textColor = severity == .normal ? Design.Text.label : severity.glyphColor
-        resetLabel.stringValue = Self.reset(for: window, expired: expired)
+        resetLabel.stringValue = Self.reset(for: window, expired: expired, now: now)
         setAccessibilityLabel(Self.spoken(
             window: window,
             expired: expired,
@@ -140,14 +148,22 @@ final class UsageWindowRow: NSView {
     }
 
     /// Both the countdown and the absolute local time — "Resets in 3h 12m · 3:45 PM".
-    private static func reset(for window: AccountUsage.Window, expired: Bool) -> String {
+    private static func reset(
+        for window: AccountUsage.Window,
+        expired: Bool,
+        now: Date = Date()
+    ) -> String {
         if expired {
             return UsageWindowRowDefaults.expiredReset
         }
 
         guard let resetsAt = window.resetsAt else { return "" }
 
-        return "Resets in \(UsageFormat.remaining(until: resetsAt)) · \(UsageFormat.absolute(resetsAt))"
+        // Counted from the moment the row was asked about, not from `Date()`. They are the same
+        // instant in the app and different ones in a fixture, and a row that took `now` for every
+        // other line and the wall clock for this one printed "Resets in 1m" beside a window three
+        // days from its reset.
+        return "Resets in \(UsageFormat.remaining(until: resetsAt, from: now)) · \(UsageFormat.absolute(resetsAt))"
     }
 }
 

@@ -1,6 +1,7 @@
 import AppKit
 
 /// How tall the controls in a row stand, which is the one measurement a row exists to state.
+@MainActor
 enum ControlRowScale {
 
     /// Compact controls beside each other — a mode chip, its actions, a caption. The app's row.
@@ -29,6 +30,7 @@ enum ControlRowScale {
 /// **Only a row can make one.** The initializer is fileprivate, so a height reaches a control
 /// from the row it sits in and from nowhere else. That is the whole mechanism: a call site
 /// cannot hand a control a size, so it cannot hand it a size that disagrees with its neighbours'.
+@MainActor
 struct ControlRowMetrics {
 
     /// The height every member of the row shares.
@@ -37,13 +39,20 @@ struct ControlRowMetrics {
     /// The slot a glyph is drawn in inside a control of that height.
     let glyphSlot: CGFloat
 
-    /// The optical size that mark is configured at.
-    let glyphPointSize: CGFloat
+    /// The role that mark's optical size comes from.
+    ///
+    /// The role rather than the size it currently resolves to: a promoted member stores what it
+    /// adopted, and a mark's optical size follows the chrome's type scale, so a stored number
+    /// would be the size of the theme that promoted it (`Design.Symbol.Role`).
+    let glyphRole: Design.Symbol.Role
+
+    /// The optical size that mark is configured at, now.
+    var glyphPointSize: CGFloat { glyphRole.pointSize }
 
     fileprivate init(scale: ControlRowScale) {
         height = scale.height
         glyphSlot = Design.Symbol.slot(inControlOfHeight: height)
-        glyphPointSize = Design.Symbol.pointSize(forSlot: glyphSlot)
+        glyphRole = Design.Symbol.role(forSlot: glyphSlot)
     }
 }
 

@@ -205,6 +205,20 @@ final class SettingsSidebar: NSView {
         rebuildResults()
     }
 
+    /// Drops the query, so the next visit to Settings opens on the whole page list.
+    ///
+    /// A search is a question about *this* visit. The sidebar is built once and hidden rather
+    /// than torn down, so without this the query outlived the visit that asked it: leaving
+    /// Settings and coming back reopened a filtered list nobody had just typed, and — because
+    /// re-entry selects General while the filter may have excluded it — a pane showing a page
+    /// the sidebar was not listing.
+    ///
+    /// Through the field's own clear, so a reset rebuilds exactly what a deleted query
+    /// rebuilds, live field editor included.
+    func resetSearch() {
+        searchField.clear()
+    }
+
     var visibleItemIDs: [String] {
         displayedItems.map(\.id)
     }

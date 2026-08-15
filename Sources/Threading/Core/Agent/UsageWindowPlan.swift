@@ -92,6 +92,11 @@ enum UsageWindowHold: Equatable {
     /// The weekly limit is running ahead of the clock, so a window pulled forward is a week
     /// spent faster rather than a day spent better.
     case weeklyAheadOfPace(fraction: Double)
+    /// One of the user's own limits is holding this account. Beside `weeklyAheadOfPace` and for
+    /// the same kind of reason: the poke spends a message, and a line the user drew is a
+    /// statement about spending. The difference is whose line it is, which is why it is its own
+    /// row rather than folded into that one.
+    case customLimitReached(reason: String)
 }
 
 // MARK: - Usage Window Plan
@@ -164,6 +169,9 @@ enum UsageWindowPlan {
         /// message opens the window and the poke would be paying for something free.
         var isWorking: Bool
         var pokesToday: Int
+        /// Whether one of the user's own limits stands in the way, and what it says. Gathered by
+        /// the caller like everything else here, so the rules themselves stay pure.
+        var customLimitHold: CustomLimitHold = .clear
         var calendar: Calendar = .current
     }
 
@@ -215,6 +223,15 @@ enum UsageWindowPlan {
            let elapsed = weekly.elapsedFraction(at: input.now),
            spent > elapsed + UsageWindowDefaults.weeklyPaceTolerance {
             return .hold(.weeklyAheadOfPace(fraction: spent))
+        }
+
+        // Last, because it is the most specific: every guard above describes the *provider's*
+        // arithmetic, and this one describes a line the user drew over it. A poke held here is
+        // held for a reason they can change.
+        if input.customLimitHold.isHolding {
+            return .hold(.customLimitReached(
+                reason: CustomLimitReceipt.holdReason(input.customLimitHold)
+            ))
         }
 
         return .poke

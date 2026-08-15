@@ -124,6 +124,7 @@ final class UsageAlertCenter {
             rules: rules,
             usage: usage,
             fired: ledger.fired(for: accountID),
+            history: Self.history(for: account, rules: rules),
             now: now
         ))
 
@@ -140,6 +141,25 @@ final class UsageAlertCenter {
         AgentKind.allCases
             .filter(\.supportsAccounts)
             .flatMap { AgentAccountDiscovery.allAccounts(for: $0) }
+    }
+
+    /// The sparse history the synthetic-window rules on this account need, and nothing else.
+    ///
+    /// Bounded by the rules' own windows rather than by everything the store holds: a rule names
+    /// one window, and reading the rest would be work proportional to the account's whole history
+    /// on a path that runs on every reading.
+    static func history(
+        for account: AgentAccount,
+        rules: [CustomLimit]
+    ) -> [String: [UsageSample]] {
+        var result: [String: [UsageSample]] = [:]
+        for windowID in Set(rules.filter { $0.metric == .syntheticWindow }.map(\.windowID)) {
+            result[windowID] = UsageHistoryStore.shared.samples(
+                for: account,
+                windowID: windowID
+            )
+        }
+        return result
     }
 
     // MARK: - Private Methods

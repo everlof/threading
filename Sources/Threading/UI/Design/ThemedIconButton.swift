@@ -127,12 +127,12 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         /// (`gearshape` renders 14×14 at 11pt) were shrunk *after* rendering, thinning the
         /// stroke the configuration had chosen. `Design.Symbol.image(_:slot:pointSize:)` is
         /// the fit.
-        var glyphPointSize: CGFloat {
+        var glyphRole: Design.Symbol.Role {
             switch self {
-            case .toolbar, .splitMenu: Design.Symbol.toolbar
-            case .compactSplitMenu: Design.Symbol.control
-            case .inline: Design.Symbol.control
-            case .besidePrimary, .titledSplitMenu: Design.Symbol.pointSize(forSlot: glyph)
+            case .toolbar, .splitMenu: .toolbar
+            case .compactSplitMenu: .control
+            case .inline: .control
+            case .besidePrimary, .titledSplitMenu: Design.Symbol.role(forSlot: glyph)
             }
         }
 
@@ -236,7 +236,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// `adopt` takes a `ControlRowMetrics`, which only a row can make.
     private var drawnSize: NSSize
     private var drawnGlyph: CGFloat
-    private var drawnGlyphPointSize: CGFloat
+    private var drawnGlyphRole: Design.Symbol.Role
 
     /// What the slot holds, kept so it can be re-rendered when the slot changes size. A symbol
     /// has to be *configured* at the new size rather than scaled to it (see `Design.Symbol`),
@@ -298,7 +298,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
         self.actionTarget = target
         drawnSize = target.size
         drawnGlyph = target.glyph
-        drawnGlyphPointSize = target.glyphPointSize
+        drawnGlyphRole = target.glyphRole
         super.init(frame: .zero, inkSource: inkSource)
         setup(symbolName: symbolName, glyphMaterialization: glyphMaterialization)
     }
@@ -361,14 +361,22 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
             // arrives at whatever size LaunchServices holds, and a symbol's fitted
             // configuration cannot speak for it. Capped to the slot it draws exactly where a
             // symbol would.
+            iconView.clearSymbol()
             iconView.slot = NSSize(width: drawnGlyph, height: drawnGlyph)
             iconView.image = customImage
             return
         }
         iconView.slot = nil
-        iconView.image = symbolName.flatMap {
-            Design.Symbol.image($0, slot: drawnGlyph, pointSize: drawnGlyphPointSize)
+        // Through the glyph view's own symbol seam rather than by handing it a finished
+        // picture: a render freezes the optical size it was configured at, and that size moves
+        // with the chrome's type (`SymbolMetric`). The view re-renders itself on a theme
+        // change, so this button does not have to know that it should.
+        guard let symbolName else {
+            iconView.clearSymbol()
+            iconView.image = nil
+            return
         }
+        iconView.setSymbol(symbolName, slot: drawnGlyph, role: drawnGlyphRole)
     }
 
     /// Crosses the presentation-only lazy boundary for a control that is about to be shown.
@@ -637,7 +645,7 @@ extension ThemedIconButton: ControlRowMember {
 
         drawnSize = size
         drawnGlyph = metrics.glyphSlot
-        drawnGlyphPointSize = metrics.glyphPointSize
+        drawnGlyphRole = metrics.glyphRole
         widthConstraint?.constant = size.width
         heightConstraint?.constant = size.height
         if hasMaterializedGlyph { renderSlot() }

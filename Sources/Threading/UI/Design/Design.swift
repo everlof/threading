@@ -356,14 +356,26 @@ enum Design {
             case conversation
         }
 
+        /// How much larger or smaller than its authored size the chrome's type is drawn: the
+        /// theme material's own `textScale` times the user's app-text-size preference.
+        ///
+        /// Published rather than left inside `scaled(_:)` because it is **not only type's**.
+        /// `Design.Symbol` reads the same number: a mark is weighed against the words beside
+        /// it — that is what its 11pt `.medium` was measured for — so a scale that moved the
+        /// words and not the marks is a scale that breaks the pair it was measured as. See
+        /// `Symbol.optical(_:)`.
+        static var scale: CGFloat {
+            let material = AppThemePalette.current.material(
+                for: NSApplication.shared.effectiveAppearance
+            )
+            return material.textScale * AppSettings.appTextSize.scale
+        }
+
         /// Resolves the user's semantic text-size preference in the one place point sizes enter
         /// the design system. This reaches prose, code, aligned numerics, marks, and every
         /// host-rendered extension node while leaving an explicit terminal profile untouched.
         private static func scaled(_ pointSize: CGFloat) -> CGFloat {
-            let material = AppThemePalette.current.material(
-                for: NSApplication.shared.effectiveAppearance
-            )
-            return pointSize * material.textScale * AppSettings.appTextSize.scale
+            pointSize * scale
         }
 
         /// A prose font, resolved through the four layers that may have an opinion about it.
@@ -732,13 +744,66 @@ enum Design {
     // MARK: - Symbols
 
     enum Symbol {
+
+        /// **A mark's optical size is type, not layout, so it moves with the type.**
+        ///
+        /// The three sizes below were each measured against a *label* — `control`'s 11pt
+        /// `.medium` strokes at SF 13 regular's stem, which is the pairing the whole chrome is
+        /// built on (see `configuration`). They were then written down as constants, and the
+        /// chrome's type stopped being constant: a theme states `material.textScale` (0.80
+        /// under Win98, 0.82 Platinum, 0.86 OpenStep, 0.94 TUI) and the reader states an app
+        /// text size (0.90…1.30). Both move every label in the window and neither moved a mark,
+        /// so the measured pair only held at one setting of two dials. Under TUI the settings
+        /// search field drew an 11pt ✕ beside an 11.3pt "Ask AI" — the mark carrying body-text
+        /// weight beside button-sized words — and under Win98 that same ✕ stood over a 9.6pt
+        /// label. `Typography.scaled`'s own comment had claimed marks all along; this is the
+        /// line that makes it true.
+        ///
+        /// **Its slot is layout, and does not move.** A toolbar button is 28 points at every
+        /// text size, so the 16pt hole in it is too, and `image(_:slot:pointSize:)` already
+        /// configures a mark *down* to whatever slot it is given. So a scaled-up mark is capped
+        /// by the control holding it — which is right, since the control did not grow either —
+        /// and a scaled-down one simply draws lighter, which is the whole point.
+        ///
+        /// The role, not the number it currently resolves to, is what a view that *stores* a
+        /// render has to hold on to — see `Design.Symbol.Role` and `SymbolMetric`.
+        enum Role: CaseIterable {
+
+            /// Beside a control's label.
+            case control
+
+            /// A top-level toolbar action, whose 16pt slot an 11pt glyph underfilled — the
+            /// toolbar read as a row of marks smaller and lighter than every control below it.
+            case toolbar
+
+            /// Disclosure chevrons, which should read as a hint rather than a control.
+            case chevron
+
+            /// The size this pairing was **measured** at, with the chrome's type at its
+            /// authored size. Not for drawing: it is the constant the rule is stated in.
+            var measured: CGFloat {
+                switch self {
+                case .control: 11
+                case .toolbar: 13
+                case .chevron: 8
+                }
+            }
+
+            /// What it resolves to against the type currently on screen.
+            @MainActor
+            var pointSize: CGFloat { measured * Typography.scale }
+        }
+
         /// Beside a control's label.
-        static let control: CGFloat = 11
+        @MainActor
+        static var control: CGFloat { Role.control.pointSize }
         /// A top-level toolbar action, whose 16pt slot an 11pt glyph underfilled — the toolbar
         /// read as a row of marks smaller and lighter than every control below it.
-        static let toolbar: CGFloat = 13
+        @MainActor
+        static var toolbar: CGFloat { Role.toolbar.pointSize }
         /// Disclosure chevrons, which should read as a hint rather than a control.
-        static let chevron: CGFloat = 8
+        @MainActor
+        static var chevron: CGFloat { Role.chevron.pointSize }
 
         /// `.medium`, because glyphs are weighed against the text beside them and the anchor
         /// is its stem: SF 13 regular's is ~1.25pt, which is what an 11pt `.medium` symbol
@@ -774,8 +839,15 @@ enum Design {
         /// that sits beside a label. Without this a promoted button drew its old 11pt mark in a
         /// slot half again as wide, which is a lighter stroke in a larger control — the
         /// opposite of what growing it was for.
+        @MainActor
         static func pointSize(forSlot slot: CGFloat) -> CGFloat {
-            slot >= Size.tabIconSlot ? toolbar : control
+            role(forSlot: slot).pointSize
+        }
+
+        /// The same answer as a role, for a view that stores its render and has to make it
+        /// again when the theme moves the type (`Design.Symbol.Role`).
+        static func role(forSlot slot: CGFloat) -> Role {
+            slot >= Size.tabIconSlot ? .toolbar : .control
         }
 
         /// A symbol sized so its rendered form fits `slot` — by *configuring* smaller, never by
@@ -1049,10 +1121,22 @@ enum Design {
         ///
         /// Not `selection` above, which is the theme's role for a selected row at rest:
         /// `SidebarHoverRowView` paints the accent while its window is in front, and under
-        /// **System** hands the fill back to AppKit entirely. Stated once here so a control
-        /// sitting in the row need know neither fact. See `Design.Ink.selection`.
+        /// **System** the system's own selection colour. Stated once here so a control sitting
+        /// in the row need know neither fact. See `Design.Ink.selection`.
         static var selectionFill: NSColor {
             AppThemePalette.current.isSystem ? .selectedContentBackgroundColor : accent
+        }
+
+        /// The same fill for a selected row whose **window is not in front** — the strength
+        /// AppKit calls unemphasized.
+        ///
+        /// Its pair, and here for the reason the pair exists: the sidebar draws its own selection
+        /// under every theme now, System included, so both strengths have to be sayable without
+        /// a view reaching for a raw `NSColor` to cover the case the palette does not author.
+        static var selectionFillUnemphasized: NSColor {
+            AppThemePalette.current.isSystem
+                ? .unemphasizedSelectedContentBackgroundColor
+                : AppThemePalette.color(.accentMuted)
         }
 
         /// The ground behind the run of a string a search matched.

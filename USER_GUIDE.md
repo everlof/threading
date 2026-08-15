@@ -229,8 +229,9 @@ the arrangement menu, **View ▸ Compact Tree** (rebindable in Settings ▸ Keyb
 
 Whichever tree you keep, the list tightens as you narrow the column. Drag the divider in from
 the width the app opens at and the step between levels closes along with the space on either
-side of a row, so the space goes to the titles instead of the structure around them. It happens
-by degree rather than at a threshold, and drag back out and the list opens up again.
+side of a row and the selection behind it, so the space goes to the titles instead of the
+structure around them. It happens by degree rather than at a threshold, it is fully closed by
+the time the divider stops, and drag back out and the list opens up again.
 
 Rows move rather than blink. A session that starts fades in while the rows below it slide down,
 one that is archived or deleted takes the gap with it, and a row that changes place — a session
@@ -1643,10 +1644,34 @@ it red over your own line rather than the provider's. It is off by default, beca
 control you cannot dismiss should not go red because you asked for one quiet notification. The
 pill's number and its ring's fill stay the provider's own figure either way.
 
-Three things it deliberately does not do, this version:
+**Limits that hold, not just tell.** Each limit is armed at a level, chosen by the template you
+pick:
 
-- It does not stop anything. Nothing is held back, no session is paused, and typing into a
-  session spends whatever you type. The limit is a line and a notification.
+- *It reaches 50% / 75% / 90%* and *Every 10%* — a notification, nothing more.
+- *Keep it under 80%* — Threading also **stops spending that account on its own**: a scheduled
+  send waits for the reset instead of going, the morning usage-window poke stands down, the
+  account stops being offered as somewhere to move a rate-limited conversation, and an agent
+  asking to message a session on it is refused with your line as the reason.
+- *Always leave them 50%* — the shared-login rule. The line **rises with the clock**: at any
+  moment, at least the share you named of what time has released is still there for whoever else
+  uses that login.
+- *No more than 15% in any 5h* — a shorter window recreated on a plan that no longer meters one.
+  It measures what was actually spent in the last five hours, so one enthusiastic morning cannot
+  quietly spend the week.
+
+**Parking a session.** A limit can go one step further and hold sessions on that account at their
+next turn boundary: the queue stops handing messages over, the sidebar row carries a small mark,
+and the composer shows a strip reading *Held at your own limit* with a **Continue Anyway** button.
+That strip is deliberately not the red triangle a provider refusal wears — this is a line you
+drew, and you can walk through it. Continuing applies to the current window only and expires with
+it, so one late-night exception does not switch the rule off.
+
+Three things it deliberately does not do, even then:
+
+- **It never stops the keyboard.** Everything above holds what *Threading* starts on its own.
+  A turn you type and send goes, whatever your limits say — including from a parked session. A
+  limit sold as a hard stop that a keystroke walks through would be a lie, so it is not sold as
+  one.
 - It never guesses. If Threading has no reading for that window — never fetched, or the window's
   reset has just passed — the row says so and nothing is announced. A percentage you were never
   shown is not a percentage you should be alerted about.
@@ -3310,6 +3335,14 @@ does not ask again in every tab — while a different theme, or a different pair
 Sessions shown as a conversation rather than a terminal are drawn in the system's own colours;
 a theme sets only the backdrop behind them.
 
+**The theme list is grouped.** Settings ▸ Themes ▸ **App theme**, and the same picker on the
+Current Theme page, file the catalogue under headings: System and Threading first, then **Design
+styles**, **Palettes**, **Classic desktops**, **Classic software**, and **Seasonal** — followed by
+a section per extension that ships themes, and your own copies last. A heading is a label rather
+than a step: nothing moved into a submenu, so every theme is still one press away. It is also
+what freed the rows to be plain names, since where a theme comes from is now said once over the
+group instead of on every line.
+
 **Some themes are a palette rather than a look.** Pure Black, Cappuccino, Solarized, Nord, and
 Dracula keep the app's modern shape and spend their identity on colour: Pure Black is a true
 `#000000` ground rather than the system's elevated grey, with colour reserved for the terminal;
@@ -3358,10 +3391,10 @@ tile behind it is still drawn from the theme's own background, so an extension c
 Threading's icon look like a different app. A contributed theme without a mark gets the same
 generated icon every built-in style does.
 
-An installed extension can offer app themes of its own. They appear in the picker labelled by
-the extension's name — "Storm — Usage Rain" — while the extension is enabled, and leave with
-it; if the one you were using goes away, the app falls back to System and records that as the
-choice. An extension theme cannot be edited in place: duplicate it to make an editable copy,
+An installed extension can offer app themes of its own. They appear in the picker under a
+heading carrying the extension's name — "Storm" filed under "Usage Rain" — while the extension
+is enabled, and leave with it; if the one you were using goes away, the app falls back to System
+and records that as the choice. An extension theme cannot be edited in place: duplicate it to make an editable copy,
 or update the extension that ships it.
 
 **An extension's theme follows its files.** While the extension is enabled, Threading watches
@@ -3481,6 +3514,9 @@ an extension is enabled or disabled.
 A typed query shows a **✕** at the field's trailing edge; clicking it — or pressing **Escape**
 in the field — clears the search and restores the full page list, keeping the caret where it
 was. With nothing typed, Escape passes through as before.
+
+Leaving Settings drops the query too: a search is a question about the visit that asked it, so
+the next **Cmd+,** opens on the whole page list rather than on a filter you typed some time ago.
 
 The sidebar filters immediately while you type and shows the results with their paths:
 searching *mute*, for example, keeps the **General** row and lists **Silence every sound**

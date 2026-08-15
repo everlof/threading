@@ -207,10 +207,10 @@ final class PaneNoticeView: NSView, ThemedComponent {
         actions: [PaneNoticeAction],
         onDismiss: (() -> Void)?
     ) {
-        glyph.image = Design.Symbol.image(
+        glyph.setSymbol(
             tone.symbol,
             slot: PaneNoticeDefaults.glyphSlot,
-            pointSize: Design.Symbol.pointSize(forSlot: PaneNoticeDefaults.glyphSlot)
+            role: Design.Symbol.role(forSlot: PaneNoticeDefaults.glyphSlot)
         )
 
         titleLabel?.translatesAutoresizingMaskIntoConstraints = false

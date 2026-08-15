@@ -130,10 +130,10 @@ final class ThemedDisclosureRow: ThemedControl {
     }
 
     private func updateChevron() {
-        chevron.image = Design.Symbol.image(
+        chevron.setSymbol(
             isExpanded ? "chevron.down" : "chevron.right",
             slot: Layout.chevronSlot,
-            pointSize: Design.Symbol.chevron,
+            role: .chevron,
             weight: .semibold
         )
     }

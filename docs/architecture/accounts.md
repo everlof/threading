@@ -802,13 +802,114 @@ job is to say how much is left.
 account's own windows' tones and each row takes its model's, so a line drawn on one model's window
 tints that row and no other.
 
-Still reading the provider's 100%: the Limit History charts, where the cap belongs as its own
-marker kind beside the existing reset/expiry/projection markers.
+**The Limit History chart draws the cap as a horizontal `ThemedChartValueRule`**, not as a marker.
+`ThemedChartMarker` is anchored to a `Date` and drawn vertically, which is right for the three
+things it already marks — a reset, an expiry, a projected exhaustion all happen *at a time*. A
+limit is not an event: it is a level the series is read against. Making it a marker kind would
+have given that enum one case whose geometry contradicted the other four. Only a fixed cap is
+drawn; a pace share's line moves with the clock, and one horizontal rule across a week of history
+would be a line that was never there.
+
+### The other two metrics
+
+**Pace share** (`share × elapsedFraction`) is the shared-login shape, and its line **rises with
+the clock**. That is why nothing reads `rule.bound` directly: `CustomLimitBounds.resolvedBound`
+is asked for the line *at a moment*, and returns nil where it cannot be placed — a pace share on
+a window whose length the provider never stated has no elapsed fraction to take a share of, and
+inventing one would draw a line nobody set. Nil reads as "cannot see", which holds and does not
+alert.
+
+`consumedOfBound` treats **zero spend as zero consumption whatever the line is**. A literal pace
+share opens each window with a bound of exactly zero and the division is `0 / 0`; the answer is
+not "infinitely over", because nothing has been released and nothing has been taken from the
+account's owner. That single rule is what the draft's proposed "grace floor" would have bought,
+which is why there is no floor.
+
+**Synthetic windows** (`CustomLimitTrailingWindow`) measure consumption inside a trailing span the
+provider does not meter — a five-hour discipline recreated on a plan that meters only a week.
+Funded by **fraction delta** over `UsageHistoryStore`'s samples, so the unit stays the provider's
+own normalized metric and nothing is estimated. Three rules the arithmetic turns on:
+
+- a **reset inside the span** ends the subtraction at the reset evidence; subtracting across the
+  boundary would read a clear as *negative* consumption, which then reads as headroom — on the one
+  metric whose whole purpose is to notice a burst;
+- history that does not reach back far enough **cannot answer**, and says so rather than calling
+  the unobserved hours zero;
+- the span starts at the last sample **at or before** the boundary rather than the first one
+  inside it. History is sparse, so the true value at the boundary is unknown and the two
+  candidates bracket it; starting earlier can only over-count, which holds sooner. A rule that
+  exists to notice a burst errs toward noticing.
+
+Its **instance is the span itself** rather than the provider window's turn, which is what makes a
+trailing rule re-arm sensibly: a line crossed and then left behind can be crossed again once the
+spend has aged out. Keying on the provider window's reset would have meant one announcement per
+*week* for a rule about five hours.
+
+Ledger funding — the draft's second source, for an account with no live reading at all — is
+deliberately not built: it is the one place this feature would put an *estimate* where a limit is
+enforced.
+
+### Tier 4: park
+
+A park is a hold plus one more consequence: `ConversationOutbox` stops draining at the turn
+boundary, the row carries a mark, and the composer gets a strip. It **does not stop the keyboard**
+— a turn typed and sent by hand goes, and the copy says so. Two deliberate differences from a
+provider park:
+
+- **It is not the triangle.** `ThemedWarningMark` means "the provider stopped this and you cannot
+  answer it". A self-imposed cap is conduct, not weather, so the row wears the `RowConductSummary`
+  mark — the family that already marks rows whose non-inherited settings act when nobody is
+  watching — and the strip swaps its mark for the same glyph. There is no new `SessionActivity`
+  case: the process really is idle and the provider really would accept a turn.
+- **Continue Anyway is real and scoped.** The rule is the user's own, so overriding it is
+  legitimate. `CustomLimitOverrideStore` keys the permission by account, rule and window instance
+  and prunes it at the reset, so one late-night exception does not quietly disable the rule
+  forever. It is stored at `preference` criticality rather than `rebuildableCache`, unlike the
+  alert ledger: losing a fired alert costs one duplicate notification, while losing an override
+  silently re-parks a session the user has already answered for.
+
+The strip is the escape strip's surface with a `source` — same geometry, same two offers, a
+different mark and different words. A provider refusal **outranks** a park where both stand: it is
+the one the user cannot answer, and naming the smaller fact on top of the larger one would be the
+wrong way round.
 
 `UsageBarView.drawnFillWidth` and `drawnCapTrackWidth` exist because a test reached the fill
 through `subviews.first`, and the capped track inserted below it quietly made that a different
 view — the test then reported a fill of zero for a bar drawing correctly. A gauge a test has to
 index into is a gauge whose tests break on layering.
+
+### Holding Threading's own spend
+
+`CustomLimitBounds.hold` is **one decision for four seams** — the scheduled-send delivery, the
+usage-window poke's guard table, `LimitEscapeRanking`'s eligibility, and the control plane's
+admission — because a hold that four call sites each decided for themselves would be four subtly
+different lines, and the user drew one. Only rules armed at `hold` or above are asked: a rule that
+exists to colour a bar or fire one notification has not been given permission to stop anything.
+
+Its two refusing cases are kept apart rather than collapsed into a bool, because **"over your
+line" and "cannot see" have opposite remedies**. Holds engage on unknowns, asymmetrically with
+alerts, which go silent on them: an alert derived from a guess is noise, while a hold skipped for
+a missing reading spends the user's quota for a reason they cannot see.
+
+What each seam does with it:
+
+- a **scheduled send** stands aside and re-arms at the window's reset — the user asked for the
+  message to go, and a limit is a "not yet" rather than a "no". `ScheduledResetPolicy` bounds how
+  many times that may happen, and a hold with no reset to wait for lets the send through rather
+  than eating it. The reset-anchored `hasRoom` check takes the effective bound too: on an account
+  fenced at half, 60% is not room;
+- the **usage-window poke** gains a `customLimitReached` row, last in the guard table, because
+  every guard above it describes the provider's arithmetic and this one describes a line over it;
+- `LimitEscapeRanking` refuses a fenced login as a destination and reports it through
+  `exclusions`, so a receipt can say **"excluded by your limit"** rather than leaving it looking
+  spent — silent exclusion slanders an account with headroom and points the user at the provider
+  for a line they drew themselves. Its pace deficit generalizes to
+  `bound × elapsedFraction − usedFraction`, which is the shipped formula exactly when no rule
+  draws a line, and is the "yours vs. theirs" answer when one does;
+- the **control plane** refuses `send_to_session` with `targetHeldByOwnLimit`, carrying the rule's
+  own sentence. The check runs *after* the scope checks, so a caller cannot learn whether a
+  session outside its scope has a limit on it. The plane asks through a `Dependencies` closure
+  like every other fact it needs, so the refusal matrix stays a table test.
 
 ### Window instances, and why a rule re-arms
 

@@ -856,10 +856,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         }
 
         let indicator = NSImageView()
-        indicator.image = Design.Symbol.image(
+        indicator.holdSymbol(
             RowConductDefaults.symbol,
-            slot: Design.Size.inlineButtonGlyph,
-            pointSize: Design.Symbol.control
+            slot: Design.Size.inlineButtonGlyph
         )
         indicator.imageScaling = .scaleProportionallyDown
         indicator.translatesAutoresizingMaskIntoConstraints = false

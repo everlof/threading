@@ -24,9 +24,14 @@ enum LimitEscapeRanking {
         let accountID: AccountID
         let usage: AccountUsage?
 
-        init(accountID: AccountID, usage: AccountUsage?) {
+        /// The user's own limits on this login, passed in rather than fetched, so the ranking
+        /// stays the pure function its tests read it as.
+        let limits: [CustomLimit]
+
+        init(accountID: AccountID, usage: AccountUsage?, limits: [CustomLimit] = []) {
             self.accountID = accountID
             self.usage = usage
+            self.limits = limits
         }
     }
 
@@ -39,9 +44,26 @@ enum LimitEscapeRanking {
         /// weeks later says which window the choice turned on rather than only which login won.
         let decidingWindowName: String
 
-        /// `elapsedFraction − usedFraction` on that window: how far behind its own linear burn
-        /// the account is. Positive is room to spare, negative is burning faster than the clock.
+        /// `bound × elapsedFraction − usedFraction` on that window: how far behind its own
+        /// linear burn toward **the line that applies** the account is. Positive is room to
+        /// spare, negative is burning faster than the clock.
+        ///
+        /// The bound generalizes the shipped formula rather than replacing it — with no line of
+        /// the user's it is 1 and this is `elapsedFraction − usedFraction` exactly. What it buys
+        /// is the "yours vs. theirs" answer: a shared login far under the share reserved for its
+        /// owner ranks ahead of a free login near its own cap, which is the comparison somebody
+        /// choosing a destination is actually making.
         let paceDeficit: Double
+    }
+
+    /// A login that was *refused* by one of the user's own limits, and the hold that refused it.
+    ///
+    /// Separate from simply not appearing, because the receipt has to be able to say **"excluded
+    /// by your limit"** rather than "spent". Silent exclusion reads as spent, which slanders an
+    /// account with headroom — and worse, points the user at the provider for a line they drew.
+    struct Excluded: Equatable {
+        let accountID: AccountID
+        let hold: CustomLimitHold
     }
 
     // MARK: - Public Methods
@@ -95,6 +117,23 @@ enum LimitEscapeRanking {
         eligible(candidate, metering: model, at: now) != nil
     }
 
+    /// The logins this ranking refused because of a rule of the user's, so a strip or a receipt
+    /// can name them rather than leaving them looking spent.
+    static func exclusions(
+        _ candidates: [Candidate],
+        at now: Date = Date()
+    ) -> [Excluded] {
+        candidates.compactMap { candidate in
+            let hold = CustomLimitBounds.hold(
+                on: candidate.usage,
+                in: candidate.limits,
+                at: now
+            )
+            guard hold.isHolding else { return nil }
+            return Excluded(accountID: candidate.accountID, hold: hold)
+        }
+    }
+
     // MARK: - Private Methods
 
     /// One login's eligibility, decided on **every** window that meters the session's model —
@@ -118,17 +157,33 @@ enum LimitEscapeRanking {
     ) -> Ranked? {
         guard let usage = candidate.usage else { return nil }
 
+        // A fourth refusal, and the only one that is not about what the provider said: an account
+        // the user fenced off must never be somewhere a conversation is moved *into*. It is
+        // reported through `exclusions` rather than dropped silently, because a login that
+        // disappears from an offer reads as spent.
+        guard !CustomLimitBounds.hold(
+            on: usage,
+            in: candidate.limits,
+            at: now
+        ).isHolding else { return nil }
+
         let windows = usage.windows(metering: model)
         guard !windows.isEmpty else { return nil }
 
         var worst: Ranked?
         for window in windows {
             guard !window.isExpired(at: now), let fraction = window.fraction else { return nil }
-            guard fraction < LimitEscapeDefaults.headroomFraction else { return nil }
+            let bound = CustomLimitBounds.effectiveBound(
+                on: window.id,
+                in: candidate.limits,
+                window: window,
+                at: now
+            )
+            guard fraction / bound < LimitEscapeDefaults.headroomFraction else { return nil }
 
             // A window whose length the provider did not state has no pace to be behind, so it
             // contributes nothing rather than a number invented from one side of the subtraction.
-            let deficit = (window.elapsedFraction(at: now) ?? fraction) - fraction
+            let deficit = bound * (window.elapsedFraction(at: now) ?? (fraction / bound)) - fraction
             if let standing = worst, standing.paceDeficit <= deficit { continue }
 
             worst = Ranked(
@@ -278,7 +333,8 @@ extension LimitEscapeSuggestion {
         let candidates = destinations.map {
             LimitEscapeRanking.Candidate(
                 accountID: $0.id,
-                usage: AccountUsageService.shared.usage(for: $0)
+                usage: AccountUsageService.shared.usage(for: $0),
+                limits: CustomLimitSettings.shared.rules(for: $0.id)
             )
         }
 

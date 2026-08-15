@@ -460,6 +460,47 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertEqual(popUp.selectedItem?.title, "Codex")
     }
 
+    /// A section head names the rows under it and is not one of them.
+    ///
+    /// The trap is the first one: a pop-up takes the first entry it is given as its selection,
+    /// and a list that opens with a head would have "selected" the head — a button drawing an
+    /// empty title, reporting no selected item, over a list where nothing looks chosen.
+    func testAPopUpOpensOnItsFirstItemRatherThanOnASectionHead() {
+        let popUp = ThemedPopUp()
+        popUp.addHeader("Design styles")
+        popUp.addItem(withTitle: "Editorial")
+        popUp.addItem(withTitle: "Cyberpunk")
+        popUp.addHeader("Palettes")
+        popUp.addItem(withTitle: "Nord")
+
+        XCTAssertEqual(popUp.indexOfSelectedItem, 1, "the pop-up selected its section head")
+        XCTAssertEqual(popUp.selectedItem?.title, "Editorial")
+        XCTAssertNil(popUp.item(at: 0), "a head answered as a choosable item")
+        XCTAssertNil(popUp.item(at: 3))
+    }
+
+    /// Entry indices stop being item indices the moment a head is in the list, so a caller that
+    /// looked its selection up in the model it built from would land one row down per head above
+    /// it. Asking the control is what keeps the two from having to agree.
+    func testAPopUpFindsAnItemByItsRepresentedValueAcrossSectionHeads() throws {
+        let popUp = ThemedPopUp()
+        popUp.addHeader("Classic desktops")
+        popUp.addItem(ThemedMenuItem(title: "Windows 98", representedValue: "retro-98"))
+        popUp.addHeader("Seasonal")
+        popUp.addItem(ThemedMenuItem(title: "Christmas", representedValue: "christmas"))
+
+        let index = try XCTUnwrap(
+            popUp.indexOfItem { $0.representedValue as? String == "christmas" }
+        )
+        XCTAssertEqual(index, 3)
+        popUp.selectItem(at: index)
+        XCTAssertEqual(popUp.selectedItem?.title, "Christmas")
+
+        XCTAssertNil(popUp.indexOfItem { $0.representedValue as? String == "Seasonal" },
+                     "a section head answered a search for an item")
+        XCTAssertEqual(popUp.indexOfFirstItem, 1, "the first choosable row was not found")
+    }
+
     /// The index usually comes from looking a stored value up in a list, so one the list no
     /// longer holds must leave the control unselected rather than trap — the settings window is
     /// not a place to crash over a stale preference.
@@ -7108,6 +7149,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "ConversationHandoffView",
                 "ConversationOutboxRailView",
                 "ConversationOutboxRowView",
+                "ScheduledSessionPlaceholderView",
                 "ScheduledMessageStripView",
                 "ScheduledMessageRowView",
                 "CompareInspectorView",

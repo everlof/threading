@@ -207,6 +207,23 @@ final class ProjectSidebarViewController: NSViewController {
     /// had at the last layout pass — see `SidebarDensity` and `applyWidthDensity`.
     private var presentedDensity = SidebarDensity.relaxed
 
+    /// The narrowest the column can actually be dragged to, where the tightening bottoms out.
+    ///
+    /// Told to the sidebar rather than read from a constant, because the split view's minimum is
+    /// *measured*: `MainWindowController.updateSidebarMinimumThickness` raises it to clear the
+    /// window controls floating over the column, and a toolbar item added later moves it again.
+    /// The band ran to `SidebarDefaults.tightDensityWidth` while the column stopped some 28pt
+    /// above it, so the tight end of every metric was unreachable — the list at its narrowest
+    /// drew a depth step of 11 where 6 was the answer, which is what "still so much inset per
+    /// level in the most compact form" was. Unset, the constant stands: a list with no window
+    /// controller over it has nothing better to go on.
+    var densityFloor: CGFloat = SidebarDefaults.tightDensityWidth {
+        didSet {
+            guard densityFloor != oldValue else { return }
+            applyWidthDensity()
+        }
+    }
+
     /// The settings section list, shown in place of the projects when settings is open — so
     /// the window never grows a second sidebar.
     private var settingsSidebar: SettingsSidebar?
@@ -1338,14 +1355,16 @@ extension ProjectSidebarViewController {
         let width = view.bounds.width
         guard width > 0 else { return }
 
-        let density = SidebarDensity(width: width)
+        let density = SidebarDensity(width: width, floor: densityFloor)
         guard initial || density != presentedDensity else { return }
 
         presentedDensity = density
         applyOutlineIndentation()
 
         guard !initial else { return }
-        outlineView.enumerateAvailableRowViews { _, row in
+        outlineView.enumerateAvailableRowViews { rowView, row in
+            // Both halves: the cell's own gutters, and the capsule the row view draws under it.
+            (rowView as? SidebarDensityAdopting)?.applySidebarDensity(density)
             let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
             (cell as? SidebarDensityAdopting)?.applySidebarDensity(density)
         }
@@ -1359,8 +1378,9 @@ extension ProjectSidebarViewController {
     ///
     /// The reclaim is bounded by this list's own selection capsule: content may move out into the
     /// band the `.inset` style keeps, but not past the shape a selected row fills
-    /// (`SidebarRowDefaults.hoverHighlightInsetX`, which `SidebarHoverRowView.highlightPath`
-    /// draws to). `SidebarDefaults.tightTrailingCellReclaim` is measured against that.
+    /// (`SidebarDensity.selectionInsetX`, which `SidebarHoverRowView.highlightPath` draws to).
+    /// The two close together with the drag, so the clearance between them narrows and never
+    /// inverts; `SidebarDefaults.tightTrailingCellReclaim` is measured against the tight end.
     private func applyOutlineIndentation() {
         outlineView.indentationPerLevel = presentedDensity.indentationPerLevel
         outlineView.trailingCellReclaim = presentedDensity.trailingCellReclaim
@@ -2085,6 +2105,10 @@ extension ProjectSidebarViewController {
             arrangeButton.isHidden = true
             settingsButton.contentTintColor = Design.Text.label
         } else {
+            // The query leaves with the visit that asked it — `SettingsSidebar.resetSearch`
+            // says why. Cleared on the way *out* rather than on the way in, so nothing about
+            // reopening Settings is spent undoing the last visit.
+            settingsSidebar?.resetSearch()
             settingsSidebar?.isHidden = true
             scrollView.isHidden = false
             setEmptyStateVisible(rootNodes.isEmpty)
@@ -2473,9 +2497,10 @@ private extension ProjectSidebarViewController {
         presentSidebarMenu(projectMenuEntries(row: row), from: anchor)
     }
 
-    /// The rest of what a project's `+` can make, offered on its secondary click. The press
-    /// itself makes a chat; this is where the terminal lives, and where the chat is named so
-    /// the gesture still says what it does.
+    /// What a project's `+` can make, offered on its press. The press used to make a chat
+    /// directly with this menu on the secondary click, but selecting the row already puts the
+    /// composer on screen — the press duplicated a click the pointer was one row-height from,
+    /// while hiding the terminal behind a gesture nothing advertised.
     @discardableResult
     private func showProjectCreationMenu(
         for projectID: ProjectID,
@@ -2760,10 +2785,6 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             cell.onHoverAction = { [weak self] anchor in
                 self?.showProjectActions(for: projectNode.projectID, from: anchor)
             }
-            cell.onCreateAction = { [weak self] projectID in
-                // What the `+` is for: a chat in this project, without a menu in the way.
-                self?.select(projectID: projectID)
-            }
             cell.onCreateMenuAction = { [weak self] projectID, anchor, menuAnchor in
                 self?.showProjectCreationMenu(
                     for: projectID,
@@ -2856,6 +2877,9 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         guard let rowView = rowView as? SidebarHoverRowView else { return }
         instantiatedHoverRowViews.add(rowView)
         rowView.showsGroupRule = showsGroupRule(forRow: row)
+        // The row's own half of the density, for the same reason `dequeueCell` stamps the cell:
+        // a row arriving after a drag has no other moment to learn how wide its column is.
+        rowView.applySidebarDensity(presentedDensity)
 
         // A selected working row that scrolled away and back arrives as a *new* row view,
         // which owes its beam a restamp nothing else would deliver.

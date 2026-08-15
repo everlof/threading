@@ -16,7 +16,11 @@ final class CustomLimitShowTests: XCTestCase {
         static let height = UsageBarDefaults.height
 
         static var directory: URL {
-            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            // Non-empty, deliberately: an override set to "" resolves to `/`, and the failure
+            // that produces is a read-only-volume error three frames deep in a PNG write rather
+            // than anything that names the environment.
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !override.isEmpty {
                 return URL(fileURLWithPath: override)
             }
             return URL(fileURLWithPath: NSTemporaryDirectory())

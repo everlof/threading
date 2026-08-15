@@ -70,6 +70,50 @@ enum AppThemeLibrary {
 
     static var all: [AppTheme] { stock + contributed + custom }
 
+    /// `stock`, filed — the house group with System at its head, then the named families.
+    ///
+    /// System leads the house group rather than standing in a section of its own: it is not a
+    /// style, it is the app in the system's clothes, and a head over one row saying "System"
+    /// would only repeat it.
+    static var stockSections: [AppThemeSection] {
+        [AppThemeSection([.system] + AppThemeStyles.house.themes)] + AppThemeStyles.styleFamilies
+    }
+
+    /// The same catalogue `all` holds, filed under the heads a picker draws over it.
+    ///
+    /// Every theme, exactly once, so a picker built from this and a caller reasoning about `all`
+    /// cannot disagree — `testSectionsAreTheWholeCatalogueInOrder` holds the two together. The
+    /// stock tier keeps the catalogue's own order; the contributed tier is *grouped* by its
+    /// extension, which is the one place the two lists may run in a different sequence.
+    ///
+    /// The three tiers become three kinds of section rather than three suffixes repeated on
+    /// every row: the stock families as the catalogue files them, then **one section per
+    /// contributing extension** — which is what tells two extensions shipping a "Storm" apart,
+    /// and where a user goes to update or remove either — and the user's own copies last, being
+    /// the only ones they can edit.
+    static var sections: [AppThemeSection] {
+        var sections = stockSections
+
+        var contributions: [(name: String, themes: [AppTheme])] = []
+        for theme in contributed {
+            // A theme whose contributor cannot be named still has to appear somewhere; the
+            // generic head is the one case where the section is not the extension's own name.
+            let name = contributorName(of: theme) ?? L10n.string("Extensions")
+            if let index = contributions.firstIndex(where: { $0.name == name }) {
+                contributions[index].themes.append(theme)
+            } else {
+                contributions.append((name, [theme]))
+            }
+        }
+        sections += contributions.map { AppThemeSection($0.name, $0.themes) }
+
+        let owned = custom
+        if !owned.isEmpty {
+            sections.append(AppThemeSection(L10n.string("Custom"), owned))
+        }
+        return sections
+    }
+
     static func theme(withID id: AppThemeID) -> AppTheme? {
         all.first { $0.id == id }
     }

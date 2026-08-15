@@ -1,23 +1,24 @@
 # Limit management: your own limits, ahead of the provider's
 
-**Status: partly shipped.** Sequencing step 1 — *alerts on provider windows* — shipped
-2026-08-14: the rule record, the two storage scopes, `CustomLimitEvaluator`, window-instance
-identity, the fired-state ledger, `UsageAlertCenter` and the Accounts page's Limits section. Step
-2's *bar* half shipped 2026-08-15 — `CustomLimitBounds`, the capped track on `UsageBarView`,
-effective-bound tinting on `UsageWindowRow`, both account menus and the always-visible pill. Its
-durable decisions now live in
-[`accounts.md § Your own limits, ahead of the provider's`](../architecture/accounts.md#your-own-limits-ahead-of-the-providers);
-**that file is authoritative for what exists**, and this one remains the plan for steps 2–6.
-Re-check the rest against the code before starting, and move the decisions that survive into
-`docs/architecture/` — most likely [`accounts.md`](../architecture/accounts.md),
-[`limit-recovery.md`](../architecture/limit-recovery.md) and
-[`usage-dashboard.md`](../architecture/usage-dashboard.md) — rather than leaving them here.
+**Status: shipped.** All five sequencing steps that belong to this draft are built and tested:
+alerts on provider windows, the line drawn where the reading is, the four hold seams, both new
+metrics, and the tier-4 park. Step 6 — grants integration — is the *sibling* draft's work
+([usage-aware-accounts.md](usage-aware-accounts.md), section C) and is named here only because it
+consumes this evaluator.
 
-What the shipped slice settled, so the sections below are read against it: thresholds are
-fractions of the bound and a sentence always names the percentage the *window* reads; the
-consequence ladder is one ordered enum clamped to what the build implements, so a rule stored at
-a later tier evaluates rather than being dropped; and the metric enum declares `paceShare` and
-`syntheticWindow` already, so steps 4's arrival changes no stored shape.
+**The durable record is
+[`accounts.md § Your own limits, ahead of the provider's`](../architecture/accounts.md#your-own-limits-ahead-of-the-providers).**
+That file is authoritative for what exists and why; this one is kept as the delivery plan and the
+decision record beside it, in the shape
+[`cross-platform-usage-dashboard.md`](cross-platform-usage-dashboard.md) set. The four open
+questions are answered at the end.
+
+One thing about ledger funding, so the boundary is not lost: a synthetic window is funded by
+**fraction delta** over the history the app already keeps, which is the provider's own normalized
+unit. The draft's second funding source — the transcript ledger's quarter-hour buckets, for an
+account with no live reading at all — is deliberately **not** built. It is the one part of this
+feature that would put an *estimate* where a limit is enforced, and the dashboard's rule that an
+estimated transcript cost must never become a provider limit binds it. See the open questions.
 
 Sibling of [usage-aware-accounts.md](usage-aware-accounts.md): that draft tells the *agent* its
 budget and moves work when an account is spent; this one lets the *user* draw the line the
@@ -317,30 +318,57 @@ Two extensions fall out nearly free, and one is deliberately deferred:
 
 ## Sequencing
 
-1. ~~**Alerts on provider windows.**~~ **Shipped 2026-08-14.** Smallest slice, immediately
-   useful, and it built the evaluator, instance identity, fired-state store and
-   `UsageAlertCenter` everything else rides.
-2. **Show:** ~~cap ticks and effective-bound tinting~~ — **the bar shipped 2026-08-15**
-   (`CustomLimitBounds`, `UsageBarView.capMark`, `UsageWindowRow`). The line turned out not to be
-   a tick: it is a change in the *track*, because a pace mark and a cap mark on a 6pt bar are two
-   different kinds of thing and cannot share one vocabulary. What remains of this step is the
-   cap-line marker on the Limit History charts. The bar, both menus and the always-visible pill —
-   segments, ring and the per-rule `showsInToolbar` switch — all shipped.
-3. **Holds:** the three existing seams plus the plane's refusal sentence.
-4. **The two new metrics:** pace share, then synthetic windows (fraction-delta first, ledger
-   funding second).
-5. **Tier 4:** park, conduct mark, strip variant, Continue Anyway.
-6. **Grants integration:** the sibling draft's section C consumes the evaluator.
+All five steps below shipped between 2026-08-14 and 2026-08-15.
 
-## Open questions
+1. ~~**Alerts on provider windows.**~~ The rule record, the two storage scopes,
+   `CustomLimitEvaluator`, window-instance identity, the fired-state ledger, `UsageAlertCenter`
+   and the Accounts page's Limits section.
+2. ~~**Show.**~~ The line turned out not to be a tick: it is a change in the *track*, because a
+   pace mark and a cap mark on a 6pt bar are two different kinds of thing and cannot share one
+   vocabulary. `CustomLimitBounds` is the single answer every surface asks — the popover's bars,
+   both account menus, the always-visible pill (opt-in per rule) and the Limit History chart,
+   where the cap is a **horizontal value rule** rather than a marker, since a line the user set is
+   not an event.
+3. ~~**Holds.**~~ `CustomLimitBounds.hold` is one decision for all four seams: the scheduled-send
+   delivery, the usage-window poke's guard table, `LimitEscapeRanking`'s eligibility (with
+   `exclusions` so a fenced login reads as excluded rather than spent), and the control plane's
+   `targetHeldByOwnLimit` refusal.
+4. ~~**The two new metrics.**~~ Pace share, whose line rises with the clock; and synthetic windows
+   funded by fraction delta (`CustomLimitTrailingWindow`). Ledger funding is not built — see the
+   status note above.
+5. ~~**Tier 4.**~~ `CustomLimitBounds.park`, the outbox gate at the turn boundary, the conduct
+   mark on the row, the strip variant, and `CustomLimitOverrideStore` behind Continue Anyway.
+6. **Grants integration** — the sibling draft's section C consumes this evaluator. Not this
+   draft's work.
 
-- Does a pace share want a grace floor at window open (literal `share × elapsed` starts at
-  zero), or is the literal reading — which is what the instruction says — the right default with
-  the floor as a per-rule option?
-- The compact register for a user-authored segment in the pill: `5h` must not appear bare, so
-  what marks it as the user's line without costing the width the columns fought for — a glyph,
-  a distinct tone, or a short word?
-- Anchored synthetic windows: worth the phase state once trailing ships, or is trailing's
-  strictly-stronger guarantee simply better than nostalgia for the provider's old shape?
-- Threshold re-arm for trailing windows that oscillate around a line: re-arm below the previous
-  step, below `threshold − ε`, or only after a quiet interval?
+## Open questions, answered
+
+- **Does a pace share want a grace floor at window open?** No. The literal reading works once
+  `0 / 0` is read as zero rather than as infinity, which `CustomLimitBounds.consumedOfBound` does:
+  nothing has been released and nothing has been taken from the account's owner, so nothing is
+  over the line. A floor would only have bought that one degenerate instant, and the first minutes
+  of a window are exactly where a shared login should be strictest.
+- **The compact register for a user-authored segment in the pill.** The question dissolved. A
+  synthetic window never gets a segment of its own: the pill draws the *provider's* windows and
+  tints them, so there is no bare `5h` to disambiguate. What a rule moves in the toolbar is the
+  tint and the ring's binding comparison, and only from a rule that opted in.
+- **Anchored synthetic windows.** Not worth the phase state. Trailing is strictly stronger — it
+  admits no burst that an anchor's boundary would have let through — and "strictly stronger"
+  leaves nothing for the phase state to buy beyond nostalgia for the provider's old shape.
+- **Threshold re-arm for a trailing window that oscillates.** Answered by construction rather than
+  by a quiet-interval rule: a trailing rule's window *instance* is the span itself, so a line
+  crossed and then left behind re-arms exactly when the spend ages out of the span. No epsilon, no
+  timer.
+
+## What was not built, and why
+
+- **Ledger-funded synthetic windows.** The one place this feature would put an estimate where a
+  limit is enforced. It stays unbuilt until there is a way to label an estimate end-to-end that
+  survives every surface it reaches; the dashboard's own rule is the precedent.
+- **Provider-wide rules** ("all Codex logins share one synthetic window"), as this draft always
+  intended: every consumer is per-account, and an aggregate bound needs an aggregation story the
+  ledger has and the live readings do not. Nothing in the rule record precludes it.
+- **A standing "where is my slack" surface.** The pace deficit is rule-aware now
+  (`bound × elapsedFraction − usedFraction`), so the identity menu and the escape ranking answer
+  the question where it is actionable. A separate dashboard stays unbuilt unless that proves
+  insufficient.

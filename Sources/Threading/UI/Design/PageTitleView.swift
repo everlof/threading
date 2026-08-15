@@ -80,11 +80,7 @@ final class PageTitleView: BackdropThemedControl {
     private func setup(symbolName: String) {
         translatesAutoresizingMaskIntoConstraints = false
 
-        iconView.image = Design.Symbol.image(
-            symbolName,
-            slot: Design.Size.tabIconSlot,
-            pointSize: Design.Symbol.control
-        )
+        iconView.setSymbol(symbolName, slot: Design.Size.tabIconSlot)
         iconView.setContentHuggingPriority(.required, for: .horizontal)
 
         titleLabel.applyFont(.control)
@@ -214,11 +210,7 @@ final class PageTitleView: BackdropThemedControl {
         self.identity = identity
 
         iconView.slot = nil
-        iconView.image = Design.Symbol.image(
-            symbolName,
-            slot: Design.Size.tabIconSlot,
-            pointSize: Design.Symbol.control
-        )
+        iconView.setSymbol(symbolName, slot: Design.Size.tabIconSlot)
         titleLabel.setStringValue(title, animated: isRename)
         setAccessibilityTitle(title)
         invalidateIntrinsicContentSize()

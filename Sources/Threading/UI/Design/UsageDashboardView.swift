@@ -854,6 +854,27 @@ final class UsageDashboardView: NSView, ThemedComponent {
             ))
         }
 
+        // The user's own line on this window, drawn as a level the series is read against.
+        // Resolved from the series key rather than carried on the row: the key is the one place
+        // that already knows which account and window a series belongs to.
+        var valueRules: [ThemedChartValueRule] = []
+        if let parts = UsageHistoryStore.seriesKeyParts(selected.id),
+           let accountID = AccountID(rawValue: parts.accountID),
+           let rule = CustomLimitBounds.tightest(
+               on: parts.windowID,
+               in: CustomLimitSettings.shared.rules(for: accountID)
+           ),
+           let bound = CustomLimitBounds.resolvedBound(of: rule, window: nil, at: now) {
+            // A fixed cap only: a pace share's line moves with the clock, so drawing it as one
+            // horizontal rule across a week of history would be a line that was never there.
+            valueRules.append(ThemedChartValueRule(
+                id: selected.id + "|cap",
+                value: bound,
+                title: L10n.format("Your limit · %@", percent(bound)),
+                kind: .cap
+            ))
+        }
+
         let chartEnd = [
             now,
             selected.projection?.endpointAt,
@@ -865,6 +886,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
             accessibilitySummary: L10n.format("%@ is at %@", selected.windowLabel, selected.currentFraction.map(percent) ?? "—"),
             series: chartSeries,
             markers: markers,
+            valueRules: valueRules,
             xRange: start...chartEnd,
             yRange: 0...1,
             valueFormat: .percent,

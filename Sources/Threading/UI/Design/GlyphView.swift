@@ -45,10 +45,60 @@ final class GlyphView: NSView {
         }
     }
 
+    /// The symbol this view is showing, held as the **request** rather than the render.
+    ///
+    /// A rendered `NSImage` freezes its configuration the way an `NSFont` freezes on a label,
+    /// and a mark's optical size follows the chrome's type scale (`Design.Symbol.Role`), so a
+    /// view that only ever stored the finished picture kept the size the theme was showing when
+    /// it was built. Every glyph in the chrome comes through here, which is why the answer lives
+    /// here rather than at fifteen call sites: `rederiveThemedContent` re-renders it, and the
+    /// app-theme sweep already calls that beside the fonts and colours it re-resolves.
+    private struct SymbolRequest {
+        let name: String
+        /// The layout cap, when layout states one. Nil where the mark's own optical size is the
+        /// whole answer — a grip in a rail is as big as it is — so the cap moves with it rather
+        /// than clamping it back to the size the previous theme drew.
+        let slot: CGFloat?
+        let role: Design.Symbol.Role
+        let weight: NSFont.Weight
+    }
+
+    private var symbolRequest: SymbolRequest?
+
     init() {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityElement(false)
+    }
+
+    /// Shows `name` at a mark's size, re-rendered whenever the theme moves the type it is
+    /// weighed against. The route for every SF Symbol in an app-owned control; assigning
+    /// `image` directly stays right for artwork that is not ours (an app's own icon).
+    func setSymbol(
+        _ name: String,
+        slot: CGFloat? = nil,
+        role: Design.Symbol.Role = .control,
+        weight: NSFont.Weight = .medium
+    ) {
+        symbolRequest = SymbolRequest(name: name, slot: slot, role: role, weight: weight)
+        renderSymbol()
+    }
+
+    /// Empties the slot, and forgets the request with it — a view handed real artwork or
+    /// nothing at all must not have a stale symbol re-rendered under it by the next sweep.
+    func clearSymbol() {
+        symbolRequest = nil
+    }
+
+    private func renderSymbol() {
+        guard let request = symbolRequest else { return }
+        let pointSize = request.role.pointSize
+        image = Design.Symbol.image(
+            request.name,
+            slot: request.slot ?? pointSize,
+            pointSize: pointSize,
+            weight: request.weight
+        )
     }
 
     @available(*, unavailable)
@@ -89,5 +139,20 @@ final class GlyphView: NSView {
         } else {
             image.draw(in: aligned)
         }
+    }
+}
+
+// MARK: - Theme
+
+extension GlyphView: ThemeDerivedContent {
+
+    /// Renders the held symbol again at the size its role resolves to now.
+    ///
+    /// A glyph is the one piece of themed content that is neither a colour nor a font and
+    /// freezes like both: `Design.Symbol.image` *configures* a symbol at a point size, and the
+    /// point size follows the chrome's type scale. Without this a theme switch redrew a 0.80×
+    /// label beside the mark the previous theme had rendered.
+    func rederiveThemedContent() {
+        renderSymbol()
     }
 }

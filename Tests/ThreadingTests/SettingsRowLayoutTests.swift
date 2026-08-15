@@ -803,6 +803,48 @@ final class SettingsRowLayoutTests: XCTestCase {
         )
     }
 
+    /// A search is a question about the visit that asked it, so leaving Settings drops it.
+    ///
+    /// The sidebar is built once and hidden rather than torn down, so the query used to outlive
+    /// its visit: reopening Settings landed on a filter nobody had just typed, with the pane on
+    /// the General page that re-entry selects and the sidebar not listing it.
+    func testLeavingSettingsDropsTheSearchSoTheNextVisitOpensOnTheWholeList() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "threading-settings-search-reset-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let manager = StateManager(appSupportDirectory: directory)
+        defer { manager.closeDatabase() }
+
+        let controller = ProjectSidebarViewController(
+            projectStore: ProjectStore(stateManager: manager)
+        )
+        _ = controller.view
+
+        controller.setSettingsMode(true)
+        let sidebar = try XCTUnwrap(
+            descendants(of: controller.view).compactMap { $0 as? SettingsSidebar }.first
+        )
+        let restingPages = sidebar.visibleItemIDs
+        XCTAssertFalse(restingPages.isEmpty, "the resting list is the whole catalogue")
+
+        sidebar.updateSearchQuery("themes")
+        XCTAssertNotEqual(sidebar.visibleItemIDs, restingPages, "the query filtered nothing")
+
+        controller.setSettingsMode(false)
+        XCTAssertEqual(sidebar.searchFieldForTesting.stringValue, "")
+        XCTAssertNil(sidebar.clearSearchButton, "an emptied field still offered its ✕")
+
+        controller.setSettingsMode(true)
+        XCTAssertEqual(
+            sidebar.visibleItemIDs,
+            restingPages,
+            "reopening Settings landed on the previous visit's filter"
+        )
+    }
+
     // MARK: - The result rows
 
     /// A setting-level result marks the words the query accounts for, so the reader is not

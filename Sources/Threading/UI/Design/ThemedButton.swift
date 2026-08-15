@@ -30,10 +30,11 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
 
     // MARK: - Geometry
 
+    @MainActor
     private enum Layout {
         static let height: CGFloat = Design.Size.chipHeight
         static let titleInset: CGFloat = Design.Spacing.inset
-        static let imageSize: CGFloat = Design.Symbol.control + 3
+        static var imageSize: CGFloat { Design.Symbol.control + 3 }
         static let imageTitleGap: CGFloat = Design.Spacing.small
         static let plainInset: CGFloat = Design.Spacing.tight
         static let disabledAlpha: CGFloat = 0.4
@@ -46,7 +47,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
         /// A menu-row disclosure is a trailing column, not another word in the title. It uses
         /// the same optical size as the app's real menu chevron so a button acting as a cell and
         /// a row inside `ThemedMenu` make the same promise.
-        static let submenuIndicatorSize: CGFloat = Design.Symbol.chevron
+        static var submenuIndicatorSize: CGFloat { Design.Symbol.chevron }
         static let submenuIndicatorGap: CGFloat = Design.Spacing.small
 
         /// The chord is a reminder, not a second title, so it steps back from the same ink
@@ -71,8 +72,9 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     ///
     /// Composed from the two below rather than from `Layout` again, so the word column and the
     /// mark column cannot drift apart — they are the same three numbers read twice.
-    static let plainTitleLeadingInset: CGFloat =
+    static var plainTitleLeadingInset: CGFloat {
         Layout.plainInset + markSlotWidth + markTitleGap
+    }
 
     // MARK: - Emphasis
 
@@ -1282,8 +1284,8 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// another, so a stack of readings reads as a list rather than as sentences that happen to
     /// share a left margin. When one of those rows is a titled button, every other row has to
     /// match the geometry it already has — so it is stated here rather than guessed there.
-    static let markSlotWidth: CGFloat = Layout.imageSize
-    static let markTitleGap: CGFloat = Layout.imageTitleGap
+    static var markSlotWidth: CGFloat { Layout.imageSize }
+    static var markTitleGap: CGFloat { Layout.imageTitleGap }
 
     private var foreground: NSColor {
         if let contentTintColor { return dimmed(contentTintColor) }

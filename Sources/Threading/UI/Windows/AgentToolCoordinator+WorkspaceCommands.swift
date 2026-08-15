@@ -202,6 +202,12 @@ extension AgentToolCoordinator {
                 up, so typed input would land inside whatever its screen is showing. Try \
                 again shortly — list_sessions shows who is working.
                 """
+        case .targetHeldByOwnLimit(let reason):
+            return """
+                \(reason) This is the user's own limit, not the provider's — that session \
+                can still be typed into by hand, and the line is theirs to move in \
+                Settings ▸ Accounts.
+                """
         case .messageEmpty:
             return "Provide a message: whole sentences, as the receiving conversation will read them."
         case .messageTooLong(let limit):

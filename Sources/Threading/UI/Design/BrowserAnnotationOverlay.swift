@@ -47,7 +47,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
         static let modeBadgeInset: CGFloat = Design.Spacing.medium
         static let modeBadgePadding: CGFloat = Design.Spacing.small
         static let modeBadgeGlyphGap: CGFloat = Design.Spacing.tight
-        static let modeBadgeGlyphSize: CGFloat = Design.Symbol.control
+        static var modeBadgeGlyphSize: CGFloat { Design.Symbol.control }
     }
 
     var markers: [BrowserAnnotationMarker] = [] {
@@ -82,13 +82,15 @@ final class BrowserAnnotationOverlay: ThemedControl {
         }
     }
 
-    /// The badge's glyph, resolved once: the same mark the toolbar's control wears while the
+    /// The badge's glyph, resolved per draw: the same mark the toolbar's control wears while the
     /// mode is on, so the two readings of "annotating" are visibly the same statement.
-    private let modeBadgeGlyph = Design.Symbol.image(
-        DesignSymbols.annotating,
-        slot: Layout.modeBadgeGlyphSize,
-        pointSize: Design.Symbol.control
-    )
+    private var modeBadgeGlyph: NSImage? {
+        Design.Symbol.image(
+            DesignSymbols.annotating,
+            slot: Layout.modeBadgeGlyphSize,
+            pointSize: Design.Symbol.control
+        )
+    }
 
     var onAdd: ((CGPoint) -> Void)?
     var onSelect: ((Int) -> Void)?

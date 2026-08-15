@@ -41,10 +41,9 @@ struct CustomLimitWindowInstance: Hashable, Codable {
 
 /// Where one rule stands against its own line.
 ///
-/// The ladder's two upper states are declared and not yet produced: `holding` and `parked` arrive
-/// with tiers 3 and 4, and naming them here keeps a later slice from renaming a state a receipt
-/// or a test already names. `CustomLimitTier.isImplemented` is what stops this build claiming
-/// either.
+/// `parked` is declared and not yet produced — it arrives with tier 4, and naming it here keeps
+/// that slice from renaming a state a receipt or a test already names.
+/// `CustomLimitTier.isImplemented` is what stops this build claiming it.
 enum CustomLimitState: String, Equatable {
 
     /// The reading this rule needs is not there. Notify goes silent; a hold would engage.
@@ -62,7 +61,7 @@ enum CustomLimitState: String, Equatable {
     /// At or over the bound, with nothing above notify armed.
     case reached
 
-    /// At or over the bound on a tier-3 rule. Not produced yet.
+    /// At or over the bound on a tier-3 rule: Threading's own spend has stood down.
     case holding
 
     /// At or over the bound on a tier-4 rule. Not produced yet.
@@ -171,6 +170,11 @@ enum CustomLimitEvaluator {
         /// nothing about this turn of its window.
         var fired: [String: [Double]] = [:]
 
+        /// Sparse fraction history per window id, for the synthetic-window metric. Only the rules
+        /// that name a window need it, and only over their own span — nothing here scans a
+        /// transcript, and the history is already kept for the dashboard.
+        var history: [String: [UsageSample]] = [:]
+
         var now: Date = Date()
     }
 
@@ -205,6 +209,13 @@ enum CustomLimitEvaluator {
             )
         }
 
+        // A synthetic window measures something else entirely: not where the provider window
+        // stands, but how much of it was spent inside the trailing span. Its own branch, because
+        // sharing the fixed-cap path would mean dividing a *position* by a *budget*.
+        if rule.metric == .syntheticWindow {
+            return evaluateTrailing(rule: rule, window: window, instance: instance, input: input)
+        }
+
         // An expired window keeps its identity and loses its number: the percentage describes the
         // turn before this one, and reading it as consumption would fire this instance's alerts
         // off last instance's spend.
@@ -222,7 +233,22 @@ enum CustomLimitEvaluator {
             )
         }
 
-        let consumed = live / rule.bound
+        guard let bound = CustomLimitBounds.resolvedBound(of: rule, window: window, at: input.now) else {
+            // The rule is supported but its line cannot be placed from this reading — a pace
+            // share on a window whose length the provider never stated. Reported as a missing
+            // reading, which is what it is.
+            return CustomLimitEvaluation(
+                rule: rule,
+                instance: instance,
+                consumedOfBound: nil,
+                windowFraction: live,
+                state: .unknown,
+                reason: .noReading,
+                crossedThresholds: []
+            )
+        }
+
+        let consumed = CustomLimitBounds.consumedOfBound(fraction: live, bound: bound)
         let alreadyFired = Set(input.fired[firedKey(ruleID: rule.id, instance: instance)] ?? [])
         let crossed = rule.thresholds
             .filter { consumed >= $0 - CustomLimitEvaluatorDefaults.crossingTolerance }
@@ -239,6 +265,70 @@ enum CustomLimitEvaluator {
             consumedOfBound: consumed,
             windowFraction: live,
             state: state,
+            reason: atBound
+                ? .atBound(consumedOfBound: consumed)
+                : .underBound(consumedOfBound: consumed),
+            crossedThresholds: crossed
+        )
+    }
+
+    /// A synthetic window's answer: consumption inside the trailing span against its budget.
+    ///
+    /// The **instance** is the trailing span itself rather than the provider window's turn, which
+    /// is what makes a synthetic rule's alerts re-arm sensibly: a trailing sum has no reset to
+    /// re-arm on, so a line crossed and then fallen back below is allowed to be crossed again
+    /// once consumption has actually left the span. Keying on the provider window's reset would
+    /// have meant one announcement per *week* for a rule about five hours.
+    private static func evaluateTrailing(
+        rule: CustomLimit,
+        window: AccountUsage.Window?,
+        instance: CustomLimitWindowInstance,
+        input: Input
+    ) -> CustomLimitEvaluation {
+        let live = window.flatMap { $0.isExpired(at: input.now) ? nil : $0.fraction }
+
+        guard let span = rule.trailingSpan,
+              let spent = CustomLimitTrailingWindow.consumption(
+                  in: input.history[rule.windowID] ?? [],
+                  span: span,
+                  at: input.now
+              ) else {
+            return CustomLimitEvaluation(
+                rule: rule,
+                instance: instance,
+                consumedOfBound: nil,
+                windowFraction: live,
+                state: .unknown,
+                reason: .noReading,
+                crossedThresholds: []
+            )
+        }
+
+        let consumed = CustomLimitBounds.consumedOfBound(fraction: spent, bound: rule.bound)
+        let trailingInstance = CustomLimitWindowInstance(
+            windowID: rule.windowID,
+            resetsAt: input.now.addingTimeInterval(span)
+        )
+        let alreadyFired = Set(
+            input.fired[firedKey(ruleID: rule.id, instance: trailingInstance)] ?? []
+        )
+        let crossed = rule.thresholds
+            .filter { consumed >= $0 - CustomLimitEvaluatorDefaults.crossingTolerance }
+            .filter { !alreadyFired.contains($0) }
+            .sorted()
+
+        let atBound = consumed >= CustomLimitDefaults.boundThreshold
+            - CustomLimitEvaluatorDefaults.crossingTolerance
+
+        return CustomLimitEvaluation(
+            rule: rule,
+            instance: trailingInstance,
+            consumedOfBound: consumed,
+            // The number a surface *prints* for a synthetic rule is the trailing spend, not the
+            // provider window's position: a rule about "any five hours" that printed the weekly's
+            // 62% would be naming a figure it is not measuring.
+            windowFraction: spent,
+            state: state(atBound: atBound, consumed: consumed, rule: rule),
             reason: atBound
                 ? .atBound(consumedOfBound: consumed)
                 : .underBound(consumedOfBound: consumed),
@@ -279,6 +369,47 @@ enum CustomLimitEvaluator {
 /// of one fact.
 enum CustomLimitBounds {
 
+    /// The line a rule draws **right now**, as a fraction of the window it names.
+    ///
+    /// A fixed cap's line is a constant and a pace share's rises with the clock, so every consumer
+    /// asks for it at a moment rather than reading `rule.bound` directly — `rule.bound` is what
+    /// the *user typed*, and for a pace share that is a share of elapsed time rather than a
+    /// position on the bar.
+    ///
+    /// Nil when the rule cannot be resolved from what is here: a pace share on a window whose
+    /// length the provider never stated has no elapsed fraction to take a share of, and inventing
+    /// one would draw a line nobody set. Callers read nil as "cannot see", which holds and does
+    /// not alert — the asymmetry the whole feature turns on.
+    static func resolvedBound(
+        of rule: CustomLimit,
+        window: AccountUsage.Window?,
+        at now: Date = Date()
+    ) -> Double? {
+        switch rule.metric {
+        case .fixedCap:
+            return rule.bound
+        case .paceShare:
+            guard let elapsed = window?.elapsedFraction(at: now) else { return nil }
+            return rule.bound * elapsed
+        case .syntheticWindow:
+            return nil
+        }
+    }
+
+    /// How much of a rule's line is spent, given the window's own reading.
+    ///
+    /// **Zero spend is zero consumption, whatever the line is.** A literal pace share opens each
+    /// window with a bound of exactly zero, and the division at that instant is `0 / 0`. The
+    /// answer is not "infinitely over": nothing has been released and nothing has been spent, so
+    /// nothing has been taken from the account's owner. Reading it any other way would put every
+    /// pace-share rule in breach for the first minutes of every window, which is the one stretch
+    /// where the rule is trivially satisfied.
+    static func consumedOfBound(fraction: Double, bound: Double) -> Double {
+        guard fraction > 0 else { return 0 }
+        guard bound > 0 else { return .infinity }
+        return fraction / bound
+    }
+
     /// The tightest line drawn on one window, or nil when none is.
     ///
     /// **A rule at the provider's own line draws nothing.** Its bound *is* the window, so a tick
@@ -287,18 +418,42 @@ enum CustomLimitBounds {
     /// Rules this build cannot evaluate draw nothing either, for the reason they are not
     /// evaluated: a pace share's bound is a share of elapsed time, and drawn as a fixed tick it
     /// would be a line the user never asked for.
-    static func tightest(on windowID: String, in rules: [CustomLimit]) -> CustomLimit? {
+    static func tightest(
+        on windowID: String,
+        in rules: [CustomLimit],
+        window: AccountUsage.Window? = nil,
+        at now: Date = Date()
+    ) -> CustomLimit? {
         rules
-            .filter { $0.isSupported }
-            .filter { $0.windowID == windowID }
-            .filter { $0.bound < CustomLimitDefaults.boundThreshold }
-            .min { $0.bound < $1.bound }
+            .filter { $0.isSupported && $0.windowID == windowID }
+            .filter { rule in
+                guard let bound = resolvedBound(of: rule, window: window, at: now) else {
+                    return false
+                }
+                return bound < CustomLimitDefaults.boundThreshold
+            }
+            .min { left, right in
+                let leftBound = resolvedBound(of: left, window: window, at: now)
+                    ?? CustomLimitDefaults.boundThreshold
+                let rightBound = resolvedBound(of: right, window: window, at: now)
+                    ?? CustomLimitDefaults.boundThreshold
+                return leftBound < rightBound
+            }
     }
 
     /// The effective bound on a window: the tighter of the provider's whole window and the user's
     /// own line. `1` when nothing of theirs binds it, which is the shipped formula exactly.
-    static func effectiveBound(on windowID: String, in rules: [CustomLimit]) -> Double {
-        tightest(on: windowID, in: rules)?.bound ?? CustomLimitDefaults.boundThreshold
+    static func effectiveBound(
+        on windowID: String,
+        in rules: [CustomLimit],
+        window: AccountUsage.Window? = nil,
+        at now: Date = Date()
+    ) -> Double {
+        guard let rule = tightest(on: windowID, in: rules, window: window, at: now),
+              let bound = resolvedBound(of: rule, window: window, at: now) else {
+            return CustomLimitDefaults.boundThreshold
+        }
+        return bound
     }
 
     /// The severity a window's reading takes once the user's line is what it is measured against.
@@ -309,12 +464,15 @@ enum CustomLimitBounds {
     static func severity(
         of fraction: Double?,
         on windowID: String,
-        in rules: [CustomLimit]
+        in rules: [CustomLimit],
+        window: AccountUsage.Window? = nil,
+        at now: Date = Date()
     ) -> UsageSeverity {
         guard let fraction else { return UsageSeverity.from(fraction: nil) }
-        return UsageSeverity.from(
-            fraction: fraction / effectiveBound(on: windowID, in: rules)
-        )
+        return UsageSeverity.from(fraction: consumedOfBound(
+            fraction: fraction,
+            bound: effectiveBound(on: windowID, in: rules, window: window, at: now)
+        ))
     }
 
     /// The rules allowed to move the **always-visible** pill.
@@ -336,14 +494,21 @@ enum CustomLimitBounds {
     static func retinted(
         _ readings: [AccountUsage.Reading],
         of windows: [AccountUsage.Window],
-        in rules: [CustomLimit]
+        in rules: [CustomLimit],
+        at now: Date = Date()
     ) -> [AccountUsage.Reading] {
         guard !rules.isEmpty else { return readings }
         return zip(windows, readings).map { window, reading in
             AccountUsage.Reading(
                 name: reading.name,
                 value: reading.value,
-                severity: severity(of: reading.fraction, on: window.id, in: rules),
+                severity: severity(
+                    of: reading.fraction,
+                    on: window.id,
+                    in: rules,
+                    window: window,
+                    at: now
+                ),
                 fraction: reading.fraction
             )
         }
@@ -356,6 +521,128 @@ enum CustomLimitBounds {
     /// is the shipped rule exactly when no line is drawn. A weekly at 56% beside a five-hour at
     /// 40% under a 45% line: the five-hour is what stops the work, and the ring belongs to
     /// whatever stops the work.
+    /// Whether Threading-initiated spend stands down on this account, and which rule says so.
+    ///
+    /// Only rules armed at `hold` or above are asked: a rule that exists to draw a line on a bar
+    /// or fire one notification has not been given permission to stop anything, and reading it as
+    /// though it had would be the feature taking an authority nobody granted it.
+    ///
+    /// The **first** binding rule wins rather than the tightest, in the rules' own order, so the
+    /// sentence a receipt prints is stable while a reading moves. Unknown beats over-line when
+    /// both are present, because it is the one whose remedy is "look again".
+    static func hold(
+        on usage: AccountUsage?,
+        in rules: [CustomLimit],
+        history: [String: [UsageSample]] = [:],
+        at now: Date = Date()
+    ) -> CustomLimitHold {
+        var overLine: CustomLimitHold?
+
+        for rule in rules where rule.isSupported && rule.effectiveTier >= .hold {
+            let window = usage?.allWindows.first { $0.id == rule.windowID }
+            let name = window?.label ?? UsageDefaults.label(forWindowID: rule.windowID)
+
+            let live: Double?
+            let bound: Double?
+            if rule.metric == .syntheticWindow {
+                live = rule.trailingSpan.flatMap { span in
+                    CustomLimitTrailingWindow.consumption(
+                        in: history[rule.windowID] ?? [],
+                        span: span,
+                        at: now
+                    )
+                }
+                bound = rule.bound
+            } else {
+                live = window.flatMap { $0.isExpired(at: now) ? nil : $0.fraction }
+                bound = resolvedBound(of: rule, window: window, at: now)
+            }
+
+            guard let live, let bound else {
+                return .cannotSee(rule: rule, windowName: name)
+            }
+            if overLine == nil,
+               consumedOfBound(fraction: live, bound: bound) >= CustomLimitDefaults.boundThreshold
+                   - CustomLimitEvaluatorDefaults.crossingTolerance {
+                overLine = .overLine(rule: rule, windowName: name)
+            }
+        }
+
+        return overLine ?? .clear
+    }
+
+    /// Whether sessions on this account are **parked** — held at their next turn boundary — and
+    /// which rule says so.
+    ///
+    /// A park is a hold plus one more consequence, so it asks the same question of a narrower set:
+    /// only rules armed at `park`, and only where the user has not already walked through this
+    /// turn of the window.
+    ///
+    /// Two deliberate differences from a provider park, and they are the whole design:
+    ///
+    /// - **It is not the triangle.** `ThemedWarningMark` means "the provider stopped this and you
+    ///   cannot answer it". A self-imposed cap is conduct, not weather, so it reads as a conduct
+    ///   mark on an otherwise idle row, and there is no new `SessionActivity` case — the process
+    ///   really is idle and the provider really would accept a turn.
+    /// - **Continue Anyway is real.** The rule is the user's own, so overriding it is legitimate;
+    ///   the override is scoped to this window instance and expires with it.
+    static func park(
+        on usage: AccountUsage?,
+        in rules: [CustomLimit],
+        overrides: Set<String> = [],
+        history: [String: [UsageSample]] = [:],
+        at now: Date = Date()
+    ) -> CustomLimitHold {
+        var overLine: CustomLimitHold?
+
+        for rule in rules where rule.isSupported && rule.effectiveTier >= .park {
+            let window = usage?.allWindows.first { $0.id == rule.windowID }
+            let instance = window.map(CustomLimitWindowInstance.init(window:))
+                ?? CustomLimitWindowInstance(windowID: rule.windowID, resetsAt: nil)
+            if overrides.contains(firedKeyForOverride(ruleID: rule.id, instance: instance)) {
+                continue
+            }
+
+            let name = window?.label ?? UsageDefaults.label(forWindowID: rule.windowID)
+
+            let live: Double?
+            let bound: Double?
+            if rule.metric == .syntheticWindow {
+                live = rule.trailingSpan.flatMap { span in
+                    CustomLimitTrailingWindow.consumption(
+                        in: history[rule.windowID] ?? [],
+                        span: span,
+                        at: now
+                    )
+                }
+                bound = rule.bound
+            } else {
+                live = window.flatMap { $0.isExpired(at: now) ? nil : $0.fraction }
+                bound = resolvedBound(of: rule, window: window, at: now)
+            }
+
+            guard let live, let bound else {
+                return .cannotSee(rule: rule, windowName: name)
+            }
+            if overLine == nil,
+               consumedOfBound(fraction: live, bound: bound) >= CustomLimitDefaults.boundThreshold
+                   - CustomLimitEvaluatorDefaults.crossingTolerance {
+                overLine = .overLine(rule: rule, windowName: name)
+            }
+        }
+
+        return overLine ?? .clear
+    }
+
+    /// The key an override is filed under — the evaluator's own, so a park and an alert cannot
+    /// disagree about which turn of which window a record belongs to.
+    static func firedKeyForOverride(
+        ruleID: UUID,
+        instance: CustomLimitWindowInstance
+    ) -> String {
+        CustomLimitEvaluator.firedKey(ruleID: ruleID, instance: instance)
+    }
+
     static func bindingWindow(
         among windows: [AccountUsage.Window],
         in rules: [CustomLimit],
@@ -363,10 +650,53 @@ enum CustomLimitBounds {
     ) -> AccountUsage.Window? {
         windows
             .filter { !$0.isExpired(at: now) && $0.fraction != nil }
-            .max {
-                ($0.fraction ?? 0) / effectiveBound(on: $0.id, in: rules)
-                    < ($1.fraction ?? 0) / effectiveBound(on: $1.id, in: rules)
+            .max { left, right in
+                consumedOfBound(
+                    fraction: left.fraction ?? 0,
+                    bound: effectiveBound(on: left.id, in: rules, window: left, at: now)
+                ) < consumedOfBound(
+                    fraction: right.fraction ?? 0,
+                    bound: effectiveBound(on: right.id, in: rules, window: right, at: now)
+                )
             }
+    }
+}
+
+// MARK: - Custom Limit Hold
+
+/// Whether Threading's **own** spend stands down on an account right now, and why.
+///
+/// One decision for all four seams — the scheduled-send delivery, the usage-window poke, the
+/// escape ranking's eligibility and the control plane's admission — because a hold that four call
+/// sites each decided for themselves would be four subtly different lines, and the user drew one.
+///
+/// The honesty boundary is the whole shape of this type. Threading can guarantee its own conduct;
+/// it cannot stop the keyboard. So the two refusing cases are kept apart rather than collapsed
+/// into a bool: **"over your line" and "cannot see" have opposite remedies**, and a receipt that
+/// says the wrong one sends the reader looking for spend that never happened.
+enum CustomLimitHold: Equatable {
+
+    /// Nothing of the user's binds this account, or nothing that binds it is reached.
+    case clear
+
+    /// A rule of theirs is at or past its bound.
+    case overLine(rule: CustomLimit, windowName: String)
+
+    /// A rule of theirs needs a reading that is not there.
+    ///
+    /// **Holds engage on unknowns**, asymmetrically with alerts, which go silent on them. An
+    /// alert derived from a guess is noise; a hold skipped because the reading was missing spends
+    /// the user's quota for a reason they cannot see. "I could not look, so I spent anyway" is the
+    /// wrong side of the ask that created the rule.
+    case cannotSee(rule: CustomLimit, windowName: String)
+
+    var isHolding: Bool { self != .clear }
+
+    var rule: CustomLimit? {
+        switch self {
+        case .clear: return nil
+        case .overLine(let rule, _), .cannotSee(let rule, _): return rule
+        }
     }
 }
 

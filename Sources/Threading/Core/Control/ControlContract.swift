@@ -72,6 +72,10 @@ enum ControlRefusal: Error, Equatable, Sendable {
     case targetBusy
     case messageEmpty
     case messageTooLong(limit: Int)
+    /// One of the **user's own** limits is holding the target's account. Carries the rule's own
+    /// sentence, because the whole point of the case is that this is not the provider refusing:
+    /// a caller told "spent" would report a quota problem the user does not have.
+    case targetHeldByOwnLimit(reason: String)
     /// The surface was there and still did not take it (mid-launch, a remote participant
     /// holds input authority, the transport just exited).
     case deliveryFailed

@@ -95,6 +95,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ConversationHandoffView",
         "ConversationOutboxRailView",
         "ConversationOutboxRowView",
+        "ScheduledSessionPlaceholderView",
         "ScheduledMessageStripView",
         "ScheduledMessageRowView",
         "CompareInspectorView",
@@ -458,17 +459,27 @@ final class ComponentGalleryViewController: NSViewController {
     }
 
     private func configureThemePopUp() {
-        for theme in AppThemeLibrary.stock {
-            themePopUp.addItem(
-                ThemedMenuItem(
-                    title: theme.name,
-                    image: ThemeSwatchImage.menuSwatch(for: theme.terminalPalette),
-                    representedValue: theme.id.rawValue
+        // The stock catalogue as it files itself, so the gallery's picker gains a section the
+        // day the catalogue does — the drift `AppThemeStyles.takeovers` exists to prevent, one
+        // list along. Stock only: this chooses what to *draw the gallery in*, and every story
+        // here is a stock surface.
+        for section in AppThemeLibrary.stockSections {
+            if let title = section.title { themePopUp.addHeader(title) }
+            for theme in section.themes {
+                themePopUp.addItem(
+                    ThemedMenuItem(
+                        title: theme.name,
+                        image: ThemeSwatchImage.menuSwatch(for: theme.terminalPalette),
+                        representedValue: theme.id.rawValue
+                    )
                 )
-            )
+            }
         }
-        let selected = AppThemeLibrary.stock.firstIndex { $0.id == AppThemePalette.current.id } ?? 0
-        themePopUp.selectItem(at: selected)
+        themePopUp.selectItem(
+            at: themePopUp.indexOfItem {
+                $0.representedValue as? String == AppThemePalette.current.id.rawValue
+            } ?? themePopUp.indexOfFirstItem ?? -1
+        )
         themePopUp.target = self
         themePopUp.action = #selector(themeChanged)
         themePopUp.setAccessibilityLabel(L10n.string("Gallery theme"))
@@ -1349,6 +1360,26 @@ final class ComponentGalleryViewController: NSViewController {
             scheduledStrip.setRows(scheduledRows)
         }
 
+        let scheduledSessionPlaceholder = ScheduledSessionPlaceholderView()
+        scheduledSessionPlaceholder.configure(
+            ScheduledSessionPlaceholderView.Model(
+                title: "Run the release readiness pass",
+                trigger: "Starts tomorrow at 09:00",
+                problem: "Waiting for the selected account's weekly window to reset",
+                brief: "Run the full test suite, fix any failures at their source, and leave "
+                    + "the checkout committed and ready for review.",
+                configuration: "Codex · GPT-5 · Full access · Standard speed"
+            )
+        )
+        scheduledSessionPlaceholder.onStartNow = { [weak self] in
+            self?.showReceipt(L10n.string("Scheduled session started now."))
+        }
+        scheduledSessionPlaceholder.onCancel = { [weak self] in
+            self?.showReceipt(L10n.string("Scheduled session cancelled."))
+        }
+        scheduledSessionPlaceholder.widthAnchor.constraint(equalToConstant: 480).isActive = true
+        scheduledSessionPlaceholder.heightAnchor.constraint(equalToConstant: 400).isActive = true
+
         // The states of one strip, stacked: both answers as they arrive, the wait alone — which
         // is what somebody with a single login sees, and the shape the row has to hold together
         // without the control its sentence was sized against — the offer while the migration
@@ -1534,6 +1565,12 @@ final class ComponentGalleryViewController: NSViewController {
                         + "click one to open it, ✕ to unschedule it, and Send now where the "
                         + "clock has stopped being the thing to say.",
                     scheduledStrip
+                ),
+                story(
+                    "ScheduledSessionPlaceholderView",
+                    "The frozen brief and launch decisions for a conversation waiting on its "
+                        + "trigger. Start now and Cancel schedule exercise the two exits.",
+                    scheduledSessionPlaceholder
                 ),
                 story(
                     "LimitEscapeStripView",
@@ -4197,9 +4234,11 @@ final class ComponentGalleryViewController: NSViewController {
 
     // MARK: Actions
 
+    /// By id rather than by position: the picker carries section heads, so its row indices stop
+    /// matching the catalogue's the moment a head sits above the row that was clicked.
     @objc private func themeChanged() {
-        let index = themePopUp.indexOfSelectedItem
-        guard let theme = AppThemeLibrary.stock[safe: index] else { return }
+        guard let raw = themePopUp.selectedItem?.representedValue as? String,
+              let theme = AppThemeLibrary.theme(withID: AppThemeID(raw)) else { return }
         setTheme(theme)
         showReceipt(L10n.format("Applied the %@ theme app-wide.", theme.name))
     }
@@ -4209,7 +4248,9 @@ final class ComponentGalleryViewController: NSViewController {
     /// The public interaction reaches this through `themeChanged`; the render harness uses the
     /// same path so every captured fixture names and displays the theme it actually renders.
     func setTheme(_ theme: AppTheme) {
-        if let index = AppThemeLibrary.stock.firstIndex(where: { $0.id == theme.id }) {
+        if let index = themePopUp.indexOfItem(
+            where: { $0.representedValue as? String == theme.id.rawValue }
+        ) {
             themePopUp.selectItem(at: index)
         }
         AppThemeLibrary.apply(theme)

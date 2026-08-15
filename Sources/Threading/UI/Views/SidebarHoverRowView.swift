@@ -4,9 +4,13 @@ import AppKit
 
 /// Row container that paints a soft highlight while the pointer is over it.
 ///
-/// Selection is drawn by the outline view itself; this fills the gap between "nothing" and
-/// "selected", so rows read as clickable before they are clicked. Group headings do not get
-/// one — they only expand from their disclosure, and a highlight would promise more.
+/// Hover fills the gap between "nothing" and "selected", so rows read as clickable before they
+/// are clicked. Group headings do not get one — they only expand from their disclosure, and a
+/// highlight would promise more.
+///
+/// The **selection** under it is drawn here too, under every theme and at an inset that closes
+/// as the column narrows (`SidebarDensityAdopting`) — the one thing AppKit's own capsule could
+/// not do. See `drawSelection`.
 ///
 /// The **selected** session's row can additionally wear the agent-activity beam — the same
 /// breathing ring the composer has, on the selection capsule's own silhouette — while its
@@ -19,9 +23,14 @@ import AppKit
 /// theme colours has to be distinguishable from the plain one AppKit builds, which draws the
 /// system's. This is the sidebar's louder answer to the question `ThemedTableRowView` answers
 /// everywhere else.
-final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
+final class SidebarHoverRowView: NSTableRowView, ThemedComponent, SidebarDensityAdopting {
 
     // MARK: - Properties
+
+    /// The gutters the column's current width states — read for `selectionInsetX`, which is the
+    /// only one of them this view draws. `.relaxed` until a controller says otherwise, which is
+    /// the right answer for the lists that never fit themselves to a divider.
+    private var density = SidebarDensity.relaxed
 
     /// A heading keeps the class for the rule below without inheriting the wash: it only
     /// expands from its disclosure, and a highlight would promise more. Set at creation,
@@ -66,6 +75,25 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
     /// so a list of rows carries no retained SwiftUI hosts for a state almost none of them has.
     private var activityBeam: AgentActivityBeamView?
 
+    /// The ring's two horizontal constraints, held because the capsule they trace narrows with
+    /// the column.
+    private var beamLeadingConstraint: NSLayoutConstraint?
+    private var beamTrailingConstraint: NSLayoutConstraint?
+
+    // MARK: - Density
+
+    /// See `SidebarDensityAdopting`. The capsule is drawn rather than laid out, so a new density
+    /// is a redraw — plus the beam's two constraints, which trace the same silhouette and are
+    /// the only part of it that is a constraint at all.
+    func applySidebarDensity(_ density: SidebarDensity) {
+        guard density != self.density else { return }
+
+        self.density = density
+        beamLeadingConstraint?.constant = density.selectionInsetX
+        beamTrailingConstraint?.constant = -density.selectionInsetX
+        needsDisplay = true
+    }
+
     // MARK: - Activity Beam
 
     /// Restates what the row's ring should draw. `.none` fades a mounted ring out — and costs
@@ -84,15 +112,19 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
 
         let beam = AgentActivityBeamView(surface: .sidebarRow)
         addSubview(beam, positioned: .above, relativeTo: nil)
+        let leading = beam.leadingAnchor.constraint(
+            equalTo: leadingAnchor,
+            constant: density.selectionInsetX
+        )
+        let trailing = beam.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -density.selectionInsetX
+        )
+        beamLeadingConstraint = leading
+        beamTrailingConstraint = trailing
         NSLayoutConstraint.activate([
-            beam.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
-                constant: SidebarRowDefaults.hoverHighlightInsetX
-            ),
-            beam.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -SidebarRowDefaults.hoverHighlightInsetX
-            ),
+            leading,
+            trailing,
             beam.topAnchor.constraint(
                 equalTo: topAnchor,
                 constant: SidebarRowDefaults.hoverHighlightInsetY
@@ -158,19 +190,31 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
     /// the backdrop and leaves every foreground cue neutral reads as the same app in a
     /// different tint, which is exactly what it was.
     ///
-    /// Under **System** this defers to `super` entirely, so the stock source-list selection —
-    /// the user's own accent, its vibrancy, its unemphasised grey — is untouched.
+    /// Under **System** this used to defer to `super` entirely, leaving the stock source-list
+    /// selection untouched — and with it the one thing about that shape a narrow column needs
+    /// back. `.inset` hangs a plain view in the row at a fixed 10pt from each edge whatever the
+    /// divider is doing, so at the narrowest column the app allows, a selected row still stood
+    /// ten points off a seam six points away from everything else the list draws.
+    ///
+    /// So the shape is now the list's under every theme and only the *colour* still asks which
+    /// one is in force: `Design.Surface.selectionFill` is the system's own selection colour
+    /// under System and the theme's accent otherwise, so a System window keeps the user's accent,
+    /// their unemphasised grey, and their Increase Contrast. What it gives up is AppKit's
+    /// vibrant blend on that one fill, which is the price of a capsule that can move.
+    ///
+    /// Overriding without calling `super` is also what *removes* the stock capsule: measured on
+    /// macOS 26, AppKit inserts its selection view only when the row's own `drawSelection`
+    /// reaches it. Two capsules on one row was never a risk here.
     override func drawSelection(in dirtyRect: NSRect) {
-        guard !AppThemeLibrary.current.isSystem else {
-            return super.drawSelection(in: dirtyRect)
-        }
         guard isSelected else { return }
 
-        // Full accent in the window in front, muted behind it — the same two strengths AppKit
+        // Full strength in the window in front, muted behind it — the same two AppKit
         // distinguishes, but on the question `ListSelectionStrength` re-answers for every list
         // in the app: the *window's*, not the focus inside it. So a background window does not
         // shout and the front one does not whisper at the row a click just picked.
-        let fill = isEmphasized ? Design.Surface.accent : AppThemePalette.color(.accentMuted)
+        let fill = isEmphasized
+            ? Design.Surface.selectionFill
+            : Design.Surface.selectionFillUnemphasized
         fill.setFill()
         highlightPath.fill()
     }
@@ -200,9 +244,9 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
                 - SidebarDefaults.compactGroupRuleHeight
         Design.Surface.divider.setFill()
         NSRect(
-            x: bounds.minX + SidebarRowDefaults.hoverHighlightInsetX,
+            x: bounds.minX + density.selectionInsetX,
             y: ruleY,
-            width: bounds.width - SidebarRowDefaults.hoverHighlightInsetX * 2,
+            width: bounds.width - density.selectionInsetX * 2,
             height: SidebarDefaults.compactGroupRuleHeight
         ).fill()
     }
@@ -216,7 +260,7 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
     /// on identical geometry. Two strengths of one affordance cannot be two shapes.
     private var highlightPath: NSBezierPath {
         let shape = bounds.insetBy(
-            dx: SidebarRowDefaults.hoverHighlightInsetX,
+            dx: density.selectionInsetX,
             dy: SidebarRowDefaults.hoverHighlightInsetY
         )
         return ThemedSurface.Shape(
@@ -233,9 +277,9 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent {
     /// tall (Botanical's 24) drew hover as a taper under a selection that stayed a rounded rect:
     /// the two shapes this comment exists to prevent, arrived at from the opposite direction.
     ///
-    /// Under **System** the selection is AppKit's own and never reaches `highlightPath`, so
-    /// there is no theme silhouette for hover to agree with — it keeps the fixed corner that
-    /// was measured against the stock source list.
+    /// Under **System** there is no theme corner to fit, because System states no `Design.Radius`
+    /// of its own; both strengths take the corner AppKit rounds its source-list selection by,
+    /// read off that view rather than guessed at.
     private func highlightRadius(fitting size: NSSize) -> CGFloat {
         AppThemeLibrary.current.isSystem
             ? SidebarRowDefaults.systemHoverHighlightRadius

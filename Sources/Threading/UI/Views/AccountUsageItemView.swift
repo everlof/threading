@@ -212,15 +212,32 @@ final class AccountUsageItemView: BackdropOverlay {
         // A user-authored limit joins that comparison, but only from a rule that asked to be
         // here: this is the surface that cannot be dismissed, and it must not acquire a new red
         // state because somebody made a rule to fire one quiet 50% alert.
-        let rules = CustomLimitBounds.toolbarRules(
-            CustomLimitSettings.shared.rules(for: account.id)
+        show(
+            usage: usage,
+            limits: CustomLimitBounds.toolbarRules(
+                CustomLimitSettings.shared.rules(for: account.id)
+            )
         )
+    }
+
+    /// The drawing half, over values a caller supplies.
+    ///
+    /// Split from `render` so a render fixture can put two pills side by side — one on a login
+    /// with a rule that asked for the toolbar and one without — which is the only way to review
+    /// the claim that the two print the same numbers and differ only in tint.
+    func show(
+        usage: AccountUsage?,
+        limits rules: [CustomLimit],
+        at now: Date = Date()
+    ) {
         let metered = usage?.windows(metering: model) ?? []
-        let binding = CustomLimitBounds.bindingWindow(among: metered, in: rules)
+        let binding = CustomLimitBounds.bindingWindow(among: metered, in: rules, at: now)
         let severity = CustomLimitBounds.severity(
             of: binding?.fraction,
             on: binding?.id ?? "",
-            in: rules
+            in: rules,
+            window: binding,
+            at: now
         )
 
         // The gauge still draws the provider's own figure. A ring filled to consumed-of-bound
@@ -229,9 +246,13 @@ final class AccountUsageItemView: BackdropOverlay {
         ringView.fraction = binding?.fraction
         ringView.tint = severity.glyphColor
 
-        let readings = usage?.readings(metering: model) ?? []
+        // `at: now` rather than the default: every other reading in this method is taken at the
+        // moment the caller named, and a `readings` call that quietly used `Date()` instead
+        // reported every window as expired whenever the two differed — which is always, in a
+        // fixture.
+        let readings = usage?.readings(at: now, metering: model) ?? []
         summaryLabel.attributedStringValue = Self.summary(
-            readings: CustomLimitBounds.retinted(readings, of: metered, in: rules),
+            readings: CustomLimitBounds.retinted(readings, of: metered, in: rules, at: now),
             ink: ink
         )
     }

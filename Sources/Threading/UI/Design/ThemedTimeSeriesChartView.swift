@@ -157,6 +157,35 @@ struct ThemedChartMarker: Equatable, Sendable, Identifiable {
     let kind: ThemedChartMarkerKind
 }
 
+// MARK: - Value Rule
+
+/// A line across the plot at one **value**, rather than at one moment.
+///
+/// `ThemedChartMarker` is anchored to a `Date` and draws vertically, which is right for the three
+/// things it already marks — a reset, an expiry, a projected exhaustion all happen *at a time*. A
+/// limit the user drew is not an event: it is a level the series is read against, and it is
+/// horizontal for the same reason a pace mark is vertical. Making it a marker kind would have
+/// given the enum one case whose geometry contradicted the other four.
+struct ThemedChartValueRule: Equatable, Sendable, Identifiable {
+
+    enum Kind: Equatable, Sendable {
+        /// A line the reader set themselves — drawn in the warning role, since crossing it is a
+        /// thing they asked to be told about rather than a thing the chart is reporting.
+        case cap
+    }
+
+    let id: String
+
+    /// Where the line sits, in the series' own units.
+    let value: Double
+
+    /// What the line is called, drawn at its leading end. Kept short: it shares the plot with the
+    /// series it is measuring.
+    let title: String
+
+    let kind: Kind
+}
+
 enum ThemedChartValueFormat: Equatable, Sendable {
     case percent
     case currency
@@ -173,6 +202,10 @@ struct ThemedChartModel: Equatable, Sendable {
     let accessibilitySummary: String
     let series: [ThemedChartSeries]
     let markers: [ThemedChartMarker]
+
+    /// Horizontal lines at named values — see `ThemedChartValueRule`.
+    let valueRules: [ThemedChartValueRule]
+
     let xRange: ClosedRange<Date>?
     let yRange: ClosedRange<Double>?
     let valueFormat: ThemedChartValueFormat
@@ -203,6 +236,7 @@ struct ThemedChartModel: Equatable, Sendable {
         accessibilitySummary: String,
         series: [ThemedChartSeries],
         markers: [ThemedChartMarker] = [],
+        valueRules: [ThemedChartValueRule] = [],
         xRange: ClosedRange<Date>? = nil,
         yRange: ClosedRange<Double>? = nil,
         valueFormat: ThemedChartValueFormat = .number,
@@ -222,6 +256,7 @@ struct ThemedChartModel: Equatable, Sendable {
         self.accessibilitySummary = accessibilitySummary
         self.series = series
         self.markers = markers
+        self.valueRules = valueRules
         self.xRange = xRange
         self.yRange = yRange
         self.valueFormat = valueFormat
@@ -930,6 +965,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
                 draw(series: model.series[index], geometry: geometry, at: index, in: plot)
             }
         }
+        drawValueRules(in: plot)
         drawMarkers(in: plot)
         drawLegend()
         if let selected { drawSelection(selected, in: plot) }
@@ -1736,6 +1772,55 @@ class ThemedTimeSeriesChartView: ThemedControl {
         let width = new.x - old.x
         guard width > 0 else { return 0 }
         return (new.y - old.y) / width
+    }
+
+    /// The horizontal lines: a level the series is read against, drawn behind the time markers.
+    ///
+    /// Behind them because the two answer different questions and a crossing is where they meet —
+    /// a vertical reset marker standing over the cap line reads as the reset clearing it, which is
+    /// what happened. Skipped in a ranking chart, where the value axis runs the other way and a
+    /// "level" is a bar length rather than a line anyone could draw.
+    private func drawValueRules(in plot: NSRect) {
+        guard model.orientation == .vertical, !model.valueRules.isEmpty else { return }
+
+        let span = resolvedYRange.upperBound - resolvedYRange.lowerBound
+        guard span > 0 else { return }
+
+        for rule in model.valueRules {
+            let normalized = (rule.value - resolvedYRange.lowerBound) / span
+            guard (0...1).contains(normalized) else { continue }
+
+            let y = plot.minY + CGFloat(normalized) * plot.height
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: plot.minX, y: y))
+            path.line(to: NSPoint(x: plot.maxX, y: y))
+            valueRuleColor(rule.kind).setStroke()
+            path.lineWidth = Design.Chart.markerLineWidth
+            // A longer dash than a time marker's, so the two read as different kinds of line even
+            // where they cross and even in one ink.
+            let dash = [Design.Spacing.small, Design.Spacing.tight]
+            path.setLineDash(dash, count: dash.count, phase: 0)
+            path.stroke()
+
+            // Measured rather than given the axis slot: an axis label is a formatted number in a
+            // fixed column, while this is a short phrase naming the line. Drawn at the axis width
+            // it truncated to `Your limit ·…`, which names nothing.
+            let font = Design.Typography.numericDetail()
+            let measured = (rule.title as NSString).size(withAttributes: [.font: font]).width
+            draw(
+                rule.title,
+                at: NSPoint(x: plot.minX + Design.Spacing.tight, y: y + Design.Spacing.hairline),
+                color: valueRuleColor(rule.kind),
+                alignment: .left,
+                width: min(measured + Design.Spacing.small, plot.width)
+            )
+        }
+    }
+
+    private func valueRuleColor(_ kind: ThemedChartValueRule.Kind) -> NSColor {
+        switch kind {
+        case .cap: return Design.Status.warning
+        }
     }
 
     private func drawMarkers(in plot: NSRect) {

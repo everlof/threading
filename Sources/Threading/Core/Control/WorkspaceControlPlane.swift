@@ -36,6 +36,14 @@ final class WorkspaceControlPlane {
         /// Arms one watcher's one-shot watch on one target. The plane has already decided the
         /// watch is permitted; the centre owns the edge, the budget and the notice.
         let armWatch: (SessionID, SessionID, TimeInterval?) -> SessionWatchCenter.WatchArmOutcome
+
+        /// Whether one of the *user's own* limits is holding the target's account, and the
+        /// sentence that says so. Nil is the ordinary answer.
+        ///
+        /// A closure rather than a store read, like every other fact this plane needs: the
+        /// admission rules stay a pure function of what it was handed, which is what lets the
+        /// refusal matrix be a table test rather than a fixture with a preferences suite in it.
+        var heldByOwnLimit: (SessionID) -> String? = { _ in nil }
     }
 
     private let dependencies: Dependencies
@@ -54,6 +62,19 @@ final class WorkspaceControlPlane {
             steer: { SessionMessageDelivery.steer($0, to: $1) },
             armWatch: {
                 SessionWatchCenter.shared.arm(watcher: $0, target: $1, timeout: $2)
+            },
+            heldByOwnLimit: { sessionID in
+                guard let session = ProjectStore.shared.session(withID: sessionID),
+                      let account = AgentAccountDiscovery.account(
+                          for: session.kind,
+                          handle: session.accountHandle
+                      ) else { return nil }
+                let hold = CustomLimitBounds.hold(
+                    on: AccountUsageService.shared.usage(for: account),
+                    in: CustomLimitSettings.shared.rules(for: account.id)
+                )
+                guard hold.isHolding else { return nil }
+                return CustomLimitReceipt.holdReason(hold)
             }
         )
     )
@@ -120,6 +141,14 @@ final class WorkspaceControlPlane {
             return completion(.refused(.targetUnknown))
         }
         guard !target.isArchived else { return completion(.refused(.targetArchived)) }
+
+        // A message from one agent to another is Threading-initiated spend on the target's
+        // account, which is exactly what a tier-3 rule stands down. Refused in the plane's own
+        // voice rather than delivered and regretted — and *after* the scope checks, so a caller
+        // cannot learn whether a session outside its scope has a limit on it.
+        if let held = dependencies.heldByOwnLimit(targetID) {
+            return completion(.refused(.targetHeldByOwnLimit(reason: held)))
+        }
 
         // The budget bounds what is delivered, header included — a cap applied before the
         // prefix let every message exceed the limit it had just been held to.

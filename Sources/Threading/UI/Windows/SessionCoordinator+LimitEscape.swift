@@ -73,7 +73,11 @@ extension SessionCoordinator {
         guard store.suggestion(for: sessionID) != nil else { return }
 
         let usage = AccountUsageService.shared.usage(for: account)
-        let candidate = LimitEscapeRanking.Candidate(accountID: account.id, usage: usage)
+        let candidate = LimitEscapeRanking.Candidate(
+            accountID: account.id,
+            usage: usage,
+            limits: CustomLimitSettings.shared.rules(for: account.id)
+        )
         guard LimitEscapeRanking.hasHeadroom(candidate, metering: model) else {
             // Degraded with its reason, and deliberately **not** escalated to whichever login
             // now ranks best: choosing a second account on the user's behalf is the automatic

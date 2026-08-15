@@ -495,6 +495,12 @@ final class ThemePreferencesViewController: NSViewController {
         return AppThemeID(raw)
     }
 
+    /// The picker's whole list, heads included — the part `selectedAppThemeIDForTesting` cannot
+    /// see and the part a section is.
+    var appThemeMenuEntriesForTesting: [ThemedMenuEntry] {
+        appThemePopUp?.entries ?? []
+    }
+
     @objc private func appThemeChanged(_ sender: ThemedPopUp) {
         guard let raw = sender.selectedItem?.representedValue as? String else { return }
         applyAppTheme(id: AppThemeID(raw))
@@ -521,20 +527,16 @@ final class ThemePreferencesViewController: NSViewController {
     private func reloadAppThemeControls() {
         guard let popUp = appThemePopUp else { return }
         popUp.removeAllItems()
-        for theme in AppThemeLibrary.all {
-            // A contributed theme is labelled by the extension it came from — that is where a
-            // user goes to update or remove it, and two extensions may both ship a "Storm".
-            let title: String
-            if AppThemeLibrary.isCustom(theme) {
-                title = "\(theme.name) — Custom"
-            } else if let contributor = AppThemeLibrary.contributorName(of: theme) {
-                title = "\(theme.name) — \(contributor)"
-            } else {
-                title = theme.name
+        // Twenty-nine names in one flat column, with the tier written into each row's own title
+        // (`— Custom`, `— <extension>`) because there was nowhere else to put it. The heads say
+        // it once over the rows it applies to, and the rows go back to being just names.
+        for section in AppThemeLibrary.sections {
+            if let title = section.title { popUp.addHeader(title) }
+            for theme in section.themes {
+                popUp.addItem(
+                    ThemedMenuItem(title: theme.name, representedValue: theme.id.rawValue)
+                )
             }
-            popUp.addItem(
-                ThemedMenuItem(title: title, representedValue: theme.id.rawValue)
-            )
         }
         // **The selection names the user's choice, not what is on screen.** The two are the same
         // every launch but one: recovery wears System while the stored choice is something else,
@@ -542,8 +544,11 @@ final class ThemePreferencesViewController: NSViewController {
         // that already looks selected would record System over their theme. Selecting the stored
         // one instead makes that click write back the value that was already there.
         let selectedID = Self.selectedAppThemeID
-        let index = AppThemeLibrary.all.firstIndex { $0.id == selectedID } ?? 0
-        popUp.selectItem(at: index)
+        popUp.selectItem(
+            at: popUp.indexOfItem { $0.representedValue as? String == selectedID.rawValue }
+                ?? popUp.indexOfFirstItem
+                ?? -1
+        )
         let selected = AppThemeLibrary.theme(withID: selectedID) ?? AppThemeLibrary.current
         appThemeSubtitle?.stringValue = selected.summary ?? ""
         duplicateAppThemeButton?.isEnabled = true

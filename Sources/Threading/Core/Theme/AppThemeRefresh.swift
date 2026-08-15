@@ -493,6 +493,10 @@ enum AppThemeRefresh {
             // two are re-stated together — a constraint's constant freezes exactly the way a
             // layer's corner does. See `PanelContentInset`.
             view.reapplyRecordedContentInset()
+            // And a mark is weighed against the font two lines up, so it is re-stated beside
+            // it: a symbol size follows the chrome's type scale, and a rendered glyph freezes
+            // the same way its label's `NSFont` does. See `SymbolMetric`.
+            view.reapplyRecordedSymbolSize()
             // Content baked against a role rather than resolved from one — see
             // `ThemeDerivedContent`. Inside the appearance block, because what it bakes against
             // is a themed colour and the answer differs per appearance.

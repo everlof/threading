@@ -68,7 +68,9 @@ final class ThemedPopUp: ThemedControl {
 
     // MARK: - Selection
 
-    private var entries: [ThemedMenuEntry] = []
+    /// Readable so a caller can assert on the list it built — the heads and rules included,
+    /// which `numberOfItems` and `item(at:)` deliberately cannot see.
+    private(set) var entries: [ThemedMenuEntry] = []
 
     /// Mirrors `NSPopUpButton.indexOfSelectedItem`. `-1` while there is nothing to select, which
     /// is the value AppKit reports for an empty pop-up.
@@ -78,6 +80,8 @@ final class ThemedPopUp: ThemedControl {
         pullsDown ? nil : item(at: indexOfSelectedItem)
     }
 
+    /// Every entry, rules and section heads included — the bound its callers iterate `item(at:)`
+    /// over, and the index the next `addItem` will take.
     var numberOfItems: Int { entries.count }
 
     /// What the button itself shows: the choice, or a pull-down's fixed first item.
@@ -114,13 +118,29 @@ final class ThemedPopUp: ThemedControl {
     func addItem(_ item: ThemedMenuItem) {
         entries.append(.item(item))
         // AppKit selects the first item a pop-up is given, and call sites rely on it — a menu
-        // built without an explicit `selectItem(at:)` still shows something.
-        if indexOfSelectedItem < 0 { indexOfSelectedItem = 0 }
+        // built without an explicit `selectItem(at:)` still shows something. The index is this
+        // entry's, not zero: entry 0 is a section head in a list that opens with one, and a
+        // pop-up "selecting" a head shows an empty button and reports no selection at all.
+        if indexOfSelectedItem < 0 { indexOfSelectedItem = entries.count - 1 }
         itemsChanged()
     }
 
     func addSeparator() {
         entries.append(.separator)
+        itemsChanged()
+    }
+
+    /// A name over the items that follow it, choosing nothing itself.
+    ///
+    /// A separator says the next rows are different; a head says what they *are*, which is what
+    /// lets every row underneath stop repeating it — see `ThemedMenuEntry.header`. It costs no
+    /// trip through the menu, so a long list gains its structure without gaining a level.
+    ///
+    /// A head belongs to a chooser rather than to a pull-down, whose first entry is its fixed
+    /// label: `pullsDown` shows and skips entry zero, and a head there would be shown as the
+    /// button's title and hidden from the list it names.
+    func addHeader(_ title: String) {
+        entries.append(.header(title))
         itemsChanged()
     }
 
@@ -138,6 +158,23 @@ final class ThemedPopUp: ThemedControl {
         indexOfSelectedItem = item(at: index) == nil ? -1 : index
         needsDisplay = true
     }
+
+    /// The entry index of the first item `predicate` accepts.
+    ///
+    /// **Ask the control, not the model.** An entry index stops being an item index the moment a
+    /// menu carries a separator or a section head, so a caller that looked its selection up in
+    /// the list it built the pop-up *from* lands one row further down for every head above it —
+    /// or on a head, which is no row at all and reads as the pop-up having forgotten the choice.
+    func indexOfItem(where predicate: (ThemedMenuItem) -> Bool) -> Int? {
+        entries.firstIndex { entry in
+            guard case .item(let item) = entry else { return false }
+            return predicate(item)
+        }
+    }
+
+    /// The first choosable row — where a pop-up lands when the value it was asked to show is
+    /// not in the list.
+    var indexOfFirstItem: Int? { indexOfItem { _ in true } }
 
     func removeAllItems() {
         entries.removeAll()

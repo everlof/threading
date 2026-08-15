@@ -89,7 +89,7 @@ struct RowConductSummary: Equatable, Sendable {
         in store: ProjectStore = .shared
     ) -> RowConductSummary? {
         let project = store.project(forSessionID: session.id)
-        return self.session(
+        let settings = self.session(
             muted: session.notificationsMuted,
             inheritedMuted: project?.notificationsMuted ?? false,
             limitRecovery: session.limitRecoveryPolicy,
@@ -98,6 +98,21 @@ struct RowConductSummary: Equatable, Sendable {
                 project: project?.limitRecoveryPolicy,
                 app: LimitRecoverySettings.policy
             ).policy
+        )
+
+        // A park by one of the user's own limits belongs in this family and **not** on the
+        // warning triangle. `ThemedWarningMark` means "the provider stopped this and you cannot
+        // answer it"; a self-imposed line is conduct — the same kind of fact as a session that
+        // mutes itself or recovers differently, which is what this mark already says. The
+        // process really is idle and the provider really would accept a turn, so there is no new
+        // `SessionActivity` case either.
+        let park = CustomLimitParkPolicy.hold(sessionID: session.id)
+        guard let rule = park.rule else { return settings }
+
+        return RowConductSummary(
+            statements: [RowConductStrings.parkedByOwnLimit(
+                CustomLimitReceipt.holdSummaryLine(park, rule: rule)
+            )] + (settings?.statements ?? [])
         )
     }
 
@@ -131,6 +146,12 @@ struct RowConductSummary: Equatable, Sendable {
 /// "Limit recovery on". A reader glancing at a hover card wants to know what will happen, and the
 /// setting's name is only useful to somebody already looking for it.
 enum RowConductStrings {
+
+    /// What a parked row says it is doing. Named as *your* limit in the first two words, because
+    /// the whole point of the mark is that this is not the provider.
+    static func parkedByOwnLimit(_ line: String) -> String {
+        L10n.format("Held at your limit · %@", line)
+    }
 
     static func limitRecovery(_ policy: LimitRecoveryPolicy) -> String {
         switch policy {

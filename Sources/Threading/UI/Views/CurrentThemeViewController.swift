@@ -199,26 +199,27 @@ final class CurrentThemeViewController: NSViewController {
         validationNote.isHidden = true
     }
 
+    /// The origin every row used to carry as a suffix — `Dracula — Built-in` — is a section head
+    /// now, said once over the rows it applies to. The card underneath still spells the origin
+    /// out for the *selected* theme in `sourceDescription`, which is where the question "can I
+    /// edit this one" is actually answered.
     private func reloadThemePopUp(_ selected: AppTheme) {
         themePopUp.removeAllItems()
-        for theme in AppThemeLibrary.all {
-            let suffix: String
-            if AppThemeLibrary.isCustom(theme) {
-                suffix = L10n.string("Custom")
-            } else if let contributor = AppThemeLibrary.contributorName(of: theme) {
-                suffix = contributor
-            } else {
-                suffix = L10n.string("Built-in")
-            }
-            themePopUp.addItem(
-                ThemedMenuItem(
-                    title: "\(theme.name) — \(suffix)",
-                    representedValue: theme.id.rawValue
+        for section in AppThemeLibrary.sections {
+            if let title = section.title { themePopUp.addHeader(title) }
+            for theme in section.themes {
+                themePopUp.addItem(
+                    ThemedMenuItem(
+                        title: theme.name,
+                        representedValue: theme.id.rawValue
+                    )
                 )
-            )
+            }
         }
         themePopUp.selectItem(
-            at: AppThemeLibrary.all.firstIndex { $0.id == selected.id } ?? 0
+            at: themePopUp.indexOfItem { $0.representedValue as? String == selected.id.rawValue }
+                ?? themePopUp.indexOfFirstItem
+                ?? -1
         )
     }
 
