@@ -366,7 +366,7 @@ enum TerminalError: LocalizedError {
 Sources/Threading/
 ├── App/                    # App entry point, AppDelegate
 ├── Core/
-│   ├── Constants/          # TerminalConstants.swift
+│   ├── Constants/          # Genuinely cross-cutting terminal, window, and shared UI constants
 │   ├── Agent/              # AgentLauncher, AgentRuntime, session discovery, GitInfo
 │   ├── MCP/                # MCPServer, MCPConnection, MCPSessionRegistry, MCPTools
 │   ├── Logging/            # ThreadingLogger (os_log), EventLog (durable journal)

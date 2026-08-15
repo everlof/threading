@@ -179,3 +179,37 @@ UI, and app-build paths; test membership now has one source of truth: the filesy
 executes through the focused Xcode test plan. It also asserts that its own name remains absent,
 so restoring per-file registration would fail the proof rather than quietly reintroducing a
 second list.
+
+### Milestone 5 — authoritative registries and subsystem ownership
+
+Built-in MCP tools now enter the runtime through one admitted `MCPBuiltInToolDescriptor` per
+typed identity. A descriptor carries argument decoding, schema, behavior annotations, catalog
+group and presentation, and its application execution binding. Advertised definitions, enabled
+names, scoped definitions, catalog rows, completeness checks, and execution routing all consume
+`MCPBuiltInToolRegistry.descriptors`; an incomplete or disagreeing declaration is rejected rather
+than forming a partial second catalog. `MCPWireTests` prove descriptor parity for every closed
+`MCPBuiltInTool` case.
+
+The settings and command paths already had the intended authoritative catalogs, so this milestone
+kept and verified them instead of adding competing registries. `SettingsPages.all` feeds Settings
+navigation, both search paths, and the read-only `list_settings` MCP tool. `AppCommands.all` feeds
+`CommandRegistry`, whose descriptors project into menus, the command palette, shortcuts,
+extensions, and the host command plane.
+
+Typed event transport moved to `Core/Events`, each event declaration moved beside its owning
+project, session, settings, stats, disk, or theme subsystem, and nonvisual AppKit lifetime helpers
+moved to `UI/Infrastructure`. Agent and MCP defaults likewise moved to `Core/Agent` and `Core/MCP`.
+The architecture
+gate rejects returning those declarations to `TerminalConstants.swift`.
+
+| Metric | Milestone 4 | Milestone 5 | Change |
+|---|---:|---:|---:|
+| Threading application Swift files / lines | 751 / 322,070 | 762 / 322,261 | +11 ownership files / +191 net contract and guard lines |
+| `TerminalConstants.swift` lines | 1,323 | 542 | −781 shared-grab-bag lines |
+| `ProjectStore.shared` | 299 / 64 files | 299 / 64 files | unchanged in this slice |
+| Concrete UI-controller references in Core | 19 / 5 files | 19 / 5 files | unchanged; still ratcheted |
+| `ThreadingTests` Sources-phase entries | 0 | 0 | filesystem remains the only test-membership list |
+
+This milestone changes authoritative representation and ownership, not product behavior. Focused
+MCP, event, scheduling, persistence, theme, agent-launch, hook, and registry suites cover the moved
+boundaries; the full test plan is the milestone gate.
