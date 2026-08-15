@@ -347,6 +347,97 @@ final class SurfaceBevelTests: XCTestCase {
         )
     }
 
+    /// And it leaves when the *theme* does, which is the shape the bug was actually reported in.
+    ///
+    /// The path above is one pointer pass inside one theme. What arrived as a screenshot was a
+    /// chip wearing four disconnected corner smudges — white up-left, violet down-right — on a
+    /// theme that authors no halo at all: TUI, whose material states `glow: nil` and a control
+    /// radius of zero. Nothing in TUI can draw that. The marks belonged to Claymorphism's
+    /// control glow, whose paired caster the chip picked up under the pointer and kept across
+    /// the theme change; only the corners showed because the exterior-only clip is the sole part
+    /// of a caster's frame a square plate does not cover.
+    ///
+    /// So the sweep is the assertion, not a second `applySurface`: a live theme change goes
+    /// through `AppThemeRefresh.repaintEverything`, which re-applies the surface each view
+    /// *recorded* — here the raised one, glow and all — against the new material. A theme with
+    /// no `controlGlow` has to resolve that to no caster rather than to "leave what is there".
+    func testAHaloDoesNotSurviveTheThemeThatAuthoredIt() throws {
+        AppThemePalette.set(AppThemeStyles.claymorphism)
+        defer { AppThemePalette.set(.system) }
+
+        // Ordered by `cacheDisplay`, never shown — see CLAUDE.md on fixture windows.
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 160, height: 60),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: true
+        )
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 60))
+        window.contentView = host
+
+        let chip = ChipView()
+        chip.configure(symbolName: nil, title: "Claude Code · Everlof")
+        chip.frame = NSRect(x: 20, y: 17, width: 120, height: Design.Size.choiceHeight)
+        host.addSubview(chip)
+        host.layoutSubtreeIfNeeded()
+
+        let entered = try XCTUnwrap(NSEvent.enterExitEvent(
+            with: .mouseEntered,
+            location: NSPoint(x: 80, y: 30),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            trackingNumber: 0,
+            userData: nil
+        ))
+        chip.mouseEntered(with: entered)
+        XCTAssertFalse(
+            casterNames(on: chip).isEmpty,
+            "the fixture proves nothing unless clay's pointer halo actually arrived"
+        )
+
+        AppThemePalette.set(AppThemeStyles.tui)
+        AppThemeRefresh.repaintEverything()
+
+        XCTAssertEqual(
+            casterNames(on: chip),
+            [],
+            "a chip carried another theme's halo across the switch that retired it"
+        )
+
+        // And then the pointer leaves, which is the state the screenshot was taken in and the
+        // one the naming seam broke: at rest a chip is restyled through the *panel* path, so a
+        // clear that looked for `threading.glow.*` never found the control pair sitting there.
+        // Asserted after the switch as well as before it, because either order leaves the same
+        // chip wearing the same four corners.
+        let exited = try XCTUnwrap(NSEvent.enterExitEvent(
+            with: .mouseExited,
+            location: NSPoint(x: 200, y: 200),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            trackingNumber: 0,
+            userData: nil
+        ))
+        chip.mouseExited(with: exited)
+
+        XCTAssertEqual(
+            casterNames(on: chip),
+            [],
+            "the pointer left and the halo stayed — a lit outline around a plate nobody drew"
+        )
+        XCTAssertEqual(chip.layer?.shadowOpacity, 0)
+        XCTAssertEqual(
+            chip.layer?.cornerRadius,
+            0,
+            "TUI squares its controls, so there is no corner for a halo to show through"
+        )
+    }
+
     /// A halo is a wash, and a wash cannot draw a line.
     ///
     /// The caster is an opaque black shape that exists only to manufacture the blur; it used to
