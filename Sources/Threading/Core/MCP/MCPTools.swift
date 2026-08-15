@@ -1658,14 +1658,14 @@ typealias MCPToolCall = AgentCommand
 struct MCPToolCallParameters: Decodable, Sendable {
   let call: AgentCommand
 
-  private enum CodingKeys: String, CodingKey {
+  enum CodingKeys: String, CodingKey {
     case name, arguments
   }
 
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let name = try container.decode(String.self, forKey: .name)
-    guard let tool = MCPBuiltInTool(rawValue: name) else {
+    guard let descriptor = MCPBuiltInToolRegistry.descriptor(named: name) else {
       call = .unknown(
         name: name,
         arguments: try container.decodeIfPresent(
@@ -1676,7 +1676,16 @@ struct MCPToolCallParameters: Decodable, Sendable {
       return
     }
 
-    switch tool {
+    call = try descriptor.argumentDecoding.decode(from: container)
+  }
+}
+
+extension MCPBuiltInTool {
+  func decodeArguments(
+    from container: KeyedDecodingContainer<MCPToolCallParameters.CodingKeys>
+  ) throws -> AgentCommand {
+    let call: AgentCommand
+    switch self {
     case .displayImage:
       call = .displayImage(
         try container.decodeIfPresent(DisplayImageArguments.self, forKey: .arguments)
@@ -2127,6 +2136,7 @@ struct MCPToolCallParameters: Decodable, Sendable {
         ) ?? ExtensionComponentPatchArguments(patch: nil)
       )
     }
+    return call
   }
 }
 
@@ -2648,7 +2658,7 @@ enum MCPTools {
   /// Schema declarations are typed, then validated into `definitions` below. Keeping the
   /// declaration list private means a missing or duplicate identity is excluded rather than
   /// becoming an ambiguously routed protocol surface.
-  private static let declaredDefinitions: [MCPToolDefinition] = [
+  static let declaredDefinitions: [MCPToolDefinition] = [
     MCPToolDefinition(
       tool: .displayImage,
       description: """
@@ -5175,29 +5185,11 @@ enum MCPTools {
 
   /// The complete, deterministic built-in registry. Only identities with exactly one schema are
   /// admitted; a partial or duplicated declaration therefore fails closed in `tools/list`.
-  static let definitions: [MCPToolDefinition] = {
-    let grouped = Dictionary(grouping: declaredDefinitions) { definition in
-      definition.tool
-    }
-    return MCPBuiltInTool.allCases.compactMap { tool in
-      guard let matches = grouped[tool], matches.count == 1 else { return nil }
-      return matches[0]
-    }
-  }()
+  static let definitions = MCPBuiltInToolRegistry.descriptors.map(\.definition)
 
   static func definition(for tool: MCPBuiltInTool) -> MCPToolDefinition? {
-    definitions.first { $0.tool == tool }
+    MCPBuiltInToolRegistry.descriptor(for: tool)?.definition
   }
-
-  /// Diagnostics used by tests and startup logging. Empty is the only healthy registry state.
-  static let definitionIssues: [String] = {
-    let grouped = Dictionary(grouping: declaredDefinitions.compactMap(\.tool)) { $0 }
-    return MCPBuiltInTool.allCases.compactMap { tool in
-      let count = grouped[tool]?.count ?? 0
-      guard count != 1 else { return nil }
-      return "\(tool.rawValue) has \(count) schema declarations; expected exactly one"
-    }
-  }()
 
   /// The twenty named colours of a palette, described once for `create_theme`.
   ///

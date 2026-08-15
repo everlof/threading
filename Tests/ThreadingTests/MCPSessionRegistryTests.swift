@@ -322,8 +322,8 @@ final class MCPWireTests: XCTestCase {
     XCTAssertEqual(watch.inputSchema.required, ["session_id"])
     XCTAssertEqual(watch.inputSchema.properties["timeout_minutes"]?.type, .number)
     XCTAssertTrue(
-      MCPToolCatalog.catalogIssues.isEmpty,
-      "Every workspace tool needs exactly one catalog row and one schema: \(MCPToolCatalog.catalogIssues)"
+      MCPBuiltInToolRegistry.issues.isEmpty,
+      "Every workspace tool needs one complete descriptor: \(MCPBuiltInToolRegistry.issues)"
     )
   }
 
@@ -515,12 +515,15 @@ final class MCPWireTests: XCTestCase {
   }
 
   @MainActor
-  func testBuiltInRegistryHasOneSchemaAndOneCatalogEntryPerTypedCommand() {
-    XCTAssertEqual(MCPTools.definitionIssues, [])
-    XCTAssertEqual(MCPToolCatalog.catalogIssues, [])
+  func testBuiltInRegistryHasOneCompleteDescriptorPerTypedCommand() throws {
+    XCTAssertEqual(MCPBuiltInToolRegistry.issues, [])
     XCTAssertEqual(
-      Set(MCPTools.definitions.map(\.name)),
-      Set(MCPBuiltInTool.allCases.map(\.rawValue))
+      MCPBuiltInToolRegistry.descriptors.map(\.tool),
+      MCPBuiltInTool.allCases
+    )
+    XCTAssertEqual(
+      MCPTools.definitions.map(\.name),
+      MCPBuiltInTool.allCases.map(\.rawValue)
     )
     XCTAssertEqual(
       Set(MCPToolCatalog.groups.flatMap { $0.tools.map(\.name) }),
@@ -532,6 +535,30 @@ final class MCPWireTests: XCTestCase {
       },
       "browser_annotations had a schema and handler but used to be absent from its group"
     )
+
+    let handler = RecordingCommandHandler()
+    for descriptor in MCPBuiltInToolRegistry.descriptors {
+      let payload = try JSONSerialization.data(
+        withJSONObject: ["name": descriptor.tool.rawValue, "arguments": [:]]
+      )
+      let command = try JSONDecoder().decode(MCPToolCallParameters.self, from: payload).call
+      XCTAssertEqual(command.builtInTool, descriptor.tool)
+      XCTAssertEqual(descriptor.definition.name, descriptor.tool.rawValue)
+      XCTAssertEqual(descriptor.annotations, descriptor.definition.annotations)
+      XCTAssertEqual(descriptor.presentation.builtInTool, descriptor.tool)
+      XCTAssertEqual(descriptor.family, descriptor.tool.family)
+
+      var result: MCPToolResult?
+      let sessionID = SessionID()
+      descriptor.execution.execute(
+        command,
+        with: handler,
+        for: sessionID
+      ) { result = $0 }
+      XCTAssertEqual(handler.receivedTool, descriptor.tool)
+      XCTAssertEqual(handler.receivedSessionID, sessionID)
+      XCTAssertEqual(result?.isError, false)
+    }
   }
 
   func testBuiltInDefinitionsAdvertiseConservativeBehaviorHints() throws {
@@ -916,6 +943,18 @@ final class MCPWireTests: XCTestCase {
     let jsonrpc: String
     let id: RequestID
     let result: Result
+  }
+
+  @MainActor
+  private final class RecordingCommandHandler: AgentCommandHandling {
+    var receivedTool: MCPBuiltInTool?
+    var receivedSessionID: SessionID?
+
+    func handle(_ command: AgentCommand, for sessionID: SessionID) -> MCPToolResult {
+      receivedTool = command.builtInTool
+      receivedSessionID = sessionID
+      return .success("executed")
+    }
   }
 
   private struct ToolList: Decodable {

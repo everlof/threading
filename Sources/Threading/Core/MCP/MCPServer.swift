@@ -545,8 +545,7 @@ final class MCPServer: @unchecked Sendable {
                 return
             }
 
-            // Completion-based, since some tools (a page load, a DOM query) finish asynchronously.
-            handler.handle(call, for: sessionID) { result in
+            let complete: @MainActor @Sendable (MCPToolResult) -> Void = { result in
         ThreadingLogger.mcp.info(
             "tools/call \(call.name, privacy: .public) for \(sessionID, privacy: .public): isError=\(result.isError, privacy: .public)"
         )
@@ -554,6 +553,23 @@ final class MCPServer: @unchecked Sendable {
                 // A failing tool reports through `isError` in the result, not a protocol error:
                 // the call itself succeeded, and the agent should see why it did not work.
                 finish(result)
+            }
+
+            // Built-ins execute through the same descriptor that decoded and advertised them.
+            // External tools remain open-ended and reach the handler through `.unknown`.
+            if let tool = call.builtInTool {
+                guard let descriptor = MCPBuiltInToolRegistry.descriptor(for: tool) else {
+                    finish(.failure("Tool \(call.name) has no complete built-in descriptor."))
+                    return
+                }
+                descriptor.execution.execute(
+                    call,
+                    with: handler,
+                    for: sessionID,
+                    completion: complete
+                )
+            } else {
+                handler.handle(call, for: sessionID, completion: complete)
             }
         }
     }

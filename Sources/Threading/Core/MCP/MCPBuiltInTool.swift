@@ -2,9 +2,10 @@ import Foundation
 
 /// A built-in command understood by the application.
 ///
-/// Identity and policy live together here, apart from argument payloads and the large wire-schema
-/// catalogue. A newly added case must therefore be classified before it compiles, while provider
-/// tools remain open-ended and use `MCPJSONValue` through `.unknown`.
+/// This closed identity feeds `MCPBuiltInToolRegistry`, where decoding, schema, annotations,
+/// grouping, catalog presentation, and execution become one admitted descriptor. A newly added
+/// case must therefore be classified before it compiles, while provider tools remain open-ended
+/// and use `MCPJSONValue` through `.unknown`.
 enum MCPBuiltInTool: String, CaseIterable, Sendable {
   case displayImage = "display_image"
   case displayChart = "display_chart"

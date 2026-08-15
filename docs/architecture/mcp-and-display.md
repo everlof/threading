@@ -138,20 +138,20 @@ returns a standard MCP image block as well as caching and optionally displaying 
 
 ## Command contract
 
-Built-in tool identity is closed in `MCPBuiltInTool`; its exhaustive `Family` mapping is the
-single source for capability ownership. Wire names, the catalog, schemas, launch preapproval,
-decoding and dispatch all derive from that identity rather than maintaining parallel string
-lists. `MCPToolCatalog.catalogIssues` and `MCPToolDefinitions.definitionIssues` enforce the
-load-bearing invariant: every built-in has exactly one catalog row and exactly one schema, and
-the row's family agrees with the type. A broken declaration is omitted instead of being
-advertised ambiguously.
+Built-in tool identity is closed in `MCPBuiltInTool`; its exhaustive `Family` mapping remains the
+small capability-ownership review surface. `MCPBuiltInToolRegistry` admits exactly one typed
+descriptor per identity. Each descriptor contains the argument decoder, schema definition,
+behavior annotations, catalog presentation, group membership, and application execution binding.
+`issues` enforces the load-bearing invariant: every built-in has exactly one schema and catalog
+row, the row's family agrees with the type, and identity/annotations agree. A broken declaration
+is omitted instead of being decoded, advertised, enabled, or dispatched ambiguously.
 
-The source boundary mirrors that contract. `MCPBuiltInTool.swift` owns only closed identity,
-family policy and behavior annotations. `MCPTools.swift` owns the wire argument values, decoder
-and schema definitions. `MCPToolCatalog.swift` owns the user-facing catalog and enablement
-policy. Do not move identity back beside thousands of lines of schema literals: capability
-review must remain a small exhaustive switch, while the large declarative schema catalog is
-allowed to stay mechanically repetitive.
+The large literals remain beside the concern that owns their wording: `MCPTools.swift` holds wire
+argument values and schema declarations, while `MCPToolCatalog.swift` holds group instructions and
+Settings presentation. They are declaration inputs, not parallel runtime registries. Decoding,
+advertised definitions, enabled names, derived catalog rows, scoped definitions, completeness
+checks, and handler execution all consume the admitted descriptors. Do not bypass that registry
+with another name list or a direct built-in dispatch switch.
 
 The catalog is also the runtime admission policy. `tools/list`, launch preapproval and
 `MCPServer` dispatch consume the same enabled definitions. A valid built-in command whose group

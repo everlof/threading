@@ -6,7 +6,7 @@ import Foundation
 ///
 /// Built-ins carry the same closed identity as their schema and command payload. External
 /// providers remain intentionally open-ended and carry only their names.
-struct MCPToolInfo {
+struct MCPToolInfo: Sendable {
   let builtInTool: MCPBuiltInTool?
   let name: String
   let title: String
@@ -45,7 +45,7 @@ struct MCPToolInfo {
 /// Grouping is the unit of control on purpose: several tools only make sense as a set — clicking a
 /// page you never navigated to, or activating a tab you never listed — so the switch is per group,
 /// not per tool.
-struct MCPToolGroup {
+struct MCPToolGroup: Sendable {
   let id: String
   let builtInFamily: MCPBuiltInTool.Family?
   let title: String
@@ -70,6 +70,36 @@ struct MCPToolGroup {
     self.builtInFamily = family
     self.title = L10n.string(title)
     self.summary = L10n.string(summary)
+    self.symbol = symbol
+    self.tools = tools
+    self.instruction = instruction
+  }
+
+  func replacingTools(_ tools: [MCPToolInfo]) -> MCPToolGroup {
+    MCPToolGroup(
+      id: id,
+      builtInFamily: builtInFamily,
+      title: title,
+      summary: summary,
+      symbol: symbol,
+      tools: tools,
+      instruction: instruction
+    )
+  }
+
+  private init(
+    id: String,
+    builtInFamily: MCPBuiltInTool.Family?,
+    title: String,
+    summary: String,
+    symbol: String,
+    tools: [MCPToolInfo],
+    instruction: String
+  ) {
+    self.id = id
+    self.builtInFamily = builtInFamily
+    self.title = title
+    self.summary = summary
     self.symbol = symbol
     self.tools = tools
     self.instruction = instruction
@@ -101,8 +131,8 @@ enum MCPInstructionDefaults {
 
 // MARK: - Tool Catalogue
 
-/// The single source of truth for the tools Threading exposes over MCP: what they are, how they
-/// group, and — read live from `AppSettings` — which groups are currently on.
+/// Group wording and enablement policy for the tools Threading exposes over MCP. Built-in rows are
+/// admitted and re-derived through `MCPBuiltInToolRegistry`; external providers stay open-ended.
 ///
 /// Everything the server advertises (`tools/list`), the launch line enables, and the model is
 /// told (`initialize` instructions) derives from here, so turning a group off on the Tools page
@@ -111,7 +141,7 @@ enum MCPToolCatalog {
 
   // MARK: Groups
 
-  static let groups: [MCPToolGroup] = [
+  static let declaredGroups: [MCPToolGroup] = [
     continuation,
     display,
     browser,
@@ -125,6 +155,14 @@ enum MCPToolCatalog {
     appearance,
     extensionAuthoring,
   ]
+
+  /// The public catalog is derived from the admitted descriptors. A malformed declaration is
+  /// absent from Settings for the same reason it is absent from `tools/list` and dispatch.
+  static let groups: [MCPToolGroup] = declaredGroups.map { group in
+    group.replacingTools(
+      MCPBuiltInToolRegistry.descriptors(inGroupID: group.id).map(\.presentation)
+    )
+  }
 
   /// Includes optional-provider declarations even while a provider group is unavailable.
   /// Settings therefore remains useful documentation before its backing service starts.
@@ -980,51 +1018,12 @@ enum MCPToolCatalog {
     return enabledToolNames.contains { themeNames.contains($0) }
   }
 
-  /// Static integrity diagnostics. Empty is the only state that may expose every built-in.
-  static let catalogIssues: [String] = {
-    var issues = MCPTools.definitionIssues
-    let builtInInfos = groups.flatMap { group in
-      group.tools.compactMap { info -> (MCPBuiltInTool.Family, MCPBuiltInTool)? in
-        guard let family = group.builtInFamily, let tool = info.builtInTool else {
-          issues.append("\(group.id) mixes built-in and external tool metadata")
-          return nil
-        }
-        if tool.family != family {
-          issues.append(
-            "\(tool.rawValue) belongs to \(tool.family.rawValue), not \(family.rawValue)"
-          )
-        }
-        return (family, tool)
-      }
-    }
-    let grouped = Dictionary(grouping: builtInInfos.map(\.1)) { $0 }
-    for tool in MCPBuiltInTool.allCases {
-      let count = grouped[tool]?.count ?? 0
-      if count != 1 {
-        issues.append(
-          "\(tool.rawValue) has \(count) catalog entries; expected exactly one"
-        )
-      }
-    }
-    return issues
-  }()
-
   @MainActor
-  private static var enabledBuiltInTools: [MCPBuiltInTool] {
-    let admitted = Set(
-      groups.filter(isEnabled).flatMap { group in
-        group.tools.compactMap { info -> MCPBuiltInTool? in
-          guard let family = group.builtInFamily,
-            let tool = info.builtInTool,
-            tool.family == family,
-            MCPTools.definition(for: tool) != nil
-          else {
-            return nil
-          }
-          return tool
-        }
-      })
-    return MCPBuiltInTool.allCases.filter(admitted.contains)
+  private static var enabledBuiltInDescriptors: [MCPBuiltInToolDescriptor] {
+    let enabledGroupIDs = Set(groups.filter(isEnabled).map(\.id))
+    return MCPBuiltInToolRegistry.descriptors.filter {
+      enabledGroupIDs.contains($0.groupID)
+    }
   }
 
   @MainActor
@@ -1047,7 +1046,7 @@ enum MCPToolCatalog {
   /// The `tools/list` payload, filtered to the enabled groups.
   @MainActor
   static var enabledDefinitions: [MCPToolDefinition] {
-    let builtIn = enabledBuiltInTools.compactMap(MCPTools.definition)
+    let builtIn = enabledBuiltInDescriptors.map(\.definition)
     let external = enabledExternalTools.map { tool in
       MCPToolDefinition(
         name: tool.name,
@@ -1078,9 +1077,10 @@ enum MCPToolCatalog {
   /// tools, whereas the toggles govern what full sessions may reach. External tools are
   /// excluded — a scope names built-ins only.
   static func scopedDefinitions(_ allowedTools: [String]) -> [MCPToolDefinition] {
-    MCPBuiltInTool.allCases
-      .filter { allowedTools.contains($0.rawValue) }
-      .compactMap(MCPTools.definition)
+    let allowed = Set(allowedTools)
+    return MCPBuiltInToolRegistry.descriptors
+      .filter { allowed.contains($0.tool.rawValue) }
+      .map(\.definition)
   }
 
   /// Admission inside a scope, derived from the same scoped definitions `tools/list`
