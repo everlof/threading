@@ -21,6 +21,21 @@ import XCTest
 @MainActor
 final class ThemedToggleRenderTests: XCTestCase {
 
+    /// Pixel comparisons need a window only for first-responder state. Reusing one unshown host
+    /// keeps that dependency bounded across the theme/state matrix; constructing a fresh window
+    /// for every resting/focused sample was enough to cross AppKit's live-window threshold late
+    /// in the full test plan even though each sample detached its content afterwards.
+    private static let renderHostWindow: NSWindow = {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1, height: 1),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        return window
+    }()
+
     // MARK: - Configuration
 
     private enum Render {
@@ -271,14 +286,10 @@ final class ThemedToggleRenderTests: XCTestCase {
             // `hasKeyboardFocus` asks the window directly — so the fixture needs a window, but
             // never a visible one: `makeFirstResponder` does not require key status, and a window
             // ordered on screen and then released is what strands the test host mid-suite.
-            let window = NSWindow(
-                contentRect: host.bounds,
-                styleMask: [.titled],
-                backing: .buffered,
-                defer: false
-            )
-            window.isReleasedWhenClosed = false
+            let window = Self.renderHostWindow
+            window.setContentSize(host.bounds.size)
             window.contentView = host
+            host.frame = NSRect(origin: .zero, size: host.bounds.size)
             if focused {
                 XCTAssertTrue(window.makeFirstResponder(toggle), "the switch refused focus")
             }
@@ -310,6 +321,7 @@ final class ThemedToggleRenderTests: XCTestCase {
                     height: diameter
                 )
             )
+            window.makeFirstResponder(nil)
             window.contentView = nil
         }
 
