@@ -40,6 +40,8 @@ final class CompareExportPanel: NSObject {
     /// read what the accessory is made of and drive a choice through it, which otherwise would
     /// mean putting a modal sheet on screen.
     let panel = NSSavePanel()
+    // Approved system-owned save-panel accessory; pinned in theme-boundary.json.
+    // swiftlint:disable:next stock_appkit_control
     let chooser = NSPopUpButton()
     private(set) var format: CompareExportFormat = .singlePage
 
