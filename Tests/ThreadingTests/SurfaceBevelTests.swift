@@ -377,8 +377,13 @@ final class SurfaceBevelTests: XCTestCase {
 
         let chip = ChipView()
         chip.configure(symbolName: nil, title: "Claude Code · Everlof")
-        chip.frame = NSRect(x: 20, y: 17, width: 120, height: Design.Size.choiceHeight)
+        chip.translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(chip)
+        NSLayoutConstraint.activate([
+            chip.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 20),
+            chip.widthAnchor.constraint(equalToConstant: 120),
+            chip.centerYAnchor.constraint(equalTo: host.centerYAnchor)
+        ])
         host.layoutSubtreeIfNeeded()
 
         let entered = try XCTUnwrap(NSEvent.enterExitEvent(
@@ -400,11 +405,17 @@ final class SurfaceBevelTests: XCTestCase {
 
         AppThemePalette.set(AppThemeStyles.tui)
         AppThemeRefresh.repaintEverything()
+        host.layoutSubtreeIfNeeded()
 
         XCTAssertEqual(
             casterNames(on: chip),
             [],
             "a chip carried another theme's halo across the switch that retired it"
+        )
+        XCTAssertEqual(
+            chip.frame.height,
+            Design.Size.choiceHeight,
+            "the host overrode the component's theme-specific height during the switch"
         )
 
         // And then the pointer leaves, which is the state the screenshot was taken in and the
