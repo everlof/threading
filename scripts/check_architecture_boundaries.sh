@@ -59,6 +59,13 @@ if rg -n \
 fi
 
 if rg -n \
+  '(ProjectStore|AgentRuntime|AppSettings|EventLog)\.shared\b' \
+  "${main_window_controller}"; then
+  echo "architecture-boundary: MainWindowController must use its injected AppEnvironment" >&2
+  failed=1
+fi
+
+if rg -n \
   'private var (preSettingsPage|history|pendingHistoryTarget)|\bhistory\.(visit|goBack|goForward|prune|canGo)' \
   "${main_window_controller}"; then
   echo "architecture-boundary: MainWindowController presents navigation destinations;" >&2

@@ -374,10 +374,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// no project context, so project-scoped extension commands disable there.
     var currentProjectID: ProjectID? {
         if let currentSessionID {
-            return ProjectStore.shared.project(forSessionID: currentSessionID)?.id
+            return environment.projectStore.project(forSessionID: currentSessionID)?.id
         }
         if let currentTerminalID {
-            return ProjectStore.shared.displayProject(forTerminalID: currentTerminalID)?.id
+            return environment.projectStore.displayProject(forTerminalID: currentTerminalID)?.id
         }
         return containerViewController.currentComposerProjectID
     }
@@ -391,7 +391,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// control rather than leaving it pointed at whatever was open before.
     var currentFolderURL: URL? {
         currentProjectID
-            .flatMap { ProjectStore.shared.project(withID: $0) }?
+            .flatMap { environment.projectStore.project(withID: $0) }?
             .folderURL
     }
 
@@ -400,15 +400,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// the composer follows the selected project. Settings deliberately carries no checkout.
     var currentExecutionDirectoryURL: URL? {
         if let currentSessionID,
-           let path = ProjectStore.shared.workingDirectory(forSessionID: currentSessionID) {
+           let path = environment.projectStore.workingDirectory(forSessionID: currentSessionID) {
             return URL(fileURLWithPath: path, isDirectory: true)
         }
         if let currentTerminalID,
-           let terminal = ProjectStore.shared.terminal(withID: currentTerminalID) {
+           let terminal = environment.projectStore.terminal(withID: currentTerminalID) {
             return URL(fileURLWithPath: terminal.currentDirectory, isDirectory: true)
         }
         return containerViewController.currentComposerProjectID
-            .flatMap { ProjectStore.shared.project(withID: $0) }?
+            .flatMap { environment.projectStore.project(withID: $0) }?
             .folderURL
     }
 
@@ -822,7 +822,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     private func configureWorkspaceNavigator() {
-        workspaceSidebarViewController.activate(AppSettings.shared.workspaceNavigatorSelection)
+        workspaceSidebarViewController.activate(environment.settings.workspaceNavigatorSelection)
         workspaceSidebarViewController.synchronizeSelection(
             with: currentWorkspaceNavigatorDestination
         )
@@ -836,7 +836,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         appEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
             guard let self else { return }
             self.workspaceSidebarViewController.activate(
-                AppSettings.shared.workspaceNavigatorSelection
+                environment.settings.workspaceNavigatorSelection
             )
             self.workspaceSidebarViewController.synchronizeSelection(
                 with: self.currentWorkspaceNavigatorDestination
@@ -994,7 +994,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // destination is then resolved against the session's current durable/live surfaces.
         appEvents.observe(SessionNotificationOpened.self) { [weak self] event in
             guard let self,
-                  ProjectStore.shared.session(withID: event.sessionID) != nil else { return }
+                  environment.projectStore.session(withID: event.sessionID) != nil else { return }
             // Settings takes the sidebar over, so arriving from a notification has to leave it
             // the same way Back does — otherwise the pane switches to the session while the
             // sidebar keeps listing settings sections, with no row to show which one arrived.
@@ -1376,9 +1376,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Restores the session that was selected when the app last quit.
     func restoreSelectedSession() {
-        guard AppSettings.shared.restoresLastSession,
-              let sessionID = ProjectStore.shared.selectedSessionID,
-              ProjectStore.shared.session(withID: sessionID) != nil else { return }
+        guard environment.settings.restoresLastSession,
+              let sessionID = environment.projectStore.selectedSessionID,
+              environment.projectStore.session(withID: sessionID) != nil else { return }
         sidebarViewController.select(sessionID: sessionID)
     }
 
@@ -1597,17 +1597,17 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // Consumed whatever the policy is, and before the policy is consulted: a list written
         // under one choice must not be able to fire under a later one.
         let recorded = StateManager.shared.consumeRunningSessionIDs()
-        let settings = AppSettings.shared
+        let settings = environment.settings
         let policy = settings.sessionRestorePolicy
 
         let plan = StartupSessionRelaunch.plan(
             policy: policy,
             recorded: recorded,
-            sessions: ProjectStore.shared.projects.flatMap(\.sessions),
+            sessions: environment.projectStore.projects.flatMap(\.sessions),
             windowDays: settings.sessionRestoreWindowDays,
             limit: settings.sessionRestoreLimit,
             excluding: settings.restoresLastSession
-                ? ProjectStore.shared.selectedSessionID
+                ? environment.projectStore.selectedSessionID
                 : nil
         )
         // Recorded before the plan is allowed to be empty, and recorded for every policy: the
@@ -1619,7 +1619,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // the ordinary answer when the only session running at the quit was the selected one,
         // which `plan` leaves to `restoreSelectedSession`. Logging only the launches made that
         // case look exactly like a record that was never written.
-        EventLog.shared.record(.session, "Relaunching sessions from last quit", [
+        environment.eventLog.record(.session, "Relaunching sessions from last quit", [
             "policy": policy.rawValue,
             "recorded": String(recorded.count),
             "relaunching": String(plan.sessionIDs.count)
@@ -1700,7 +1700,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     func selectWorkspaceNavigator(_ selection: WorkspaceNavigatorSelection) {
-        AppSettings.shared.workspaceNavigatorSelection = selection
+        environment.settings.workspaceNavigatorSelection = selection
         workspaceSidebarViewController.activate(selection)
         workspaceSidebarViewController.synchronizeSelection(
             with: currentWorkspaceNavigatorDestination
@@ -1750,7 +1750,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         if let sessionID = currentSessionID {
             return .session(
                 id: sessionID.uuidString.lowercased(),
-                projectID: ProjectStore.shared.project(forSessionID: sessionID)?
+                projectID: environment.projectStore.project(forSessionID: sessionID)?
                     .id.uuidString.lowercased()
             )
         }
@@ -1769,7 +1769,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         switch destination {
         case .project(let rawID):
             guard let projectID = ProjectID(uuidString: rawID),
-                  ProjectStore.shared.project(withID: projectID) != nil else {
+                  environment.projectStore.project(withID: projectID) != nil else {
                 return L10n.string("That project is no longer available.")
             }
             exitSettingsForNavigation()
@@ -1778,9 +1778,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         case .session(let rawID, let rawProjectID):
             guard let sessionID = SessionID(uuidString: rawID),
-                  let session = ProjectStore.shared.session(withID: sessionID),
+                  let session = environment.projectStore.session(withID: sessionID),
                   !session.isArchived,
-                  let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+                  let project = environment.projectStore.project(forSessionID: sessionID) else {
                 return L10n.string("That session is no longer available.")
             }
             if let rawProjectID {
@@ -1813,10 +1813,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         setSettingsModeChrome(visible: false)
 
         let sessionID = containerViewController.currentSessionID
-        let session = sessionID.flatMap { ProjectStore.shared.session(withID: $0) }
+        let session = sessionID.flatMap { environment.projectStore.session(withID: $0) }
 
         if let sessionID, let session {
-            let project = ProjectStore.shared.project(forSessionID: sessionID)
+            let project = environment.projectStore.project(forSessionID: sessionID)
             showPageTitle(
                 title: session.displayTitle,
                 symbolName: SessionTitleDefaults.projectSymbolName,
@@ -1827,7 +1827,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 toolTip: project.map { "\($0.name) — \(session.displayTitle)" }
             )
         } else if let terminalID = containerViewController.currentTerminalID,
-                  let terminal = ProjectStore.shared.terminal(withID: terminalID) {
+                  let terminal = environment.projectStore.terminal(withID: terminalID) {
             showPageTitle(
                 title: ProjectTerminalTitle.displayTitle(for: terminal),
                 symbolName: "terminal",
@@ -1835,7 +1835,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 toolTip: terminal.currentDirectory
             )
         } else if let projectID = containerViewController.currentComposerProjectID {
-            let project = ProjectStore.shared.project(withID: projectID)
+            let project = environment.projectStore.project(withID: projectID)
             showPageTitle(
                 title: project?.name ?? L10n.string("New Session"),
                 symbolName: SessionTitleDefaults.projectSymbolName,
@@ -2073,10 +2073,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// a browser needs a session id and nothing else. Gated on the same switches that decide how
     /// much of the workspace comes back at all.
     func restoreDetachedBrowserWindowsAtLaunch() {
-        guard AppSettings.shared.restoresLastSession
-            || AppSettings.shared.restoresSessionsAtLaunch else { return }
+        guard environment.settings.restoresLastSession
+            || environment.settings.restoresSessionsAtLaunch else { return }
 
-        for session in ProjectStore.shared.projects.flatMap(\.sessions) where !session.isArchived {
+        for session in environment.projectStore.projects.flatMap(\.sessions) where !session.isArchived {
             restoreDetachedBrowserWindows(for: session.id)
         }
     }
@@ -2734,11 +2734,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
               ProjectScriptService.shared.activeCatalog?.repositoryRoot
                 == invocation.repositoryRoot else { return nil }
 
-        guard let terminal = ProjectStore.shared.addTerminal(
+        guard let terminal = environment.projectStore.addTerminal(
             to: projectID,
             currentDirectory: invocation.workingDirectory.path
         ) else { return nil }
-        ProjectStore.shared.renameTerminal(
+        environment.projectStore.renameTerminal(
             id: terminal.id,
             to: L10n.format("Script: %@", invocation.script.name)
         )
@@ -2746,7 +2746,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         sidebarViewController.select(terminalID: terminal.id)
         guard let controller = ProjectTerminalRuntime.shared.controller(for: terminal.id),
               let receipt = controller.runProjectScript(invocation) else {
-            ProjectStore.shared.removeTerminal(id: terminal.id)
+            environment.projectStore.removeTerminal(id: terminal.id)
             return nil
         }
         return receipt
@@ -3007,7 +3007,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// and controls that need a session leave the key-view loop when no session is selected.
     func updateToolbarControlStates() {
         let session = containerViewController.currentSessionID.flatMap {
-            ProjectStore.shared.session(withID: $0)
+            environment.projectStore.session(withID: $0)
         }
         let hasSession = session != nil
         updatePaneToggleSelection()
@@ -3049,7 +3049,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Nil when no session is on screen — Settings, say — so the caller can offer its own.
     func visibleSessionActionEntries() -> [ThemedMenuEntry]? {
         guard let sessionID = currentSessionID,
-              let session = ProjectStore.shared.session(withID: sessionID) else { return nil }
+              let session = environment.projectStore.session(withID: sessionID) else { return nil }
 
         sidebarViewController.actionSessionID = sessionID
         return sidebarViewController.sessionActionEntries(for: session)
@@ -3060,7 +3060,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// confirmation and relaunch behavior as the Interface menu.
     func toggleCurrentSessionSurface() {
         guard let sessionID = currentSessionID,
-              let session = ProjectStore.shared.session(withID: sessionID),
+              let session = environment.projectStore.session(withID: sessionID),
               session.kind.supportsNativeUI else {
             NSSound.beep()
             return
@@ -3464,7 +3464,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     private func currentAgentController() -> AgentSessionViewController? {
         guard let currentSessionID else { return nil }
-        return AgentRuntime.shared.controller(for: currentSessionID)
+        return environment.agentRuntime.controller(for: currentSessionID)
     }
 
     /// Keeps the window named after the app.
@@ -3771,33 +3771,33 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         // A window pinned to a session that no longer exists goes with it — before the store
         // sweep, or its own persistence writes the deleted session's document back.
         closeDetachedWindows(
-            forSessionsOutside: Set(ProjectStore.shared.projects.flatMap(\.sessions).map(\.id))
+            forSessionsOutside: Set(environment.projectStore.projects.flatMap(\.sessions).map(\.id))
         )
 
         // The shown session may have just been deleted; fall back to an empty pane.
-        if let currentSessionID, ProjectStore.shared.session(withID: currentSessionID) == nil {
+        if let currentSessionID, environment.projectStore.session(withID: currentSessionID) == nil {
             containerViewController.show(sessionID: nil)
         }
-        if let currentTerminalID, ProjectStore.shared.terminal(withID: currentTerminalID) == nil {
+        if let currentTerminalID, environment.projectStore.terminal(withID: currentTerminalID) == nil {
             containerViewController.closeTerminal(for: currentTerminalID)
         }
 
         // A deleted session must not keep its image in memory, nor leave a live MCP endpoint
         // addressing a session that no longer exists.
-        let liveSessionIDs = Set(ProjectStore.shared.projects.flatMap { $0.sessions.map(\.id) })
-        let liveTerminalIDs = Set(ProjectStore.shared.projects.flatMap { $0.terminals.map(\.id) })
+        let liveSessionIDs = Set(environment.projectStore.projects.flatMap { $0.sessions.map(\.id) })
+        let liveTerminalIDs = Set(environment.projectStore.projects.flatMap { $0.terminals.map(\.id) })
         displayPaneController.retainOnly(sessionIDs: liveSessionIDs)
         containerViewController.retainDrawerSessions(liveSessionIDs)
         MCPSessionRegistry.retainOnly(sessionIDs: liveSessionIDs)
         GitTurnBaselineStore.shared.retainOnly(sessionIDs: liveSessionIDs)
         // The before-shot ring is per session and in memory, so a deleted chat's pixels go with it.
         BrowserAutoCaptureRing.shared.retainOnly(sessionIDs: liveSessionIDs)
-        AgentRuntime.shared.retainOnly(sessionIDs: liveSessionIDs)
+        environment.agentRuntime.retainOnly(sessionIDs: liveSessionIDs)
         // Visual baselines are the project's, not the session's, so this sweep is by project: a
         // deleted chat leaves the library alone, and a removed project takes its own with it. The
         // removal confirmation says so.
         BrowserBaselineStore.shared.retainOnly(
-            projectIDs: Set(ProjectStore.shared.projects.map(\.id))
+            projectIDs: Set(environment.projectStore.projects.map(\.id))
         )
 
         // Nor stay reachable through Back: a retraced page must exist to be presented.
@@ -3808,7 +3808,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
             case .terminal(let terminalID):
                 return liveTerminalIDs.contains(terminalID)
             case .composer(let projectID):
-                return ProjectStore.shared.project(withID: projectID) != nil
+                return environment.projectStore.project(withID: projectID) != nil
             case .settings, .settingsAISearch:
                 return true
             }
@@ -3968,7 +3968,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         _ container: TerminalContainerViewController,
         didRequestOpenSession sessionID: SessionID
     ) {
-        guard ProjectStore.shared.session(withID: sessionID) != nil else {
+        guard environment.projectStore.session(withID: sessionID) != nil else {
             NSSound.beep()
             return
         }
@@ -3993,17 +3993,17 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         // The review's Last Turn baseline is captured on the entering-working edge; the store
         // watches every change and finds that edge itself.
         GitTurnBaselineStore.shared.noteActivity(
-            AgentRuntime.shared.activity(sessionID: sessionID),
+            environment.agentRuntime.activity(sessionID: sessionID),
             sessionID: sessionID,
-            hasAuthoritativeReporting: AgentRuntime.shared.reportsOwnTurns(sessionID: sessionID)
+            hasAuthoritativeReporting: environment.agentRuntime.reportsOwnTurns(sessionID: sessionID)
         )
 
-        if AgentRuntime.shared.activity(sessionID: sessionID) == .working {
+        if environment.agentRuntime.activity(sessionID: sessionID) == .working {
             displayPaneController.noteSessionStartedWorking(sessionID)
         }
 
         // An agent that just stopped working may have switched branches on the way.
-        if AgentRuntime.shared.activity(sessionID: sessionID) != .working {
+        if environment.agentRuntime.activity(sessionID: sessionID) != .working {
             // The hook-less half of observed-work capture. A reporting session already caught up
             // on its `turnFinished` hook; this edge is inferred from output, so it is later and
             // vaguer, but it is the only "something happened" a session without lifecycle hooks
@@ -4014,7 +4014,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
             // The session's own branch record follows the same moment; a change regroups
             // the sidebar through the store's change notification.
-            ProjectStore.shared.refreshBranch(forSessionID: sessionID)
+            environment.projectStore.refreshBranch(forSessionID: sessionID)
 
             // So does the agent's name for the conversation, which lives in the transcript.
             // This is the only way a *native* session's title arrives — no PTY, no OSC.
@@ -4050,7 +4050,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         for sessionID: SessionID
     ) {
         guard sessionID == currentSessionID else { return }
-        let state = AgentRuntime.shared.subagentState(for: sessionID)
+        let state = environment.agentRuntime.subagentState(for: sessionID)
         displayPaneController.activateSubagents(
             state.timeline,
             selectedThreadID: agent.descriptor.threadID,
@@ -4065,7 +4065,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         didUpdateSelectedSubagent agent: SubagentTimeline.Agent,
         for sessionID: SessionID
     ) {
-        let state = AgentRuntime.shared.subagentState(for: sessionID)
+        let state = environment.agentRuntime.subagentState(for: sessionID)
         displayPaneController.updateSubagents(
             state.timeline,
             selectedThreadID: agent.descriptor.threadID,
@@ -4078,7 +4078,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         subagentsDidChange timeline: SubagentTimeline,
         for sessionID: SessionID
     ) {
-        let selectedThreadID = AgentRuntime.shared
+        let selectedThreadID = environment.agentRuntime
             .subagentState(for: sessionID)
             .selectedThreadID
         displayPaneController.updateSubagents(
@@ -4118,7 +4118,7 @@ extension MainWindowController: NSWindowDelegate {
     /// runs after `applicationShouldTerminate` has already recorded and terminated, and both
     /// calls are no-ops on an empty runtime.
     func windowWillClose(_ notification: Notification) {
-        AgentRuntime.shared.terminateAll()
+        environment.agentRuntime.terminateAll()
         ProjectTerminalRuntime.shared.terminateAll()
     }
 
