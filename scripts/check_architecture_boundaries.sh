@@ -22,6 +22,11 @@ if ! python3 "${script_directory}/check_module_boundaries.py" "${repository_dire
   failed=1
 fi
 
+if ! python3 -m unittest "${script_directory}/tests/test_module_boundaries.py"; then
+  echo "architecture-boundary: module boundary checker regression tests failed" >&2
+  failed=1
+fi
+
 tool_handlers=(
   "${repository_directory}"/Sources/Threading/UI/Windows/AgentToolCoordinator+*.swift
 )
@@ -32,12 +37,7 @@ session_coordinators=(
 
 conversation_controller="${repository_directory}/Sources/Threading/UI/Views/ConversationViewController.swift"
 browser_controller="${repository_directory}/Sources/Threading/UI/Views/BrowserViewController.swift"
-browser_download_coordinator="${repository_directory}/Sources/Threading/Application/Browser/BrowserDownloadCoordinator.swift"
-browser_navigation_coordinator="${repository_directory}/Sources/Threading/Application/Browser/BrowserNavigationCoordinator.swift"
-browser_agent_navigation_policy="${repository_directory}/Sources/Threading/Application/Browser/BrowserAgentNavigationPolicy.swift"
-browser_storage_command_service="${repository_directory}/Sources/Threading/Application/Browser/BrowserStorageCommandService.swift"
 agent_session_command_adapter="${repository_directory}/Sources/Threading/UI/Windows/AgentToolCoordinator+SessionCommands.swift"
-agent_session_command_service="${repository_directory}/Sources/Threading/Application/Sessions/AgentSessionCommandService.swift"
 project_model="${repository_directory}/Sources/Threading/Models/Project.swift"
 project_model_files=(
   "${repository_directory}/Sources/Threading/Models/AgentProviderCapabilities.swift"
@@ -47,10 +47,7 @@ project_model_files=(
   "${repository_directory}/Sources/Threading/Models/PersistedUIDocuments.swift"
 )
 main_window_controller="${repository_directory}/Sources/Threading/UI/Windows/MainWindowController.swift"
-window_navigation_coordinator="${repository_directory}/Sources/Threading/Application/Navigation/WindowNavigationCoordinator.swift"
 extension_command_adapter="${repository_directory}/Sources/Threading/UI/Windows/AgentToolCoordinator+ExtensionCommands.swift"
-extension_authoring_service="${repository_directory}/Sources/Threading/Application/Extensions/ExtensionAuthoringCommandService.swift"
-extension_authoring_catalog="${repository_directory}/Sources/Threading/Application/Extensions/ExtensionComponentAuthoringCatalog.swift"
 extension_preview_service="${repository_directory}/Sources/Threading/UI/Extensions/ExtensionComponentAuthoringService.swift"
 component_gallery_controller="${repository_directory}/Sources/Threading/UI/Windows/ComponentGalleryWindowController.swift"
 
@@ -69,22 +66,11 @@ if rg -n \
   failed=1
 fi
 
-if rg -n '^import (AppKit|WebKit)\b' "${window_navigation_coordinator}"; then
-  echo "architecture-boundary: WindowNavigationCoordinator must remain Foundation-only" >&2
-  failed=1
-fi
-
 if rg -n \
   'ExtensionProjectScaffolder|ExtensionComponentAuthoringCatalog|dependencies\.projects|Bundle\.main\.resourceURL' \
   "${extension_command_adapter}"; then
   echo "architecture-boundary: extension authoring handlers are transport/UI adapters;" >&2
   echo "  catalog validation and scaffolding belong to ExtensionAuthoringCommandService" >&2
-  failed=1
-fi
-
-if rg -n '^import (AppKit|WebKit)\b' \
-  "${extension_authoring_service}" "${extension_authoring_catalog}"; then
-  echo "architecture-boundary: extension authoring application services must remain UI-free" >&2
   failed=1
 fi
 
@@ -133,21 +119,11 @@ if rg -n \
   failed=1
 fi
 
-if rg -n '^import (AppKit|WebKit)\b' "${browser_download_coordinator}"; then
-  echo "architecture-boundary: BrowserDownloadCoordinator must remain Foundation-only" >&2
-  failed=1
-fi
-
 if rg -n \
   'loadCompletion|loadReadiness|trackedLoadHasCommitted|trackedDocumentReadinessToken|observedDOMContentLoadedTokens|navigationToken' \
   "${browser_controller}"; then
   echo "architecture-boundary: BrowserViewController delegates tracked navigation state;" >&2
   echo "  navigation lifecycle belongs to BrowserNavigationCoordinator" >&2
-  failed=1
-fi
-
-if rg -n '^import (AppKit|WebKit)\b' "${browser_navigation_coordinator}"; then
-  echo "architecture-boundary: BrowserNavigationCoordinator must remain Foundation-only" >&2
   failed=1
 fi
 
@@ -159,11 +135,6 @@ if rg -n \
   failed=1
 fi
 
-if rg -n '^import (AppKit|WebKit)\b' "${browser_agent_navigation_policy}"; then
-  echo "architecture-boundary: BrowserAgentNavigationPolicy must remain Foundation-only" >&2
-  failed=1
-fi
-
 if rg -n \
   'action must be clear_site_data|page or tab changed before site data|recordsRemoved' \
   "${repository_directory}/Sources/Threading/UI/Windows/AgentToolCoordinator+BrowserCommands.swift"; then
@@ -172,20 +143,10 @@ if rg -n \
   failed=1
 fi
 
-if rg -n '^import (AppKit|WebKit)\b' "${browser_storage_command_service}"; then
-  echo "architecture-boundary: BrowserStorageCommandService must remain Foundation-only" >&2
-  failed=1
-fi
-
 if rg -n 'dependencies\.(projects|archiveScheduler)\b|\bAppSettings\b' \
   "${agent_session_command_adapter}"; then
   echo "architecture-boundary: AgentToolCoordinator session handlers are transport adapters;" >&2
   echo "  session command behavior belongs to AgentSessionCommandService" >&2
-  failed=1
-fi
-
-if rg -n '^import (AppKit|WebKit)\b' "${agent_session_command_service}"; then
-  echo "architecture-boundary: AgentSessionCommandService must remain Foundation-only" >&2
   failed=1
 fi
 

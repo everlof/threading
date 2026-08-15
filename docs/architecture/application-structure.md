@@ -44,9 +44,11 @@ contracts remain in the Foundation-only `ThreadingRemoteKit` and `ThreadingExten
 rather than being copied into the application layer.
 
 `ThreadingDomain` owns typed project, session, terminal, transcript, and account identities plus
-their storage-safe encoding behavior. Its package has no dependencies, and
-`scripts/check_module_boundaries.py` rejects every import except Foundation. The app target exposes
-migration aliases so contracts can move without a repository-wide mechanical rewrite.
+their storage-safe encoding behavior. Its package has no dependencies. The same directory-wide
+`scripts/check_module_boundaries.py` rule rejects every Domain import except Foundation and every
+Application import except Foundation plus the explicitly approved lower-level contract modules.
+The app target exposes migration aliases so contracts can move without a repository-wide
+mechanical rewrite.
 
 The application target currently approximates the other layers:
 

@@ -8,8 +8,20 @@ import re
 import sys
 
 
-MODULE_IMPORTS = {
-    "ThreadingDomain": {"Foundation"},
+MODULE_BOUNDARIES = {
+    "ThreadingDomain": (
+        pathlib.Path("Packages/ThreadingDomain/Sources/ThreadingDomain"),
+        {"Foundation"},
+    ),
+    "Threading/Application": (
+        pathlib.Path("Sources/Threading/Application"),
+        {
+            "Foundation",
+            "ThreadingDomain",
+            "ThreadingExtensionKit",
+            "ThreadingRemoteKit",
+        },
+    ),
 }
 IMPORT = re.compile(r"^\s*(?:@\w+\s+)?import\s+([A-Za-z_][A-Za-z0-9_]*)\b", re.MULTILINE)
 
@@ -18,8 +30,11 @@ def main() -> int:
     repository = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     failures: list[str] = []
 
-    for module, allowed in MODULE_IMPORTS.items():
-        root = repository / "Packages" / module / "Sources" / module
+    for module, (relative_root, allowed) in MODULE_BOUNDARIES.items():
+        root = repository / relative_root
+        if not root.is_dir():
+            failures.append(f"{relative_root}: declared {module} source root is missing")
+            continue
         for path in sorted(root.rglob("*.swift")):
             imports = set(IMPORT.findall(path.read_text()))
             for imported in sorted(imports - allowed):
@@ -33,7 +48,7 @@ def main() -> int:
             print(f"module-boundary: {failure}", file=sys.stderr)
         return 1
 
-    print("module-boundary: clean (ThreadingDomain is Foundation-only)")
+    print("module-boundary: clean (Domain and Application imports are approved)")
     return 0
 
 
