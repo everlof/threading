@@ -44,11 +44,26 @@ project_model_files=(
   "${project_model}"
   "${repository_directory}/Sources/Threading/Models/PersistedUIDocuments.swift"
 )
+main_window_controller="${repository_directory}/Sources/Threading/UI/Windows/MainWindowController.swift"
+window_navigation_coordinator="${repository_directory}/Sources/Threading/Application/Navigation/WindowNavigationCoordinator.swift"
 
 if rg -n \
   '(ProjectStore|AgentRuntime|AppSettings|EventLog)\.shared\b' \
   "${session_coordinators[@]}"; then
   echo "architecture-boundary: SessionCoordinator must use its injected AppEnvironment" >&2
+  failed=1
+fi
+
+if rg -n \
+  'private var (preSettingsPage|history|pendingHistoryTarget)|\bhistory\.(visit|goBack|goForward|prune|canGo)' \
+  "${main_window_controller}"; then
+  echo "architecture-boundary: MainWindowController presents navigation destinations;" >&2
+  echo "  timeline and Settings-detour state belong to WindowNavigationCoordinator" >&2
+  failed=1
+fi
+
+if rg -n '^import (AppKit|WebKit)\b' "${window_navigation_coordinator}"; then
+  echo "architecture-boundary: WindowNavigationCoordinator must remain Foundation-only" >&2
   failed=1
 fi
 

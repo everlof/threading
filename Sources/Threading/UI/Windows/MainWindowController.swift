@@ -112,20 +112,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         onPresentationChanged: { [weak self] in self?.updateSessionTitleItem() }
     )
 
-    /// The page that was on screen before Settings opened, restored when it closes.
-    ///
-    /// A *page*, not a session id: a project's composer is as much somewhere to come back to as
-    /// a session is, and remembering only sessions dropped the user on the empty state — taking
-    /// a half-written prompt off the screen with it.
-    private var preSettingsPage: NavigationHistory.Page?
-
-    /// Where the window has been: the selection history behind ⌃⌘← / ⌃⌘→.
-    private var history = NavigationHistory()
-
-    /// The page a Back or Forward press is currently presenting, so its arrival is recognised
-    /// and not pushed as a fresh visit. A plain flag would not survive the sidebar's deferred
-    /// presentation — the delegate callback lands a run-loop turn after `select` returns.
-    private var pendingHistoryTarget: NavigationHistory.Page?
+    /// Selection history, replay identity, and the page hidden behind Settings.
+    private let navigation = WindowNavigationCoordinator()
 
     /// The panel agents display content in, and its split item, retained so it can be
     /// revealed when content arrives.
@@ -2677,7 +2665,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// ⌃⌘← — retraces the window's page selection, Xcode's Go Back.
     func goBack() {
-        guard let page = history.goBack() else {
+        guard let page = navigation.goBack() else {
             NSSound.beep()
             return
         }
@@ -2705,7 +2693,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// ⌃⌘→ — the step back forward.
     func goForward() {
-        guard let page = history.goForward() else {
+        guard let page = navigation.goForward() else {
             NSSound.beep()
             return
         }
@@ -2713,19 +2701,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         updateNavigationButtons()
     }
 
-    var canGoBack: Bool { history.canGoBack }
-    var canGoForward: Bool { history.canGoForward }
+    var canGoBack: Bool { navigation.canGoBack }
+    var canGoForward: Bool { navigation.canGoForward }
 
     /// A page actually presented, from any entrance. The one being replayed by Back or Forward
     /// is recognised and not pushed again; everything else is a fresh visit. Cleared on every
     /// arrival either way, so an abandoned replay cannot swallow a later genuine visit.
     private func recordVisit(_ page: NavigationHistory.Page) {
-        if pendingHistoryTarget == page {
-            pendingHistoryTarget = nil
-        } else {
-            pendingHistoryTarget = nil
-            history.visit(page)
-        }
+        navigation.recordVisit(page)
         updateNavigationButtons()
         refreshProjectScriptContext()
     }
@@ -2785,25 +2768,20 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         switch page {
         case .session(let sessionID):
             exitSettingsForNavigation()
-            pendingHistoryTarget = page
             sidebarViewController.select(sessionID: sessionID)
 
         case .terminal(let terminalID):
             exitSettingsForNavigation()
-            pendingHistoryTarget = page
             sidebarViewController.select(terminalID: terminalID)
 
         case .composer(let projectID):
             exitSettingsForNavigation()
-            pendingHistoryTarget = page
             sidebarViewController.select(projectID: projectID)
 
         case .settings(let pageID):
-            pendingHistoryTarget = page
             showSettingsPage(id: pageID)
 
         case .settingsAISearch:
-            pendingHistoryTarget = page
             showSettingsAISearchSurface()
         }
     }
@@ -2824,12 +2802,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         guard containerViewController.isShowingSettings else { return }
         sidebarViewController.setSettingsMode(false)
         workspaceSidebarViewController.setSettingsOverride(false)
-        preSettingsPage = nil
+        navigation.abandonSettingsDetour()
     }
 
     private func updateNavigationButtons() {
-        navBackToolbarButton?.isEnabled = history.canGoBack
-        navForwardToolbarButton?.isEnabled = history.canGoForward
+        navBackToolbarButton?.isEnabled = navigation.canGoBack
+        navForwardToolbarButton?.isEnabled = navigation.canGoForward
     }
 
     /// Opens the display panel on the current session's tabs, or closes it.
@@ -3351,7 +3329,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             sidebarViewController.setSettingsMode(false)
             workspaceSidebarViewController.setSettingsOverride(false)
 
-            switch preSettingsPage {
+            switch navigation.takeSettingsReturnTarget() {
             case .session(let sessionID):
                 containerViewController.show(sessionID: sessionID)
                 syncDisplayPane(to: sessionID)
@@ -3374,9 +3352,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             case .settings, .settingsAISearch, .none:
                 containerViewController.show(sessionID: nil)
             }
-            preSettingsPage = nil
         } else {
-            preSettingsPage = currentPage()
+            navigation.beginSettingsDetour(from: currentPage())
             workspaceSidebarViewController.setSettingsOverride(true)
             sidebarViewController.setSettingsMode(true)
             containerViewController.showSettingsPage(id: SettingsPages.generalID)
@@ -3764,7 +3741,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
 
         // `discardDeletedSession` already removed the live controller and subagent state at the
         // durable mutation boundary. Prune only pages naming this chat from window history.
-        history.prune { page in
+        navigation.prune { page in
             guard case .session(let candidate) = page else { return true }
             return candidate != sessionID
         }
@@ -3806,7 +3783,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         )
 
         // Nor stay reachable through Back: a retraced page must exist to be presented.
-        history.prune { page in
+        navigation.prune { page in
             switch page {
             case .session(let sessionID):
                 return liveSessionIDs.contains(sessionID)
@@ -3828,7 +3805,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         didCloseTerminal terminalID: TerminalID
     ) {
         containerViewController.closeTerminal(for: terminalID)
-        history.prune { page in
+        navigation.prune { page in
             if case .terminal(let candidate) = page { return candidate != terminalID }
             return true
         }
