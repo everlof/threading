@@ -204,6 +204,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming {
     var tailscaleReadiness: TailscaleReadiness { tailscale.readiness }
     var hostedServiceState: RemoteHostedServiceState { hostedService.state }
 
+    /// Installed by the application composition root before the listener is allowed to start.
+    var sessionCommands: (any RemoteSessionCommands)? {
+        get { server.sessionCommands }
+        set { server.sessionCommands = newValue }
+    }
+
     func signInHostedService(
         identityToken: String,
         authorizationCode: String,

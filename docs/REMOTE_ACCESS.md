@@ -574,10 +574,17 @@ device id, display name and authentication time become visible together. Main-ac
 notification code reads that snapshot once per decision; it never assembles an identity from
 independently mutable connection fields.
 
+The loopback transport does not locate `AppDelegate` or a window. The application composition
+root injects `RemoteSessionCommands`, the narrow main-actor capability for creating or resuming a
+session and reconciling navigation after durable metadata, archive, or surface changes. This is
+also the integration-test seam: the real HTTP server can prove routing and refusal behavior with
+no AppKit window graph.
+
 ## Implementation map
 
 - `Sources/Threading/Core/Remote`: loopback HTTP/WebSocket server, durable owner-device registry,
-  authentication, pluggable Cloudflare/Tailscale transports, routing and live session mirrors.
+  authentication, pluggable Cloudflare/Tailscale transports, routing, the application command
+  capability, and live session mirrors.
 - `Sources/Threading/Resources/RemoteClient`: dependency-free browser client.
 - `ThreadingRemoteKit`: versioned wire DTOs and pairing-link parsing shared by macOS and iOS.
 - `Sources/ThreadingMobile`: SwiftUI iOS shell, UIKit Native-conversation timeline and SwiftTerm

@@ -26,6 +26,7 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
     private let lock = NSLock()
     private weak var authorizerStorage: (any RemoteAuthorizing)?
     private weak var invitationRedeemerStorage: (any RemoteInvitationRedeeming)?
+    private weak var sessionCommandsStorage: (any RemoteSessionCommands)?
     private var diagnosticsReceiverStorage: RemoteClientDiagnosticsReceiver = {
         records, source, deviceID in
         MacRemoteDiagnostics.receive(records, source: source, deviceID: deviceID)
@@ -41,6 +42,11 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
     var invitationRedeemer: (any RemoteInvitationRedeeming)? {
         get { lock.withLock { invitationRedeemerStorage } }
         set { lock.withLock { invitationRedeemerStorage = newValue } }
+    }
+
+    var sessionCommands: (any RemoteSessionCommands)? {
+        get { lock.withLock { sessionCommandsStorage } }
+        set { lock.withLock { sessionCommandsStorage = newValue } }
     }
 
     var diagnosticsReceiver: RemoteClientDiagnosticsReceiver {
@@ -82,6 +88,10 @@ final class RemoteAccessServer: @unchecked Sendable {
     var invitationRedeemer: (any RemoteInvitationRedeeming)? {
         get { dependencies.invitationRedeemer }
         set { dependencies.invitationRedeemer = newValue }
+    }
+    var sessionCommands: (any RemoteSessionCommands)? {
+        get { dependencies.sessionCommands }
+        set { dependencies.sessionCommands = newValue }
     }
 
     /// Injectable so integration tests never append to the developer's real support journal.
@@ -777,11 +787,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
 
             if !AgentRuntime.shared.isRunning(sessionID: sessionID) {
-                guard let appDelegate = AppDelegate.shared else {
+                guard let sessionCommands = self.sessionCommands,
+                      sessionCommands.resumeRemoteSession(sessionID) else {
                     respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
                     return
                 }
-                appDelegate.resumeRemoteSession(sessionID)
             }
             respond(.respond(RemoteRouter.json(
                 ["state": AgentRuntime.shared.isRunning(sessionID: sessionID) ? "ready" : "starting"],
@@ -878,8 +888,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
 
-            guard let session = AppDelegate.shared?.startRemoteSession(
-                in: projectID,
+            let launch = RemoteSessionLaunch(
+                projectID: projectID,
                 kind: kind,
                 accountHandle: accountHandle,
                 model: creation.model,
@@ -888,14 +898,15 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 permissionMode: permissionMode,
                 usesNativeUI: usesNativeUI,
                 prompt: prompt
-            ) else {
+            )
+            guard let sessionID = self.sessionCommands?.startRemoteSession(launch) else {
                 respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
                 return
             }
 
             respond(.respond(RemoteRouter.json(
                 RemoteCreateSessionResponseDTO(
-                    sessionID: session.id.uuidString,
+                    sessionID: sessionID.uuidString,
                     me: RemoteSessionMirrorRegistry.shared.meResponse(for: authorization)
                 ),
                 status: 201,
@@ -1289,7 +1300,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(422, "Unsupported Value")))
                 return
             }
-            AppDelegate.shared?.refreshAfterRemoteSessionMutation(
+            self.sessionCommands?.refreshAfterRemoteSessionMutation(
                 sessionID: sessionID,
                 archived: false
             )
@@ -1432,7 +1443,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 // A live process belongs to the standing surface until its replacement is
                 // durable. A database refusal must leave that process and surface untouched.
                 AgentRuntime.shared.discard(sessionID: sessionID)
-                AppDelegate.shared?.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
+                self.sessionCommands?.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
             case .unchanged:
                 break
             case .targetNotFound:

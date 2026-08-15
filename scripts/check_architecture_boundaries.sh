@@ -11,6 +11,12 @@ if ! python3 "${script_directory}/check_logging_boundaries.py" "${repository_dir
   failed=1
 fi
 
+if ! python3 "${script_directory}/check_dependency_boundaries.py" "${repository_directory}"; then
+  echo "architecture-boundary: Core must depend on application capabilities, never AppDelegate," >&2
+  echo "  windows, or new concrete controllers; reduce the explicit legacy debt in place" >&2
+  failed=1
+fi
+
 tool_handlers=(
   "${repository_directory}"/Sources/Threading/UI/Windows/AgentToolCoordinator+*.swift
 )

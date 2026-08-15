@@ -556,17 +556,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         let sidebarStarted = DispatchTime.now().uptimeNanoseconds
         sidebarViewController.delegate = self
 
-        // Provider archive can change while Threading is not frontmost. The store notification
-        // rebuilds the tree; this lifecycle event also empties a pane whose row was filed away,
-        // matching the local and remote archive paths instead of leaving an invisible session on
-        // screen until another row is selected.
-        appEvents.observe(SessionArchivedStateDidChange.self) { [weak self] event in
-            self?.refreshAfterRemoteSessionMutation(
-                sessionID: event.sessionID,
-                archived: event.isArchived
-            )
-        }
-
         // A **plain** item, not `sidebarWithViewController:`, and that is the whole of the
         // sidebar's new silhouette.
         //

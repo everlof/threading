@@ -13,6 +13,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
 
     private var server: RemoteAccessServer!
     private var authority: RemoteAuthorityStore!
+    private var sessionCommands: RecordingRemoteSessionCommands!
     private var port: UInt16!
 
     override func setUp() {
@@ -24,6 +25,8 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )
         server = RemoteAccessServer()
         server.authorizer = authority
+        sessionCommands = RecordingRemoteSessionCommands()
+        server.sessionCommands = sessionCommands
         server.receiveClientDiagnostics = { _, _, _ in true }
         let usageSummary = RemoteUsageLimitSeriesSummaryDTO(
             id: "codex|personal|weekly",
@@ -999,6 +1002,129 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
     func testApiRequiresAValidBearerToken() throws {
         XCTAssertEqual(try XCTUnwrap(get("/api/me")).status, 401)
         XCTAssertEqual(try XCTUnwrap(get("/api/me", bearer: "wrong")).status, 401)
+    }
+
+    func testCreateAndResumeRouteThroughInjectedApplicationCommands() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-session-commands-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let dormant = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: false,
+            title: "Dormant remote session"
+        ))
+
+        let createdID = SessionID()
+        sessionCommands.createdSessionID = createdID
+        let create = try JSONEncoder().encode(RemoteCreateSessionRequestDTO(
+            projectID: project.id.uuidString,
+            agentKind: AgentKind.codex.rawValue,
+            surface: "terminal",
+            prompt: "Inspect the dependency boundary"
+        ))
+
+        let createProbe = try XCTUnwrap(post(
+            "/api/session",
+            bearer: "goodtoken",
+            body: create
+        ))
+        XCTAssertEqual(createProbe.status, 201)
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteCreateSessionResponseDTO.self,
+                from: createProbe.body
+            ).sessionID,
+            createdID.uuidString
+        )
+        XCTAssertEqual(sessionCommands.launches.count, 1)
+        let launch = try XCTUnwrap(sessionCommands.launches.first)
+        XCTAssertEqual(launch.projectID, project.id)
+        XCTAssertEqual(launch.kind, .codex)
+        XCTAssertEqual(launch.accountHandle, .standard)
+        XCTAssertFalse(launch.usesNativeUI)
+        XCTAssertEqual(launch.prompt, "Inspect the dependency boundary")
+
+        let resumeProbe = try XCTUnwrap(post(
+            "/api/session/\(dormant.id.uuidString)/resume",
+            bearer: "goodtoken",
+            body: Data()
+        ))
+        XCTAssertEqual(resumeProbe.status, 202)
+        XCTAssertEqual(sessionCommands.resumedSessionIDs, [dormant.id])
+    }
+
+    func testSessionRefreshesRouteThroughInjectedApplicationCommands() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-session-refresh-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .claude,
+            usesNativeUI: false,
+            title: "Remote refresh"
+        ))
+
+        let pin = try JSONEncoder().encode(RemoteSetSessionPinnedRequestDTO(isPinned: true))
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/pinned",
+                bearer: "goodtoken",
+                body: pin
+            )).status,
+            200
+        )
+        XCTAssertEqual(sessionCommands.sessionRefreshes.count, 1)
+        XCTAssertEqual(sessionCommands.sessionRefreshes.first?.sessionID, session.id)
+        XCTAssertEqual(sessionCommands.sessionRefreshes.first?.archived, false)
+
+        let surface = try JSONEncoder().encode(
+            RemoteSetSessionSurfaceRequestDTO(surface: "conversation")
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/surface",
+                bearer: "goodtoken",
+                body: surface
+            )).status,
+            200
+        )
+        XCTAssertEqual(sessionCommands.surfaceRefreshes, [session.id])
+        XCTAssertTrue(try XCTUnwrap(ProjectStore.shared.session(withID: session.id)).usesNativeUI)
+    }
+
+    func testDormantResumeFailsClosedWithoutApplicationCommands() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-session-no-commands-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: false,
+            title: "No application capability"
+        ))
+        server.sessionCommands = nil
+
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/resume",
+                bearer: "goodtoken",
+                body: Data()
+            )).status,
+            503
+        )
     }
 
     @MainActor
@@ -2601,6 +2727,39 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         let received = recv(fd, &buffer, buffer.count, 0)
         guard received > 0 else { return "" }
         return String(decoding: buffer[0..<received], as: UTF8.self)
+    }
+}
+
+@MainActor
+private final class RecordingRemoteSessionCommands: RemoteSessionCommands {
+    struct SessionRefresh {
+        let sessionID: SessionID
+        let archived: Bool
+    }
+
+    var createdSessionID: SessionID?
+    var resumeResult = true
+    private(set) var launches: [RemoteSessionLaunch] = []
+    private(set) var resumedSessionIDs: [SessionID] = []
+    private(set) var sessionRefreshes: [SessionRefresh] = []
+    private(set) var surfaceRefreshes: [SessionID] = []
+
+    func resumeRemoteSession(_ sessionID: SessionID) -> Bool {
+        resumedSessionIDs.append(sessionID)
+        return resumeResult
+    }
+
+    func startRemoteSession(_ launch: RemoteSessionLaunch) -> SessionID? {
+        launches.append(launch)
+        return createdSessionID
+    }
+
+    func refreshAfterRemoteSessionMutation(sessionID: SessionID, archived: Bool) {
+        sessionRefreshes.append(SessionRefresh(sessionID: sessionID, archived: archived))
+    }
+
+    func refreshAfterRemoteSurfaceMutation(sessionID: SessionID) {
+        surfaceRefreshes.append(sessionID)
     }
 }
 

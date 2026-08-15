@@ -54,8 +54,10 @@ The current source tree only approximates these responsibilities:
 
 The inventory reports executable references, excluding comments. At the 15 August 2026 baseline:
 
-- `Core/Remote/RemoteAccessServer.swift` calls `AppDelegate.shared` four times for resume, create,
-  archive/pin refresh, and surface refresh.
+- `Core/Remote/RemoteAccessServer.swift` called `AppDelegate.shared` four times for resume, create,
+  pin refresh, and surface refresh. Milestone 1 replaced those calls with the injected
+  `RemoteSessionCommands` application capability; provider archive events are now adapted at
+  the composition root through the same refresh operation.
 - `Core/Agent/AgentRuntime.swift` constructs and retains `AgentSessionViewController` and
   `ConversationViewController`.
 - `Core/Agent/LimitRecoveryCoordinator.swift` accepts concrete `AgentSessionViewController`
@@ -66,9 +68,10 @@ The inventory reports executable references, excluding comments. At the 15 Augus
 - `Core/Session/ProjectTerminalRuntime.swift` constructs and retains
   `ProjectTerminalViewController`.
 
-These edges are the measured migration queue, not exemptions. The first enforced slice is the
-remote server's dependency on `AppDelegate`; runtime/controller ownership follows behind an
-application capability or projection boundary.
+These edges are the measured migration queue, not exemptions. The architecture gate now rejects
+any Core reference to `AppDelegate` or `MainWindowController`, discovers concrete UI controller
+types, and permits only the 19 references in its explicit ratcheted legacy map. Runtime/controller
+ownership follows behind an application capability or projection boundary.
 
 ## Health ledger
 
@@ -90,3 +93,21 @@ Baseline from commit `01da0d8f` on 15 August 2026, with a clean worktree:
 Every structural milestone records the same metrics here. Counts may rise temporarily when an
 explicit seam replaces implicit coupling; the report must explain the authority that moved and
 the gate or test that prevents regression.
+
+### Milestone 1 — remote application capability
+
+Measured after introducing `RemoteSessionCommands`:
+
+| Metric | Baseline | Milestone 1 | Change |
+|---|---:|---:|---:|
+| Threading Swift files / lines | 749 / 322,134 | 750 / 322,177 | +1 / +43 for the explicit contract |
+| `AppDelegate.shared` in Core | 4 / 1 file | 0 / 0 files | −4 / −1 file |
+| Concrete UI-controller references in Core | 19 / 5 files | 19 / 5 files | unchanged; now ratcheted |
+| `MainWindowController` authority | 5,081 / 4 files | 5,070 / 4 files | −11 event-composition lines |
+| `ProjectStore.shared` | 345 / 68 files | 345 / 68 files | unchanged in this slice |
+
+The real loopback server's focused suite routes create, resume, metadata refresh, and surface
+refresh through a recording capability without constructing `AppDelegate` or a window. A missing
+capability fails a dormant resume closed with HTTP 503. `scripts/check_dependency_boundaries.py`
+prevents the removed upward edge from returning and makes every remaining controller edge an
+explicit debt reduction.

@@ -102,7 +102,8 @@ enum FirstResponderUndo {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate,
+    RemoteSessionCommands {
 
     // MARK: - Singleton
 
@@ -127,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     private var mainWindowController: MainWindowController?
     private let issueReportEvents = AppEventObservations()
+    private let remoteSessionEvents = AppEventObservations()
     private var onboardingWindowController: OnboardingWindowController?
     /// True while first-launch onboarding is deferring the main window. Gates session restore
     /// and routes Dock-click reopens to the onboarding window instead of the hidden main one.
@@ -636,6 +638,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         // Remote access is a separate loopback server behind a tunnel, independent of the MCP
         // listener — no ordering dependency, and it starts only if the user has turned it on.
+        RemoteAccessCoordinator.shared.sessionCommands = self
+        remoteSessionEvents.observe(SessionArchivedStateDidChange.self) { [weak self] event in
+            self?.refreshAfterRemoteSessionMutation(
+                sessionID: event.sessionID,
+                archived: event.isArchived
+            )
+        }
         RemoteAccessCoordinator.shared.startIfEnabled()
 
         // Who takes the marks made on an image nobody else claimed. Installed here rather than
@@ -987,39 +996,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// but deliberately does not activate the app: a phone should not steal focus from whoever
     /// is using the Mac merely because it reopened a session.
     @MainActor
-    func resumeRemoteSession(_ sessionID: SessionID) {
+    func resumeRemoteSession(_ sessionID: SessionID) -> Bool {
         guard ownsSingleInstanceLock,
               ProjectStore.shared.session(withID: sessionID) != nil,
               let mainWindowController else {
-            return
+            return false
         }
         mainWindowController.resumeRemoteSession(sessionID)
+        return true
     }
 
     @MainActor
-    func startRemoteSession(
-        in projectID: ProjectID,
-        kind: AgentKind,
-        accountHandle: AccountHandle,
-        model: String?,
-        reasoningEffort: String?,
-        fastMode: Bool?,
-        permissionMode: AgentPermissionMode?,
-        usesNativeUI: Bool,
-        prompt: String
-    ) -> AgentSession? {
+    func startRemoteSession(_ launch: RemoteSessionLaunch) -> SessionID? {
         guard ownsSingleInstanceLock, let mainWindowController else { return nil }
         return mainWindowController.startRemoteSession(
-            in: projectID,
-            kind: kind,
-            accountHandle: accountHandle,
-            model: model,
-            reasoningEffort: reasoningEffort,
-            fastMode: fastMode,
-            permissionMode: permissionMode,
-            usesNativeUI: usesNativeUI,
-            prompt: prompt
-        )
+            in: launch.projectID,
+            kind: launch.kind,
+            accountHandle: launch.accountHandle,
+            model: launch.model,
+            reasoningEffort: launch.reasoningEffort,
+            fastMode: launch.fastMode,
+            permissionMode: launch.permissionMode,
+            usesNativeUI: launch.usesNativeUI,
+            prompt: launch.prompt
+        )?.id
     }
 
     @MainActor
