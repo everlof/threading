@@ -1142,11 +1142,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Measured rather than stated, for the same reason `updateHeaderInset` measures: those
     /// controls are AppKit's to place, and an item added to the toolbar has to move this floor
     /// with it. Idempotent — the value only ever changes when the toolbar's contents do.
+    /// The list is fitted to the column it has, and the tight end of that fitting is *this*
+    /// width rather than the constant the split item started from — so the floor is handed on
+    /// as it is decided. See `ProjectSidebarViewController.densityFloor`.
     private func updateSidebarMinimumThickness() {
         let target = max(
             SidebarDefaults.minWidth,
             windowControlsTrailingEdge() + Design.Spacing.medium
         )
+        sidebarViewController.densityFloor = target
         guard abs(sidebarItem.minimumThickness - target) > 0.5 else { return }
 
         sidebarItem.minimumThickness = target

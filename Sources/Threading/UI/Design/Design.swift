@@ -1049,10 +1049,22 @@ enum Design {
         ///
         /// Not `selection` above, which is the theme's role for a selected row at rest:
         /// `SidebarHoverRowView` paints the accent while its window is in front, and under
-        /// **System** hands the fill back to AppKit entirely. Stated once here so a control
-        /// sitting in the row need know neither fact. See `Design.Ink.selection`.
+        /// **System** the system's own selection colour. Stated once here so a control sitting
+        /// in the row need know neither fact. See `Design.Ink.selection`.
         static var selectionFill: NSColor {
             AppThemePalette.current.isSystem ? .selectedContentBackgroundColor : accent
+        }
+
+        /// The same fill for a selected row whose **window is not in front** — the strength
+        /// AppKit calls unemphasized.
+        ///
+        /// Its pair, and here for the reason the pair exists: the sidebar draws its own selection
+        /// under every theme now, System included, so both strengths have to be sayable without
+        /// a view reaching for a raw `NSColor` to cover the case the palette does not author.
+        static var selectionFillUnemphasized: NSColor {
+            AppThemePalette.current.isSystem
+                ? .unemphasizedSelectedContentBackgroundColor
+                : AppThemePalette.color(.accentMuted)
         }
 
         /// The ground behind the run of a string a search matched.

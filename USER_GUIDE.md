@@ -229,8 +229,9 @@ the arrangement menu, **View ▸ Compact Tree** (rebindable in Settings ▸ Keyb
 
 Whichever tree you keep, the list tightens as you narrow the column. Drag the divider in from
 the width the app opens at and the step between levels closes along with the space on either
-side of a row, so the space goes to the titles instead of the structure around them. It happens
-by degree rather than at a threshold, and drag back out and the list opens up again.
+side of a row and the selection behind it, so the space goes to the titles instead of the
+structure around them. It happens by degree rather than at a threshold, it is fully closed by
+the time the divider stops, and drag back out and the list opens up again.
 
 Rows move rather than blink. A session that starts fades in while the rows below it slide down,
 one that is archived or deleted takes the gap with it, and a row that changes place — a session

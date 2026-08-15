@@ -121,7 +121,7 @@ Components so far:
 | `ThemedTableRowView` | Every list's row, including the lists that never say so (`ThemedTableRowDefaults`). It draws selection — held back to the ink it contains under a style, handed to AppKit under System — and any *other* plate a row needs, today `isDropTarget`. Such a plate takes **the selection's own silhouette**, which is not always ours: under System an inset-style table pads its selection 10 points in from the row (`systemInsetStylePadding`) while our path stops a hairline in, so a wash drawn from `selectionPath` ran the full width of a list whose selection did not, and one drawn from the *cell* — inset further still — stood as tall as the selection and visibly narrower. Neither number is AppKit's to publish, so the pin is a pixel comparison of the two plates as drawn (`testTheDropWashTakesTheSelectionsOwnShape`). |
 | `ThemedTableView` / `ThemedOutlineView` | Tables that start transparent, replacing the system background. A row's secondary click — and accessibility's "show menu", its pointerless twin — is *reported* (`onContextMenu`, with the row under the gesture and the anchor it carries) rather than answered with an `NSMenu`, so the host presents an app-owned dropdown; the two classes restate that hook rather than share it, because `NSOutlineView` is already an `NSTableView`. A list that draws its own drop affordance instead of AppKit's also needs `onDraggingExited`: a drag leaving or ending is told to the *view* and to no delegate method, so without it the affordance stays lit on the last row the pointer crossed. `onQuickLook` reports the preview keys — bare Space on the selected row, the trackpad's three-finger tap or force click on the row under the pointer — on the same contract: the host answers whether that row holds anything to inspect, and a `false` answer hands the event back to AppKit, so type-select survives in every list that sets no hook and a modified Space is never taken from the system. |
 | `ThemedTableHeaderView` | A semantic-role table header that retains AppKit resizing and tracking. |
-| `ThemedTableRowView` | The row a list is *selected* in, handed back from `rowViewForRow:`/`rowViewForItem:`. Fills with `Design.Surface.selection` — the accent held back far enough that the row's own label tiers still read over it, so a themed list needs no second set of inks — at the theme's control corner, inset a hair so two selected rows read as two. Under **System** it defers to `super`, keeping AppKit's own highlight. Not the sidebar's row: `SidebarHoverRowView` fills with the accent at full strength because the selected session is the window's subject. |
+| `ThemedTableRowView` | The row a list is *selected* in, handed back from `rowViewForRow:`/`rowViewForItem:`. Fills with `Design.Surface.selection` — the accent held back far enough that the row's own label tiers still read over it, so a themed list needs no second set of inks — at the theme's control corner, inset a hair so two selected rows read as two. Under **System** it defers to `super`, keeping AppKit's own highlight. Not the sidebar's row: `SidebarHoverRowView` fills with the accent at full strength because the selected session is the window's subject, and draws its own capsule under every theme — System included — because that shape closes with the column the divider narrows. |
 | `SeparatorView` | A hairline rule, replacing `NSBox(boxType: .separator)`. `frameGap(to:forInkGap:)` and `applyOpticalSpacing(in:precededBy:followedBy:inkGap:)` keep an authored gap between the rule and visible content on either axis: the adjacent `OpticalInsetProviding` control owns its invisible padding, while bare content keeps the full gap. |
 | `HoverTrackingView` / `HoverPopoverScheduler` | The pointer bridge and timing policy for hover-presented detail. A `ThemedControl` anchor reports its already-shared state through `onHoverChange`; a feature does not install a competing tracking area over it. The surface root reports crossing into the popover, while the scheduler owns dwell, crossing grace, and cancellation. |
 | `ThemedStatusProgressRing` | A compact semantic ring for bounded completed/pending/failed counts. It draws a neutral track plus positive and negative slices; adjacent text must name every non-zero bucket so hue is never the only signal. |
@@ -854,8 +854,9 @@ same rule for a reason that is not visible in either file: `NSTrackingArea` repo
 *rectangle* and knows nothing about what is drawn over that rectangle, so both views are sent
 `mouseEntered` whichever one a click would reach. Resting on a receipt therefore lit the sidebar
 row hidden behind it — and because the row's highlight and the band happen to be inset from the
-column by the same 10 points (`SidebarRowDefaults.hoverHighlightInsetX`, which follows the stock
-source list's selection, and `ToastDefaults.hostInset`, which is `Design.Spacing.medium`), that 6%
+column by the same 10 points at the width it opens to (`SidebarRowDefaults.hoverHighlightInsetX`,
+which started from the stock source list's selection and now closes with the column, and
+`ToastDefaults.hostInset`, which is `Design.Spacing.medium`), that 6%
 wash lined up exactly with the band's sides and stood six points proud of its top edge. It read as a backplate belonging to the band, rounded to a corner that was
 not the band's, which is how it was reported. The wash was the visible half: the session row under
 it also armed its hover popover, which would have opened over the band somebody was reaching
@@ -1841,9 +1842,15 @@ hierarchy, not a pair. (*"Roughly a quarter alpha"* was a description of the the
 and two of them never matched it — see the 2026-08-05 note below, which turns it into a
 construction.)
 
-**Under System it hands the highlight straight back**, the same rule `SidebarHoverRowView`
-follows — the stock accent, its emphasized and unemphasized strengths and its vibrancy are worth
-more than consistency with a theme that is trying to look like the platform.
+**Under System it hands the highlight straight back** — the stock accent, its emphasized and
+unemphasized strengths and its vibrancy are worth more than consistency with a theme that is
+trying to look like the platform. `SidebarHoverRowView` followed the same rule until the capsule
+had to *move*: AppKit hangs its selection view at a fixed 10pt from each edge whatever the
+divider does, and a column fitted to its width cannot leave its outermost shape out of the
+fitting (see [`window-chrome.md`](window-chrome.md), *the list is fitted to the column it has*).
+That row draws the shape itself under every theme now and takes only the colour from the system —
+which is why the two classes answer this differently: one sits in a list of a fixed width, the
+other in the one column the user drags.
 
 One AppKit behaviour worth keeping, found while writing the test: **a row view that overrides
 `drawSelection(in:)` is called; one that does not is skipped entirely.** A detached stock

@@ -12,15 +12,19 @@ import AppKit
 ///
 /// The answer is a fraction rather than a second layout: nothing switches at a threshold, the
 /// gutters and the depth step simply close in step with the drag. The fraction is 0 at
-/// `relaxedDensityWidth` and 1 at `tightDensityWidth`, and every metric is that fraction of the
-/// way from its relaxed value to its tight one, rounded to whole points so text stays on the
-/// pixel grid.
+/// `relaxedDensityWidth` and 1 at the narrowest the column goes, and every metric is that
+/// fraction of the way from its relaxed value to its tight one, rounded to whole points so text
+/// stays on the pixel grid.
 ///
 /// **The value is what it draws, and nothing else.** The fraction behind it is an input, not
-/// state: two widths that round to the same four numbers *are* the same density and compare
+/// state: two widths that round to the same numbers *are* the same density and compare
 /// equal, which is what lets a live divider drag skip every pass that would move nothing. Storing
 /// the raw fraction alongside made 209pt and 209.4pt different values that drew identically, and
 /// restamped every row on screen for each of them.
+///
+/// **The band ends where the drag does.** The fraction is 1 at the narrowest width the split
+/// view actually allows, which is a runtime measurement rather than the constant below it — see
+/// `init(width:floor:)`.
 ///
 /// **This is not the compact tree.** `AppSettings.compactsSidebarTree` is a choice about what the
 /// list says with depth at *any* width, and it flattens the tree outright; this is the same tree
@@ -45,6 +49,16 @@ struct SidebarDensity: Equatable {
     /// How much of the `.inset` style's own trailing padding the cells take back — the larger
     /// half of that gap, and not the row's to give: see `SidebarDefaults.tightTrailingCellReclaim`.
     let trailingCellReclaim: CGFloat
+
+    /// How far the capsule a selected or hovered row is filled with stands off the column's two
+    /// edges — the outermost thing the list draws, and the only metric here that closes for how
+    /// the column *looks* rather than for what the title can hold.
+    ///
+    /// The list draws that shape itself in every theme, which is what makes this the sidebar's
+    /// to fit: under **System** it used to be AppKit's, a plain view hung in the row at a fixed
+    /// 10pt whatever the column was doing. It bounds `trailingCellReclaim`, since content moving
+    /// out into the style's trailing band must stay inside the shape a selected row fills.
+    let selectionInsetX: CGFloat
 
     // MARK: - Initialization
 
@@ -73,11 +87,24 @@ struct SidebarDensity: Equatable {
             SidebarRowDefaults.tightTrailingInset
         )
         trailingCellReclaim = fitted(0, SidebarDefaults.tightTrailingCellReclaim)
+        selectionInsetX = fitted(
+            SidebarRowDefaults.hoverHighlightInsetX,
+            SidebarRowDefaults.tightHoverHighlightInsetX
+        )
     }
 
-    /// The density a column of this width draws at.
-    init(width: CGFloat) {
-        let band = SidebarDefaults.relaxedDensityWidth - SidebarDefaults.tightDensityWidth
+    /// The density a column of this width draws at, given the narrowest it can be dragged to.
+    ///
+    /// **The floor is an input because the split view's is measured, not stated.** It is raised
+    /// at runtime to clear the window controls floating over the column
+    /// (`MainWindowController.updateSidebarMinimumThickness`), which puts it some 28pt above
+    /// `SidebarDefaults.tightDensityWidth` — and a band ending below the last reachable width
+    /// spends only part of itself: the column stopped at 208pt while the arithmetic was still
+    /// halfway between the two ends, which is the whole of why the tightest list nobody could
+    /// get to looked like the list at 240. A floor at or above the opening width leaves every
+    /// metric relaxed, which is the right answer for a column that cannot be narrowed at all.
+    init(width: CGFloat, floor: CGFloat = SidebarDefaults.tightDensityWidth) {
+        let band = SidebarDefaults.relaxedDensityWidth - floor
         guard band > 0 else {
             self.init(compaction: 0)
             return
@@ -88,12 +115,15 @@ struct SidebarDensity: Equatable {
 
 // MARK: - Sidebar Density Adopting
 
-/// A sidebar cell that holds its own gutters and can restate them without being rebuilt.
+/// A sidebar view that holds its own gutters and can restate them without being rebuilt.
 ///
 /// The rows are the half of the density AppKit does not own: the outline places the cell and the
-/// chevron, and everything inside the cell is the row's. A conforming row keeps the two
+/// chevron, and everything inside the cell is the row's. A conforming view keeps the two
 /// constraints the density moves rather than baking the constants in, so a width change is a
 /// constant assignment on the rows currently on screen — not a reload.
+///
+/// Both halves of a row conform: the cell for its content gutters, and the row view under it for
+/// the capsule it draws a selection and a hover into.
 @MainActor
 protocol SidebarDensityAdopting: AnyObject {
     func applySidebarDensity(_ density: SidebarDensity)

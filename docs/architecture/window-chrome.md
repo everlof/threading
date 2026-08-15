@@ -678,22 +678,48 @@ with 30pt of structure beside it.
 
 `SidebarDensity` closes that with a fraction rather than a second layout. Nothing switches at a
 threshold: 0 at `SidebarDefaults.relaxedDensityWidth` (the width the app opens itself to), 1 at
-`tightDensityWidth` (the narrowest the split view allows), and each metric that far from its
-relaxed value to its tight one — the outline's per-level step 14 → 8, a row's leading and trailing
-gutters 4 → 2 and 6 → 2, and 4pt of the `.inset` style's own trailing padding handed back to the
-cells. At the floor that is 22pt back for a session under a branch heading, on a column 180pt wide.
+the narrowest the split view allows, and each metric that far from its relaxed value to its tight
+one — the outline's per-level step 14 → 6, a row's leading and trailing gutters 4 → 2 and 6 → 2,
+8pt of the `.inset` style's own trailing padding handed back to the cells, and the selection
+capsule closing from 10pt off each edge to 6. At the floor that is 30pt back for a session under a
+branch heading.
+
+**The floor is the split view's, and it is measured.** The band ran down to
+`SidebarDefaults.tightDensityWidth` (180) while `updateSidebarMinimumThickness` was raising the
+real minimum to clear the window controls floating over the column — about 208pt. So the tightest
+list was a set of values no drag could reach: at the narrowest the app allowed, the depth step
+drew 11 rather than 6 and two of the reclaimable trailing points were never taken, which is what
+"the most compact sidebar still has so much inset per level" turned out to be. The window
+controller now hands the sidebar the floor it enforces
+(`ProjectSidebarViewController.densityFloor`, restated wherever that minimum is), and a toolbar
+item added later moves both together. The constant remains the fallback for a list with no window
+controller over it — the extensions navigator, a test fixture.
 
 **The trailing side is mostly not the row's.** Measured at every width on macOS 26: the chevron
 starts 12pt in and the cell follows it, so the leading side wastes nothing — but the style keeps
 **16pt past every cell's trailing edge**, against a row gutter of six. That band is where the
-space is, and what bounds it is the shape this list draws over it: the selection capsule is inset
-`SidebarRowDefaults.hoverHighlightInsetX` (10), and a pin or `⋯` moved out past that would ride
-the edge of its own accent fill. So `ThemedOutlineView.trailingCellReclaim` widens the cells by a
-stated number of points and never past the row's edge, the sidebar states 4 (cell ending 12pt in,
-two points clear of the capsule), and `SidebarWidthDensityTests` asserts the margin — the number
-is only safe while that holds. The mark itself moves out by the reclaim plus what the row's own
-gutter can give: that gutter is measured to the button's ink and clamped so the slot never
-overhangs the cell that hit-tests it, so the two do not simply add.
+space is, and what bounds it is the shape this list draws over it: a pin or `⋯` moved out past the
+selection capsule would ride the edge of its own accent fill. So
+`ThemedOutlineView.trailingCellReclaim` widens the cells by a stated number of points and never
+past the row's edge, and the sidebar states 8 at the tight end — the cell ending 8pt in, two
+points clear of a capsule that has closed to 6. The two close *together*, so the clearance falls
+from six points to two and never inverts; `SidebarWidthDensityTests` walks the band and asserts
+it, because the numbers are only safe while that holds. The mark itself moves out by the reclaim
+plus what the row's own gutter can give: that gutter is measured to the button's ink and clamped
+so the slot never overhangs the cell that hit-tests it, so the two do not simply add.
+
+**The capsule is the list's own shape now, System included.** It was AppKit's there — `.inset`
+hangs a plain `NSView` in a selected row at exactly (10, 0, width - 20, height) with an 8pt
+corner, whatever the divider is doing, so the one thing the narrowest column most wanted back was
+the one thing that could not move. `SidebarHoverRowView.drawSelection` no longer defers to
+`super`; it fills `highlightPath` under every theme and only the *colour* still asks which theme
+is in force (`Design.Surface.selectionFill` / `selectionFillUnemphasized`, the system's own
+selection colours under System). Three things make that safe: overriding without calling `super`
+is what stops AppKit inserting its capsule view at all, so there is never a second shape under
+ours; hover and selection were already one silhouette and now are under System too, which
+`SidebarRowHighlightTests` sweeps; and the corner under System is the 8 read off AppKit's own
+view rather than the 5 that had been eyeballed. What it gives up is the vibrant blend on that one
+fill.
 
 Five things are load-bearing:
 

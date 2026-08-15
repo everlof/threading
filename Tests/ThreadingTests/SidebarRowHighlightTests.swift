@@ -91,10 +91,11 @@ final class SidebarRowHighlightTests: XCTestCase {
     /// under any theme, whatever shape the sidebar highlight takes, hover and selection take
     /// the *same* one.
     ///
-    /// System is excluded rather than special-cased — there the row hands selection back to
-    /// AppKit, so the two shapes have different authors and are not ours to reconcile.
+    /// **System included.** It used to be excluded because the row handed selection back to
+    /// AppKit there, which gave the two shapes different authors; the row draws both under
+    /// every theme now, so the invariant covers the theme most people run.
     func testHoverAndSelectionShareOneSilhouetteUnderEveryStockTheme() throws {
-        let themes = AppThemeLibrary.stock.filter { !$0.isSystem }
+        let themes = AppThemeLibrary.stock
         XCTAssertFalse(themes.isEmpty, "Fixture premise: there are stock themes to sweep")
 
         for theme in themes {
@@ -141,6 +142,37 @@ final class SidebarRowHighlightTests: XCTestCase {
         }
     }
 
+    /// And the rectangle closes on the column's edges as the divider narrows it.
+    ///
+    /// The capsule is the outermost thing the list draws, so ten points of ground between a
+    /// selected row and the seam beside it is the gap a narrow sidebar can least afford. Read
+    /// under **System**, which is where this could not be done at all while AppKit owned the
+    /// shape: it hangs its own selection view at a fixed inset whatever the divider does.
+    func testTheHighlightClosesOnTheColumnAsItNarrows() throws {
+        try withTheme(.system) {
+            let tight = SidebarDensity(width: SidebarDefaults.tightDensityWidth)
+            XCTAssertLessThan(
+                tight.selectionInsetX,
+                SidebarRowDefaults.hoverHighlightInsetX,
+                "Fixture premise: the tight end of the band is a closer capsule"
+            )
+
+            for state in [Highlight.hovered, .selected] {
+                let relaxed = try silhouette(of: state).middle
+                let narrow = try silhouette(of: state, density: tight).middle
+
+                XCTAssertEqual(narrow.lowerBound, Int(tight.selectionInsetX))
+                XCTAssertEqual(
+                    narrow.upperBound,
+                    Int(Fixture.width - tight.selectionInsetX) - 1,
+                    "\(state) should reach further out at the narrowest column"
+                )
+                XCTAssertLessThan(narrow.lowerBound, relaxed.lowerBound)
+                XCTAssertGreaterThan(narrow.upperBound, relaxed.upperBound)
+            }
+        }
+    }
+
     // MARK: - The Selected Row's Activity Beam
 
     /// The ring is pinned to the very silhouette hover and selection fill — the row inset by
@@ -170,6 +202,32 @@ final class SidebarRowHighlightTests: XCTestCase {
             "the ring should take the selection capsule's own silhouette"
         )
         XCTAssertEqual(beam.appliedActiveForTesting, true)
+    }
+
+    /// And it follows the capsule when the column narrows it, rather than staying at the edge
+    /// the row was born with — a ring tracing a shape that has moved is the one artefact this
+    /// pinning exists to prevent.
+    func testTheActivityBeamFollowsACapsuleThatNarrows() throws {
+        AppThemePalette.set(.system)
+        defer { AppThemePalette.set(.system) }
+
+        let row = SidebarHoverRowView(
+            frame: NSRect(x: 0, y: 0, width: Fixture.width, height: Fixture.height)
+        )
+        row.setActivityBeam(workload: AgentWorkload(workingCount: 1, anyAtTopEffort: false))
+        let beam = try XCTUnwrap(row.activityBeamForTesting)
+
+        let tight = SidebarDensity(width: SidebarDefaults.tightDensityWidth)
+        row.applySidebarDensity(tight)
+        row.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            beam.frame,
+            row.bounds.insetBy(
+                dx: tight.selectionInsetX,
+                dy: SidebarRowDefaults.hoverHighlightInsetY
+            )
+        )
     }
 
     /// Almost every row is never the selected working one, and telling those rows so must stay
@@ -224,10 +282,11 @@ final class SidebarRowHighlightTests: XCTestCase {
     /// one, and how much narrower is the radius. Rendered once per state and read twice, so
     /// the two numbers cannot come from two different draws.
     private func silhouette(
-        of state: Highlight
+        of state: Highlight,
+        density: SidebarDensity = .relaxed
     ) throws -> (top: ClosedRange<Int>, middle: ClosedRange<Int>) {
-        let plain = try render(.none)
-        let highlighted = try render(state)
+        let plain = try render(.none, density: density)
+        let highlighted = try render(state, density: density)
         let scale = CGFloat(plain.pixelsWide) / Fixture.width
         let middle = plain.pixelsHigh / 2
 
@@ -295,9 +354,13 @@ final class SidebarRowHighlightTests: XCTestCase {
 
     /// Draws the row view alone — no outline view, no session content — so what lands in the
     /// bitmap is the highlight and the ground under it and nothing else.
-    private func render(_ state: Highlight) throws -> NSBitmapImageRep {
+    private func render(
+        _ state: Highlight,
+        density: SidebarDensity = .relaxed
+    ) throws -> NSBitmapImageRep {
         let host = NSView(frame: NSRect(x: 0, y: 0, width: Fixture.width, height: Fixture.height))
         let row = SidebarHoverRowView(frame: host.bounds)
+        row.applySidebarDensity(density)
         host.addSubview(row)
 
         switch state {
@@ -348,8 +411,9 @@ final class SidebarRowHighlightTests: XCTestCase {
     }
 
     /// The roundest stock theme, so the taper it should produce is unmistakable rather than
-    /// one antialiased pixel. Never System: under System the row hands selection back to
-    /// AppKit, so there is no shape of ours for hover to be compared against.
+    /// one antialiased pixel. Never System, which states no control corner of its own — its
+    /// capsule takes the one AppKit rounds a source-list selection by, and a theme picked for
+    /// having the broadest authored corner cannot be the one that authors none.
     private func roundTheme() throws -> AppTheme {
         try XCTUnwrap(
             AppThemeLibrary.stock

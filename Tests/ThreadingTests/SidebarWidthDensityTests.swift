@@ -16,6 +16,11 @@ final class SidebarWidthDensityTests: XCTestCase {
 
     // MARK: - Fixtures
 
+    /// What the `.inset` style keeps past every cell's trailing edge — 16pt, measured on
+    /// macOS 26 and the band the reclaim is spent out of. Written down here rather than read
+    /// off the app, because a number taken from the code under test proves nothing about it.
+    private static let styleTrailingBand: CGFloat = 16
+
     private var directories: [URL] = []
     private var stateManagers: [StateManager] = []
     private var windows: [NSWindow] = []
@@ -218,9 +223,35 @@ final class SidebarWidthDensityTests: XCTestCase {
         XCTAssertEqual(floor.indentationPerLevel, SidebarDefaults.tightIndentationPerLevel)
         XCTAssertEqual(floor.rowLeadingInset, SidebarRowDefaults.tightLeadingInset)
         XCTAssertEqual(floor.rowTrailingInset, SidebarRowDefaults.tightTrailingInset)
+        XCTAssertEqual(floor.selectionInsetX, SidebarRowDefaults.tightHoverHighlightInsetX)
 
         XCTAssertEqual(SidebarDensity(width: 40), floor, "past the floor is still the floor")
         XCTAssertEqual(SidebarDensity(width: 0), floor)
+    }
+
+    /// Which floor, though, is the split view's to say and not this file's — it is raised at
+    /// runtime to clear the window controls floating over the column. The band has to end there
+    /// or its tight end is a set of values no drag can reach: measured on the running window,
+    /// the column stopped at 208pt while the arithmetic was still halfway down, so the most
+    /// compact sidebar the app allowed drew a depth step of 11 where 6 was the answer.
+    func testTheBandEndsAtTheWidthTheColumnCanActuallyReach() {
+        let reachable: CGFloat = 208
+
+        XCTAssertEqual(
+            SidebarDensity(width: reachable, floor: reachable),
+            SidebarDensity(width: SidebarDefaults.tightDensityWidth),
+            "the narrowest column there is has to draw the tightest list there is"
+        )
+        XCTAssertNotEqual(
+            SidebarDensity(width: reachable),
+            SidebarDensity(width: reachable, floor: reachable),
+            "which is exactly what a band ending below the last reachable width does not do"
+        )
+
+        // A column that cannot be narrowed at all is not a column that should be drawn tight.
+        for floor in [SidebarDefaults.relaxedDensityWidth, 260] {
+            XCTAssertEqual(SidebarDensity(width: floor, floor: floor), .relaxed)
+        }
     }
 
     /// In between it is a fraction, not a threshold: every metric falls with the drag, and the
@@ -376,16 +407,75 @@ final class SidebarWidthDensityTests: XCTestCase {
     /// What bounds that reclaim: the selection capsule this list draws itself. Content may move
     /// out into the band the style keeps, and must stop inside the shape a selected row fills —
     /// a pin drawn over the edge of its own accent capsule is the failure this prevents.
+    ///
+    /// The capsule is not a fixed edge to stay inside, because it closes with the column too. So
+    /// the rule is asserted at both ends of the band and every point between: whatever the drag
+    /// is doing, the cell stops inside the shape drawn over it.
     func testReclaimedContentStaysInsideTheSelectionCapsule() {
-        let (controller, _) = makeSidebar(width: SidebarDefaults.tightDensityWidth)
+        for width in [SidebarDefaults.relaxedDensityWidth, 220, SidebarDefaults.tightDensityWidth] {
+            let (controller, _) = makeSidebar(width: width)
+            let inset = SidebarDensity(width: width).selectionInsetX
 
-        for (rowView, cell) in builtRows(controller) {
-            XCTAssertLessThanOrEqual(
-                cell.frame.maxX,
-                rowView.frame.width - SidebarRowDefaults.hoverHighlightInsetX,
-                "\(type(of: cell)) reaches past the capsule a selected row is filled with"
+            for (rowView, cell) in builtRows(controller) {
+                XCTAssertLessThanOrEqual(
+                    cell.frame.maxX,
+                    rowView.frame.width - inset,
+                    "\(type(of: cell)) at \(width)pt reaches past the capsule it is drawn inside"
+                )
+            }
+        }
+
+        // And the clearance between the two closes without ever running out, which is the thing
+        // the numbers above are only safe while doing. Asserted as a floor across the band
+        // rather than as a monotone fall: the reclaim and the capsule round to whole points
+        // independently, so between the two steps that answer one drag the gap gives a point
+        // back before taking it again. Six at the top, two at the bottom, never under.
+        func clearance(at width: CGFloat) -> CGFloat {
+            let density = SidebarDensity(width: width)
+            return (Self.styleTrailingBand - density.trailingCellReclaim) - density.selectionInsetX
+        }
+
+        for width in stride(
+            from: SidebarDefaults.relaxedDensityWidth,
+            through: SidebarDefaults.tightDensityWidth,
+            by: -1
+        ) {
+            XCTAssertGreaterThanOrEqual(
+                clearance(at: width),
+                2,
+                "at \(width)pt the cell reaches its own capsule"
             )
         }
+
+        XCTAssertEqual(clearance(at: SidebarDefaults.relaxedDensityWidth), 6)
+        XCTAssertEqual(clearance(at: SidebarDefaults.tightDensityWidth), 2)
+    }
+
+    /// The same thing on the rows: told the floor the split view actually enforces, the list at
+    /// that width draws what the tightest list draws — rather than the halfway one it drew while
+    /// the band ran on down to a width no drag could reach.
+    func testTheListDrawsItsTightestAtTheFloorItIsGiven() throws {
+        let reachable: CGFloat = 208
+        let (controller, _) = makeSidebar(width: 320)
+
+        resize(to: reachable)
+        let halfway = contentLeadingEdge(try XCTUnwrap(sessionCells(builtRows(controller)).first).cell)
+
+        controller.densityFloor = reachable
+        draw()
+        let tightened = contentLeadingEdge(
+            try XCTUnwrap(sessionCells(builtRows(controller)).first).cell
+        )
+        XCTAssertLessThan(tightened, halfway, "the floor has to move the list it bounds")
+
+        // And it is the *tightest* list, not merely a tighter one: the same leading edge the
+        // fixture draws at the floor the constant states.
+        let reference = makeSidebar(width: SidebarDefaults.tightDensityWidth).controller
+        XCTAssertEqual(
+            tightened,
+            contentLeadingEdge(try XCTUnwrap(sessionCells(builtRows(reference)).first).cell),
+            accuracy: 0.5
+        )
     }
 
     /// A drag is not one resize but a hundred, and the re-placement is applied on top of frames
@@ -504,6 +594,10 @@ final class SidebarWidthDensityTests: XCTestCase {
     /// The column at both ends of the band, light and dark — the review surface for how much a
     /// narrow sidebar actually wins, which no frame assertion can judge the look of. One fixture,
     /// resized between the renders, which is the path a divider drag takes in the app.
+    ///
+    /// The narrow render is taken at the width the window controls leave, with the floor to
+    /// match, because that is the narrowest column a person can actually drag to — a picture of
+    /// a 180pt sidebar reviews a list nobody is ever shown.
     func testRendersTheColumnAtBothEndsOfTheBand() throws {
         let (controller, store) = makeSidebar(width: SidebarDefaults.relaxedDensityWidth)
         // With the pinned session selected: the capsule is what bounds how far the reclaimed
@@ -544,7 +638,10 @@ final class SidebarWidthDensityTests: XCTestCase {
         }
 
         try render(as: "wide")
-        resize(to: SidebarDefaults.tightDensityWidth)
+
+        let reachable = PaneHeaderDefaults.assumedWindowControlsWidth + Design.Spacing.medium
+        controller.densityFloor = reachable
+        resize(to: reachable)
         try render(as: "narrow")
     }
 }
