@@ -112,6 +112,66 @@ final class UsageWindowSettingsRenderTests: XCTestCase {
         )
     }
 
+    /// Nothing the diagram draws escapes its own bounds.
+    ///
+    /// The totals column was a fixed width sized to `7h working  +1h`, and a *measured* burn
+    /// writes minutes into every figure — `6h 36m working  +1h 24m` — which is wider. AppKit
+    /// stopped clipping drawing to a view's bounds in macOS 14, so the difference did not
+    /// vanish: it ran out of the view and across the settings card's frame. The columns are
+    /// measured from the drawn strings now; this renders the grid inside a transparent margin
+    /// and asserts the margin stayed empty, so the next overflow fails here instead of on a
+    /// screenshot. The clean three-hour fixture burn cannot catch it — its totals are exactly
+    /// the round strings the fixed width was sized for — so this one uses 2h 36m.
+    @MainActor
+    func testTheDiagramDrawsNothingOutsideItsOwnBounds() throws {
+        let margin: CGFloat = 40
+        let measuredBurn: TimeInterval = 2 * 3600 + 36 * 60
+
+        let grid = UsageWindowGridView()
+        grid.show(workday: workday, burn: measuredBurn, windowLength: windowLength)
+
+        let host = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: SettingsUIDefaults.pageWidth + margin * 2,
+            height: UsageWindowGridDefaults.height + margin * 2
+        ))
+        host.addSubview(grid)
+        NSLayoutConstraint.activate([
+            grid.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: margin),
+            grid.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -margin),
+            grid.topAnchor.constraint(equalTo: host.topAnchor, constant: margin),
+            grid.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -margin)
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        // The host paints nothing itself, so any ink in the margin is the grid's.
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+
+        let scaleX = CGFloat(rep.pixelsWide) / host.bounds.width
+        let scaleY = CGFloat(rep.pixelsHigh) / host.bounds.height
+        // A point inside this rectangle is the grid's to draw; the 1pt allowance is for
+        // antialiasing at the very edge, not for content.
+        let inked = grid.frame.insetBy(dx: -1, dy: -1)
+
+        var spill: [NSPoint] = []
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide {
+                let point = NSPoint(x: CGFloat(x) / scaleX, y: CGFloat(y) / scaleY)
+                guard !inked.contains(point) else { continue }
+                if let alpha = rep.colorAt(x: x, y: y)?.alphaComponent, alpha > 0 {
+                    spill.append(point)
+                }
+            }
+        }
+
+        XCTAssertTrue(
+            spill.isEmpty,
+            "the diagram drew outside its bounds at \(spill.prefix(5)) (\(spill.count) pixels)"
+        )
+    }
+
     /// A diagram with two identical rows is a diagram making no point. This is the render-side
     /// guard on the claim `UsageWindowPlanTests` proves arithmetically.
     @MainActor

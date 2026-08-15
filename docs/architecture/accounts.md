@@ -673,6 +673,15 @@ Three things the renders caught that no assertion would have.
 - Platinum's caption is a taller face than the system one, and the axis label drawn on the floor
   of its band lost its descenders off the bottom of the view. It is centred in the band now.
 
+And one thing the renders could *not* catch, because the fixture was too clean. The text columns
+were fixed widths sized to the longest strings imagined for them, and the fixture's round
+three-hour burn produces exactly those strings — but a *measured* burn writes minutes into every
+figure (`6h 36m working  +1h 23m`), which is wider, and macOS 14 stopped clipping drawing to a
+view's bounds, so the overflow ran out of the diagram and across the settings card's own frame.
+The columns are measured from the strings actually drawn now, the old constants kept only as
+floors, and `testTheDiagramDrawsNothingOutsideItsOwnBounds` renders the grid inside a transparent
+margin with a minutes-heavy burn and asserts the margin stayed empty.
+
 The accessibility label states both lanes' window counts and totals outright, because the whole
 argument is carried by fill and by one extra break, and neither survives being read aloud.
 

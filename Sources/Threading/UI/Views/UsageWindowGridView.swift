@@ -111,8 +111,8 @@ final class UsageWindowGridView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let span, span.duration > 0, !lanes.isEmpty else { return }
 
-        let labelWidth = UsageWindowGridDefaults.labelColumnWidth
-        let totalWidth = UsageWindowGridDefaults.totalColumnWidth
+        let labelWidth = labelColumnWidth()
+        let totalWidth = totalColumnWidth()
         let plot = NSRect(
             x: labelWidth,
             y: UsageWindowGridDefaults.axisHeight,
@@ -258,6 +258,14 @@ final class UsageWindowGridView: NSView {
     /// The productive total, and on the poked lane what it gained. The delta is the number the
     /// picture exists to produce, so it is the one in the accent colour.
     private func drawTotal(for lane: Lane, besideBar bar: NSRect, width: CGFloat) {
+        let text = totalText(for: lane)
+        text.draw(at: NSPoint(
+            x: bounds.width - width + Design.Spacing.medium,
+            y: bar.midY - text.size().height / 2
+        ))
+    }
+
+    private func totalText(for lane: Lane) -> NSAttributedString {
         let text = NSMutableAttributedString(
             string: UsageWindowGridStrings.productive(
                 UsageFormat.duration(lane.outlook.productiveTime)
@@ -278,10 +286,32 @@ final class UsageWindowGridView: NSView {
             ))
         }
 
-        text.draw(at: NSPoint(
-            x: bounds.width - width + Design.Spacing.medium,
-            y: bar.midY - text.size().height / 2
-        ))
+        return text
+    }
+
+    // MARK: - Columns
+
+    /// The text columns, measured from the strings about to be drawn, with the defaults as
+    /// floors so short strings do not let a column collapse.
+    ///
+    /// They were fixed widths sized to the longest string imagined for them — `7h working  +1h`
+    /// — and a measured burn writes `6h 36m working  +1h 23m`, which is wider. AppKit stopped
+    /// clipping drawing to a view's bounds in macOS 14, so the difference did not vanish; it ran
+    /// across the settings card's own frame.
+    private func labelColumnWidth() -> CGFloat {
+        lanes.reduce(UsageWindowGridDefaults.labelColumnWidth) { width, lane in
+            let text = NSAttributedString(
+                string: lane.title,
+                attributes: attributes(color: Design.Text.secondary)
+            )
+            return max(width, text.size().width + Design.Spacing.medium)
+        }
+    }
+
+    private func totalColumnWidth() -> CGFloat {
+        lanes.reduce(UsageWindowGridDefaults.totalColumnWidth) { width, lane in
+            max(width, totalText(for: lane).size().width + Design.Spacing.medium)
+        }
     }
 
     // MARK: - Geometry
@@ -389,8 +419,9 @@ enum UsageWindowGridDefaults {
     static let axisHeight: CGFloat = 22
     static let height: CGFloat = barHeight * 2 + laneGap + axisHeight
 
-    /// The two text columns. Wide enough for `Without a poke` and `7h working  +1h` at the
-    /// caption size, which are the longest strings either column takes.
+    /// The two text columns' floors. Wide enough for `Without a poke` and `7h working  +1h` at
+    /// the caption size; a measured burn writes longer totals, so `draw` widens a column to the
+    /// strings it is about to draw and these only stop short ones collapsing it.
     static let labelColumnWidth: CGFloat = 118
     static let totalColumnWidth: CGFloat = 120
 
