@@ -70,7 +70,6 @@ The inventory reports executable references, excluding comments. At the 15 Augus
   `ConversationViewController`.
 - `Core/Agent/LimitRecoveryCoordinator.swift` accepts concrete `AgentSessionViewController`
   values in five paths.
-- `Core/Agent/SessionContextHandoff.swift` stores a `ConversationViewController` case.
 - `Core/Remote/RemoteSessionMirrorRegistry.swift` accepts a `ConversationViewController` when
   building its live projection.
 - `Core/Session/ProjectTerminalRuntime.swift` constructs and retains
@@ -78,8 +77,10 @@ The inventory reports executable references, excluding comments. At the 15 Augus
 
 These edges are the measured migration queue, not exemptions. The architecture gate now rejects
 any Core reference to `AppDelegate` or `MainWindowController`, discovers concrete UI controller
-types, and permits only the 19 references in its explicit ratcheted legacy map. Runtime/controller
-ownership follows behind an application capability or projection boundary.
+types, and permits only the 18 references across four files in its explicit ratcheted legacy map.
+Session-context routing moved behind a typed receiver/query boundary in the stabilization closure;
+the remaining runtime/controller ownership follows behind an application capability or projection
+boundary.
 
 ## Health ledger
 
@@ -257,11 +258,57 @@ parallel:
 
 | Inventory | Authoritative code | Generated/visible projection | Drift proof |
 |---|---|---|---|
-| Built-in MCP tools | `MCPBuiltInToolRegistry.descriptors` | MCP `tools/list`, Tools settings, scoped catalogs and execution routing | `MCPWireTests` checks identity, decoding, schema, annotations, grouping and binding parity. |
-| Settings | `SettingsPages.all` plus extension settings registry | Settings navigation, both search paths and `list_settings` | `SettingsAnchorResolutionTests` builds indexed pages and resolves row anchors. |
+| Built-in MCP tools | `MCPTools.authoredDeclarations`; `MCPBuiltInToolRegistry.descriptors` is the admitted projection | MCP `tools/list`, Tools settings, scoped catalogs, decoding and typed execution routing | `MCPWireTests` checks identity, decoding, schema, annotations, grouping and binding parity, including incomplete-declaration refusal. |
+| Settings | `AppSettingDefinitions.all`, projected through `SettingsPages.all`, plus the extension settings registry | Settings navigation, both search paths and `list_settings` | `AppSettingDefinitionTests` checks keys, defaults, validation, migrations, anchors and remote/catalog projection; anchor tests resolve the rendered rows. |
 | Commands and shortcuts | `AppCommands.all`, then `CommandRegistry` for extension/project additions and overrides | Menus, Keyboard settings, command palette and host command plane | `KeyboardShortcutTests`, `TabCyclingCommandTests`, and command-policy tests enumerate the registry. |
 | Public extension components | `ThreadingComponentCatalog.document` | Committed Markdown, JSON and per-component schemas in `docs/extensions/generated` | `ThreadingComponentCatalogGenerator --check` runs in CI. |
 
 Do not add a hand-maintained tool, settings, shortcut, or component list to architecture docs. Add
 metadata to its registry and extend the relevant completeness test; every consumer should see the
 same projection.
+
+## Stabilization-review closure — 15 August 2026
+
+The follow-up review began at `d0351b1a^` with this common report definition:
+
+| Metric | Review baseline | Closure | Change |
+|---|---:|---:|---:|
+| Threading Swift files / lines | 788 / 327,076 | 793 / 328,627 | +5 / +1,551 for typed declarations, application interfaces and proofs |
+| `static … shared` declarations | 89 / 87 files | 89 / 87 files | unchanged; no service locator added |
+| `ProjectStore.shared` | 302 / 66 files | 247 / 63 files | −55 / −3 files |
+| `AgentRuntime.shared` | 116 / 32 files | 102 / 31 files | −14 / −1 file |
+| `AppSettings.shared` | 223 / 40 files | 216 / 39 files | −7 / −1 file |
+| `EventLog.shared` | 94 / 27 files | 82 / 25 files | −12 / −2 files |
+| Concrete UI-controller references in Core | 19 / 5 files | 18 / 4 files | −1 complete edge / −1 file |
+| UI-framework imports in Core/Models | 63 / 61 files | 63 / 61 files | unchanged; Application now has a directory-wide import gate |
+| `MainWindowController` authority | 5,107 / 4 files | 5,107 / 4 files | authority is environment-backed; no line-count-only split |
+| `AgentToolCoordinator` authority | 9,357 / 15 files | 9,005 / 15 files | −352 typed decoding/routing/policy lines |
+| Capability extensions | 5,909 / 11 files | 5,909 / 11 files | unchanged |
+| `ThreadingTests` Swift files | 377 | 379 | +2 focused proof files; still filesystem synchronized |
+
+The six findings closed as ownership changes, not documentation exceptions:
+
+1. The fast plan no longer includes the two tests that deliberately order real browser windows.
+   AppKit render fixtures leave the last-window lifecycle alone, zero-width chart layout uses a
+   satisfiable owner-defined constraint model, and tab-strip height has one owner. The formerly
+   reported privacy test never failed in its xcresult; the host was terminated by window lifecycle
+   work left behind by a different test class.
+2. Domain and Application imports are checked recursively. Application permits Foundation and the
+   explicitly approved lower-level contract modules only; synthetic nested violations prove the
+   checker fails closed. Redundant per-filename UI-import checks were removed.
+3. `MainWindowController`, `RemoteAccessServer`, and conversation scheduling now consume injected
+   environments, narrow remote application interfaces, and a current-session projection. Their
+   gates reject returning to the four process singletons; live singleton construction remains at
+   composition roots.
+4. One typed MCP declaration owns wire identity, typed argument decoding, schema, annotations,
+   family/group, settings presentation, routing policy and execution binding. Runtime and UI lists
+   project from the admitted declarations; the old `AgentCommand` case inventory, decode switch,
+   catalog rows and execution switch are gone.
+5. One typed setting definition owns stable identity, the exact persistence key and value shape,
+   absence/default semantics, validation, notification policy, page/row/search metadata and remote
+   policy. `AppSettings`, migrations, navigation, search and `list_settings` consume those
+   definitions; duplicate keys/anchors and compatibility drift fail tests.
+6. MCP policy extraction reduced tool-coordinator authority by 352 lines. Session-context routing
+   now depends on `SessionContextReceiving` and an injected destination query, removing the entire
+   Core-to-`ConversationViewController` edge and lowering the dependency ratchet in the same
+   commit.

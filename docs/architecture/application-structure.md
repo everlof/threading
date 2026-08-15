@@ -70,10 +70,14 @@ permits only the ratcheted concrete-controller edges reported by
 - `Core/Agent/AgentRuntime.swift` constructs and retains agent-session and conversation view
   controllers.
 - `Core/Agent/LimitRecoveryCoordinator.swift` accepts concrete agent-session controllers.
-- `Core/Agent/SessionContextHandoff.swift` stores a conversation-controller case.
 - `Core/Remote/RemoteSessionMirrorRegistry.swift` accepts a conversation controller while adapting
   its live projection.
 - `Core/Session/ProjectTerminalRuntime.swift` constructs and retains a project-terminal controller.
+
+Session-context routing is no longer in this queue: Core targets the typed
+`SessionContextReceiving` capability and resolves it through `SessionContextDestinationQuerying`;
+the UI controller is only an adapter. The ratchet now permits 18 references across the four files
+above, down from 19 across five.
 
 These are a migration queue, not exemptions. Remove one complete ownership edge, add a focused
 capability/projection test, and lower the ratchet in the same coherent commit.
@@ -97,7 +101,7 @@ Inventories are projections of code-owned registries, not Markdown lists updated
 
 | Inventory | Source of truth | Projections and proof |
 |---|---|---|
-| Built-in MCP tools | `MCPBuiltInToolRegistry.descriptors` | MCP `tools/list`, Tools settings, scoped catalogs, and routing derive from descriptors; `MCPWireTests` enforces identity/decoder/schema/annotation/group/binding parity. |
+| Built-in MCP tools | `MCPTools.authoredDeclarations`; `MCPBuiltInToolRegistry.descriptors` is its fail-closed admitted projection | MCP `tools/list`, Tools settings, scoped catalogs, decoding, and typed execution routing derive from declarations; `MCPWireTests` enforces identity/decoder/schema/annotation/group/binding parity and rejects incomplete declarations. |
 | Settings | `AppSettingDefinitions.all`, projected through `SettingsPages.all`, plus the extension settings registry | Each built-in definition owns its stable identity, current or migration persistence key and value shape, absence/default semantics, validation, notification policy, page/row/search metadata, and remote policy. `AppSettings`, navigation, both search paths, and `list_settings` project from it; definition completeness and anchor-resolution tests prove key, order, and row parity. |
 | Commands and shortcuts | `AppCommands.all`, then `CommandRegistry` for extensions, project scripts, and overrides | Menus, Keyboard settings, the command palette, and host command plane consume registry descriptors; shortcut and command-policy tests enumerate them. |
 | Public extension components | `ThreadingComponentCatalog.document` | `ThreadingComponentCatalogGenerator` writes committed Markdown, JSON, and schemas under `docs/extensions/generated`; CI runs it with `--check`. |

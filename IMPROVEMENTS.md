@@ -12,14 +12,14 @@ gate prevents the old coupling from returning.
 
 | Boundary | Current measurement | Next coherent reduction |
 |---|---:|---|
-| Concrete UI-controller references in Core | 19 across 5 files | Replace one runtime-to-controller lookup with a typed application capability; ratchet the gate in the same commit. |
+| Concrete UI-controller references in Core | 18 across 4 files | Move the next complete runtime/controller ownership edge behind a typed application capability; ratchet the gate in the same commit. |
 | UI-framework imports in Core/Models | 63 across 61 files | Extract stable Foundation-only contracts into the existing domain boundary before adding another module. |
-| `ProjectStore.shared` | 295 across 64 files | Migrate one application coordinator or background service through `AppEnvironment`; do not rewrite leaf call sites mechanically. |
-| `AgentRuntime.shared` | 116 across 32 files | Inject the runtime at the next ownership boundary that already has a composition root. |
-| `AppSettings.shared` | 223 across 40 files | Pass a narrow settings projection or store only where a use case needs it. |
-| `EventLog.shared` | 94 across 27 files | Inject logging into application services; system log APIs may remain process-global. |
-| `MainWindowController` authority | 5,075 lines across 4 files | Continue moving use cases out; the controller should converge on composition, navigation, and window lifecycle. |
-| `AgentToolCoordinator` authority | 9,349 lines across 15 files | Continue moving one command family at a time into independently tested application services. |
+| `ProjectStore.shared` | 247 across 63 files | Migrate the next complete application coordinator or background service through an existing composition root. |
+| `AgentRuntime.shared` | 102 across 31 files | Inject the runtime at the next ownership boundary that already has a composition root. |
+| `AppSettings.shared` | 216 across 39 files | Pass a narrow settings projection or store only where a use case needs it. |
+| `EventLog.shared` | 82 across 25 files | Inject logging into application services; system log APIs may remain process-global. |
+| `MainWindowController` authority | 5,107 lines across 4 files | Continue moving use cases out; the controller should converge on composition, navigation, and window lifecycle. |
+| `AgentToolCoordinator` authority | 9,005 lines across 15 files | Move the next command family's policy and sequencing behind a typed, independently tested boundary. |
 
 ## Rules for closing an item
 
