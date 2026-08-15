@@ -169,9 +169,11 @@ for work that is not subordinate to a conversation. `ProjectTerminal` is deliber
 small record rather than a third `AgentKind`: identity, displayed and custom titles, current
 directory, branch, theme assignment and creation time, with none of the transcript, provider,
 account, model, resume or import fields an `AgentSession` requires. A project's hover `+` opens
-the chat composer on its press and offers **New Chat…** or **New Terminal** on a secondary
-click — the common case is a chat, and it should not cost a menu; clicking the project row
-itself keeps opening the chat composer. The PTY begins when the terminal is first shown, is retained by
+a menu on its press: **New Chat…** or **New Terminal**. It briefly opened the chat composer
+directly on the press with this menu on a secondary click — "the common case is a chat, and it
+should not cost a menu" — but clicking the project row itself already opens the composer, so
+that press saved nothing while hiding the terminal behind a gesture nothing advertised. The
+PTY begins when the terminal is first shown, is retained by
 `ProjectTerminalRuntime` across sidebar switches, and ends when the row, project or app closes.
 After a normal exit the row remains dormant and **Start Again** creates a fresh shell in its
 last recorded directory. The record survives relaunch; process state and scrollback do not.

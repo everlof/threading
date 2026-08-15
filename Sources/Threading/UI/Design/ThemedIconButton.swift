@@ -202,10 +202,12 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
 
     /// The menu a *secondary* click asks for, on a button whose press already does something.
     ///
-    /// The alternative to `presentsMenu`, not a companion to it. A button that offers a choice on
-    /// every press makes the common case cost two gestures — the sidebar's `+` asked "chat or
-    /// terminal?" every time, and it is a chat nearly every time. So the press does the ordinary
-    /// thing and the rest hangs off right-click, the way a row's own actions already do.
+    /// The alternative to `presentsMenu`, not a companion to it: a button that offers a choice on
+    /// every press makes its common case cost two gestures, so a press with one ordinary meaning
+    /// keeps it and the rest hangs off right-click, the way a row's own actions already do. Earn
+    /// the split before reaching for it — the sidebar's `+` lived here while its press made a
+    /// chat, until that press turned out to duplicate what clicking the row already does, and its
+    /// menu went back to being the press (`presentsMenu`).
     ///
     /// Returning `false` lets the click fall through to whatever would have handled it, which is
     /// how a row keeps its own context menu when a button on it offers none.

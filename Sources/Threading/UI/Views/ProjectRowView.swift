@@ -85,7 +85,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// slot. A project row shows `+` and `⋯`; a branch heading shows a grouping gear.
     private let createButton = ThemedIconButton(
         symbolName: SidebarRowDefaults.createSymbol,
-        accessibility: L10n.string("New chat"),
+        accessibility: L10n.string("New chat or terminal"),
         target: .inline,
         inkSource: .chrome,
         glyphMaterialization: .deferred
@@ -109,9 +109,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
     /// Invoked when the `⋯`/gear is pressed, carrying the anchor to hang a menu from.
     var onHoverAction: ((NSView) -> Void)?
-    /// Invoked when the project row's `+` is pressed: a new chat, made without asking.
-    var onCreateAction: ((ProjectID) -> Void)?
-    /// Invoked when the `+` is right-clicked, for the rest of what it can make. Carries the
+    /// Invoked when the project row's `+` is pressed, for everything it can make. Carries the
     /// button to hang the menu from beside the project it belongs to.
     var onCreateMenuAction: ((ProjectID, NSView, ThemedMenuAnchor) -> Bool)?
 
@@ -580,9 +578,11 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         hoverButton.onPress = { [weak self] in self?.hoverButtonClicked() }
         hoverButton.translatesAutoresizingMaskIntoConstraints = false
 
-        // The `+` is an action, not a menu: a press makes a chat, which is what it is asked for
-        // nearly every time. The terminal is a right-click away. Both gestures are bound to a
-        // project in `configure`, not here — see `bindCreateButton`.
+        // The `+` is a menu again: its press used to make a chat directly, but that is exactly
+        // what clicking the row already does, so the shortcut saved nothing — and it hid
+        // the terminal behind a right-click. The choice is bound to a project in `configure`,
+        // not here — see `bindCreateButton`.
+        createButton.presentsMenu = true
         createButton.translatesAutoresizingMaskIntoConstraints = false
 
         hoverControls.orientation = .horizontal
@@ -814,18 +814,13 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         onHoverAction?(hoverButton)
     }
 
-    /// Binds both of the `+`'s gestures to *this* project rather than to whatever the row is
-    /// showing when they fire.
-    ///
-    /// A press outlives the row it started on — `ThemedIconButton` completes the gesture even
-    /// after the sidebar has recycled this view into another project's row — and a late release
-    /// that read the row's current project would make the chat in the wrong checkout. The same
-    /// binding the archive button on a session row makes, for the same reason.
+    /// Binds the `+`'s menu to *this* project rather than to whatever the row is showing when
+    /// the press fires — a menu read off the row's current project would offer to make things
+    /// in whichever checkout the recycled row shows next.
     private func bindCreateButton(to projectID: ProjectID) {
-        createButton.onPress = { [weak self] in self?.onCreateAction?(projectID) }
-        createButton.onContextMenu = { [weak self] anchor in
-            guard let self else { return false }
-            return onCreateMenuAction?(projectID, createButton, anchor) ?? false
+        createButton.onPress = { [weak self] in
+            guard let self else { return }
+            _ = onCreateMenuAction?(projectID, createButton, .control)
         }
     }
 

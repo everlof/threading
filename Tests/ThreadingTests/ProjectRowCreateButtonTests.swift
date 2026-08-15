@@ -2,16 +2,27 @@ import AppKit
 import XCTest
 @testable import Threading
 
-/// What a project row's `+` does, and what it costs when the answer is a menu.
+/// What a project row's `+` does: its press opens the creation menu — **New Chat…** or
+/// **New Terminal** — anchored to the button.
 ///
-/// It used to open one on every press: **New Chat…** or **New Terminal**, two gestures for the
-/// thing asked for nearly every time. So the press makes the chat and the secondary click keeps
-/// the choice — the same split a row's own actions already use, and the reason `ThemedIconButton`
-/// grew an `onContextMenu` beside `presentsMenu` rather than instead of it.
+/// The button has been each way once. It began as this menu, was flattened so the press made a
+/// chat directly ("what it is asked for nearly every time") with the menu on the secondary
+/// click, and came back when that press turned out to duplicate what clicking the row already
+/// does — `select(projectID:)` puts the composer on screen either way, so the shortcut saved
+/// nothing and hid the terminal behind a right-click nothing advertised. Opening on the press
+/// also puts the `+` on `ThemedIconButton.presentsMenu`, the gesture that cannot lose its
+/// release to a row reload.
 @MainActor
 final class ProjectRowCreateButtonTests: XCTestCase {
 
     // MARK: - Helpers
+
+    /// A host that records the secondary clicks that reach it, standing in for the outline row
+    /// whose own context menu a fall-through would open.
+    private final class ClickRecordingHost: NSView {
+        var secondaryClicks = 0
+        override func rightMouseDown(with event: NSEvent) { secondaryClicks += 1 }
+    }
 
     /// A row in a window, since hit testing and press tracking need real frames. The window is
     /// built and never ordered on screen — see `SessionRowActionsTests` for what showing one
@@ -21,11 +32,11 @@ final class ProjectRowCreateButtonTests: XCTestCase {
             name: "Threading",
             folderURL: URL(fileURLWithPath: "/tmp/Threading")
         )
-    ) -> (host: NSView, row: ProjectRowView) {
+    ) -> (host: ClickRecordingHost, row: ProjectRowView) {
         let row = ProjectRowView(customizationLookup: { _ in .empty })
         row.translatesAutoresizingMaskIntoConstraints = false
 
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 28))
+        let host = ClickRecordingHost(frame: NSRect(x: 0, y: 0, width: 240, height: 28))
         host.addSubview(row)
         NSLayoutConstraint.activate([
             row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
@@ -52,7 +63,7 @@ final class ProjectRowCreateButtonTests: XCTestCase {
     private func createButton(in root: NSView) throws -> ThemedIconButton {
         func walk(_ node: NSView) -> ThemedIconButton? {
             if let button = node as? ThemedIconButton,
-               button.accessibilityTitle() == L10n.string("New chat") {
+               button.accessibilityTitle() == L10n.string("New chat or terminal") {
                 return button
             }
             for child in node.subviews {
@@ -108,65 +119,62 @@ final class ProjectRowCreateButtonTests: XCTestCase {
         XCTAssertTrue(label.isHidden, "a reused count label should stay warm but leave no pixels")
     }
 
-    func testTheCreateButtonMakesAChatOnItsPressWithoutAskingFirst() throws {
+    func testTheCreateButtonOpensItsMenuOnThePress() throws {
         let project = Project(name: "Threading", folderURL: URL(fileURLWithPath: "/tmp/Threading"))
         let (host, row) = hostedRow(project: project)
-        var created: [ProjectID] = []
-        var asked = 0
-        row.onCreateAction = { created.append($0) }
-        row.onCreateMenuAction = { _, _, _ in asked += 1; return true }
-
-        let button = try createButton(in: host)
-        button.mouseDown(with: try event(.leftMouseDown, on: button))
-        button.mouseUp(with: try event(.leftMouseUp, on: button))
-
-        XCTAssertEqual(created, [project.id], "the + did not make a chat in its own project")
-        XCTAssertEqual(asked, 0, "the + still asked which kind before making anything")
-    }
-
-    /// A press outlives the row it started on, and the sidebar recycles rows whenever the tree's
-    /// shape changes. The chat has to land in the project the `+` was aimed at.
-    func testAPressStartedOnOneProjectNeverMakesAChatInTheRowsNext() throws {
-        let aimed = Project(name: "Threading", folderURL: URL(fileURLWithPath: "/tmp/Threading"))
-        let next = Project(name: "Skalman", folderURL: URL(fileURLWithPath: "/tmp/Skalman"))
-        let (host, row) = hostedRow(project: aimed)
-        var created: [ProjectID] = []
-        row.onCreateAction = { created.append($0) }
-
-        let button = try createButton(in: host)
-        button.mouseDown(with: try event(.leftMouseDown, on: button))
-        row.configure(with: next)
-        button.mouseUp(with: try event(.leftMouseUp, on: button))
-
-        XCTAssertEqual(created, [aimed.id], "the release made a chat in the row's new project")
-    }
-
-    func testTheCreateButtonKeepsTheOtherChoicesOnItsSecondaryClick() throws {
-        let project = Project(name: "Threading", folderURL: URL(fileURLWithPath: "/tmp/Threading"))
-        let (host, row) = hostedRow(project: project)
-        var created = 0
         var asked: [(ProjectID, ThemedMenuAnchor)] = []
-        row.onCreateAction = { _ in created += 1 }
         row.onCreateMenuAction = { projectID, _, anchor in
             asked.append((projectID, anchor))
             return true
         }
 
         let button = try createButton(in: host)
-        button.rightMouseDown(with: try event(.rightMouseDown, on: button))
+        button.mouseDown(with: try event(.leftMouseDown, on: button))
 
-        XCTAssertEqual(asked.count, 1, "right-clicking the + offered nothing")
-        XCTAssertEqual(asked.first?.0, project.id)
-        XCTAssertEqual(created, 0, "right-clicking the + also made a chat")
-        // A menu asked for by a secondary click belongs to the pointer, not to the control —
-        // see `ThemedMenuAnchor`.
-        guard case .pointer = try XCTUnwrap(asked.first?.1) else {
-            return XCTFail("the secondary click's menu was anchored to the control")
+        XCTAssertEqual(asked.count, 1, "pressing the + offered nothing")
+        XCTAssertEqual(asked.first?.0, project.id, "the menu was not the + button's own project's")
+        // A menu the press asked for hangs from the control, the way the `⋯`'s does.
+        guard case .control = try XCTUnwrap(asked.first?.1) else {
+            return XCTFail("the press's menu was not anchored to the control")
         }
     }
 
-    /// The pointerless route to the same choices, which is the whole reason the gesture is not
-    /// the only way to reach them.
+    /// The sidebar recycles rows whenever the tree's shape changes, so the menu is bound to a
+    /// project at `configure`, not read from the row when the press fires. The choices offered
+    /// have to be the ones for the project the `+` visibly belongs to.
+    func testTheMenuBelongsToTheProjectTheRowShowsAtThePress() throws {
+        let first = Project(name: "Threading", folderURL: URL(fileURLWithPath: "/tmp/Threading"))
+        let next = Project(name: "Skalman", folderURL: URL(fileURLWithPath: "/tmp/Skalman"))
+        let (host, row) = hostedRow(project: first)
+        var asked: [ProjectID] = []
+        row.onCreateMenuAction = { projectID, _, _ in asked.append(projectID); return true }
+
+        let button = try createButton(in: host)
+        button.mouseDown(with: try event(.leftMouseDown, on: button))
+        row.configure(with: next)
+        button.mouseDown(with: try event(.leftMouseDown, on: button))
+
+        XCTAssertEqual(asked, [first.id, next.id], "a press offered another project's choices")
+    }
+
+    /// The `+` keeps no secondary menu of its own — its press *is* the menu — so a right-click
+    /// falls through to the row, whose context menu is what a secondary click on a row means
+    /// everywhere else in the sidebar.
+    func testASecondaryClickFallsThroughToTheRowsOwnMenu() throws {
+        let project = Project(name: "Threading", folderURL: URL(fileURLWithPath: "/tmp/Threading"))
+        let (host, row) = hostedRow(project: project)
+        var asked = 0
+        row.onCreateMenuAction = { _, _, _ in asked += 1; return true }
+
+        let button = try createButton(in: host)
+        button.rightMouseDown(with: try event(.rightMouseDown, on: button))
+
+        XCTAssertEqual(asked, 0, "right-clicking the + opened the press's menu")
+        XCTAssertEqual(host.secondaryClicks, 1, "the + swallowed the row's secondary click")
+    }
+
+    /// The pointerless route to the same choices: for a button whose press is its menu,
+    /// accessibility's "show menu" is that press.
     func testAccessibilityCanShowTheCreateButtonsMenu() throws {
         let (host, row) = hostedRow()
         var anchors: [ThemedMenuAnchor] = []
@@ -183,12 +191,7 @@ final class ProjectRowCreateButtonTests: XCTestCase {
     /// A button offering no menu of its own must not eat the click: the row it sits in has one,
     /// and a secondary click that lands on the `⋯` by a couple of points should still reach it.
     func testAButtonWithoutASecondaryMenuLetsTheClickThrough() throws {
-        final class ContextMenuHost: NSView {
-            var clicks = 0
-            override func rightMouseDown(with event: NSEvent) { clicks += 1 }
-        }
-
-        let host = ContextMenuHost(frame: NSRect(x: 0, y: 0, width: 120, height: 40))
+        let host = ClickRecordingHost(frame: NSRect(x: 0, y: 0, width: 120, height: 40))
         let button = ThemedIconButton(
             symbolName: "ellipsis",
             accessibility: "Actions",
@@ -199,6 +202,6 @@ final class ProjectRowCreateButtonTests: XCTestCase {
 
         button.rightMouseDown(with: try event(.rightMouseDown, on: button))
 
-        XCTAssertEqual(host.clicks, 1, "the button swallowed a secondary click it had no use for")
+        XCTAssertEqual(host.secondaryClicks, 1, "the button swallowed a secondary click it had no use for")
     }
 }

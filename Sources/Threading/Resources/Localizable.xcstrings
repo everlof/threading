@@ -25616,6 +25616,16 @@
         }
       }
     },
+    "New chat or terminal": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ny chatt eller terminal"
+          }
+        }
+      }
+    },
     "Rename Terminal": {
       "localizations": {
         "sv": {

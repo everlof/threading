@@ -2461,9 +2461,10 @@ private extension ProjectSidebarViewController {
         presentSidebarMenu(projectMenuEntries(row: row), from: anchor)
     }
 
-    /// The rest of what a project's `+` can make, offered on its secondary click. The press
-    /// itself makes a chat; this is where the terminal lives, and where the chat is named so
-    /// the gesture still says what it does.
+    /// What a project's `+` can make, offered on its press. The press used to make a chat
+    /// directly with this menu on the secondary click, but selecting the row already puts the
+    /// composer on screen — the press duplicated a click the pointer was one row-height from,
+    /// while hiding the terminal behind a gesture nothing advertised.
     @discardableResult
     private func showProjectCreationMenu(
         for projectID: ProjectID,
@@ -2747,10 +2748,6 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             )
             cell.onHoverAction = { [weak self] anchor in
                 self?.showProjectActions(for: projectNode.projectID, from: anchor)
-            }
-            cell.onCreateAction = { [weak self] projectID in
-                // What the `+` is for: a chat in this project, without a menu in the way.
-                self?.select(projectID: projectID)
             }
             cell.onCreateMenuAction = { [weak self] projectID, anchor, menuAnchor in
                 self?.showProjectCreationMenu(

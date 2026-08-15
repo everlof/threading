@@ -316,10 +316,10 @@ while the app runs, and on hover when aged. Code counts honour `.gitignore`, ski
 generated files, and neither measurement runs while a session in the project is working.
 
 ### Managing
-**Hover a project row** — a **+** and **⋯** fade in at its trailing edge. The **+** opens the
-chat composer straight away; **right-click it** for **New Chat…** or **New Terminal**. Clicking
-the project row itself also opens the chat composer. The **⋯** opens the project's actions, also
-available on **right-click**:
+**Hover a project row** — a **+** and **⋯** fade in at its trailing edge. The **+** opens a
+menu of what the project can start: **New Chat…** or **New Terminal**. (Clicking the project
+row itself opens the chat composer directly, so a new chat never needs the menu.) The **⋯**
+opens the project's actions, also available on **right-click**:
 - Rename Project…
 - Reveal in Finder
 - Project Icon — see [Project icons](#project-icons)
