@@ -129,7 +129,8 @@ extension SessionCoordinator {
         // scheduled send would complete on the strength of "we pressed Return" — a fact about
         // our keystrokes, not about the message — and that gap costs more here than anywhere
         // else it exists: nobody is watching, and `complete` deletes the only durable copy.
-        SessionMessageDelivery.deliver(message.prompt, to: sessionID) { [weak self] outcome in
+        let prompt = handingOverImages(of: message, to: sessionID)
+        SessionMessageDelivery.deliver(prompt, to: sessionID) { [weak self] outcome in
             guard let self else { return }
             switch outcome {
             case .sentNow, .queuedBehindTurn:
@@ -196,7 +197,7 @@ extension SessionCoordinator {
 
         guard container.launchInBackground(
             sessionID: session.id,
-            initialPrompt: message.prompt.transportTextForWake
+            initialPrompt: handingOverImages(of: message, to: session.id).transportTextForWake
         ) else {
             return finish(message, failedBecause: L10n.string(
                 "Its agent could not be started."
@@ -254,8 +255,17 @@ extension SessionCoordinator {
             }
         }
 
+        guard let session = startSessionUnattended(plan: plan, title: message.text) else {
+            return finish(message, failedBecause: L10n.string(
+                "Its session could not be created."
+            ))
+        }
+
+        // Composed after the session exists rather than before it, because the pictures can only
+        // be filed against a session that has a folder — and the paths that go into the opening
+        // prompt have to be the ones that filing produced.
         var opening = NewChatOpeningMessage.compose(
-            prompt: message.text,
+            prompt: handingOverImages(of: message, to: session.id).text,
             reusableMessage: environment.settings.newChatOpeningMessage
         )
         if let managedPlan = plan.managedWorkspacePlan {
@@ -263,11 +273,6 @@ extension SessionCoordinator {
                 to: opening,
                 plan: managedPlan
             )
-        }
-        guard let session = startSessionUnattended(plan: plan, title: message.text) else {
-            return finish(message, failedBecause: L10n.string(
-                "Its session could not be created."
-            ))
         }
 
         environment.eventLog.record(.composer, "Session started from a schedule", [
@@ -289,6 +294,41 @@ extension SessionCoordinator {
         sidebar.reload()
         deliveredScheduled(message, to: session.id, wokeTheAgent: true)
         container.reopenIfShowing(sessionID: session.id)
+    }
+
+    // MARK: - The Pictures It Was Carrying
+
+    /// Hands a scheduled send's images to the session receiving it, and answers the prompt with
+    /// their paths on the end.
+    ///
+    /// **Custody moves before the words do.** The copies this record has been holding since
+    /// Friday live in a directory `complete` is about to delete, so naming one of them in the
+    /// prompt would hand the agent a path that stops existing the moment the send succeeds. The
+    /// files are therefore recorded against the session first — the same door the composer's own
+    /// images go through, which is also what makes them show up in the attachments pane — and it
+    /// is the session's copies that are named.
+    ///
+    /// Repeatable on purpose. A delivery that finds its target busy is retried, and
+    /// `SessionAttachmentStore` matches a second mention against the source path it already has,
+    /// so the row is refreshed rather than duplicated.
+    private func handingOverImages(
+        of message: ScheduledMessage,
+        to sessionID: SessionID
+    ) -> ConversationPrompt {
+        let held = ScheduledMessageStore.shared.attachments.urls(for: message)
+        guard !held.isEmpty,
+              let folder = environment.projectStore.workingDirectory(forSessionID: sessionID)
+        else { return message.prompt }
+
+        let handed = PromptAttachment.handOver(
+            paths: held.map(\.path),
+            sessionID: sessionID,
+            projectRoot: URL(fileURLWithPath: folder, isDirectory: true)
+        )
+        return ConversationPrompt(
+            text: PromptAttachment.appending(paths: handed, to: message.text),
+            context: message.context
+        )
     }
 
     // MARK: - Recording What Happened

@@ -172,6 +172,54 @@ final class ScheduleMomentPickerTests: XCTestCase {
         XCTAssertEqual(picker.selectedMoment, expected(hour: 9, minute: 0))
     }
 
+    /// The name and the date sit in the middle of the slot the selection fills, not against its
+    /// top edge.
+    ///
+    /// A vertical `NSStackView` built from `init(views:)` puts its arranged views in the leading
+    /// gravity area, which for a vertical stack is the top — so the pair sat at the top of the
+    /// row with all of `dayRowHeight`'s spare height under it. Nothing failed: the ink was there,
+    /// in order, at the right size. It read as a selection plate with its text shoved into the
+    /// corner of it, and as a first row whose name touched the panel's own border.
+    func testADayRowCentresItsNameAndDateInTheRow() throws {
+        let picker = makePicker(now: moment(hour: 7, minute: 0))
+        picker.loadView()
+        picker.view.layoutSubtreeIfNeeded()
+
+        let days = try XCTUnwrap(
+            descendants(of: picker.view).compactMap { $0 as? ThemedTableView }.first
+        )
+        let cell = try XCTUnwrap(picker.tableView(
+            days,
+            viewFor: days.tableColumns.first,
+            row: 0
+        ))
+        cell.setFrameSize(NSSize(
+            width: ScheduleMomentPickerLayout.dayColumnWidth,
+            height: days.rowHeight
+        ))
+        cell.layoutSubtreeIfNeeded()
+
+        let labels = descendants(of: cell).compactMap { $0 as? NSTextField }
+        XCTAssertEqual(labels.count, 2, "a day row states its name and its date")
+
+        let ink = labels.reduce(NSRect.null) { union, label in
+            union.union(cell.convert(label.bounds, from: label))
+        }
+        XCTAssertGreaterThan(ink.height, 0)
+        XCTAssertEqual(
+            ink.midY,
+            cell.bounds.midY,
+            accuracy: 1,
+            "the labels sit \(ink.minY)pt from the bottom and \(cell.bounds.maxY - ink.maxY)pt "
+                + "from the top of a \(cell.bounds.height)pt row"
+        )
+        XCTAssertGreaterThan(
+            cell.bounds.maxY - ink.maxY,
+            Design.Spacing.tight,
+            "the top line of the row is against its own edge"
+        )
+    }
+
     /// The component contract every themed surface carries, on the sheet that is now the whole
     /// answer rather than an accessory inside an alert.
     func testPickerPassesTheThemeBoundaryAndRendersDistinctLiveThemes() throws {

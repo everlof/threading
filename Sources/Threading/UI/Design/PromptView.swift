@@ -1187,18 +1187,11 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     private static func quotedPath(_ path: String) -> String {
-        path.contains(" ") ? "\"\(path)\"" : path
+        PromptAttachment.quotedPath(path)
     }
 
     private func appending(paths: [String], to text: String) -> String {
-        guard !paths.isEmpty else { return text }
-
-        let addition = paths.map(Self.quotedPath).joined(separator: " ")
-        guard !text.isEmpty else { return addition }
-        guard !text.hasSuffix(" "), !text.hasSuffix("\n") else {
-            return text + addition
-        }
-        return text + " " + addition
+        PromptAttachment.appending(paths: paths, to: text)
     }
 
     private func layoutAttachmentStrip() {
@@ -2063,6 +2056,40 @@ enum PromptAttachment {
                 preferredName: isGenerated ? L10n.string("Pasted image") : nil
             )
         }
+    }
+
+    /// Files pictures with the session about to be handed them, and answers the paths to name.
+    ///
+    /// The answer is the session's **own** copies, not the caller's: a scheduled send hands over
+    /// files from a directory it is about to delete, and a path in a prompt that names one of
+    /// those is a picture the agent opens after it has gone. Falls back to what it was given if
+    /// custody could not be taken, because a path that might still work beats no picture at all.
+    @MainActor
+    static func handOver(paths: [String], sessionID: SessionID, projectRoot: URL) -> [String] {
+        guard !paths.isEmpty else { return [] }
+        let recorded = record(paths: paths, sessionID: sessionID, projectRoot: projectRoot)
+        return recorded.isEmpty ? paths : recorded.map(\.url.path)
+    }
+
+    /// The words followed by quoted paths — the only form of an image either CLI can open.
+    ///
+    /// Shared with the scheduled send that finally hands its pictures over: the composer builds
+    /// this at submission time from the box's own attachments, and a message scheduled on Friday
+    /// builds it on Monday from the copies the app took. One spelling, so a path with a space in
+    /// it is quoted the same way in both.
+    static func appending(paths: [String], to text: String) -> String {
+        guard !paths.isEmpty else { return text }
+
+        let addition = paths.map(quotedPath).joined(separator: " ")
+        guard !text.isEmpty else { return addition }
+        guard !text.hasSuffix(" "), !text.hasSuffix("\n") else {
+            return text + addition
+        }
+        return text + " " + addition
+    }
+
+    static func quotedPath(_ path: String) -> String {
+        path.contains(" ") ? "\"\(path)\"" : path
     }
 
     /// Whether `paths` would find anything, without doing the work.

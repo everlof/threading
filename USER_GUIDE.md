@@ -1284,10 +1284,15 @@ conversation or read it in full, and Threading will not answer that question wit
 so those wait for one click instead. And a session that is mid-turn when the moment arrives is
 waited on rather than interrupted.
 
-**Images can't be scheduled.** A pasted screenshot lives in a temporary file that may be gone by
-the time the message sends, so the offer refuses while one is attached. It refuses out loud: the
-clock stays pressable whenever it cannot be used — no project chosen, nothing written yet, or an
-image attached — and opening it shows the reason instead of a list of times.
+**Images are scheduled with the message.** Threading copies each attached picture into its own
+storage the moment you schedule, so the send no longer depends on the temporary file the
+screenshot arrived in — that file is free to disappear over the weekend. The waiting row counts
+what it is holding ("Fix this bug · 2 images"), and when the message finally goes the pictures
+are filed with the session like any other attachment, so they appear in its Attachments pane.
+Editing or sending a waiting message hands the pictures straight back to the composer.
+
+The clock stays pressable whenever a start cannot be scheduled — no project chosen, nothing
+written yet — and opening it shows the reason instead of a list of times.
 
 If you schedule against a usage window's reset, **Settings ▸ Usage Windows** decides what happens
 when the moment comes and the window has not actually turned over: send it anyway, wait once for

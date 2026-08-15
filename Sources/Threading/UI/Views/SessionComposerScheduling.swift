@@ -14,10 +14,13 @@ extension SessionComposerViewController {
 
     /// The offers behind the Schedule chip.
     ///
-    /// Refuses rather than offering an unusable menu: there has to be a project, something
-    /// written, and no images — each with its own sentence, because "nothing happened when I
-    /// clicked it" is the worst of the three possible answers. The missing project used to be
-    /// the exception, answered with an empty menu, which is that worst answer exactly.
+    /// Refuses rather than offering an unusable menu: there has to be a project and something
+    /// written, each with its own sentence, because "nothing happened when I clicked it" is the
+    /// worst possible answer. The missing project used to be the exception, answered with an
+    /// empty menu, which is that worst answer exactly.
+    ///
+    /// An attached image used to be a third refusal, on the grounds that a pasted screenshot is
+    /// a temporary file. It is now taken custody of instead — see `ScheduledAttachmentStore`.
     func scheduleEntries() -> [ThemedMenuEntry] {
         if let reason = scheduleRefusalReason() {
             return [.item(ThemedMenuItem(title: reason, isEnabled: false))]
@@ -84,8 +87,11 @@ extension SessionComposerViewController {
             // states one blocker once rather than three phrasings of it.
             return ComposerDefaults.chooseProjectFirstReason
         }
-        if !promptView.attachmentPaths.isEmpty {
-            return L10n.string("Images can't be scheduled — they are temporary files.")
+        if promptView.attachmentPaths.count > ScheduledAttachmentDefaults.maximumPerMessage {
+            return L10n.format(
+                "A scheduled session can carry at most %lld images.",
+                Int64(ScheduledAttachmentDefaults.maximumPerMessage)
+            )
         }
         if promptView.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return L10n.string("Write the brief first.")
@@ -100,26 +106,15 @@ extension SessionComposerViewController {
         let brief = promptView.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !brief.isEmpty else { return }
 
-        // The same checkout resolution an immediate start performs, done now rather than at fire
-        // time: the branch named here is the one the user was looking at.
-        let plan = ScheduledSessionPlan(
-            reservedSessionID: SessionID(),
-            projectID: projectID,
-            kind: selectedAgent,
-            accountHandle: selectedAccountHandle,
-            model: selectedModel,
-            reasoningEffort: selectedReasoningEffort,
-            fastMode: selectedFastMode,
-            branch: selectedBranch,
-            usesNativeUI: usesNativeUI,
-            permissionMode: selectedAgent.supportsPermissionModes ? selectedPermissionMode : nil,
-            managedWorkspacePlan: selectedManagedWorkspacePlan
-        )
+        let id = ScheduledMessageID()
+        guard let attachments = takeCustodyOfAttachments(for: id) else { return }
 
         let message = ScheduledMessage(
+            id: id,
             dueAt: date,
-            target: .newSession(plan),
+            target: .newSession(frozenPlan(in: projectID, reserving: SessionID())),
             text: brief,
+            attachments: attachments,
             anchor: anchor
         )
 
@@ -133,8 +128,35 @@ extension SessionComposerViewController {
         let brief = promptView.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !brief.isEmpty else { return }
 
-        let plan = ScheduledSessionPlan(
-            reservedSessionID: SessionID(),
+        let id = ScheduledMessageID()
+        guard let attachments = takeCustodyOfAttachments(for: id) else { return }
+
+        let message = ScheduledMessage(
+            id: id,
+            whenSessionFinishes: watchedSessionID,
+            target: .newSession(frozenPlan(in: projectID, reserving: SessionID())),
+            text: brief,
+            attachments: attachments
+        )
+
+        guard storeScheduledStart(message, projectID: projectID, event: [
+            "afterSession": watchedSessionID.uuidString
+        ]) else { return }
+
+        ScheduledMessageScheduler.shared.evaluateCompletion(
+            of: watchedSessionID,
+            acceptsSettledSnapshot: true
+        )
+    }
+
+    /// The same checkout resolution an immediate start performs, done now rather than at fire
+    /// time: the branch named here is the one the user was looking at.
+    private func frozenPlan(
+        in projectID: ProjectID,
+        reserving sessionID: SessionID
+    ) -> ScheduledSessionPlan {
+        ScheduledSessionPlan(
+            reservedSessionID: sessionID,
             projectID: projectID,
             kind: selectedAgent,
             accountHandle: selectedAccountHandle,
@@ -146,20 +168,24 @@ extension SessionComposerViewController {
             permissionMode: selectedAgent.supportsPermissionModes ? selectedPermissionMode : nil,
             managedWorkspacePlan: selectedManagedWorkspacePlan
         )
-        let message = ScheduledMessage(
-            whenSessionFinishes: watchedSessionID,
-            target: .newSession(plan),
-            text: brief
-        )
+    }
 
-        guard storeScheduledStart(message, projectID: projectID, event: [
-            "afterSession": watchedSessionID.uuidString
-        ]) else { return }
-
-        ScheduledMessageScheduler.shared.evaluateCompletion(
-            of: watchedSessionID,
-            acceptsSettledSnapshot: true
-        )
+    /// Copies whatever pictures the box is holding into the app's own keeping, under the id the
+    /// record is about to be given. Answers nil once the refusal has been shown — the composer
+    /// still has everything, so the words and the images stay where the user can act on them.
+    private func takeCustodyOfAttachments(
+        for id: ScheduledMessageID
+    ) -> [ScheduledAttachment]? {
+        guard let taken = ScheduledAttachmentStore.shared.take(
+            promptView.attachmentPaths,
+            for: id
+        ) else {
+            reportScheduleFailure(L10n.string(
+                "The attached images could not be kept, so this was not scheduled."
+            ))
+            return nil
+        }
+        return taken
     }
 
     @discardableResult
@@ -176,7 +202,7 @@ extension SessionComposerViewController {
             ) ?? (ScheduledSessionReservation.reserve(message, in: .shared) != nil)
             guard reserved else {
                 // The record is not allowed to outlive the conversation it promised to show.
-                // Remove it again if its matching conversation could not be persisted.
+                // Removing it also releases the attachment copies this attempt owned.
                 ScheduledMessageStore.shared.remove(message.id)
                 reportScheduleFailure(L10n.string("Its session could not be created."))
                 return false
@@ -194,15 +220,9 @@ extension SessionComposerViewController {
             refreshScheduledStrip()
             return true
         case .failure(let refusal):
-            let alert = ThemedAlert()
-            alert.messageText = L10n.string("Couldn't schedule this")
-            alert.informativeText = ScheduledRefusalText.sentence(for: refusal)
-            alert.alertStyle = .warning
-            if let window = view.window {
-                alert.beginSheetModal(for: window)
-            } else {
-                alert.runModal()
-            }
+            // The record never landed, so nothing owns the copies this attempt took.
+            ScheduledMessageStore.shared.attachments.release(message.id)
+            reportScheduleFailure(ScheduledRefusalText.sentence(for: refusal))
             return false
         }
     }
@@ -236,7 +256,7 @@ extension SessionComposerViewController {
             ScheduledMessageStore.shared.sessionStarts(in: projectID).map { message in
                 ScheduledMessageStripView.Row(
                     id: message.id,
-                    summary: message.summary,
+                    summary: ScheduledTiming.summary(of: message),
                     timing: ScheduledTiming.automaticStartSentence(for: message, from: now),
                     problem: ScheduledTiming.problem(for: message.state)
                 )
@@ -277,8 +297,12 @@ extension SessionComposerViewController {
                   let message = ScheduledMessageStore.shared[id],
                   case .newSession(let plan) = message.target else { return }
 
+            // Detached before the removal, and in that order: `remove` deletes the pictures, so
+            // taking them back has to happen while the record still owns them.
+            let images = ScheduledMessageStore.shared.attachments.detach(message)
             self.discardScheduledStart(message)
             self.promptView.stringValue = message.text
+            self.promptView.attachFiles(at: images)
             self.adopt(plan)
             self.view.window?.makeFirstResponder(self.promptView)
             self.refreshScheduledStrip()

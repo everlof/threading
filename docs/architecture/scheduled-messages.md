@@ -32,10 +32,12 @@ every delivery rule. Splitting them would be two of everything below.
   work remains `.working`, so the condition is not satisfied while a subagent or other reported
   work is still outstanding.
 
-**Images are unschedulable, and the composer says so rather than dropping them.** A pasted
-screenshot is a file in a temporary directory, and a path written down now can name nothing by
-Monday — the reason [`persistence.md`](persistence.md) already refuses to *draft* them. Scheduling
-is that hazard with a longer fuse, so the affordance is disabled with its reason on the tooltip.
+**Images ride along as copies.** They were refused outright at first, and the reason was sound as
+far as it went: a pasted screenshot is a file in a temporary directory, and a path written down
+now can name nothing by Monday — the reason [`persistence.md`](persistence.md) already refuses to
+*draft* them. But that is an argument against keeping *the path*, not against keeping the
+picture. `ScheduledAttachmentStore` takes a copy at the moment of scheduling, so the record stops
+depending on anything outside it surviving the wait. See [Custody](#custody) below.
 
 **A time trigger keeps the instant and the words.** `dueAt` is an absolute `Date`;
 `intendedTimeZone` and `intendedWallClock` are what the user actually chose. They disagree the
@@ -81,6 +83,64 @@ that is gone.
 **`init(directory:)` exists for the tests**, for `DraftStore`'s reason: the bundle is hosted in the
 app, so a store that always resolved Application Support would have every run editing the
 developer's own scheduled sends.
+
+## Custody
+
+`ScheduledAttachmentStore` owns the bytes behind `ScheduledMessage.attachments`, in
+`scheduled-attachments/<message id>/<slot>/<name>` beside `scheduled-messages.json`.
+
+**Beside the record, not inside it.** The record's whole contract is a synchronous verified write
+on every mutation; inlining megabytes of PNG would make each of those writes proportional to the
+pictures rather than to the words. So the JSON keeps the names and this keeps the bytes.
+
+**A slot per image, so nothing is renamed.** Two screenshots can both be `Screenshot.png`, and
+renaming one breaks the two things downstream that read the name: a pasted image is recognised by
+its `threading-attachment-` prefix, and the attachments pane shows a dropped file under the name
+it already had. `slot` and `name` are stored apart rather than as one relative path, because a
+single string decoded off disk is one `../` away from naming somewhere else — the name is
+re-sanitized on the way out as well as on the way in.
+
+**Refuses rather than taking a short set.** A send that quietly lost one of three pictures is
+worse than one that was refused: the composer still holds all three when custody is asked for, so
+a stated refusal is the only outcome that leaves the user able to act. Anything already copied is
+removed on the way out. Bounded by `ScheduledAttachmentDefaults` — a count *and* an aggregate byte
+ceiling, because a per-image cap is not an aggregate cap.
+
+**Released by `ScheduledMessageStore`'s own mutations**, never by the surfaces that ask for them:
+`remove`, `forget(sessionID:)`, `forget(projectID:)` and `retainOnly` each drop what leaves, and
+`load` sweeps directories no record names — the record and its pictures are two writes, and a
+quit between them strands one. The release happens *after* the commit: a failed write leaves the
+record current, and a record whose pictures had already gone is a send that can no longer be sent.
+
+**The sweep spares what this run is still in the middle of.** Those same two writes leave a
+window where the bytes exist and nothing names them, which is indistinguishable from an orphan —
+and `ScheduledMessageStore.shared` is constructed lazily, so the *first* schedule of a run can be
+what triggers `load`, whose sweep then lands inside that window. The record went to disk naming
+two files deleted a microsecond earlier. `ScheduledAttachmentStore` therefore keeps an in-memory
+`inFlight` set — ids it has taken custody for and not yet released — and `retainOnly` keeps the
+union. It is memory-only for `claimed`'s reason: it describes what this process is in the middle
+of, not what is durable, so a later launch correctly sees a genuinely stranded directory as
+stranded. Caught end-to-end from the composer, not by a unit test: the two stores only meet in the
+app.
+
+**Custody moves before the words do.** At fire time the pictures are recorded against the
+receiving session through `PromptAttachment.handOver` — the same door the composer's own images
+use, which is what puts them in the attachments pane — and it is the *session's* copies whose
+paths go into the prompt. Naming our own would hand the agent a path that stops existing the
+moment `complete` deletes the record. Repeatable on purpose, since a delivery that finds its
+target busy is retried and `SessionAttachmentStore` matches a second mention by source path.
+
+**Editing — and Send now for a scheduled reply — detaches rather than borrows.** `detach` *moves*
+the files to the temporary directory and hands those paths to the composer, because what comes
+back has to be exactly what a freshly pasted image is: the composer will hold the path, send it,
+and take custody again if the message is scheduled a second time. Lending our own file would leave
+the composer pointing into a directory the very next `remove` deletes. Start now for a scheduled
+session is different: it runs the same reserved conversation, so its normal fire-time handover
+keeps custody intact.
+
+**The conversation surface was losing them silently.** Only the draft view ever refused an
+attached image; chat read the text and the context, left the pictures in the box, and then cleared
+it — so a reply scheduled with a screenshot attached arrived without one and nothing said so.
 
 ## The scheduler announces; the coordinator performs
 
@@ -201,6 +261,15 @@ deleted branch or folder from silently changing the target.
 `ScheduledTimePresets` is pure — a function of `(now, calendar, locale)` and a usage reading — so
 every rule is a test and none of it lives in a view.
 
+**A wall-clock offer states its time beside the title, not under it.**
+`ThemedMenuMetrics.heights` gives every row in a run the height of the tallest kind in it, which
+is right for a group of logins where some carry a scoped window and reads as a defect here: "In an
+hour" is the only wall-clock offer whose title does not already say the time, so its one subtitle
+stretched "Tomorrow at 09:00" and "Monday at 09:00" into 46pt rows holding a single line each.
+`ThemedMenuItem.titleDetail` exists for exactly this and says so in its own comment. A reset offer
+keeps its subtitle — "14:30 · resets in 4h 37m" is two facts rather than a qualifier, and it sits
+in its own run behind a separator, which is what makes the change of height legible.
+
 - **In an hour**, rounded up to the next five minutes. The one a coding-agent composer wants most:
   *start on this after my meeting*.
 - **Tomorrow at 9:00**, and **Monday at 9:00** — suppressed on Sunday, where it would name
@@ -255,17 +324,16 @@ A split Start button was the other candidate and was rejected: `ThemedButton` ha
 means teaching every button in the app to stop drawing its own surface.
 
 **It is pressable even when it cannot be used**, because the refusal *is* the answer. There are
-four reasons a start cannot be scheduled — no project, nothing written, an attached image, and a
-store that refuses the record — and `scheduleEntries` states the first three as a single disabled
-menu row, in the words the user should read, on the grounds that "nothing happened when I clicked
-it" is the worst of them. Disabling the button defeated exactly that: the press never arrived, so
-the sentence survived only on a tooltip, and what reached the user was a dim glyph and a question
-("why is this disabled for me?"). The tooltip still carries the reason for a pointer that pauses;
-the press now carries it for everyone else. The missing-project case is one of the three rather
-than an empty menu, and it borrows the composer's own `chooseProjectFirstReason` so the screen
-states one blocker once. Images stay refused for the reason `DraftStore` refuses to draft them: a
-pasted screenshot lives in a temporary directory, and a path recorded now can name nothing by
-Monday.
+four reasons a start cannot be scheduled — no project, nothing written, more pictures than
+custody accepts, and a store that refuses the record — and `scheduleEntries` states the first
+three as a single disabled menu row, in the words the user should read, on the grounds that
+"nothing happened when I clicked it" is the worst of them. Disabling the button defeated exactly
+that: the press never arrived, so the sentence survived only on a tooltip, and what reached the
+user was a dim glyph and a question ("why is this disabled for me?"). The tooltip still carries
+the reason for a pointer that pauses; the press now carries it for everyone else. The
+missing-project case is one of the three rather than an empty menu, and it borrows the composer's
+own `chooseProjectFirstReason` so the screen states one blocker once. An attached image used to be
+one of these refusals outright; see [Custody](#custody).
 
 **“When a conversation finishes…” in both schedule menus.** The row is enabled only when at
 least one live conversation has a current turn with an authoritative finish signal. It opens a
@@ -294,6 +362,14 @@ day still has it and on that day's next quarter hour otherwise; the list's highl
 that moment, which is why the lists do *not* set `allowsEmptySelection = false` — a list that
 refuses an empty selection re-picks its first row after a reload and posts it late enough to
 overwrite the sheet's own choice.
+
+**A day row centres its pair by constraint, not by the stack.** A vertical `NSStackView` built
+from `init(views:)` puts everything in its leading gravity area, which for a vertical stack is the
+top — so the name and its date sat against the row's top edge with all of `dayRowHeight`'s spare
+height under them. Every assertion passed; what it looked like was a selection plate with its text
+shoved into the corner, and a first row whose name touched the panel's own border. `dayRowHeight`
+states a floor as well as a computed height, so the spare space is real and has to be spent
+deliberately rather than all at one end.
 
 **`ScheduledMessageStripView`, above the composer** — and deliberately *not* rows in
 `ConversationOutboxRailView`. That rail computes a drag's index across every pending row and hands

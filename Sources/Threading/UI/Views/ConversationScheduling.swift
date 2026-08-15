@@ -66,18 +66,27 @@ extension ConversationViewController {
     ///
     /// Empties the box on success only, which is the rule the immediate send already follows: a
     /// refusal has to leave the words where the user can still act on them.
+    ///
+    /// **Images come too.** This surface never refused them the way the draft view did — it
+    /// simply read the text and the context and left the pictures in the box to be cleared, so a
+    /// reply scheduled with a screenshot attached arrived without it. They are taken custody of
+    /// here for the same reason and by the same route as a scheduled session start.
     func scheduleComposerContents(at date: Date, anchor: ScheduledMessage.Anchor) {
         let prompt = ConversationPrompt(
             text: promptView.stringValue,
             context: promptView.contextAttachments
         )
-        guard !prompt.isEmpty else { return }
+        let id = ScheduledMessageID()
+        guard let attachments = takeCustodyOfAttachments(for: id) else { return }
+        guard !prompt.isEmpty || !attachments.isEmpty else { return }
 
         let message = ScheduledMessage(
+            id: id,
             dueAt: date,
             target: .session(sessionID),
             text: prompt.text,
             context: prompt.context,
+            attachments: attachments,
             anchor: anchor
         )
 
@@ -89,13 +98,17 @@ extension ConversationViewController {
             text: promptView.stringValue,
             context: promptView.contextAttachments
         )
-        guard !prompt.isEmpty else { return }
+        let id = ScheduledMessageID()
+        guard let attachments = takeCustodyOfAttachments(for: id) else { return }
+        guard !prompt.isEmpty || !attachments.isEmpty else { return }
 
         let message = ScheduledMessage(
+            id: id,
             whenSessionFinishes: watchedSessionID,
             target: .session(sessionID),
             text: prompt.text,
-            context: prompt.context
+            context: prompt.context,
+            attachments: attachments
         )
         guard storeComposerContents(message) else { return }
 
@@ -107,6 +120,24 @@ extension ConversationViewController {
         )
     }
 
+    /// Copies the box's pictures into the app's own keeping under the id this record will have.
+    /// Answers nil once the refusal has been said, leaving the composer holding everything.
+    private func takeCustodyOfAttachments(
+        for id: ScheduledMessageID
+    ) -> [ScheduledAttachment]? {
+        guard let taken = ScheduledAttachmentStore.shared.take(
+            promptView.attachmentPaths,
+            for: id
+        ) else {
+            apply(timeline.appendNotice(
+                L10n.string("The attached images could not be kept, so this was not scheduled."),
+                kind: .error
+            ))
+            return nil
+        }
+        return taken
+    }
+
     @discardableResult
     private func storeComposerContents(_ message: ScheduledMessage) -> Bool {
         switch ScheduledMessageStore.shared.add(message) {
@@ -116,6 +147,8 @@ extension ConversationViewController {
             refreshScheduledStrip()
             return true
         case .failure(let refusal):
+            // Nothing owns the copies this attempt took once the record is refused.
+            ScheduledMessageStore.shared.attachments.release(message.id)
             apply(timeline.appendNotice(ScheduledRefusalText.sentence(for: refusal), kind: .error))
             return false
         }
@@ -132,7 +165,7 @@ extension ConversationViewController {
             ScheduledMessageStore.shared.messages(for: sessionID).map { message in
                 ScheduledMessageStripView.Row(
                     id: message.id,
-                    summary: message.summary,
+                    summary: ScheduledTiming.summary(of: message),
                     timing: ScheduledTiming.sentence(for: message, from: now),
                     problem: ScheduledTiming.problem(for: message.state)
                 )
@@ -157,9 +190,12 @@ extension ConversationViewController {
             )
             if !draft.isEmpty { self.outbox.append(draft) }
 
+            // Before the removal: `remove` deletes the pictures this record owns.
+            let images = ScheduledMessageStore.shared.attachments.detach(message)
             ScheduledMessageStore.shared.remove(id)
             self.promptView.stringValue = message.text
             self.promptView.clearContextAttachments()
+            self.promptView.attachFiles(at: images)
             for attachment in message.context {
                 self.promptView.addContextAttachment(attachment)
             }
@@ -175,10 +211,34 @@ extension ConversationViewController {
 
         scheduledStrip.onSendNow = { [weak self] id in
             guard let self, let message = ScheduledMessageStore.shared[id] else { return }
+            let images = ScheduledMessageStore.shared.attachments.detach(message)
             ScheduledMessageStore.shared.remove(id)
-            _ = self.sendAppPrompt(message.text, context: message.context)
+            _ = self.sendAppPrompt(
+                self.handingOver(images, appendedTo: message.text),
+                context: message.context
+            )
             self.refreshScheduledStrip()
         }
+    }
+
+    /// Files a waiting send's pictures with this conversation and puts their paths on the end of
+    /// its words, which is the only form of an image either CLI reads.
+    private func handingOver(_ paths: [String], appendedTo text: String) -> String {
+        // The folder comes from the store rather than from the controller's own `project`, which
+        // is private to its file — and the store is the same answer the unattended delivery uses,
+        // so a picture lands in the same place whichever route sent it.
+        guard !paths.isEmpty,
+              let folder = ProjectStore.shared.workingDirectory(forSessionID: sessionID)
+        else { return text }
+
+        return PromptAttachment.appending(
+            paths: PromptAttachment.handOver(
+                paths: paths,
+                sessionID: sessionID,
+                projectRoot: URL(fileURLWithPath: folder, isDirectory: true)
+            ),
+            to: text
+        )
     }
 }
 
@@ -190,6 +250,18 @@ extension ConversationViewController {
 /// three different ways.
 @MainActor
 enum ScheduledTiming {
+
+    /// What a waiting row says it is holding.
+    ///
+    /// The pictures are counted rather than left implicit: by the time this row is read the file
+    /// the user attached is gone from the temporary directory, and the count is the only evidence
+    /// on screen that the app took its own copy. A send with no images reads exactly as before.
+    static func summary(of message: ScheduledMessage) -> String {
+        let words = message.summary
+        // A wordless send already *is* its count, and appending it would read "1 image · 1 image".
+        guard let note = message.attachmentNote, words != note else { return words }
+        return L10n.format("%@ · %@", words, note)
+    }
 
     static func sentence(for message: ScheduledMessage, from now: Date = Date()) -> String {
         switch message.trigger {

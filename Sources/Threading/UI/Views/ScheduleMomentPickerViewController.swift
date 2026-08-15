@@ -578,6 +578,16 @@ final class ScheduleMomentPickerViewController: NSViewController {
 
     // MARK: - Rows
 
+    /// A day's name over its date, centred in the slot the selection fills.
+    ///
+    /// **The pair is centred by a constraint, not by the stack.** A vertical `NSStackView` built
+    /// from `init(views:)` puts everything in its leading gravity area, which is the top — so the
+    /// two labels sat against the row's top edge with the row's whole spare height left under
+    /// them. Every assertion about this row passed: the ink was there, in the right order, at the
+    /// right size. What it looked like was a selection plate with its text shoved into the top of
+    /// it, and a first row whose name touched the panel's own border. `dayRowHeight` states a
+    /// floor as well as a computed height, so the spare space is real and has to be spent
+    /// deliberately rather than all at one end.
     private func makeDayRow(_ day: ScheduleMomentOptions.Day) -> NSView {
         let title = NSTextField(labelWithString: day.title)
         title.applyFont(.body)
@@ -591,13 +601,26 @@ final class ScheduleMomentPickerViewController: NSViewController {
         labels.orientation = .vertical
         labels.alignment = .leading
         labels.spacing = Design.Spacing.hairline
-        labels.edgeInsets = NSEdgeInsets(
-            top: 0,
-            left: Design.Spacing.small,
-            bottom: 0,
-            right: Design.Spacing.small
-        )
-        return labels
+        labels.translatesAutoresizingMaskIntoConstraints = false
+
+        let cell = NSView()
+        cell.addSubview(labels)
+        NSLayoutConstraint.activate([
+            labels.leadingAnchor.constraint(
+                equalTo: cell.leadingAnchor,
+                constant: Design.Spacing.small
+            ),
+            labels.trailingAnchor.constraint(
+                lessThanOrEqualTo: cell.trailingAnchor,
+                constant: -Design.Spacing.small
+            ),
+            labels.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            // A row that somehow holds more than it was measured for grows the cell honestly
+            // rather than drawing over its neighbour.
+            labels.topAnchor.constraint(greaterThanOrEqualTo: cell.topAnchor),
+            labels.bottomAnchor.constraint(lessThanOrEqualTo: cell.bottomAnchor)
+        ])
+        return cell
     }
 
     private func makeTimeRow(_ time: ScheduleMomentOptions.Time) -> NSView {

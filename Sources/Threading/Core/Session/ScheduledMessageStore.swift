@@ -43,6 +43,12 @@ final class ScheduledMessageStore {
     private let persistence: RecoverableFileStore<ScheduledMessagesFile>
     private let center: NotificationCenter
 
+    /// The bytes behind `ScheduledMessage.attachments`. Held here rather than at the surfaces
+    /// because every way a record leaves — a removed row, a deleted session, a deleted project,
+    /// a sweep — has to take its pictures with it, and there is no route out that does not pass
+    /// through this file.
+    let attachments: ScheduledAttachmentStore
+
     /// Ids taken by a performer and not yet resolved. Held in memory only: a claim is a promise
     /// about *this* run of the app, and a claim that survived a quit would strand the record.
     private var claimed: Set<ScheduledMessageID> = []
@@ -58,6 +64,15 @@ final class ScheduledMessageStore {
             .appendingPathComponent(ProjectIconDefaults.applicationDirectoryName)
 
         self.center = center
+        // An injected directory takes the pictures with it. The words and the bytes are one
+        // record split across two places, and a test store writing its own JSON to a scratch
+        // path while deleting from Application Support would be the file-store twin of the
+        // `UserDefaults` trap CLAUDE.md records.
+        if let directory {
+            self.attachments = ScheduledAttachmentStore(directory: directory)
+        } else {
+            self.attachments = .shared
+        }
         self.persistence = RecoverableFileStore(
             url: root.appendingPathComponent(ScheduledMessageDefaults.fileName),
             fileManager: fileManager,
@@ -213,6 +228,9 @@ final class ScheduledMessageStore {
         updated.remove(at: index)
         guard commit(updated) else { return false }
         claimed.remove(id)
+        // After the commit, never before: a failed write leaves the record current, and a record
+        // whose pictures had already been deleted would be a send that could no longer be sent.
+        attachments.release(id)
         return true
     }
 
@@ -365,12 +383,14 @@ final class ScheduledMessageStore {
         guard changed else { return }
         guard commit(retained) else { return }
         claimed.formIntersection(Set(retained.map(\.id)))
+        attachments.retainOnly(Set(retained.map(\.id)))
     }
 
     func forget(projectID: ProjectID) {
         let retained = messages.filter { $0.target.projectID != projectID }
         guard retained.count != messages.count, commit(retained) else { return }
         claimed.formIntersection(Set(retained.map(\.id)))
+        attachments.retainOnly(Set(retained.map(\.id)))
     }
 
     /// Drops everything whose target is not in the given sets. The sweep for a store that has
@@ -409,6 +429,7 @@ final class ScheduledMessageStore {
         guard changed else { return }
         guard commit(retained) else { return }
         claimed.formIntersection(Set(retained.map(\.id)))
+        attachments.retainOnly(Set(retained.map(\.id)))
     }
 
     // MARK: - Private Methods
@@ -429,6 +450,9 @@ final class ScheduledMessageStore {
             }
         }
         messages = outcome.value.messages
+        // The record and its pictures are two writes, so a quit between them can strand a
+        // directory nothing names. Swept once, here, against the list that just came off disk.
+        attachments.retainOnly(Set(messages.map(\.id)))
     }
 
     /// Makes disk authoritative for every mutation. A scheduled send can be the only copy of

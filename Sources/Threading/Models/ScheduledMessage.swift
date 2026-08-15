@@ -87,6 +87,34 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
     }
 }
 
+// MARK: - Scheduled Attachment
+
+/// One image a scheduled send is carrying, named where the app keeps its own copy of it.
+///
+/// **Not a path to where the user's picture happened to be.** A pasted screenshot lands in the
+/// temporary directory, which is exactly the file the system is entitled to delete before
+/// Monday — the reason scheduling images was refused outright at first. The record therefore
+/// names a copy the app took at the moment of scheduling, inside a directory it owns, and the
+/// original is never read again.
+///
+/// `slot` and `name` are stored apart rather than as one relative path so the store can rebuild
+/// the location itself. A single string decoded straight out of a file is one `../` away from
+/// naming somewhere else entirely, and the picture's own name has to survive intact: a pasted
+/// screenshot is recognised downstream by its `threading-attachment-` prefix, and the session
+/// attachments pane shows a dropped file under the name it already had.
+struct ScheduledAttachment: Codable, Sendable, Equatable {
+    /// Which numbered slot inside the message's own directory holds it. Slots keep two files
+    /// called `Screenshot.png` from colliding without renaming either of them.
+    let slot: Int
+    /// The file's own name, as the user knew it.
+    let name: String
+
+    init(slot: Int, name: String) {
+        self.slot = slot
+        self.name = name
+    }
+}
+
 // MARK: - Scheduled Message
 
 /// A message the user wrote now and asked to be sent later.
@@ -95,10 +123,11 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
 /// that does not. They share a store, a strip and every rule about what happens when their
 /// trigger fires, so splitting them into two types would be two of everything below.
 ///
-/// **Images are deliberately absent.** A pasted screenshot is a file in a temporary directory,
-/// and a path written down now can name nothing by Monday — which is why `DraftStore` already
-/// refuses to draft them. Scheduling is that hazard at its worst, so the composer refuses to
-/// schedule while any are attached rather than sending a brief whose pictures are gone.
+/// **Images ride along as copies, not as paths.** They were refused entirely to begin with, on
+/// the sound observation that a pasted screenshot is a file in a temporary directory and a path
+/// written down now can name nothing by Monday. That is an argument against *the path*, not
+/// against the picture: `ScheduledAttachment` names bytes the app took custody of when the send
+/// was scheduled, so the record no longer depends on anything outside it surviving the wait.
 struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
 
     // MARK: - Target
@@ -232,6 +261,9 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
     var target: Target
     var text: String
     var context: [ConversationContextAttachment]
+    /// Images this send is carrying, in the order their paths will be handed over.
+    /// `ScheduledAttachmentStore` owns the bytes; this names them.
+    var attachments: [ScheduledAttachment]
     var trigger: Trigger
     var state: State
 
@@ -255,6 +287,7 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         target: Target,
         text: String,
         context: [ConversationContextAttachment] = [],
+        attachments: [ScheduledAttachment] = [],
         anchor: Anchor = .wallClock,
         state: State = .armed,
         resetRearmCount: Int = 0
@@ -264,6 +297,7 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
 
         self.id = id
         self.createdAt = createdAt
+        self.attachments = attachments
         self.trigger = .time(TimeTrigger(
             dueAt: dueAt,
             intendedTimeZoneIdentifier: timeZone.identifier,
@@ -288,6 +322,7 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         target: Target,
         text: String,
         context: [ConversationContextAttachment] = [],
+        attachments: [ScheduledAttachment] = [],
         state: State = .armed
     ) {
         self.id = id
@@ -295,6 +330,7 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         self.target = target
         self.text = text
         self.context = context
+        self.attachments = attachments
         self.trigger = .sessionFinished(watchedSessionID)
         self.state = state
         self.resetRearmCount = 0
@@ -310,6 +346,7 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         case target
         case text
         case context
+        case attachments
         case trigger
         case state
         case resetRearmCount
@@ -329,6 +366,12 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         context = try container.decodeIfPresent(
             [ConversationContextAttachment].self,
             forKey: .context
+        ) ?? []
+        // Absent in every record written before images could be scheduled, and absent again the
+        // moment a send stops carrying any — decoded permissively for the reason `context` is.
+        attachments = try container.decodeIfPresent(
+            [ScheduledAttachment].self,
+            forKey: .attachments
         ) ?? []
         state = try container.decode(State.self, forKey: .state)
         resetRearmCount = try container.decodeIfPresent(Int.self, forKey: .resetRearmCount) ?? 0
@@ -358,6 +401,7 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         try container.encode(target, forKey: .target)
         try container.encode(text, forKey: .text)
         try container.encode(context, forKey: .context)
+        try container.encode(attachments, forKey: .attachments)
         try container.encode(trigger, forKey: .trigger)
         try container.encode(state, forKey: .state)
         try container.encode(resetRearmCount, forKey: .resetRearmCount)
@@ -368,11 +412,30 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
     /// What a row shows. Empty prose with staged context still reads as something, for the same
     /// reason `ConversationOutbox.Item.summary` does.
     var summary: String {
-        ConversationPrompt(text: text, context: context).visibleText
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty, context.isEmpty, let attachmentNote else {
+            return ConversationPrompt(text: text, context: context).visibleText
+        }
+        // A picture and nothing else is a real message to schedule, and the context sentence
+        // would be describing something this send does not have.
+        return attachmentNote
+    }
+
+    /// How the pictures are counted in a row that has to say they survived the wait, or nil when
+    /// there are none. Waiting is the whole reason to say it: the temporary file the user
+    /// attached is gone by then, and the row is the only evidence the copy is not.
+    var attachmentNote: String? {
+        switch attachments.count {
+        case 0: return nil
+        case 1: return L10n.string("1 image")
+        default: return L10n.format("%lld images", Int64(attachments.count))
+        }
     }
 
     var isEmpty: Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && context.isEmpty
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && context.isEmpty
+            && attachments.isEmpty
     }
 
     func isDue(at now: Date) -> Bool {
@@ -404,6 +467,7 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
             target: target,
             text: text,
             context: context,
+            attachments: attachments,
             anchor: current.anchor,
             state: .armed,
             resetRearmCount: countingRearm ? resetRearmCount + 1 : resetRearmCount

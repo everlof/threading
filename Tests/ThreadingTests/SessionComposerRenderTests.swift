@@ -1033,19 +1033,18 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         XCTAssertTrue(composer.scheduleButton.isEnabled)
         XCTAssertEqual(try refusal(), "Write the brief first.")
 
-        // Something written and an image beside it: a pasted screenshot is a file in a temporary
-        // directory, and a path recorded now can name nothing by Monday.
+        // Something written and an image beside it. This used to be the third refusal, on the
+        // grounds that a pasted screenshot lives in a temporary directory — which is an argument
+        // against keeping the *path*. `ScheduledAttachmentStore` keeps the bytes instead, so the
+        // offer is a list of times like any other.
         let imageURL = try makeImageFile()
         defer { try? FileManager.default.removeItem(at: imageURL) }
         prompt.stringValue = "Crop the empty space out of this"
         prompt.attachFiles(at: [imageURL.path])
         composer.refreshScheduleChip()
         XCTAssertTrue(composer.scheduleButton.isEnabled)
-        XCTAssertEqual(
-            composer.scheduleButton.toolTip,
-            "Images can't be scheduled — they are temporary files."
-        )
-        XCTAssertEqual(try refusal(), "Images can't be scheduled — they are temporary files.")
+        XCTAssertNil(try refusal(), "an attached image was refused rather than carried")
+        XCTAssertEqual(composer.scheduleButton.toolTip, "Start this session later")
 
         // Nothing in the way: the menu is the offers, and every one of them can be chosen.
         prompt.clear()
@@ -1093,6 +1092,53 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
             "scheduling left Start active and implied that a second press was required"
         )
         XCTAssertEqual(start.toolTip, "Write the brief first.")
+    }
+
+    /// A screenshot pasted into the brief is still there on Monday.
+    ///
+    /// The record cannot name the temporary file it arrived in — that is the whole reason
+    /// scheduling used to refuse — so what has to survive is a copy the app took, and the row has
+    /// to say it is holding one. Editing puts the picture back in the box it came out of, which
+    /// is what makes changing your mind cost a click rather than another paste.
+    func testAScheduledStartCarriesTheImagesTheBriefWasWrittenWith() throws {
+        let composer = SessionComposerViewController()
+        _ = composer.view
+
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
+        defer { store.removeProject(id: project.id) }
+        composer.show(projectID: project.id)
+
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+        let imageURL = try makeImageFile()
+        defer { try? FileManager.default.removeItem(at: imageURL) }
+        prompt.stringValue = "Crop the empty space out of this"
+        prompt.attachFiles(at: [imageURL.path])
+
+        composer.scheduleStart(at: Date().addingTimeInterval(60 * 60), anchor: .wallClock)
+
+        let waiting = try XCTUnwrap(
+            ScheduledMessageStore.shared.sessionStarts(in: project.id).first
+        )
+        defer { ScheduledMessageStore.shared.remove(waiting.id) }
+
+        XCTAssertEqual(waiting.attachments.count, 1)
+        let kept = ScheduledMessageStore.shared.attachments.urls(for: waiting)
+        XCTAssertEqual(kept.count, 1, "the record named a picture nothing was holding")
+        XCTAssertNotEqual(
+            kept.first?.path,
+            imageURL.path,
+            "the record kept a path into the temporary directory rather than a copy"
+        )
+        XCTAssertEqual(
+            ScheduledTiming.summary(of: waiting),
+            "Crop the empty space out of this · 1 image"
+        )
+        XCTAssertTrue(prompt.attachmentPaths.isEmpty, "the box kept what it had already sent")
+
+        // The original is free to go — which is exactly what happens to a pasted screenshot.
+        try FileManager.default.removeItem(at: imageURL)
+        XCTAssertEqual(ScheduledMessageStore.shared.attachments.urls(for: waiting).count, 1)
     }
 
     func testWordsTypedBeforeChoosingAProjectFollowIntoIt() throws {

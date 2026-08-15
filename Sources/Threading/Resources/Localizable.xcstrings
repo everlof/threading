@@ -1,6 +1,10 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "1 image": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "1 bild"}}}},
+    "%lld images": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld bilder"}}}},
+    "A scheduled session can carry at most %lld images.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En schemalagd session kan bära högst %lld bilder."}}}},
+    "The attached images could not be kept, so this was not scheduled.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "De bifogade bilderna kunde inte sparas, så detta schemalades inte."}}}},
     "%lld of %lld+": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld av %lld+"}}}},
     "Chats that are about no project live here. The folder is made the first time you start a scratchpad, and it is an ordinary git repository, so Git Review works on it and nothing you write is lost. It sits outside Threading's own storage on purpose — Reset Everything does not touch it.": {
       "localizations": {

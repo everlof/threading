@@ -82,17 +82,32 @@ enum ScheduleMenu {
 
     // MARK: - Private Methods
 
+    /// One offer, with its reading placed by how much of a reading it is.
+    ///
+    /// **A wall-clock preset's time goes on the title's own line.** `ThemedMenuMetrics.heights`
+    /// gives every row in a run the height of the tallest kind in it, deliberately — a group of
+    /// logins where three carry a scoped window and two do not otherwise reads as a spacing
+    /// defect rather than as rows that differ. That rule was doing the opposite here: "In an
+    /// hour" is the only wall-clock offer whose title does not already say the time, so its one
+    /// subtitle stretched "Tomorrow at 09:00" and "Monday at 09:00" to 46pt each and left them
+    /// looking like rows with a missing second line. `titleDetail` is the mechanism for exactly
+    /// this and says so in its own comment: a small qualifier belongs beside the title, because
+    /// demoting it to a second line costs a subtitle-height row to every row beside it.
+    ///
+    /// **A reset preset keeps its subtitle.** "14:30 · resets in 4h 37m" is two facts and a
+    /// sentence's worth of them, not a qualifier — and it sits in its own run behind a separator,
+    /// which is what makes the change of height legible rather than accidental.
     private static func row(
         _ preset: ScheduledTimePreset,
         onChoose: @escaping (Choice) -> Void
     ) -> ThemedMenuItem {
-        ThemedMenuItem(
+        var item = ThemedMenuItem(
             title: preset.title,
-            // The reading rides as the row's subtitle, which is the mechanism the account rows
-            // already use for exactly this — a fact beside an offer, not a second offer.
-            subtitle: preset.detail,
+            subtitle: preset.anchor == .wallClock ? nil : preset.detail,
             representedValue: preset.id,
             onChoose: { onChoose(.at(preset.date, anchor: preset.anchor)) }
         )
+        if preset.anchor == .wallClock { item.titleDetail = preset.detail }
+        return item
     }
 }
