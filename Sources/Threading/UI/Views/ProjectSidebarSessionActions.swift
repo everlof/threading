@@ -645,6 +645,24 @@ extension ProjectSidebarViewController {
     /// the menu is built, so whichever surface presents the menu targets the right session.
     func sessionActionEntries(for session: AgentSession) -> [ThemedMenuEntry] {
         let sessionID = session.id
+        if let scheduled = scheduledMessageStore.scheduledStart(for: sessionID) {
+            return [
+                action(L10n.string("Start now"), symbol: "play.fill") { [weak self] in
+                    guard let self else { return }
+                    self.delegate?.projectSidebar(
+                        self,
+                        startScheduledMessageNow: scheduled.id
+                    )
+                },
+                action(L10n.string("Cancel schedule"), symbol: "xmark.circle") { [weak self] in
+                    guard let self else { return }
+                    self.delegate?.projectSidebar(
+                        self,
+                        cancelScheduledMessage: scheduled.id
+                    )
+                }
+            ]
+        }
         var entries: [ThemedMenuEntry] = []
 
         entries.append(action(

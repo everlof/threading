@@ -71,13 +71,34 @@
       }
     },
     {
+      "id": "scheduled-session-placeholder",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Scheduled conversation empty state",
+      "description": "The real waiting conversation before its first launch, showing its brief, frozen agent configuration, exact automatic trigger, attention state, and safe actions.",
+      "states": ["Wall-clock trigger", "Usage-reset trigger", "Conversation-finished trigger", "Waiting problem", "Start now", "Cancel schedule"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk"],
+        "appearances": ["Light", "Dark", "Theme-authored"],
+        "sizes": ["760×590-point conversation pane"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ScheduledSessionPlaceholderRenderTests.swift",
+        "test": "ThreadingTests/ScheduledSessionPlaceholderRenderTests/testRendersTimeResetAndConversationTriggers"
+      },
+      "capture": {
+        "glob": "scheduled-session-*.png"
+      }
+    },
+    {
       "id": "sidebar-session-rows",
       "kind": "surface",
       "status": "implemented",
       "priority": "important",
       "title": "Sidebar session rows",
-      "description": "Session rows at rest, working, hovered, selected, pinned and under title truncation pressure. Each image is one named row state in light or dark appearance.",
-      "states": ["Idle", "Working", "Hovered", "Selected", "Pinned", "Long title"],
+      "description": "Session rows at rest, working, hovered, selected, pinned, scheduled and under title truncation pressure. Each image is one named row state in light or dark appearance.",
+      "states": ["Idle", "Working", "Hovered", "Selected", "Pinned", "Scheduled", "Long title"],
       "matrix": {
         "themes": ["System"],
         "appearances": ["Light", "Dark"],

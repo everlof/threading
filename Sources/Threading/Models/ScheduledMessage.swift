@@ -41,6 +41,12 @@ struct ScheduledMessageID: Hashable, Sendable, Codable, CustomStringConvertible 
 /// standard login is a real case rather than an absent string, and `persistedSessionName` /
 /// `init(storedName:)` is the spelling every other persisted copy of it uses.
 struct ScheduledSessionPlan: Codable, Sendable, Equatable {
+    /// The conversation reserved when the schedule is created.
+    ///
+    /// Older records have no value and keep their original create-at-fire behaviour. New
+    /// records use this identity for the waiting sidebar row and for the eventual launch, so
+    /// the thing somebody inspected before its trigger is the thing that actually starts.
+    let reservedSessionID: SessionID?
     let projectID: ProjectID
     let kind: AgentKind
     let accountHandleName: String?
@@ -55,6 +61,7 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
     var accountHandle: AccountHandle { AccountHandle(storedName: accountHandleName) }
 
     init(
+        reservedSessionID: SessionID? = nil,
         projectID: ProjectID,
         kind: AgentKind,
         accountHandle: AccountHandle,
@@ -66,6 +73,7 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
         permissionMode: AgentPermissionMode?,
         managedWorkspacePlan: ManagedWorkspacePlan? = nil
     ) {
+        self.reservedSessionID = reservedSessionID
         self.projectID = projectID
         self.kind = kind
         self.accountHandleName = accountHandle.persistedSessionName
@@ -103,8 +111,10 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         case newSession(ScheduledSessionPlan)
 
         var sessionID: SessionID? {
-            guard case .session(let id) = self else { return nil }
-            return id
+            switch self {
+            case .session(let id): return id
+            case .newSession(let plan): return plan.reservedSessionID
+            }
         }
 
         var projectID: ProjectID? {

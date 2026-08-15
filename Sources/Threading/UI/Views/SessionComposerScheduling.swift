@@ -103,6 +103,7 @@ extension SessionComposerViewController {
         // The same checkout resolution an immediate start performs, done now rather than at fire
         // time: the branch named here is the one the user was looking at.
         let plan = ScheduledSessionPlan(
+            reservedSessionID: SessionID(),
             projectID: projectID,
             kind: selectedAgent,
             accountHandle: selectedAccountHandle,
@@ -133,6 +134,7 @@ extension SessionComposerViewController {
         guard !brief.isEmpty else { return }
 
         let plan = ScheduledSessionPlan(
+            reservedSessionID: SessionID(),
             projectID: projectID,
             kind: selectedAgent,
             accountHandle: selectedAccountHandle,
@@ -168,6 +170,18 @@ extension SessionComposerViewController {
     ) -> Bool {
         switch ScheduledMessageStore.shared.add(message) {
         case .success:
+            let reserved = delegate?.sessionComposer(
+                self,
+                reserveScheduledStart: message
+            ) ?? (ScheduledSessionReservation.reserve(message, in: .shared) != nil)
+            guard reserved else {
+                // The record is not allowed to outlive the conversation it promised to show.
+                // Remove it again if its matching conversation could not be persisted.
+                ScheduledMessageStore.shared.remove(message.id)
+                reportScheduleFailure(L10n.string("Its session could not be created."))
+                return false
+            }
+
             var fields = details
             fields.merge([
                 "project": projectID.uuidString,
@@ -190,6 +204,18 @@ extension SessionComposerViewController {
                 alert.runModal()
             }
             return false
+        }
+    }
+
+    private func reportScheduleFailure(_ reason: String) {
+        let alert = ThemedAlert()
+        alert.messageText = L10n.string("Couldn't schedule this")
+        alert.informativeText = reason
+        alert.alertStyle = .warning
+        if let window = view.window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
         }
     }
 
@@ -239,7 +265,8 @@ extension SessionComposerViewController {
 
     func wireScheduledStrip() {
         scheduledStrip.onRemove = { [weak self] id in
-            ScheduledMessageStore.shared.remove(id)
+            guard let message = ScheduledMessageStore.shared[id] else { return }
+            self?.discardScheduledStart(message)
             self?.refreshScheduledStrip()
         }
 
@@ -250,7 +277,7 @@ extension SessionComposerViewController {
                   let message = ScheduledMessageStore.shared[id],
                   case .newSession(let plan) = message.target else { return }
 
-            ScheduledMessageStore.shared.remove(id)
+            self.discardScheduledStart(message)
             self.promptView.stringValue = message.text
             self.adopt(plan)
             self.view.window?.makeFirstResponder(self.promptView)
@@ -258,12 +285,17 @@ extension SessionComposerViewController {
         }
 
         scheduledStrip.onSendNow = { [weak self] id in
-            guard let self, let message = ScheduledMessageStore.shared[id] else { return }
-            ScheduledMessageStore.shared.remove(id)
-            self.promptView.stringValue = message.text
-            if case .newSession(let plan) = message.target { self.adopt(plan) }
-            self.refreshScheduledStrip()
-            self.startTapped()
+            guard let self, ScheduledMessageStore.shared[id] != nil else { return }
+            self.delegate?.sessionComposer(self, startScheduledMessageNow: id)
         }
+    }
+
+    /// Removes both halves of a scheduled start. The schedule goes first so deleting the
+    /// reserved session cannot turn its own record into a failed "target was deleted" item.
+    private func discardScheduledStart(_ message: ScheduledMessage) {
+        guard ScheduledMessageStore.shared.remove(message.id) else { return }
+        guard case .newSession(let plan) = message.target,
+              let sessionID = plan.reservedSessionID else { return }
+        _ = ProjectStore.shared.removeSession(id: sessionID)
     }
 }

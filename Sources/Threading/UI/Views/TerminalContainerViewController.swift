@@ -20,6 +20,7 @@ final class TerminalContainerViewController: NSViewController {
     typealias SessionComposerFactory = @MainActor () -> SessionComposerViewController
 
     private let placeholderView = SessionPlaceholderView()
+    private var scheduledPlaceholderView: ScheduledSessionPlaceholderView?
     private let appEvents = AppEventObservations()
 
     /// Whether this pane opens nothing.
@@ -281,6 +282,10 @@ final class TerminalContainerViewController: NSViewController {
         // file having grown and answer off the main thread.
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
             self?.refreshGitStatusOverlayModel()
+            self?.refreshScheduledStateIfShowing()
+        }
+        appEvents.observe(ScheduledMessagesDidChange.self) { [weak self] _ in
+            self?.refreshScheduledStateIfShowing()
         }
         // Who is watching moves on its own clock — a phone picked up, a browser tab closed —
         // and only the chat on screen is worth redrawing for.
@@ -1023,6 +1028,12 @@ final class TerminalContainerViewController: NSViewController {
             return
         }
 
+        if let scheduled = ScheduledMessageStore.shared.scheduledStart(for: sessionID) {
+            applyDrawer(for: nil)
+            showScheduledState(scheduled, session: agentSession)
+            return
+        }
+
         // A continuation's bootstrap is model-derived rather than stored as a free-form draft.
         // Regenerating it here means an app quit between creation and first launch cannot strand
         // a destination that has a snapshot but was never told to read it.
@@ -1444,6 +1455,7 @@ final class TerminalContainerViewController: NSViewController {
         // and takes its ghosts with it, rather than finishing a fade over the surface that
         // replaced the one it was carrying a box between.
         composerHandoff.finish()
+        scheduledPlaceholderView?.isHidden = true
 
         if let page = settingsPage {
             page.view.removeFromSuperview()
@@ -1505,6 +1517,76 @@ final class TerminalContainerViewController: NSViewController {
             guard let self else { return }
             self.delegate?.terminalContainerDidRequestNewSession(self)
         }
+    }
+
+    private func showScheduledState(
+        _ message: ScheduledMessage,
+        session: AgentSession
+    ) {
+        guard case .newSession(let plan) = message.target else { return }
+        let scheduledView = scheduledPlaceholderForPresentation()
+
+        hideComposerIfLoaded()
+        placeholderView.isHidden = true
+        recoveryView?.isHidden = true
+        scheduledView.isHidden = false
+        applyPaneBackground(.chrome)
+        currentSessionID = session.id
+        gitStatusOverlay.updateModel(nil)
+
+        scheduledView.configure(.init(
+            title: session.displayTitle,
+            trigger: ScheduledTiming.automaticStartCauseSentence(for: message),
+            problem: ScheduledTiming.problem(for: message.state),
+            brief: message.summary,
+            configuration: scheduledConfiguration(plan)
+        ))
+        scheduledView.onStartNow = { [weak self] in
+            guard let self else { return }
+            self.delegate?.terminalContainer(self, startScheduledMessageNow: message.id)
+        }
+        scheduledView.onCancel = { [weak self] in
+            guard let self else { return }
+            self.delegate?.terminalContainer(self, cancelScheduledMessage: message.id)
+        }
+    }
+
+    private func scheduledPlaceholderForPresentation() -> ScheduledSessionPlaceholderView {
+        if let scheduledPlaceholderView { return scheduledPlaceholderView }
+        let scheduled = ScheduledSessionPlaceholderView()
+        scheduled.isHidden = true
+        view.addSubview(scheduled, positioned: .below, relativeTo: drawerDivider)
+        NSLayoutConstraint.activate([
+            scheduled.topAnchor.constraint(equalTo: contentTopAnchor),
+            scheduled.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            scheduled.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scheduled.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        scheduledPlaceholderView = scheduled
+        return scheduled
+    }
+
+    private func refreshScheduledStateIfShowing() {
+        guard let sessionID = currentSessionID,
+              scheduledPlaceholderView?.isHidden == false,
+              let message = ScheduledMessageStore.shared.scheduledStart(for: sessionID),
+              let session = ProjectStore.shared.session(withID: sessionID) else { return }
+        showScheduledState(message, session: session)
+    }
+
+    private func scheduledConfiguration(_ plan: ScheduledSessionPlan) -> String {
+        var parts = [plan.kind.displayName]
+        if !plan.accountHandle.isStandard { parts.append(plan.accountHandle.name) }
+        if let model = plan.model { parts.append(ModelName.display(for: model)) }
+        if let effort = plan.reasoningEffort {
+            parts.append(AgentReasoningLevel(effort: effort, description: "").displayName)
+        }
+        if let fast = plan.fastMode {
+            parts.append(fast ? L10n.string("Fast") : L10n.string("Standard"))
+        }
+        if let branch = plan.branch { parts.append(branch) }
+        parts.append(plan.usesNativeUI ? L10n.string("Native chat") : L10n.string("Terminal"))
+        return parts.joined(separator: " · ")
     }
 
     // MARK: - Recovery
@@ -2020,6 +2102,7 @@ private extension TerminalContainerViewController {
         guard let sessionID = currentSessionID,
               let session = ProjectStore.shared.session(withID: sessionID),
               let project = ProjectStore.shared.executionProject(forSessionID: sessionID),
+              scheduledPlaceholderView?.isHidden != false,
               currentConversation == nil
         else {
             gitStatusOverlay.updateModel(nil)
@@ -2343,6 +2426,14 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
 
 @MainActor
 protocol TerminalContainerViewControllerDelegate: AnyObject {
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        startScheduledMessageNow id: ScheduledMessageID
+    )
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        cancelScheduledMessage id: ScheduledMessageID
+    )
     func terminalContainer(
         _ container: TerminalContainerViewController,
         visibleSessionDidChange sessionID: SessionID?

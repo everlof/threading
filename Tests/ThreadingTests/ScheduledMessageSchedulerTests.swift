@@ -531,6 +531,36 @@ final class ScheduledFinishPickerTests: XCTestCase {
         )
     }
 
+    func testScheduledConversationNamesAUsageResetAndItsExpectedMoment() {
+        let now = Date(timeIntervalSince1970: 1_775_000_000)
+        let dueAt = now.addingTimeInterval(3_600)
+        let message = ScheduledMessage(
+            dueAt: dueAt,
+            target: .session(SessionID()),
+            text: "Continue after reset",
+            anchor: .usageWindowReset(windowID: "five-hour")
+        )
+
+        let sentence = ScheduledTiming.automaticStartCauseSentence(for: message, from: now)
+
+        XCTAssertTrue(sentence.hasPrefix("Starts automatically after the usage window resets"))
+        XCTAssertTrue(sentence.contains(UsageFormat.absolute(dueAt, from: now)))
+        XCTAssertTrue(sentence.contains(UsageFormat.remaining(until: dueAt, from: now)))
+    }
+
+    func testScheduledConversationNamesTheFinishTriggerAsItsCause() {
+        let message = ScheduledMessage(
+            whenSessionFinishes: SessionID(),
+            target: .session(SessionID()),
+            text: "Review it"
+        )
+
+        XCTAssertEqual(
+            ScheduledTiming.automaticStartCauseSentence(for: message),
+            "Starts automatically when “Conversation” finishes"
+        )
+    }
+
     func testScheduleMenuOffersTheFinishPickerOnlyWhenItHasAReliableCandidate() throws {
         var choseFinish = false
         let enabled = ScheduleMenu.entries(canWaitForConversation: true) { choice in

@@ -1884,6 +1884,19 @@ final class SessionComposerViewController: NSViewController {
 
 @MainActor
 protocol SessionComposerViewControllerDelegate: AnyObject {
+    /// Persists the real conversation that represents a scheduled start before its trigger.
+    @discardableResult
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        reserveScheduledStart message: ScheduledMessage
+    ) -> Bool
+
+    /// Explicitly spends a scheduled start now, including one needing attention.
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        startScheduledMessageNow id: ScheduledMessageID
+    )
+
     /// Answers whether a session was actually started. The composer empties itself on `true`
     /// and keeps everything it holds on `false`, so a start that could not be recorded does not
     /// take the prompt with it.
@@ -1934,6 +1947,24 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
     /// The location chip asked for a folder that is not a project yet.
     func sessionComposerDidRequestAddFolder(_ composer: SessionComposerViewController)
     func sessionComposerDidRequestNewFolder(_ composer: SessionComposerViewController)
+}
+
+extension SessionComposerViewControllerDelegate {
+    @discardableResult
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        reserveScheduledStart message: ScheduledMessage
+    ) -> Bool {
+        ScheduledSessionReservation.reserve(message, in: .shared) != nil
+    }
+
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        startScheduledMessageNow id: ScheduledMessageID
+    ) {
+        guard ScheduledMessageStore.shared.prepareForImmediateAttempt(id) else { return }
+        NotificationCenter.default.post(ScheduledMessageDidBecomeDue(id: id))
+    }
 }
 
 // MARK: - Project Actions

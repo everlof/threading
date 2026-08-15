@@ -607,8 +607,15 @@ struct RemoteAttentionRequestPolicy {
 /// shared by list, resume and WebSocket attach prevents a known UUID from becoming a side door
 /// around archiving.
 enum RemoteSessionAccess {
+    @MainActor
     static func isVisible(_ session: AgentSession?) -> Bool {
-        session?.isArchived == false
+        guard let session, !session.isArchived else { return false }
+
+        // A reserved scheduled start is a real local conversation so the sidebar can select it,
+        // but the remote protocol has no scheduled-state projection or lifecycle actions yet.
+        // Hiding it at the shared access gate keeps list, resume and WebSocket attach aligned:
+        // an empty, not-yet-launched session must not look like an ordinary remote chat.
+        return ScheduledMessageStore.shared.scheduledStart(for: session.id) == nil
     }
 }
 

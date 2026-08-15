@@ -3530,6 +3530,20 @@ private enum MainWindowUIScenarioSize {
 
 extension MainWindowController: ProjectSidebarViewControllerDelegate {
 
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        startScheduledMessageNow id: ScheduledMessageID
+    ) {
+        sessionCoordinator.startScheduledMessageNow(id)
+    }
+
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        cancelScheduledMessage id: ScheduledMessageID
+    ) {
+        sessionCoordinator.cancelScheduledMessage(id)
+    }
+
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSession sessionID: SessionID) {
         // Taken rather than read: an opening prompt belongs to the launch that follows it,
         // not to every later selection of the same session.
@@ -3856,6 +3870,20 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
 // MARK: - TerminalContainerViewControllerDelegate
 
 extension MainWindowController: TerminalContainerViewControllerDelegate {
+
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        startScheduledMessageNow id: ScheduledMessageID
+    ) {
+        sessionCoordinator.startScheduledMessageNow(id)
+    }
+
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        cancelScheduledMessage id: ScheduledMessageID
+    ) {
+        sessionCoordinator.cancelScheduledMessage(id)
+    }
 
     func terminalContainer(
         _ container: TerminalContainerViewController,

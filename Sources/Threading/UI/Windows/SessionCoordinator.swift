@@ -689,6 +689,33 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     @discardableResult
     func sessionComposer(
         _ composer: SessionComposerViewController,
+        reserveScheduledStart message: ScheduledMessage
+    ) -> Bool {
+        guard let session = ScheduledSessionReservation.reserve(
+            message,
+            in: environment.projectStore
+        ) else { return false }
+
+        environment.eventLog.record(.composer, "Scheduled session reserved", [
+            "session": session.id.uuidString,
+            "prompt": message.text
+        ])
+        sidebar.reload()
+        sidebar.select(sessionID: session.id)
+        onPresentationChanged()
+        return true
+    }
+
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
+        startScheduledMessageNow id: ScheduledMessageID
+    ) {
+        startScheduledMessageNow(id)
+    }
+
+    @discardableResult
+    func sessionComposer(
+        _ composer: SessionComposerViewController,
         startSessionIn projectID: ProjectID,
         kind: AgentKind,
         accountHandle: AccountHandle,
@@ -891,7 +918,17 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             return nil
         }
 
-        let sessionID = SessionID()
+        let sessionID = plan.reservedSessionID ?? SessionID()
+        if let existing = environment.projectStore.session(withID: sessionID) {
+            guard !existing.hasLaunched, !existing.isArchived else { return nil }
+
+            // A failed first launch may already have provisioned the workspace. Reuse it on an
+            // explicit retry instead of creating a second checkout for the same conversation.
+            if plan.managedWorkspacePlan == nil || existing.managedWorkspace != nil {
+                return existing
+            }
+        }
+
         let workspace: ManagedWorkspace?
         if let managedPlan = plan.managedWorkspacePlan {
             guard ManagedWorkspaceEligibility.supportsFinishHandshake(
@@ -906,6 +943,19 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             guard workspace != nil else { return nil }
         } else {
             workspace = nil
+        }
+
+        if let existing = environment.projectStore.session(withID: sessionID) {
+            guard let workspace else { return existing }
+            let result = environment.projectStore.update(sessionID: sessionID) {
+                $0.managedWorkspace = workspace
+                $0.branch = workspace.targetBranch
+            }
+            guard result == .applied else {
+                try? ManagedGitWorkspace.discardUnstarted(workspace)
+                return nil
+            }
+            return environment.projectStore.session(withID: sessionID)
         }
 
         let session = environment.projectStore.addSession(

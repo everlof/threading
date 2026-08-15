@@ -54,12 +54,14 @@ final class ScheduledMessageStoreTests: XCTestCase {
 
     private func sessionStart(
         in projectID: ProjectID,
+        reserving sessionID: SessionID? = nil,
         dueIn seconds: TimeInterval = 3_600
     ) -> ScheduledMessage {
         ScheduledMessage(
             dueAt: now.addingTimeInterval(seconds),
             target: .newSession(
                 ScheduledSessionPlan(
+                    reservedSessionID: sessionID,
                     projectID: projectID,
                     kind: .claude,
                     accountHandle: .standard,
@@ -85,6 +87,24 @@ final class ScheduledMessageStoreTests: XCTestCase {
         XCTAssertEqual(store.messages(for: session).count, 1)
         XCTAssertEqual(store.all.first?.text, "Pick this up")
         XCTAssertTrue(store.hasClockWorkPending)
+    }
+
+    func testAReservedSessionStartIsAddressableByItsConversationID() throws {
+        let store = makeStore()
+        let projectID = ProjectID()
+        let sessionID = SessionID()
+        let start = sessionStart(in: projectID, reserving: sessionID)
+
+        XCTAssertNoThrow(try store.add(start, now: now).get())
+        XCTAssertEqual(store.scheduledStart(for: sessionID)?.id, start.id)
+        XCTAssertEqual(store.messages(for: sessionID).map(\.id), [start.id])
+
+        let reopened = makeStore()
+        XCTAssertEqual(
+            reopened.scheduledStart(for: sessionID)?.target.sessionID,
+            sessionID,
+            "the sidebar identity disappeared after the scheduled record was decoded"
+        )
     }
 
     func testAcceptsAFinishTriggerWithoutInventingAClockTime() {
@@ -231,6 +251,16 @@ final class ScheduledMessageStoreTests: XCTestCase {
 
         XCTAssertEqual(store[armed.id]?.state, .failed("Its project folder is gone"))
         XCTAssertEqual(store.needingAttention.count, 1)
+    }
+
+    func testStartNowMakesAnAttentionItemClaimableAgain() throws {
+        let store = makeStore()
+        let start = try store.add(message(), now: now).get()
+        XCTAssertTrue(store.setState(.missed, for: start.id))
+        XCTAssertNil(store.claim(start.id))
+
+        XCTAssertTrue(store.prepareForImmediateAttempt(start.id))
+        XCTAssertNotNil(store.claim(start.id))
     }
 
     // MARK: - The Clock Passing While Nobody Watched

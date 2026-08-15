@@ -30,6 +30,29 @@ extension SessionCoordinator {
         }
     }
 
+    /// Starts a waiting scheduled item because the user explicitly asked, regardless of whether
+    /// its original trigger is still in the future or its earlier attempt needs attention.
+    func startScheduledMessageNow(_ id: ScheduledMessageID) {
+        guard ScheduledMessageStore.shared.prepareForImmediateAttempt(id) else { return }
+        performScheduledSend(id)
+    }
+
+    /// Cancels a scheduled start and removes the empty conversation reserved to represent it.
+    func cancelScheduledMessage(_ id: ScheduledMessageID) {
+        guard let message = ScheduledMessageStore.shared[id],
+              case .newSession(let plan) = message.target else { return }
+        guard ScheduledMessageStore.shared.remove(id) else { return }
+
+        if let sessionID = plan.reservedSessionID {
+            let wasShowing = container.currentSessionID == sessionID
+            _ = environment.projectStore.removeSession(id: sessionID)
+            sidebar.reload()
+            if wasShowing { sidebar.select(projectID: plan.projectID) }
+        } else {
+            sidebar.reload()
+        }
+    }
+
     // MARK: - A Window That Had Not Actually Reset
 
     /// Re-reads the usage window a send was aimed at, and stands aside if it has not turned over.
@@ -258,9 +281,14 @@ extension SessionCoordinator {
         // A session that has never run takes its opening prompt as a launch argument on both
         // surfaces, so unlike a resume this is safe in a terminal too — there is no restored
         // conversation for the CLI to ask a question about.
-        container.launchInBackground(sessionID: session.id, initialPrompt: opening)
+        guard container.launchInBackground(sessionID: session.id, initialPrompt: opening) else {
+            return finish(message, failedBecause: L10n.string(
+                "Its agent could not be started."
+            ))
+        }
         sidebar.reload()
         deliveredScheduled(message, to: session.id, wokeTheAgent: true)
+        container.reopenIfShowing(sessionID: session.id)
     }
 
     // MARK: - Recording What Happened

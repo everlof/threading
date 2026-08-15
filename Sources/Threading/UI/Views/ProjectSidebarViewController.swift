@@ -90,6 +90,7 @@ final class ProjectSidebarViewController: NSViewController {
     /// injected store lets deterministic UI workloads exercise the real outline controller
     /// without reading or mutating the user's projects.
     let projectStore: ProjectStore
+    let scheduledMessageStore: ScheduledMessageStore
     let canAskAgentToRename: (SessionID) -> Bool
     let canAskForReportBack: (SessionID) -> Bool
 
@@ -328,11 +329,13 @@ final class ProjectSidebarViewController: NSViewController {
 
     init(
         projectStore: ProjectStore = .shared,
+        scheduledMessageStore: ScheduledMessageStore = .shared,
         canAskAgentToRename: @escaping (SessionID) -> Bool = { _ in false },
         canAskForReportBack: @escaping (SessionID) -> Bool = { _ in false },
         defersInitialTreeMount: Bool = false
     ) {
         self.projectStore = projectStore
+        self.scheduledMessageStore = scheduledMessageStore
         self.canAskAgentToRename = canAskAgentToRename
         self.canAskForReportBack = canAskForReportBack
         self.defersInitialTreeMount = defersInitialTreeMount
@@ -550,6 +553,11 @@ private extension ProjectSidebarViewController {
     private func observeStoreChanges() {
         appEvents.observe(ProjectsDidChange.self) { [weak self] change in
             self?.projectsDidChange(change)
+        }
+        // Scheduling changes no tree geometry after the reservation is present. Only the
+        // mounted row's durable state label and actions need to be restamped.
+        appEvents.observe(ScheduledMessagesDidChange.self) { [weak self] _ in
+            self?.refreshRows()
         }
         // No theme observer for the ground: `SidebarBackdropView` re-decides what it shows on
         // every theme change itself, so the controller cannot forget to tell it.
@@ -2461,10 +2469,9 @@ private extension ProjectSidebarViewController {
         presentSidebarMenu(projectMenuEntries(row: row), from: anchor)
     }
 
-    /// What a project's `+` can make, offered on its press. The press used to make a chat
-    /// directly with this menu on the secondary click, but selecting the row already puts the
-    /// composer on screen — the press duplicated a click the pointer was one row-height from,
-    /// while hiding the terminal behind a gesture nothing advertised.
+    /// The rest of what a project's `+` can make, offered on its secondary click. The press
+    /// itself makes a chat; this is where the terminal lives, and where the chat is named so
+    /// the gesture still says what it does.
     @discardableResult
     private func showProjectCreationMenu(
         for projectID: ProjectID,
@@ -2749,6 +2756,10 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             cell.onHoverAction = { [weak self] anchor in
                 self?.showProjectActions(for: projectNode.projectID, from: anchor)
             }
+            cell.onCreateAction = { [weak self] projectID in
+                // What the `+` is for: a chat in this project, without a menu in the way.
+                self?.select(projectID: projectID)
+            }
             cell.onCreateMenuAction = { [weak self] projectID, anchor, menuAnchor in
                 self?.showProjectCreationMenu(
                     for: projectID,
@@ -2796,18 +2807,20 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
                 return false
             }
 
+            let scheduledStart = scheduledMessageStore.scheduledStart(for: session.id)
             cell.configure(
                 with: session,
                 activity: AgentRuntime.shared.activity(sessionID: sessionNode.sessionID),
                 isLoading: loadingState.isLoading(sessionNode.sessionID),
-                conduct: RowConductSummary.forSession(session, in: projectStore)
+                conduct: RowConductSummary.forSession(session, in: projectStore),
+                isScheduledStart: scheduledStart != nil
             )
             cell.onAction = { [weak self] sessionID, anchor in
                 self?.showRowActions(for: sessionID, from: anchor)
             }
-            cell.onArchive = { [weak self] sessionID in
+            cell.onArchive = scheduledStart == nil ? { [weak self] sessionID in
                 self?.archiveSession(sessionID)
-            }
+            } : nil
             return true
         }
 
@@ -3418,6 +3431,14 @@ enum SidebarIdentifiers {
 
 @MainActor
 protocol ProjectSidebarViewControllerDelegate: AnyObject {
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        startScheduledMessageNow id: ScheduledMessageID
+    )
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        cancelScheduledMessage id: ScheduledMessageID
+    )
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSession sessionID: SessionID)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectTerminal terminalID: TerminalID)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectProject projectID: ProjectID)

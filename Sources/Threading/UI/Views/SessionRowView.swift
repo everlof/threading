@@ -897,7 +897,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         with session: AgentSession,
         activity: SessionActivity,
         isLoading: Bool = false,
-        conduct: RowConductSummary? = nil
+        conduct: RowConductSummary? = nil,
+        isScheduledStart: Bool = false
     ) {
         // Rows reconfigure constantly while an agent works, so an open popover survives a
         // same-session refresh; only reuse for a different session dismisses it.
@@ -919,7 +920,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         nativeToolTip = nil
         setPinned(session.isPinned)
         setConductMark(conduct)
-        if session.wake != nil {
+        if isScheduledStart {
+            let label = attentionLabelForPresentation()
+            label.stringValue = L10n.string("Scheduled")
+            label.setAccessibilityLabel(L10n.string("Session is scheduled to start automatically"))
+            label.isHidden = false
+        } else if session.wake != nil {
             let label = attentionLabelForPresentation()
             label.stringValue = L10n.string("Woke")
             label.setAccessibilityLabel(L10n.string("Session woke from snooze"))
@@ -938,9 +944,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // outlives the row it started on — `ThemedIconButton` completes the gesture even after
         // the sidebar has recycled this view into another session's row — and a late release
         // reading `sessionID` would archive whichever session the row had become.
-        archiveButton.onPress = { [weak self] in self?.onArchive?(session.id) }
+        archiveButton.isHidden = isScheduledStart
+        archiveButton.onPress = isScheduledStart
+            ? nil
+            : { [weak self] in self?.onArchive?(session.id) }
 
-        isDormant = activity == .dormant
+        isDormant = activity == .dormant && !isScheduledStart
 
         updateStatus(for: activity, isLoading: isLoading)
 

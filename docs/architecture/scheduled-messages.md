@@ -19,6 +19,10 @@ every delivery rule. Splitting them would be two of everything below.
   the session eventually starts, while Standard and Fast remain explicit conversation overrides.
   `AccountHandle` is deliberately not `Codable`, so the handle rides as `persistedSessionName` and
   is rebuilt with `init(storedName:)`, which is the spelling every other persisted copy uses.
+  New records also carry a `reservedSessionID`: scheduling immediately creates the ordinary,
+  unlaunched `AgentSession` that will eventually run. The optional encoding preserves records
+  written before reservation existed; those legacy records still create their session at fire
+  time.
 
 - **`.time(TimeTrigger)`** — the original clock trigger: an absolute instant plus the wall-clock
   intent needed to survive a time-zone change.
@@ -150,7 +154,7 @@ that only because re-archiving is idempotent; a send is not.
 | Either, mid-turn | `.waiting`, retried on the activity edge — **only** where the agent reports its own turns |
 | Dormant, native | `launchInBackground(sessionID:initialPrompt:)` — laid out offscreen, never takes the pane |
 | Dormant, terminal | **`.waiting`. Never typed into.** See below |
-| `.newSession` | plan re-validated, session created, launched in the background |
+| `.newSession` | plan re-validated, reserved session launched in the background; legacy records create one first |
 
 **Waking a dormant session is a deliberate departure from
 [`control-plane.md`](control-plane.md).** Slice one refuses to resume a dormant target because
@@ -175,6 +179,22 @@ to the base project when a named checkout is gone, which is right for a composer
 looking at and wrong for an unattended 09:00 start that would then run in the wrong folder. The
 branch, the folder's existence and the account's discoverability are each re-checked; any of them
 missing fails the send visibly.
+
+## A scheduled start is a real waiting conversation
+
+Scheduling from the draft surface immediately reserves an ordinary `AgentSession` with the
+plan's stable id and frozen launch configuration. That gives the intent a durable place in the
+sidebar before any process exists. Selecting its row does not launch it: the conversation pane
+shows a bounded scheduled-state surface with the brief, configuration, and the exact automatic
+cause — a wall-clock time, the named usage reset and its expected time, or the named conversation
+whose current turn must finish. It also offers **Start now** and **Cancel schedule**. The sidebar
+row says **Scheduled**, suppresses archive, and exposes those same two lifecycle actions.
+
+The schedule remains the authority. Removing it also removes the empty reservation; starting it
+claims the schedule and launches that same session id, so the row does not disappear and return as
+a different conversation. A managed workspace is still provisioned at launch rather than at
+reservation: waiting should not consume a worktree, and launch-time validation is what prevents a
+deleted branch or folder from silently changing the target.
 
 ## Presets, including the one Slack would never have
 
@@ -294,8 +314,10 @@ the draft surface the still-visible primary action says “Start session,” so 
 said “When … finishes” looked like a condition waiting for that button. Draft rows use
 `ScheduledTiming.automaticStartSentence`; once scheduling clears the brief, the outside Start
 button follows `PromptView.isSubmissionAvailable` and becomes disabled. The receipt and the
-action therefore agree: Threading will create this one automatically, while Start is only for a
-new brief typed into the now-empty box.
+action therefore agree: Threading will start the reserved conversation automatically, while Start
+is only for a new brief typed into the now-empty box. The reserved sidebar conversation makes the
+same promise more concrete: opening it shows the trigger and Start now, never an empty chat that
+might or might not require the draft surface's button.
 
 **A row states its height; a floor alone is not a height.** The row stated only `height ≥ 26`,
 and the draft view's column has a second free height above it — the hero region soaks up
@@ -315,9 +337,10 @@ sits above its frame centre, and equal frame centres left the x visibly below th
 - **No MCP `schedule_message`.** [`control-plane.md`](control-plane.md) sequences queue/steer/wait
   as slice three; the store is shaped so an adapter drops in later.
 - **No mirroring to iOS or the browser.** The outbox itself does not cross
-  `RemoteConversationSnapshotDTO` today, so scheduled rows staying on the Mac keeps one rule rather
-  than two. Noted as a *not yet*: `ConversationOutbox`'s own header states that a queue has to
-  cross RemoteKit.
+  `RemoteConversationSnapshotDTO` today, and the remote protocol has neither a scheduled-state
+  projection nor its lifecycle actions. `RemoteSessionAccess` therefore withholds reserved
+  sessions until they start, keeping list, resume and WebSocket attach under the same rule. Noted
+  as a *not yet*: `ConversationOutbox`'s own header states that a queue has to cross RemoteKit.
 - **No recurrence.** "Every weekday at 9" is a different feature with different failure modes.
 - **No shell drawers or standalone project terminals as targets.** They are `TerminalID`
   destinations with no turn model to deliver against.

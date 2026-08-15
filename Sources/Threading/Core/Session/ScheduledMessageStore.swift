@@ -95,6 +95,19 @@ final class ScheduledMessageStore {
         all.filter { $0.target.projectID == projectID }
     }
 
+    /// The one scheduled start represented by a reserved conversation, if it is still waiting.
+    ///
+    /// A session id is unique, so this is intentionally singular. Keeping the lookup here also
+    /// keeps UI surfaces from learning the target enum's persistence shape.
+    func scheduledStart(for sessionID: SessionID) -> ScheduledMessage? {
+        // No ordering is observable for an exact id. Avoid sorting the whole store for every
+        // visible sidebar row and every session projected to a remote catalogue.
+        messages.first { message in
+            guard case .newSession(let plan) = message.target else { return false }
+            return plan.reservedSessionID == sessionID
+        }
+    }
+
     subscript(id: ScheduledMessageID) -> ScheduledMessage? {
         messages.first { $0.id == id }
     }
@@ -219,6 +232,18 @@ final class ScheduledMessageStore {
         var updated = messages
         updated[index].state = state
         return commit(updated)
+    }
+
+    /// Makes a missed or failed item claimable for an explicit Start now request.
+    ///
+    /// This changes no armed/waiting schedule. Those states are already owed, while attention
+    /// states are deliberately excluded from `claim` until the user makes this decision.
+    @discardableResult
+    func prepareForImmediateAttempt(_ id: ScheduledMessageID) -> Bool {
+        guard let message = self[id] else { return false }
+        guard message.state.needsAttention else { return true }
+        claimed.remove(id)
+        return setState(.armed, for: id)
     }
 
     // MARK: - Claiming
@@ -359,7 +384,12 @@ final class ScheduledMessageStore {
             let targetIsMissing: Bool
             switch message.target {
             case .session(let id): targetIsMissing = !sessionIDs.contains(id)
-            case .newSession(let plan): targetIsMissing = !projectIDs.contains(plan.projectID)
+            case .newSession(let plan):
+                if let reserved = plan.reservedSessionID {
+                    targetIsMissing = !sessionIDs.contains(reserved)
+                } else {
+                    targetIsMissing = !projectIDs.contains(plan.projectID)
+                }
             }
 
             if targetIsMissing {

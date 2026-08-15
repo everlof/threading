@@ -1471,6 +1471,36 @@
     "Scheduled · starts automatically when “%@” finishes": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Schemalagd · startar automatiskt när ”%@” blir klar" } } }
     },
+    "Scheduled": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Schemalagd" } } }
+    },
+    "Scheduled session": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Schemalagd session" } } }
+    },
+    "Session is scheduled to start automatically": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionen är schemalagd att starta automatiskt" } } }
+    },
+    "Brief": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdrag" } } }
+    },
+    "Start now": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Starta nu" } } }
+    },
+    "Cancel schedule": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Avbryt schemaläggning" } } }
+    },
+    "Native chat": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inbyggd chatt" } } }
+    },
+    "Starts automatically %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Startar automatiskt %@" } } }
+    },
+    "Starts automatically after the usage window resets · expected %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Startar automatiskt när användningsfönstret återställs · förväntas %@" } } }
+    },
+    "Starts automatically when “%@” finishes": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Startar automatiskt när ”%@” blir klar" } } }
+    },
     "The conversation this was waiting for was deleted.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Konversationen som det här väntade på togs bort." } } }
     },
@@ -25612,16 +25642,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ny chatt"
-          }
-        }
-      }
-    },
-    "New chat or terminal": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ny chatt eller terminal"
           }
         }
       }

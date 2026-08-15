@@ -236,6 +236,38 @@ enum ScheduledTiming {
         }
     }
 
+    /// The trigger phrased as a cause for the scheduled conversation's empty state.
+    ///
+    /// Reset-backed clock records still carry an exact instant, but the reset is the reason the
+    /// session starts. Naming both prevents the timestamp from making that dependency invisible.
+    static func automaticStartCauseSentence(
+        for message: ScheduledMessage,
+        from now: Date = Date()
+    ) -> String {
+        switch message.trigger {
+        case .time(let time):
+            switch time.anchor {
+            case .wallClock:
+                return L10n.format(
+                    "Starts automatically %@",
+                    sentence(for: time.dueAt, from: now)
+                )
+            case .usageWindowReset:
+                return L10n.format(
+                    "Starts automatically after the usage window resets · expected %@",
+                    sentence(for: time.dueAt, from: now)
+                )
+            }
+        case .sessionFinished(let sessionID):
+            let title = ProjectStore.shared.session(withID: sessionID)?.displayTitle
+                ?? L10n.string("Conversation")
+            return L10n.format(
+                "Starts automatically when “%@” finishes",
+                title
+            )
+        }
+    }
+
     /// The sentence that replaces the timing when the clock is no longer the thing to say.
     static func problem(for state: ScheduledMessage.State) -> String? {
         switch state {

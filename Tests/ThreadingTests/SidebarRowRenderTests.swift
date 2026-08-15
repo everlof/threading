@@ -149,7 +149,17 @@ final class SidebarRowRenderTests: XCTestCase {
         written += try write(story: "14-hovered-while-loading", activity: .idle, hovered: true, loading: true)
         written += try write(story: "15-hovered-while-blocked", activity: .awaitingUser, hovered: true)
 
-        XCTAssertEqual(written, 30, "Every story should render in both appearances")
+        // A reserved scheduled conversation is alive in the tree but is not a dormant session.
+        // Its durable label replaces that dimming, and its hover has only the safe actions menu.
+        written += try write(
+            story: "16-scheduled-start",
+            activity: .dormant,
+            hovered: false,
+            scheduled: true,
+            title: "Audit the release checklist"
+        )
+
+        XCTAssertEqual(written, 32, "Every story should render in both appearances")
         print("Rendered sidebar-row storybook to \(Render.directory.path)")
     }
 
@@ -838,6 +848,7 @@ final class SidebarRowRenderTests: XCTestCase {
         selected: Bool = false,
         pinned: Bool = false,
         loading: Bool = false,
+        scheduled: Bool = false,
         title: String = "Fix the hover state"
     ) throws -> Int {
         let directory = Render.directory
@@ -886,11 +897,21 @@ final class SidebarRowRenderTests: XCTestCase {
                 // hovered stories deterministic rather than a race with the crossfade.
                 var session = AgentSession(kind: .claude, title: title)
                 session.isPinned = pinned
-                cell.configure(with: session, activity: activity, isLoading: loading)
+                cell.configure(
+                    with: session,
+                    activity: activity,
+                    isLoading: loading,
+                    isScheduledStart: scheduled
+                )
                 if hovered, let entered = Self.enterEvent() {
                     row.mouseEntered(with: entered)
                     cell.mouseEntered(with: entered)
-                    cell.configure(with: session, activity: activity, isLoading: loading)
+                    cell.configure(
+                        with: session,
+                        activity: activity,
+                        isLoading: loading,
+                        isScheduledStart: scheduled
+                    )
                 }
                 // The row view owns hover and selection ground; the cell owns the ink that
                 // must read on it. Keeping both in the evidence fixture prevents a hover story
