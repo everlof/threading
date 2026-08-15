@@ -36,6 +36,14 @@ browser_download_coordinator="${repository_directory}/Sources/Threading/Applicat
 browser_navigation_coordinator="${repository_directory}/Sources/Threading/Application/Browser/BrowserNavigationCoordinator.swift"
 agent_session_command_adapter="${repository_directory}/Sources/Threading/UI/Windows/AgentToolCoordinator+SessionCommands.swift"
 agent_session_command_service="${repository_directory}/Sources/Threading/Application/Sessions/AgentSessionCommandService.swift"
+project_model="${repository_directory}/Sources/Threading/Models/Project.swift"
+project_model_files=(
+  "${repository_directory}/Sources/Threading/Models/AgentProviderCapabilities.swift"
+  "${repository_directory}/Sources/Threading/Models/AgentSession.swift"
+  "${repository_directory}/Sources/Threading/Models/ManagedWorkspace.swift"
+  "${project_model}"
+  "${repository_directory}/Sources/Threading/Models/PersistedUIDocuments.swift"
+)
 
 if rg -n \
   '(ProjectStore|AgentRuntime|AppSettings|EventLog)\.shared\b' \
@@ -105,6 +113,19 @@ if rg -n '^import (AppKit|WebKit)\b' "${agent_session_command_service}"; then
   failed=1
 fi
 
+if rg -n '^import (AppKit|WebKit)\b' "${project_model_files[@]}"; then
+  echo "architecture-boundary: persisted model declarations must remain AppKit-free" >&2
+  failed=1
+fi
+
+if rg -n \
+  '^(struct AgentSession|struct ManagedWorkspace|struct Persisted|struct AgentCapabilities|enum AgentKind)' \
+  "${project_model}"; then
+  echo "architecture-boundary: Project.swift owns project records only;" >&2
+  echo "  provider, session, workspace, and persisted UI records have dedicated owners" >&2
+  failed=1
+fi
+
 if rg -n 'SWIFT_STRICT_CONCURRENCY = targeted;' \
   "${repository_directory}/Threading.xcodeproj/project.pbxproj"; then
   echo "architecture-boundary: targeted concurrency checking must not be reintroduced" >&2
@@ -144,9 +165,9 @@ if rg -n \
   '([Kk]ind\s*[!=]=\s*\.(claude|codex|grok|openCode)\b|\.(claude|codex|grok|openCode)\s*[!=]=\s*[A-Za-z_][A-Za-z0-9_.]*[Kk]ind\b|\$[0-9]\s*[!=]=\s*\.(claude|codex|grok|openCode)\b)' \
   "${repository_directory}/Sources/Threading" \
   --glob '*.swift' \
-  --glob '!**/Models/Project.swift'; then
+  --glob '!**/Models/AgentSession.swift'; then
   echo "architecture-boundary: compare AgentKind capabilities, not runtime identity — add a" >&2
-  echo "  member to AgentCapabilities in Models/Project.swift and ask kind.supports(_:)" >&2
+  echo "  member to AgentCapabilities in Models/AgentProviderCapabilities.swift and ask kind.supports(_:)" >&2
   failed=1
 fi
 
