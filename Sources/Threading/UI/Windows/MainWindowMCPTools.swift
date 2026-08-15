@@ -200,13 +200,7 @@ struct AgentToolDependencies {
 /// tools actually need, while its chrome, layout, and navigation remain outside this type.
 /// Called on the main queue by `MCPServer`.
 @MainActor
-final class AgentToolCoordinator: AgentCommandHandling {
-
-  private enum BrowserWorkspaceEffect {
-    case none
-    case invalidate
-    case announce
-  }
+final class AgentToolCoordinator: AgentCommandHandling, MCPBuiltInToolExecuting {
 
   let displayPaneController: DisplayPaneController
   /// Where this session's browser actually is, across every pane that can hold one. The panel
@@ -298,233 +292,26 @@ final class AgentToolCoordinator: AgentCommandHandling {
 
   var presentationWindow: NSWindow? { windowProvider() }
 
-  /// A trace is useful only if it explains the kind of operation, but target text and form
-  /// values can be sensitive. Keep this deliberately structural: refs are safe identifiers;
-  /// selectors, semantic names, URLs, typed values and baseline paths are never copied here.
-  private func browserTraceDetail(for call: MCPToolCall) -> String? {
-    func target(
-      ref: String?,
-      selector: String?,
-      locator: BrowserSemanticLocator?
-    ) -> String {
-      if let ref, !ref.isEmpty { return "target ref \(String(ref.prefix(40)))" }
-      if selector?.isEmpty == false { return "strict selector target" }
-      if locator != nil { return "semantic locator target" }
-      return "page"
-    }
-
-    switch call {
-    case .browserNavigate(let arguments):
-      return "navigate; wait=\(arguments.waitUntil ?? "load")"
-    case .browserHistory(let arguments):
-      return "\(arguments.action ?? "unknown"); wait=\(arguments.waitUntil ?? "load")"
-    case .browserStop:
-      return "stop outstanding resources"
-    case .browserTabs(let arguments):
-      return "action=\(arguments.action ?? "unknown"); context=\(arguments.context ?? "shared")"
-    case .browserStorage(let arguments):
-      return "action=\(arguments.action ?? "unknown")"
-    case .browserUpload(let arguments):
-      return "\(arguments.paths?.count ?? 0) suggested paths; "
-        + target(
-          ref: arguments.ref,
-          selector: arguments.selector,
-          locator: arguments.locator
-        )
-    case .browserDownload(let arguments):
-      return target(
-        ref: arguments.ref,
-        selector: arguments.selector,
-        locator: arguments.locator
-      )
-    case .browserResize(let arguments):
-      if let width = arguments.width, let height = arguments.height {
-        return "viewport \(width)×\(height)"
-      }
-      return "reset viewport"
-    case .browserEmulate(let arguments):
-      var changes: [String] = []
-      if arguments.colorScheme != nil { changes.append("color scheme") }
-      if arguments.mediaType != nil { changes.append("media") }
-      if arguments.userAgent != nil { changes.append("user agent") }
-      return changes.isEmpty ? "no condition" : changes.joined(separator: ", ")
-    case .browserCapabilities:
-      return "backend capability matrix"
-    case .browserRunIsolated(let arguments):
-      return "\(arguments.steps?.count ?? 0) isolated Playwright steps"
-    case .browserAttachChrome(let arguments):
-      return "\(arguments.steps?.count ?? 0) attached Chrome steps across "
-        + "\(arguments.allowedOrigins?.count ?? 0) authorized origins"
-    case .browserSnapshot(let arguments):
-      return target(ref: arguments.ref, selector: arguments.selector, locator: nil)
-    case .browserAnnotations:
-      return "user-authored page notes"
-    case .browserScreenshot(let arguments):
-      if arguments.fullPage == true { return "full page" }
-      return target(
-        ref: arguments.ref,
-        selector: arguments.selector,
-        locator: arguments.locator
-      )
-    case .browserVisualCompare(let arguments):
-      if arguments.fullPage == true { return "full-page visual comparison" }
-      return "visual comparison; "
-        + target(
-          ref: arguments.ref,
-          selector: arguments.selector,
-          locator: arguments.locator
-        )
-    // Names the action and how the baseline was addressed, never the baseline's own name: a
-    // name is the user's words, and the trace is deliberately structural.
-    case .browserBaselines(let arguments):
-      let addressed = arguments.baselineID != nil ? "by id" : "by name"
-      return "\(arguments.action ?? "list"); \(addressed)"
-    case .browserQuery:
-      return "CSS query"
-    case .browserClick(let arguments):
-      if arguments.x != nil { return "viewport coordinates" }
-      return target(
-        ref: arguments.ref,
-        selector: arguments.selector,
-        locator: arguments.locator
-      )
-    case .browserHover(let arguments):
-      return target(
-        ref: arguments.ref,
-        selector: arguments.selector,
-        locator: arguments.locator
-      )
-    case .browserDrag(let arguments):
-      let source = target(
-        ref: arguments.sourceRef,
-        selector: arguments.sourceSelector,
-        locator: arguments.sourceLocator
-      )
-      let destination = target(
-        ref: arguments.targetRef,
-        selector: arguments.targetSelector,
-        locator: arguments.targetLocator
-      )
-      return "\(source) to \(destination)"
-    case .browserType(let arguments):
-      return target(
-        ref: arguments.ref,
-        selector: arguments.selector,
-        locator: arguments.locator
-      ) + "; \(arguments.text?.count ?? 0) characters"
-    case .browserFillForm(let arguments):
-      return "\(arguments.fields?.count ?? 0) fields"
-    // The trace deliberately records that a credential fill happened and nothing about which
-    // one: it already omits locator names and field values, and an account label is the user's
-    // own words about an account.
-    case .browserFillCredentials(let arguments):
-      return target(
-        ref: arguments.ref,
-        selector: arguments.selector,
-        locator: arguments.locator
-      ) + "; stored credential"
-    case .browserSelect(let arguments):
-      return target(
-        ref: arguments.ref,
-        selector: arguments.selector,
-        locator: arguments.locator
-      ) + (arguments.label != nil ? "; by label" : "; by value")
-    case .browserSetChecked(let arguments):
-      return target(
-        ref: arguments.ref,
-        selector: arguments.selector,
-        locator: arguments.locator
-      ) + "; checked=\(arguments.checked.map(String.init) ?? "missing")"
-    case .browserPressKey(let arguments):
-      return target(
-        ref: arguments.ref,
-        selector: arguments.selector,
-        locator: arguments.locator
-      ) + "; key category=\((arguments.key?.count ?? 0) == 1 ? "character" : "named")"
-    case .browserScroll(let arguments):
-      return "\(arguments.direction ?? "down"); "
-        + target(
-          ref: arguments.ref,
-          selector: arguments.selector,
-          locator: arguments.locator
-        )
-    case .browserWait(let arguments):
-      if arguments.time != nil { return "fixed duration" }
-      if arguments.text != nil { return "page text present" }
-      if arguments.textGone != nil { return "page text absent" }
-      if arguments.url != nil { return "exact URL" }
-      if arguments.urlContains != nil { return "partial URL" }
-      if arguments.urlMatches != nil { return "URL regex" }
-      if arguments.title != nil { return "exact title" }
-      if arguments.titleContains != nil { return "partial title" }
-      if arguments.responseURLContains != nil || arguments.responseStatus != nil {
-        return "network response"
-      }
-      if arguments.count != nil { return "selector count" }
-      return "element condition"
-    case .browserConsole:
-      return "console metadata"
-    case .browserNetwork:
-      return "network metadata"
-    case .browserPerformance(let arguments):
-      return
-        "up to \(arguments.maximumResources ?? BrowserAgentDefaults.defaultPerformanceResources) resources"
-    case .browserAccessibilityAudit(let arguments):
-      return
-        "up to \(arguments.maximumIssues ?? BrowserAgentDefaults.defaultAccessibilityAuditIssues) issues"
-    default:
-      return nil
-    }
-  }
-
-  private func browserWorkspaceEffect(for call: MCPToolCall) -> BrowserWorkspaceEffect {
-    switch call {
-    case .browserNavigate, .browserHistory:
-      return .announce
-    case .browserTabs(let arguments):
-      switch arguments.action?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .lowercased()
-      {
-      case "new":
-        return .announce
-      case "activate", "close":
-        return .invalidate
-      default:
-        return .none
-      }
-    case .browserStop, .browserStorage, .browserUpload, .browserDownload,
-      .browserResize, .browserEmulate, .browserClick, .browserHover,
-      .browserDrag, .browserType, .browserFillForm, .browserSelect,
-      .browserSetChecked, .browserPressKey, .browserScroll:
-      return .invalidate
-    default:
-      return .none
-    }
-  }
-
+  /// Compatibility entry point for synchronous application callers. It still executes through
+  /// the declaration and the shared observation wrapper; asynchronous tools return an explicit
+  /// failure instead of pretending their result was ready.
   func handle(_ call: MCPToolCall, for sessionID: SessionID) -> MCPToolResult {
-    switch call {
-    case .displayImage(let arguments):
-      return displayImage(arguments, for: sessionID)
-    case .displayChart(let arguments):
-      return displayChart(arguments, for: sessionID)
-    case .displayScene(let arguments):
-      return displayScene(arguments, for: sessionID)
-    case .displayHTML(let arguments):
-      return displayHTML(arguments, for: sessionID)
-    case .displayCompareFiles(let arguments):
-      return displayCompareFiles(arguments, for: sessionID)
-    case .conversationHistory:
-      return .failure("Conversation history is loaded asynchronously; retry the tool call.")
-    default:
-      return .failure("Unknown tool: \(call.name)")
-    }
+    var result: MCPToolResult?
+    executeBuiltIn(call, for: sessionID) { result = $0 }
+    return result ?? .failure("\(call.name) completes asynchronously.")
   }
 
-  /// Async entry point: the browser tools finish on a page load, a DOM query, or a snapshot;
-  /// everything else answers synchronously and is forwarded to `handle(_:for:)`.
   func handle(
+    _ call: MCPToolCall,
+    for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  ) {
+    executeBuiltIn(call, for: sessionID, completion: completion)
+  }
+
+  /// Applies privacy-preserving tracing, remote projection, panel observation, and optional
+  /// before-capture around the declaration's typed implementation.
+  func executeBuiltIn(
     _ call: MCPToolCall, for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   ) {
@@ -532,12 +319,12 @@ final class AgentToolCoordinator: AgentCommandHandling {
     let shouldTrace =
       call.builtInTool?.family == .browser
       && call.builtInTool != .browserTrace
-    let traceDetail = shouldTrace ? browserTraceDetail(for: call) : nil
+    let traceDetail = shouldTrace ? call.browserTraceDetail : nil
     let initialTraceBrowser =
       shouldTrace
       ? browserResolver.browser(for: sessionID)
       : nil
-    let workspaceEffect = browserWorkspaceEffect(for: call)
+    let workspaceEffect = call.browserWorkspaceEffect
     // A tool that reads or changes the panel means the agent's transcript now reflects it, so
     // record that: a later resume only re-describes the panel if the user changed it in between.
     let observed: @MainActor @Sendable (MCPToolResult) -> Void = { [weak self] result in
@@ -616,167 +403,28 @@ final class AgentToolCoordinator: AgentCommandHandling {
     completion observed: @escaping @MainActor @Sendable (MCPToolResult) -> Void,
     plain completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   ) {
-    switch call {
-    case .conversationHistory(let arguments):
-      ConversationContinuation.loadHistoryPage(
-        for: sessionID,
-        cursor: arguments.cursor
-      ) { result in
-        switch result {
-        case .success(let page): completion(.success(page))
-        case .failure(let error): completion(.failure(error.message))
-        }
-      }
-    case .browserNavigate(let arguments):
-      browserNavigate(arguments, for: sessionID, completion: observed)
-    case .browserHistory(let arguments):
-      browserHistory(arguments, for: sessionID, completion: observed)
-    case .browserStop:
-      browserStop(for: sessionID, completion: observed)
-    case .browserTabs(let arguments):
-      observed(browserTabs(arguments, for: sessionID))
-    case .browserStorage(let arguments):
-      browserStorage(arguments, for: sessionID, completion: observed)
-    case .browserTrace(let arguments):
-      observed(browserTrace(arguments, for: sessionID))
-    case .browserUpload(let arguments):
-      browserUpload(arguments, for: sessionID, completion: observed)
-    case .browserDownload(let arguments):
-      browserDownload(arguments, for: sessionID, completion: observed)
-    case .browserResize(let arguments):
-      browserResize(arguments, for: sessionID, completion: observed)
-    case .browserEmulate(let arguments):
-      browserEmulate(arguments, for: sessionID, completion: observed)
-    case .browserCapabilities:
-      observed(browserCapabilities(for: sessionID))
-    case .browserRunIsolated(let arguments):
-      browserRunIsolated(arguments, for: sessionID, completion: observed)
-    case .browserAttachChrome(let arguments):
-      browserAttachChrome(arguments, for: sessionID, completion: observed)
-    case .browserSnapshot(let arguments):
-      browserSnapshot(arguments, for: sessionID, completion: observed)
-    case .browserAnnotations:
-      browserAnnotations(for: sessionID, completion: observed)
-    case .browserQuery(let arguments):
-      browserQuery(arguments, for: sessionID, completion: observed)
-    case .browserClick(let arguments):
-      browserClick(arguments, for: sessionID, completion: observed)
-    case .browserHover(let arguments):
-      browserHover(arguments, for: sessionID, completion: observed)
-    case .browserDrag(let arguments):
-      browserDrag(arguments, for: sessionID, completion: observed)
-    case .browserType(let arguments):
-      browserType(arguments, for: sessionID, completion: observed)
-    case .browserFillForm(let arguments):
-      browserFillForm(arguments, for: sessionID, completion: observed)
-    case .browserFillCredentials(let arguments):
-      browserFillCredentials(arguments, for: sessionID, completion: observed)
-    case .browserSelect(let arguments):
-      browserSelect(arguments, for: sessionID, completion: observed)
-    case .browserSetChecked(let arguments):
-      browserSetChecked(arguments, for: sessionID, completion: observed)
-    case .browserPressKey(let arguments):
-      browserPressKey(arguments, for: sessionID, completion: observed)
-    case .browserScroll(let arguments):
-      browserScroll(arguments, for: sessionID, completion: observed)
-    case .browserWait(let arguments):
-      browserWait(arguments, for: sessionID, completion: observed)
-    case .browserConsole(let arguments):
-      browserConsole(arguments, for: sessionID, completion: observed)
-    case .browserNetwork(let arguments):
-      browserNetwork(arguments, for: sessionID, completion: observed)
-    case .browserPerformance(let arguments):
-      browserPerformance(arguments, for: sessionID, completion: observed)
-    case .browserAccessibilityAudit(let arguments):
-      browserAccessibilityAudit(arguments, for: sessionID, completion: observed)
-    case .browserScreenshot(let arguments):
-      browserScreenshot(arguments, for: sessionID, completion: observed)
-    case .browserVisualCompare(let arguments):
-      browserVisualCompare(arguments, for: sessionID, completion: observed)
-    case .browserBaselines(let arguments):
-      browserBaselines(arguments, for: sessionID, completion: observed)
-    case .panelListTabs:
-      observed(panelListTabs(for: sessionID))
-    case .panelActivateTab(let arguments):
-      observed(panelActivateTab(arguments, for: sessionID))
-    case .setProjectIcon(let arguments):
-      setProjectIcon(arguments, for: sessionID, completion: completion)
-    case .archiveSession(let arguments):
-      completion(archiveSession(arguments, for: sessionID))
-    case .cancelSessionArchive:
-      completion(cancelSessionArchive(for: sessionID))
-    case .setSessionName(let arguments):
-      completion(setSessionName(arguments, for: sessionID))
-    case .listSessions:
-      // Not `observed`: a listing is not panel content, and marking the panel seen here
-      // would suppress the description a later resume owes the agent.
-      completion(listProjectSessions(for: sessionID))
-    case .sendToSession(let arguments):
-      // Answers only once the delivery is confirmed or honestly unconfirmed — a terminal
-      // send waits on the target's own turn-started receipt.
-      sendToSession(arguments, for: sessionID, completion: completion)
-    case .watchSession(let arguments):
-      completion(watchSession(arguments, for: sessionID))
-    case .listReclaimableStorage:
-      completion(listReclaimableStorage())
-    case .listSettings:
-      // Not `observed`: the catalogue is not panel content, and marking the panel seen here
-      // would suppress the description a later resume owes the agent.
-      completion(listSettings())
-    case .proposeStorageCleanup(let arguments):
-      // Answers only once the user has decided, so the agent's next turn knows the
-      // outcome rather than assuming one.
-      proposeStorageCleanup(arguments, completion: completion)
-    case .notifyUser(let arguments):
-      completion(notifyUser(arguments, for: sessionID))
-    case .listThemes:
-      // Not `observed`: a theme is not panel content, and marking the panel seen here
-      // would suppress the description a later resume owes the agent.
-      completion(listThemes(for: sessionID))
-    case .setTheme(let arguments):
-      completion(setTheme(arguments, for: sessionID))
-    case .createTheme(let arguments):
-      completion(createTheme(arguments, for: sessionID))
-    case .listAppThemes:
-      completion(listAppThemes())
-    case .getAppTheme(let arguments):
-      completion(getAppTheme(arguments))
-    case .setAppTheme(let arguments):
-      completion(setAppTheme(arguments))
-    case .createAppTheme(let arguments):
-      completion(createAppTheme(arguments))
-    case .duplicateAppTheme(let arguments):
-      completion(duplicateAppTheme(arguments))
-    case .updateAppTheme(let arguments):
-      completion(updateAppTheme(arguments))
-    case .extensionListComponents:
-      completion(extensionListComponents())
-    case .extensionScaffoldProject(let arguments):
-      completion(extensionScaffoldProject(arguments))
-    case .extensionProposeInstall(let arguments):
-      extensionProposeInstall(arguments, completion: completion)
-    case .extensionDescribeComponent(let arguments):
-      completion(extensionDescribeComponent(arguments))
-    case .extensionValidateComponentPatch(let arguments):
-      completion(extensionValidateComponentPatch(arguments))
-    case .extensionPreviewComponentPatch(let arguments):
-      observed(extensionPreviewComponentPatch(arguments, for: sessionID))
-    case .unknown(let name, let arguments):
-      let routed = dependencies.externalTools.invokeTool(
-        named: name,
-        arguments: arguments,
-        for: sessionID
-      ) { response in
-        completion(
-          response.isError
-            ? .failure(response.text)
-            : .success(response.text))
-      }
-      if !routed {
-        completion(.failure("Unknown tool: \(name)"))
-      }
-    default:
-      observed(handle(call, for: sessionID))
+    call.execute(
+      with: self,
+      for: sessionID,
+      completion: call.observesPanel ? observed : completion
+    )
+  }
+
+  func handleExternalTool(
+    named name: String,
+    arguments: MCPJSONValue,
+    for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  ) {
+    let routed = dependencies.externalTools.invokeTool(
+      named: name,
+      arguments: arguments,
+      for: sessionID
+    ) { response in
+      completion(response.isError ? .failure(response.text) : .success(response.text))
+    }
+    if !routed {
+      completion(.failure("Unknown tool: \(name)"))
     }
   }
 
@@ -809,7 +457,7 @@ final class AgentToolCoordinator: AgentCommandHandling {
     )
   }
 
-  private func notifyUser(
+  func notifyUser(
     _ arguments: NotifyUserArguments,
     for sessionID: SessionID
   ) -> MCPToolResult {

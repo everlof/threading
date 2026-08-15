@@ -40,9 +40,10 @@ final class SessionNameToolTests: XCTestCase {
             {"name": "set_session_name", "arguments": {"name": "worktree diff crash"}}
             """)
 
-        guard case .setSessionName(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: SetSessionNameArguments = try requireToolArguments(
+          call,
+          tool: .setSessionName
+        )
         XCTAssertEqual(arguments.name, "worktree diff crash")
     }
 
@@ -54,9 +55,10 @@ final class SessionNameToolTests: XCTestCase {
             {"name": "set_session_name"}
             """)
 
-        guard case .setSessionName(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: SetSessionNameArguments = try requireToolArguments(
+          call,
+          tool: .setSessionName
+        )
         XCTAssertNil(arguments.name)
     }
 

@@ -249,9 +249,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserClick(let click)) = request.parameters else {
-            return XCTFail("Expected typed browser_click arguments")
-        }
+        let click: BrowserClickArguments = try requireToolArguments(
+          request.parameters.toolCall,
+          tool: .browserClick
+        )
         XCTAssertEqual(click.locator?.role, "button")
         XCTAssertEqual(click.locator?.name, "Save changes")
         XCTAssertEqual(click.locator?.exact, true)
@@ -500,9 +501,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserType(let arguments)) = request.parameters else {
-            return XCTFail("Expected typed browser_type arguments")
-        }
+        let arguments: BrowserTypeArguments = try requireToolArguments(
+          request.parameters.toolCall,
+          tool: .browserType
+        )
         XCTAssertEqual(arguments.ref, "e4")
         XCTAssertEqual(arguments.text, "Ada")
         XCTAssertEqual(arguments.slowly, true)
@@ -528,9 +530,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserFillForm(let fillForm)) = fillFormRequest.parameters else {
-            return XCTFail("Expected typed browser_fill_form arguments")
-        }
+        let fillForm: BrowserFillFormArguments = try requireToolArguments(
+          fillFormRequest.parameters.toolCall,
+          tool: .browserFillForm
+        )
         let formFields = try XCTUnwrap(fillForm.fields)
         XCTAssertEqual(formFields.count, 3)
         XCTAssertEqual(formFields[0].ref, "e4")
@@ -567,10 +570,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserScreenshot(let screenshot)) =
-                screenshotRequest.parameters else {
-            return XCTFail("Expected typed browser_screenshot arguments")
-        }
+        let screenshot: BrowserScreenshotArguments = try requireToolArguments(
+          screenshotRequest.parameters.toolCall,
+          tool: .browserScreenshot
+        )
         XCTAssertEqual(screenshot.ref, "e19")
         XCTAssertNil(screenshot.selector)
         XCTAssertNil(screenshot.fullPage)
@@ -624,9 +627,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserNetwork(let network)) = networkRequest.parameters else {
-            return XCTFail("Expected typed browser_network arguments")
-        }
+        let network: BrowserNetworkArguments = try requireToolArguments(
+          networkRequest.parameters.toolCall,
+          tool: .browserNetwork
+        )
         XCTAssertEqual(network.kind, "fetch")
         XCTAssertEqual(network.errorsOnly, true)
         XCTAssertEqual(network.clear, true)
@@ -645,10 +649,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserPerformance(let performance)) =
-                performanceRequest.parameters else {
-            return XCTFail("Expected typed browser_performance arguments")
-        }
+        let performance: BrowserPerformanceArguments = try requireToolArguments(
+          performanceRequest.parameters.toolCall,
+          tool: .browserPerformance
+        )
         XCTAssertEqual(performance.maximumResources, 7)
         let performanceDefinition = try XCTUnwrap(
             MCPTools.definitions.first { $0.name == MCPTools.browserPerformance }
@@ -682,10 +686,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserAccessibilityAudit(let accessibility)) =
-                accessibilityRequest.parameters else {
-            return XCTFail("Expected typed browser_accessibility_audit arguments")
-        }
+        let accessibility: BrowserAccessibilityAuditArguments = try requireToolArguments(
+          accessibilityRequest.parameters.toolCall,
+          tool: .browserAccessibilityAudit
+        )
         XCTAssertEqual(accessibility.maximumIssues, 12)
         let accessibilityDefinition = try XCTUnwrap(
             MCPTools.definitions.first { $0.name == MCPTools.browserAccessibilityAudit }
@@ -722,9 +726,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserNavigate(let navigate)) = navigateRequest.parameters else {
-            return XCTFail("Expected typed browser_navigate arguments")
-        }
+        let navigate: BrowserNavigateArguments = try requireToolArguments(
+          navigateRequest.parameters.toolCall,
+          tool: .browserNavigate
+        )
         XCTAssertEqual(navigate.url, "https://example.com")
         XCTAssertEqual(navigate.waitUntil, "domcontentloaded")
         let navigateDefinition = try XCTUnwrap(
@@ -761,9 +766,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserHistory(let history)) = historyRequest.parameters else {
-            return XCTFail("Expected typed browser_history arguments")
-        }
+        let history: BrowserHistoryArguments = try requireToolArguments(
+          historyRequest.parameters.toolCall,
+          tool: .browserHistory
+        )
         XCTAssertEqual(history.action, "reload_from_origin")
         XCTAssertEqual(history.waitUntil, "commit")
         let historyDefinition = try XCTUnwrap(
@@ -792,9 +798,7 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserStop(_)) = stopRequest.parameters else {
-            return XCTFail("Expected typed browser_stop arguments")
-        }
+        _ = try requireToolCommand(stopRequest.parameters.toolCall, tool: .browserStop)
         let stopDefinition = try XCTUnwrap(
             MCPTools.definitions.first { $0.name == MCPTools.browserStop }
         )
@@ -822,9 +826,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserTabs(let tabs)) = tabsRequest.parameters else {
-            return XCTFail("Expected typed browser_tabs arguments")
-        }
+        let tabs: BrowserTabsArguments = try requireToolArguments(
+          tabsRequest.parameters.toolCall,
+          tool: .browserTabs
+        )
         XCTAssertEqual(tabs.action, "new")
         XCTAssertEqual(tabs.context, "private")
         XCTAssertNil(tabs.tab)
@@ -843,9 +848,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserStorage(let storage)) = storageRequest.parameters else {
-            return XCTFail("Expected typed browser_storage arguments")
-        }
+        let storage: BrowserStorageArguments = try requireToolArguments(
+          storageRequest.parameters.toolCall,
+          tool: .browserStorage
+        )
         XCTAssertEqual(storage.action, "clear_site_data")
         let storageDefinition = try XCTUnwrap(
             MCPTools.definitions.first { $0.name == MCPTools.browserStorage }
@@ -871,9 +877,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserTrace(let trace)) = traceRequest.parameters else {
-            return XCTFail("Expected typed browser_trace arguments")
-        }
+        let trace: BrowserTraceArguments = try requireToolArguments(
+          traceRequest.parameters.toolCall,
+          tool: .browserTrace
+        )
         XCTAssertEqual(trace.action, "export")
 
         let uploadRequest = try JSONDecoder().decode(
@@ -893,9 +900,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserUpload(let upload)) = uploadRequest.parameters else {
-            return XCTFail("Expected typed browser_upload arguments")
-        }
+        let upload: BrowserUploadArguments = try requireToolArguments(
+          uploadRequest.parameters.toolCall,
+          tool: .browserUpload
+        )
         XCTAssertEqual(upload.paths, ["/tmp/one.txt", "/tmp/two.txt"])
         XCTAssertEqual(upload.locator?.label, "Attachments")
 
@@ -913,9 +921,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserDownload(let download)) = downloadRequest.parameters else {
-            return XCTFail("Expected typed browser_download arguments")
-        }
+        let download: BrowserDownloadArguments = try requireToolArguments(
+          downloadRequest.parameters.toolCall,
+          tool: .browserDownload
+        )
         XCTAssertEqual(download.ref, "e17")
 
         let compareRequest = try JSONDecoder().decode(
@@ -939,10 +948,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserVisualCompare(let comparison)) =
-                compareRequest.parameters else {
-            return XCTFail("Expected typed browser_visual_compare arguments")
-        }
+        let comparison: BrowserVisualCompareArguments = try requireToolArguments(
+          compareRequest.parameters.toolCall,
+          tool: .browserVisualCompare
+        )
         XCTAssertEqual(comparison.baselinePath, "/tmp/baseline.png")
         XCTAssertEqual(comparison.locator?.role, "button")
         XCTAssertEqual(comparison.channelThreshold, 12)
@@ -980,9 +989,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserResize(let resize)) = resizeRequest.parameters else {
-            return XCTFail("Expected typed browser_resize arguments")
-        }
+        let resize: BrowserResizeArguments = try requireToolArguments(
+          resizeRequest.parameters.toolCall,
+          tool: .browserResize
+        )
         XCTAssertEqual(resize.width, 375)
         XCTAssertEqual(resize.height, 667)
 
@@ -1004,9 +1014,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserEmulate(let emulate)) = emulateRequest.parameters else {
-            return XCTFail("Expected typed browser_emulate arguments")
-        }
+        let emulate: BrowserEmulateArguments = try requireToolArguments(
+          emulateRequest.parameters.toolCall,
+          tool: .browserEmulate
+        )
         XCTAssertEqual(emulate.colorScheme, "dark")
         XCTAssertEqual(emulate.userAgent, "ThreadingBrowserTest/1.0")
         XCTAssertEqual(emulate.mediaType, "print")
@@ -1046,9 +1057,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserCapabilities) = capabilitiesRequest.parameters else {
-            return XCTFail("Expected typed browser_capabilities arguments")
-        }
+        _ = try requireToolCommand(
+            capabilitiesRequest.parameters.toolCall,
+            tool: .browserCapabilities
+        )
         let capabilitiesDefinition = try XCTUnwrap(
             MCPTools.definitions.first { $0.name == MCPTools.browserCapabilities }
         )
@@ -1073,9 +1085,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserAnnotations) = annotationsRequest.parameters else {
-            return XCTFail("Expected typed browser_annotations arguments")
-        }
+        _ = try requireToolCommand(
+            annotationsRequest.parameters.toolCall,
+            tool: .browserAnnotations
+        )
         let annotationsDefinition = try XCTUnwrap(
             MCPTools.definitions.first { $0.name == MCPTools.browserAnnotations }
         )
@@ -1113,10 +1126,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserRunIsolated(let isolated)) =
-                isolatedRequest.parameters else {
-            return XCTFail("Expected typed browser_run_isolated arguments")
-        }
+        let isolated: BrowserIsolatedRunArguments = try requireToolArguments(
+          isolatedRequest.parameters.toolCall,
+          tool: .browserRunIsolated
+        )
         XCTAssertEqual(isolated.engine, "firefox")
         XCTAssertEqual(isolated.locale, "sv-SE")
         XCTAssertEqual(isolated.timezone, "Europe/Stockholm")
@@ -1155,9 +1168,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserSelect(let selection)) = selectRequest.parameters else {
-            return XCTFail("Expected typed browser_select arguments")
-        }
+        let selection: BrowserSelectArguments = try requireToolArguments(
+          selectRequest.parameters.toolCall,
+          tool: .browserSelect
+        )
         XCTAssertEqual(selection.ref, "e8")
         XCTAssertEqual(selection.label, "Sweden")
         XCTAssertNil(selection.value)
@@ -1173,9 +1187,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserHover(let hover)) = hoverRequest.parameters else {
-            return XCTFail("Expected typed browser_hover arguments")
-        }
+        let hover: BrowserTargetArguments = try requireToolArguments(
+          hoverRequest.parameters.toolCall,
+          tool: .browserHover
+        )
         XCTAssertEqual(hover.ref, "e9")
         XCTAssertNil(hover.selector)
 
@@ -1193,9 +1208,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserDrag(let drag)) = dragRequest.parameters else {
-            return XCTFail("Expected typed browser_drag arguments")
-        }
+        let drag: BrowserDragArguments = try requireToolArguments(
+          dragRequest.parameters.toolCall,
+          tool: .browserDrag
+        )
         XCTAssertEqual(drag.sourceRef, "e10")
         XCTAssertNil(drag.sourceSelector)
         XCTAssertEqual(drag.targetRef, "e11")
@@ -1215,9 +1231,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserSetChecked(let checked)) = checkedRequest.parameters else {
-            return XCTFail("Expected typed browser_set_checked arguments")
-        }
+        let checked: BrowserSetCheckedArguments = try requireToolArguments(
+          checkedRequest.parameters.toolCall,
+          tool: .browserSetChecked
+        )
         XCTAssertEqual(checked.ref, "e12")
         XCTAssertNil(checked.selector)
         XCTAssertEqual(checked.checked, true)
@@ -1236,9 +1253,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserClick(let click)) = clickRequest.parameters else {
-            return XCTFail("Expected typed browser_click arguments")
-        }
+        let click: BrowserClickArguments = try requireToolArguments(
+          clickRequest.parameters.toolCall,
+          tool: .browserClick
+        )
         XCTAssertNil(click.ref)
         XCTAssertNil(click.selector)
         XCTAssertEqual(click.x, 412.5)
@@ -1260,9 +1278,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserPressKey(let key)) = keyRequest.parameters else {
-            return XCTFail("Expected typed browser_press_key arguments")
-        }
+        let key: BrowserKeyArguments = try requireToolArguments(
+          keyRequest.parameters.toolCall,
+          tool: .browserPressKey
+        )
         XCTAssertEqual(key.ref, "e14")
         XCTAssertEqual(key.key, "Tab")
         XCTAssertEqual(key.shift, true)
@@ -1297,9 +1316,10 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserWait(let wait)) = waitRequest.parameters else {
-            return XCTFail("Expected typed browser_wait arguments")
-        }
+        let wait: BrowserWaitArguments = try requireToolArguments(
+          waitRequest.parameters.toolCall,
+          tool: .browserWait
+        )
         XCTAssertEqual(wait.locator?.label, "Email address")
         XCTAssertEqual(wait.targetValue, "ready")
         XCTAssertEqual(wait.timeout, 4)

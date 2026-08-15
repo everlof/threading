@@ -23,9 +23,10 @@ final class ThemeToolTests: XCTestCase {
             {"name": "set_theme", "arguments": {"theme_id": "ocean", "scope": "project"}}
             """)
 
-        guard case .setTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: SetThemeArguments = try requireToolArguments(
+          call,
+          tool: .setTheme
+        )
         XCTAssertEqual(arguments.themeID, TerminalThemeID.ocean.rawValue)
         XCTAssertNil(arguments.theme)
         XCTAssertEqual(arguments.scope, "project")
@@ -38,9 +39,10 @@ final class ThemeToolTests: XCTestCase {
             {"name": "set_theme"}
             """)
 
-        guard case .setTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: SetThemeArguments = try requireToolArguments(
+          call,
+          tool: .setTheme
+        )
         XCTAssertNil(arguments.themeID)
         XCTAssertNil(arguments.theme)
         XCTAssertNil(arguments.scope)
@@ -51,9 +53,10 @@ final class ThemeToolTests: XCTestCase {
             {"name": "set_theme", "arguments": {"theme": "Ocean", "scope": "session"}}
             """)
 
-        guard case .setTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: SetThemeArguments = try requireToolArguments(
+          call,
+          tool: .setTheme
+        )
         XCTAssertNil(arguments.themeID)
         XCTAssertEqual(arguments.theme, "Ocean")
     }
@@ -71,9 +74,10 @@ final class ThemeToolTests: XCTestCase {
             }
             """)
 
-        guard case .createTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: CreateThemeArguments = try requireToolArguments(
+          call,
+          tool: .createTheme
+        )
         XCTAssertEqual(arguments.name, "Dusk")
         XCTAssertEqual(arguments.baseID, TerminalThemeID.ocean.rawValue)
         XCTAssertNil(arguments.base)
@@ -83,11 +87,9 @@ final class ThemeToolTests: XCTestCase {
     }
 
     func testListThemesTakesNoArguments() throws {
-        guard case .listThemes = try call("""
+        _ = try requireToolCommand(try call("""
             {"name": "list_themes", "arguments": {}}
-            """) else {
-            return XCTFail("list_themes did not decode")
-        }
+            """), tool: .listThemes)
     }
 
     func testExtensionInstallProposalDecodesItsPackageDirectory() throws {
@@ -98,9 +100,10 @@ final class ThemeToolTests: XCTestCase {
             }
             """)
 
-        guard case .extensionProposeInstall(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: ExtensionProposeInstallArguments = try requireToolArguments(
+          call,
+          tool: .extensionProposeInstall
+        )
         XCTAssertEqual(
             arguments.directory,
             "/tmp/build-watch.threadingextension"
@@ -119,9 +122,10 @@ final class ThemeToolTests: XCTestCase {
             }
             """)
 
-        guard case .createTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: CreateThemeArguments = try requireToolArguments(
+          call,
+          tool: .createTheme
+        )
         XCTAssertNil(arguments.baseID)
         XCTAssertEqual(arguments.base, "Ocean")
     }
@@ -223,9 +227,10 @@ final class ThemeToolTests: XCTestCase {
             }
             """)
 
-        guard case .duplicateAppTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: DuplicateAppThemeArguments = try requireToolArguments(
+          call,
+          tool: .duplicateAppTheme
+        )
         XCTAssertEqual(arguments.themeID, "cyberpunk")
         XCTAssertEqual(arguments.name, "Cyberpunk Violet")
         XCTAssertEqual(arguments.apply, false)
@@ -267,9 +272,10 @@ final class ThemeToolTests: XCTestCase {
             }
             """)
 
-        guard case .updateAppTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: UpdateAppThemeArguments = try requireToolArguments(
+          call,
+          tool: .updateAppTheme
+        )
         XCTAssertEqual(arguments.themeID, "custom-violet")
         XCTAssertEqual(arguments.appearance, "adaptive")
         let dark = try XCTUnwrap(arguments.variants?["dark"])
@@ -300,9 +306,10 @@ final class ThemeToolTests: XCTestCase {
             }
             """)
 
-        guard case .createAppTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: CreateAppThemeArguments = try requireToolArguments(
+          call,
+          tool: .createAppTheme
+        )
         XCTAssertEqual(arguments.mode, "dark")
         XCTAssertNil(arguments.appearance)
         XCTAssertEqual(arguments.roles?["accent"], "#AA77FF")
@@ -452,9 +459,10 @@ final class ThemeToolTests: XCTestCase {
             }
             """)
 
-        guard case .updateAppTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: UpdateAppThemeArguments = try requireToolArguments(
+          call,
+          tool: .updateAppTheme
+        )
         let sidebar = try XCTUnwrap(arguments.variants?["dark"]?.sidebar)
         XCTAssertEqual(sidebar.gradient?.angleDegrees, 135)
         XCTAssertEqual(sidebar.gradient?.stops?.count, 2)
@@ -475,13 +483,39 @@ final class ThemeToolTests: XCTestCase {
               }
             }
             """)
-        guard case .createAppTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: CreateAppThemeArguments = try requireToolArguments(
+          call,
+          tool: .createAppTheme
+        )
         guard case .image(let image) = try XCTUnwrap(arguments.variants?["dark"]?.sidebar?.logo) else {
             return XCTFail("logo object did not decode as an image source")
         }
         XCTAssertEqual(image.base64, "AAAA")
+    }
+
+    func testTypedThemeConstructionPreservesTheLogoWireShape() throws {
+        let source = UpdateAppThemeArguments(
+            themeID: "custom-x",
+            name: nil,
+            appearance: nil,
+            mode: nil,
+            summary: nil,
+            variants: [
+                "dark": AppThemeVariantArguments(
+                    sidebar: AppThemeSidebarArguments(logo: .hidden)
+                )
+            ],
+            roles: nil,
+            material: nil,
+            terminalColors: nil,
+            apply: false
+        )
+
+        let decoded: UpdateAppThemeArguments = try AgentCommand.updateAppTheme(source)
+            .decodedArguments()
+        guard case .hidden = try XCTUnwrap(decoded.variants?["dark"]?.sidebar?.logo) else {
+            return XCTFail("typed construction changed the scalar logo spelling")
+        }
     }
 
     /// The whole loop an agent actually runs: create a theme whose sidebar carries a gradient,
@@ -827,9 +861,10 @@ final class ThemeToolTests: XCTestCase {
             }
             """)
 
-        guard case .updateAppTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: UpdateAppThemeArguments = try requireToolArguments(
+          call,
+          tool: .updateAppTheme
+        )
         let variant = try XCTUnwrap(arguments.variants?["light"])
         let chrome = try XCTUnwrap(variant.chrome)
         XCTAssertEqual(chrome.titleBar?.activeGradient?.angleDegrees, 90)
@@ -1087,9 +1122,10 @@ final class ThemeToolTests: XCTestCase {
               }
             }
             """)
-        guard case .createAppTheme(let create) = createCall else {
-            return XCTFail("decoded as \(createCall.name)")
-        }
+        let create: CreateAppThemeArguments = try requireToolArguments(
+          createCall,
+          tool: .createAppTheme
+        )
         let decodedTitle = try XCTUnwrap(create.variants?["light"]?.chrome?.titleBar)
         XCTAssertEqual(decodedTitle.buttonGlyphStyle, "platinum")
         XCTAssertEqual(decodedTitle.buttonPlacement, "split")
@@ -1153,9 +1189,10 @@ final class ThemeToolTests: XCTestCase {
               }
             }
             """)
-        guard case .updateAppTheme(let update) = updateCall else {
-            return XCTFail("decoded as \(updateCall.name)")
-        }
+        let update: UpdateAppThemeArguments = try requireToolArguments(
+          updateCall,
+          tool: .updateAppTheme
+        )
         let revised = coordinator().updateAppTheme(update)
         XCTAssertFalse(revised.isError, revised.text)
         let updated = try XCTUnwrap(AppThemeLibrary.theme(withID: theme.id))
@@ -1203,9 +1240,10 @@ final class ThemeToolTests: XCTestCase {
               }
             }
             """)
-        guard case .createAppTheme(let create) = createCall else {
-            return XCTFail("decoded as \(createCall.name)")
-        }
+        let create: CreateAppThemeArguments = try requireToolArguments(
+          createCall,
+          tool: .createAppTheme
+        )
         let decoded = try XCTUnwrap(create.variants?["light"]?.chrome?.titleBar)
         XCTAssertEqual(decoded.shape, "leading_tab")
         XCTAssertEqual(decoded.tabWidth, 210)
@@ -1282,9 +1320,10 @@ final class ThemeToolTests: XCTestCase {
               }
             }
             """)
-        guard case .createAppTheme(let create) = createCall else {
-            return XCTFail("decoded as \(createCall.name)")
-        }
+        let create: CreateAppThemeArguments = try requireToolArguments(
+          createCall,
+          tool: .createAppTheme
+        )
         let decoded = try XCTUnwrap(create.variants?["light"]?.chrome?.titleBar)
         XCTAssertEqual(decoded.titleFontStyle, "italic")
         XCTAssertEqual(decoded.buttonGlyphStyle, "irix")
@@ -1369,9 +1408,10 @@ final class ThemeToolTests: XCTestCase {
               }
             }
             """)
-        guard case .createAppTheme(let create) = createCall else {
-            return XCTFail("decoded as \(createCall.name)")
-        }
+        let create: CreateAppThemeArguments = try requireToolArguments(
+          createCall,
+          tool: .createAppTheme
+        )
         let decoded = try XCTUnwrap(create.variants?["light"]?.chrome?.titleBar)
         XCTAssertEqual(decoded.buttonGlyphStyle, "amiga")
         XCTAssertEqual(decoded.visibleButtons, ["close", "zoom", "depth"])
@@ -1704,9 +1744,10 @@ final class ThemeToolTests: XCTestCase {
             }
             """)
 
-        guard case .updateAppTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: UpdateAppThemeArguments = try requireToolArguments(
+          call,
+          tool: .updateAppTheme
+        )
         let material = try XCTUnwrap(arguments.variants?["light"]?.material)
         XCTAssertEqual(material.typeface, "serif")
         XCTAssertEqual(material.fontFamily, "Baskerville")
@@ -1764,9 +1805,10 @@ final class ThemeToolTests: XCTestCase {
             }
             """)
 
-        guard case .updateAppTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: UpdateAppThemeArguments = try requireToolArguments(
+          call,
+          tool: .updateAppTheme
+        )
         let material = try XCTUnwrap(arguments.variants?["light"]?.material)
         XCTAssertEqual(material.removeControlBorderWidth, true)
         XCTAssertNil(material.controlBorderWidth)
@@ -1785,9 +1827,10 @@ final class ThemeToolTests: XCTestCase {
             }
             """)
 
-        guard case .updateAppTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: UpdateAppThemeArguments = try requireToolArguments(
+          call,
+          tool: .updateAppTheme
+        )
         let material = try XCTUnwrap(arguments.variants?["light"]?.material)
         XCTAssertEqual(material.removeBackdropPattern, true)
         XCTAssertNil(material.backdropPattern)
@@ -1806,9 +1849,10 @@ final class ThemeToolTests: XCTestCase {
             }
             """)
 
-        guard case .updateAppTheme(let arguments) = call else {
-            return XCTFail("decoded as \(call.name)")
-        }
+        let arguments: UpdateAppThemeArguments = try requireToolArguments(
+          call,
+          tool: .updateAppTheme
+        )
         let material = try XCTUnwrap(arguments.variants?["light"]?.material)
         XCTAssertEqual(material.removeHeadingStyle, true)
         XCTAssertNil(material.headingStyle)
@@ -1836,9 +1880,10 @@ final class ThemeToolTests: XCTestCase {
               }
             }
             """)
-        guard case .createAppTheme(let arguments) = createCall else {
-            return XCTFail("decoded as \(createCall.name)")
-        }
+        let arguments: CreateAppThemeArguments = try requireToolArguments(
+          createCall,
+          tool: .createAppTheme
+        )
         let result = coordinator().createAppTheme(arguments)
         XCTAssertFalse(result.isError, result.text)
         let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
@@ -1886,9 +1931,10 @@ final class ThemeToolTests: XCTestCase {
               }
             }
             """)
-        guard case .createAppTheme(let arguments) = createCall else {
-            return XCTFail("decoded as \(createCall.name)")
-        }
+        let arguments: CreateAppThemeArguments = try requireToolArguments(
+          createCall,
+          tool: .createAppTheme
+        )
 
         let result = coordinator().createAppTheme(arguments)
         XCTAssertFalse(result.isError, result.text)
@@ -1957,9 +2003,10 @@ final class ThemeToolTests: XCTestCase {
               }
             }
             """)
-        guard case .createAppTheme(let create) = createCall else {
-            return XCTFail("decoded as \(createCall.name)")
-        }
+        let create: CreateAppThemeArguments = try requireToolArguments(
+          createCall,
+          tool: .createAppTheme
+        )
 
         let result = coordinator().createAppTheme(create)
         XCTAssertFalse(result.isError, result.text)
@@ -2093,9 +2140,10 @@ final class ThemeToolTests: XCTestCase {
               }
             }
             """)
-        guard case .createAppTheme(let create) = createCall else {
-            return XCTFail("decoded as \(createCall.name)")
-        }
+        let create: CreateAppThemeArguments = try requireToolArguments(
+          createCall,
+          tool: .createAppTheme
+        )
         let materialPatch = try XCTUnwrap(create.variants?["light"]?.material)
         XCTAssertEqual(materialPatch.scrollerPlacement, "leading")
         XCTAssertEqual(materialPatch.scrollerTrackStyle, "stippled")

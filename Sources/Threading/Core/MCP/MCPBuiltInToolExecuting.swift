@@ -1,0 +1,201 @@
+import Foundation
+
+/// Typed application implementations available to built-in MCP declarations.
+///
+/// This is an execution boundary, not a second tool inventory: it contains no wire identity,
+/// schema, grouping, presentation, or decoding policy. A declaration captures one of these
+/// typed implementations when it constructs a command, so runtime dispatch never switches on
+/// a string or erases an argument through `Any`.
+@MainActor
+protocol MCPBuiltInToolExecuting: AnyObject {
+  func displayImage(_ arguments: DisplayImageArguments, for sessionID: SessionID) -> MCPToolResult
+  func displayChart(_ arguments: DisplayChartArguments, for sessionID: SessionID) -> MCPToolResult
+  func displayScene(_ arguments: DisplaySceneArguments, for sessionID: SessionID) -> MCPToolResult
+  func displayHTML(_ arguments: DisplayHTMLArguments, for sessionID: SessionID) -> MCPToolResult
+  func displayCompareFiles(
+    _ arguments: DisplayCompareFilesArguments, for sessionID: SessionID
+  ) -> MCPToolResult
+
+  func browserNavigate(
+    _ arguments: BrowserNavigateArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserHistory(
+    _ arguments: BrowserHistoryArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserStop(
+    for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserTabs(_ arguments: BrowserTabsArguments, for sessionID: SessionID) -> MCPToolResult
+  func browserStorage(
+    _ arguments: BrowserStorageArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserTrace(_ arguments: BrowserTraceArguments, for sessionID: SessionID) -> MCPToolResult
+  func browserUpload(
+    _ arguments: BrowserUploadArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserDownload(
+    _ arguments: BrowserDownloadArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserResize(
+    _ arguments: BrowserResizeArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserEmulate(
+    _ arguments: BrowserEmulateArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserCapabilities(for sessionID: SessionID) -> MCPToolResult
+  func browserRunIsolated(
+    _ arguments: BrowserIsolatedRunArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserAttachChrome(
+    _ arguments: BrowserAttachRunArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserSnapshot(
+    _ arguments: BrowserSnapshotArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserAnnotations(
+    for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserScreenshot(
+    _ arguments: BrowserScreenshotArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserVisualCompare(
+    _ arguments: BrowserVisualCompareArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserBaselines(
+    _ arguments: BrowserBaselinesArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserQuery(
+    _ arguments: BrowserSelectorArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserClick(
+    _ arguments: BrowserClickArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserHover(
+    _ arguments: BrowserTargetArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserDrag(
+    _ arguments: BrowserDragArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserType(
+    _ arguments: BrowserTypeArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserFillForm(
+    _ arguments: BrowserFillFormArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserFillCredentials(
+    _ arguments: BrowserFillCredentialsArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserSelect(
+    _ arguments: BrowserSelectArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserSetChecked(
+    _ arguments: BrowserSetCheckedArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserPressKey(
+    _ arguments: BrowserKeyArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserScroll(
+    _ arguments: BrowserScrollArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserWait(
+    _ arguments: BrowserWaitArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserConsole(
+    _ arguments: BrowserConsoleArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserNetwork(
+    _ arguments: BrowserNetworkArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserPerformance(
+    _ arguments: BrowserPerformanceArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func browserAccessibilityAudit(
+    _ arguments: BrowserAccessibilityAuditArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+
+  func panelListTabs(for sessionID: SessionID) -> MCPToolResult
+  func panelActivateTab(
+    _ arguments: PanelActivateTabArguments, for sessionID: SessionID
+  ) -> MCPToolResult
+  func setProjectIcon(
+    _ arguments: SetProjectIconArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func archiveSession(
+    _ arguments: ArchiveSessionArguments, for sessionID: SessionID
+  ) -> MCPToolResult
+  func cancelSessionArchive(for sessionID: SessionID) -> MCPToolResult
+  func setSessionName(
+    _ arguments: SetSessionNameArguments, for sessionID: SessionID
+  ) -> MCPToolResult
+  func listProjectSessions(for sessionID: SessionID) -> MCPToolResult
+  func sendToSession(
+    _ arguments: SendToSessionArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func watchSession(
+    _ arguments: WatchSessionArguments, for sessionID: SessionID
+  ) -> MCPToolResult
+  func listReclaimableStorage() -> MCPToolResult
+  func proposeStorageCleanup(
+    _ arguments: StorageCleanupArguments,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func listSettings() -> MCPToolResult
+  func notifyUser(_ arguments: NotifyUserArguments, for sessionID: SessionID) -> MCPToolResult
+  func listThemes(for sessionID: SessionID) -> MCPToolResult
+  func setTheme(_ arguments: SetThemeArguments, for sessionID: SessionID) -> MCPToolResult
+  func createTheme(_ arguments: CreateThemeArguments, for sessionID: SessionID) -> MCPToolResult
+  func listAppThemes() -> MCPToolResult
+  func getAppTheme(_ arguments: AppThemeReferenceArguments) -> MCPToolResult
+  func setAppTheme(_ arguments: SetAppThemeArguments) -> MCPToolResult
+  func createAppTheme(_ arguments: CreateAppThemeArguments) -> MCPToolResult
+  func duplicateAppTheme(_ arguments: DuplicateAppThemeArguments) -> MCPToolResult
+  func updateAppTheme(_ arguments: UpdateAppThemeArguments) -> MCPToolResult
+  func extensionListComponents() -> MCPToolResult
+  func extensionScaffoldProject(_ arguments: ExtensionScaffoldProjectArguments) -> MCPToolResult
+  func extensionProposeInstall(
+    _ arguments: ExtensionProposeInstallArguments,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func extensionDescribeComponent(
+    _ arguments: ExtensionComponentReferenceArguments
+  ) -> MCPToolResult
+  func extensionValidateComponentPatch(
+    _ arguments: ExtensionComponentPatchArguments
+  ) -> MCPToolResult
+  func extensionPreviewComponentPatch(
+    _ arguments: ExtensionComponentPatchArguments, for sessionID: SessionID
+  ) -> MCPToolResult
+}

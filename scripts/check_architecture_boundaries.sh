@@ -52,6 +52,17 @@ main_window_controller="${repository_directory}/Sources/Threading/UI/Windows/Mai
 extension_command_adapter="${repository_directory}/Sources/Threading/UI/Windows/AgentToolCoordinator+ExtensionCommands.swift"
 extension_preview_service="${repository_directory}/Sources/Threading/UI/Extensions/ExtensionComponentAuthoringService.swift"
 component_gallery_controller="${repository_directory}/Sources/Threading/UI/Windows/ComponentGalleryWindowController.swift"
+mcp_tools="${repository_directory}/Sources/Threading/Core/MCP/MCPTools.swift"
+mcp_catalog="${repository_directory}/Sources/Threading/Core/MCP/MCPToolCatalog.swift"
+mcp_handler="${repository_directory}/Sources/Threading/UI/Windows/MainWindowMCPTools.swift"
+
+if rg -n 'enum AgentCommand\b|func decodeArguments\s*\(' "${mcp_tools}" \
+  || rg -n 'tool:\s*\.[A-Za-z]' "${mcp_catalog}" \
+  || rg -n 'switch\s+call\b' "${mcp_handler}"; then
+  echo "architecture-boundary: built-in MCP identity, decoding, catalogue metadata, and" >&2
+  echo "  execution routing must stay in the single typed declaration inventory" >&2
+  failed=1
+fi
 
 if rg -n \
   '(ProjectStore|AgentRuntime|AppSettings|EventLog)\.shared\b' \

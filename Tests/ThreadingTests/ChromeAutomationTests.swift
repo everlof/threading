@@ -234,9 +234,10 @@ final class ChromeAutomationTests: XCTestCase {
                 """#.utf8
             )
         )
-        guard case .toolCall(.browserAttachChrome(let attach)) = request.parameters else {
-            return XCTFail("Expected typed browser_attach_chrome arguments")
-        }
+        let attach: BrowserAttachRunArguments = try requireToolArguments(
+          request.parameters.toolCall,
+          tool: .browserAttachChrome
+        )
         XCTAssertEqual(attach.allowedOrigins, ["https://example.test"])
         XCTAssertEqual(attach.timeoutMS, 9_000)
         XCTAssertEqual(attach.screenshot, true)

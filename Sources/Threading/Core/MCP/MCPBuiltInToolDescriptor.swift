@@ -6,11 +6,23 @@ import Foundation
 /// that wire payload into the exact application command the execution side accepts.
 struct MCPToolArgumentDecoding: Sendable {
   let tool: MCPBuiltInTool
+  private let decodeBody:
+    @Sendable (KeyedDecodingContainer<MCPToolCallParameters.CodingKeys>) throws -> AgentCommand
+
+  init(
+    tool: MCPBuiltInTool,
+    decode: @escaping @Sendable (
+      KeyedDecodingContainer<MCPToolCallParameters.CodingKeys>
+    ) throws -> AgentCommand
+  ) {
+    self.tool = tool
+    self.decodeBody = decode
+  }
 
   func decode(
     from container: KeyedDecodingContainer<MCPToolCallParameters.CodingKeys>
   ) throws -> AgentCommand {
-    try tool.decodeArguments(from: container)
+    try decodeBody(container)
   }
 }
 
@@ -29,16 +41,14 @@ struct MCPToolExecutionBinding: Sendable {
       completion(.failure("Threading refused a mismatched built-in tool binding."))
       return
     }
-    handler.handle(command, for: sessionID, completion: completion)
+    handler.executeBuiltIn(command, for: sessionID, completion: completion)
   }
 }
 
 /// One complete admitted built-in tool contract.
 ///
 /// Identity, typed argument decoding, wire schema, behavior annotations, Settings/catalog
-/// presentation, group membership, and application execution all meet here. The underlying
-/// schema and presentation literals each remain beside the large declarative catalog that owns
-/// their wording, but no runtime consumer joins those lists independently.
+/// presentation, group membership, and application execution all meet here.
 struct MCPBuiltInToolDescriptor: Sendable {
   let tool: MCPBuiltInTool
   let argumentDecoding: MCPToolArgumentDecoding
@@ -51,23 +61,89 @@ struct MCPBuiltInToolDescriptor: Sendable {
   let execution: MCPToolExecutionBinding
 }
 
+/// An independently auditable projection of authored declarations. Production uses one live
+/// snapshot; tests can remove or duplicate a declaration and prove every consumer fails closed.
+struct MCPBuiltInToolRegistrySnapshot: Sendable {
+  let descriptors: [MCPBuiltInToolDescriptor]
+  let issues: [String]
+
+  init(
+    declarations: [MCPToolDefinition],
+    expectedTools: [MCPBuiltInTool] = MCPBuiltInTool.allCases
+  ) {
+    var issues: [String] = []
+    var declarationsByTool: [MCPBuiltInTool: [MCPToolDefinition]] = [:]
+    var declarationsByName: [String: [MCPToolDefinition]] = [:]
+    for definition in declarations {
+      guard let tool = definition.tool else {
+        issues.append("the built-in registry contains an external definition")
+        continue
+      }
+      declarationsByTool[tool, default: []].append(definition)
+      declarationsByName[definition.name, default: []].append(definition)
+    }
+
+    var descriptors: [MCPBuiltInToolDescriptor] = []
+    for (order, tool) in expectedTools.enumerated() {
+      let definitions = declarationsByTool[tool] ?? []
+      if definitions.count != 1 {
+        issues.append(
+          "\(String(describing: tool)) has \(definitions.count) declarations; expected exactly one"
+        )
+      }
+      guard let definition = definitions.only,
+        let groupID = definition.builtInGroupID,
+        let family = definition.builtInFamily,
+        let presentation = definition.builtInPresentation,
+        let argumentDecoding = definition.argumentDecoding,
+        let annotations = definition.annotations
+      else {
+        if definitions.count == 1 {
+          issues.append(
+            "\(String(describing: tool)) is missing built-in declaration metadata"
+          )
+        }
+        continue
+      }
+      guard declarationsByName[definition.name]?.count == 1 else {
+        issues.append("\(definition.name) is declared by more than one built-in identity")
+        continue
+      }
+
+      descriptors.append(
+        MCPBuiltInToolDescriptor(
+          tool: tool,
+          argumentDecoding: argumentDecoding,
+          definition: definition,
+          annotations: annotations,
+          groupID: groupID,
+          family: family,
+          presentation: presentation,
+          catalogOrder: order,
+          execution: MCPToolExecutionBinding(tool: tool)
+        ))
+    }
+
+    self.descriptors = descriptors
+    self.issues = issues
+  }
+
+  func descriptor(for tool: MCPBuiltInTool) -> MCPBuiltInToolDescriptor? {
+    descriptors.first { $0.tool == tool }
+  }
+
+  func descriptor(named name: String) -> MCPBuiltInToolDescriptor? {
+    descriptors.first { $0.definition.name == name }
+  }
+}
+
 /// The authoritative built-in registry. An incomplete or contradictory declaration is omitted,
 /// so decoding, advertisement, enablement, catalog display, scoped access, and execution all fail
 /// closed in the same way.
 enum MCPBuiltInToolRegistry {
-  private struct PresentationRow: Sendable {
-    let groupID: String
-    let family: MCPBuiltInTool.Family
-    let presentation: MCPToolInfo
-    let order: Int
-  }
-
-  private struct BuildResult: Sendable {
-    let descriptors: [MCPBuiltInToolDescriptor]
-    let issues: [String]
-  }
-
-  private static let result = build()
+  private static let result = MCPBuiltInToolRegistrySnapshot(
+    declarations: MCPTools.authoredDeclarations
+  )
 
   static let descriptors = result.descriptors
   static let issues = result.issues
@@ -77,8 +153,7 @@ enum MCPBuiltInToolRegistry {
   }
 
   static func descriptor(named name: String) -> MCPBuiltInToolDescriptor? {
-    guard let tool = MCPBuiltInTool(rawValue: name) else { return nil }
-    return descriptor(for: tool)
+    descriptors.first { $0.definition.name == name }
   }
 
   static func descriptors(inGroupID groupID: String) -> [MCPBuiltInToolDescriptor] {
@@ -87,85 +162,23 @@ enum MCPBuiltInToolRegistry {
       .sorted { $0.catalogOrder < $1.catalogOrder }
   }
 
-  private static func build() -> BuildResult {
-    var issues: [String] = []
-
-    var definitionsByTool: [MCPBuiltInTool: [MCPToolDefinition]] = [:]
-    for definition in MCPTools.declaredDefinitions {
-      guard let tool = definition.tool else {
-        issues.append("the built-in schema registry contains an external definition")
-        continue
-      }
-      definitionsByTool[tool, default: []].append(definition)
-    }
-
-    var rowsByTool: [MCPBuiltInTool: [PresentationRow]] = [:]
-    var order = 0
-    for group in MCPToolCatalog.declaredGroups {
-      guard let family = group.builtInFamily else {
-        issues.append("the built-in catalog contains external group \(group.id)")
-        continue
-      }
-      for presentation in group.tools {
-        guard let tool = presentation.builtInTool else {
-          issues.append("\(group.id) mixes built-in and external tool metadata")
-          continue
-        }
-        rowsByTool[tool, default: []].append(
-          PresentationRow(
-            groupID: group.id,
-            family: family,
-            presentation: presentation,
-            order: order
-          ))
-        order += 1
-      }
-    }
-
-    var descriptors: [MCPBuiltInToolDescriptor] = []
-    for tool in MCPBuiltInTool.allCases {
-      let definitions = definitionsByTool[tool] ?? []
-      let rows = rowsByTool[tool] ?? []
-      if definitions.count != 1 {
-        issues.append(
-          "\(tool.rawValue) has \(definitions.count) schema declarations; expected exactly one"
-        )
-      }
-      if rows.count != 1 {
-        issues.append(
-          "\(tool.rawValue) has \(rows.count) catalog entries; expected exactly one"
-        )
-      }
-      guard let definition = definitions.only, let row = rows.only else { continue }
-      guard row.family == tool.family else {
-        issues.append(
-          "\(tool.rawValue) belongs to \(tool.family.rawValue), not \(row.family.rawValue)"
-        )
-        continue
-      }
-      guard definition.name == tool.rawValue,
-        definition.annotations == tool.annotations
-      else {
-        issues.append("\(tool.rawValue) schema identity or annotations disagree with its type")
-        continue
-      }
-
-      descriptors.append(
-        MCPBuiltInToolDescriptor(
-          tool: tool,
-          argumentDecoding: MCPToolArgumentDecoding(tool: tool),
-          definition: definition,
-          annotations: tool.annotations,
-          groupID: row.groupID,
-          family: row.family,
-          presentation: row.presentation,
-          catalogOrder: row.order,
-          execution: MCPToolExecutionBinding(tool: tool)
-        ))
-    }
-
-    return BuildResult(descriptors: descriptors, issues: issues)
+  /// Constructs a command through the same typed decoder used on the wire. This is useful to
+  /// application adapters and tests that already hold an argument value; it deliberately does
+  /// not provide another execution route.
+  static func command<Arguments: Encodable & Sendable>(
+    for tool: MCPBuiltInTool,
+    arguments: Arguments
+  ) throws -> AgentCommand {
+    let encodedArguments = try JSONEncoder().encode(arguments)
+    let argumentsValue = try JSONDecoder().decode(MCPJSONValue.self, from: encodedArguments)
+    let envelope = MCPJSONValue.object([
+      "name": .string(tool.rawValue),
+      "arguments": argumentsValue,
+    ])
+    let data = try JSONEncoder().encode(envelope)
+    return try JSONDecoder().decode(MCPToolCallParameters.self, from: data).call
   }
+
 }
 
 private extension Array {

@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Tool Call
 
-struct DisplayImageArguments: Decodable, Sendable {
+struct DisplayImageArguments: Codable, Sendable {
   let path: String?
   let title: String?
 }
@@ -11,26 +11,26 @@ struct DisplayImageArguments: Decodable, Sendable {
 ///
 /// These deliberately mirror, but do not import, `ThreadingExtensionKit`. The application
 /// coordinator translates them at the UI boundary so the MCP core stays extension-agnostic.
-struct MCPScene: Decodable, Equatable, Sendable {
+struct MCPScene: Codable, Equatable, Sendable {
   let accessibilityLabel: String
   let preferredAspectRatio: Double
   let items: [MCPSceneItem]
 }
 
-struct MCPSceneRect: Decodable, Equatable, Sendable {
+struct MCPSceneRect: Codable, Equatable, Sendable {
   let x: Double
   let y: Double
   let width: Double
   let height: Double
 }
 
-enum MCPSceneShape: String, Decodable, Equatable, Sendable {
+enum MCPSceneShape: String, Codable, Equatable, Sendable {
   case rectangle
   case roundedRectangle
   case ellipse
 }
 
-enum MCPSceneColor: String, Decodable, Equatable, Sendable {
+enum MCPSceneColor: String, Codable, Equatable, Sendable {
   case neutral
   case accent
   case positive
@@ -44,7 +44,7 @@ enum MCPSceneColor: String, Decodable, Equatable, Sendable {
   case category6
 }
 
-struct MCPSceneItem: Decodable, Equatable, Sendable {
+struct MCPSceneItem: Codable, Equatable, Sendable {
   let id: String
   let frame: MCPSceneRect
   let shape: MCPSceneShape
@@ -58,7 +58,7 @@ struct MCPSceneItem: Decodable, Equatable, Sendable {
   let isSelected: Bool
 }
 
-struct DisplaySceneArguments: Decodable, Sendable {
+struct DisplaySceneArguments: Codable, Sendable {
   let scene: MCPScene?
   let title: String?
   let subtitle: String?
@@ -69,8 +69,8 @@ struct DisplaySceneArguments: Decodable, Sendable {
 /// Every field is optional at the transport so a malformed call reaches the handler and is
 /// answered with a sentence the model can act on, rather than failing as an undecodable blob
 /// whose complaint names a Swift key path.
-struct DisplayChartArguments: Decodable, Sendable {
-  struct Series: Decodable, Sendable {
+struct DisplayChartArguments: Codable, Sendable {
+  struct Series: Codable, Sendable {
     let name: String?
     let values: [Double]?
     let details: [String]?
@@ -100,12 +100,12 @@ struct DisplayChartArguments: Decodable, Sendable {
   }
 }
 
-struct DisplayHTMLArguments: Decodable, Sendable {
+struct DisplayHTMLArguments: Codable, Sendable {
   let html: String?
   let title: String?
 }
 
-struct DisplayCompareFilesArguments: Decodable, Sendable {
+struct DisplayCompareFilesArguments: Codable, Sendable {
   let oldPath: String?
   let newPath: String?
   let oldTitle: String?
@@ -131,7 +131,7 @@ struct DisplayCompareFilesArguments: Decodable, Sendable {
   }
 }
 
-struct BrowserNavigateArguments: Decodable, Sendable {
+struct BrowserNavigateArguments: Codable, Sendable {
   let url: String?
   let waitUntil: String?
 
@@ -146,7 +146,7 @@ struct BrowserNavigateArguments: Decodable, Sendable {
   }
 }
 
-struct BrowserHistoryArguments: Decodable, Sendable {
+struct BrowserHistoryArguments: Codable, Sendable {
   let action: String?
   let waitUntil: String?
 
@@ -161,39 +161,39 @@ struct BrowserHistoryArguments: Decodable, Sendable {
   }
 }
 
-struct BrowserTabsArguments: Decodable, Sendable {
+struct BrowserTabsArguments: Codable, Sendable {
   let action: String?
   let tab: PanelTabReference?
   var context: String? = nil
 }
 
-struct BrowserStorageArguments: Decodable, Sendable {
+struct BrowserStorageArguments: Codable, Sendable {
   let action: String?
 }
 
-struct BrowserTraceArguments: Decodable, Sendable {
+struct BrowserTraceArguments: Codable, Sendable {
   let action: String?
 }
 
-struct BrowserUploadArguments: Decodable, Sendable {
+struct BrowserUploadArguments: Codable, Sendable {
   let paths: [String]?
   let ref: String?
   let selector: String?
   var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserDownloadArguments: Decodable, Sendable {
+struct BrowserDownloadArguments: Codable, Sendable {
   let ref: String?
   let selector: String?
   var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserResizeArguments: Decodable, Sendable {
+struct BrowserResizeArguments: Codable, Sendable {
   let width: Int?
   let height: Int?
 }
 
-struct BrowserEmulateArguments: Decodable, Sendable {
+struct BrowserEmulateArguments: Codable, Sendable {
   let colorScheme: String?
   let userAgent: String?
   let mediaType: String?
@@ -324,7 +324,7 @@ struct BrowserAttachRunArguments: Codable, Sendable {
   }
 }
 
-struct BrowserSnapshotArguments: Decodable, Sendable {
+struct BrowserSnapshotArguments: Codable, Sendable {
   let maximumNodes: Int?
   let ref: String?
   let selector: String?
@@ -335,14 +335,14 @@ struct BrowserSnapshotArguments: Decodable, Sendable {
   }
 }
 
-struct BrowserSelectorArguments: Decodable, Sendable {
+struct BrowserSelectorArguments: Codable, Sendable {
   let selector: String?
 }
 
 /// A rerender-safe target description resolved from the live accessibility semantics instead of
 /// from one DOM node identity. Exactly one of role, label, or testID is the locator's primary key;
 /// name may refine a role. Exact matching is the deterministic default.
-struct BrowserSemanticLocator: Decodable, Equatable, Sendable {
+struct BrowserSemanticLocator: Codable, Equatable, Sendable {
   let role: String?
   let name: String?
   let label: String?
@@ -378,13 +378,13 @@ struct BrowserSemanticLocator: Decodable, Equatable, Sendable {
   }
 }
 
-struct BrowserTargetArguments: Decodable, Sendable {
+struct BrowserTargetArguments: Codable, Sendable {
   let ref: String?
   let selector: String?
   var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserClickArguments: Decodable, Sendable {
+struct BrowserClickArguments: Codable, Sendable {
   let ref: String?
   let selector: String?
   let x: Double?
@@ -399,7 +399,7 @@ struct BrowserClickArguments: Decodable, Sendable {
   }
 }
 
-struct BrowserDragArguments: Decodable, Sendable {
+struct BrowserDragArguments: Codable, Sendable {
   let sourceRef: String?
   let sourceSelector: String?
   let targetRef: String?
@@ -417,7 +417,7 @@ struct BrowserDragArguments: Decodable, Sendable {
   }
 }
 
-struct BrowserTypeArguments: Decodable, Sendable {
+struct BrowserTypeArguments: Codable, Sendable {
   let ref: String?
   let selector: String?
   let text: String?
@@ -426,11 +426,11 @@ struct BrowserTypeArguments: Decodable, Sendable {
   var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserFillFormArguments: Decodable, Sendable {
+struct BrowserFillFormArguments: Codable, Sendable {
   let fields: [BrowserFormFieldArguments]?
 }
 
-struct BrowserFormFieldArguments: Decodable, Sendable {
+struct BrowserFormFieldArguments: Codable, Sendable {
   let ref: String?
   let selector: String?
   let value: String?
@@ -439,7 +439,7 @@ struct BrowserFormFieldArguments: Decodable, Sendable {
   var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserSelectArguments: Decodable, Sendable {
+struct BrowserSelectArguments: Codable, Sendable {
   let ref: String?
   let selector: String?
   let value: String?
@@ -447,7 +447,7 @@ struct BrowserSelectArguments: Decodable, Sendable {
   var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserSetCheckedArguments: Decodable, Sendable {
+struct BrowserSetCheckedArguments: Codable, Sendable {
   let ref: String?
   let selector: String?
   let checked: Bool?
@@ -457,7 +457,7 @@ struct BrowserSetCheckedArguments: Decodable, Sendable {
 /// Deliberately carries no origin, username, or password. The origin comes from the live
 /// authorized page and the values from the user's own vault, so neither the agent nor a page
 /// that injected instructions into it can name what gets filled where.
-struct BrowserFillCredentialsArguments: Decodable, Sendable {
+struct BrowserFillCredentialsArguments: Codable, Sendable {
   /// Which stored test account, when one origin holds more than one. User-authored and not a
   /// secret, so it is safe both to accept and to name back in an error.
   let account: String?
@@ -466,7 +466,7 @@ struct BrowserFillCredentialsArguments: Decodable, Sendable {
   var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserKeyArguments: Decodable, Sendable {
+struct BrowserKeyArguments: Codable, Sendable {
   let key: String?
   let ref: String?
   let selector: String?
@@ -477,7 +477,7 @@ struct BrowserKeyArguments: Decodable, Sendable {
   var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserScrollArguments: Decodable, Sendable {
+struct BrowserScrollArguments: Codable, Sendable {
   let direction: String?
   let amount: Double?
   let ref: String?
@@ -485,7 +485,7 @@ struct BrowserScrollArguments: Decodable, Sendable {
   var locator: BrowserSemanticLocator? = nil
 }
 
-struct BrowserWaitArguments: Decodable, Sendable {
+struct BrowserWaitArguments: Codable, Sendable {
   let time: Double?
   let text: String?
   let textGone: String?
@@ -523,12 +523,12 @@ struct BrowserWaitArguments: Decodable, Sendable {
   }
 }
 
-struct BrowserConsoleArguments: Decodable, Sendable {
+struct BrowserConsoleArguments: Codable, Sendable {
   let level: String?
   let clear: Bool?
 }
 
-struct BrowserNetworkArguments: Decodable, Sendable {
+struct BrowserNetworkArguments: Codable, Sendable {
   let kind: String?
   let errorsOnly: Bool?
   let clear: Bool?
@@ -539,7 +539,7 @@ struct BrowserNetworkArguments: Decodable, Sendable {
   }
 }
 
-struct BrowserPerformanceArguments: Decodable, Sendable {
+struct BrowserPerformanceArguments: Codable, Sendable {
   let maximumResources: Int?
 
   private enum CodingKeys: String, CodingKey {
@@ -547,7 +547,7 @@ struct BrowserPerformanceArguments: Decodable, Sendable {
   }
 }
 
-struct BrowserAccessibilityAuditArguments: Decodable, Sendable {
+struct BrowserAccessibilityAuditArguments: Codable, Sendable {
   let maximumIssues: Int?
 
   private enum CodingKeys: String, CodingKey {
@@ -555,7 +555,7 @@ struct BrowserAccessibilityAuditArguments: Decodable, Sendable {
   }
 }
 
-struct BrowserScreenshotArguments: Decodable, Sendable {
+struct BrowserScreenshotArguments: Codable, Sendable {
   let fullPage: Bool?
   let ref: String?
   let selector: String?
@@ -571,14 +571,14 @@ struct BrowserScreenshotArguments: Decodable, Sendable {
 }
 
 /// A rectangle the comparison is told to skip, in the capture's own pixel space.
-struct BrowserIgnoreRectArguments: Decodable, Sendable {
+struct BrowserIgnoreRectArguments: Codable, Sendable {
   let x: Int?
   let y: Int?
   let width: Int?
   let height: Int?
 }
 
-struct BrowserVisualCompareArguments: Decodable, Sendable {
+struct BrowserVisualCompareArguments: Codable, Sendable {
   /// Exactly one of these names what the page is compared *with*. The first three are stored
   /// baselines; the last two are the other things worth diffing against — another live tab, and
   /// the page's own past.
@@ -693,7 +693,7 @@ enum BrowserVisualCompareDetail: String, Sendable, CaseIterable {
   var includesStructure: Bool { self == .structure }
 }
 
-struct BrowserBaselinesArguments: Decodable, Sendable {
+struct BrowserBaselinesArguments: Codable, Sendable {
   /// `list`, `capture`, or `delete`.
   let action: String?
   let baselineID: String?
@@ -748,14 +748,14 @@ struct BrowserBaselinesArguments: Decodable, Sendable {
   }
 }
 
-struct SetProjectIconArguments: Decodable, Sendable {
+struct SetProjectIconArguments: Codable, Sendable {
   let path: String?
   let url: String?
 }
 
-struct ListThemesArguments: Decodable, Sendable {}
+struct ListThemesArguments: Codable, Sendable {}
 
-struct SetThemeArguments: Decodable, Sendable {
+struct SetThemeArguments: Codable, Sendable {
   let themeID: String?
   /// Accepted for clients launched against the pre-ID schema.
   let theme: String?
@@ -767,7 +767,7 @@ struct SetThemeArguments: Decodable, Sendable {
   }
 }
 
-struct CreateThemeArguments: Decodable, Sendable {
+struct CreateThemeArguments: Codable, Sendable {
   let name: String?
   let baseID: String?
   /// Accepted for clients launched against the pre-ID schema.
@@ -782,7 +782,7 @@ struct CreateThemeArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemeReferenceArguments: Decodable, Sendable {
+struct AppThemeReferenceArguments: Codable, Sendable {
   let themeID: String?
 
   private enum CodingKeys: String, CodingKey {
@@ -790,7 +790,7 @@ struct AppThemeReferenceArguments: Decodable, Sendable {
   }
 }
 
-struct SetAppThemeArguments: Decodable, Sendable {
+struct SetAppThemeArguments: Codable, Sendable {
   let themeID: String?
 
   private enum CodingKeys: String, CodingKey {
@@ -798,7 +798,7 @@ struct SetAppThemeArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemeGlowArguments: Decodable, Sendable {
+struct AppThemeGlowArguments: Codable, Sendable {
   let role: String?
   let radius: Double?
   let opacity: Double?
@@ -815,7 +815,7 @@ struct AppThemeGlowArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemeGlowHighlightArguments: Decodable, Sendable {
+struct AppThemeGlowHighlightArguments: Codable, Sendable {
   let role: String?
   let radius: Double?
   let opacity: Double?
@@ -829,7 +829,7 @@ struct AppThemeGlowHighlightArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemeMaterialArguments: Decodable, Sendable {
+struct AppThemeMaterialArguments: Codable, Sendable {
   let panelRadius: Double?
   let controlRadius: Double?
   let borderWidth: Double?
@@ -903,7 +903,7 @@ struct AppThemeMaterialArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemePopoverStyleArguments: Decodable, Sendable {
+struct AppThemePopoverStyleArguments: Codable, Sendable {
   let arrow: String?
   let surfaceRole: String?
   let edge: String?
@@ -920,7 +920,7 @@ struct AppThemePopoverStyleArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemeBackdropPatternArguments: Decodable, Sendable {
+struct AppThemeBackdropPatternArguments: Codable, Sendable {
   let kind: String?
   let role: String?
   let opacity: Double?
@@ -933,7 +933,7 @@ struct AppThemeBackdropPatternArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemeButtonStyleArguments: Decodable, Sendable {
+struct AppThemeButtonStyleArguments: Codable, Sendable {
   let textTransform: String?
   let titleRendering: String?
   let fontWeight: String?
@@ -984,7 +984,7 @@ struct AppThemeButtonStyleArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemeHeadingStyleArguments: Decodable, Sendable {
+struct AppThemeHeadingStyleArguments: Codable, Sendable {
   let typeface: String?
   let fontFamily: String?
   let fontWeight: String?
@@ -997,23 +997,23 @@ struct AppThemeHeadingStyleArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemeBevelArguments: Decodable, Sendable {
+struct AppThemeBevelArguments: Codable, Sendable {
   let width: Double?
   let style: String?
 }
 
 /// An image handed to a theme tool: a file path the host reads, or the bytes inline.
-struct AppThemeImageArguments: Decodable, Sendable {
+struct AppThemeImageArguments: Codable, Sendable {
   let path: String?
   let base64: String?
 }
 
-struct AppThemeGradientStopArguments: Decodable, Sendable {
+struct AppThemeGradientStopArguments: Codable, Sendable {
   let color: String?
   let position: Double?
 }
 
-struct AppThemeGradientArguments: Decodable, Sendable {
+struct AppThemeGradientArguments: Codable, Sendable {
   let angleDegrees: Double?
   let stops: [AppThemeGradientStopArguments]?
 
@@ -1023,13 +1023,13 @@ struct AppThemeGradientArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemeSidebarImageArguments: Decodable, Sendable {
+struct AppThemeSidebarImageArguments: Codable, Sendable {
   let source: AppThemeImageArguments?
   let mode: String?
   let opacity: Double?
 }
 
-struct AppThemeSidebarTitleArguments: Decodable, Sendable {
+struct AppThemeSidebarTitleArguments: Codable, Sendable {
   let text: String?
   let fontFamily: String?
   let fontSize: Double?
@@ -1044,14 +1044,14 @@ struct AppThemeSidebarTitleArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemeSidebarNavigatorWellArguments: Decodable, Sendable {
+struct AppThemeSidebarNavigatorWellArguments: Codable, Sendable {
   let fill: String?
   let bevel: String?
 }
 
 /// The sidebar block of a variant patch. `logo` is `"mark"`, `"hidden"`, or an image object;
 /// each `remove_*` takes one stated half back to its default, and `remove` clears the block.
-struct AppThemeSidebarArguments: Decodable, Sendable {
+struct AppThemeSidebarArguments: Codable, Sendable {
   let gradient: AppThemeGradientArguments?
   let removeGradient: Bool?
   let image: AppThemeSidebarImageArguments?
@@ -1103,7 +1103,7 @@ struct AppThemeSidebarArguments: Decodable, Sendable {
 /// The chrome block of a variant patch — the window-frame takeover. Presence of the block
 /// with a title bar opts the theme into drawing the entire frame; `remove` hands the frame
 /// back to macOS; each `remove_*` takes one stated half back to its default.
-struct AppThemeChromeArguments: Decodable, Sendable {
+struct AppThemeChromeArguments: Codable, Sendable {
   let titleBar: AppThemeChromeTitleBarArguments?
   let frame: AppThemeChromeFrameArguments?
   let removeFrame: Bool?
@@ -1117,7 +1117,7 @@ struct AppThemeChromeArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemeChromeTitleBarArguments: Decodable, Sendable {
+struct AppThemeChromeTitleBarArguments: Codable, Sendable {
   let activeGradient: AppThemeGradientArguments?
   let inactiveGradient: AppThemeGradientArguments?
   let removeInactiveGradient: Bool?
@@ -1219,7 +1219,7 @@ struct AppThemeChromeTitleBarArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemeChromeTextureArguments: Decodable, Sendable {
+struct AppThemeChromeTextureArguments: Codable, Sendable {
   let kind: String?
   let color: String?
   let removeColor: Bool?
@@ -1233,7 +1233,7 @@ struct AppThemeChromeTextureArguments: Decodable, Sendable {
   }
 }
 
-struct AppThemeChromeFrameArguments: Decodable, Sendable {
+struct AppThemeChromeFrameArguments: Codable, Sendable {
   let width: Double?
   let cornerRadius: Double?
   let antialiasesCorners: Bool?
@@ -1246,7 +1246,7 @@ struct AppThemeChromeFrameArguments: Decodable, Sendable {
 }
 
 /// `"mark"`, `"hidden"`, or `{path|base64}` — mirroring the document's own logo spelling.
-enum AppThemeSidebarLogoArguments: Decodable, Sendable {
+enum AppThemeSidebarLogoArguments: Codable, Sendable {
   case mark
   case hidden
   case image(AppThemeImageArguments)
@@ -1269,9 +1269,22 @@ enum AppThemeSidebarLogoArguments: Decodable, Sendable {
     }
     self = .image(try AppThemeImageArguments(from: decoder))
   }
+
+  func encode(to encoder: Encoder) throws {
+    switch self {
+    case .mark:
+      var container = encoder.singleValueContainer()
+      try container.encode("mark")
+    case .hidden:
+      var container = encoder.singleValueContainer()
+      try container.encode("hidden")
+    case .image(let image):
+      try image.encode(to: encoder)
+    }
+  }
 }
 
-struct AppThemeVariantArguments: Decodable, Sendable {
+struct AppThemeVariantArguments: Codable, Sendable {
   let roles: [String: String]?
   let material: AppThemeMaterialArguments?
   let terminalColors: [String: String]?
@@ -1301,7 +1314,7 @@ struct AppThemeVariantArguments: Decodable, Sendable {
   }
 }
 
-struct CreateAppThemeArguments: Decodable, Sendable {
+struct CreateAppThemeArguments: Codable, Sendable {
   let name: String?
   let baseID: String?
   let appearance: String?
@@ -1324,7 +1337,7 @@ struct CreateAppThemeArguments: Decodable, Sendable {
   }
 }
 
-struct DuplicateAppThemeArguments: Decodable, Sendable {
+struct DuplicateAppThemeArguments: Codable, Sendable {
   let themeID: String?
   let name: String?
   let apply: Bool?
@@ -1335,7 +1348,7 @@ struct DuplicateAppThemeArguments: Decodable, Sendable {
   }
 }
 
-struct UpdateAppThemeArguments: Decodable, Sendable {
+struct UpdateAppThemeArguments: Codable, Sendable {
   let themeID: String?
   let name: String?
   let appearance: String?
@@ -1362,12 +1375,12 @@ struct UpdateAppThemeArguments: Decodable, Sendable {
 /// Paths arrive as one absolute path per line, since the schema this server speaks has no
 /// array type. Whatever arrives is only ever *matched against* the current findings — see
 /// `MainWindowController.proposeStorageCleanup`.
-struct StorageCleanupArguments: Decodable, Sendable {
+struct StorageCleanupArguments: Codable, Sendable {
   let paths: String?
   let reason: String?
 }
 
-struct NotifyUserArguments: Decodable, Sendable {
+struct NotifyUserArguments: Codable, Sendable {
   let title: String?
   let message: String?
   let recipient: String?
@@ -1394,7 +1407,7 @@ struct NotifyUserArguments: Decodable, Sendable {
   }
 }
 
-enum PanelTabReference: Decodable, Equatable, Sendable {
+enum PanelTabReference: Codable, Equatable, Sendable {
   case index(Int)
   case identifier(String)
 
@@ -1406,24 +1419,34 @@ enum PanelTabReference: Decodable, Equatable, Sendable {
       self = .identifier(try container.decode(String.self))
     }
   }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    switch self {
+    case .index(let index):
+      try container.encode(index)
+    case .identifier(let identifier):
+      try container.encode(identifier)
+    }
+  }
 }
 
-struct PanelActivateTabArguments: Decodable, Sendable {
+struct PanelActivateTabArguments: Codable, Sendable {
   let tab: PanelTabReference?
 }
 
-struct EmptyToolArguments: Decodable, Sendable {}
+struct EmptyToolArguments: Codable, Sendable {}
 
 /// What an agent says when it files its own session away.
 ///
 /// Only a reason, because everything else is already decided by where the call arrived: the URL
 /// carries the session, so an agent cannot archive a conversation other than its own, and *when*
 /// is not the agent's to choose — see `SessionArchiveScheduler`.
-struct ArchiveSessionArguments: Decodable, Sendable {
+struct ArchiveSessionArguments: Codable, Sendable {
   let reason: String?
 }
 
-struct SetSessionNameArguments: Decodable, Sendable {
+struct SetSessionNameArguments: Codable, Sendable {
   let name: String?
 }
 
@@ -1433,7 +1456,7 @@ struct SetSessionNameArguments: Decodable, Sendable {
 /// transcript id, which belongs to a different identity space and can be absent for half the
 /// runtimes. The sender is not an argument: the MCP URL carries it, exactly as it does for the
 /// self-scoped session tools.
-struct SendToSessionArguments: Decodable, Sendable {
+struct SendToSessionArguments: Codable, Sendable {
   let sessionID: String?
   let message: String?
   /// "queue" (default) or "steer". Decoded as a raw string so an unknown value can be
@@ -1456,7 +1479,7 @@ struct SendToSessionArguments: Decodable, Sendable {
 ///
 /// The boundary is the app's own answer to "is it finished". A timeout is optional: omission
 /// means the watch lasts for this run of Threading instead of inheriting a magic deadline.
-struct WatchSessionArguments: Decodable, Sendable {
+struct WatchSessionArguments: Codable, Sendable {
   let sessionID: String?
   let timeoutMinutes: Double?
 
@@ -1471,185 +1494,179 @@ struct WatchSessionArguments: Decodable, Sendable {
   }
 }
 
-struct ConversationHistoryArguments: Decodable, Sendable {
+struct ConversationHistoryArguments: Codable, Sendable {
   let cursor: String?
 }
 
-struct ExtensionComponentReferenceArguments: Decodable, Sendable {
+struct ExtensionComponentReferenceArguments: Codable, Sendable {
   let component: String?
   let version: Int?
 }
 
-struct ExtensionComponentPatchArguments: Decodable, Sendable {
+struct ExtensionComponentPatchArguments: Codable, Sendable {
   let patch: String?
 }
 
-struct ExtensionScaffoldProjectArguments: Decodable, Sendable {
+struct ExtensionScaffoldProjectArguments: Codable, Sendable {
   let name: String?
   let identifier: String?
   let directory: String?
 }
 
-struct ExtensionProposeInstallArguments: Decodable, Sendable {
+struct ExtensionProposeInstallArguments: Codable, Sendable {
   let directory: String?
+}
+
+/// Whether a successful command changes the browser workspace projection.
+enum MCPBrowserWorkspaceEffect: Sendable {
+  case none
+  case invalidate
+  case announce
+}
+
+/// Structural, privacy-preserving trace descriptions shared by typed browser declarations.
+enum MCPBrowserTraceDetail {
+  static func target(
+    ref: String?,
+    selector: String?,
+    locator: BrowserSemanticLocator?
+  ) -> String {
+    if let ref, !ref.isEmpty { return "target ref \(String(ref.prefix(40)))" }
+    if selector?.isEmpty == false { return "strict selector target" }
+    if locator != nil { return "semantic locator target" }
+    return "page"
+  }
+
+  static func emulation(_ arguments: BrowserEmulateArguments) -> String {
+    var changes: [String] = []
+    if arguments.colorScheme != nil { changes.append("color scheme") }
+    if arguments.mediaType != nil { changes.append("media") }
+    if arguments.userAgent != nil { changes.append("user agent") }
+    return changes.isEmpty ? "no condition" : changes.joined(separator: ", ")
+  }
+
+  static func wait(_ arguments: BrowserWaitArguments) -> String {
+    if arguments.time != nil { return "fixed duration" }
+    if arguments.text != nil { return "page text present" }
+    if arguments.textGone != nil { return "page text absent" }
+    if arguments.url != nil { return "exact URL" }
+    if arguments.urlContains != nil { return "partial URL" }
+    if arguments.urlMatches != nil { return "URL regex" }
+    if arguments.title != nil { return "exact title" }
+    if arguments.titleContains != nil { return "partial title" }
+    if arguments.responseURLContains != nil || arguments.responseStatus != nil {
+      return "network response"
+    }
+    if arguments.count != nil { return "selector count" }
+    return "element condition"
+  }
 }
 
 /// A transport-decoded application command.
 ///
-/// MCP owns decoding and schemas; the application layer receives this typed value and never
-/// switches on wire names or raw JSON for built-ins.
-enum AgentCommand: Sendable {
-  case displayImage(DisplayImageArguments)
-  case displayChart(DisplayChartArguments)
-  case displayScene(DisplaySceneArguments)
-  case displayHTML(DisplayHTMLArguments)
-  case displayCompareFiles(DisplayCompareFilesArguments)
-  case conversationHistory(ConversationHistoryArguments)
-  case browserNavigate(BrowserNavigateArguments)
-  case browserHistory(BrowserHistoryArguments)
-  case browserStop(EmptyToolArguments)
-  case browserTabs(BrowserTabsArguments)
-  case browserStorage(BrowserStorageArguments)
-  case browserTrace(BrowserTraceArguments)
-  case browserUpload(BrowserUploadArguments)
-  case browserDownload(BrowserDownloadArguments)
-  case browserResize(BrowserResizeArguments)
-  case browserEmulate(BrowserEmulateArguments)
-  case browserCapabilities(EmptyToolArguments)
-  case browserRunIsolated(BrowserIsolatedRunArguments)
-  case browserAttachChrome(BrowserAttachRunArguments)
-  case browserSnapshot(BrowserSnapshotArguments)
-  case browserAnnotations(EmptyToolArguments)
-  case browserScreenshot(BrowserScreenshotArguments)
-  case browserVisualCompare(BrowserVisualCompareArguments)
-  case browserBaselines(BrowserBaselinesArguments)
-  case browserQuery(BrowserSelectorArguments)
-  case browserClick(BrowserClickArguments)
-  case browserHover(BrowserTargetArguments)
-  case browserDrag(BrowserDragArguments)
-  case browserType(BrowserTypeArguments)
-  case browserFillForm(BrowserFillFormArguments)
-  case browserFillCredentials(BrowserFillCredentialsArguments)
-  case browserSelect(BrowserSelectArguments)
-  case browserSetChecked(BrowserSetCheckedArguments)
-  case browserPressKey(BrowserKeyArguments)
-  case browserScroll(BrowserScrollArguments)
-  case browserWait(BrowserWaitArguments)
-  case browserConsole(BrowserConsoleArguments)
-  case browserNetwork(BrowserNetworkArguments)
-  case browserPerformance(BrowserPerformanceArguments)
-  case browserAccessibilityAudit(BrowserAccessibilityAuditArguments)
-  case panelListTabs(EmptyToolArguments)
-  case panelActivateTab(PanelActivateTabArguments)
-  case setProjectIcon(SetProjectIconArguments)
-  case archiveSession(ArchiveSessionArguments)
-  case cancelSessionArchive(EmptyToolArguments)
-  case setSessionName(SetSessionNameArguments)
-  case listSessions(EmptyToolArguments)
-  case sendToSession(SendToSessionArguments)
-  case watchSession(WatchSessionArguments)
-  case listReclaimableStorage(EmptyToolArguments)
-  case proposeStorageCleanup(StorageCleanupArguments)
-  case listSettings(EmptyToolArguments)
-  case notifyUser(NotifyUserArguments)
-  case listThemes(ListThemesArguments)
-  case setTheme(SetThemeArguments)
-  case createTheme(CreateThemeArguments)
-  case listAppThemes(EmptyToolArguments)
-  case getAppTheme(AppThemeReferenceArguments)
-  case setAppTheme(SetAppThemeArguments)
-  case createAppTheme(CreateAppThemeArguments)
-  case duplicateAppTheme(DuplicateAppThemeArguments)
-  case updateAppTheme(UpdateAppThemeArguments)
-  case extensionListComponents(EmptyToolArguments)
-  case extensionScaffoldProject(ExtensionScaffoldProjectArguments)
-  case extensionProposeInstall(ExtensionProposeInstallArguments)
-  case extensionDescribeComponent(ExtensionComponentReferenceArguments)
-  case extensionValidateComponentPatch(ExtensionComponentPatchArguments)
-  case extensionPreviewComponentPatch(ExtensionComponentPatchArguments)
-  case unknown(name: String, arguments: MCPJSONValue)
+/// A built-in captures its concrete `Sendable` arguments in the declaration's typed execution
+/// closure. There is no payload enum, `Any` box, wire-name switch, or second routing table.
+struct AgentCommand: Sendable {
+  let builtInTool: MCPBuiltInTool?
+  let name: String
+  let browserTraceDetail: String?
+  let browserWorkspaceEffect: MCPBrowserWorkspaceEffect
+  let observesPanel: Bool
+  let externalArguments: MCPJSONValue?
+  let decodedArgumentsValue: MCPJSONValue?
 
-  /// The application identity of a built-in command. Exhaustive on purpose: adding a call
-  /// payload without classifying it is a compiler error instead of an unadvertised behavior.
-  var builtInTool: MCPBuiltInTool? {
-    switch self {
-    case .displayImage: return .displayImage
-    case .displayChart: return .displayChart
-    case .displayScene: return .displayScene
-    case .displayHTML: return .displayHTML
-    case .displayCompareFiles: return .displayCompareFiles
-    case .conversationHistory: return .conversationHistory
-    case .browserNavigate: return .browserNavigate
-    case .browserHistory: return .browserHistory
-    case .browserStop: return .browserStop
-    case .browserTabs: return .browserTabs
-    case .browserStorage: return .browserStorage
-    case .browserTrace: return .browserTrace
-    case .browserUpload: return .browserUpload
-    case .browserDownload: return .browserDownload
-    case .browserResize: return .browserResize
-    case .browserEmulate: return .browserEmulate
-    case .browserCapabilities: return .browserCapabilities
-    case .browserRunIsolated: return .browserRunIsolated
-    case .browserAttachChrome: return .browserAttachChrome
-    case .browserSnapshot: return .browserSnapshot
-    case .browserAnnotations: return .browserAnnotations
-    case .browserScreenshot: return .browserScreenshot
-    case .browserVisualCompare: return .browserVisualCompare
-    case .browserBaselines: return .browserBaselines
-    case .browserQuery: return .browserQuery
-    case .browserClick: return .browserClick
-    case .browserHover: return .browserHover
-    case .browserDrag: return .browserDrag
-    case .browserType: return .browserType
-    case .browserFillForm: return .browserFillForm
-    case .browserFillCredentials: return .browserFillCredentials
-    case .browserSelect: return .browserSelect
-    case .browserSetChecked: return .browserSetChecked
-    case .browserPressKey: return .browserPressKey
-    case .browserScroll: return .browserScroll
-    case .browserWait: return .browserWait
-    case .browserConsole: return .browserConsole
-    case .browserNetwork: return .browserNetwork
-    case .browserPerformance: return .browserPerformance
-    case .browserAccessibilityAudit: return .browserAccessibilityAudit
-    case .panelListTabs: return .panelListTabs
-    case .panelActivateTab: return .panelActivateTab
-    case .setProjectIcon: return .setProjectIcon
-    case .archiveSession: return .archiveSession
-    case .cancelSessionArchive: return .cancelSessionArchive
-    case .setSessionName: return .setSessionName
-    case .listSessions: return .listSessions
-    case .sendToSession: return .sendToSession
-    case .watchSession: return .watchSession
-    case .listReclaimableStorage: return .listReclaimableStorage
-    case .proposeStorageCleanup: return .proposeStorageCleanup
-    case .listSettings: return .listSettings
-    case .notifyUser: return .notifyUser
-    case .listThemes: return .listThemes
-    case .setTheme: return .setTheme
-    case .createTheme: return .createTheme
-    case .listAppThemes: return .listAppThemes
-    case .getAppTheme: return .getAppTheme
-    case .setAppTheme: return .setAppTheme
-    case .createAppTheme: return .createAppTheme
-    case .duplicateAppTheme: return .duplicateAppTheme
-    case .updateAppTheme: return .updateAppTheme
-    case .extensionListComponents: return .extensionListComponents
-    case .extensionScaffoldProject: return .extensionScaffoldProject
-    case .extensionProposeInstall: return .extensionProposeInstall
-    case .extensionDescribeComponent: return .extensionDescribeComponent
-    case .extensionValidateComponentPatch: return .extensionValidateComponentPatch
-    case .extensionPreviewComponentPatch: return .extensionPreviewComponentPatch
-    case .unknown: return nil
-    }
+  private let executeBody: @MainActor @Sendable (
+    MCPBuiltInToolExecuting,
+    SessionID,
+    @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  ) -> Void
+
+  init(
+    tool: MCPBuiltInTool,
+    browserTraceDetail: String?,
+    browserWorkspaceEffect: MCPBrowserWorkspaceEffect,
+    observesPanel: Bool,
+    decodedArgumentsValue: MCPJSONValue,
+    execute: @escaping @MainActor @Sendable (
+      MCPBuiltInToolExecuting,
+      SessionID,
+      @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) -> Void
+  ) {
+    self.builtInTool = tool
+    self.name = tool.rawValue
+    self.browserTraceDetail = browserTraceDetail
+    self.browserWorkspaceEffect = browserWorkspaceEffect
+    self.observesPanel = observesPanel
+    self.externalArguments = nil
+    self.decodedArgumentsValue = decodedArgumentsValue
+    self.executeBody = execute
   }
 
-  var name: String {
-    switch self {
-    case .unknown(let name, _): return name
-    default: return builtInTool?.rawValue ?? ""
+  static func external(name: String, arguments: MCPJSONValue) -> AgentCommand {
+    AgentCommand(
+      builtInTool: nil,
+      name: name,
+      browserTraceDetail: nil,
+      browserWorkspaceEffect: .none,
+      observesPanel: false,
+      externalArguments: arguments,
+      decodedArgumentsValue: nil,
+      executeBody: { _, _, completion in
+        completion(.failure("External command reached the built-in execution path."))
+      }
+    )
+  }
+
+  private init(
+    builtInTool: MCPBuiltInTool?,
+    name: String,
+    browserTraceDetail: String?,
+    browserWorkspaceEffect: MCPBrowserWorkspaceEffect,
+    observesPanel: Bool,
+    externalArguments: MCPJSONValue?,
+    decodedArgumentsValue: MCPJSONValue?,
+    executeBody: @escaping @MainActor @Sendable (
+      MCPBuiltInToolExecuting,
+      SessionID,
+      @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) -> Void
+  ) {
+    self.builtInTool = builtInTool
+    self.name = name
+    self.browserTraceDetail = browserTraceDetail
+    self.browserWorkspaceEffect = browserWorkspaceEffect
+    self.observesPanel = observesPanel
+    self.externalArguments = externalArguments
+    self.decodedArgumentsValue = decodedArgumentsValue
+    self.executeBody = executeBody
+  }
+
+  @MainActor
+  func execute(
+    with handler: MCPBuiltInToolExecuting,
+    for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  ) {
+    executeBody(handler, sessionID, completion)
+  }
+
+  func decodedArguments<Arguments: Decodable>(
+    as type: Arguments.Type = Arguments.self
+  ) throws -> Arguments {
+    guard let decodedArgumentsValue else {
+      throw DecodingError.valueNotFound(
+        Arguments.self,
+        DecodingError.Context(
+          codingPath: [],
+          debugDescription: "\(name) has no built-in arguments"
+        )
+      )
     }
+    return try JSONDecoder().decode(
+      Arguments.self,
+      from: JSONEncoder().encode(decodedArgumentsValue)
+    )
   }
 }
 
@@ -1668,7 +1685,7 @@ struct MCPToolCallParameters: Decodable, Sendable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let name = try container.decode(String.self, forKey: .name)
     guard let descriptor = MCPBuiltInToolRegistry.descriptor(named: name) else {
-      call = .unknown(
+      call = .external(
         name: name,
         arguments: try container.decodeIfPresent(
           MCPJSONValue.self,
@@ -1682,465 +1699,7 @@ struct MCPToolCallParameters: Decodable, Sendable {
   }
 }
 
-extension MCPBuiltInTool {
-  func decodeArguments(
-    from container: KeyedDecodingContainer<MCPToolCallParameters.CodingKeys>
-  ) throws -> AgentCommand {
-    let call: AgentCommand
-    switch self {
-    case .displayImage:
-      call = .displayImage(
-        try container.decodeIfPresent(DisplayImageArguments.self, forKey: .arguments)
-          ?? DisplayImageArguments(path: nil, title: nil)
-      )
-    case .displayChart:
-      call = .displayChart(
-        try container.decodeIfPresent(DisplayChartArguments.self, forKey: .arguments)
-          ?? DisplayChartArguments(
-            title: nil,
-            summary: nil,
-            kind: nil,
-            categories: nil,
-            series: nil,
-            stacked: nil,
-            valueFormat: nil,
-            unit: nil,
-            maximumValue: nil
-          )
-      )
-    case .displayScene:
-      call = .displayScene(
-        try container.decodeIfPresent(DisplaySceneArguments.self, forKey: .arguments)
-          ?? DisplaySceneArguments(scene: nil, title: nil, subtitle: nil)
-      )
-    case .displayHTML:
-      call = .displayHTML(
-        try container.decodeIfPresent(DisplayHTMLArguments.self, forKey: .arguments)
-          ?? DisplayHTMLArguments(html: nil, title: nil)
-      )
-    case .displayCompareFiles:
-      call = .displayCompareFiles(
-        try container.decodeIfPresent(DisplayCompareFilesArguments.self, forKey: .arguments)
-          ?? DisplayCompareFilesArguments()
-      )
-    case .conversationHistory:
-      call = .conversationHistory(
-        try container.decodeIfPresent(
-          ConversationHistoryArguments.self,
-          forKey: .arguments
-        ) ?? ConversationHistoryArguments(cursor: nil)
-      )
-    case .browserNavigate:
-      call = .browserNavigate(
-        try container.decodeIfPresent(BrowserNavigateArguments.self, forKey: .arguments)
-          ?? BrowserNavigateArguments()
-      )
-    case .browserHistory:
-      call = .browserHistory(
-        try container.decodeIfPresent(BrowserHistoryArguments.self, forKey: .arguments)
-          ?? BrowserHistoryArguments()
-      )
-    case .browserStop:
-      call = .browserStop(
-        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
-          ?? EmptyToolArguments()
-      )
-    case .browserTabs:
-      call = .browserTabs(
-        try container.decodeIfPresent(BrowserTabsArguments.self, forKey: .arguments)
-          ?? BrowserTabsArguments(action: nil, tab: nil)
-      )
-    case .browserStorage:
-      call = .browserStorage(
-        try container.decodeIfPresent(BrowserStorageArguments.self, forKey: .arguments)
-          ?? BrowserStorageArguments(action: nil)
-      )
-    case .browserTrace:
-      call = .browserTrace(
-        try container.decodeIfPresent(BrowserTraceArguments.self, forKey: .arguments)
-          ?? BrowserTraceArguments(action: nil)
-      )
-    case .browserUpload:
-      call = .browserUpload(
-        try container.decodeIfPresent(BrowserUploadArguments.self, forKey: .arguments)
-          ?? BrowserUploadArguments(paths: nil, ref: nil, selector: nil)
-      )
-    case .browserDownload:
-      call = .browserDownload(
-        try container.decodeIfPresent(BrowserDownloadArguments.self, forKey: .arguments)
-          ?? BrowserDownloadArguments(ref: nil, selector: nil)
-      )
-    case .browserResize:
-      call = .browserResize(
-        try container.decodeIfPresent(BrowserResizeArguments.self, forKey: .arguments)
-          ?? BrowserResizeArguments(width: nil, height: nil)
-      )
-    case .browserEmulate:
-      call = .browserEmulate(
-        try container.decodeIfPresent(BrowserEmulateArguments.self, forKey: .arguments)
-          ?? BrowserEmulateArguments()
-      )
-    case .browserCapabilities:
-      call = .browserCapabilities(
-        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
-          ?? EmptyToolArguments()
-      )
-    case .browserRunIsolated:
-      call = .browserRunIsolated(
-        try container.decode(BrowserIsolatedRunArguments.self, forKey: .arguments)
-      )
-    case .browserAttachChrome:
-      call = .browserAttachChrome(
-        try container.decode(BrowserAttachRunArguments.self, forKey: .arguments)
-      )
-    case .browserSnapshot:
-      call = .browserSnapshot(
-        try container.decodeIfPresent(BrowserSnapshotArguments.self, forKey: .arguments)
-          ?? BrowserSnapshotArguments(maximumNodes: nil, ref: nil, selector: nil)
-      )
-    case .browserAnnotations:
-      call = .browserAnnotations(
-        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
-          ?? EmptyToolArguments()
-      )
-    case .browserScreenshot:
-      call = .browserScreenshot(
-        try container.decodeIfPresent(BrowserScreenshotArguments.self, forKey: .arguments)
-          ?? BrowserScreenshotArguments(
-            fullPage: nil,
-            ref: nil,
-            selector: nil,
-            show: nil,
-            includeImage: nil
-          )
-      )
-    case .browserVisualCompare:
-      call = .browserVisualCompare(
-        try container.decodeIfPresent(
-          BrowserVisualCompareArguments.self,
-          forKey: .arguments
-        )
-          ?? BrowserVisualCompareArguments()
-      )
-    case .browserBaselines:
-      call = .browserBaselines(
-        try container.decodeIfPresent(BrowserBaselinesArguments.self, forKey: .arguments)
-          ?? BrowserBaselinesArguments()
-      )
-    case .browserQuery:
-      call = .browserQuery(
-        try container.decodeIfPresent(BrowserSelectorArguments.self, forKey: .arguments)
-          ?? BrowserSelectorArguments(selector: nil)
-      )
-    case .browserClick:
-      call = .browserClick(
-        try container.decodeIfPresent(BrowserClickArguments.self, forKey: .arguments)
-          ?? BrowserClickArguments(
-            ref: nil,
-            selector: nil,
-            x: nil,
-            y: nil,
-            button: nil,
-            clickCount: nil
-          )
-      )
-    case .browserHover:
-      call = .browserHover(
-        try container.decodeIfPresent(BrowserTargetArguments.self, forKey: .arguments)
-          ?? BrowserTargetArguments(ref: nil, selector: nil)
-      )
-    case .browserDrag:
-      call = .browserDrag(
-        try container.decodeIfPresent(BrowserDragArguments.self, forKey: .arguments)
-          ?? BrowserDragArguments(
-            sourceRef: nil,
-            sourceSelector: nil,
-            targetRef: nil,
-            targetSelector: nil
-          )
-      )
-    case .browserType:
-      call = .browserType(
-        try container.decodeIfPresent(BrowserTypeArguments.self, forKey: .arguments)
-          ?? BrowserTypeArguments(
-            ref: nil,
-            selector: nil,
-            text: nil,
-            slowly: nil,
-            submit: nil
-          )
-      )
-    case .browserFillForm:
-      call = .browserFillForm(
-        try container.decodeIfPresent(BrowserFillFormArguments.self, forKey: .arguments)
-          ?? BrowserFillFormArguments(fields: nil)
-      )
-    case .browserFillCredentials:
-      call = .browserFillCredentials(
-        try container.decodeIfPresent(BrowserFillCredentialsArguments.self, forKey: .arguments)
-          ?? BrowserFillCredentialsArguments(account: nil, ref: nil, selector: nil)
-      )
-    case .browserSelect:
-      call = .browserSelect(
-        try container.decodeIfPresent(BrowserSelectArguments.self, forKey: .arguments)
-          ?? BrowserSelectArguments(
-            ref: nil,
-            selector: nil,
-            value: nil,
-            label: nil
-          )
-      )
-    case .browserSetChecked:
-      call = .browserSetChecked(
-        try container.decodeIfPresent(BrowserSetCheckedArguments.self, forKey: .arguments)
-          ?? BrowserSetCheckedArguments(ref: nil, selector: nil, checked: nil)
-      )
-    case .browserPressKey:
-      call = .browserPressKey(
-        try container.decodeIfPresent(BrowserKeyArguments.self, forKey: .arguments)
-          ?? BrowserKeyArguments(
-            key: nil,
-            ref: nil,
-            selector: nil,
-            shift: nil,
-            control: nil,
-            option: nil,
-            command: nil
-          )
-      )
-    case .browserScroll:
-      call = .browserScroll(
-        try container.decodeIfPresent(BrowserScrollArguments.self, forKey: .arguments)
-          ?? BrowserScrollArguments(
-            direction: nil,
-            amount: nil,
-            ref: nil,
-            selector: nil
-          )
-      )
-    case .browserWait:
-      call = .browserWait(
-        try container.decodeIfPresent(BrowserWaitArguments.self, forKey: .arguments)
-          ?? BrowserWaitArguments(
-            time: nil,
-            text: nil,
-            textGone: nil,
-            urlContains: nil,
-            ref: nil,
-            selector: nil,
-            state: nil,
-            timeout: nil
-          )
-      )
-    case .browserConsole:
-      call = .browserConsole(
-        try container.decodeIfPresent(BrowserConsoleArguments.self, forKey: .arguments)
-          ?? BrowserConsoleArguments(level: nil, clear: nil)
-      )
-    case .browserNetwork:
-      call = .browserNetwork(
-        try container.decodeIfPresent(BrowserNetworkArguments.self, forKey: .arguments)
-          ?? BrowserNetworkArguments(kind: nil, errorsOnly: nil, clear: nil)
-      )
-    case .browserPerformance:
-      call = .browserPerformance(
-        try container.decodeIfPresent(BrowserPerformanceArguments.self, forKey: .arguments)
-          ?? BrowserPerformanceArguments(maximumResources: nil)
-      )
-    case .browserAccessibilityAudit:
-      call = .browserAccessibilityAudit(
-        try container.decodeIfPresent(
-          BrowserAccessibilityAuditArguments.self,
-          forKey: .arguments
-        ) ?? BrowserAccessibilityAuditArguments(maximumIssues: nil)
-      )
-    case .panelListTabs:
-      call = .panelListTabs(
-        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
-          ?? EmptyToolArguments()
-      )
-    case .panelActivateTab:
-      call = .panelActivateTab(
-        try container.decodeIfPresent(PanelActivateTabArguments.self, forKey: .arguments)
-          ?? PanelActivateTabArguments(tab: nil)
-      )
-    case .setProjectIcon:
-      call = .setProjectIcon(
-        try container.decodeIfPresent(SetProjectIconArguments.self, forKey: .arguments)
-          ?? SetProjectIconArguments(path: nil, url: nil)
-      )
-    case .archiveSession:
-      call = .archiveSession(
-        try container.decodeIfPresent(ArchiveSessionArguments.self, forKey: .arguments)
-          ?? ArchiveSessionArguments(reason: nil)
-      )
-    case .cancelSessionArchive:
-      call = .cancelSessionArchive(
-        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
-          ?? EmptyToolArguments()
-      )
-    case .setSessionName:
-      call = .setSessionName(
-        try container.decodeIfPresent(SetSessionNameArguments.self, forKey: .arguments)
-          ?? SetSessionNameArguments(name: nil)
-      )
-    case .listSessions:
-      call = .listSessions(
-        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
-          ?? EmptyToolArguments()
-      )
-    case .sendToSession:
-      call = .sendToSession(
-        try container.decodeIfPresent(SendToSessionArguments.self, forKey: .arguments)
-          ?? SendToSessionArguments(sessionID: nil, message: nil)
-      )
-    case .watchSession:
-      call = .watchSession(
-        try container.decodeIfPresent(WatchSessionArguments.self, forKey: .arguments)
-          ?? WatchSessionArguments(sessionID: nil, timeoutMinutes: nil)
-      )
-    case .listReclaimableStorage:
-      call = .listReclaimableStorage(
-        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
-          ?? EmptyToolArguments()
-      )
-    case .proposeStorageCleanup:
-      call = .proposeStorageCleanup(
-        try container.decodeIfPresent(StorageCleanupArguments.self, forKey: .arguments)
-          ?? StorageCleanupArguments(paths: nil, reason: nil)
-      )
-    case .listSettings:
-      call = .listSettings(
-        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
-          ?? EmptyToolArguments()
-      )
-    case .notifyUser:
-      call = .notifyUser(
-        try container.decodeIfPresent(NotifyUserArguments.self, forKey: .arguments)
-          ?? NotifyUserArguments(title: nil, message: nil)
-      )
-    case .listThemes:
-      call = .listThemes(
-        try container.decodeIfPresent(ListThemesArguments.self, forKey: .arguments)
-          ?? ListThemesArguments()
-      )
-    case .setTheme:
-      call = .setTheme(
-        try container.decodeIfPresent(SetThemeArguments.self, forKey: .arguments)
-          ?? SetThemeArguments(themeID: nil, theme: nil, scope: nil)
-      )
-    case .createTheme:
-      call = .createTheme(
-        try container.decodeIfPresent(CreateThemeArguments.self, forKey: .arguments)
-          ?? CreateThemeArguments(
-            name: nil,
-            baseID: nil,
-            base: nil,
-            colors: nil,
-            apply: nil
-          )
-      )
-    case .listAppThemes:
-      call = .listAppThemes(
-        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
-          ?? EmptyToolArguments()
-      )
-    case .getAppTheme:
-      call = .getAppTheme(
-        try container.decodeIfPresent(AppThemeReferenceArguments.self, forKey: .arguments)
-          ?? AppThemeReferenceArguments(themeID: nil)
-      )
-    case .setAppTheme:
-      call = .setAppTheme(
-        try container.decodeIfPresent(SetAppThemeArguments.self, forKey: .arguments)
-          ?? SetAppThemeArguments(themeID: nil)
-      )
-    case .createAppTheme:
-      call = .createAppTheme(
-        try container.decodeIfPresent(CreateAppThemeArguments.self, forKey: .arguments)
-          ?? CreateAppThemeArguments(
-            name: nil,
-            baseID: nil,
-            appearance: nil,
-            mode: nil,
-            summary: nil,
-            variants: nil,
-            roles: nil,
-            material: nil,
-            terminalColors: nil,
-            apply: nil
-          )
-      )
-    case .duplicateAppTheme:
-      call = .duplicateAppTheme(
-        try container.decodeIfPresent(DuplicateAppThemeArguments.self, forKey: .arguments)
-          ?? DuplicateAppThemeArguments(themeID: nil, name: nil, apply: nil)
-      )
-    case .updateAppTheme:
-      call = .updateAppTheme(
-        try container.decodeIfPresent(UpdateAppThemeArguments.self, forKey: .arguments)
-          ?? UpdateAppThemeArguments(
-            themeID: nil,
-            name: nil,
-            appearance: nil,
-            mode: nil,
-            summary: nil,
-            variants: nil,
-            roles: nil,
-            material: nil,
-            terminalColors: nil,
-            apply: nil
-          )
-      )
-    case .extensionListComponents:
-      call = .extensionListComponents(
-        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
-          ?? EmptyToolArguments()
-      )
-    case .extensionScaffoldProject:
-      call = .extensionScaffoldProject(
-        try container.decodeIfPresent(
-          ExtensionScaffoldProjectArguments.self,
-          forKey: .arguments
-        )
-          ?? ExtensionScaffoldProjectArguments(
-            name: nil,
-            identifier: nil,
-            directory: nil
-          )
-      )
-    case .extensionProposeInstall:
-      call = .extensionProposeInstall(
-        try container.decodeIfPresent(
-          ExtensionProposeInstallArguments.self,
-          forKey: .arguments
-        ) ?? ExtensionProposeInstallArguments(directory: nil)
-      )
-    case .extensionDescribeComponent:
-      call = .extensionDescribeComponent(
-        try container.decodeIfPresent(
-          ExtensionComponentReferenceArguments.self,
-          forKey: .arguments
-        ) ?? ExtensionComponentReferenceArguments(component: nil, version: nil)
-      )
-    case .extensionValidateComponentPatch:
-      call = .extensionValidateComponentPatch(
-        try container.decodeIfPresent(
-          ExtensionComponentPatchArguments.self,
-          forKey: .arguments
-        ) ?? ExtensionComponentPatchArguments(patch: nil)
-      )
-    case .extensionPreviewComponentPatch:
-      call = .extensionPreviewComponentPatch(
-        try container.decodeIfPresent(
-          ExtensionComponentPatchArguments.self,
-          forKey: .arguments
-        ) ?? ExtensionComponentPatchArguments(patch: nil)
-      )
-    }
-    return call
-  }
-}
+
 
 // MARK: - Tool Result
 
@@ -2239,12 +1798,18 @@ struct MCPToolResult: Encodable, Sendable {
 /// Called on the main queue, since the model layer and AppKit both require it.
 @MainActor
 protocol AgentCommandHandling: AnyObject {
-  func handle(_ command: AgentCommand, for sessionID: SessionID) -> MCPToolResult
-
-  /// Async variant, for tools whose answer is not ready synchronously — a page load, a DOM
-  /// query, a screenshot. Defaults to the synchronous form for handlers that need nothing.
-  func handle(
+  /// Applies handler-wide observation, audit, and capture policy before invoking the typed
+  /// implementation captured by the declaration.
+  func executeBuiltIn(
     _ command: AgentCommand,
+    for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+
+  /// Provider tools remain intentionally open-ended. Built-ins never use this path.
+  func handleExternalTool(
+    named name: String,
+    arguments: MCPJSONValue,
     for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
@@ -2256,14 +1821,6 @@ protocol AgentCommandHandling: AnyObject {
 }
 
 extension AgentCommandHandling {
-  func handle(
-    _ command: AgentCommand,
-    for sessionID: SessionID,
-    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
-  ) {
-    completion(handle(command, for: sessionID))
-  }
-
   func panelState(for sessionID: SessionID) -> String { "" }
 }
 
@@ -2277,13 +1834,71 @@ struct MCPToolDefinition: Encodable, Sendable {
   let description: String
   let inputSchema: MCPToolInputSchema
   let annotations: MCPToolAnnotations?
+  let builtInGroupID: String?
+  let builtInFamily: MCPBuiltInTool.Family?
+  let builtInPresentation: MCPToolInfo?
+  let argumentDecoding: MCPToolArgumentDecoding?
 
-  init(tool: MCPBuiltInTool, description: String, inputSchema: MCPInputSchema) {
+  init<Arguments: Decodable & Sendable>(
+    tool: MCPBuiltInTool,
+    name: String,
+    groupID: String,
+    family: MCPBuiltInTool.Family,
+    annotations: MCPToolAnnotations,
+    title: String,
+    detail: String,
+    symbol: String,
+    decodeArguments: @escaping @Sendable (
+      KeyedDecodingContainer<MCPToolCallParameters.CodingKeys>
+    ) throws -> Arguments,
+    browserTraceDetail: @escaping @Sendable (Arguments) -> String? = { _ in nil },
+    browserWorkspaceEffect: @escaping @Sendable (Arguments) -> MCPBrowserWorkspaceEffect = {
+      _ in .none
+    },
+    observesPanel: Bool,
+    executeArguments: @escaping @MainActor @Sendable (
+      MCPBuiltInToolExecuting,
+      Arguments,
+      SessionID,
+      @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) -> Void,
+    description: String,
+    inputSchema: MCPInputSchema
+  ) {
     self.tool = tool
-    self.name = tool.rawValue
+    self.name = name
     self.description = description
     self.inputSchema = .builtIn(inputSchema)
-    self.annotations = tool.annotations
+    self.annotations = annotations
+    self.builtInGroupID = groupID
+    self.builtInFamily = family
+    self.builtInPresentation = MCPToolInfo(
+      tool: tool,
+      name: name,
+      title: title,
+      detail: detail,
+      symbol: symbol
+    )
+    self.argumentDecoding = MCPToolArgumentDecoding(
+      tool: tool,
+      decode: { container in
+        let arguments = try decodeArguments(container)
+        let argumentValue = try container.decodeIfPresent(
+          MCPJSONValue.self,
+          forKey: .arguments
+        ) ?? .emptyObject
+        return AgentCommand(
+          tool: tool,
+          browserTraceDetail: browserTraceDetail(arguments),
+          browserWorkspaceEffect: browserWorkspaceEffect(arguments),
+          observesPanel: observesPanel,
+          decodedArgumentsValue: argumentValue,
+          execute: { handler, sessionID, completion in
+            executeArguments(handler, arguments, sessionID, completion)
+          }
+        )
+      }
+    )
   }
 
   init(name: String, description: String, externalSchema: MCPJSONValue) {
@@ -2292,6 +1907,10 @@ struct MCPToolDefinition: Encodable, Sendable {
     self.description = description
     self.inputSchema = .externalJSON(externalSchema)
     self.annotations = nil
+    self.builtInGroupID = nil
+    self.builtInFamily = nil
+    self.builtInPresentation = nil
+    self.argumentDecoding = nil
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -2307,8 +1926,8 @@ struct MCPToolDefinition: Encodable, Sendable {
   }
 }
 
-/// Standard MCP behavior hints, derived from the closed built-in identity rather than maintained
-/// alongside the wire schema. They are conservative signals, not an authorization boundary:
+/// Standard MCP behavior hints. Built-ins author these beside the rest of their one declaration.
+/// They are conservative signals, not an authorization boundary:
 /// Threading still enforces browser grants and explicit destructive confirmations itself.
 struct MCPToolAnnotations: Encodable, Equatable, Sendable {
   let readOnlyHint: Bool
@@ -2610,7 +2229,9 @@ enum MCPTools {
   static let extensionAuthoringTools = names(in: .extensionAuthoring)
 
   private static func names(in family: MCPBuiltInTool.Family) -> [String] {
-    MCPBuiltInTool.allCases.filter { $0.family == family }.map(\.rawValue)
+    MCPBuiltInToolRegistry.descriptors
+      .filter { $0.family == family }
+      .map(\.definition.name)
   }
 
   private static var browserSemanticLocatorSchema: MCPPropertySchema {
@@ -2655,14 +2276,33 @@ enum MCPTools {
   /// Every tool the server serves. Clients pre-approve this MCP server as one app capability;
   /// browser tools then enforce origin and consequential-action approval inside Threading, where
   /// the app can account for cookies and the page the user is actually looking at.
-  static let allTools = MCPBuiltInTool.allCases.map(\.rawValue)
+  static let allTools = MCPBuiltInToolRegistry.descriptors.map(\.definition.name)
 
-  /// Schema declarations are typed, then validated into `definitions` below. Keeping the
-  /// declaration list private means a missing or duplicate identity is excluded rather than
-  /// becoming an ambiguously routed protocol surface.
-  static let declaredDefinitions: [MCPToolDefinition] = [
+  /// The only authored built-in inventory. Each row owns its closed identity, typed decoding,
+  /// execution binding, schema, annotations, family, group, and Settings presentation.
+  static let authoredDeclarations: [MCPToolDefinition] = [
     MCPToolDefinition(
       tool: .displayImage,
+      name: "display_image",
+      groupID: "display",
+      family: .display,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Show image",
+      detail: "Render an image file in the panel — a screenshot, chart, or diagram.",
+      symbol: "photo",
+      decodeArguments: { container in
+        try container.decodeIfPresent(DisplayImageArguments.self, forKey: .arguments)
+          ?? DisplayImageArguments(path: nil, title: nil)
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.displayImage(arguments, for: sessionID))
+      },
       description: """
         Display an image to the user in Threading's side panel, beside this terminal. \
         Use this for screenshots, generated charts and diagrams, or any image file \
@@ -2695,6 +2335,36 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .displayChart,
+      name: "display_chart",
+      groupID: "display",
+      family: .display,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Chart numbers",
+      detail: "Plot measured values natively — comparisons, rankings, breakdowns, trends.",
+      symbol: "chart.bar",
+      decodeArguments: { container in
+        try container.decodeIfPresent(DisplayChartArguments.self, forKey: .arguments)
+          ?? DisplayChartArguments(
+            title: nil,
+            summary: nil,
+            kind: nil,
+            categories: nil,
+            series: nil,
+            stacked: nil,
+            valueFormat: nil,
+            unit: nil,
+            maximumValue: nil
+          )
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.displayChart(arguments, for: sessionID))
+      },
       description: """
         Chart numbers you are reporting, natively. Give values and the words for them — \
         Threading owns the scale, axes, ticks, legend, colours, hover and the accessibility \
@@ -2799,6 +2469,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .displayScene,
+      name: "display_scene",
+      groupID: "display",
+      family: .display,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Show native scene",
+      detail: "Render a bounded semantic visualization using Threading’s native UI.",
+      symbol: "square.grid.3x3",
+      decodeArguments: { container in
+        try container.decodeIfPresent(DisplaySceneArguments.self, forKey: .arguments)
+          ?? DisplaySceneArguments(scene: nil, title: nil, subtitle: nil)
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.displayScene(arguments, for: sessionID))
+      },
       description: """
         Render a bounded semantic visualization in Threading's side panel using native \
         AppKit. Use this when another MCP tool returns a normalized scene for a treemap, \
@@ -2918,6 +2608,33 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .conversationHistory,
+      name: "conversation_history",
+      groupID: "conversation-continuation",
+      family: .continuation,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Read handoff history",
+      detail: "Read only this session's paginated, cross-provider conversation snapshot.",
+      symbol: "text.book.closed",
+      decodeArguments: { container in
+        try container.decodeIfPresent(
+          ConversationHistoryArguments.self,
+          forKey: .arguments
+        ) ?? ConversationHistoryArguments(cursor: nil)
+      },
+      observesPanel: false,
+      executeArguments: { _, arguments, sessionID, completion in
+        ConversationContinuation.loadHistoryPage(for: sessionID, cursor: arguments.cursor) { result in
+          switch result {
+          case .success(let page): completion(.success(page))
+          case .failure(let error): completion(.failure(error.message))
+          }
+        }
+      },
       description: """
         Read the frozen conversation snapshot that created this cross-provider \
         continuation. The tool is scoped to this session: it cannot select another \
@@ -2941,6 +2658,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .notifyUser,
+      name: "notify_user",
+      groupID: "notifications",
+      family: .notifications,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Notify chat participants",
+      detail: "Send one requested, session-scoped result to its intended participant.",
+      symbol: "bell.badge",
+      decodeArguments: { container in
+        try container.decodeIfPresent(NotifyUserArguments.self, forKey: .arguments)
+          ?? NotifyUserArguments(title: nil, message: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.notifyUser(arguments, for: sessionID))
+      },
       description: """
         Notify this session's participant once a requested milestone has actually been \
         reached. Call it only when a participant explicitly asks to be notified. By \
@@ -2982,6 +2719,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .displayHTML,
+      name: "display_html",
+      groupID: "display",
+      family: .display,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Show HTML",
+      detail: "Capture an HTML attachment — tables, charts, diagrams, rich reports.",
+      symbol: "doc.richtext",
+      decodeArguments: { container in
+        try container.decodeIfPresent(DisplayHTMLArguments.self, forKey: .arguments)
+          ?? DisplayHTMLArguments(html: nil, title: nil)
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.displayHTML(arguments, for: sessionID))
+      },
       description: """
         Capture an HTML document in Threading's Attachments pane beside this terminal. Use \
         this when structure carries the meaning and plain text would destroy it: \
@@ -3020,6 +2777,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .displayCompareFiles,
+      name: "display_compare_files",
+      groupID: "display",
+      family: .display,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Compare files",
+      detail: "Two images as an interactive wipe/fade/difference; two text files as a diff.",
+      symbol: "rectangle.on.rectangle",
+      decodeArguments: { container in
+        try container.decodeIfPresent(DisplayCompareFilesArguments.self, forKey: .arguments)
+          ?? DisplayCompareFilesArguments()
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.displayCompareFiles(arguments, for: sessionID))
+      },
       description: """
         Compare two files in Threading's side panel. Two images open an interactive \
         comparison the user can wipe, crossfade, or difference — use it whenever you \
@@ -3059,6 +2836,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserNavigate,
+      name: "browser_navigate",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Open a page",
+      detail: "Open or search, optionally returning at commit or DOM readiness.",
+      symbol: "arrow.up.forward.app",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserNavigateArguments.self, forKey: .arguments)
+          ?? BrowserNavigateArguments()
+      },
+      browserTraceDetail: { arguments in "navigate; wait=\(arguments.waitUntil ?? "load")" },
+      browserWorkspaceEffect: { _ in .announce },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserNavigate(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Open a URL in Threading's browser (a full pane beside this terminal), or run a \
         search if the text is not a URL. The call creates this session's browser tab if \
@@ -3088,6 +2887,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserHistory,
+      name: "browser_history",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Navigate history",
+      detail: "",
+      symbol: "clock.arrow.circlepath",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserHistoryArguments.self, forKey: .arguments)
+          ?? BrowserHistoryArguments()
+      },
+      browserTraceDetail: { arguments in "\(arguments.action ?? "unknown"); wait=\(arguments.waitUntil ?? "load")" },
+      browserWorkspaceEffect: { _ in .announce },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserHistory(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Navigate the shared browser backward or forward, reload the current page, or use \
         reload_from_origin to make WebKit revalidate content with its origin server using \
@@ -3120,6 +2941,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserStop,
+      name: "browser_stop",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Stop page loading",
+      detail: "Cancel outstanding resources and inspect the content already rendered.",
+      symbol: "xmark",
+      decodeArguments: { container in
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      },
+      browserTraceDetail: { arguments in "stop outstanding resources" },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, _, sessionID, completion in
+        handler.browserStop(for: sessionID, completion: completion)
+      },
       description: """
         Stop all outstanding resource loads in the active shared browser page, then \
         return a fresh semantic snapshot of the content that rendered before cancellation. \
@@ -3132,6 +2975,34 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserTabs,
+      name: "browser_tabs",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Manage browser tabs",
+      detail: "",
+      symbol: "rectangle.stack",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserTabsArguments.self, forKey: .arguments)
+          ?? BrowserTabsArguments(action: nil, tab: nil)
+      },
+      browserTraceDetail: { arguments in "action=\(arguments.action ?? "unknown"); context=\(arguments.context ?? "shared")" },
+      browserWorkspaceEffect: { arguments in
+        switch arguments.action?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "new": return .announce
+        case "activate", "close": return .invalidate
+        default: return .none
+        }
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.browserTabs(arguments, for: sessionID))
+      },
       description: """
         List, create, activate, or close independent browser tabs in this session. Each \
         browser tab keeps its own page, history, pop-ups, responsive viewport, emulated \
@@ -3169,6 +3040,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserStorage,
+      name: "browser_storage",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Clear site data",
+      detail: "Clear the active site's browser data after explicit user confirmation.",
+      symbol: "trash",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserStorageArguments.self, forKey: .arguments)
+          ?? BrowserStorageArguments(action: nil)
+      },
+      browserTraceDetail: { arguments in "action=\(arguments.action ?? "unknown")" },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserStorage(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Clear cookies, caches, local storage, IndexedDB, service workers, and other WebKit \
         website data for the active browser site. This is destructive and always requires \
@@ -3190,6 +3083,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserTrace,
+      name: "browser_trace",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Record browser trace",
+      detail: "Capture and export bounded, sanitized agent and network diagnostics.",
+      symbol: "record.circle",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserTraceArguments.self, forKey: .arguments)
+          ?? BrowserTraceArguments(action: nil)
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.browserTrace(arguments, for: sessionID))
+      },
       description: """
         Record and export a bounded, metadata-only trace for the active browser tab. The \
         trace contains agent tool names, success/error outcomes, durations, navigation \
@@ -3210,6 +3123,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserUpload,
+      name: "browser_upload",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Choose files",
+      detail: "Suggest files through a native user-approved file chooser.",
+      symbol: "arrow.up.doc",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserUploadArguments.self, forKey: .arguments)
+          ?? BrowserUploadArguments(paths: nil, ref: nil, selector: nil)
+      },
+      browserTraceDetail: { arguments in "\(arguments.paths?.count ?? 0) suggested paths; " + MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserUpload(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Suggest one or more existing local paths to one exact file input, then open \
         WebKit's native file chooser. The chooser displays the suggestions and the user \
@@ -3242,6 +3177,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserDownload,
+      name: "browser_download",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Download file",
+      detail: "Download through a native user-approved save destination.",
+      symbol: "arrow.down.doc",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserDownloadArguments.self, forKey: .arguments)
+          ?? BrowserDownloadArguments(ref: nil, selector: nil)
+      },
+      browserTraceDetail: { arguments in MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserDownload(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Activate one exact semantic control and wait for the resulting WebKit download. \
         The user chooses or cancels the destination in a native save panel that explicitly \
@@ -3266,6 +3223,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserResize,
+      name: "browser_resize",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Resize viewport",
+      detail: "Test responsive layouts at an exact CSS-pixel width and height.",
+      symbol: "aspectratio",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserResizeArguments.self, forKey: .arguments)
+          ?? BrowserResizeArguments(width: nil, height: nil)
+      },
+      browserTraceDetail: { arguments in arguments.width.flatMap { width in arguments.height.map { "viewport \(width)×\($0)" } } ?? "reset viewport" },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserResize(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Give the active browser tab an exact responsive-test viewport without resizing \
         Threading's window. The user sees the same live page inside a pannable frame, and \
@@ -3295,6 +3274,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserEmulate,
+      name: "browser_emulate",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Emulate browser",
+      detail: "Test color, CSS media, and User-Agent behavior in the active tab.",
+      symbol: "circle.lefthalf.filled",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserEmulateArguments.self, forKey: .arguments)
+          ?? BrowserEmulateArguments()
+      },
+      browserTraceDetail: { arguments in MCPBrowserTraceDetail.emulation(arguments) },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserEmulate(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Change one or more runtime-only test conditions in the active browser tab. \
         color_scheme accepts dark, light, or auto; CSS prefers-color-scheme, matchMedia, \
@@ -3330,6 +3331,27 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserCapabilities,
+      name: "browser_capabilities",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      ),
+      title: "Inspect browser capabilities",
+      detail: "Read supported emulation and automation limits before choosing a backend.",
+      symbol: "checklist",
+      decodeArguments: { container in
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      },
+      browserTraceDetail: { arguments in "backend capability matrix" },
+      observesPanel: true,
+      executeArguments: { handler, _, sessionID, completion in
+        completion(handler.browserCapabilities(for: sessionID))
+      },
       description: """
         Report the available browser automation backends and an explicit machine-readable \
         capability matrix. Use this before assuming that a test condition can be emulated. \
@@ -3344,6 +3366,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserRunIsolated,
+      name: "browser_run_isolated",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Run isolated browser test",
+      detail: "Execute a bounded scenario in a fresh local Playwright context.",
+      symbol: "testtube.2",
+      decodeArguments: { container in
+        try container.decode(BrowserIsolatedRunArguments.self, forKey: .arguments)
+      },
+      browserTraceDetail: { arguments in "\(arguments.steps?.count ?? 0) isolated Playwright steps" },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserRunIsolated(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Run one bounded end-to-end scenario in a fresh, non-persistent Playwright browser \
         context, then close the browser. This backend never imports cookies, credentials, \
@@ -3465,6 +3507,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserAttachChrome,
+      name: "browser_attach_chrome",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Use signed-in Chrome",
+      detail: "Drive the user's Chrome automation profile inside an allowed origin list.",
+      symbol: "person.badge.key",
+      decodeArguments: { container in
+        try container.decode(BrowserAttachRunArguments.self, forKey: .arguments)
+      },
+      browserTraceDetail: { arguments in "\(arguments.steps?.count ?? 0) attached Chrome steps across \(arguments.allowedOrigins?.count ?? 0) authorized origins" },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserAttachChrome(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Run one bounded scenario in real Google Chrome, against the automation profile the \
         user set up in Settings and signed into. This is a third backend, distinct from both \
@@ -3519,6 +3581,27 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserSnapshot,
+      name: "browser_snapshot",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      ),
+      title: "Read page",
+      detail: "Read a semantic page tree with stable references for interaction.",
+      symbol: "list.bullet.rectangle",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserSnapshotArguments.self, forKey: .arguments)
+          ?? BrowserSnapshotArguments(maximumNodes: nil, ref: nil, selector: nil)
+      },
+      browserTraceDetail: { arguments in MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: nil) },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserSnapshot(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Read the current page as a compact accessibility-oriented tree. Interactive \
         elements carry stable refs such as e12; pass those refs to browser_click, \
@@ -3560,6 +3643,27 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserQuery,
+      name: "browser_query",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      ),
+      title: "Query CSS",
+      detail: "Expert fallback for inspecting a selector already known.",
+      symbol: "magnifyingglass",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserSelectorArguments.self, forKey: .arguments)
+          ?? BrowserSelectorArguments(selector: nil)
+      },
+      browserTraceDetail: { arguments in "CSS query" },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserQuery(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Return the elements in the current page matching a CSS selector — their tag, \
         id, classes, visible text, key attributes (href, src, value, aria-label), and \
@@ -3579,6 +3683,35 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserClick,
+      name: "browser_click",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Click page content",
+      detail: "Click a semantic target, or a viewport point for canvas-style content.",
+      symbol: "cursorarrow.rays",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserClickArguments.self, forKey: .arguments)
+          ?? BrowserClickArguments(
+            ref: nil,
+            selector: nil,
+            x: nil,
+            y: nil,
+            button: nil,
+            clickCount: nil
+          )
+      },
+      browserTraceDetail: { arguments in arguments.x != nil ? "viewport coordinates" : MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserClick(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Click an interactive element in the current page, preferably by a ref returned \
         from browser_snapshot. It sends the pointer and mouse sequence application-style \
@@ -3637,6 +3770,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserHover,
+      name: "browser_hover",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Hover an element",
+      detail: "Reveal menus, tooltips, and controls driven by pointer hover.",
+      symbol: "cursorarrow.motionlines",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserTargetArguments.self, forKey: .arguments)
+          ?? BrowserTargetArguments(ref: nil, selector: nil)
+      },
+      browserTraceDetail: { arguments in MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserHover(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Hover a page element, preferably by a ref returned from browser_snapshot. This \
         triggers pointer and mouse handlers and mirrors page-readable CSS hover rules \
@@ -3660,6 +3815,33 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserDrag,
+      name: "browser_drag",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Drag an element",
+      detail: "Drag a referenced item onto another referenced element.",
+      symbol: "hand.draw",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserDragArguments.self, forKey: .arguments)
+          ?? BrowserDragArguments(
+            sourceRef: nil,
+            sourceSelector: nil,
+            targetRef: nil,
+            targetSelector: nil
+          )
+      },
+      browserTraceDetail: { arguments in MCPBrowserTraceDetail.target(ref: arguments.sourceRef, selector: arguments.sourceSelector, locator: arguments.sourceLocator) + " to " + MCPBrowserTraceDetail.target(ref: arguments.targetRef, selector: arguments.targetSelector, locator: arguments.targetLocator) },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserDrag(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Drag one page element onto another, preferably using two refs returned by \
         browser_snapshot. Sends pointer, mouse, and HTML drag/drop events without moving \
@@ -3698,6 +3880,34 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserType,
+      name: "browser_type",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Enter text",
+      detail: "Fill an editable element without exposing passwords to the agent.",
+      symbol: "character.cursor.ibeam",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserTypeArguments.self, forKey: .arguments)
+          ?? BrowserTypeArguments(
+            ref: nil,
+            selector: nil,
+            text: nil,
+            slowly: nil,
+            submit: nil
+          )
+      },
+      browserTraceDetail: { arguments in MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) + "; \(arguments.text?.count ?? 0) characters" },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserType(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Enter text into an editable element, preferably by a browser_snapshot ref. \
         Password fields are never filled by the agent; the user must type secrets in the \
@@ -3738,6 +3948,27 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserFillCredentials,
+      name: "browser_fill_credentials",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Sign in with a test credential",
+      detail: "",
+      symbol: "key",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserFillCredentialsArguments.self, forKey: .arguments)
+          ?? BrowserFillCredentialsArguments(account: nil, ref: nil, selector: nil)
+      },
+      browserTraceDetail: { arguments in MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) + "; stored credential" },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserFillCredentials(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Sign in with a test credential the user stored in Threading for the page's exact \
         origin. This tool takes no username, password, or origin: Threading resolves the \
@@ -3776,6 +4007,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserFillForm,
+      name: "browser_fill_form",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Fill a form",
+      detail: "Fill several text, select, and checkable controls in one validated batch.",
+      symbol: "list.clipboard",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserFillFormArguments.self, forKey: .arguments)
+          ?? BrowserFillFormArguments(fields: nil)
+      },
+      browserTraceDetail: { arguments in "\(arguments.fields?.count ?? 0) fields" },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserFillForm(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Fill several text fields, native selects, checkboxes, radios, or switches in one \
         call. All targets and requested value kinds are checked before the first field is \
@@ -3839,6 +4092,33 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserSelect,
+      name: "browser_select",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Select an option",
+      detail: "Choose an exact visible label or submitted value from a select control.",
+      symbol: "chevron.up.chevron.down",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserSelectArguments.self, forKey: .arguments)
+          ?? BrowserSelectArguments(
+            ref: nil,
+            selector: nil,
+            value: nil,
+            label: nil
+          )
+      },
+      browserTraceDetail: { arguments in MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) + (arguments.label != nil ? "; by label" : "; by value") },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserSelect(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Select one option in a native select control, preferably by a browser_snapshot \
         ref. Match exactly one option by its submitted value or visible label; available \
@@ -3874,6 +4154,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserSetChecked,
+      name: "browser_set_checked",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Set checked state",
+      detail: "Check or uncheck a checkbox or switch without accidentally toggling it.",
+      symbol: "checkmark.square",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserSetCheckedArguments.self, forKey: .arguments)
+          ?? BrowserSetCheckedArguments(ref: nil, selector: nil, checked: nil)
+      },
+      browserTraceDetail: { arguments in MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) + "; checked=\(arguments.checked.map(String.init) ?? "missing")" },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserSetChecked(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Put a checkbox, radio button, or switch into an exact checked state, preferably \
         by a browser_snapshot ref. Unlike clicking, this is idempotent: an already-correct \
@@ -3904,6 +4206,36 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserPressKey,
+      name: "browser_press_key",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Press a key",
+      detail: "Send keys and modifiers with native control and focus behavior.",
+      symbol: "keyboard",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserKeyArguments.self, forKey: .arguments)
+          ?? BrowserKeyArguments(
+            key: nil,
+            ref: nil,
+            selector: nil,
+            shift: nil,
+            control: nil,
+            option: nil,
+            command: nil
+          )
+      },
+      browserTraceDetail: { arguments in MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) + "; key category=\((arguments.key?.count ?? 0) == 1 ? "character" : "named")" },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserPressKey(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Press a keyboard key on a referenced element or the page's focused element. Page \
         handlers receive cancellable keyboard events first; when they do not handle the \
@@ -3949,6 +4281,33 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserScroll,
+      name: "browser_scroll",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Scroll",
+      detail: "Scroll the page or a referenced scrollable element.",
+      symbol: "arrow.up.and.down",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserScrollArguments.self, forKey: .arguments)
+          ?? BrowserScrollArguments(
+            direction: nil,
+            amount: nil,
+            ref: nil,
+            selector: nil
+          )
+      },
+      browserTraceDetail: { arguments in "\(arguments.direction ?? "down"); " + MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) },
+      browserWorkspaceEffect: { _ in .invalidate },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserScroll(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Scroll the page or a referenced scrollable element. The result includes a fresh \
         page snapshot describing the newly visible content.
@@ -3978,6 +4337,36 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserWait,
+      name: "browser_wait",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Wait for page",
+      detail: "Wait for text, URL changes, target states, or a short duration.",
+      symbol: "clock",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserWaitArguments.self, forKey: .arguments)
+          ?? BrowserWaitArguments(
+            time: nil,
+            text: nil,
+            textGone: nil,
+            urlContains: nil,
+            ref: nil,
+            selector: nil,
+            state: nil,
+            timeout: nil
+          )
+      },
+      browserTraceDetail: { arguments in MCPBrowserTraceDetail.wait(arguments) },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserWait(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Wait for text, a URL change, or an element state, or pause for a short fixed \
         duration, then return a fresh page snapshot. For an element, provide ref or \
@@ -4095,6 +4484,27 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserAnnotations,
+      name: "browser_annotations",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      ),
+      title: "Read page annotations",
+      detail: "Read user-authored notes anchored to the current page.",
+      symbol: "note.text",
+      decodeArguments: { container in
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      },
+      browserTraceDetail: { arguments in "user-authored page notes" },
+      observesPanel: true,
+      executeArguments: { handler, _, sessionID, completion in
+        handler.browserAnnotations(for: sessionID, completion: completion)
+      },
       description: """
         Read the user's native annotations for the active browser page. Each note includes \
         its numbered pin and document-space CSS-pixel coordinates. These notes were \
@@ -4107,6 +4517,33 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserScreenshot,
+      name: "browser_screenshot",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      ),
+      title: "Screenshot page or element",
+      detail: "Capture a viewport, full page, or one referenced element.",
+      symbol: "camera",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserScreenshotArguments.self, forKey: .arguments)
+          ?? BrowserScreenshotArguments(
+            fullPage: nil,
+            ref: nil,
+            selector: nil,
+            show: nil,
+            includeImage: nil
+          )
+      },
+      browserTraceDetail: { arguments in arguments.fullPage == true ? "full page" : MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserScreenshot(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Capture the current browser page as PNG. By default the image is returned to you \
         for visual inspection and shown to the user as a persistent image tab. It can \
@@ -4159,6 +4596,30 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserVisualCompare,
+      name: "browser_visual_compare",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      ),
+      title: "Compare rendered pixels",
+      detail: "Compare a capture with a stored baseline, and say which regions changed.",
+      symbol: "square.on.square.dashed",
+      decodeArguments: { container in
+        try container.decodeIfPresent(
+          BrowserVisualCompareArguments.self,
+          forKey: .arguments
+        )
+          ?? BrowserVisualCompareArguments()
+      },
+      browserTraceDetail: { arguments in arguments.fullPage == true ? "full-page visual comparison" : "visual comparison; " + MCPBrowserTraceDetail.target(ref: arguments.ref, selector: arguments.selector, locator: arguments.locator) },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserVisualCompare(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Capture the active page and compare its rendered pixels with a stored baseline. Name \
         the baseline with exactly one of baseline_id, baseline_name, or the legacy \
@@ -4303,6 +4764,27 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserBaselines,
+      name: "browser_baselines",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Manage visual baselines",
+      detail: "List, capture, or remove this project’s approved page pictures.",
+      symbol: "photo.stack",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserBaselinesArguments.self, forKey: .arguments)
+          ?? BrowserBaselinesArguments()
+      },
+      browserTraceDetail: { arguments in "\(arguments.action ?? "list"); \(arguments.baselineID != nil ? "by id" : "by name")" },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserBaselines(arguments, for: sessionID, completion: completion)
+      },
       description: """
         List, capture, or delete this project's stored visual baselines. A baseline is an \
         approved picture of what a page should look like; it belongs to the project rather \
@@ -4383,6 +4865,27 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserConsole,
+      name: "browser_console",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      ),
+      title: "Read console",
+      detail: "Read console messages and uncaught page errors.",
+      symbol: "exclamationmark.triangle",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserConsoleArguments.self, forKey: .arguments)
+          ?? BrowserConsoleArguments(level: nil, clear: nil)
+      },
+      browserTraceDetail: { arguments in "console metadata" },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserConsole(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Read console messages, uncaught errors, and unhandled promise rejections captured \
         from the current page. Use level=error for a focused debugging pass.
@@ -4403,6 +4906,27 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserNetwork,
+      name: "browser_network",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      ),
+      title: "Read network activity",
+      detail: "Inspect redacted request metadata, status codes, and durations.",
+      symbol: "network",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserNetworkArguments.self, forKey: .arguments)
+          ?? BrowserNetworkArguments(kind: nil, errorsOnly: nil, clear: nil)
+      },
+      browserTraceDetail: { arguments in "network metadata" },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserNetwork(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Read bounded network metadata captured from the current page: method, redacted \
         URL, resource type, status, and duration. Request and response bodies, headers, \
@@ -4432,6 +4956,27 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserPerformance,
+      name: "browser_performance",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      ),
+      title: "Measure page performance",
+      detail: "Summarize navigation, paint, layout, long-task, and resource timing.",
+      symbol: "speedometer",
+      decodeArguments: { container in
+        try container.decodeIfPresent(BrowserPerformanceArguments.self, forKey: .arguments)
+          ?? BrowserPerformanceArguments(maximumResources: nil)
+      },
+      browserTraceDetail: { arguments in "up to \(arguments.maximumResources ?? BrowserAgentDefaults.defaultPerformanceResources) resources" },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserPerformance(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Summarize performance measurements from the current document using WebKit's Web \
         Performance APIs: navigation milestones, paint timing, observed LCP and layout \
@@ -4456,6 +5001,29 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .browserAccessibilityAudit,
+      name: "browser_accessibility_audit",
+      groupID: "browser",
+      family: .browser,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      ),
+      title: "Audit page accessibility",
+      detail: "Find bounded, actionable semantic accessibility issues with stable refs.",
+      symbol: "figure.roll",
+      decodeArguments: { container in
+        try container.decodeIfPresent(
+          BrowserAccessibilityAuditArguments.self,
+          forKey: .arguments
+        ) ?? BrowserAccessibilityAuditArguments(maximumIssues: nil)
+      },
+      browserTraceDetail: { arguments in "up to \(arguments.maximumIssues ?? BrowserAgentDefaults.defaultAccessibilityAuditIssues) issues" },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.browserAccessibilityAudit(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Run bounded, deterministic accessibility checks against the current WebKit \
         document, its open shadow roots, and accessible same-origin frames. Reports \
@@ -4481,6 +5049,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .panelListTabs,
+      name: "panel_list_tabs",
+      groupID: "tabs",
+      family: .panel,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "List tabs",
+      detail: "See what is open in the panel and which tab is active.",
+      symbol: "list.bullet.rectangle",
+      decodeArguments: { container in
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      },
+      observesPanel: true,
+      executeArguments: { handler, _, sessionID, completion in
+        completion(handler.panelListTabs(for: sessionID))
+      },
       description: """
         List the tabs open in this session's display panel — their index, id, kind \
         (image, document, browser, compare, and so on), title, and which one is \
@@ -4492,6 +5080,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .setProjectIcon,
+      name: "set_project_icon",
+      groupID: "project",
+      family: .project,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Set project icon",
+      detail: "Give the sidebar project an icon, from a file or an image URL.",
+      symbol: "photo.badge.plus",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SetProjectIconArguments.self, forKey: .arguments)
+          ?? SetProjectIconArguments(path: nil, url: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.setProjectIcon(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Set the icon Threading shows for this session's project in its sidebar. Use \
         the project's own mark — a favicon or logo file from the repository, or an \
@@ -4517,6 +5125,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .archiveSession,
+      name: "archive_session",
+      groupID: "session-lifecycle",
+      family: .session,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Archive this session",
+      detail: "File the session away when the turn ends, with an undo on the receipt.",
+      symbol: "archivebox",
+      decodeArguments: { container in
+        try container.decodeIfPresent(ArchiveSessionArguments.self, forKey: .arguments)
+          ?? ArchiveSessionArguments(reason: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.archiveSession(arguments, for: sessionID))
+      },
       description: """
         File this session away in Threading once the current turn ends. Call it when the \
         user asks you to close, archive, or finish with this conversation — "commit this \
@@ -4558,6 +5186,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .cancelSessionArchive,
+      name: "cancel_session_archive",
+      groupID: "session-lifecycle",
+      family: .session,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Cancel a pending archive",
+      detail: "Take back an archive the session asked for, before it happens.",
+      symbol: "arrow.uturn.backward",
+      decodeArguments: { container in
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, _, sessionID, completion in
+        completion(handler.cancelSessionArchive(for: sessionID))
+      },
       description: """
         Take back an archive this session asked for, while it is still pending. Use it when \
         the user changes their mind after archive_session and before your turn ends. It \
@@ -4568,6 +5216,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .setSessionName,
+      name: "set_session_name",
+      groupID: "session-lifecycle",
+      family: .session,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Name this session",
+      detail: "Re-title the sidebar row after what the conversation turned out to be.",
+      symbol: "character.cursor.ibeam",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SetSessionNameArguments.self, forKey: .arguments)
+          ?? SetSessionNameArguments(name: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.setSessionName(arguments, for: sessionID))
+      },
       description: """
         Name this session in Threading's sidebar, after what the conversation turned out to \
         be about. Call it when the user asks you to rename or re-title this chat, and when \
@@ -4601,6 +5269,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .listSessions,
+      name: "list_sessions",
+      groupID: "workspace-control",
+      family: .workspace,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "List project sessions",
+      detail: "Read the project’s sessions — names, ids, agents, and who is working.",
+      symbol: "list.bullet.rectangle",
+      decodeArguments: { container in
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, _, sessionID, completion in
+        completion(handler.listProjectSessions(for: sessionID))
+      },
       description: """
         List the sessions in this session's own project: each row carries the session's \
         Threading id, its name, its agent, whether it is working right now, and which \
@@ -4615,6 +5303,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .sendToSession,
+      name: "send_to_session",
+      groupID: "workspace-control",
+      family: .workspace,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Message another session",
+      detail: "Deliver a message to a project sibling, named as coming from this one.",
+      symbol: "paperplane",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SendToSessionArguments.self, forKey: .arguments)
+          ?? SendToSessionArguments(sessionID: nil, message: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.sendToSession(arguments, for: sessionID, completion: completion)
+      },
       description: """
         Send a message to another session in this project, addressed by the Threading id \
         list_sessions prints. The message is delivered as that session's own next turn: \
@@ -4662,6 +5370,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .watchSession,
+      name: "watch_session",
+      groupID: "workspace-control",
+      family: .workspace,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      ),
+      title: "Watch a session",
+      detail: "One notice when a sibling settles, exits, or hits its limit.",
+      symbol: "eye",
+      decodeArguments: { container in
+        try container.decodeIfPresent(WatchSessionArguments.self, forKey: .arguments)
+          ?? WatchSessionArguments(sessionID: nil, timeoutMinutes: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.watchSession(arguments, for: sessionID))
+      },
       description: """
         Wait for another chat/session in this project to settle, so work here can continue \
         after its current turn finishes, its agent exits, or it stops at its usage limit. Use it \
@@ -4696,6 +5424,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .panelActivateTab,
+      name: "panel_activate_tab",
+      groupID: "tabs",
+      family: .panel,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Activate tab",
+      detail: "Bring one of the panel's tabs to the front.",
+      symbol: "rectangle.stack.badge.play",
+      decodeArguments: { container in
+        try container.decodeIfPresent(PanelActivateTabArguments.self, forKey: .arguments)
+          ?? PanelActivateTabArguments(tab: nil)
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.panelActivateTab(arguments, for: sessionID))
+      },
       description: """
         Bring one of the display panel's tabs to the front, so the user is looking at it. \
         Identify the tab by its index (from panel_list_tabs) or its id. Activating a browser or \
@@ -4713,6 +5461,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .listReclaimableStorage,
+      name: "list_reclaimable_storage",
+      groupID: "storage",
+      family: .storage,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "List reclaimable storage",
+      detail: "Read what build output can be deleted and rebuilt, and how big it is.",
+      symbol: "list.bullet.rectangle",
+      decodeArguments: { container in
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, _, sessionID, completion in
+        completion(handler.listReclaimableStorage())
+      },
       description: """
         Find safe, rebuildable build output when disk space is short, a command fails \
         with ENOSPC or “No space left on device”, or the user asks what is taking up \
@@ -4729,6 +5497,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .proposeStorageCleanup,
+      name: "propose_storage_cleanup",
+      groupID: "storage",
+      family: .storage,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Propose a cleanup",
+      detail: "Ask you to approve removing some of it. Never removes anything itself.",
+      symbol: "hand.raised",
+      decodeArguments: { container in
+        try container.decodeIfPresent(StorageCleanupArguments.self, forKey: .arguments)
+          ?? StorageCleanupArguments(paths: nil, reason: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.proposeStorageCleanup(arguments, completion: completion)
+      },
       description: """
         Propose deleting some of what list_reclaimable_storage returned. This does not \
         delete anything: it shows the user exactly what you are proposing and why, and \
@@ -4758,6 +5546,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .listSettings,
+      name: "list_settings",
+      groupID: "settings-directory",
+      family: .settings,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "List settings pages",
+      detail: "Read the Settings pages, their sidebar groups, and their vocabulary.",
+      symbol: "list.bullet.rectangle",
+      decodeArguments: { container in
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, _, sessionID, completion in
+        completion(handler.listSettings())
+      },
       description: """
         List Threading's own Settings pages — every destination the app's Settings \
         sidebar offers, each with its stable id, the sidebar group it sits under, the \
@@ -4771,6 +5579,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .listThemes,
+      name: "list_themes",
+      groupID: "appearance",
+      family: .appearance,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "List themes",
+      detail: "Read the available themes and which one this session is using.",
+      symbol: "list.bullet",
+      decodeArguments: { container in
+        try container.decodeIfPresent(ListThemesArguments.self, forKey: .arguments)
+          ?? ListThemesArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, _, sessionID, completion in
+        completion(handler.listThemes(for: sessionID))
+      },
       description: """
         List the terminal colour themes available in Threading — each one's stable ID, name, \
         whether it is built in, custom, or dynamically follows the app chrome, and its \
@@ -4783,6 +5611,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .setTheme,
+      name: "set_theme",
+      groupID: "appearance",
+      family: .appearance,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Set the theme",
+      detail: "Apply a theme to this session, its project, or as the default.",
+      symbol: "paintbrush",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SetThemeArguments.self, forKey: .arguments)
+          ?? SetThemeArguments(themeID: nil, theme: nil, scope: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.setTheme(arguments, for: sessionID))
+      },
       description: """
         Set the terminal colour theme, for this session, for its whole project, or as \
         the app-wide default. Takes effect immediately — the terminal you are running \
@@ -4820,6 +5668,32 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .createTheme,
+      name: "create_theme",
+      groupID: "appearance",
+      family: .appearance,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Create a theme",
+      detail: "Build a new palette from a description, guarded against unreadable text.",
+      symbol: "wand.and.stars",
+      decodeArguments: { container in
+        try container.decodeIfPresent(CreateThemeArguments.self, forKey: .arguments)
+          ?? CreateThemeArguments(
+            name: nil,
+            baseID: nil,
+            base: nil,
+            colors: nil,
+            apply: nil
+          )
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.createTheme(arguments, for: sessionID))
+      },
       description: """
         Create a new terminal theme and, unless told otherwise, apply it to this \
         session. Use it when the user describes colours they want rather than naming a \
@@ -4868,6 +5742,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .listAppThemes,
+      name: "list_app_themes",
+      groupID: "appearance",
+      family: .appearance,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "List app themes",
+      detail: "Read the chrome themes and see which one is active.",
+      symbol: "rectangle.3.group",
+      decodeArguments: { container in
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, _, sessionID, completion in
+        completion(handler.listAppThemes())
+      },
       description: """
         List Threading's app-chrome themes, their stable IDs, whether each is built in or \
         custom, and which one is active. These style the window, sidebar, panels, text \
@@ -4878,6 +5772,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .getAppTheme,
+      name: "get_app_theme",
+      groupID: "appearance",
+      family: .appearance,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Inspect app theme",
+      detail: "Read a chrome theme's exact semantic colours and material.",
+      symbol: "doc.text.magnifyingglass",
+      decodeArguments: { container in
+        try container.decodeIfPresent(AppThemeReferenceArguments.self, forKey: .arguments)
+          ?? AppThemeReferenceArguments(themeID: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.getAppTheme(arguments))
+      },
       description: """
         Read one complete app-chrome theme document in the same snake-case vocabulary \
         accepted by create_app_theme and update_app_theme. Each available light/dark \
@@ -4897,6 +5811,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .setAppTheme,
+      name: "set_app_theme",
+      groupID: "appearance",
+      family: .appearance,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Set app theme",
+      detail: "Restyle the app's window chrome immediately.",
+      symbol: "paintbrush.pointed",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SetAppThemeArguments.self, forKey: .arguments)
+          ?? SetAppThemeArguments(themeID: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.setAppTheme(arguments))
+      },
       description: """
         Apply an app-chrome theme immediately and app-wide. There is one window chrome, \
         so unlike terminal themes this has no session or project scope. Do not change it \
@@ -4915,6 +5849,37 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .createAppTheme,
+      name: "create_app_theme",
+      groupID: "appearance",
+      family: .appearance,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Create app theme",
+      detail: "Build a custom chrome theme from a base and a partial patch.",
+      symbol: "wand.and.rays",
+      decodeArguments: { container in
+        try container.decodeIfPresent(CreateAppThemeArguments.self, forKey: .arguments)
+          ?? CreateAppThemeArguments(
+            name: nil,
+            baseID: nil,
+            appearance: nil,
+            mode: nil,
+            summary: nil,
+            variants: nil,
+            roles: nil,
+            material: nil,
+            terminalColors: nil,
+            apply: nil
+          )
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.createAppTheme(arguments))
+      },
       description: """
         Create a custom app-chrome theme from partial light and/or dark variant patches. \
         One variant makes a fixed light or dark theme; both variants with appearance \
@@ -4985,6 +5950,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .duplicateAppTheme,
+      name: "duplicate_app_theme",
+      groupID: "appearance",
+      family: .appearance,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Duplicate app theme",
+      detail: "Make an editable custom copy before modifying a built-in style.",
+      symbol: "plus.square.on.square",
+      decodeArguments: { container in
+        try container.decodeIfPresent(DuplicateAppThemeArguments.self, forKey: .arguments)
+          ?? DuplicateAppThemeArguments(themeID: nil, name: nil, apply: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.duplicateAppTheme(arguments))
+      },
       description: """
         Duplicate any app-chrome theme into an editable custom theme. Returns the copy's \
         stable ID. Every available light/dark variant is copied; an adaptive theme stays \
@@ -5010,6 +5995,37 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .updateAppTheme,
+      name: "update_app_theme",
+      groupID: "appearance",
+      family: .appearance,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Update app theme",
+      detail: "Patch an editable chrome theme while keeping its stable identity.",
+      symbol: "slider.horizontal.3",
+      decodeArguments: { container in
+        try container.decodeIfPresent(UpdateAppThemeArguments.self, forKey: .arguments)
+          ?? UpdateAppThemeArguments(
+            themeID: nil,
+            name: nil,
+            appearance: nil,
+            mode: nil,
+            summary: nil,
+            variants: nil,
+            roles: nil,
+            material: nil,
+            terminalColors: nil,
+            apply: nil
+          )
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.updateAppTheme(arguments))
+      },
       description: """
         Patch an existing custom app-chrome theme in place while keeping its stable ID. \
         Built-in themes are immutable. Only supplied variants and fields change; this can \
@@ -5070,6 +6086,26 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .extensionListComponents,
+      name: "extension_list_components",
+      groupID: "extension-authoring",
+      family: .extensionAuthoring,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "List components",
+      detail: "Read every public, versioned UI component contract.",
+      symbol: "list.bullet.rectangle",
+      decodeArguments: { container in
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, _, sessionID, completion in
+        completion(handler.extensionListComponents())
+      },
       description: """
         List every versioned Threading UI component an extension may customize. Returns \
         stable component IDs, versions, context kinds and summaries. Use this before \
@@ -5079,6 +6115,33 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .extensionScaffoldProject,
+      name: "extension_scaffold_project",
+      groupID: "extension-authoring",
+      family: .extensionAuthoring,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Create extension project",
+      detail: "Create a separate project with the app-shipped SDK and starter panel.",
+      symbol: "plus.rectangle.on.folder",
+      decodeArguments: { container in
+        try container.decodeIfPresent(
+          ExtensionScaffoldProjectArguments.self,
+          forKey: .arguments
+        )
+          ?? ExtensionScaffoldProjectArguments(
+            name: nil,
+            identifier: nil,
+            directory: nil
+          )
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.extensionScaffoldProject(arguments))
+      },
       description: """
         Create a new, separate Swift WebAssembly extension project at an absolute path. \
         It vendors the exact SDK snapshot shipped by this Threading build and creates a \
@@ -5106,6 +6169,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .extensionProposeInstall,
+      name: "extension_propose_install",
+      groupID: "extension-authoring",
+      family: .extensionAuthoring,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Propose extension install",
+      detail: "Show a package’s runtime and capabilities, then install it disabled if approved.",
+      symbol: "checkmark.shield",
+      decodeArguments: { container in
+        try container.decodeIfPresent(
+          ExtensionProposeInstallArguments.self,
+          forKey: .arguments
+        ) ?? ExtensionProposeInstallArguments(directory: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.extensionProposeInstall(arguments, completion: completion)
+      },
       description: """
         Inspect a built .threadingextension package or unpacked package directory, show \
         its runtime and complete capability request to the user, and install it only \
@@ -5130,6 +6215,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .extensionDescribeComponent,
+      name: "extension_describe_component",
+      groupID: "extension-authoring",
+      family: .extensionAuthoring,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Describe component",
+      detail: "Read one contract, its limits, host assets, example and JSON Schema.",
+      symbol: "doc.text.magnifyingglass",
+      decodeArguments: { container in
+        try container.decodeIfPresent(
+          ExtensionComponentReferenceArguments.self,
+          forKey: .arguments
+        ) ?? ExtensionComponentReferenceArguments(component: nil, version: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.extensionDescribeComponent(arguments))
+      },
       description: """
         Describe one public extension component in full: properties, slots, replacement \
         limits, host-owned behavior, contextual image assets, an example patch and a \
@@ -5151,6 +6258,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .extensionValidateComponentPatch,
+      name: "extension_validate_component_patch",
+      groupID: "extension-authoring",
+      family: .extensionAuthoring,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Validate patch",
+      detail: "Check patch JSON using the same validator as the extension runtime.",
+      symbol: "checkmark.seal",
+      decodeArguments: { container in
+        try container.decodeIfPresent(
+          ExtensionComponentPatchArguments.self,
+          forKey: .arguments
+        ) ?? ExtensionComponentPatchArguments(patch: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.extensionValidateComponentPatch(arguments))
+      },
       description: """
         Decode and validate one component-patch JSON object with exactly the same SDK \
         validator Threading uses before accepting a running extension's publication. \
@@ -5168,6 +6297,28 @@ enum MCPTools {
     ),
     MCPToolDefinition(
       tool: .extensionPreviewComponentPatch,
+      name: "extension_preview_component_patch",
+      groupID: "extension-authoring",
+      family: .extensionAuthoring,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Preview patch",
+      detail: "Render a safe native preview without installing or publishing it.",
+      symbol: "eye",
+      decodeArguments: { container in
+        try container.decodeIfPresent(
+          ExtensionComponentPatchArguments.self,
+          forKey: .arguments
+        ) ?? ExtensionComponentPatchArguments(patch: nil)
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.extensionPreviewComponentPatch(arguments, for: sessionID))
+      },
       description: """
         Validate and render a component patch through Threading's native semantic-node \
         renderer, then show the result in this session's display panel. The preview uses \

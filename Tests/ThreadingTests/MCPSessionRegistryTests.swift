@@ -208,9 +208,7 @@ final class MCPSessionRegistryTests: XCTestCase {
       MCPToolCallParameters.self,
       from: Data(#"{"name":"list_settings"}"#.utf8)
     ).call
-    guard case .listSettings = scopedCall else {
-      return XCTFail("Expected a typed list_settings command")
-    }
+    _ = try requireToolCommand(scopedCall, tool: .listSettings)
     let unscopedCall = try JSONDecoder().decode(
       MCPToolCallParameters.self,
       from: Data(#"{"name":"list_themes"}"#.utf8)
@@ -236,9 +234,10 @@ final class MCPWireTests: XCTestCase {
         .utf8
     )
     let decoded = try JSONDecoder().decode(MCPToolCallParameters.self, from: data)
-    guard case .notifyUser(let arguments) = decoded.call else {
-      return XCTFail("Expected typed notify_user arguments")
-    }
+    let arguments: NotifyUserArguments = try requireToolArguments(
+      decoded.call,
+      tool: .notifyUser
+    )
     XCTAssertEqual(arguments.title, "Ready")
     XCTAssertEqual(arguments.message, "The review is complete.")
     XCTAssertEqual(arguments.recipient, "Kalle’s iPhone")
@@ -274,9 +273,10 @@ final class MCPWireTests: XCTestCase {
         .utf8
     )
     let decoded = try JSONDecoder().decode(MCPToolCallParameters.self, from: data)
-    guard case .sendToSession(let arguments) = decoded.call else {
-      return XCTFail("Expected typed send_to_session arguments")
-    }
+    let arguments: SendToSessionArguments = try requireToolArguments(
+      decoded.call,
+      tool: .sendToSession
+    )
     XCTAssertEqual(arguments.sessionID, target)
     XCTAssertEqual(arguments.message, "The importer bug is in the byte cap.")
     XCTAssertNil(arguments.disposition, "Absent means queue; the default is decided in one place")
@@ -288,18 +288,17 @@ final class MCPWireTests: XCTestCase {
           .utf8
       )
     )
-    guard case .sendToSession(let steerArguments) = steered.call else {
-      return XCTFail("Expected typed send_to_session arguments")
-    }
+    let steerArguments: SendToSessionArguments = try requireToolArguments(
+      steered.call,
+      tool: .sendToSession
+    )
     XCTAssertEqual(steerArguments.disposition, "steer")
 
     let listed = try JSONDecoder().decode(
       MCPToolCallParameters.self,
       from: Data(#"{"name":"list_sessions"}"#.utf8)
     )
-    guard case .listSessions = listed.call else {
-      return XCTFail("Expected typed list_sessions call")
-    }
+    _ = try requireToolCommand(listed.call, tool: .listSessions)
 
     let watched = try JSONDecoder().decode(
       MCPToolCallParameters.self,
@@ -307,9 +306,10 @@ final class MCPWireTests: XCTestCase {
         #"{"name":"watch_session","arguments":{"session_id":"\#(target)","timeout_minutes":120}}"#.utf8
       )
     )
-    guard case .watchSession(let watchArguments) = watched.call else {
-      return XCTFail("Expected typed watch_session arguments")
-    }
+    let watchArguments: WatchSessionArguments = try requireToolArguments(
+      watched.call,
+      tool: .watchSession
+    )
     XCTAssertEqual(watchArguments.sessionID, target)
     XCTAssertEqual(watchArguments.timeoutMinutes, 120)
 
@@ -344,9 +344,10 @@ final class MCPWireTests: XCTestCase {
         "name":"display_image","arguments":{"path":"chart.png","title":"Build"}
       }}
       """)
-    guard case .toolCall(.displayImage(let image)) = imageRequest.parameters else {
-      return XCTFail("Expected typed display_image arguments")
-    }
+    let image: DisplayImageArguments = try requireToolArguments(
+      imageRequest.parameters.toolCall,
+      tool: .displayImage
+    )
     XCTAssertEqual(image.path, "chart.png")
     XCTAssertEqual(image.title, "Build")
 
@@ -356,9 +357,10 @@ final class MCPWireTests: XCTestCase {
         "name":"panel_activate_tab","arguments":{"tab":3}
       }}
       """)
-    guard case .toolCall(.panelActivateTab(let tab)) = tabRequest.parameters else {
-      return XCTFail("Expected typed panel_activate_tab arguments")
-    }
+    let tab: PanelActivateTabArguments = try requireToolArguments(
+      tabRequest.parameters.toolCall,
+      tool: .panelActivateTab
+    )
     XCTAssertEqual(tab.tab, .index(3))
 
     let tabID = UUID().uuidString
@@ -368,9 +370,10 @@ final class MCPWireTests: XCTestCase {
         "name":"panel_activate_tab","arguments":{"tab":"\(tabID)"}
       }}
       """)
-    guard case .toolCall(.panelActivateTab(let identifiedTab)) = tabIDRequest.parameters else {
-      return XCTFail("Expected string tab identifier")
-    }
+    let identifiedTab: PanelActivateTabArguments = try requireToolArguments(
+      tabIDRequest.parameters.toolCall,
+      tool: .panelActivateTab
+    )
     XCTAssertEqual(identifiedTab.tab, .identifier(tabID))
   }
 
@@ -401,9 +404,10 @@ final class MCPWireTests: XCTestCase {
       """.utf8
     )
     let decoded = try JSONDecoder().decode(MCPToolCallParameters.self, from: data)
-    guard case .displayScene(let arguments) = decoded.call else {
-      return XCTFail("Expected typed display_scene arguments")
-    }
+    let arguments: DisplaySceneArguments = try requireToolArguments(
+      decoded.call,
+      tool: .displayScene
+    )
 
     XCTAssertEqual(arguments.title, "iOS 26.5 vs 26.4")
     XCTAssertEqual(arguments.subtitle, "+326 MB installed")
@@ -443,9 +447,10 @@ final class MCPWireTests: XCTestCase {
         }
       }}
       """)
-    guard case .toolCall(.displayCompareFiles(let compare)) = compareRequest.parameters else {
-      return XCTFail("Expected typed display_compare_files arguments")
-    }
+    let compare: DisplayCompareFilesArguments = try requireToolArguments(
+      compareRequest.parameters.toolCall,
+      tool: .displayCompareFiles
+    )
     XCTAssertEqual(compare.oldPath, "/tmp/a.png")
     XCTAssertEqual(compare.newPath, "/tmp/b.png")
     XCTAssertEqual(compare.oldTitle, "Baseline")
@@ -464,9 +469,10 @@ final class MCPWireTests: XCTestCase {
       """
       {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browser_query"}}
       """)
-    guard case .toolCall(.browserQuery(let query)) = missing.parameters else {
-      return XCTFail("Expected browser_query call")
-    }
+    let query: BrowserSelectorArguments = try requireToolArguments(
+      missing.parameters.toolCall,
+      tool: .browserQuery
+    )
     XCTAssertNil(query.selector)
 
     let wrongType = try request(
@@ -561,6 +567,33 @@ final class MCPWireTests: XCTestCase {
     }
   }
 
+  func testIncompleteOrDuplicateDeclarationCannotAdvertiseDecodeOrExecute() throws {
+    let withoutNavigate = MCPTools.authoredDeclarations.filter {
+      $0.tool != .browserNavigate
+    }
+    let incomplete = MCPBuiltInToolRegistrySnapshot(declarations: withoutNavigate)
+
+    XCTAssertNil(incomplete.descriptor(for: .browserNavigate))
+    XCTAssertNil(incomplete.descriptor(named: MCPTools.browserNavigate))
+    XCTAssertFalse(
+      incomplete.descriptors.map(\.definition.name).contains(MCPTools.browserNavigate)
+    )
+    XCTAssertTrue(
+      incomplete.issues.contains { $0.contains("browserNavigate has 0 declarations") }
+    )
+
+    let navigate = try XCTUnwrap(
+      MCPTools.authoredDeclarations.first { $0.tool == .browserNavigate }
+    )
+    let duplicate = MCPBuiltInToolRegistrySnapshot(
+      declarations: MCPTools.authoredDeclarations + [navigate]
+    )
+    XCTAssertNil(duplicate.descriptor(for: .browserNavigate))
+    XCTAssertTrue(
+      duplicate.issues.contains { $0.contains("browserNavigate has 2 declarations") }
+    )
+  }
+
   func testBuiltInDefinitionsAdvertiseConservativeBehaviorHints() throws {
     let snapshot = try XCTUnwrap(MCPTools.definition(for: .browserSnapshot))
     XCTAssertEqual(
@@ -617,13 +650,10 @@ final class MCPWireTests: XCTestCase {
       }}
       """)
 
-    guard
-      case .toolCall(.unknown(let name, let arguments)) =
-        extensionRequest.parameters
-    else {
-      return XCTFail("Expected an extension-routable unknown tool")
-    }
-    XCTAssertEqual(name, "ext__com__example__cache__lookup")
+    let external = try XCTUnwrap(extensionRequest.parameters.toolCall)
+    XCTAssertNil(external.builtInTool)
+    XCTAssertEqual(external.name, "ext__com__example__cache__lookup")
+    let arguments = try XCTUnwrap(external.externalArguments)
     XCTAssertEqual(
       arguments,
       .object([
@@ -642,12 +672,10 @@ final class MCPWireTests: XCTestCase {
         "name":"conversation_history","arguments":{}
       }}
       """)
-    guard
-      case .toolCall(.conversationHistory(let firstArguments)) =
-        first.parameters
-    else {
-      return XCTFail("Expected typed conversation history arguments")
-    }
+    let firstArguments: ConversationHistoryArguments = try requireToolArguments(
+      first.parameters.toolCall,
+      tool: .conversationHistory
+    )
     XCTAssertNil(firstArguments.cursor)
 
     let next = try request(
@@ -656,12 +684,10 @@ final class MCPWireTests: XCTestCase {
         "name":"conversation_history","arguments":{"cursor":"7"}
       }}
       """)
-    guard
-      case .toolCall(.conversationHistory(let nextArguments)) =
-        next.parameters
-    else {
-      return XCTFail("Expected paginated conversation history arguments")
-    }
+    let nextArguments: ConversationHistoryArguments = try requireToolArguments(
+      next.parameters.toolCall,
+      tool: .conversationHistory
+    )
     XCTAssertEqual(nextArguments.cursor, "7")
   }
 
@@ -744,18 +770,20 @@ final class MCPWireTests: XCTestCase {
         "arguments":{"reason":"committed and pushed"}
       }}
       """)
-    guard case .toolCall(.archiveSession(let arguments)) = archive.parameters else {
-      return XCTFail("Expected typed archive arguments")
-    }
+    let arguments: ArchiveSessionArguments = try requireToolArguments(
+      archive.parameters.toolCall,
+      tool: .archiveSession
+    )
     XCTAssertEqual(arguments.reason, "committed and pushed")
 
     let bare = try request(
       """
       {"jsonrpc":"2.0","id":"bare","method":"tools/call","params":{"name":"archive_session"}}
       """)
-    guard case .toolCall(.archiveSession(let empty)) = bare.parameters else {
-      return XCTFail("Expected an archive call with no reason to decode")
-    }
+    let empty: ArchiveSessionArguments = try requireToolArguments(
+      bare.parameters.toolCall,
+      tool: .archiveSession
+    )
     XCTAssertNil(empty.reason)
 
     let cancel = try request(
@@ -764,9 +792,7 @@ final class MCPWireTests: XCTestCase {
         "name":"cancel_session_archive"
       }}
       """)
-    guard case .toolCall(.cancelSessionArchive) = cancel.parameters else {
-      return XCTFail("Expected a typed cancellation")
-    }
+    _ = try requireToolCommand(cancel.parameters.toolCall, tool: .cancelSessionArchive)
   }
 
   /// Archiving stops the agent and takes the row off screen, so it is advertised as the
@@ -813,12 +839,10 @@ final class MCPWireTests: XCTestCase {
         "arguments":{"component":"sidebar.session-row","version":1}
       }}
       """)
-    guard
-      case .toolCall(.extensionDescribeComponent(let arguments)) =
-        description.parameters
-    else {
-      return XCTFail("Expected typed extension component description arguments")
-    }
+    let arguments: ExtensionComponentReferenceArguments = try requireToolArguments(
+      description.parameters.toolCall,
+      tool: .extensionDescribeComponent
+    )
     XCTAssertEqual(arguments.component, "sidebar.session-row")
     XCTAssertEqual(arguments.version, 1)
 
@@ -829,13 +853,11 @@ final class MCPWireTests: XCTestCase {
         "arguments":{"patch":"{\\"id\\":\\"example\\"}"}
       }}
       """)
-    guard
-      case .toolCall(.extensionValidateComponentPatch(let arguments)) =
-        validation.parameters
-    else {
-      return XCTFail("Expected typed extension component patch arguments")
-    }
-    XCTAssertEqual(arguments.patch, #"{"id":"example"}"#)
+    let validationArguments: ExtensionComponentPatchArguments = try requireToolArguments(
+      validation.parameters.toolCall,
+      tool: .extensionValidateComponentPatch
+    )
+    XCTAssertEqual(validationArguments.patch, #"{"id":"example"}"#)
   }
 
   @MainActor
@@ -950,10 +972,23 @@ final class MCPWireTests: XCTestCase {
     var receivedTool: MCPBuiltInTool?
     var receivedSessionID: SessionID?
 
-    func handle(_ command: AgentCommand, for sessionID: SessionID) -> MCPToolResult {
+    func executeBuiltIn(
+      _ command: AgentCommand,
+      for sessionID: SessionID,
+      completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
       receivedTool = command.builtInTool
       receivedSessionID = sessionID
-      return .success("executed")
+      completion(.success("executed"))
+    }
+
+    func handleExternalTool(
+      named name: String,
+      arguments: MCPJSONValue,
+      for sessionID: SessionID,
+      completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+      completion(.failure("unexpected external tool \(name)"))
     }
   }
 

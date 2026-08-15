@@ -138,20 +138,21 @@ returns a standard MCP image block as well as caching and optionally displaying 
 
 ## Command contract
 
-Built-in tool identity is closed in `MCPBuiltInTool`; its exhaustive `Family` mapping remains the
-small capability-ownership review surface. `MCPBuiltInToolRegistry` admits exactly one typed
-descriptor per identity. Each descriptor contains the argument decoder, schema definition,
-behavior annotations, catalog presentation, group membership, and application execution binding.
-`issues` enforces the load-bearing invariant: every built-in has exactly one schema and catalog
-row, the row's family agrees with the type, and identity/annotations agree. A broken declaration
-is omitted instead of being decoded, advertised, enabled, or dispatched ambiguously.
+Built-in identity stays closed in `MCPBuiltInTool` so capability ownership is compile-time typed.
+`MCPTools.authoredDeclarations` is the single per-tool authoring surface: each generic declaration
+owns its identity and wire name, concrete argument decoder, schema, behavior annotations, family,
+group, Settings presentation, trace and workspace policy, panel-observation policy, and typed
+application implementation binding. `MCPBuiltInToolRegistry` admits exactly one complete
+descriptor per identity. A missing or duplicate declaration is omitted instead of being decoded,
+advertised, enabled, or dispatched ambiguously.
 
-The large literals remain beside the concern that owns their wording: `MCPTools.swift` holds wire
-argument values and schema declarations, while `MCPToolCatalog.swift` holds group instructions and
-Settings presentation. They are declaration inputs, not parallel runtime registries. Decoding,
-advertised definitions, enabled names, derived catalog rows, scoped definitions, completeness
-checks, and handler execution all consume the admitted descriptors. Do not bypass that registry
-with another name list or a direct built-in dispatch switch.
+`MCPToolCatalog.swift` now owns only group-level instructions and ordering; its tool rows are
+projected from admitted declarations. Decoding, advertised definitions, enabled names, catalogue
+rows, scoped definitions, Settings presentation, completeness checks, and execution all consume
+the same descriptors. `AgentCommand` is a typed closure-backed value, not a payload enum: the
+concrete `Sendable` argument value captured by the generic declaration reaches the matching
+`MCPBuiltInToolExecuting` implementation without `Any`, string routing, or a command switch. Do
+not bypass that registry with another name list or a direct built-in dispatch switch.
 
 The catalog is also the runtime admission policy. `tools/list`, launch preapproval and
 `MCPServer` dispatch consume the same enabled definitions. A valid built-in command whose group
@@ -160,11 +161,12 @@ application handler runs. External extension tools use a separate open-world pat
 omitted when their names are blank, duplicate another enabled external tool, or collide with a
 built-in.
 
-`AgentCommand` is the application-layer command enum; `MCPToolCall` remains only as a
-compatibility alias at the transport boundary. `AgentToolCoordinator` owns routing and common
-workspace policy, while capability extensions own project, display, panel, extension-authoring,
-browser-interaction and browser-inspection behavior. This keeps a new command from requiring
-edits to an untyped transport switch spread across one window-controller file.
+`MCPToolCall` remains only as a compatibility alias at the transport boundary.
+`AgentToolCoordinator` implements the narrow typed execution protocol and common observation
+policy, while capability extensions own project, display, panel, extension-authoring,
+browser-interaction and browser-inspection behavior. Adding a built-in requires its closed typed
+identity, one complete declaration, and the typed implementation—there are no decoding,
+catalogue, annotation, or UI-routing inventories to edit in parallel.
 
 MCP behavior annotations are emitted from the typed identity as conservative promises to
 clients. Unknown or state-changing behavior is not marked read-only or idempotent. Tools that

@@ -46,6 +46,11 @@ struct JSONRPCRequest: Decodable, Sendable {
         case toolCall(MCPToolCall)
         case invalid
         case none
+
+        var toolCall: MCPToolCall? {
+            guard case .toolCall(let command) = self else { return nil }
+            return command
+        }
     }
 
     let jsonrpc: String
@@ -556,7 +561,7 @@ final class MCPServer: @unchecked Sendable {
             }
 
             // Built-ins execute through the same descriptor that decoded and advertised them.
-            // External tools remain open-ended and reach the handler through `.unknown`.
+            // External tools remain open-ended and retain their JSON value at the provider edge.
             if let tool = call.builtInTool {
                 guard let descriptor = MCPBuiltInToolRegistry.descriptor(for: tool) else {
                     finish(.failure("Tool \(call.name) has no complete built-in descriptor."))
@@ -569,7 +574,16 @@ final class MCPServer: @unchecked Sendable {
                     completion: complete
                 )
             } else {
-                handler.handle(call, for: sessionID, completion: complete)
+                guard let arguments = call.externalArguments else {
+                    finish(.failure("External tool \(call.name) has no arguments payload."))
+                    return
+                }
+                handler.handleExternalTool(
+                    named: call.name,
+                    arguments: arguments,
+                    for: sessionID,
+                    completion: complete
+                )
             }
         }
     }

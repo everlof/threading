@@ -15,12 +15,13 @@ struct MCPToolInfo: Sendable {
 
   init(
     tool: MCPBuiltInTool,
+    name: String,
     title: String,
     detail: String,
     symbol: String
   ) {
     self.builtInTool = tool
-    self.name = tool.rawValue
+    self.name = name
     self.title = L10n.string(title)
     self.detail = L10n.string(detail)
     self.symbol = symbol
@@ -141,27 +142,47 @@ enum MCPToolCatalog {
 
   // MARK: Groups
 
-  static let declaredGroups: [MCPToolGroup] = [
-    continuation,
-    display,
-    browser,
-    tabs,
-    project,
-    session,
-    workspace,
-    storage,
-    settings,
-    notifications,
-    appearance,
-    extensionAuthoring,
+  private static let authoredGroups: [MCPToolGroup] = [
+    authoredContinuation,
+    authoredDisplay,
+    authoredBrowser,
+    authoredTabs,
+    authoredProject,
+    authoredSession,
+    authoredWorkspace,
+    authoredStorage,
+    authoredSettings,
+    authoredNotifications,
+    authoredAppearance,
+    authoredExtensionAuthoring,
   ]
 
   /// The public catalog is derived from the admitted descriptors. A malformed declaration is
   /// absent from Settings for the same reason it is absent from `tools/list` and dispatch.
-  static let groups: [MCPToolGroup] = declaredGroups.map { group in
+  static let groups: [MCPToolGroup] = authoredGroups.map { group in
     group.replacingTools(
       MCPBuiltInToolRegistry.descriptors(inGroupID: group.id).map(\.presentation)
     )
+  }
+
+  static let continuation = group(id: "conversation-continuation")
+  static let display = group(id: "display")
+  static let browser = group(id: "browser")
+  static let tabs = group(id: "tabs")
+  static let project = group(id: "project")
+  static let session = group(id: "session-lifecycle")
+  static let workspace = group(id: "workspace-control")
+  static let storage = group(id: "storage")
+  static let settings = group(id: "settings-directory")
+  static let notifications = group(id: "notifications")
+  static let appearance = group(id: "appearance")
+  static let extensionAuthoring = group(id: "extension-authoring")
+
+  private static func group(id: String) -> MCPToolGroup {
+    guard let group = groups.first(where: { $0.id == id }) else {
+      preconditionFailure("Missing MCP tool group \(id)")
+    }
+    return group
   }
 
   /// Includes optional-provider declarations even while a provider group is unavailable.
@@ -171,20 +192,13 @@ enum MCPToolCatalog {
     groups + MCPExternalToolRegistry.shared.groups.map(externalGroup)
   }
 
-  static let continuation = MCPToolGroup(
+  private static let authoredContinuation = MCPToolGroup(
     id: "conversation-continuation",
     family: .continuation,
     title: "Conversation handoff",
     summary: "Let a new provider read the frozen history that created its session.",
     symbol: "arrow.triangle.branch",
-    tools: [
-      MCPToolInfo(
-        tool: .conversationHistory,
-        title: "Read handoff history",
-        detail: "Read only this session's paginated, cross-provider conversation snapshot.",
-        symbol: "text.book.closed"
-      )
-    ],
+    tools: [],
     instruction: """
       A session created with Continue with Another Provider begins with a bootstrap asking \
       you to call conversation_history. Do so before answering, and follow next_cursor \
@@ -194,44 +208,13 @@ enum MCPToolCatalog {
       """
   )
 
-  static let display = MCPToolGroup(
+  private static let authoredDisplay = MCPToolGroup(
     id: "display",
     family: .display,
     title: "Display panel",
     summary: "Let agents show inspectable attachments and live content beside the chat.",
     symbol: "photo.on.rectangle",
-    tools: [
-      MCPToolInfo(
-        tool: .displayImage,
-        title: "Show image",
-        detail: "Render an image file in the panel — a screenshot, chart, or diagram.",
-        symbol: "photo"
-      ),
-      MCPToolInfo(
-        tool: .displayChart,
-        title: "Chart numbers",
-        detail: "Plot measured values natively — comparisons, rankings, breakdowns, trends.",
-        symbol: "chart.bar"
-      ),
-      MCPToolInfo(
-        tool: .displayScene,
-        title: "Show native scene",
-        detail: "Render a bounded semantic visualization using Threading’s native UI.",
-        symbol: "square.grid.3x3"
-      ),
-      MCPToolInfo(
-        tool: .displayHTML,
-        title: "Show HTML",
-        detail: "Capture an HTML attachment — tables, charts, diagrams, rich reports.",
-        symbol: "doc.richtext"
-      ),
-      MCPToolInfo(
-        tool: .displayCompareFiles,
-        title: "Compare files",
-        detail: "Two images as an interactive wipe/fade/difference; two text files as a diff.",
-        symbol: "rectangle.on.rectangle"
-      ),
-    ],
+    tools: [],
     instruction: """
       Use display_chart when an answer turns on numbers the reader has to compare: before \
       against after, one implementation against another, a duration or cost broken down by \
@@ -269,224 +252,13 @@ enum MCPToolCatalog {
       """
   )
 
-  static let browser = MCPToolGroup(
+  private static let authoredBrowser = MCPToolGroup(
     id: "browser",
     family: .browser,
     title: "Browser",
     summary: "Let agents open, read, and act on live web pages in a browser tab.",
     symbol: "globe",
-    tools: [
-      MCPToolInfo(
-        tool: .browserNavigate,
-        title: "Open a page",
-        detail: "Open or search, optionally returning at commit or DOM readiness.",
-        symbol: "arrow.up.forward.app"
-      ),
-      MCPToolInfo(
-        tool: .browserHistory,
-        title: "Navigate history",
-        detail: """
-          Go back, close a pop-up, go forward, reload, or revalidate with chosen readiness.
-          """,
-        symbol: "clock.arrow.circlepath"
-      ),
-      MCPToolInfo(
-        tool: .browserStop,
-        title: "Stop page loading",
-        detail: "Cancel outstanding resources and inspect the content already rendered.",
-        symbol: "xmark"
-      ),
-      MCPToolInfo(
-        tool: .browserTabs,
-        title: "Manage browser tabs",
-        detail: """
-          List, create, activate, and close shared or private live browser tabs.
-          """,
-        symbol: "rectangle.stack"
-      ),
-      MCPToolInfo(
-        tool: .browserStorage,
-        title: "Clear site data",
-        detail: "Clear the active site's browser data after explicit user confirmation.",
-        symbol: "trash"
-      ),
-      MCPToolInfo(
-        tool: .browserFillCredentials,
-        title: "Sign in with a test credential",
-        detail: """
-          Fill a stored test account for this exact origin. Never returns the value.
-          """,
-        symbol: "key"
-      ),
-      MCPToolInfo(
-        tool: .browserTrace,
-        title: "Record browser trace",
-        detail: "Capture and export bounded, sanitized agent and network diagnostics.",
-        symbol: "record.circle"
-      ),
-      MCPToolInfo(
-        tool: .browserUpload,
-        title: "Choose files",
-        detail: "Suggest files through a native user-approved file chooser.",
-        symbol: "arrow.up.doc"
-      ),
-      MCPToolInfo(
-        tool: .browserDownload,
-        title: "Download file",
-        detail: "Download through a native user-approved save destination.",
-        symbol: "arrow.down.doc"
-      ),
-      MCPToolInfo(
-        tool: .browserResize,
-        title: "Resize viewport",
-        detail: "Test responsive layouts at an exact CSS-pixel width and height.",
-        symbol: "aspectratio"
-      ),
-      MCPToolInfo(
-        tool: .browserEmulate,
-        title: "Emulate browser",
-        detail: "Test color, CSS media, and User-Agent behavior in the active tab.",
-        symbol: "circle.lefthalf.filled"
-      ),
-      MCPToolInfo(
-        tool: .browserCapabilities,
-        title: "Inspect browser capabilities",
-        detail: "Read supported emulation and automation limits before choosing a backend.",
-        symbol: "checklist"
-      ),
-      MCPToolInfo(
-        tool: .browserRunIsolated,
-        title: "Run isolated browser test",
-        detail: "Execute a bounded scenario in a fresh local Playwright context.",
-        symbol: "testtube.2"
-      ),
-      MCPToolInfo(
-        tool: .browserAttachChrome,
-        title: "Use signed-in Chrome",
-        detail: "Drive the user's Chrome automation profile inside an allowed origin list.",
-        symbol: "person.badge.key"
-      ),
-      MCPToolInfo(
-        tool: .browserSnapshot,
-        title: "Read page",
-        detail: "Read a semantic page tree with stable references for interaction.",
-        symbol: "list.bullet.rectangle"
-      ),
-      MCPToolInfo(
-        tool: .browserAnnotations,
-        title: "Read page annotations",
-        detail: "Read user-authored notes anchored to the current page.",
-        symbol: "note.text"
-      ),
-      MCPToolInfo(
-        tool: .browserClick,
-        title: "Click page content",
-        detail: "Click a semantic target, or a viewport point for canvas-style content.",
-        symbol: "cursorarrow.rays"
-      ),
-      MCPToolInfo(
-        tool: .browserHover,
-        title: "Hover an element",
-        detail: "Reveal menus, tooltips, and controls driven by pointer hover.",
-        symbol: "cursorarrow.motionlines"
-      ),
-      MCPToolInfo(
-        tool: .browserDrag,
-        title: "Drag an element",
-        detail: "Drag a referenced item onto another referenced element.",
-        symbol: "hand.draw"
-      ),
-      MCPToolInfo(
-        tool: .browserType,
-        title: "Enter text",
-        detail: "Fill an editable element without exposing passwords to the agent.",
-        symbol: "character.cursor.ibeam"
-      ),
-      MCPToolInfo(
-        tool: .browserFillForm,
-        title: "Fill a form",
-        detail: "Fill several text, select, and checkable controls in one validated batch.",
-        symbol: "list.clipboard"
-      ),
-      MCPToolInfo(
-        tool: .browserSelect,
-        title: "Select an option",
-        detail: "Choose an exact visible label or submitted value from a select control.",
-        symbol: "chevron.up.chevron.down"
-      ),
-      MCPToolInfo(
-        tool: .browserSetChecked,
-        title: "Set checked state",
-        detail: "Check or uncheck a checkbox or switch without accidentally toggling it.",
-        symbol: "checkmark.square"
-      ),
-      MCPToolInfo(
-        tool: .browserPressKey,
-        title: "Press a key",
-        detail: "Send keys and modifiers with native control and focus behavior.",
-        symbol: "keyboard"
-      ),
-      MCPToolInfo(
-        tool: .browserScroll,
-        title: "Scroll",
-        detail: "Scroll the page or a referenced scrollable element.",
-        symbol: "arrow.up.and.down"
-      ),
-      MCPToolInfo(
-        tool: .browserWait,
-        title: "Wait for page",
-        detail: "Wait for text, URL changes, target states, or a short duration.",
-        symbol: "clock"
-      ),
-      MCPToolInfo(
-        tool: .browserScreenshot,
-        title: "Screenshot page or element",
-        detail: "Capture a viewport, full page, or one referenced element.",
-        symbol: "camera"
-      ),
-      MCPToolInfo(
-        tool: .browserVisualCompare,
-        title: "Compare rendered pixels",
-        detail: "Compare a capture with a stored baseline, and say which regions changed.",
-        symbol: "square.on.square.dashed"
-      ),
-      MCPToolInfo(
-        tool: .browserBaselines,
-        title: "Manage visual baselines",
-        detail: "List, capture, or remove this project’s approved page pictures.",
-        symbol: "photo.stack"
-      ),
-      MCPToolInfo(
-        tool: .browserConsole,
-        title: "Read console",
-        detail: "Read console messages and uncaught page errors.",
-        symbol: "exclamationmark.triangle"
-      ),
-      MCPToolInfo(
-        tool: .browserNetwork,
-        title: "Read network activity",
-        detail: "Inspect redacted request metadata, status codes, and durations.",
-        symbol: "network"
-      ),
-      MCPToolInfo(
-        tool: .browserPerformance,
-        title: "Measure page performance",
-        detail: "Summarize navigation, paint, layout, long-task, and resource timing.",
-        symbol: "speedometer"
-      ),
-      MCPToolInfo(
-        tool: .browserAccessibilityAudit,
-        title: "Audit page accessibility",
-        detail: "Find bounded, actionable semantic accessibility issues with stable refs.",
-        symbol: "figure.roll"
-      ),
-      MCPToolInfo(
-        tool: .browserQuery,
-        title: "Query CSS",
-        detail: "Expert fallback for inspecting a selector already known.",
-        symbol: "magnifyingglass"
-      ),
-    ],
+    tools: [],
     instruction: """
       Threading hosts a shared browser beside this terminal. You and the user see the same \
       live page. browser_navigate opens a page and creates this session's browser tab when \
@@ -566,26 +338,13 @@ enum MCPToolCatalog {
       """
   )
 
-  static let tabs = MCPToolGroup(
+  private static let authoredTabs = MCPToolGroup(
     id: "tabs",
     family: .panel,
     title: "Panel tabs",
     summary: "Let agents list the panel's tabs and switch between them.",
     symbol: "rectangle.stack",
-    tools: [
-      MCPToolInfo(
-        tool: .panelListTabs,
-        title: "List tabs",
-        detail: "See what is open in the panel and which tab is active.",
-        symbol: "list.bullet.rectangle"
-      ),
-      MCPToolInfo(
-        tool: .panelActivateTab,
-        title: "Activate tab",
-        detail: "Bring one of the panel's tabs to the front.",
-        symbol: "rectangle.stack.badge.play"
-      ),
-    ],
+    tools: [],
     instruction: """
       The display panel holds a set of tabs that coexist — each image and document opens its \
       own, and the browser is a tab too. panel_list_tabs shows what is open and which tab is \
@@ -594,20 +353,13 @@ enum MCPToolCatalog {
       """
   )
 
-  static let project = MCPToolGroup(
+  private static let authoredProject = MCPToolGroup(
     id: "project",
     family: .project,
     title: "Project icon",
     summary: "Let agents set the project's sidebar icon.",
     symbol: "app.badge",
-    tools: [
-      MCPToolInfo(
-        tool: .setProjectIcon,
-        title: "Set project icon",
-        detail: "Give the sidebar project an icon, from a file or an image URL.",
-        symbol: "photo.badge.plus"
-      )
-    ],
+    tools: [],
     instruction: """
       set_project_icon sets the sidebar icon of the project this session runs in. Use \
       it when the user asks for a project icon, or offer it when you come across the \
@@ -619,7 +371,7 @@ enum MCPToolCatalog {
   // The id stays `session-lifecycle` although the group has outgrown the word: it is the key
   // the user's disabled-groups set is stored under, so renaming it would silently switch the
   // group back on for everyone who had turned it off.
-  static let session = MCPToolGroup(
+  private static let authoredSession = MCPToolGroup(
     id: "session-lifecycle",
     family: .session,
     title: "This session",
@@ -628,26 +380,7 @@ enum MCPToolCatalog {
     // Listed in `MCPBuiltInTool` declaration order, which `MCPWireTests` holds this to: the
     // group's rows and `MCPTools.sessionTools` are the same list, and a page that ordered them
     // by hand would drift from the registry the moment either changed.
-    tools: [
-      MCPToolInfo(
-        tool: .archiveSession,
-        title: "Archive this session",
-        detail: "File the session away when the turn ends, with an undo on the receipt.",
-        symbol: "archivebox"
-      ),
-      MCPToolInfo(
-        tool: .cancelSessionArchive,
-        title: "Cancel a pending archive",
-        detail: "Take back an archive the session asked for, before it happens.",
-        symbol: "arrow.uturn.backward"
-      ),
-      MCPToolInfo(
-        tool: .setSessionName,
-        title: "Name this session",
-        detail: "Re-title the sidebar row after what the conversation turned out to be.",
-        symbol: "character.cursor.ibeam"
-      ),
-    ],
+    tools: [],
     instruction: """
       set_session_name names this session's row in the sidebar. Sessions are named after \
       their first message, which stops describing them the moment the work moves on, and \
@@ -672,32 +405,13 @@ enum MCPToolCatalog {
   // "This session" acts on the session a call arrived on; this group is the first that sees
   // past it — deliberately no further than the calling session's own project, and through
   // `WorkspaceControlPlane`, which owns that rule for every caller rather than per tool.
-  static let workspace = MCPToolGroup(
+  private static let authoredWorkspace = MCPToolGroup(
     id: "workspace-control",
     family: .workspace,
     title: "Other sessions",
     summary: "Let a session list the project’s other sessions and send them messages.",
     symbol: "bubble.left.and.bubble.right",
-    tools: [
-      MCPToolInfo(
-        tool: .listSessions,
-        title: "List project sessions",
-        detail: "Read the project’s sessions — names, ids, agents, and who is working.",
-        symbol: "list.bullet.rectangle"
-      ),
-      MCPToolInfo(
-        tool: .sendToSession,
-        title: "Message another session",
-        detail: "Deliver a message to a project sibling, named as coming from this one.",
-        symbol: "paperplane"
-      ),
-      MCPToolInfo(
-        tool: .watchSession,
-        title: "Watch a session",
-        detail: "One notice when a sibling settles, exits, or hits its limit.",
-        symbol: "eye"
-      ),
-    ],
+    tools: [],
     instruction: """
       This project's other chats and sessions are reachable from this one. list_sessions names \
       them — id, agent, whether they are working, and which surface is live — and send_to_session \
@@ -726,26 +440,13 @@ enum MCPToolCatalog {
       """
   )
 
-  static let storage = MCPToolGroup(
+  private static let authoredStorage = MCPToolGroup(
     id: "storage",
     family: .storage,
     title: "Disk space",
     summary: "Let agents see reclaimable build output and propose removing some of it.",
     symbol: "internaldrive",
-    tools: [
-      MCPToolInfo(
-        tool: .listReclaimableStorage,
-        title: "List reclaimable storage",
-        detail: "Read what build output can be deleted and rebuilt, and how big it is.",
-        symbol: "list.bullet.rectangle"
-      ),
-      MCPToolInfo(
-        tool: .proposeStorageCleanup,
-        title: "Propose a cleanup",
-        detail: "Ask you to approve removing some of it. Never removes anything itself.",
-        symbol: "hand.raised"
-      ),
-    ],
+    tools: [],
     instruction: """
       If a command fails for lack of disk space — "No space left on device", ENOSPC, a \
       build or install dying partway with a write error — call list_reclaimable_storage \
@@ -765,20 +466,13 @@ enum MCPToolCatalog {
       """
   )
 
-  static let settings = MCPToolGroup(
+  private static let authoredSettings = MCPToolGroup(
     id: "settings-directory",
     family: .settings,
     title: "Settings directory",
     summary: "Let agents read which Settings pages exist, to point you at the right one.",
     symbol: "gearshape",
-    tools: [
-      MCPToolInfo(
-        tool: .listSettings,
-        title: "List settings pages",
-        detail: "Read the Settings pages, their sidebar groups, and their vocabulary.",
-        symbol: "list.bullet.rectangle"
-      )
-    ],
+    tools: [],
     instruction: """
       list_settings returns the catalogue of Threading's Settings pages — each page's \
       stable id, its sidebar group, and its own vocabulary. When the user asks where a \
@@ -788,20 +482,13 @@ enum MCPToolCatalog {
       """
   )
 
-  static let notifications = MCPToolGroup(
+  private static let authoredNotifications = MCPToolGroup(
     id: "notifications",
     family: .notifications,
     title: "Notifications",
     summary: "Let agents notify this Mac or a paired iPhone when requested work is ready.",
     symbol: "bell",
-    tools: [
-      MCPToolInfo(
-        tool: .notifyUser,
-        title: "Notify chat participants",
-        detail: "Send one requested, session-scoped result to its intended participant.",
-        symbol: "bell.badge"
-      )
-    ],
+    tools: [],
     instruction: """
       notify_user defaults to the participant who wrote the current turn, so “send me a \
       summary when you are done” follows the speaker. `recipient` may explicitly name \
@@ -816,68 +503,13 @@ enum MCPToolCatalog {
       """
   )
 
-  static let appearance = MCPToolGroup(
+  private static let authoredAppearance = MCPToolGroup(
     id: "appearance",
     family: .appearance,
     title: "Themes",
     summary: "Let agents style terminals and the app's own chrome.",
     symbol: "paintpalette",
-    tools: [
-      MCPToolInfo(
-        tool: .listThemes,
-        title: "List themes",
-        detail: "Read the available themes and which one this session is using.",
-        symbol: "list.bullet"
-      ),
-      MCPToolInfo(
-        tool: .setTheme,
-        title: "Set the theme",
-        detail: "Apply a theme to this session, its project, or as the default.",
-        symbol: "paintbrush"
-      ),
-      MCPToolInfo(
-        tool: .createTheme,
-        title: "Create a theme",
-        detail: "Build a new palette from a description, guarded against unreadable text.",
-        symbol: "wand.and.stars"
-      ),
-      MCPToolInfo(
-        tool: .listAppThemes,
-        title: "List app themes",
-        detail: "Read the chrome themes and see which one is active.",
-        symbol: "rectangle.3.group"
-      ),
-      MCPToolInfo(
-        tool: .getAppTheme,
-        title: "Inspect app theme",
-        detail: "Read a chrome theme's exact semantic colours and material.",
-        symbol: "doc.text.magnifyingglass"
-      ),
-      MCPToolInfo(
-        tool: .setAppTheme,
-        title: "Set app theme",
-        detail: "Restyle the app's window chrome immediately.",
-        symbol: "paintbrush.pointed"
-      ),
-      MCPToolInfo(
-        tool: .createAppTheme,
-        title: "Create app theme",
-        detail: "Build a custom chrome theme from a base and a partial patch.",
-        symbol: "wand.and.rays"
-      ),
-      MCPToolInfo(
-        tool: .duplicateAppTheme,
-        title: "Duplicate app theme",
-        detail: "Make an editable custom copy before modifying a built-in style.",
-        symbol: "plus.square.on.square"
-      ),
-      MCPToolInfo(
-        tool: .updateAppTheme,
-        title: "Update app theme",
-        detail: "Patch an editable chrome theme while keeping its stable identity.",
-        symbol: "slider.horizontal.3"
-      ),
-    ],
+    tools: [],
     instruction: """
       You can change the colours of the terminal you are running in. list_themes reports \
       what exists and what this session currently uses; set_theme applies one, to this \
@@ -923,50 +555,13 @@ enum MCPToolCatalog {
       """
   )
 
-  static let extensionAuthoring = MCPToolGroup(
+  private static let authoredExtensionAuthoring = MCPToolGroup(
     id: "extension-authoring",
     family: .extensionAuthoring,
     title: "Extension authoring",
     summary: "Let agents discover, validate and preview Threading UI extension components.",
     symbol: "puzzlepiece.extension",
-    tools: [
-      MCPToolInfo(
-        tool: .extensionListComponents,
-        title: "List components",
-        detail: "Read every public, versioned UI component contract.",
-        symbol: "list.bullet.rectangle"
-      ),
-      MCPToolInfo(
-        tool: .extensionScaffoldProject,
-        title: "Create extension project",
-        detail: "Create a separate project with the app-shipped SDK and starter panel.",
-        symbol: "plus.rectangle.on.folder"
-      ),
-      MCPToolInfo(
-        tool: .extensionProposeInstall,
-        title: "Propose extension install",
-        detail: "Show a package’s runtime and capabilities, then install it disabled if approved.",
-        symbol: "checkmark.shield"
-      ),
-      MCPToolInfo(
-        tool: .extensionDescribeComponent,
-        title: "Describe component",
-        detail: "Read one contract, its limits, host assets, example and JSON Schema.",
-        symbol: "doc.text.magnifyingglass"
-      ),
-      MCPToolInfo(
-        tool: .extensionValidateComponentPatch,
-        title: "Validate patch",
-        detail: "Check patch JSON using the same validator as the extension runtime.",
-        symbol: "checkmark.seal"
-      ),
-      MCPToolInfo(
-        tool: .extensionPreviewComponentPatch,
-        title: "Preview patch",
-        detail: "Render a safe native preview without installing or publishing it.",
-        symbol: "eye"
-      ),
-    ],
+    tools: [],
     instruction: """
       You can create and author Threading extensions without editing Threading's own source. \
       extension_scaffold_project creates a separate, self-contained project with the \
