@@ -10,6 +10,7 @@ The storage bucket is private. The only public surface is a narrow ingestion ope
 native app -> POST https://remote.threading.codes/v1/reports -> private R2
                                                               (30-day expiry)
 developer  -> authenticated developer pickup API -----------> list metadata / exact object
+private R2 -> event Queue -> Worker metadata lookup ---------> owned triage webhook
 ```
 
 There is deliberately no unauthenticated GET, list, update, or delete route. Developer pickup
@@ -70,6 +71,12 @@ does not retain the caller's address or headers in the object. Worker logs conta
 report ID, diagnostic source, idempotency outcome, and bounded error code—not request bodies,
 descriptions, screenshots, addresses, or credentials.
 
+R2 emits a `PutObject` event only after commit. The bounded Queue consumer looks the object up by
+its server-derived key, validates custom metadata, and sends an idempotent triage event containing
+only report ID/reference, category (`report`, `crash`, or `diagnostics`), trigger, platform source,
+receipt time and size. It never reads the object body. Delivery retries five times and then moves
+to a 14-day dead-letter Queue. The receiver credential and pickup credential are independent.
+
 ## Abuse boundary
 
 An app-bundled token is not authentication; anyone who can download the app can recover it.
@@ -84,9 +91,11 @@ Anonymous reporting therefore remains safe by bounding the work an untrusted cal
   and stores at most one object for each UUID.
 - R2 is reachable only through the Worker binding. Keep `r2.dev`, custom domains, public CORS, and
   public credentials disabled.
-- The `reports/v1/` lifecycle deletes objects after 30 days. Production also needs a zone-level
-  request/body rule, an early daily-capacity alert, and a spend alert. Edge rate-limit bindings
-  are per-location abuse protection; D1 is the globally consistent storage ceiling.
+- The `reports/v1/` lifecycle deletes objects after 30 days. Terraform also owns a zone-level
+  host/path/source rule; Worker streaming enforces the 64-KiB body ceiling on plans without WAF
+  body fields. Production still needs an early daily-capacity alert and a spend alert. Edge
+  rate-limit bindings are per-location abuse protection; D1 is the globally consistent storage
+  ceiling.
 
 App Attest can later strengthen iOS submissions, but it is not the trust boundary and cannot be a
 universal requirement because the service is unavailable on macOS. Authenticated Threading

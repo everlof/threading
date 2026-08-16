@@ -25,6 +25,62 @@ afterEach(() => {
 });
 
 describe("service release surfaces", () => {
+  it("keeps local sign-in absent from the production profile", async () => {
+    const response = await worker.fetch(new Request(
+      "http://127.0.0.1/v1/auth/local-development",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+    ), testEnv);
+
+    expect(response.status).toBe(404);
+  });
+
+  it("bootstraps a bounded session only for the explicit loopback local profile", async () => {
+    const local = overrideEnv({
+      LOCAL_DEVELOPMENT_MODE: "1",
+      LOCAL_ICE_MODE: "host-only",
+      REPORT_ALERT_WEBHOOK_URL: undefined,
+      REPORT_ALERT_WEBHOOK_TOKEN: undefined,
+      ISSUE_REPORTS_BUCKET_NAME: "threading-private-issue-reports-local",
+    });
+    const response = await worker.fetch(new Request(
+      "http://127.0.0.1/v1/auth/local-development",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+    ), local);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      accountID: "local-development-account",
+      accessToken: expect.any(String),
+      refreshToken: expect.any(String),
+    });
+
+    const nonLoopback = await worker.fetch(new Request(
+      "https://service.test/v1/auth/local-development",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+    ), local);
+    expect(nonLoopback.status).toBe(404);
+  });
+
+  it("reports local storage ready without Apple, TURN, APNs, or an alert webhook", async () => {
+    const local = overrideEnv({
+      LOCAL_DEVELOPMENT_MODE: "1",
+      LOCAL_ICE_MODE: "host-only",
+      APPLE_TEAM_ID: undefined,
+      APPLE_KEY_ID: undefined,
+      APPLE_PRIVATE_KEY: undefined,
+      TURN_KEY_ID: undefined,
+      TURN_KEY_API_TOKEN: undefined,
+      REPORT_ALERT_WEBHOOK_URL: undefined,
+      REPORT_ALERT_WEBHOOK_TOKEN: undefined,
+      ISSUE_REPORTS_BUCKET_NAME: "threading-private-issue-reports-local",
+    });
+
+    const response = await worker.fetch(new Request("http://127.0.0.1/ready"), local);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ready", rendezvousProtocol: 1 });
+  });
+
   it("keeps liveness cheap and hardened without claiming dependency readiness", async () => {
     const response = await worker.fetch(new Request("https://service.test/health"), testEnv);
 
@@ -53,6 +109,9 @@ describe("service release surfaces", () => {
       APPLE_KEY_ID: "TESTKEY001",
       APPLE_PRIVATE_KEY: testApplePrivateKey,
       APPLE_TOKEN_ENCRYPTION_SECRET: "independent-test-encryption-secret-at-least-32-bytes",
+      APNS_TEAM_ID: "TESTTEAM01",
+      APNS_KEY_ID: "TESTKEY001",
+      APNS_PRIVATE_KEY: testApplePrivateKey,
       TURN_KEY_ID: "test-turn-key",
       TURN_KEY_API_TOKEN: "test-turn-token",
     });
@@ -82,6 +141,9 @@ describe("service release surfaces", () => {
       APPLE_KEY_ID: "TESTKEY001",
       APPLE_PRIVATE_KEY: testApplePrivateKey,
       APPLE_TOKEN_ENCRYPTION_SECRET: "independent-schema-test-secret-at-least-32-bytes",
+      APNS_TEAM_ID: "TESTTEAM01",
+      APNS_KEY_ID: "TESTKEY001",
+      APNS_PRIVATE_KEY: testApplePrivateKey,
       TURN_KEY_ID: "test-turn-key",
       TURN_KEY_API_TOKEN: "test-turn-token",
     });
@@ -159,4 +221,17 @@ async function rowExists(table: string, column: string, value: string): Promise<
   const row = await testEnv.DB.prepare(`SELECT 1 AS found FROM ${table} WHERE ${column} = ?`)
     .bind(value).first<{ found: number }>();
   return row?.found === 1;
+}
+
+type EnvOverrides = { [Key in keyof Env]?: Env[Key] | undefined };
+
+function overrideEnv(bindings: EnvOverrides): Env {
+  return new Proxy(testEnv, {
+    get(target, property, receiver) {
+      if (Object.prototype.hasOwnProperty.call(bindings, property)) {
+        return Reflect.get(bindings, property);
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
 }

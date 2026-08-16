@@ -163,6 +163,27 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         ownerDevices = RemoteOwnerDeviceRegistry(store: ownerDeviceStore)
         self.guestShareStore = guestShareStore ?? Self.defaultGuestShareStore()
         self.hostedService = hostedService ?? RemoteHostedServiceController()
+        let hostedPushService = self.hostedService
+        services.notifications.configureHostedPushSender(
+            isAvailable: { [weak hostedPushService] in
+                hostedPushService?.canSendHostedPush == true
+            },
+            send: { [weak hostedPushService] event, token, environment, playsSound in
+                guard let hostedPushService else {
+                    return RemoteAPNSDeliveryResult(
+                        statusCode: nil,
+                        reason: "Hosted push service is unavailable.",
+                        apnsID: nil
+                    )
+                }
+                return await hostedPushService.sendHostedPush(
+                    event: event,
+                    deviceToken: token,
+                    environment: environment,
+                    playsSound: playsSound
+                )
+            }
+        )
         server.authorizer = authority
         server.invitationRedeemer = self
         server.hostCommands = self

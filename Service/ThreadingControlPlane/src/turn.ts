@@ -16,6 +16,7 @@ interface CloudflareTURNResponse {
 /// TURN is an availability fallback: a credential-provisioning outage must not suppress the
 /// direct STUN path. The returned native configuration remains within the Swift-side 8 × 4 cap.
 export async function generateIceServers(env: Env): Promise<IceServer[]> {
+  if (env.LOCAL_DEVELOPMENT_MODE === "1" && env.LOCAL_ICE_MODE === "host-only") return [];
   if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) return [fallbackSTUN];
   try {
     const response = await fetch(

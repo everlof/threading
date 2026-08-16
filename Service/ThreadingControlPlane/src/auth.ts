@@ -93,6 +93,24 @@ export async function handleAppleSignIn(request: Request, env: Env): Promise<Res
   return issueSession(accountID, env, now);
 }
 
+/** Loopback-only account bootstrap for the cloud-free Wrangler development profile. */
+export async function handleLocalDevelopmentSignIn(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (env.LOCAL_DEVELOPMENT_MODE !== "1" || !isLoopbackRequest(request)) {
+    throw new HttpError(404, "notFound", "Endpoint was not found");
+  }
+  assertExactKeys(await readJSON(request, 1024), []);
+  const accountID = "local-development-account";
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    "INSERT INTO accounts (id, created_at, updated_at) VALUES (?, ?, ?) "
+      + "ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, auth_invalidated_at = NULL",
+  ).bind(accountID, now, now).run();
+  return issueSession(accountID, env, now);
+}
+
 export async function handleRefresh(request: Request, env: Env): Promise<Response> {
   const body = await readJSON(request);
   assertExactKeys(body, ["refreshToken"]);
@@ -541,4 +559,9 @@ function requiredString(value: unknown, name: string, maximumBytes: number): str
     throw new HttpError(400, "invalidRequest", `${name} is invalid`);
   }
   return value;
+}
+
+function isLoopbackRequest(request: Request): boolean {
+  const host = new URL(request.url).hostname.toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
 }

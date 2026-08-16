@@ -4,11 +4,13 @@ import {
   handleAppleNotification,
   handleAppleSignIn,
   handleDeleteAccount,
+  handleLocalDevelopmentSignIn,
   handleRefresh,
   handleSignOut,
   validateDueAppleSessions,
 } from "./auth";
 import { validateAppleConfiguration } from "./apple-tokens";
+import { handleAPNSPush, validateAPNSConfiguration } from "./apns";
 import { sha256Hex, verifyRendezvousSessionToken } from "./crypto";
 import {
   authorizeRendezvousCredential,
@@ -20,6 +22,10 @@ import {
 } from "./enrollment";
 import { bearerToken, json } from "./http";
 import { handleIssueReport } from "./issue-report-intake";
+import {
+  handleIssueReportNotificationBatch,
+  validateReportAlertConfiguration,
+} from "./issue-report-notifications";
 import { handleIssueReportPickup } from "./issue-report-pickup";
 import { BOUNDS, validateIdentifier } from "./protocol";
 
@@ -39,6 +45,9 @@ export default {
       if (request.method === "POST" && url.pathname === "/v1/auth/apple") {
         return await handleAppleSignIn(request, env);
       }
+      if (request.method === "POST" && url.pathname === "/v1/auth/local-development") {
+        return await handleLocalDevelopmentSignIn(request, env);
+      }
       if (request.method === "POST" && url.pathname === "/v1/auth/apple/events") {
         return await handleAppleNotification(request, env);
       }
@@ -56,6 +65,9 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/v1/reports") {
         return await handleIssueReport(request, env);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/push") {
+        return await handleAPNSPush(request, env);
       }
       if (request.method === "GET" && url.pathname === "/v1/developer/reports") {
         return await handleIssueReportPickup(request, env);
@@ -134,10 +146,23 @@ export default {
         + "AND (replacement_expires_at IS NULL OR replacement_expires_at <= ?)) LIMIT 1000)",
     ).bind(now, now).run();
   },
+
+  async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
+    await handleIssueReportNotificationBatch(batch, env);
+  },
 } satisfies ExportedHandler<Env>;
 
 async function readinessResponse(env: Env): Promise<Response> {
   try {
+    if (env.LOCAL_DEVELOPMENT_MODE === "1") {
+      requiredConfigurationSecret(env.SESSION_SIGNING_SECRET, 32, 4096);
+      requiredConfigurationSecret(env.APPLE_TOKEN_ENCRYPTION_SECRET, 32, 4096);
+      requiredConfigurationSecret(env.REPORT_PICKUP_TOKEN, 32, 4096);
+      validateReportAlertConfiguration(env);
+      requiredConfigurationSecret(env.ISSUE_REPORTS_BUCKET_NAME, 1, 128);
+      await probeStorage(env);
+      return json({ status: "ready", rendezvousProtocol: BOUNDS.protocolVersion });
+    }
     const clientIDs = env.APPLE_CLIENT_IDS.split(",")
       .map((value) => value.trim())
       .filter(Boolean);
@@ -159,22 +184,13 @@ async function readinessResponse(env: Env): Promise<Response> {
     requiredConfigurationSecret(env.TURN_KEY_ID, 1, 1024);
     requiredConfigurationSecret(env.TURN_KEY_API_TOKEN, 1, 4096);
     requiredConfigurationSecret(env.REPORT_PICKUP_TOKEN, 32, 4096);
-    await validateAppleConfiguration(clientIDs, env);
-    await env.DB.batch([
-      env.DB.prepare("SELECT auth_invalidated_at FROM accounts LIMIT 1"),
-      env.DB.prepare(
-        "SELECT last_validation_attempt_at, last_validated_at, invalidated_at "
-          + "FROM apple_tokens LIMIT 1",
-      ),
-      env.DB.prepare(
-        "SELECT replacement_digest, replacement_encrypted_token, replacement_expires_at "
-          + "FROM refresh_sessions LIMIT 1",
-      ),
-      env.DB.prepare("SELECT device_id, revoked_at FROM rendezvous_credentials LIMIT 1"),
-      env.DB.prepare("SELECT jti_digest FROM apple_notifications LIMIT 1"),
-      env.DB.prepare("SELECT accepted_count FROM issue_report_daily_quota LIMIT 1"),
+    requiredConfigurationSecret(env.ISSUE_REPORTS_BUCKET_NAME, 1, 128);
+    validateReportAlertConfiguration(env);
+    await Promise.all([
+      validateAppleConfiguration(clientIDs, env),
+      validateAPNSConfiguration(env),
     ]);
-    await env.ISSUE_REPORTS.head("health/readiness-probe");
+    await probeStorage(env);
     return json({ status: "ready", rendezvousProtocol: BOUNDS.protocolVersion });
   } catch (error) {
     console.warn("readiness_failed", {
@@ -182,6 +198,24 @@ async function readinessResponse(env: Env): Promise<Response> {
     });
     return json({ status: "unavailable" }, 503);
   }
+}
+
+async function probeStorage(env: Env): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare("SELECT auth_invalidated_at FROM accounts LIMIT 1"),
+    env.DB.prepare(
+      "SELECT last_validation_attempt_at, last_validated_at, invalidated_at "
+        + "FROM apple_tokens LIMIT 1",
+    ),
+    env.DB.prepare(
+      "SELECT replacement_digest, replacement_encrypted_token, replacement_expires_at "
+        + "FROM refresh_sessions LIMIT 1",
+    ),
+    env.DB.prepare("SELECT device_id, revoked_at FROM rendezvous_credentials LIMIT 1"),
+    env.DB.prepare("SELECT jti_digest FROM apple_notifications LIMIT 1"),
+    env.DB.prepare("SELECT accepted_count FROM issue_report_daily_quota LIMIT 1"),
+  ]);
+  await env.ISSUE_REPORTS.head("health/readiness-probe");
 }
 
 function requiredConfigurationSecret(
@@ -300,6 +334,7 @@ function rateLimitGroup(pathname: string): string {
   if (pathname.startsWith("/v1/auth/")) return "auth";
   if (pathname.startsWith("/v1/developer/reports")) return "developerReports";
   if (pathname === "/v1/reports") return "reports";
+  if (pathname === "/v1/push") return "push";
   if (pathname === "/v1/account") return "account";
   return "unknown";
 }

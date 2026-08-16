@@ -67,6 +67,8 @@ async function listReports(url: URL, env: Env): Promise<Response> {
       receivedAt: object.customMetadata?.receivedAt ?? object.uploaded.toISOString(),
       schemaVersion: object.customMetadata?.schemaVersion ?? null,
       source: object.customMetadata?.source ?? null,
+      trigger: object.customMetadata?.trigger ?? null,
+      kind: object.customMetadata?.kind ?? null,
       size: object.size,
     })),
     cursor: listed.truncated ? listed.cursor : null,

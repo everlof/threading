@@ -7,10 +7,13 @@
     "check": "tsc --noEmit",
     "test": "vitest run && node --test scripts/*.test.mjs",
     "test:load": "THREADING_RENDEZVOUS_LOAD=1 THREADING_RENDEZVOUS_LOAD_HOSTS=100 vitest run test/rendezvous-load.test.ts",
-    "dev": "wrangler dev",
+    "dev": "node scripts/local-dev.mjs",
+    "dev:cloud-config": "wrangler dev --config wrangler.jsonc",
+    "infra:plan": "node scripts/infra.mjs plan",
+    "infra:apply": "node scripts/infra.mjs apply",
     "preflight": "node scripts/preflight.mjs",
     "verify:production": "node scripts/verify-production.mjs",
-    "deploy": "npm run preflight && npm run check && npm test && npm run test:load && wrangler d1 migrations apply threading-control-plane --remote && wrangler deploy && npm run verify:production",
+    "deploy": "node scripts/deploy-production.mjs",
     "types": "wrangler types"
   },
   "dependencies": {

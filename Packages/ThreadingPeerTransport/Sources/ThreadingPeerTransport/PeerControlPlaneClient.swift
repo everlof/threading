@@ -105,6 +105,30 @@ public struct PeerDeviceServiceCredential: Codable, Equatable, Hashable, Sendabl
     }
 }
 
+public struct PeerPushDeliveryResult: Codable, Equatable, Hashable, Sendable {
+    public let accepted: Bool
+    public let statusCode: Int
+    public let reason: String
+    public let apnsID: String?
+
+    public init(accepted: Bool, statusCode: Int, reason: String, apnsID: String?) {
+        self.accepted = accepted
+        self.statusCode = statusCode
+        self.reason = reason
+        self.apnsID = apnsID
+    }
+
+    fileprivate func validated() throws -> Self {
+        guard (100...599).contains(statusCode), accepted == (statusCode == 200),
+              isBoundedNonEmpty(reason, maximumBytes: 256),
+              apnsID.map({ isBoundedNonEmpty($0, maximumBytes: 128) }) ?? true
+        else {
+            throw PeerControlPlaneError.invalidResponse
+        }
+        return self
+    }
+}
+
 /// HTTPS endpoint for the account/enrollment API and WebSocket rendezvous API.
 /// Plain HTTP is accepted only for a loopback development service.
 public struct PeerControlPlaneServiceEndpoint: Equatable, Sendable {
@@ -135,6 +159,11 @@ public struct PeerControlPlaneServiceEndpoint: Equatable, Sendable {
     public var rendezvousEndpoint: PeerRendezvousServiceEndpoint {
         // The endpoint was already constrained more strictly than the WebSocket endpoint.
         try! PeerRendezvousServiceEndpoint(baseURL)
+    }
+
+    public var isLoopback: Bool {
+        guard let host = baseURL.host?.lowercased() else { return false }
+        return Self.isLoopback(host)
     }
 
     fileprivate func route(_ components: String...) -> URL {
@@ -177,6 +206,18 @@ public struct PeerControlPlaneClient: Sendable {
                 authorizationCode: authorizationCode,
                 nonce: rawNonce
             )
+        )
+        return try response.validated()
+    }
+
+    /// Authenticates against the explicit loopback-only development route. The production
+    /// service does not expose this route and a non-loopback endpoint is rejected client-side.
+    public func signInForLocalDevelopment() async throws -> PeerControlPlaneSession {
+        guard endpoint.isLoopback else { throw PeerControlPlaneError.invalidEndpoint }
+        let response: SessionResponse = try await request(
+            method: "POST",
+            url: endpoint.route("v1", "auth", "local-development"),
+            body: EmptyRequest()
         )
         return try response.validated()
     }
@@ -283,6 +324,22 @@ public struct PeerControlPlaneClient: Sendable {
             url: endpoint.route("v1", "hosts", hostID),
             bearer: accessToken
         )
+    }
+
+    /// Sends one already-authorized, bounded notification through the hosted APNs broker. The
+    /// generic payload keeps the peer package independent of ThreadingRemoteKit; the endpoint is
+    /// fixed and the Worker independently validates its exact event schema.
+    public func sendHostedPush<Payload: Encodable & Sendable>(
+        hostCredential: PeerControlPlaneBearer,
+        payload: Payload
+    ) async throws -> PeerPushDeliveryResult {
+        let response: PeerPushDeliveryResult = try await request(
+            method: "POST",
+            url: endpoint.route("v1", "push"),
+            bearer: hostCredential,
+            body: payload
+        )
+        return try response.validated()
     }
 
     public func deleteAccount(accessToken: PeerControlPlaneBearer) async throws {

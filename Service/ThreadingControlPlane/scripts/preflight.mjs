@@ -2,7 +2,8 @@ import { readFile, readdir } from "node:fs/promises";
 
 const serviceRoot = new URL("../", import.meta.url);
 const repositoryRoot = new URL("../../", serviceRoot);
-const configuration = JSON.parse(await readFile(new URL("wrangler.jsonc", serviceRoot), "utf8"));
+const configurationPath = process.env.THREADING_WRANGLER_CONFIG ?? "wrangler.jsonc";
+const configuration = JSON.parse(await readFile(new URL(configurationPath, serviceRoot), "utf8"));
 const failures = [];
 const [xcodeProject, macInfoPlist, debugEntitlements, releaseEntitlements] = await Promise.all([
   readFile(new URL("Threading.xcodeproj/project.pbxproj", repositoryRoot), "utf8"),
@@ -20,9 +21,11 @@ const exampleVariables = parseDotVariables(
 const exampleSigningSecret = exampleVariables.get("SESSION_SIGNING_SECRET") ?? "";
 const exampleEncryptionSecret = exampleVariables.get("APPLE_TOKEN_ENCRYPTION_SECRET") ?? "";
 const examplePickupSecret = exampleVariables.get("REPORT_PICKUP_TOKEN") ?? "";
+const exampleAlertSecret = exampleVariables.get("REPORT_ALERT_WEBHOOK_TOKEN") ?? "";
 if (new TextEncoder().encode(exampleSigningSecret).byteLength < 32
   || new TextEncoder().encode(exampleEncryptionSecret).byteLength < 32
   || new TextEncoder().encode(examplePickupSecret).byteLength < 32
+  || new TextEncoder().encode(exampleAlertSecret).byteLength < 32
   || exampleSigningSecret === exampleEncryptionSecret) {
   failures.push("local example secrets must satisfy the independent 32-byte runtime contract");
 }
@@ -37,6 +40,17 @@ const reportBucket = reportBuckets.find((candidate) => candidate?.binding === "I
 if (reportBucket?.bucket_name !== "threading-private-issue-reports") {
   failures.push("ISSUE_REPORTS must bind the reviewed private production bucket");
 }
+if (configuration.vars?.ISSUE_REPORTS_BUCKET_NAME !== reportBucket?.bucket_name) {
+  failures.push("ISSUE_REPORTS_BUCKET_NAME must match the private production bucket binding");
+}
+const queueConsumers = configuration.queues?.consumers ?? [];
+const reportConsumer = queueConsumers.find(
+  (candidate) => candidate?.queue === "threading-issue-report-events",
+);
+if (!reportConsumer || reportConsumer.dead_letter_queue !== "threading-issue-report-events-dlq"
+  || reportConsumer.max_batch_size !== 10 || reportConsumer.max_retries !== 5) {
+  failures.push("the issue-report Queue consumer must retain its reviewed bounded DLQ contract");
+}
 
 const route = Array.isArray(configuration.routes)
   ? configuration.routes.find((candidate) => candidate?.pattern === "remote.threading.codes")
@@ -47,6 +61,9 @@ if (configuration.workers_dev !== false || route?.custom_domain !== true) {
 
 if (configuration.vars?.APPLE_CLIENT_IDS !== "codes.threading,codes.threading.mobile") {
   failures.push("Apple client IDs must match the shipping macOS and iOS bundle identifiers");
+}
+if (configuration.vars?.APNS_TOPIC !== "codes.threading.mobile") {
+  failures.push("APNs topic must match the shipping iOS bundle identifier");
 }
 if (countMatches(
   xcodeProject,
@@ -105,16 +122,22 @@ const expectedSecrets = [
   "APPLE_KEY_ID",
   "APPLE_PRIVATE_KEY",
   "APPLE_TOKEN_ENCRYPTION_SECRET",
+  "APNS_TEAM_ID",
+  "APNS_KEY_ID",
+  "APNS_PRIVATE_KEY",
   "TURN_KEY_ID",
   "TURN_KEY_API_TOKEN",
   "REPORT_PICKUP_TOKEN",
+  "REPORT_ALERT_WEBHOOK_URL",
+  "REPORT_ALERT_WEBHOOK_TOKEN",
 ];
 if (JSON.stringify(configuration.secrets?.required) !== JSON.stringify(expectedSecrets)) {
   failures.push("the required production Worker secret bindings differ from the reviewed list");
 }
-const expectedExampleVariables = ["APPLE_CLIENT_IDS", ...expectedSecrets].sort();
+const expectedExampleVariables = ["APPLE_CLIENT_IDS", "APNS_TOPIC", ...expectedSecrets].sort();
 if (JSON.stringify([...exampleVariables.keys()].sort()) !== JSON.stringify(expectedExampleVariables)
-  || exampleVariables.get("APPLE_CLIENT_IDS") !== configuration.vars?.APPLE_CLIENT_IDS) {
+  || exampleVariables.get("APPLE_CLIENT_IDS") !== configuration.vars?.APPLE_CLIENT_IDS
+  || exampleVariables.get("APNS_TOPIC") !== configuration.vars?.APNS_TOPIC) {
   failures.push(".dev.vars.example must mirror the reviewed variable and secret bindings");
 }
 

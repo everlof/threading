@@ -4,9 +4,9 @@ import ThreadingRemoteKit
 
 /// Session-scoped notification fan-out.
 ///
-/// A live events socket gives an open phone an immediate event. APNs covers suspension and
-/// backgrounding when provider credentials are configured on the Mac. Both paths receive the
-/// same bounded DTO and the phone deduplicates by its stable event id.
+/// A live events socket gives an open phone an immediate event. The hosted APNs broker covers
+/// suspension and backgrounding; an explicit Mac-local sender remains a development override.
+/// Both paths receive the same bounded DTO and the phone deduplicates by its stable event id.
 @MainActor
 final class RemoteNotificationService {
 
@@ -39,7 +39,16 @@ final class RemoteNotificationService {
     }
 
     private var subscriptions: [String: Subscription] = [:]
-    private let pushSender = RemoteAPNSPushSender.fromEnvironment()
+    typealias HostedPushSender = @MainActor (
+        RemoteNotificationEventDTO,
+        String,
+        RemoteAPNSPushSender.Environment,
+        Bool
+    ) async -> RemoteAPNSDeliveryResult
+
+    private let localPushSender = RemoteAPNSPushSender.fromEnvironment()
+    private var hostedPushSender: HostedPushSender?
+    private var hostedPushAvailability: (@MainActor () -> Bool)?
     private let observations = AppEventObservations()
     private var announcedGuestShares: Set<String> = []
     private var currentActorBySession: [SessionID: InteractionActor] = [:]
@@ -54,7 +63,17 @@ final class RemoteNotificationService {
         }
     }
 
-    var supportsPush: Bool { pushSender != nil }
+    var supportsPush: Bool {
+        localPushSender != nil || (hostedPushAvailability?() == true && hostedPushSender != nil)
+    }
+
+    func configureHostedPushSender(
+        isAvailable: @escaping @MainActor () -> Bool,
+        send: @escaping HostedPushSender
+    ) {
+        hostedPushAvailability = isAvailable
+        hostedPushSender = send
+    }
 
     func recordOwnerInteraction(sessionID: SessionID) {
         currentActorBySession[sessionID] = .owner
@@ -143,7 +162,7 @@ final class RemoteNotificationService {
         }
 
         return RemoteNotificationRegistrationResponseDTO(
-            delivery: pushSender == nil ? "live" : "push"
+            delivery: supportsPush ? "push" : "live"
         )
     }
 
@@ -413,7 +432,7 @@ final class RemoteNotificationService {
             return predicate(subscription)
         }
 
-        guard let pushSender else {
+        guard supportsPush else {
             MacRemoteDiagnostics.record(
                 .pushProviderRefused,
                 level: .warning,
@@ -433,12 +452,24 @@ final class RemoteNotificationService {
         for target in targets {
             let device = Self.diagnosticID(target.deviceID, prefix: "device")
             Task {
-                let result = await pushSender.send(
-                    event,
-                    deviceToken: target.deviceToken,
-                    environment: target.environment,
-                    playsSound: target.soundEnabledKinds.contains(event.kind)
-                )
+                let result: RemoteAPNSDeliveryResult
+                if let localPushSender {
+                    result = await localPushSender.send(
+                        event,
+                        deviceToken: target.deviceToken,
+                        environment: target.environment,
+                        playsSound: target.soundEnabledKinds.contains(event.kind)
+                    )
+                } else if let hostedPushSender {
+                    result = await hostedPushSender(
+                        event,
+                        target.deviceToken,
+                        target.environment,
+                        target.soundEnabledKinds.contains(event.kind)
+                    )
+                } else {
+                    return
+                }
                 var detail = [
                     "notification": event.id,
                     "kind": event.kind.rawValue,

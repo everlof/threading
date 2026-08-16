@@ -8,14 +8,23 @@ export interface Env {
   REPORT_RATE_LIMITER: RateLimit;
   REPORT_GLOBAL_RATE_LIMITER: RateLimit;
   REPORT_PICKUP_TOKEN?: string;
+  REPORT_ALERT_WEBHOOK_URL?: string;
+  REPORT_ALERT_WEBHOOK_TOKEN?: string;
+  ISSUE_REPORTS_BUCKET_NAME?: string;
   SESSION_SIGNING_SECRET: string;
   APPLE_CLIENT_IDS: string;
   APPLE_TEAM_ID?: string;
   APPLE_KEY_ID?: string;
   APPLE_PRIVATE_KEY?: string;
   APPLE_TOKEN_ENCRYPTION_SECRET?: string;
+  APNS_TEAM_ID?: string;
+  APNS_KEY_ID?: string;
+  APNS_PRIVATE_KEY?: string;
+  APNS_TOPIC?: string;
   TURN_KEY_ID?: string;
   TURN_KEY_API_TOKEN?: string;
+  LOCAL_DEVELOPMENT_MODE?: string;
+  LOCAL_ICE_MODE?: string;
 }
 
 export interface AccessPrincipal {

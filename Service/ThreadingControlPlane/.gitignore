@@ -1,4 +1,12 @@
 node_modules/
 .dev.vars
+.dev.vars.local
 .wrangler/
+.wrangler.production.generated.jsonc
 worker-configuration.d.ts
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfplan
+infra/.threading.tfplan
+infra/terraform.tfvars

@@ -1,10 +1,16 @@
 # Copy to .dev.vars. Never commit real values.
 SESSION_SIGNING_SECRET=local-only-signing-secret-at-least-32-bytes
 APPLE_CLIENT_IDS=codes.threading,codes.threading.mobile
+APNS_TOPIC=codes.threading.mobile
 APPLE_TEAM_ID=apple-developer-team-id
 APPLE_KEY_ID=sign-in-with-apple-key-id
 APPLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nreplace-me\n-----END PRIVATE KEY-----
 APPLE_TOKEN_ENCRYPTION_SECRET=another-independent-32-byte-random-secret
+APNS_TEAM_ID=apple-developer-team-id
+APNS_KEY_ID=apns-auth-key-id
+APNS_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nreplace-me\n-----END PRIVATE KEY-----
 TURN_KEY_ID=cloudflare-realtime-turn-key-id
 TURN_KEY_API_TOKEN=cloudflare-realtime-turn-api-token
 REPORT_PICKUP_TOKEN=independent-developer-pickup-secret-at-least-32-bytes
+REPORT_ALERT_WEBHOOK_URL=https://private-triage.example.com/threading/reports
+REPORT_ALERT_WEBHOOK_TOKEN=independent-triage-webhook-secret-at-least-32-bytes

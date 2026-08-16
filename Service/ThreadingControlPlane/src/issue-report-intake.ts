@@ -179,6 +179,8 @@ interface NormalizedDiagnostics {
   }>;
 }
 
+export type IssueReportKind = "report" | "crash" | "diagnostics";
+
 export async function handleIssueReport(request: Request, env: Env): Promise<Response> {
   const contentType = request.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (contentType !== "application/json") {
@@ -216,6 +218,8 @@ export async function handleIssueReport(request: Request, env: Env): Promise<Res
       receivedAt,
       schemaVersion: String(report.schemaVersion),
       source: report.diagnostics.source,
+      trigger: report.trigger,
+      kind: issueReportKind(report.trigger),
     },
     sha256: checksum,
   });
@@ -231,6 +235,12 @@ export async function handleIssueReport(request: Request, env: Env): Promise<Res
     alreadyReceived: false,
   });
   return receipt(report.id, false, 201);
+}
+
+export function issueReportKind(trigger: string): IssueReportKind {
+  if (trigger === "postCrash") return "crash";
+  if (trigger === "diagnostics") return "diagnostics";
+  return "report";
 }
 
 async function reserveDailyCapacity(env: Env): Promise<void> {

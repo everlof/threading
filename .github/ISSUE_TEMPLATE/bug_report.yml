@@ -1,0 +1,134 @@
+name: Bug report
+description: Report reproducible Threading behavior without publishing private diagnostics.
+title: "[Bug]: "
+labels: []
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping us improve Threading.
+
+        **Everything entered here, including attachments and comments, is public.** Do not attach raw logs, crash reports (`.ips`), support archives, screenshots, terminal output, prompts, transcripts, source code, file paths, repository or session names, notification text, email addresses, IP addresses, device names, credentials, API keys, or tokens.
+
+        Send potentially sensitive diagnostics through Threading's private reporting flow instead:
+
+        - **macOS:** choose **Help → Report a Problem…**, review the report, then press **Send to Developer**.
+        - **iPhone or iPad:** open **Diagnostics → Report a problem** (or shake the device), review the selected items, then press **Send report**.
+
+        The app returns a report reference that is safe to enter below. Private reports are not automatically copied into GitHub. If Threading cannot open, create this issue without logs or sensitive attachments and say that private diagnostics are available; a maintainer can arrange a private transfer route.
+
+        Read [Private issue-report intake](https://github.com/everlof/threading/blob/master/docs/ISSUE_REPORTING.md) for the privacy boundary.
+
+  - type: checkboxes
+    id: public-safety
+    attributes:
+      label: Public issue safety
+      description: Confirm these before entering any bug details.
+      options:
+        - label: I understand that this issue, its comments, and all attachments are public.
+          required: true
+        - label: I will replace private names, paths, content, addresses, and identifiers with neutral placeholders.
+          required: true
+        - label: I will not attach raw logs, crash reports, support archives, or unreviewed screenshots; I will use the private reporting flow for them.
+          required: true
+
+  - type: dropdown
+    id: product-area
+    attributes:
+      label: Affected area
+      description: Where did the problem appear?
+      options:
+        - macOS app
+        - iPhone or iPad app
+        - Remote access or pairing
+        - Extension or theme
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: Threading version
+      description: Use the version/build number only; do not include a device or account name.
+      placeholder: "For example: 1.0 (123)"
+    validations:
+      required: true
+
+  - type: input
+    id: system-version
+    attributes:
+      label: Operating system
+      description: The public OS name and version are sufficient.
+      placeholder: "For example: macOS 15.6 or iOS 18.5"
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Describe the visible behavior. Replace private content with placeholders such as PROJECT_A, USER_B, or /path/to/project.
+      placeholder: "After I…, Threading displayed…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Give the smallest repeatable sequence using generic names and sample content.
+      placeholder: |
+        1. Open PROJECT_A.
+        2. Start a sample session.
+        3. Choose…
+        4. Observe…
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: "I expected Threading to…"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Frequency
+      options:
+        - Every time
+        - Often
+        - Sometimes
+        - Once
+        - Unknown
+    validations:
+      required: true
+
+  - type: input
+    id: private-report-reference
+    attributes:
+      label: Private report reference
+      description: Optional. Enter only the reference returned by Send to Developer or Send report—not the report contents.
+      placeholder: "RPT-XXXXXXXXXXXX"
+
+  - type: textarea
+    id: public-log-excerpt
+    attributes:
+      label: Minimal public diagnostic excerpt
+      description: Optional. Prefer the private report reference above. If a few public lines are essential, manually copy only those lines, replace sensitive values with placeholders, and review the result again. Never paste an entire log or rely on automatic redaction.
+      render: shell
+      placeholder: |
+        [REDACTED_TIMESTAMP] operation failed result=TIMEOUT
+        # No paths, commands, prompts, content, names, addresses, or credentials.
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional public context
+      description: Optional. Include only information you have reviewed and are comfortable publishing permanently.
+

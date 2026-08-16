@@ -39,6 +39,19 @@
       "bucket_name": "threading-private-issue-reports"
     }
   ],
+  "queues": {
+    "consumers": [
+      {
+        "queue": "threading-issue-report-events",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "retry_delay": 60,
+        "dead_letter_queue": "threading-issue-report-events-dlq",
+        "max_concurrency": 2
+      }
+    ]
+  },
   "ratelimits": [
     {
       "name": "AUTH_RATE_LIMITER",
@@ -82,7 +95,9 @@
     }
   ],
   "vars": {
-    "APPLE_CLIENT_IDS": "codes.threading,codes.threading.mobile"
+    "APPLE_CLIENT_IDS": "codes.threading,codes.threading.mobile",
+    "APNS_TOPIC": "codes.threading.mobile",
+    "ISSUE_REPORTS_BUCKET_NAME": "threading-private-issue-reports"
   },
   "secrets": {
     "required": [
@@ -91,9 +106,14 @@
       "APPLE_KEY_ID",
       "APPLE_PRIVATE_KEY",
       "APPLE_TOKEN_ENCRYPTION_SECRET",
+      "APNS_TEAM_ID",
+      "APNS_KEY_ID",
+      "APNS_PRIVATE_KEY",
       "TURN_KEY_ID",
       "TURN_KEY_API_TOKEN",
-      "REPORT_PICKUP_TOKEN"
+      "REPORT_PICKUP_TOKEN",
+      "REPORT_ALERT_WEBHOOK_URL",
+      "REPORT_ALERT_WEBHOOK_TOKEN"
     ]
   },
   "observability": {

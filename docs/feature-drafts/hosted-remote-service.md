@@ -1,8 +1,8 @@
 # Hosted remote service
 
-> Status: native hosted transport implemented and physically validated 2026-08-12; production
-> deployment and the broader push/widget product remain gated below. Re-check vendor limits and
-> prices before procurement.
+> Status: native hosted transport and the stateless APNs alert broker are implemented; production
+> deployment and the broader widget/subscription product remain gated below. Re-check vendor
+> limits and prices before procurement.
 
 ## Decision
 
@@ -134,10 +134,11 @@ The control plane does not proxy ordinary terminal traffic. It consists of:
   reach this Mac?" It never returns an authority broader than the Mac-issued device capability.
 - **TURN provisioner:** Cloudflare Realtime credentials are generated on demand from a Worker-only
   long-lived key. Clients never receive the provisioning secret.
-- **Push broker:** APNs device, ActivityKit and future WidgetKit tokens; deduplication, collapse
-  identifiers, expiry and bounded delivery diagnostics. The existing native APNs path should move
-  from the Mac to this service. Firebase Cloud Messaging is not required: a direct APNs provider
-  supports all three Apple token types without adding a second registration model.
+- **Push broker:** implemented for iOS alerts as one host-authenticated, size-capped Worker call.
+  The Mac keeps the authorized subscription and forwards one target/event; the Worker stores
+  neither device token nor notification content, signs a cached APNs provider JWT, and returns
+  bounded delivery diagnostics. Stable IDs, hashed collapse identifiers and expiry make retries
+  harmless. ActivityKit and future WidgetKit tokens remain later slices. Firebase is not required.
 - **Widget snapshot store:** an opt-in, size-capped semantic projection with a generation number
   and observation time. A widget reads this store rather than activating the public relay. Stale
   data remains visibly stale when the Mac is sleeping.
@@ -148,8 +149,9 @@ The control plane does not proxy ordinary terminal traffic. It consists of:
 
 The implemented transport control plane is a Cloudflare Worker, D1 database and one hibernating
 Durable Object per Mac. The native clients depend on one narrow service interface so identity,
-TURN or the hosting vendor can still be replaced independently. Push, subscriptions, invitation
-metadata and widget snapshots are later service slices, not hidden dependencies of direct access.
+TURN or the hosting vendor can still be replaced independently. Alert push is implemented;
+subscriptions, invitation metadata and widget snapshots are later service slices, not hidden
+dependencies of direct access.
 
 ### Stored data boundary
 
@@ -176,7 +178,7 @@ round only in the summary. They are planning estimates, not vendor quotes.
 | STUN/direct traffic | Cloudflare STUN is free; application bytes on a successful direct ICE path do not enter the service |
 | TURN fallback | First 1,000 billable GB each month are free, then $0.05/GB sent from TURN to clients, including TURN overhead |
 | Tailscale/local traffic | $0 to Threading per GB; these paths do not enter the hosted service |
-| Push/widgets | Later slices; APNs itself has no per-message line item, while coalesced Worker/D1 operations use the same included pools above |
+| Push/widgets | APNs alert brokerage is implemented and has no Apple per-message line item; its bounded Worker calls use the same included pool. Widgets/Live Activities remain later slices. |
 | Operations | Logs, alerts, backup exercises, status/support systems and human support need a separate budget |
 
 The Durable Object uses WebSocket hibernation and automatic ping/pong. An idle signed-in Mac
@@ -273,16 +275,17 @@ routing/data processing, abuse handling, support SLA and volume price.
 2. **Completed — control-plane code:** Sign in with Apple, host/device enrollment, hibernating
    signaling, TURN provisioning, replay protection, race-safe quotas, Worker-native abuse limits,
    daily Apple grant validation, account deletion and scheduled bounded cleanup.
-3. **Deployment gate:** create production D1/Realtime resources, install independent secrets,
+3. **Deployment gate:** apply the Terraform/OpenTofu D1/R2/Queue/WAF resources, create Realtime
+   TURN and Apple keys, install independent secrets,
    attach `remote.threading.codes`, confirm the rate-limit namespaces and Apple server-to-server
    notifications, then run the guarded deploy. It tests before applying ordered D1 migrations,
-   deploys, and requires the custom-domain readiness probe to pass. The checked-in D1 ID
-   deliberately prevents accidental deploys.
+   deploys, and requires the custom-domain readiness probe to pass. Deployment renders D1's
+   Terraform output into a temporary Wrangler config; the checked-in placeholder remains inert.
 4. **Network release gate:** force TURN-only, then cover representative home/carrier NATs, blocked
    UDP, IPv4/IPv6, VPN, sleep/wake and repeated Wi-Fi/cellular handoff.
 5. **App release gate:** complete Apple encryption-export determination, signed archive/device
    tests, dependency/advisory refresh and account deletion/revocation verification against production.
-6. **Later product slices:** hosted APNs, widgets/Live Activities, subscriptions and
+6. **Later product slices:** widgets/Live Activities, subscriptions and
    account-backed sharing. None may turn the service into a transcript store or reintroduce
    healthy-state polling; mobile session state is already event-driven.
 7. **Rollout:** internal, 100, 500 and 1,000-host gates. Track direct/TURN share, setup/reconnect

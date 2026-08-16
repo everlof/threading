@@ -34,6 +34,8 @@ describe("private issue-report intake", () => {
       reportID: report.id,
       schemaVersion: "1",
       source: "iOSClient",
+      trigger: "diagnostics",
+      kind: "diagnostics",
     });
 
     const publicRead = await worker.fetch(new Request(
@@ -170,6 +172,8 @@ describe("private issue-report intake", () => {
     expect(listing.reports).toContainEqual(expect.objectContaining({
       reportID: report.id,
       source: "iOSClient",
+      trigger: "diagnostics",
+      kind: "diagnostics",
       size: expect.any(Number),
     }));
     expect(JSON.stringify(listing)).not.toContain(report.description);

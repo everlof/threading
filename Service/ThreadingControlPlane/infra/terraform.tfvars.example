@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars and keep the real file out of git.
+cloudflare_account_id = "0123456789abcdef0123456789abcdef"
+cloudflare_zone_id    = "fedcba9876543210fedcba9876543210"
+
+# Obtain the exact product/limit values from the production account's available-alert schema.
+# Set all three together before release. They are empty here because those identifiers are
+# account-specific; guessed examples can make an otherwise safe first apply fail.
+billing_alert_email    = ""
+billing_alert_products = []
+billing_alert_limit    = ""

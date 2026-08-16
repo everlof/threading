@@ -2,6 +2,7 @@ import AuthenticationServices
 import Foundation
 import Security
 import ThreadingPeerTransport
+import ThreadingRemoteKit
 
 enum RemoteHostedServiceState: Equatable {
     case stopped
@@ -137,6 +138,7 @@ final class RemoteHostedServiceController {
     private let endpoint: PeerControlPlaneServiceEndpoint?
     private let hostID: String
     private let hostName: String
+    private let localDevelopmentAuthentication: Bool
     private var record: RemoteHostedServiceRecord?
     private var persistenceError: String?
     private var listener: PeerHostedHostListener?
@@ -155,12 +157,15 @@ final class RemoteHostedServiceController {
         store: (any RemoteHostedServicePersisting)? = nil,
         endpoint: PeerControlPlaneServiceEndpoint? = RemoteHostedServiceController.configuredEndpoint(),
         hostID: String = RemoteHostIdentity.current.id,
-        hostName: String = RemoteHostIdentity.current.name
+        hostName: String = RemoteHostIdentity.current.name,
+        localDevelopmentAuthentication: Bool = RemoteHostedServiceController
+            .configuredLocalDevelopmentAuthentication()
     ) {
         self.store = store ?? Self.defaultStore()
         self.endpoint = endpoint
         self.hostID = hostID
         self.hostName = hostName
+        self.localDevelopmentAuthentication = localDevelopmentAuthentication
         do {
             let loaded = try self.store.load()
             if let loaded, Self.isValid(loaded, endpoint: endpoint, hostID: hostID) {
@@ -195,6 +200,10 @@ final class RemoteHostedServiceController {
 
     var serviceURL: URL? { endpoint?.baseURL }
 
+    var canSendHostedPush: Bool {
+        endpoint?.isLoopback == false && canIssueDeviceCredentials
+    }
+
     func start(targetPort: UInt16) {
         desiredPort = targetPort
         lifecycleGeneration &+= 1
@@ -209,6 +218,16 @@ final class RemoteHostedServiceController {
             return
         }
         guard record != nil else {
+            if localDevelopmentAuthentication, endpoint?.isLoopback == true {
+                state = .connecting
+                connectionTask = Task { [weak self] in
+                    await self?.bootstrapLocalDevelopment(
+                        targetPort: targetPort,
+                        generation: generation
+                    )
+                }
+                return
+            }
             state = .signInRequired
             return
         }
@@ -263,6 +282,35 @@ final class RemoteHostedServiceController {
         } else {
             state = .stopped
         }
+    }
+
+    private func bootstrapLocalDevelopment(targetPort: UInt16, generation: Int) async {
+        guard let endpoint, endpoint.isLoopback else {
+            state = .signInRequired
+            return
+        }
+        let client = PeerControlPlaneClient(endpoint: endpoint)
+        do {
+            let session = try await client.signInForLocalDevelopment()
+            let hostCredential = try await client.enrollHost(
+                accessToken: session.accessToken,
+                hostID: hostID,
+                displayName: hostName
+            )
+            try persist(RemoteHostedServiceRecord(
+                version: RemoteHostedServiceDefaults.recordVersion,
+                endpoint: endpoint.baseURL,
+                session: session,
+                hostCredential: hostCredential,
+                pendingRevokedDeviceIDs: []
+            ))
+        } catch {
+            guard generation == lifecycleGeneration else { return }
+            state = .unavailable("local-service")
+            return
+        }
+        guard generation == lifecycleGeneration else { return }
+        start(targetPort: targetPort)
     }
 
     func signOut() async throws {
@@ -333,6 +381,44 @@ final class RemoteHostedServiceController {
             lifetimeSeconds: lifetimeSeconds
         )
         return credential
+    }
+
+    func sendHostedPush(
+        event: RemoteNotificationEventDTO,
+        deviceToken: String,
+        environment: RemoteAPNSPushSender.Environment,
+        playsSound: Bool
+    ) async -> RemoteAPNSDeliveryResult {
+        guard let endpoint, !endpoint.isLoopback else {
+            return RemoteAPNSDeliveryResult(
+                statusCode: nil,
+                reason: "Hosted push is unavailable for a loopback service.",
+                apnsID: nil
+            )
+        }
+        do {
+            let current = try await validRecord(client: PeerControlPlaneClient(endpoint: endpoint))
+            let result = try await PeerControlPlaneClient(endpoint: endpoint).sendHostedPush(
+                hostCredential: current.hostCredential.credential,
+                payload: RemoteHostedPushEnvelope(
+                    deviceToken: deviceToken,
+                    environment: environment.rawValue,
+                    playsSound: playsSound,
+                    event: event
+                )
+            )
+            return RemoteAPNSDeliveryResult(
+                statusCode: result.statusCode,
+                reason: result.reason,
+                apnsID: result.apnsID
+            )
+        } catch {
+            return RemoteAPNSDeliveryResult(
+                statusCode: nil,
+                reason: "Hosted push broker was unavailable.",
+                apnsID: nil
+            )
+        }
     }
 
     func revokeDevice(deviceID: String) {
@@ -674,6 +760,16 @@ final class RemoteHostedServiceController {
         return try? PeerControlPlaneServiceEndpoint(url)
     }
 
+    private static func configuredLocalDevelopmentAuthentication(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+#if DEBUG
+        environment["THREADING_CONTROL_PLANE_LOCAL_AUTH"] == "1"
+#else
+        false
+#endif
+    }
+
     private static func requiresSignIn(_ error: Error) -> Bool {
         if error as? PeerControlPlaneError == .invalidCredential { return true }
         if case .rejected(let status, _) = error as? PeerControlPlaneError, status == 401 {
@@ -694,4 +790,11 @@ final class RemoteHostedServiceController {
         case nil: "other"
         }
     }
+}
+
+private struct RemoteHostedPushEnvelope: Encodable, Sendable {
+    let deviceToken: String
+    let environment: String
+    let playsSound: Bool
+    let event: RemoteNotificationEventDTO
 }

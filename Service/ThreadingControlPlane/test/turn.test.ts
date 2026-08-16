@@ -11,6 +11,18 @@ afterEach(() => {
 });
 
 describe("TURN credential provisioning", () => {
+  it("uses host-only ICE without contacting a cloud service in local development", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    await expect(generateIceServers({
+      LOCAL_DEVELOPMENT_MODE: "1",
+      LOCAL_ICE_MODE: "host-only",
+      TURN_KEY_ID: "must-not-be-used",
+      TURN_KEY_API_TOKEN: "must-not-be-used",
+    } as Env)).resolves.toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("keeps direct STUN available when TURN is not configured", async () => {
     await expect(generateIceServers({} as Env)).resolves.toEqual([fallbackSTUN]);
   });
