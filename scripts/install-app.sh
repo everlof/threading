@@ -12,6 +12,7 @@
 #   scripts/install-app.sh --app <path/to/.app>     # installs a bundle built anywhere
 #   scripts/install-app.sh --to ~/Applications      # somewhere other than /Applications
 #   scripts/install-app.sh --quit                   # quit a running copy without asking
+#   scripts/install-app.sh --leave-running          # install underneath a running copy
 #
 # **Why not `cp -R`.** `cp -R src dst` copies *into* `dst` when `dst` already exists as a
 # directory, so `cp -R Threading.app /Applications/Threading.app` produces
@@ -30,16 +31,22 @@ fail() { printf '\033[31merror: %s\033[0m\n' "$1" >&2; exit 1; }
 APP="$ROOT/build/release/export/$SCHEME.app"
 DEST_DIR="/Applications"
 QUIT_RUNNING=0
+LEAVE_RUNNING=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --app) shift; APP="${1:-}" ;;
         --to) shift; DEST_DIR="${1:-}" ;;
         --quit) QUIT_RUNNING=1 ;;
+        --leave-running) LEAVE_RUNNING=1 ;;
         *) fail "unknown argument '$1'" ;;
     esac
     shift
 done
+
+if [[ $QUIT_RUNNING -eq 1 && $LEAVE_RUNNING -eq 1 ]]; then
+    fail "--quit and --leave-running ask for opposite things"
+fi
 
 [[ -n "$APP" && -d "$APP" ]] || fail "no app bundle at '$APP'"
 [[ -d "$DEST_DIR" ]] || fail "no such directory: $DEST_DIR"
@@ -48,6 +55,59 @@ done
 readonly DEST="$DEST_DIR/$SCHEME.app"
 readonly STAGE="$DEST_DIR/.$SCHEME.app.incoming"
 readonly PREVIOUS="$DEST_DIR/.$SCHEME.app.previous"
+readonly PARKED_PREFIX="$DEST_DIR/.$SCHEME.app.parked-"
+
+# Which processes are running the bundle at $1.
+#
+# `pgrep -f "$DEST/Contents/MacOS/$SCHEME"` was the obvious way to ask and is the wrong one: it
+# matches against argv, which a sandboxed shell — any agent's, and so any git hook one of them
+# triggers — is not allowed to read. It comes back empty while the app is plainly running, and an
+# empty answer here means "nothing is running it, go ahead and replace it". `ps -o comm=` reports
+# the kernel's path for the running image and answers correctly in both contexts.
+#
+# It reports the path the process was *launched* from, which does not follow a later rename. That
+# is exactly the question being asked here — "who is using the bundle at this path" — and it is
+# why a parked bundle records the pids that were running it rather than being re-tested by path.
+running_pids_at() {
+    local executable="$1/Contents/MacOS/$SCHEME"
+    local pid path
+    # if/fi rather than `[[ … ]] && printf`: a non-matching last line would make the loop's final
+    # command non-zero, and under `set -e` inside a command substitution that truncates the
+    # answer to nothing — which reads here as "the app is not running".
+    while read -r pid path; do
+        if [[ "$path" == "$executable" ]]; then
+            printf '%s\n' "$pid"
+        fi
+    done < <(ps -Ao pid=,comm=)
+    return 0
+}
+
+# A bundle moved aside while a process was still running it is not litter: it is the file that
+# process reads from. Deleting it is how you get the running app SIGKILLed on its next page fault,
+# so an aside bundle is named for the pids that were running it and removed once none of them are.
+#
+# The pid is checked against a still-running Threading rather than against bare liveness, because
+# pids are reused, and a recycled one would otherwise pin 200MB on disk indefinitely.
+sweep_parked_bundles() {
+    local aside pids pid in_use
+    for aside in "$PARKED_PREFIX"*; do
+        [[ -d "$aside" ]] || continue
+        pids="${aside##*.parked-}"
+        in_use=0
+        for pid in ${pids//-/ }; do
+            if [[ "$(ps -o comm= -p "$pid" 2>/dev/null)" == *"/$SCHEME.app/Contents/MacOS/$SCHEME" ]]; then
+                in_use=1
+            fi
+        done
+        if [[ $in_use -eq 1 ]]; then
+            echo "  keeping $(basename "$aside") — pid ${pids//-/, } is still running it"
+        else
+            rm -rf "$aside"
+            echo "  removed $(basename "$aside") — nothing is running it any more"
+        fi
+    done
+    return 0
+}
 
 # MARK: - What is being installed
 
@@ -74,12 +134,16 @@ fi
 # were doing stops. That is why this asks rather than killing, and why it never escalates to
 # SIGKILL — a forced quit here can lose a turn somebody is in the middle of.
 
-# Matched unanchored on the destination's own binary path. Anchoring to the exact command line
-# is more precise and the wrong trade for a *safety* check: a pattern that fails to match
-# silently replaces a running app, while one that matches too eagerly only asks a question. The
-# failure modes are not symmetric, so this errs toward asking.
-running_pid="$(pgrep -f "$DEST/Contents/MacOS/$SCHEME" || true)"
-if [[ -n "$running_pid" ]]; then
+# --leave-running is the other answer to the same problem, and the one an automated install needs:
+# the swap below goes in underneath the running process instead of asking it to stop. It costs a
+# relaunch before the new build is the one you are using, which is a much smaller price than
+# ending a turn somebody is in the middle of.
+running_pid="$(running_pids_at "$DEST" | tr '\n' ' ' | sed 's/ *$//')"
+if [[ -n "$running_pid" && $LEAVE_RUNNING -eq 1 ]]; then
+    echo
+    echo "$SCHEME is running (pid $running_pid) and is being left alone. The new build goes in"
+    echo "underneath it; the running copy stays on the build it launched with until you reopen it."
+elif [[ -n "$running_pid" ]]; then
     if [[ $QUIT_RUNNING -eq 0 ]]; then
         if [[ ! -t 0 ]]; then
             fail "$SCHEME is running (pid $running_pid); re-run with --quit, or quit it yourself"
@@ -98,10 +162,10 @@ if [[ -n "$running_pid" ]]; then
     # short enough that a wedged app is reported rather than waited on; killing it is the user's
     # call, not this script's.
     for _ in $(seq 1 20); do
-        pgrep -f "$DEST/Contents/MacOS/$SCHEME" >/dev/null || break
+        [[ -z "$(running_pids_at "$DEST")" ]] && break
         sleep 0.5
     done
-    if pgrep -f "$DEST/Contents/MacOS/$SCHEME" >/dev/null; then
+    if [[ -n "$(running_pids_at "$DEST")" ]]; then
         fail "$SCHEME did not quit — quit it by hand and re-run (this script will not force it)"
     fi
 fi
@@ -118,18 +182,36 @@ fi
 
 rm -rf "$STAGE" "$PREVIOUS"
 say "Staging"
+sweep_parked_bundles
 ditto "$APP" "$STAGE"
 
 say "Swapping"
+aside=""
 if [[ -e "$DEST" ]]; then
-    mv "$DEST" "$PREVIOUS"
+    # Asked again here rather than reusing the answer from above, because the quit path may have
+    # changed it. Nobody running the outgoing bundle means it can simply be deleted once the new
+    # one is in place; somebody running it means it is parked under their pids instead. Only one
+    # parked bundle can accumulate: the next install finds the destination unheld — its holders
+    # are on the parked copy, not on it — and deletes it outright.
+    holders="$(running_pids_at "$DEST" | tr '\n' '-' | sed 's/-$//')"
+    if [[ -n "$holders" ]]; then
+        aside="$PARKED_PREFIX$holders"
+        rm -rf "$aside"
+    else
+        aside="$PREVIOUS"
+    fi
+    mv "$DEST" "$aside"
 fi
 if ! mv "$STAGE" "$DEST"; then
     # Put the old one back rather than leaving the machine with no app at all.
-    [[ -e "$PREVIOUS" ]] && mv "$PREVIOUS" "$DEST"
+    if [[ -n "$aside" && -e "$aside" ]]; then
+        mv "$aside" "$DEST"
+    fi
     fail "could not move the new bundle into place"
 fi
-rm -rf "$PREVIOUS"
+if [[ "$aside" == "$PREVIOUS" ]]; then
+    rm -rf "$PREVIOUS"
+fi
 
 # MARK: - Prove it took
 #
@@ -158,4 +240,8 @@ dest_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
 
 say "Installed: $SCHEME $installed_version ($installed_build)"
 echo "  $DEST"
-echo "  open it with: open -a $SCHEME"
+if [[ "$aside" == "$PARKED_PREFIX"* ]]; then
+    echo "  pid ${aside##*.parked-} is still running the previous build — quit and reopen to use this one"
+else
+    echo "  open it with: open -a $SCHEME"
+fi

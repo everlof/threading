@@ -37,6 +37,12 @@ scripts/test.sh ui       # app-level XCUITest scenarios in an isolated Cocoa hom
 open "$(ls -dt ~/Library/Developer/Xcode/DerivedData/Threading-*/Build/Products/Debug/Threading.app | head -1)"
 ```
 
+**A commit on master starts a background build.** `scripts/install_git_hooks.sh` installs
+post-commit and post-merge hooks that rebuild master's tip in a separate clone and install it over
+`/Applications/Threading.app`, cancelling and restarting when a newer commit lands. It never quits
+the running app. `scripts/autoinstall.sh status` says what it is doing and `off` pauses it; see
+[`releasing.md`](docs/architecture/releasing.md).
+
 Resources: files under `Sources/` are members of the app target automatically (Xcode 16
 synchronized folders). The asset catalogue compiles to `Assets.car`; `Resources/Icons` is marked
 an explicit folder so its loose PNGs land under `Contents/Resources/Icons/`, loaded via

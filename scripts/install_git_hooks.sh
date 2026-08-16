@@ -11,6 +11,12 @@
 # Shadowing the global hooks with a repo-local core.hooksPath would have meant
 # reimplementing Git LFS and the commit-msg hook here, so delegation it is.
 #
+# Two hooks are taught the same lesson afterwards, post-commit and post-merge,
+# and their shims run scripts/autoinstall.sh — the loop that keeps
+# /Applications/Threading.app on master's tip. Their exit codes are discarded:
+# they run after the commit or merge already happened, and a background build
+# must never be able to look like a failed git command.
+#
 set -euo pipefail
 
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,8 +26,10 @@ git_directory="$(cd "${repository_directory}" && git rev-parse --absolute-git-di
 delegation_marker="pre-push.local"
 
 global_hooks_path="$(git config --global --get core.hooksPath || true)"
+# Expanded here rather than inside the block below, because everything after it —
+# the post-commit and post-merge delegation too — reads this variable.
+global_hooks_path="${global_hooks_path/#\~/${HOME}}"
 if [[ -n "${global_hooks_path}" ]]; then
-  global_hooks_path="${global_hooks_path/#\~/${HOME}}"
   global_pre_push="${global_hooks_path}/pre-push"
 
   if [[ -f "${global_pre_push}" ]] && ! grep -q "${delegation_marker}" "${global_pre_push}"; then
@@ -83,3 +91,51 @@ chmod +x "${shim}"
 
 echo "Installed ${shim}"
 echo "Push now runs 'scripts/test.sh all'. Bypass with THREADING_SKIP_TESTS=1 git push."
+
+# The post-commit and post-merge hooks that keep /Applications current.
+#
+# Appended rather than spliced: unlike pre-push, nothing here needs to run before
+# Git LFS or to see its stdin, and appending cannot mangle a global hook whose
+# body has drifted. These hooks' exit codes are ignored by git, which is why the
+# delegate's status is swallowed rather than propagated.
+teach_global_delegation() {
+  local hook="$1"
+  local global_hook="${global_hooks_path}/${hook}"
+
+  if [[ -z "${global_hooks_path}" || ! -f "${global_hook}" ]]; then
+    echo "No global ${hook} to teach — leaving it alone."
+    return
+  fi
+  if grep -q "${hook}.local" "${global_hook}"; then
+    echo "Global ${hook} already delegates — leaving it alone."
+    return
+  fi
+
+  cp "${global_hook}" "${global_hook}.backup"
+  cat >> "${global_hook}" <<HOOK
+
+# Run repo-specific ${hook} if it exists, mirroring the pre-commit convention. Its
+# status is discarded: this hook runs after the work git was asked to do is already
+# done, so a repository-local side effect must not look like a failed git command.
+if [ -x ".git/hooks/${hook}.local" ]; then
+    .git/hooks/${hook}.local "\$@" || true
+fi
+HOOK
+  echo "Taught ${global_hook} to delegate to .git/hooks/${hook}.local"
+}
+
+for hook in post-commit post-merge; do
+  teach_global_delegation "${hook}"
+
+  hook_shim="${git_directory}/hooks/${hook}.local"
+  cat > "${hook_shim}" <<'SHIM'
+#!/usr/bin/env bash
+# Installed by scripts/install_git_hooks.sh. The logic lives in the repository.
+exec "$(git rev-parse --show-toplevel)/scripts/autoinstall.sh" trigger
+SHIM
+  chmod +x "${hook_shim}"
+  echo "Installed ${hook_shim}"
+done
+
+echo "Commits and merges on master now rebuild and install Threading.app."
+echo "Watch it with scripts/autoinstall.sh status, pause it with scripts/autoinstall.sh off."

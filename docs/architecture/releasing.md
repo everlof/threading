@@ -45,6 +45,64 @@ development-signed bundle carrying `get-task-allow`. That is fine — it is not 
 anyone ships — but it means "did the entitlement change work?" cannot be answered by looking at
 a local Release build. See [`permissions.md`](permissions.md).
 
+## Keeping /Applications on master
+
+`scripts/autoinstall.sh` rebuilds and installs Threading every time a commit lands on master. The
+post-commit and post-merge hooks call `autoinstall.sh trigger`; a build already running when the
+next commit arrives is cancelled and started again on the newer commit, so the installed copy
+converges on master's tip rather than on whichever build finished last. `status`, `log`, `off` and
+`on` are the rest of its surface, and `scripts/install_git_hooks.sh` installs the hooks.
+
+**It builds a clone, not this tree.** Several agents edit this working tree at once and master
+moves under them, so a build started here would compile a half-written state and would fight the
+developer's own DerivedData. `~/.threading-autoinstall/checkout` is a `--local` clone reset to the
+exact commit that triggered the round, with DerivedData beside it. A build is of a commit.
+
+**A build action *can* be Developer ID signed** — this is the "switch every target to manual
+signing" alternative the section above names, taken from the command line where it applies to
+every target at once:
+
+```
+CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Developer ID Application: …"
+PROVISIONING_PROFILE_SPECIFIER="" CODE_SIGN_ENTITLEMENTS=… CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO
+```
+
+Two things make it work. The entitlements are derived from the app's own file with every
+`com.apple.developer.*` key removed, because those are the profile-backed family and no
+`codes.threading` profile exists on this machine — with Sign in with Apple left in, the build
+fails outright with "requires a provisioning profile with the Sign In with Apple feature". And
+`CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO` strips the `get-task-allow` Xcode otherwise injects, so
+the app you leave running all day is not one any process running as you can attach a debugger to.
+
+The result is a bundle whose designated requirement is byte-identical to the shipping one —
+`identifier "codes.threading"` and a Developer ID leaf for the team — which is what makes the
+TCC grants survive the swap. It is *not* a shipping artefact: unnotarized, untimestamped, single
+architecture, and missing the managed capability. It still cannot answer "did the entitlement
+change work?"; only the export can.
+
+**It never quits the running app.** Threading hosts live agent sessions in PTYs, and any agent
+committing to master would otherwise end a turn somebody is in the middle of.
+`install-app.sh --leave-running` moves the new bundle in underneath the running process, which
+keeps running the build it launched with until the app is reopened. The outgoing bundle is not
+deleted while a process is still reading it — that is how a running app gets SIGKILLed on its
+next page fault — but parked as `.Threading.app.parked-<pids>` and removed once none of those
+pids is a running Threading. Only one parked copy accumulates: the next install finds the
+destination unheld, because its holders are on the parked copy, and deletes it outright.
+
+**Detection uses `ps -o comm=`, not `pgrep -f`.** `pgrep` matches against argv, which a sandboxed
+shell cannot read — and a git hook fired by an agent's commit is one. It returns nothing while the
+app is plainly running, and nothing here means "not running, safe to replace".
+
+**Cancellation is a process group.** `xcodebuild` is started under job control so it gets a group
+of its own; the trigger sends `SIGTERM` to that group, which takes the compiler children with it,
+while the builder stays alive in its own group to start the next round. The builder then compares
+master's tip with the commit it was building: moved means start again, unchanged means the build
+genuinely failed, which is reported once and out loud.
+
+Measured on this machine: 509s for the first build of a fresh checkout, 24s for an incremental
+rebuild with no source change, 27s from trigger to installed and verified. On disk: 134MB of
+checkout, 2.5GB of DerivedData, and a 200MB parked bundle whenever the app was running.
+
 Before signing, the release script runs the same `scripts/ci.sh` gate as GitHub Actions:
 architecture/localization/theme boundaries, SwiftLint, the three local package suites, and the
 off-screen app test plan under complete concurrency checking. A deliberate emergency run may
