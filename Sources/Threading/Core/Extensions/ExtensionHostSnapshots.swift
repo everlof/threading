@@ -143,9 +143,8 @@ final class LiveExtensionHostSnapshotProvider:
         }
 
         let agentRoot: pid_t?
-        if let terminal = AgentRuntime.shared.controller(for: sessionID)?.session.shellPid,
-           terminal > 0 {
-            agentRoot = terminal
+        if let terminalRoot = AgentRuntime.shared.terminalRootProcessIdentifier(for: sessionID) {
+            agentRoot = terminalRoot
         } else {
             agentRoot = AgentRuntime.shared.conversation(for: sessionID)?
                 .stream.rootProcessIdentifier

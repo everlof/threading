@@ -641,14 +641,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         // Remote access is a separate loopback server behind a tunnel, independent of the MCP
         // listener — no ordering dependency, and it starts only if the user has turned it on.
-        RemoteAccessCoordinator.shared.sessionCommands = self
+        let remoteAccess = RemoteAccessCoordinator.shared
+        remoteAccess.installTerminalApplication(environment.remoteTerminals)
+        remoteAccess.sessionCommands = self
         remoteSessionEvents.observe(SessionArchivedStateDidChange.self) { [weak self] event in
             self?.refreshAfterRemoteSessionMutation(
                 sessionID: event.sessionID,
                 archived: event.isArchived
             )
         }
-        RemoteAccessCoordinator.shared.startIfEnabled()
+        remoteAccess.startIfEnabled()
 
         // Who takes the marks made on an image nobody else claimed. Installed here rather than
         // reached for from the design system: `MediaInspector` draws pictures and knows nothing

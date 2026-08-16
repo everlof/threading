@@ -412,6 +412,29 @@ final class ContextHandoffTests: XCTestCase {
         XCTAssertEqual(destinations.terminalQueries, [sessionID])
     }
 
+    func testTerminalDestinationReceivesOnlyTypedInputOperations() {
+        let sessionID = SessionID()
+        let terminal = RecordingTerminalInputSurface()
+        let destinations = ContextDestinations(receiver: nil, terminal: terminal)
+
+        SessionContextHandoff.stage(
+            Self.attachmentReference,
+            for: sessionID,
+            querying: destinations
+        )
+        SessionContextHandoff.send(
+            Self.codeReference,
+            for: sessionID,
+            querying: destinations
+        )
+
+        XCTAssertEqual(
+            terminal.pasted,
+            [Self.attachmentReference.plainText(), Self.codeReference.plainText()]
+        )
+        XCTAssertEqual(terminal.inserted, [TerminalDefaults.submitSequence])
+    }
+
     // MARK: - Fixtures
 
     private final class RecordingContextReceiver: SessionContextReceiving {
@@ -429,11 +452,16 @@ final class ContextHandoffTests: XCTestCase {
 
     private final class ContextDestinations: SessionContextDestinationQuerying {
         let receiver: RecordingContextReceiver?
+        let terminal: RecordingTerminalInputSurface?
         var queriedSessionIDs: [SessionID] = []
         var terminalQueries: [SessionID] = []
 
-        init(receiver: RecordingContextReceiver?) {
+        init(
+            receiver: RecordingContextReceiver?,
+            terminal: RecordingTerminalInputSurface? = nil
+        ) {
             self.receiver = receiver
+            self.terminal = terminal
         }
 
         func contextReceiver(for sessionID: SessionID) -> (any SessionContextReceiving)? {
@@ -441,9 +469,24 @@ final class ContextHandoffTests: XCTestCase {
             return receiver
         }
 
-        func runningTerminalSession(for sessionID: SessionID) -> TerminalSession? {
+        func runningTerminalInputSurface(
+            for sessionID: SessionID
+        ) -> (any AgentTerminalInputSurface)? {
             terminalQueries.append(sessionID)
-            return nil
+            return terminal
+        }
+    }
+
+    private final class RecordingTerminalInputSurface: AgentTerminalInputSurface {
+        var pasted: [String] = []
+        var inserted: [String] = []
+
+        func pasteTerminalText(_ text: String) {
+            pasted.append(text)
+        }
+
+        func insertTerminalText(_ text: String) {
+            inserted.append(text)
         }
     }
 

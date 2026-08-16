@@ -11,13 +11,31 @@ struct AppEnvironment {
     let agentRuntime: AgentRuntime
     let settings: AppSettings
     let eventLog: EventLog
+    let remoteTerminals: any RemoteTerminalApplicationCapability
+
+    init(
+        projectStore: ProjectStore,
+        agentRuntime: AgentRuntime,
+        settings: AppSettings,
+        eventLog: EventLog,
+        remoteTerminals: (any RemoteTerminalApplicationCapability)? = nil
+    ) {
+        self.projectStore = projectStore
+        self.agentRuntime = agentRuntime
+        self.settings = settings
+        self.eventLog = eventLog
+        self.remoteTerminals = remoteTerminals
+            ?? LiveRemoteTerminalApplicationCapability(surfaces: agentRuntime)
+    }
 
     static var live: AppEnvironment {
-        AppEnvironment(
+        let agentRuntime: AgentRuntime = .shared
+        return AppEnvironment(
             projectStore: .shared,
-            agentRuntime: .shared,
+            agentRuntime: agentRuntime,
             settings: .shared,
-            eventLog: .shared
+            eventLog: .shared,
+            remoteTerminals: LiveRemoteTerminalApplicationCapability(surfaces: agentRuntime)
         )
     }
 }

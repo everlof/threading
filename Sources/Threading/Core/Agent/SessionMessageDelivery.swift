@@ -144,8 +144,7 @@ enum SessionMessageDelivery {
            conversation.isRunning {
             return .chat
         }
-        if let controller = AgentRuntime.shared.controller(for: sessionID),
-           controller.isRunning {
+        if AgentRuntime.shared.runningTerminalInputSurface(for: sessionID) != nil {
             return .terminal
         }
         return .dormant
@@ -289,8 +288,9 @@ enum SessionMessageDelivery {
     // MARK: - Private
 
     private static func liveTerminalTarget(for sessionID: SessionID) -> TerminalTarget? {
-        guard let controller = AgentRuntime.shared.controller(for: sessionID),
-              controller.isRunning else { return nil }
+        guard let terminal = AgentRuntime.shared.runningTerminalInputSurface(for: sessionID) else {
+            return nil
+        }
 
         let kind = ProjectStore.shared.session(withID: sessionID)?.kind
         return TerminalTarget(
@@ -299,19 +299,19 @@ enum SessionMessageDelivery {
             // A record that has vanished mid-call verifies nothing and requires everything.
             requiresVerifiedBoot: kind?.supports(.terminalThreadingBridge) ?? true,
             hasDeliveryInFlight: terminalsMidDelivery.contains(sessionID),
-            type: { [weak controller] text in
-                guard let controller else { return }
+            type: { [weak terminal] text in
+                guard let terminal else { return }
                 // Claimed at the paste, released by the receipt or its timeout, so the whole
                 // paste-then-Return window is one delivery's own.
                 terminalsMidDelivery.insert(sessionID)
-                controller.session.pasteText(text)
+                terminal.pasteTerminalText(text)
                 // The Return goes in its own write, a beat later — the rename request
                 // measured a Return bundled with its text being read as pasted content,
                 // left sitting unsent in the TUI's composer.
                 DispatchQueue.main.asyncAfter(
                     deadline: .now() + SessionRenameRequest.submitDelay
                 ) {
-                    controller.session.insertText(TerminalDefaults.submitSequence)
+                    terminal.insertTerminalText(TerminalDefaults.submitSequence)
                 }
             },
             awaitAcceptance: { completion in

@@ -27,6 +27,11 @@ if ! python3 -m unittest "${script_directory}/tests/test_module_boundaries.py"; 
   failed=1
 fi
 
+if ! python3 -m unittest "${script_directory}/tests/test_dependency_boundaries.py"; then
+  echo "architecture-boundary: dependency boundary checker regression tests failed" >&2
+  failed=1
+fi
+
 tool_handlers=(
   "${repository_directory}"/Sources/Threading/UI/Windows/AgentToolCoordinator+*.swift
 )

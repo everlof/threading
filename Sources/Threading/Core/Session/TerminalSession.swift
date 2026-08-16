@@ -730,3 +730,40 @@ extension TerminalSessionDelegate {
     func terminalSessionDidReceiveBell(_ session: TerminalSession) -> SoundEvent? { nil }
     func terminalSessionDidForwardMouseReport(_ session: TerminalSession) {}
 }
+
+// MARK: - RemoteTerminalSurface
+
+extension TerminalSession: RemoteTerminalSurface {
+    var remoteTerminalState: RemoteTerminalState {
+        let terminal = terminalView.getTerminal()
+        return RemoteTerminalState(
+            grid: RemoteTerminalGrid(cols: terminal.cols, rows: terminal.rows),
+            title: title,
+            remoteViewport: remoteViewport.map {
+                RemoteTerminalGrid(cols: $0.cols, rows: $0.rows)
+            }
+        )
+    }
+
+    var remoteTerminalSnapshot: RemoteTerminalSnapshot {
+        let state = remoteTerminalState
+        return RemoteTerminalSnapshot(
+            grid: state.grid,
+            title: state.title,
+            screenSeed: RemoteScreenSeed.repaint(of: terminalView.getTerminal()),
+            remoteViewport: state.remoteViewport
+        )
+    }
+
+    func setRemoteOutputSink(_ sink: RemoteTerminalOutputSink?) {
+        onRawOutput = sink
+    }
+
+    func setRemoteViewport(_ grid: RemoteTerminalGrid?) {
+        if let grid {
+            setRemoteViewport(cols: grid.cols, rows: grid.rows)
+        } else {
+            clearRemoteViewport()
+        }
+    }
+}

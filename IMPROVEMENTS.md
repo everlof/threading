@@ -12,10 +12,10 @@ gate prevents the old coupling from returning.
 
 | Boundary | Current measurement | Next coherent reduction |
 |---|---:|---|
-| Concrete UI-controller references in Core | 17 across 3 files | Move the next complete runtime/controller ownership edge behind a typed application capability; ratchet the gate in the same commit. |
-| UI-framework imports in Core/Models | 63 across 61 files | Extract stable Foundation-only contracts into the existing domain boundary before adding another module. |
+| Concrete UI-controller references in Core | 8 across 2 files | Move the next complete conversation or project-terminal ownership edge behind a typed application capability; ratchet the gate in the same commit. |
+| UI-framework imports in Core/Models | 62 across 60 files | Extract stable Foundation-only contracts into the existing domain boundary before adding another module. |
 | `ProjectStore.shared` | 247 across 63 files | Migrate the next complete application coordinator or background service through an existing composition root. |
-| `AgentRuntime.shared` | 102 across 31 files | Inject the runtime at the next ownership boundary that already has a composition root. |
+| `AgentRuntime.shared` | 92 across 31 files | Inject the runtime at the next ownership boundary that already has a composition root. |
 | `AppSettings.shared` | 196 across 39 files | Pass a narrow settings projection or store only where a use case needs it. |
 | `EventLog.shared` | 82 across 25 files | Inject logging into application services; system log APIs may remain process-global. |
 | `MainWindowController` authority | 5,098 lines across 4 files | Continue moving use cases out; the controller should converge on composition, navigation, and window lifecycle. |

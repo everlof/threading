@@ -56,7 +56,7 @@ The application target currently approximates the other layers:
 |---|---|
 | `Models/` | Provider capabilities and persisted records. Provider, session, workspace, project, and persisted-UI records have separate files; AppKit-bearing theme/profile values remain migration debt. |
 | `Core/Session`, `Core/Project`, `Core/Settings`, `Core/Logging` | Legacy persistence and application state. Stores and policies still share directories while injection advances boundary by boundary. |
-| `Core/Agent`, `Core/AI`, `Core/MCP`, `Core/Remote`, `Core/Extensions` | Runtime and transport. Core/Remote reaches session lifecycle only through injected `RemoteSessionCommands`; built-in MCP representation comes from one typed descriptor registry. |
+| `Core/Agent`, `Core/AI`, `Core/MCP`, `Core/Remote`, `Core/Extensions` | Runtime and transport. Core/Remote reaches session lifecycle through injected `RemoteSessionCommands` and agent-terminal runtime through injected `RemoteTerminalApplicationCapability`; built-in MCP representation comes from one typed descriptor registry. |
 | `Application/` | Foundation-only use cases and policies extracted from UI adapters, including browser, session, extension-authoring, remote-session, window-navigation, and settings-catalogue capabilities. |
 | `App/` | Process composition. `AppEnvironment` owns the legacy store/service instances passed into migrated coordinators. |
 | `UI/` | AppKit composition and presentation. Feature UI uses `UI/Design`; tool and browser controllers adapt application capabilities to windows and WebKit. |
@@ -67,17 +67,24 @@ The architecture gate rejects every Core reference to `AppDelegate` or `MainWind
 permits only the ratcheted concrete-controller edges reported by
 `scripts/check_dependency_boundaries.py`:
 
-- `Core/Agent/AgentRuntime.swift` constructs and retains agent-session and conversation view
-  controllers.
-- `Core/Agent/LimitRecoveryCoordinator.swift` accepts concrete agent-session controllers.
+- `Core/Agent/AgentRuntime.swift` constructs and retains conversation view controllers. Terminal
+  adapters are constructed in UI and retained through `AgentTerminalRuntimeSurface`.
 - `Core/Session/ProjectTerminalRuntime.swift` constructs and retains a project-terminal controller.
 
 Session-context routing is no longer in this queue: Core targets the typed
 `SessionContextReceiving` capability and resolves it through `SessionContextDestinationQuerying`;
 the UI controller is only an adapter. Remote conversation mirroring now follows the same rule:
 `RemoteConversationSurface` owns the Foundation-only projection/submission contract and
-`ConversationViewController` adapts it, so Core/Remote never receives the controller. The ratchet
-now permits 17 references across the three files above, down from 19 across five.
+`ConversationViewController` adapts it, so Core/Remote never receives the controller. Remote
+terminal mirroring crosses the injected Foundation-only `RemoteTerminalApplicationCapability`;
+its live implementation receives `AgentRuntime` from `AppEnvironment` and has no route-time
+global lookup. Context handoff and message delivery consume `AgentTerminalInputSurface`; limit
+recovery consumes `AgentTerminalLimitRecoverySurface`; extension process inspection receives only
+a scalar process-root projection. None of those Core owners can acquire the UI adapter. The
+ratchet now permits 8 references across the two files above, down from 19 across five and from the
+immediately preceding baseline of 17 across three. The checker also rejects inferred
+controller-returning lookups anywhere in Core, with exact ratchets for the remaining standalone-
+terminal declaration and call.
 
 These are a migration queue, not exemptions. Remove one complete ownership edge, add a focused
 capability/projection test, and lower the ratchet in the same coherent commit.
@@ -93,6 +100,10 @@ capability/projection test, and lower the ratchet in the same coherent commit.
   releases the controller and environment before removing it. The architecture gate rejects
   `.live` construction anywhere else and rejects moving that helper back onto `XCTestCase`. A leaf
   must not add a new `.shared` lookup for an application-owned service.
+- `AppEnvironment` constructs `RemoteTerminalApplicationCapability` from its injected
+  `AgentRuntime`; `AppDelegate` installs that same instance into the mirror registry exactly once,
+  before remote access starts. The live capability never discovers a runtime, window, or
+  controller internally.
 - A conversation retains `SessionID` and consumes an injected current-session projection. Durable
   records are values and must not be retained as a substitute for current store state.
 - Main-window and tool coordinators keep composition, routing, and presentation. Command policy,
@@ -119,31 +130,33 @@ hand-maintained tool, settings, shortcut, or component inventory.
 ## Current stabilization increment
 
 These measurements are the output of `scripts/report_architecture_health.py` against the truthful
-pre-change `HEAD` tree and the current source tree. The settings-catalogue command family moved
-from `AgentToolCoordinator` into the Foundation-only `SettingsCatalogueService`; the UI adapter
-now only maps and routes. `RemoteAccessCoordinator` also receives `AppSettings` explicitly and
-authorizes mutations from descriptor `remotePolicy`. The remote conversation mirror consumes the
-typed `RemoteConversationSurface` rather than a view controller. The architecture gate ratchets
-these moved ownership edges and the sole `AppEnvironment.live` composition root.
+pre-change `HEAD` tree and the current source tree. The remote terminal mirror now consumes the
+injected `RemoteTerminalApplicationCapability`, while UI constructs the concrete agent-terminal
+adapter and Core retains only its typed runtime surface. The capability distinguishes cheap live
+state from a bounded attach repaint, returns typed unavailable/applied outcomes, and preserves
+transport-owned authorization, validation, audit and replay ordering. The same UI adapter exposes
+separate typed Core capabilities for ordinary input, limit recovery and process-root projection;
+the architecture gate rejects every inferred controller-returning lookup outside the exact
+standalone-terminal debt ratchet.
 
 | Metric | Before | Current | Change |
 |---|---:|---:|---:|
-| Threading Swift files / lines | 793 / 328,643 | 795 / 329,431 | +2 service/capability files / +788 net typed contracts, wiring, fixtures, and proofs |
+| Threading Swift files / lines | 795 / 329,431 | 796 / 329,841 | +1 capability file / +410 net typed contracts, wiring, regression proofs, and runtime adaptation |
 | `ThreadingDomain` Swift files / lines | 1 / 197 | 1 / 197 | unchanged |
 | `static … shared` declarations | 89 / 87 files | 89 / 87 files | unchanged |
 | `ProjectStore.shared` | 247 / 63 files | 247 / 63 files | unchanged |
-| `AgentRuntime.shared` | 102 / 31 files | 102 / 31 files | unchanged |
-| `AppSettings.shared` | 216 / 39 files | 196 / 39 files | −20 references at the remote ownership boundary |
+| `AgentRuntime.shared` | 102 / 31 files | 92 / 31 files | −10 remote/controller lookups; no new source of truth |
+| `AppSettings.shared` | 196 / 39 files | 196 / 39 files | unchanged |
 | `EventLog.shared` | 82 / 25 files | 82 / 25 files | unchanged |
 | Core `AppDelegate.shared` | 0 / 0 files | 0 / 0 files | unchanged |
-| Concrete UI-controller references in Core | 18 / 4 files | 17 / 3 files | −1 complete remote projection edge / −1 file; remains active debt |
-| UI-framework imports in Core/Models | 63 / 61 files | 63 / 61 files | unchanged; remains active debt |
-| `MainWindowController` authority | 5,107 / 4 files | 5,098 / 4 files | −9 fallback-construction lines |
-| `AgentToolCoordinator` authority | 9,005 / 15 files | 8,979 / 15 files | −26 settings-catalogue policy lines |
-| Capability extensions | 5,909 / 11 files | 5,882 / 11 files | −27 settings-catalogue policy lines |
-| `ThreadingTests` Swift files | 379 | 382 | +3 focused proof files; filesystem synchronized |
+| Concrete UI-controller references in Core | 17 / 3 files | 8 / 2 files | −9 complete agent-terminal runtime ownership edge / −1 file; remains active debt |
+| UI-framework imports in Core/Models | 63 / 61 files | 62 / 60 files | −1 Core AppKit import / −1 file; remains active debt |
+| `MainWindowController` authority | 5,098 / 4 files | 5,098 / 4 files | unchanged; remains active debt |
+| `AgentToolCoordinator` authority | 8,979 / 15 files | 8,979 / 15 files | unchanged; remains active debt |
+| Capability extensions | 5,882 / 11 files | 5,882 / 11 files | unchanged |
+| `ThreadingTests` Swift files | 382 | 383 | +1 focused contract-test file; filesystem synchronized |
 
-The nine-line `MainWindowController` reduction removes a production composition escape hatch; it
-is not a controller decomposition. Likewise, moving 26 catalogue-policy lines out of
-`AgentToolCoordinator` is one coherent authority edge, not decomposition of the remaining hub.
-Both authorities stay in the active debt ledger at their full reported sizes.
+The unchanged main-window and tool-coordinator authorities stay in the active debt ledger at their
+full reported sizes. This increment removes the complete agent-terminal runtime/controller
+ownership edge; it does not claim decomposition of those hubs or of the two remaining Core
+controller dependencies.

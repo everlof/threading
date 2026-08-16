@@ -6,8 +6,8 @@ import ThreadingRemoteKit
 /// Bridges a live session to its remote subscribers: taps the PTY byte stream, keeps a ring for
 /// late joiners, fans output out to every watcher, and routes remote input back in.
 ///
-/// `@MainActor` because everything it touches — `AgentRuntime`, `TerminalSession`, `ProjectStore`
-/// — is main-only. Connections live on the server queue and their `send*` methods hop there
+/// `@MainActor` because its application capabilities and `ProjectStore` are main-only.
+/// Connections live on the server queue and their `send*` methods hop there
 /// themselves, so this class never blocks on the network.
 ///
 /// Only the agent session's main surface is mirrored. Shell drawers and display-pane terminals
@@ -18,8 +18,10 @@ final class RemoteSessionMirrorRegistry {
     static let shared = RemoteSessionMirrorRegistry()
     private let appEvents = AppEventObservations()
     private var appearanceObservation: NSKeyValueObservation?
+    private var terminalApplication: (any RemoteTerminalApplicationCapability)?
 
-    private init() {
+    init(terminalApplication: (any RemoteTerminalApplicationCapability)? = nil) {
+        self.terminalApplication = terminalApplication
         // A remote surface is a view of this app, so theme changes are live state rather than a
         // reconnect-only preference. Broadcast broadly and resolve per session: assignments can
         // change one terminal, while profile and app-theme changes can affect many.
@@ -46,6 +48,16 @@ final class RemoteSessionMirrorRegistry {
                 self?.broadcastThemes()
             }
         }
+    }
+
+    /// Completes the live graph at the application composition root before the listener starts.
+    /// Tests inject a fake at initialization; neither path permits route-time singleton lookup.
+    func installTerminalApplication(
+        _ terminalApplication: any RemoteTerminalApplicationCapability
+    ) {
+        precondition(self.terminalApplication == nil, "Remote terminal capability installs once")
+        precondition(mirrors.isEmpty, "Remote terminal capability must be installed before use")
+        self.terminalApplication = terminalApplication
     }
 
     // MARK: - State
@@ -293,15 +305,13 @@ final class RemoteSessionMirrorRegistry {
         ) else {
             return false
         }
-        var attached = false
-        if let controller = AgentRuntime.shared.controller(for: sessionID), controller.isRunning {
-            attached = attachTerminal(
-                connection,
-                to: controller.session,
-                sessionID: sessionID,
-                capability: authorization.capability
-            )
-        } else if let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID),
+        var attached = attachTerminal(
+            connection,
+            sessionID: sessionID,
+            capability: authorization.capability
+        )
+        if !attached,
+           let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID),
                   conversation.isRunning {
             attached = attachConversation(
                 connection,
@@ -366,23 +376,21 @@ final class RemoteSessionMirrorRegistry {
 
     private func attachTerminal(
         _ connection: RemoteConnection,
-        to terminal: TerminalSession,
         sessionID: SessionID,
         capability: RemoteCapability
     ) -> Bool {
-        beginCapturing(terminal, sessionID: sessionID)
+        guard let snapshot = beginCapturing(sessionID: sessionID) else { return false }
 
         let key = ObjectIdentifier(connection)
         mirrors[sessionID]?.subscribers[key] = connection
         sessionByConnection[key] = sessionID
 
-        let grid = terminal.characterGrid
         let hello = RemoteHelloDTO(
             surface: "terminal",
             capability: capability.rawValue,
-            cols: grid.cols,
-            rows: grid.rows,
-            title: terminal.title,
+            cols: snapshot.grid.cols,
+            rows: snapshot.grid.rows,
+            title: snapshot.title,
             theme: RemoteThemeBridge.appTheme(),
             terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID),
             features: RemoteWebSocketFeature.allCases.map(\.rawValue)
@@ -390,8 +398,8 @@ final class RemoteSessionMirrorRegistry {
         connection.sendText(encode(hello))
         sendLatestWorkspaceActivity(to: connection, sessionID: sessionID)
 
-        let snapshot = mirrors[sessionID]?.ring.snapshot() ?? Data()
-        if !snapshot.isEmpty { connection.sendBinary(snapshot) }
+        let ringSnapshot = mirrors[sessionID]?.ring.snapshot() ?? Data()
+        if !ringSnapshot.isEmpty { connection.sendBinary(ringSnapshot) }
         return true
     }
 
@@ -542,35 +550,50 @@ final class RemoteSessionMirrorRegistry {
     /// Begins keeping the bounded terminal history as soon as a live surface exists, not only
     /// when the first phone connects. Existing screen contents seed the ring when access is
     /// enabled after a session has already been running.
-    func beginCapturing(_ terminal: TerminalSession, sessionID: SessionID) {
-        guard mirrors[sessionID] == nil else { return }
+    @discardableResult
+    func beginCapturing(sessionID: SessionID) -> RemoteTerminalState? {
+        guard let terminalApplication else { return nil }
+        if mirrors[sessionID] != nil {
+            guard case .available(let state) = terminalApplication.state(for: sessionID) else {
+                return nil
+            }
+            return state
+        }
+
+        let result = terminalApplication.beginCapture(for: sessionID) { [weak self] data in
+            // Preserve the old capture handoff: the SwiftTerm output callback is synchronous
+            // and must return before ring maintenance or subscriber fan-out begins.
+            DispatchQueue.main.async { [weak self] in
+                self?.broadcast(data, sessionID: sessionID)
+            }
+        }
+        guard case .captured(let snapshot) = result else { return nil }
         var ring = RemoteRingBuffer(capacity: RemoteAccessDefaults.ringBufferBytes)
         // A synthesised repaint, not `getBufferAsData()`: that is plain text joined by bare line
         // feeds with blank cells as NUL, which a client renders as a staircase of run-together
         // words. See `RemoteScreenSeed`.
-        ring.append(RemoteScreenSeed.repaint(of: terminal.terminalView.getTerminal()))
+        ring.append(snapshot.screenSeed)
         mirrors[sessionID] = Mirror(ring: ring, surface: "terminal")
-        installTap(on: terminal, sessionID: sessionID)
+        return snapshot.state
     }
 
     /// Called once the listener is ready, covering terminals that predate the setting change.
     func remoteAccessStarted() {
-        for sessionID in AgentRuntime.shared.liveSessionIDs {
+        guard let terminalApplication else { return }
+        for sessionID in terminalApplication.sessionIDs {
             guard RemoteSessionAccess.isVisible(
                 ProjectStore.shared.session(withID: sessionID)
             ) else {
                 continue
             }
-            guard let controller = AgentRuntime.shared.controller(for: sessionID),
-                  controller.isRunning else { continue }
-            beginCapturing(controller.session, sessionID: sessionID)
+            beginCapturing(sessionID: sessionID)
         }
     }
 
     /// Releases idle capture as well as subscribers when the master switch is turned off.
     func remoteAccessStopped() {
         for sessionID in mirrors.keys where mirrors[sessionID]?.surface == "terminal" {
-            AgentRuntime.shared.controller(for: sessionID)?.session.clearRemoteViewport()
+            _ = terminalApplication?.setViewport(nil, for: sessionID)
             removeTap(sessionID: sessionID)
         }
         for work in pendingConversationBroadcasts.values { work.cancel() }
@@ -598,20 +621,19 @@ final class RemoteSessionMirrorRegistry {
     ) -> Bool {
         guard canWrite(sessionID: sessionID, authorization: authorization) else { return false }
         guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
-              let controller = AgentRuntime.shared.controller(for: sessionID),
-              controller.isRunning else {
+              let terminalApplication,
+              case .available = terminalApplication.state(for: sessionID) else {
             return false
         }
-        let terminal = controller.session
 
+        // Preserve the existing audit ordering: authorization and runtime admission happen
+        // first, the accepted interaction is recorded, and only then do bytes reach the PTY.
         recordFirstInput(device: device, sessionID: sessionID)
         RemoteNotificationService.shared.recordInteraction(
             sessionID: sessionID,
             authorization: authorization
         )
-
-        terminal.sendRemoteInput(bytes)
-        return true
+        return terminalApplication.sendInput(bytes, to: sessionID) == .applied
     }
 
     /// Records the visible grid of an interactive phone. This is a lease, not a preference:
@@ -628,8 +650,8 @@ final class RemoteSessionMirrorRegistry {
               (4...160).contains(rows),
               mirrors[sessionID]?.surface == "terminal",
               mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
-              let controller = AgentRuntime.shared.controller(for: sessionID),
-              controller.isRunning else {
+              let terminalApplication,
+              case .available = terminalApplication.state(for: sessionID) else {
             return
         }
 
@@ -755,10 +777,10 @@ final class RemoteSessionMirrorRegistry {
             status = .rejected
         } else if mirrors[sessionID]?.surface == "terminal",
            RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
-           let controller = AgentRuntime.shared.controller(for: sessionID),
-           controller.isRunning {
-            let bytes = Array((text + "\r").utf8)
-            controller.session.sendRemoteInput(bytes)
+           terminalApplication?.sendInput(
+               Array((text + "\r").utf8),
+               to: sessionID
+           ) == .applied {
             recordFirstInput(device: device, sessionID: sessionID)
             RemoteNotificationService.shared.recordInteraction(
                 sessionID: sessionID,
@@ -1561,7 +1583,7 @@ final class RemoteSessionMirrorRegistry {
         attentionRequestPolicy.remove(sessionID: sessionID.uuidString)
         defer { followersChanged(sessionID) }
         guard let mirror = mirrors[sessionID] else { return }
-        AgentRuntime.shared.controller(for: sessionID)?.session.clearRemoteViewport()
+        _ = terminalApplication?.setViewport(nil, for: sessionID)
         removeTap(sessionID: sessionID)
         let ended = encode(RemoteEndedDTO(reason: "sessionClosed"))
         for connection in mirror.subscribers.values {
@@ -1579,18 +1601,8 @@ final class RemoteSessionMirrorRegistry {
 
     // MARK: - Private
 
-    private func installTap(on terminal: TerminalSession, sessionID: SessionID) {
-        terminal.onRawOutput = { data in
-            // Fires on the main thread inside SwiftTerm's read hop; the async keeps the call
-            // into this @MainActor class well-typed and preserves chunk order (main is FIFO).
-            DispatchQueue.main.async {
-                RemoteSessionMirrorRegistry.shared.broadcast(data, sessionID: sessionID)
-            }
-        }
-    }
-
     private func removeTap(sessionID: SessionID) {
-        AgentRuntime.shared.controller(for: sessionID)?.session.onRawOutput = nil
+        _ = terminalApplication?.endCapture(for: sessionID)
     }
 
     private func releaseViewport(for connection: RemoteConnection, sessionID: SessionID) {
@@ -1601,22 +1613,26 @@ final class RemoteSessionMirrorRegistry {
     }
 
     private func applyViewport(for sessionID: SessionID) {
-        guard let terminal = AgentRuntime.shared.controller(for: sessionID)?.session else {
+        guard let terminalApplication,
+              case .available(let state) = terminalApplication.state(for: sessionID) else {
             return
         }
         let requests = mirrors[sessionID]?.viewportRequests.map {
             (cols: $0.value.cols, rows: $0.value.rows)
         } ?? []
         guard let grid = Self.resolvedViewport(of: requests) else {
-            guard terminal.remoteViewport != nil else { return }
+            guard state.remoteViewport != nil else { return }
+            guard terminalApplication.setViewport(nil, for: sessionID) == .applied else { return }
             EventLog.shared.record(.remote, "Remote viewport released", [
                 "session": sessionID.uuidString,
             ])
-            terminal.clearRemoteViewport()
             return
         }
-        guard terminal.remoteViewport?.cols != grid.cols
-            || terminal.remoteViewport?.rows != grid.rows else {
+        let requestedGrid = RemoteTerminalGrid(cols: grid.cols, rows: grid.rows)
+        guard state.remoteViewport != requestedGrid else {
+            return
+        }
+        guard terminalApplication.setViewport(requestedGrid, for: sessionID) == .applied else {
             return
         }
         EventLog.shared.record(.remote, "Remote viewport applied", [
@@ -1624,7 +1640,6 @@ final class RemoteSessionMirrorRegistry {
             "grid": "\(grid.cols)×\(grid.rows)",
             "clients": String(requests.count),
         ])
-        terminal.setRemoteViewport(cols: grid.cols, rows: grid.rows)
         followersChanged(sessionID)
     }
 

@@ -32,7 +32,9 @@ protocol SessionContextReceiving: AnyObject {
 @MainActor
 protocol SessionContextDestinationQuerying {
     func contextReceiver(for sessionID: SessionID) -> (any SessionContextReceiving)?
-    func runningTerminalSession(for sessionID: SessionID) -> TerminalSession?
+    func runningTerminalInputSurface(
+        for sessionID: SessionID
+    ) -> (any AgentTerminalInputSurface)?
 }
 
 extension AgentRuntime: SessionContextDestinationQuerying {
@@ -40,10 +42,6 @@ extension AgentRuntime: SessionContextDestinationQuerying {
         conversation(for: sessionID)
     }
 
-    func runningTerminalSession(for sessionID: SessionID) -> TerminalSession? {
-        guard let controller = controller(for: sessionID), controller.isRunning else { return nil }
-        return controller.session
-    }
 }
 
 @MainActor
@@ -60,7 +58,7 @@ enum SessionContextHandoff {
     /// would keep offering the door that closed.
     enum Destination {
         case conversation(any SessionContextReceiving)
-        case terminal(TerminalSession)
+        case terminal(any AgentTerminalInputSurface)
     }
 
     // MARK: - Routing
@@ -78,7 +76,9 @@ enum SessionContextHandoff {
         }
         // A dead PTY swallows a paste without a trace, so a terminal is a destination only
         // while its agent is actually there to read one.
-        guard let terminal = destinations.runningTerminalSession(for: sessionID) else { return nil }
+        guard let terminal = destinations.runningTerminalInputSurface(for: sessionID) else {
+            return nil
+        }
         return .terminal(terminal)
     }
 
@@ -159,7 +159,7 @@ enum SessionContextHandoff {
     private static func paste(
         _ attachment: ConversationContextAttachment,
         fileURL: URL?,
-        into session: TerminalSession,
+        into terminal: any AgentTerminalInputSurface,
         submitting: Bool
     ) {
         // The path goes over first and **alone**. Both CLIs read one arriving paste as a unit
@@ -167,13 +167,13 @@ enum SessionContextHandoff {
         // path with a sentence after it is a sentence. See `TerminalDrop`.
         var anchorPasted = false
         if let fileURL {
-            session.pasteText(TerminalDrop.text(for: [fileURL.path]))
+            terminal.pasteTerminalText(TerminalDrop.text(for: [fileURL.path]))
             anchorPasted = true
         }
 
         let body = attachment.plainText(omittingAnchor: anchorPasted)
         if !body.isEmpty {
-            session.pasteText(body)
+            terminal.pasteTerminalText(body)
         }
         guard submitting else { return }
 
@@ -184,11 +184,11 @@ enum SessionContextHandoff {
         // picture there; see `TerminalDefaults.pastedTurnSubmitDelay`.
         let delay = anchorPasted ? TerminalDefaults.pastedTurnSubmitDelay : 0
         guard delay > 0 else {
-            session.insertText(TerminalDefaults.submitSequence)
+            terminal.insertTerminalText(TerminalDefaults.submitSequence)
             return
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak session] in
-            session?.insertText(TerminalDefaults.submitSequence)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak terminal] in
+            terminal?.insertTerminalText(TerminalDefaults.submitSequence)
         }
     }
 }

@@ -1,0 +1,177 @@
+import Foundation
+
+/// The terminal geometry shared by the Mac PTY and every attached remote renderer.
+struct RemoteTerminalGrid: Equatable, Sendable {
+    let cols: Int
+    let rows: Int
+}
+
+/// Cheap live state used for request admission and viewport reconciliation.
+///
+/// Keeping this separate from `RemoteTerminalSnapshot` prevents high-frequency frontend input
+/// and resize requests from synthesizing a full repaint of the visible terminal grid.
+struct RemoteTerminalState: Equatable, Sendable {
+    let grid: RemoteTerminalGrid
+    let title: String
+    let remoteViewport: RemoteTerminalGrid?
+}
+
+/// The bounded state needed to attach a frontend to an already-running terminal.
+///
+/// `screenSeed` is a self-contained repaint of the visible grid, not scrollback. The application
+/// capability does not expose the terminal emulator, PTY, or presentation controller that
+/// produced it.
+struct RemoteTerminalSnapshot: Equatable, Sendable {
+    let state: RemoteTerminalState
+    let screenSeed: Data
+
+    var grid: RemoteTerminalGrid { state.grid }
+    var title: String { state.title }
+    var remoteViewport: RemoteTerminalGrid? { state.remoteViewport }
+
+    init(
+        grid: RemoteTerminalGrid,
+        title: String,
+        screenSeed: Data,
+        remoteViewport: RemoteTerminalGrid?
+    ) {
+        self.state = RemoteTerminalState(
+            grid: grid,
+            title: title,
+            remoteViewport: remoteViewport
+        )
+        self.screenSeed = screenSeed
+    }
+}
+
+enum RemoteTerminalStateResult: Equatable, Sendable {
+    case available(RemoteTerminalState)
+    case unavailable
+}
+
+enum RemoteTerminalCaptureResult: Equatable, Sendable {
+    case captured(RemoteTerminalSnapshot)
+    case unavailable
+}
+
+enum RemoteTerminalMutationResult: Equatable, Sendable {
+    case applied
+    case unavailable
+}
+
+typealias RemoteTerminalOutputSink = @MainActor (_ data: Data) -> Void
+
+/// The runtime adapter behind the application capability.
+///
+/// This is implemented by the terminal runtime itself. It deliberately contains no controller,
+/// view, or SwiftTerm type, so application policy can be driven by a server or another frontend.
+@MainActor
+protocol RemoteTerminalSurface: AnyObject, Sendable {
+    var isRunning: Bool { get }
+    var remoteTerminalState: RemoteTerminalState { get }
+    var remoteTerminalSnapshot: RemoteTerminalSnapshot { get }
+
+    func setRemoteOutputSink(_ sink: RemoteTerminalOutputSink?)
+    func sendRemoteInput(_ bytes: [UInt8])
+    func setRemoteViewport(_ grid: RemoteTerminalGrid?)
+}
+
+/// Lookup supplied by the runtime owner. Implementations query only state they already own;
+/// they do not locate a process singleton or application window internally.
+@MainActor
+protocol RemoteTerminalSurfaceQuerying: Sendable {
+    var remoteTerminalSessionIDs: Set<SessionID> { get }
+    func remoteTerminalSurface(for sessionID: SessionID) -> (any RemoteTerminalSurface)?
+}
+
+/// Foundation-only terminal operations available to remote transport and future frontends.
+///
+/// Transport authentication, share scope, visibility, input-control policy, request replay, and
+/// viewport bounds remain outside this capability. Once those checks admit an operation, this
+/// boundary either applies it to the currently running terminal or refuses it explicitly.
+@MainActor
+protocol RemoteTerminalApplicationCapability: Sendable {
+    var sessionIDs: Set<SessionID> { get }
+
+    func state(for sessionID: SessionID) -> RemoteTerminalStateResult
+    func beginCapture(
+        for sessionID: SessionID,
+        output: @escaping RemoteTerminalOutputSink
+    ) -> RemoteTerminalCaptureResult
+    func endCapture(for sessionID: SessionID) -> RemoteTerminalMutationResult
+    func sendInput(
+        _ bytes: [UInt8],
+        to sessionID: SessionID
+    ) -> RemoteTerminalMutationResult
+    func setViewport(
+        _ grid: RemoteTerminalGrid?,
+        for sessionID: SessionID
+    ) -> RemoteTerminalMutationResult
+}
+
+/// Live application implementation. Its only dependency is injected at construction and owns
+/// the surfaces it returns; there is no fallback to a process-global runtime or window lookup.
+@MainActor
+final class LiveRemoteTerminalApplicationCapability: RemoteTerminalApplicationCapability {
+    private let surfaces: any RemoteTerminalSurfaceQuerying
+
+    init(surfaces: any RemoteTerminalSurfaceQuerying) {
+        self.surfaces = surfaces
+    }
+
+    var sessionIDs: Set<SessionID> {
+        surfaces.remoteTerminalSessionIDs
+    }
+
+    func state(for sessionID: SessionID) -> RemoteTerminalStateResult {
+        guard let surface = runningSurface(for: sessionID) else { return .unavailable }
+        return .available(surface.remoteTerminalState)
+    }
+
+    func beginCapture(
+        for sessionID: SessionID,
+        output: @escaping RemoteTerminalOutputSink
+    ) -> RemoteTerminalCaptureResult {
+        guard let surface = runningSurface(for: sessionID) else { return .unavailable }
+        let snapshot = surface.remoteTerminalSnapshot
+        surface.setRemoteOutputSink(output)
+        return .captured(snapshot)
+    }
+
+    func endCapture(for sessionID: SessionID) -> RemoteTerminalMutationResult {
+        guard let surface = surfaces.remoteTerminalSurface(for: sessionID) else {
+            return .unavailable
+        }
+        surface.setRemoteOutputSink(nil)
+        return .applied
+    }
+
+    func sendInput(
+        _ bytes: [UInt8],
+        to sessionID: SessionID
+    ) -> RemoteTerminalMutationResult {
+        guard let surface = runningSurface(for: sessionID) else { return .unavailable }
+        surface.sendRemoteInput(bytes)
+        return .applied
+    }
+
+    func setViewport(
+        _ grid: RemoteTerminalGrid?,
+        for sessionID: SessionID
+    ) -> RemoteTerminalMutationResult {
+        guard let surface = surfaces.remoteTerminalSurface(for: sessionID),
+              grid == nil || surface.isRunning else {
+            return .unavailable
+        }
+        surface.setRemoteViewport(grid)
+        return .applied
+    }
+
+    private func runningSurface(for sessionID: SessionID) -> (any RemoteTerminalSurface)? {
+        guard let surface = surfaces.remoteTerminalSurface(for: sessionID),
+              surface.isRunning else {
+            return nil
+        }
+        return surface
+    }
+}

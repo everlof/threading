@@ -65,6 +65,12 @@ meeting at one seam:
   means one refusal is handled exactly once), the policy switch, the chooser actuator, and the
   scheduled continuation.
 
+Recovery reaches a terminal through `AgentTerminalLimitRecoverySurface`: bounded visible lines,
+keystroke insertion, and the two limit-park mutations. The UI adapter delegates those operations
+to its terminal and tracker; Core never obtains `AgentSessionViewController`, `TerminalSession`, or
+a view. Running-only lookup gates chooser input, while the allocated-surface lookup remains
+available to lower a transcript-derived park after a process exits.
+
 The transcript path is derived, not discovered: Claude ids are minted up front
 ([`sessions.md`](sessions.md)), so `ClaudeTranscript.url` names the file from the account's
 config directory and the project slug. Native sessions come through neither layer — the same

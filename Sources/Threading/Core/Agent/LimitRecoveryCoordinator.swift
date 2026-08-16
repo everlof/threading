@@ -82,8 +82,8 @@ final class LimitRecoveryCoordinator {
             recovering.remove(sessionID)
             parked.removeValue(forKey: sessionID)
             LimitEscapeSuggestionStore.shared.refusalCleared(for: sessionID)
-            AgentRuntime.shared.controller(for: sessionID)?
-                .activityTracker.noteLimitCleared()
+            AgentRuntime.shared.limitRecoverySurface(for: sessionID)?
+                .noteLimitCleared()
             ThreadingLogger.agent.debug(
                 "Limit stop cleared for \(sessionID.uuidString, privacy: .public)"
             )
@@ -99,8 +99,7 @@ final class LimitRecoveryCoordinator {
             "resetHint": stop.resetHint ?? ""
         ])
 
-        guard let controller = AgentRuntime.shared.controller(for: sessionID),
-              controller.isRunning else {
+        guard let terminal = AgentRuntime.shared.runningLimitRecoverySurface(for: sessionID) else {
             // Dormant by the time the poll saw it. Nothing to type into and nothing to park;
             // the refusal will still be the newest message if the session is resumed.
             EventLog.shared.record(.limitRecovery, "Refusal seen with no live process", [
@@ -118,7 +117,7 @@ final class LimitRecoveryCoordinator {
 
         switch answer.policy {
         case .flagOnly:
-            controller.activityTracker.noteLimitParked(recoveryArmed: false)
+            terminal.noteLimitParked(recoveryArmed: false)
             EventLog.shared.record(.limitRecovery, "Session flagged, policy leaves it to the user", [
                 "session": sessionID.uuidString,
                 "scope": String(describing: answer.scope)
@@ -131,7 +130,7 @@ final class LimitRecoveryCoordinator {
                 "session": sessionID.uuidString,
                 "scope": String(describing: answer.scope)
             ])
-            armWaitForReset(sessionID, controller: controller, trigger: .policy)
+            armWaitForReset(sessionID, terminal: terminal, trigger: .policy)
         }
     }
 
@@ -143,7 +142,7 @@ final class LimitRecoveryCoordinator {
     /// The same routine the policy runs, and deliberately not a second implementation of it: the
     /// chooser is answered by label, the plan is made before anything is typed, and the
     /// continuation rides `ScheduledMessage`. Three things differ, each because a press is
-    /// watched where a policy is not — see `armWaitForReset(_:controller:trigger:)`.
+    /// watched where a policy is not — see `armWaitForReset(_:terminal:trigger:)`.
     ///
     /// Reachable for a rendered conversation too, which the *policy* never is: that surface has
     /// no chooser to answer, so the keystrokes are skipped and only the schedule is made.
@@ -166,10 +165,11 @@ final class LimitRecoveryCoordinator {
         // A rendered conversation is asked of the model rather than probed for: it has no
         // terminal to read a chooser off, and the surface says so without anything being drawn.
         let usesNativeUI = ProjectStore.shared.session(withID: sessionID)?.usesNativeUI ?? false
-        let controller = AgentRuntime.shared.controller(for: sessionID)
-        let terminal = (usesNativeUI || controller?.isRunning != true) ? nil : controller
+        let terminal = usesNativeUI
+            ? nil
+            : AgentRuntime.shared.runningLimitRecoverySurface(for: sessionID)
 
-        armWaitForReset(sessionID, controller: terminal, trigger: .press)
+        armWaitForReset(sessionID, terminal: terminal, trigger: .press)
     }
 
     // MARK: - Private Methods — Wait For Reset
@@ -188,18 +188,18 @@ final class LimitRecoveryCoordinator {
     /// is scheduled, and every exit that is not "armed" flags the session instead — a policy
     /// whose precondition fails degrades to `flagOnly`, it never improvises.
     ///
-    /// A nil controller is the chooser-less case: a rendered conversation, or a terminal whose
+    /// A nil terminal is the chooser-less case: a rendered conversation, or a terminal whose
     /// process is already gone. Nothing to type into is not a failure — the schedule is the part
     /// that matters, and delivery has its own rules about finding a prompt.
     private func armWaitForReset(
         _ sessionID: SessionID,
-        controller: AgentSessionViewController?,
+        terminal: (any AgentTerminalLimitRecoverySurface)?,
         trigger: RecoveryTrigger
     ) {
         guard let plan = continuationPlan(for: sessionID) else {
             standDown(
                 sessionID,
-                controller: controller,
+                terminal: terminal,
                 trigger: trigger,
                 because: "no usage reading to schedule against",
                 sentence: LimitRecoveryStrings.noReadingProblem
@@ -210,7 +210,7 @@ final class LimitRecoveryCoordinator {
         // A continuation already waiting for this session means a previous arm is still in
         // flight — a re-armed reset, an undelivered send. A second one would type twice.
         guard !Self.hasOwedContinuation(for: sessionID) else {
-            controller?.activityTracker.noteLimitParked(recoveryArmed: true)
+            terminal?.noteLimitParked(recoveryArmed: true)
             EventLog.shared.record(.limitRecovery, "Continuation already scheduled, re-armed the park", [
                 "session": sessionID.uuidString
             ])
@@ -221,15 +221,15 @@ final class LimitRecoveryCoordinator {
             return
         }
 
-        guard let controller else {
+        guard let terminal else {
             EventLog.shared.record(.limitRecovery, "No terminal to answer, scheduling the continuation", [
                 "session": sessionID.uuidString
             ])
-            scheduleContinuation(plan, sessionID: sessionID, controller: nil, trigger: trigger)
+            scheduleContinuation(plan, sessionID: sessionID, terminal: nil, trigger: trigger)
             return
         }
 
-        answerChooser(controller, sessionID: sessionID, attempt: 0) { [weak self] result in
+        answerChooser(terminal, sessionID: sessionID, attempt: 0) { [weak self] result in
             guard let self else { return }
 
             switch result {
@@ -239,7 +239,7 @@ final class LimitRecoveryCoordinator {
                     "keystrokes": keystrokes
                 ])
                 self.scheduleContinuation(
-                    plan, sessionID: sessionID, controller: controller, trigger: trigger
+                    plan, sessionID: sessionID, terminal: terminal, trigger: trigger
                 )
 
             case .noticeOnly:
@@ -250,13 +250,13 @@ final class LimitRecoveryCoordinator {
                     "session": sessionID.uuidString
                 ])
                 self.scheduleContinuation(
-                    plan, sessionID: sessionID, controller: controller, trigger: trigger
+                    plan, sessionID: sessionID, terminal: terminal, trigger: trigger
                 )
 
             case .unreadable(let reason, let screen):
                 self.standDown(
                     sessionID,
-                    controller: controller,
+                    terminal: terminal,
                     trigger: trigger,
                     because: reason,
                     sentence: LimitRecoveryStrings.unreadableScreenProblem,
@@ -310,7 +310,7 @@ final class LimitRecoveryCoordinator {
     private func scheduleContinuation(
         _ plan: ContinuationPlan,
         sessionID: SessionID,
-        controller: AgentSessionViewController?,
+        terminal: (any AgentTerminalLimitRecoverySurface)?,
         trigger: RecoveryTrigger
     ) {
         let message = ScheduledMessage(
@@ -322,7 +322,7 @@ final class LimitRecoveryCoordinator {
 
         switch ScheduledMessageStore.shared.add(message) {
         case .success:
-            controller?.activityTracker.noteLimitParked(recoveryArmed: true)
+            terminal?.noteLimitParked(recoveryArmed: true)
             EventLog.shared.record(.limitRecovery, "Continuation scheduled for the window reset", [
                 "session": sessionID.uuidString,
                 "window": plan.windowName,
@@ -343,7 +343,7 @@ final class LimitRecoveryCoordinator {
         case .failure(let refusal):
             standDown(
                 sessionID,
-                controller: controller,
+                terminal: terminal,
                 trigger: trigger,
                 because: "the schedule was refused: \(refusal)",
                 sentence: ScheduledRefusalText.sentence(for: refusal)
@@ -367,22 +367,22 @@ final class LimitRecoveryCoordinator {
     /// has to move the marker first, the screen is read *again* before Return — so a CLI that
     /// ignored the digit can never have Return land on "Upgrade your plan".
     private func answerChooser(
-        _ controller: AgentSessionViewController,
+        _ terminal: any AgentTerminalLimitRecoverySurface,
         sessionID: SessionID,
         attempt: Int,
         completion: @escaping @MainActor (ChooserResult) -> Void
     ) {
-        let lines = controller.session.visibleScreenLines()
+        let lines = terminal.visibleTerminalScreenLines()
 
         switch LimitChooserReading.read(screenLines: lines) {
         case .chooser(let chooser) where chooser.markerOnOption:
-            controller.session.insertText(TerminalDefaults.submitSequence)
+            terminal.insertTerminalText(TerminalDefaults.submitSequence)
             completion(.answered(keystrokes: "return"))
 
         case .chooser(let chooser):
-            controller.session.insertText(String(chooser.optionDigit))
+            terminal.insertTerminalText(String(chooser.optionDigit))
             DispatchQueue.main.asyncAfter(deadline: .now() + LimitRecoveryDefaults.keystrokeDelay) {
-                self.confirmAfterDigit(controller, digit: chooser.optionDigit, completion: completion)
+                self.confirmAfterDigit(terminal, digit: chooser.optionDigit, completion: completion)
             }
 
         case .notice:
@@ -397,18 +397,18 @@ final class LimitRecoveryCoordinator {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + LimitRecoveryDefaults.chooserReadDelay) {
                 self.answerChooser(
-                    controller, sessionID: sessionID, attempt: attempt + 1, completion: completion
+                    terminal, sessionID: sessionID, attempt: attempt + 1, completion: completion
                 )
             }
         }
     }
 
     private func confirmAfterDigit(
-        _ controller: AgentSessionViewController,
+        _ terminal: any AgentTerminalLimitRecoverySurface,
         digit: Character,
         completion: @escaping @MainActor (ChooserResult) -> Void
     ) {
-        let lines = controller.session.visibleScreenLines()
+        let lines = terminal.visibleTerminalScreenLines()
 
         switch LimitChooserReading.read(screenLines: lines) {
         case .absent, .notice:
@@ -418,7 +418,7 @@ final class LimitRecoveryCoordinator {
             completion(.answered(keystrokes: "digit \(digit)"))
 
         case .chooser(let chooser) where chooser.markerOnOption:
-            controller.session.insertText(TerminalDefaults.submitSequence)
+            terminal.insertTerminalText(TerminalDefaults.submitSequence)
             completion(.answered(keystrokes: "digit \(digit), return"))
 
         case .chooser:
@@ -442,13 +442,13 @@ final class LimitRecoveryCoordinator {
     /// a button that does nothing.
     private func standDown(
         _ sessionID: SessionID,
-        controller: AgentSessionViewController?,
+        terminal: (any AgentTerminalLimitRecoverySurface)?,
         trigger: RecoveryTrigger,
         because reason: String,
         sentence: String,
         screen: String? = nil
     ) {
-        controller?.activityTracker.noteLimitParked(recoveryArmed: false)
+        terminal?.noteLimitParked(recoveryArmed: false)
 
         var detail = ["session": sessionID.uuidString, "reason": reason]
         if let screen { detail["screen"] = screen }

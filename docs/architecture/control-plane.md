@@ -69,7 +69,10 @@ Two refusal decisions worth their words:
 `SessionMessageDelivery` (Core/Agent) is `SessionContextHandoff`'s sibling for prose: one seam
 answers for whatever surface a session is on, resolved per call. Its rules are a pure function
 over injected facts (`deliver(_:chat:terminal:)`, held by `SessionMessageDeliveryTests`); the
-live wrapper only gathers the facts.
+live wrapper only gathers the facts. Terminal writes cross `AgentTerminalInputSurface`, whose
+running-only runtime query returns paste/submit operations without a terminal emulator or UI
+controller. The dependency gate rejects reintroducing the old inferred controller lookup anywhere
+in Core.
 
 | Target surface | Delivery | Outcome |
 |---|---|---|

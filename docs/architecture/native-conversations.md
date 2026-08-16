@@ -699,6 +699,11 @@ about the agent rather than about the pane's list — a dormant session has no d
 launches and loses it when it exits, so the Attachments pane watches `SessionActivityDidChange`
 and updates that one control rather than rebuilding itself several times a turn.
 
+The terminal destination is an `AgentTerminalInputSurface`, not `TerminalSession` or its view
+controller. The same two-operation capability carries cross-session prose delivery, while receipt,
+boot and turn-in-flight policy remains in `SessionMessageDelivery` and `AgentRuntime`. This keeps
+the two workflows on one live PTY without giving either Core policy presentation authority.
+
 ## Conversation Rendering
 
 A cross-runtime destination begins with a retained **Context handoff** row before its replayed
@@ -904,6 +909,17 @@ returns the existential specifically to Core/Remote, so paging, resync, broadcas
 suppression and prompt delivery cannot grow a dependency on the controller or its view hierarchy.
 The mirror registry and runtime are still singleton-backed and remain active injection debt; this
 edge removes presentation knowledge, not those globals.
+
+The terminal half uses a separate `RemoteTerminalApplicationCapability`. WebSocket DTO handling,
+authentication, share scope, session visibility, input-control policy, viewport bounds and replay
+decisions remain in the transport. Only an admitted typed `SessionID` crosses into the capability,
+which returns explicit available/unavailable or applied/unavailable outcomes for state, bounded
+capture, input and viewport leases. Cheap state is separate from the screen repaint so keystrokes
+and resize reconciliation do not walk the terminal grid. There is no durable terminal mutation in
+this path: accepted raw input keeps its audit-before-PTY ordering, while atomic terminal-line
+submission keeps its PTY-before-replay-receipt ordering. `AppEnvironment` builds the live
+capability from its injected runtime and `AppDelegate` installs it before the listener starts;
+Core/Remote never obtains an `AgentSessionViewController`, `TerminalSession`, or window.
 
 The iOS conversation is a UIKit route, not a SwiftUI composition around a UIKit timeline.
 `RemoteConversationViewController` owns the virtual collection, composer, command/skill results,

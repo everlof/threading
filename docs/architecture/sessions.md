@@ -187,6 +187,24 @@ forms are disambiguated by migrating known project-terminal files before cleanup
 are explicitly namespaced so a coincident UUID cannot make one terminal inherit or preserve
 another's history.
 
+An agent terminal's presentation adapter is constructed in UI and registered with `AgentRuntime`
+as an `AgentTerminalRuntimeSurface`; Core no longer constructs or retains its concrete view-
+controller type. Remote frontends reach the PTY through the separately injected, Foundation-only
+`RemoteTerminalApplicationCapability`, whose runtime query is supplied by the same `AgentRuntime`
+instance at the application composition root. The capability exposes typed `SessionID`, bounded
+screen seed, cheap grid/title/viewport state, capture, input and viewport operations—never a view,
+terminal emulator or controller. These are live process mutations and create no persisted session
+record; transport authorization, refusal and audit/replay ordering remain outside the runtime
+surface.
+
+Core owners see smaller faces of that adapter, never the aggregate or its controller:
+`AgentTerminalInputSurface` carries paste/submit for context handoff and receipt-backed message
+delivery; `AgentTerminalLimitRecoverySurface` adds only bounded visible lines and limit-park
+mutations; extension process inspection asks `AgentRuntime` for an optional scalar root PID. A
+stopped adapter is unavailable for input and chooser keystrokes, while limit recovery may still
+lower its transcript-derived park. The dependency gate rejects a controller-returning lookup
+anywhere in Core, including one whose concrete return type Swift would infer.
+
 `ProjectTerminalViewController` accepts OSC 7 working-directory reports and also samples the
 shell process directory, because not every shell emits OSC 7. The cwd decides sidebar
 placement: among already-added projects in the same git worktree, the deepest project folder

@@ -407,7 +407,7 @@ final class AgentSessionViewController: NSViewController {
 
         isRunning = true
         activityTracker.markRunning()
-        RemoteSessionMirrorRegistry.shared.beginCapturing(session, sessionID: sessionID)
+        RemoteSessionMirrorRegistry.shared.beginCapturing(sessionID: sessionID)
         session.start(plan: AgentLaunchPlan(
             executable: "/bin/sh",
             arguments: [
@@ -581,7 +581,7 @@ final class AgentSessionViewController: NSViewController {
         resetTranscriptFallbackObservation()
         activityTracker.markRunning()
         if AppSettings.shared.remoteAccessEnabled {
-            RemoteSessionMirrorRegistry.shared.beginCapturing(session, sessionID: sessionID)
+            RemoteSessionMirrorRegistry.shared.beginCapturing(sessionID: sessionID)
         }
 
         // The command line, before it runs. A launch that takes the app down with it leaves
@@ -1053,6 +1053,68 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         }
 
         delegate?.agentSession(self, didExitWithCode: exitCode)
+    }
+}
+
+// MARK: - Agent Runtime Composition
+
+extension AgentSessionViewController: AgentTerminalRuntimeSurface {
+    var remoteTerminalSurface: any RemoteTerminalSurface { session }
+
+    var terminalRootProcessIdentifier: pid_t? {
+        session.shellPid > 0 ? session.shellPid : nil
+    }
+
+    func pasteTerminalText(_ text: String) {
+        session.pasteText(text)
+    }
+
+    func insertTerminalText(_ text: String) {
+        session.insertText(text)
+    }
+
+    func visibleTerminalScreenLines() -> [String] {
+        session.visibleScreenLines()
+    }
+
+    func noteLimitCleared() {
+        activityTracker.noteLimitCleared()
+    }
+
+    func noteLimitParked(recoveryArmed: Bool) {
+        activityTracker.noteLimitParked(recoveryArmed: recoveryArmed)
+    }
+
+    func removeFromPresentation() {
+        view.removeFromSuperview()
+    }
+}
+
+extension AgentRuntime {
+    /// UI's concrete adapter lookup. Application and server code use the narrower runtime
+    /// capabilities on `AgentRuntime` and never acquire this controller.
+    func controller(for sessionID: SessionID) -> AgentSessionViewController? {
+        terminalRuntimeSurface(for: sessionID) as? AgentSessionViewController
+    }
+
+    /// Returns the cached controller for a session, creating one at the UI composition edge.
+    /// Allocating the terminal does not start the agent; the container launches it only after
+    /// installing the controller in a laid-out view hierarchy.
+    func makeController(for agentSession: AgentSession) -> AgentSessionViewController {
+        if let existing = controller(for: agentSession.id) {
+            return existing
+        }
+
+        let controller = AgentSessionViewController(
+            agentSession: agentSession,
+            subagentState: subagentState(for: agentSession.id),
+            launchPlanProvider: fixtureLaunchPlanProvider(for: agentSession.id)
+        )
+        precondition(
+            registerTerminalRuntimeSurface(controller, for: agentSession.id),
+            "A terminal runtime must have one UI adapter"
+        )
+        return controller
     }
 }
 

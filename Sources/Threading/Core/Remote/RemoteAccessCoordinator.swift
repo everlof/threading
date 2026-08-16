@@ -124,6 +124,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     private let server: RemoteAccessServer
+    private let mirrors: RemoteSessionMirrorRegistry
     private let tunnel = RemoteTunnel()
     private let tailscale = TailscaleRemoteTransport()
     private let hostedService: RemoteHostedServiceController
@@ -156,9 +157,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         serverServices: RemoteAccessServerServices? = nil
     ) {
         self.appSettings = appSettings
-        server = RemoteAccessServer(
-            services: serverServices ?? Self.makeServerServices(appSettings: appSettings)
-        )
+        let services = serverServices ?? Self.makeServerServices(appSettings: appSettings)
+        mirrors = services.mirrors
+        server = RemoteAccessServer(services: services)
         ownerDevices = RemoteOwnerDeviceRegistry(store: ownerDeviceStore)
         self.guestShareStore = guestShareStore ?? Self.defaultGuestShareStore()
         self.hostedService = hostedService ?? RemoteHostedServiceController()
@@ -176,6 +177,14 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         }
         restoreGuestShares()
+    }
+
+    /// Completes the terminal application graph before the listener can admit a request.
+    /// The mirror is the same instance already injected into the server services.
+    func installTerminalApplication(
+        _ terminalApplication: any RemoteTerminalApplicationCapability
+    ) {
+        mirrors.installTerminalApplication(terminalApplication)
     }
 
     /// The remote transport's live composition root. No route may recover one of these process
@@ -613,7 +622,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
 
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
-        RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
+        mirrors.sessionSharingChanged()
         ThreadingLogger.remote.info(
             "Remote guest invitation created session=\(sessionID.rawValue, privacy: .public) capability=\(capability.rawValue, privacy: .public) permission_approval=\(canApprovePermissions, privacy: .public)"
         )
@@ -729,7 +738,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             sessionShares = candidate
             authority.set(authorization, forToken: accessToken)
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
-            RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
+            mirrors.sessionSharingChanged()
             ThreadingLogger.remote.notice(
                 "Remote guest invitation redeemed session=\(sessionID.rawValue, privacy: .public) capability=\(share.capability.rawValue, privacy: .public) permission_approval=\(share.canApprovePermissions, privacy: .public)"
             )
@@ -876,7 +885,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         server.revokeConnections(shareID: record.id)
         hostedService.revokeDevice(deviceID: record.deviceID)
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
-        RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
+        mirrors.sessionSharingChanged()
         ThreadingLogger.remote.notice("Remote owner device revoked")
         return true
     }
@@ -976,7 +985,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     private func sharingChanged() {
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
-        RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
+        mirrors.sessionSharingChanged()
         reconcileRelayIfNeeded()
     }
 
@@ -1109,7 +1118,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             server.revokeConnections(shareID: member.authorization.shareID)
         }
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
-        RemoteSessionMirrorRegistry.shared.sessionSharingChanged()
+        mirrors.sessionSharingChanged()
         reconcileRelayIfNeeded()
     }
 
@@ -1163,7 +1172,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         failPendingShares(.remoteAccessUnavailable)
         stopTransports()
         server.stop()
-        RemoteSessionMirrorRegistry.shared.remoteAccessStopped()
+        mirrors.remoteAccessStopped()
         RemoteNotificationService.shared.reset()
         authority.removeAll()
         pairingBootstrapToken = nil
@@ -1222,7 +1231,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             }
             if let port {
                 self.status = .listening(port: port)
-                RemoteSessionMirrorRegistry.shared.remoteAccessStarted()
+                self.mirrors.remoteAccessStarted()
                 self.startTransports(port: port)
                 ThreadingLogger.remote.info(
                     "Remote access listener ready port=\(port, privacy: .public)"

@@ -1,12 +1,65 @@
-import AppKit
+import Foundation
 
-/// Tracks the live terminal controllers backing agent sessions.
+/// Text input accepted by a running agent terminal.
 ///
-/// Controllers are cached per session so switching away in the sidebar and back does not
+/// Context handoff and message delivery share these two PTY operations, but neither receives the
+/// terminal emulator, its view, or the controller adapting it.
+@MainActor
+protocol AgentTerminalInputSurface: AnyObject {
+    func pasteTerminalText(_ text: String)
+    func insertTerminalText(_ text: String)
+}
+
+/// The terminal facts and mutations owned by limit recovery.
+///
+/// This is deliberately separate from ordinary input: reading the visible grid and changing the
+/// activity park are authority only the recovery policy needs.
+@MainActor
+protocol AgentTerminalLimitRecoverySurface: AgentTerminalInputSurface {
+    func visibleTerminalScreenLines() -> [String]
+    func noteLimitCleared()
+    func noteLimitParked(recoveryArmed: Bool)
+}
+
+/// The process root exposed to session-scoped runtime inspection.
+///
+/// Extensions receive only the eventual bounded snapshot. Core's provider gets this scalar
+/// identity without acquiring a terminal, controller, or process-table service.
+@MainActor
+protocol AgentTerminalProcessSurface: AnyObject {
+    var terminalRootProcessIdentifier: pid_t? { get }
+}
+
+/// The application/runtime surface retained for a terminal-backed agent session.
+///
+/// Controller construction and AppKit presentation live in UI. Core retains only the lifecycle
+/// and reporting operations it owns, plus the narrower terminal capability exposed to remote
+/// frontends. No view or controller type crosses this boundary.
+@MainActor
+protocol AgentTerminalRuntimeSurface:
+    AgentTerminalLimitRecoverySurface,
+    AgentTerminalProcessSurface
+{
+    var isRunning: Bool { get }
+    var activity: SessionActivity { get }
+    var activityTracker: SessionActivityTracker { get }
+    var isVisible: Bool { get set }
+    var remoteTerminalSurface: any RemoteTerminalSurface { get }
+
+    func noteStateChanged()
+    func noteReportedCodexTranscript(path: String?, providerSessionID: TranscriptID?)
+    func noteTurnFinishedForAttachmentDetection(lastAssistantMessage: String?)
+    func terminate()
+    func removeFromPresentation()
+}
+
+/// Tracks the live terminal runtimes backing agent sessions.
+///
+/// Runtime surfaces are cached per session so switching away in the sidebar and back does not
 /// restart the agent or lose scrollback. A session with no entry here is dormant: it exists
 /// in `ProjectStore` and can be resumed, but owns no PTY.
 @MainActor
-final class AgentRuntime {
+final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
     // MARK: - Singleton
 
@@ -22,7 +75,7 @@ final class AgentRuntime {
 
     // MARK: - Properties
 
-    private var controllers: [SessionID: AgentSessionViewController] = [:]
+    private var controllers: [SessionID: any AgentTerminalRuntimeSurface] = [:]
 
 #if DEBUG
     /// Per-session launch seams for deterministic whole-app tests.
@@ -51,34 +104,72 @@ final class AgentRuntime {
         Set(controllers.keys)
     }
 
-    // MARK: - Public Methods
+    // MARK: - UI Composition
 
-    func controller(for sessionID: SessionID) -> AgentSessionViewController? {
+    /// The typed runtime value behind UI's concrete adapter lookup.
+    func terminalRuntimeSurface(for sessionID: SessionID) -> (any AgentTerminalRuntimeSurface)? {
         controllers[sessionID]
     }
 
-    /// Returns the cached controller for a session, creating one if needed.
-    ///
-    /// Creating a controller allocates the terminal but does not start the agent; call
-    /// `launch()` on the result once it is installed in the view hierarchy.
-    func makeController(for agentSession: AgentSession) -> AgentSessionViewController {
-        if let existing = controllers[agentSession.id] {
-            return existing
-        }
-
-#if DEBUG
-        let fixtureLaunchPlanProvider = fixtureLaunchPlanProviders[agentSession.id]
-#else
-        let fixtureLaunchPlanProvider: AgentLaunchPlanProvider? = nil
-#endif
-        let controller = AgentSessionViewController(
-            agentSession: agentSession,
-            subagentState: subagentState(for: agentSession.id),
-            launchPlanProvider: fixtureLaunchPlanProvider
-        )
-        controllers[agentSession.id] = controller
-        return controller
+    /// A running terminal's text-input capability, used by context handoff and message delivery.
+    func runningTerminalInputSurface(
+        for sessionID: SessionID
+    ) -> (any AgentTerminalInputSurface)? {
+        guard let surface = controllers[sessionID], surface.isRunning else { return nil }
+        return surface
     }
+
+    /// Limit recovery may lower a park after the process exits, so this query intentionally
+    /// includes an allocated stopped terminal. Callers that type use the running-only variant.
+    func limitRecoverySurface(
+        for sessionID: SessionID
+    ) -> (any AgentTerminalLimitRecoverySurface)? {
+        controllers[sessionID]
+    }
+
+    func runningLimitRecoverySurface(
+        for sessionID: SessionID
+    ) -> (any AgentTerminalLimitRecoverySurface)? {
+        guard let surface = controllers[sessionID], surface.isRunning else { return nil }
+        return surface
+    }
+
+    /// The live agent process root, as a value rather than an exposed runtime object.
+    func terminalRootProcessIdentifier(for sessionID: SessionID) -> pid_t? {
+        controllers[sessionID]?.terminalRootProcessIdentifier
+    }
+
+    /// Registers the UI-created adapter once. Main-actor composition makes this atomic without
+    /// a second cache or a controller lookup hidden inside Core.
+    @discardableResult
+    func registerTerminalRuntimeSurface(
+        _ surface: any AgentTerminalRuntimeSurface,
+        for sessionID: SessionID
+    ) -> Bool {
+        guard controllers[sessionID] == nil else { return false }
+        controllers[sessionID] = surface
+        return true
+    }
+
+    func fixtureLaunchPlanProvider(for sessionID: SessionID) -> AgentLaunchPlanProvider? {
+#if DEBUG
+        fixtureLaunchPlanProviders[sessionID]
+#else
+        nil
+#endif
+    }
+
+    // MARK: - RemoteTerminalSurfaceQuerying
+
+    var remoteTerminalSessionIDs: Set<SessionID> {
+        Set(controllers.keys)
+    }
+
+    func remoteTerminalSurface(for sessionID: SessionID) -> (any RemoteTerminalSurface)? {
+        controllers[sessionID]?.remoteTerminalSurface
+    }
+
+    // MARK: - Public Methods
 
 #if DEBUG
     /// Installs a deterministic process for one not-yet-materialized session.
@@ -547,7 +638,7 @@ final class AgentRuntime {
         subagentStates[sessionID]?.stopWorking(
             message: "Stopped when the session process ended."
         )
-        controller.view.removeFromSuperview()
+        controller.removeFromPresentation()
         controllers[sessionID] = nil
     }
 
