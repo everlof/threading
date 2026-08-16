@@ -1531,6 +1531,13 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                case .actionRequired(let issue, _) = tailscale.readiness {
                 fields[.code] = issue.rawValue
             }
+            // The relay's own code, rather than a guess made from its localised sentence. Until
+            // it existed a relay that launched and never published an address recorded nothing
+            // at all, because that case had no timeout and so never reached this branch.
+            if kind == .relay, let failure = tunnel.lastFailure {
+                fields[.reason] = failure.diagnosticReason
+                fields[.code] = failure.rawValue
+            }
             MacRemoteDiagnostics.record(
                 .relayFailed,
                 level: .warning,

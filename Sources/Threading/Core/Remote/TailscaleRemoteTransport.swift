@@ -248,20 +248,11 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         outputCollector = collector
         outputHandle = output
         command = process
-        output.readabilityHandler = { [weak self, weak process] handle in
-            let data: Data
-            do {
-                guard let chunk = try handle.read(
-                    upToCount: RemoteTailscaleDefaults.outputReadChunkBytes
-                ), !chunk.isEmpty, self != nil, process != nil else { return }
-                data = chunk
-            } catch {
-                handle.readabilityHandler = nil
-                ThreadingLogger.remote.warning(
-                    "Tailscale command output read failed stage=\(stage, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
-                )
-                return
-            }
+        // These commands print a line or two and exit, so a `read(upToCount:)` here only ever
+        // returned at exit — and the exit callback then closed this descriptor out from under
+        // that blocked read. `ChildOutputReader` explains why the primitive matters.
+        ChildOutputReader.deliver(from: output) { [weak self, weak process] data in
+            guard self != nil, process != nil else { return }
             collector.append(data)
         }
         commandDeadline = ChildProcessDeadline(
@@ -562,6 +553,5 @@ private enum RemoteTailscaleDefaults {
     static let httpsPort = 8443
     static let maximumCommandOutputBytes = 64 * 1024
     static let retainedCommandOutputBytes = 32 * 1024
-    static let outputReadChunkBytes = 16 * 1024
     static let commandTimeoutSeconds: TimeInterval = 12
 }

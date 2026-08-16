@@ -12,12 +12,17 @@ final class RemoteTunnel: RemoteAccessTransport {
     typealias State = RemoteTransportState
 
     private(set) var state: State = .stopped
+    /// The content-free code behind the current `.unavailable` sentence, for diagnostics.
+    private(set) var lastFailure: RemoteRelayFailure?
     private let childLedger: AgentChildLedger
     private var process: SpawnedChildProcess?
     private var outputHandle: FileHandle?
     private var launchID: UUID?
     private var outputBuffer = Data()
     private var didReportOutputTruncation = false
+    /// Fires if the relay never publishes an address. Without it `.starting` is a terminal state
+    /// with no timeout, no reason and no journal entry — see `startupTimeoutSeconds`.
+    private var startupDeadline: Task<Void, Never>?
     /// Old relays can still be winding down when a fast off/on starts their successor. Retain
     /// each escalation until reap so its delayed KILL cannot target a recycled process-group id.
     private var shutdownEscalations: [pid_t: ChildProcessEscalation] = [:]
@@ -36,7 +41,7 @@ final class RemoteTunnel: RemoteAccessTransport {
 
         guard let executable = Self.executableURL() else {
             ThreadingLogger.remote.notice("Cloudflare relay is unavailable because cloudflared is not installed")
-            setState(.unavailable("Install cloudflared to connect away from this Mac."))
+            fail(.notInstalled, "Install cloudflared to connect away from this Mac.")
             return
         }
 
@@ -47,7 +52,7 @@ final class RemoteTunnel: RemoteAccessTransport {
             ThreadingLogger.remote.error(
                 "Cloudflare relay pipe creation failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            setState(.unavailable("The secure relay could not launch."))
+            fail(.launchFailed, "The secure relay could not launch.")
             return
         }
         let launchID = UUID()
@@ -77,7 +82,7 @@ final class RemoteTunnel: RemoteAccessTransport {
             ThreadingLogger.remote.error(
                 "Cloudflare relay process launch failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            setState(.unavailable("The secure relay could not launch."))
+            fail(.launchFailed, "The secure relay could not launch.")
             return
         }
 
@@ -92,7 +97,7 @@ final class RemoteTunnel: RemoteAccessTransport {
             ThreadingLogger.remote.error(
                 "Cloudflare relay launch refused because the child-process ledger could not record it"
             )
-            setState(.unavailable("The secure relay could not launch."))
+            fail(.launchFailed, "The secure relay could not launch.")
             return
         }
 
@@ -100,20 +105,10 @@ final class RemoteTunnel: RemoteAccessTransport {
         self.launchID = launchID
         self.process = process
         outputHandle = output
-        output.readabilityHandler = { [weak self, weak process] handle in
-            let data: Data
-            do {
-                guard let chunk = try handle.read(
-                    upToCount: RemoteTunnelDefaults.outputReadChunkBytes
-                ), !chunk.isEmpty else { return }
-                data = chunk
-            } catch {
-                handle.readabilityHandler = nil
-                ThreadingLogger.remote.warning(
-                    "Cloudflare relay output read failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
-                )
-                return
-            }
+        // Not a hand-rolled `read(upToCount:)`: that primitive blocks until it can fill the count,
+        // and `cloudflared` prints its banner and then goes quiet, so the address in it was never
+        // read. `ChildOutputReader` carries the whole account of that.
+        ChildOutputReader.deliver(from: output) { [weak self, weak process] data in
             Task { @MainActor in
                 guard let self, self.launchID == launchID, self.process === process else { return }
                 self.consume(data)
@@ -136,24 +131,42 @@ final class RemoteTunnel: RemoteAccessTransport {
                     ThreadingLogger.remote.warning(
                         "Cloudflare relay exited after connecting status=\(status, privacy: .public)"
                     )
-                    self.setState(.unavailable(
+                    self.fail(
+                        .exitedAfterConnecting,
                         "The secure relay stopped. Turn access off and on to reconnect."
-                    ))
+                    )
                 } else if case .starting = self.state {
                     ThreadingLogger.remote.warning(
                         "Cloudflare relay exited during startup status=\(status, privacy: .public)"
                     )
-                    self.setState(.unavailable(
+                    self.fail(
+                        .exitedDuringStartup,
                         "The secure relay could not start (exit \(status))."
-                    ))
+                    )
                 }
             }
         }
 
+        lastFailure = nil
+        startupDeadline = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(RemoteTunnelDefaults.startupTimeoutSeconds))
+            guard !Task.isCancelled, let self, self.launchID == launchID else { return }
+            self.startupDeadline = nil
+            guard case .starting = self.state else { return }
+            ThreadingLogger.remote.warning(
+                "Cloudflare relay published no address within \(RemoteTunnelDefaults.startupTimeoutSeconds, privacy: .public)s"
+            )
+            self.fail(
+                .startupTimedOut,
+                "The secure relay did not answer in time. Try connecting again."
+            )
+        }
         setState(.starting)
     }
 
     func stop() {
+        startupDeadline?.cancel()
+        startupDeadline = nil
         outputHandle?.readabilityHandler = nil
         try? outputHandle?.close()
         outputHandle = nil
@@ -187,8 +200,20 @@ final class RemoteTunnel: RemoteAccessTransport {
 
         if let url = Self.publicURL(in: String(decoding: outputBuffer, as: UTF8.self)) {
             ThreadingLogger.remote.info("Cloudflare relay published an HTTPS endpoint")
+            startupDeadline?.cancel()
+            startupDeadline = nil
+            lastFailure = nil
             setState(.connected(url))
         }
+    }
+
+    /// Records the content-free code beside the sentence, so the two can never disagree about
+    /// which failure the state is currently reporting.
+    private func fail(_ failure: RemoteRelayFailure, _ message: String) {
+        startupDeadline?.cancel()
+        startupDeadline = nil
+        lastFailure = failure
+        setState(.unavailable(message))
     }
 
     private func setState(_ state: State) {
@@ -224,7 +249,10 @@ final class RemoteTunnel: RemoteAccessTransport {
 }
 
 private enum RemoteTunnelDefaults {
-    static let outputReadChunkBytes = 16 * 1024
     static let maximumOutputBytes = 64 * 1024
     static let retainedOutputBytes = 32 * 1024
+    /// A quick Tunnel publishes its address in five to ten seconds on a healthy network. This is
+    /// long enough that a slow one is not called a failure, and short enough that a relay which
+    /// never answers becomes a stated reason with a retry rather than an endless spinner.
+    static let startupTimeoutSeconds = 45
 }

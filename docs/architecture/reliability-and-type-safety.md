@@ -95,6 +95,29 @@ facts needed to reconstruct a failure after restart. Logs must identify the subs
 stable identifiers, but must not copy prompts, bearer tokens, credentials, or arbitrary client
 log text.
 
+**Read a running child's output with `availableData`, never `FileHandle.read(upToCount:)`.** The
+count reads like a ceiling and is a *length to fill*: Foundation stays inside `read(2)` until that
+many bytes arrive or the writer closes the pipe. A child that prints a burst and keeps running
+therefore delivers nothing at all, and nothing reports it, because a blocked read is not a failure
+anybody counts. This shipped: the HTTPS relay asked for 16 KB, `cloudflared` printed roughly 3 KB
+of banner — the published address inside it — and then went quiet, so the very first readability
+callback blocked for the life of the app. The tunnel was live and serving real traffic over
+`trycloudflare.com` the whole time; the settings page said "Preparing your pairing code /
+Connecting…" and iPhone pairing was unreachable in Relay mode. `ChildOutputReader` is now the one
+place that knows this, and `RemoteRelayReadinessTests` fails by timeout if the primitive changes
+back. `BoundedChildProcess.captureSuffix` is the deliberate exception: it drains a finite helper
+to EOF behind a `ChildProcessDeadline`, so filling is what it wants.
+
+**A wait with no deadline is not a state, it is a hole in the ledger.** The same bug produced no
+evidence anywhere — the diagnostics journal records `relayConnected` and `relayFailed`, and a
+transport stuck in `.starting` reaches neither, so the one failure a support report most needed to
+explain was the one it could not see. Any transport that can sit between "started" and "answered"
+carries a timeout that converts silence into a stated reason, and a typed code beside the sentence
+a person reads (`RemoteRelayFailure`, as `TailscaleReadinessIssue` already did) so a report groups
+by cause rather than by localised prose. UI follows the same rule: a spinner is for work that is
+still arriving, and a surface that is up but unusable gets its own copy and a retry, never the
+progress branch — see `RemotePairingCardState`.
+
 A feature is not stable merely because its happy path works. Before calling one stable, it has:
 
 - a typed availability/error state that the UI can render;

@@ -741,7 +741,15 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     }
 
     private func updatePairingForTransport(_ coordinator: RemoteAccessCoordinator) {
-        if coordinator.ownerDevicePersistenceError != nil {
+        let transport = AppSettings.shared.remoteAccessConnectionMode == .relay
+            ? coordinator.relayStatus
+            : coordinator.tailscaleStatus
+        switch RemotePairingCardState.resolve(
+            ownerDevicePersistenceError: coordinator.ownerDevicePersistenceError,
+            pairingCodePayload: coordinator.pairingCodePayload,
+            transport: transport
+        ) {
+        case .keychainUnavailable:
             updatePairing(
                 title: L10n.string("Pairing unavailable"),
                 detail: L10n.string(
@@ -752,9 +760,8 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 actionEnabled: false,
                 prominent: false
             )
-            return
-        }
-        if let payload = coordinator.pairingCodePayload {
+
+        case .ready(let payload):
             updatePairing(
                 title: L10n.string("Scan with your iPhone"),
                 detail: L10n.string(
@@ -765,14 +772,8 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 prominent: false,
                 pairingPayload: payload
             )
-            return
-        }
 
-        let state = AppSettings.shared.remoteAccessConnectionMode == .relay
-            ? coordinator.relayStatus
-            : coordinator.tailscaleStatus
-        switch state {
-        case .unavailable:
+        case .connectionUnavailable:
             updatePairing(
                 title: L10n.string("Private connection unavailable"),
                 detail: L10n.string(
@@ -782,7 +783,8 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 actionEnabled: true,
                 prominent: true
             )
-        case .stopped, .starting, .connected:
+
+        case .preparing:
             updatePairing(
                 title: L10n.string("Preparing your pairing code"),
                 detail: L10n.string(
@@ -792,6 +794,18 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 actionEnabled: false,
                 prominent: false,
                 busy: true
+            )
+
+        case .codeUnavailable:
+            updatePairing(
+                title: L10n.string("Pairing code unavailable"),
+                detail: L10n.string(
+                    "The connection is ready, but Threading could not build a pairing code for "
+                        + "it. Retrying starts the connection again and mints a new code."
+                ),
+                action: L10n.string("Retry Connection"),
+                actionEnabled: true,
+                prominent: true
             )
         }
     }

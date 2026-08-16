@@ -17,6 +17,35 @@ enum RemoteTransportState: Equatable, Sendable {
     case unavailable(String)
 }
 
+/// Why the relay is not carrying traffic, as a content-free code.
+///
+/// `RemoteTransportState.unavailable` carries the sentence a person reads, which is localised and
+/// occasionally parameterised; it cannot also be the token a diagnostic report groups by. This
+/// enum is the same split `TailscaleReadinessIssue` already makes, and it exists because the one
+/// failure that produced no evidence at all was the relay launching and then never publishing an
+/// address: the journal recorded `relayFailed reason=unavailable` for every cause alike, so
+/// "cloudflared is not installed" and "cloudflared started and went quiet" read identically.
+enum RemoteRelayFailure: String, Equatable, Sendable {
+    case notInstalled
+    case launchFailed
+    case startupTimedOut
+    case exitedDuringStartup
+    case exitedAfterConnecting
+
+    /// The `reason` token the diagnostics journal groups by, matching the vocabulary
+    /// `RemoteAccessCoordinator` already infers for transports that report no code.
+    var diagnosticReason: String {
+        switch self {
+        case .notInstalled, .launchFailed:
+            return "unavailable"
+        case .startupTimedOut:
+            return "timeout"
+        case .exitedDuringStartup, .exitedAfterConnecting:
+            return "process-exited"
+        }
+    }
+}
+
 /// A typed explanation of how far Tailscale setup reached. The ordinary transport state remains
 /// shared with Relay; this finer state powers actionable setup UI and content-free diagnostics.
 enum TailscaleReadiness: Equatable, Sendable {

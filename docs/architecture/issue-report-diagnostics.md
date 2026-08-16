@@ -14,7 +14,7 @@ credential, or device/account name into this vocabulary.
 | Manual and inspector reporting | `issueReportOpened`, submission started/succeeded/deferred/failed; surface and trigger tokens | Inspector PNG path, full-resolution capture, clipboard contents |
 | Report delivery | Idempotent report ID in the receipt plus delivered/queued/failed result token | HTTP body logging, caller address, authorization headers |
 | Pairing and host credentials | pairing/refresh success or failure, transport/result/code tokens | invitation URLs, bearer material, host/device names |
-| Remote listener and relay | listener/relay/socket lifecycle, protocol versions, pseudonymous peer/session tokens | SDP, ICE addresses, terminal data and connection credentials |
+| Remote listener and relay | listener/relay/socket lifecycle, protocol versions, pseudonymous peer/session tokens; `relayFailed` carries a `RemoteRelayFailure` code beside its reason | SDP, ICE addresses, terminal data and connection credentials |
 | Permission decisions | sent/received and capability/result tokens | command text, tool input, provider evidence |
 | Notifications | authorization, registration, provider, received/suppressed/presented/opened state tokens | notification title/body, push token, session title |
 | Optional environment | counts, enums, versions, permission states, memory/storage buckets | project/session/account names, stable identifiers, paths |
