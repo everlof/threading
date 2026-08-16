@@ -267,11 +267,11 @@ Do not add a hand-maintained tool, settings, shortcut, or component list to arch
 metadata to its registry and extend the relevant completeness test; every consumer should see the
 same projection.
 
-## Stabilization-review closure — 15 August 2026
+## Stabilization-review follow-up — 15 August 2026
 
 The follow-up review began at `d0351b1a^` with this common report definition:
 
-| Metric | Review baseline | Closure | Change |
+| Metric | Review baseline | Pre-follow-up snapshot | Change |
 |---|---:|---:|---:|
 | Threading Swift files / lines | 788 / 327,076 | 793 / 328,643 | +5 / +1,567 for typed declarations, application interfaces and proofs |
 | `static … shared` declarations | 89 / 87 files | 89 / 87 files | unchanged; no service locator added |
@@ -286,9 +286,21 @@ The follow-up review began at `d0351b1a^` with this common report definition:
 | Capability extensions | 5,909 / 11 files | 5,909 / 11 files | unchanged |
 | `ThreadingTests` Swift files | 377 | 379 | +2 focused proof files; still filesystem synchronized |
 
-The six findings closed as ownership changes, not documentation exceptions:
+The earlier heading called this snapshot a closure, but the evidence did not support that claim:
+the complete fast plan still terminated its host with `SIGPIPE`, main-window construction retained
+live-environment escape hatches, settings production access was still stringly typed, and both hub
+authorities remained active debt. The snapshot did establish useful boundaries, but it was not a
+green six-finding closure.
 
-1. The fast plan no longer includes the two tests that deliberately order real browser windows.
+Follow-up implementation status:
+
+1. The earlier AppKit fixture work remains valid. In addition, the remaining fast-plan crash was
+   traced to the owning process boundary: every native transport writes through
+   `AgentChildProcess`, whose parent-side stdin descriptor did not suppress `SIGPIPE`. That
+   descriptor now receives `F_SETNOSIGPIPE` before exposure, so ACP, Codex, and Claude observe an
+   ordinary failed write if a child exits before initialization or between writes. Focused real-
+   process tests pin one exit callback and complete ledger cleanup in both races.
+   The fast plan no longer includes the two tests that deliberately order real browser windows.
    The xcresult's crash attachment identified `EXC_BAD_ACCESS` in `objc_release` while XCTest
    drained the case's autorelease pool: the privacy assertion had not failed, but earlier AppKit
    menu/window state outlived its owning fixture. Motion and Privacy now use one bounded unshown
@@ -306,19 +318,50 @@ The six findings closed as ownership changes, not documentation exceptions:
 2. Domain and Application imports are checked recursively. Application permits Foundation and the
    explicitly approved lower-level contract modules only; synthetic nested violations prove the
    checker fails closed. Redundant per-filename UI-import checks were removed.
-3. `MainWindowController`, `RemoteAccessServer`, and conversation scheduling now consume injected
-   environments, narrow remote application interfaces, and a current-session projection. Their
-   gates reject returning to the four process singletons; live singleton construction remains at
-   composition roots.
+3. `MainWindowController`, `RemoteAccessServer`, and conversation scheduling consume injected
+   environments, narrow remote application interfaces, and a current-session projection.
+   `AppDelegate` is now the sole approved source of `AppEnvironment.live`; main-window fallback
+   initializers are gone, and the architecture gate rejects a second live composition root.
+   Main-window tests do not construct independent services: the helper is available only to
+   `HostedStoreTestCase` and consumes the redirected shared hosted-test graph. Its separate
+   UUID-scoped diagnostics directory is released and removed by an explicit fixture owner.
 4. One typed MCP declaration owns wire identity, typed argument decoding, schema, annotations,
    family/group, settings presentation, routing policy and execution binding. Runtime and UI lists
    project from the admitted declarations; the old `AgentCommand` case inventory, decode switch,
    catalog rows and execution switch are gone.
-5. One typed setting definition owns stable identity, the exact persistence key and value shape,
-   absence/default semantics, validation, notification policy, page/row/search metadata and remote
-   policy. `AppSettings`, migrations, navigation, search and `list_settings` consume those
-   definitions; duplicate keys/anchors and compatibility drift fail tests.
-6. MCP policy extraction reduced tool-coordinator authority by 352 lines. Session-context routing
-   now depends on `SessionContextReceiving` and an injected destination query, removing the entire
-   Core-to-`ConversationViewController` edge and lowering the dependency ratchet in the same
-   commit.
+5. Each closed `AppSettingIdentity` is authored once as an `AppSettingDescriptor<Value>` that owns
+   stable key, encoding, typed absence/default semantics, typed validation/normalization,
+   notification, presentations, and remote policy. `Value` derives the stored value category; the
+   heterogeneous registry only references typed declarations, and `AppSettingDefinitions.all`
+   erases them rather than reconstructing generic descriptors from an erased inventory.
+   Production reads, writes, and authenticated owner mutation use descriptors. Completeness tests
+   prove every closed identity occurs exactly once, that the persisted catalogue equals the
+   descriptor projection, and that every identity retains its exhaustive on-disk key and stored
+   value type compatibility contract. The GitHub-client-ID bound cannot be bypassed, and
+   nonmutable or malformed remote writes fail closed.
+6. The prior MCP and session-context extractions remain in force. This follow-up also moved the
+   complete settings-catalogue wire/schema/encoding policy from `AgentToolCoordinator` into the
+   typed Foundation-only `SettingsCatalogueService`, leaving its UI extension as mapping and
+   routing. The authority ratchet moved from 9,005 to 8,979 lines (capability extensions from 5,909
+   to 5,882); both hubs remain in the active architecture ledger for the next coherent edge.
+7. Core/Remote consumes the typed Foundation-only `RemoteConversationSurface` projection and
+   prompt-submission capability rather than `ConversationViewController`. The controller is the
+   AppKit adapter, the focused fake-backed contract test pins the erased seam, and the dependency
+   ratchet moved from 18 concrete-controller references across four Core files to 17 across three.
+   The singleton-backed mirror/runtime relationship is not concealed by that reduction and remains
+   in the active ledger.
+
+The corresponding current measurement table and remaining debt are maintained in
+`docs/architecture/application-structure.md` and `IMPROVEMENTS.md`. The final source state was
+verified on 16 August 2026 by a 656-test focused matrix covering the child-process boundary, typed
+settings and catalogue, remote conversation capability, live remote mutation, every hosted
+main-window caller, and fixture cleanup. It passed 651 tests, skipped five, failed none, and exited
+0. The focused run left all pre-existing artifact counts unchanged: 291 non-empty
+`RemoteServerIntegrationTests.*` preference domains, nine non-empty
+`RemoteGuestSharePersistenceTests.*` domains, and 84 `MainWindowTestSupport.*` temporary
+directories. Two immediately consecutive `scripts/test.sh fast` runs then each executed 5,908
+tests: 5,870 passed, 38 skipped, none failed, and both commands exited 0. Counts remained unchanged
+after the full runs. Inspection of the focused and both full action logs found one test-host launch
+apiece and no host restart, hidden retry, `TEST FAILED`, or unexpected exit. That closes this
+increment's required evidence, not the active singleton, remaining Core→UI, or hub-authority debt
+recorded in the two current ledgers.

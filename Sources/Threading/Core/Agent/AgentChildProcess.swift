@@ -66,6 +66,15 @@ final class AgentChildProcess {
         onExit: @escaping @Sendable (Int32) -> Void
     ) throws -> AgentChildProcess {
         let inputPipe = try ChildPipe()
+        // The child may exit after `posix_spawn` but before a transport's first initialization
+        // write, or between any two later writes. This descriptor is the shared ownership
+        // boundary for ACP, Codex and Claude, so make a closed reader an ordinary EPIPE error
+        // here rather than letting any one transport terminate Threading with SIGPIPE.
+        guard fcntl(inputPipe.writeEnd, F_SETNOSIGPIPE, 1) != -1 else {
+            let code = errno
+            inputPipe.closeBothEnds()
+            throw AgentChildInputError.noSignalProtectionFailed(code: code)
+        }
         let outputPipe = try ChildPipe(closingOnFailure: [inputPipe])
         let errorPipe = try ChildPipe(closingOnFailure: [inputPipe, outputPipe])
 
@@ -185,6 +194,17 @@ final class AgentChildProcess {
                 """
             )
             throw AgentChildLaunchError.ledgerWriteFailed(processIdentifier)
+        }
+    }
+}
+
+enum AgentChildInputError: LocalizedError {
+    case noSignalProtectionFailed(code: Int32)
+
+    var errorDescription: String? {
+        switch self {
+        case .noSignalProtectionFailed(let code):
+            return "The agent input pipe could not be made signal-safe (errno \(code))."
         }
     }
 }

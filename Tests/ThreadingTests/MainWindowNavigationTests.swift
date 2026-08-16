@@ -29,7 +29,7 @@ final class MainWindowNavigationTests: HostedStoreTestCase {
     }
 
     private func makeController() -> MainWindowController {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         return controller
     }

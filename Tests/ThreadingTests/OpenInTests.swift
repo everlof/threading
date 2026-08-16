@@ -11,7 +11,7 @@ import XCTest
 /// surface that makes it. The launch itself is `NSWorkspace`'s and is deliberately not
 /// simulated — a test that opened Xcode would be a test nobody could run twice.
 @MainActor
-final class OpenInTests: XCTestCase {
+final class OpenInTests: HostedStoreTestCase {
 
     // MARK: - The Registry
 
@@ -299,7 +299,7 @@ final class OpenInTests: XCTestCase {
     /// actions rather than as two more buttons inside them: those four act on the pane, this one
     /// leaves for another app — and its two halves act on the same thing, so they share a plate.
     func testThePaneHeaderCarriesTheOpenInControlAsOneSplitControl() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let root = try XCTUnwrap(controller.window?.contentView)
         controller.window?.setContentSize(NSSize(width: 1200, height: 700))
         root.layoutSubtreeIfNeeded()
@@ -346,7 +346,7 @@ final class OpenInTests: XCTestCase {
     /// No checkout, nothing to open: a fresh window shows no session and no composer, so the
     /// control hides rather than pointing at whatever was open last.
     func testTheControlHidesWhereThereIsNoCheckout() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         _ = controller.window?.contentView
         controller.updateOpenInControls()
 
@@ -368,7 +368,7 @@ final class OpenInTests: XCTestCase {
     /// includes the page title's own width, the optical insets and the stack's own gaps — the kind of
     /// arithmetic that is wrong by one control and reads as right.
     func testTheHeaderStillFitsWithTheOpenInPairAtTheNarrowestPane() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let root = try XCTUnwrap(controller.window?.contentView)
         let header = try XCTUnwrap(controller.pageTitleView.superview as? NSStackView)
 

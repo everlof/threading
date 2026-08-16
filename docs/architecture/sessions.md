@@ -716,6 +716,14 @@ about which CLI is at the other end.
   leaves a backgrounded fleet running, and teardown is reached for exactly when a fleet has run
   away. Closing stdin stays the first move on every transport that has one — Codex's app-server
   shuts down on end-of-input — so the group signal is the escalation, not the greeting.
+- **Parent-side stdin cannot signal the app.** `AgentChildProcess` owns the writable end of every
+  native child stdin pipe, so it applies `F_SETNOSIGPIPE` to that descriptor before exposing a
+  `FileHandle`. This is descriptor policy, not ACP/Codex/Claude policy: a child may exit before
+  initialization or between later writes under any of the three transports. A write then returns
+  an ordinary failure (`EPIPE` through `FileHandle`) for the transport to settle; it must never
+  deliver `SIGPIPE` to Threading's test host or shipping process. Failing to install that policy
+  fails child construction. Early-exit and later-write process tests also pin one reap, one exit
+  callback, and an empty ledger after settlement.
 - **A ledger of what is live.** `AgentChildLedger` writes one small record per child under
   Application Support the moment it is spawned, and removes it the moment it is reaped. What
   survives a launch is whatever had not been reaped when it ended: after a clean quit, at most

@@ -2,6 +2,11 @@ import XCTest
 @testable import Threading
 
 final class AppSettingDefinitionTests: XCTestCase {
+    private struct PersistenceCompatibility: Equatable {
+        let key: String
+        let valueType: AppSettingValueType
+    }
+
     func testProductionDefinitionsAreCompleteAndPersistenceKeysStayUnique() {
         XCTAssertEqual(AppSettingDefinitions.issues, [])
 
@@ -11,8 +16,29 @@ final class AppSettingDefinitionTests: XCTestCase {
         XCTAssertEqual(Set(keys).count, keys.count)
     }
 
+    func testEveryClosedPersistedIdentityIsErasedExactlyOnce() {
+        let erased = AppSettingDefinitions.persistedDescriptors
+        let counts = Dictionary(grouping: erased, by: \.identity).mapValues(\.count)
+
+        XCTAssertEqual(Set(counts.keys), Set(AppSettingIdentity.allCases))
+        XCTAssertTrue(counts.values.allSatisfy { $0 == 1 })
+        XCTAssertEqual(erased.count, AppSettingIdentity.allCases.count)
+    }
+
+    func testErasedPersistedCatalogueIsOnlyTheTypedDescriptorProjection() {
+        let projected = AppSettingDefinitions.persistedDescriptors.map(\.definition)
+        let persistedCatalogue = AppSettingDefinitions.all.filter { $0.persistence != nil }
+
+        XCTAssertEqual(persistedCatalogue, projected)
+        XCTAssertEqual(
+            projected.map(\.identity),
+            AppSettingDefinitions.persistedDescriptors.map { $0.identity.rawValue }
+        )
+        XCTAssertTrue(projected.allSatisfy { $0.persistence != nil })
+    }
+
     func testSyntheticDuplicateKeyFailsTheCatalogueAudit() throws {
-        let original = AppSettingDefinitions.definition("restoresLastSession")
+        let original = AppSettingDefinitions.restoresLastSession.definition
         let duplicate = AppSettingDefinition(
             identity: "syntheticDuplicate",
             persistence: original.persistence,
@@ -58,61 +84,234 @@ final class AppSettingDefinitionTests: XCTestCase {
         XCTAssertTrue(catalogue.issues.contains("duplicate row anchor general/Same row"))
     }
 
-    func testValidationRejectsWrongTypesUnknownCasesAndOutOfRangeValues() {
-        XCTAssertTrue(
-            AppSettingDefinitions.accepts(.integer(7), for: "sessionRestoreWindowDays")
-        )
-        XCTAssertFalse(
-            AppSettingDefinitions.accepts(.integer(31), for: "sessionRestoreWindowDays")
-        )
-        XCTAssertFalse(
-            AppSettingDefinitions.accepts(.string("7"), for: "sessionRestoreWindowDays")
-        )
-        XCTAssertTrue(
-            AppSettingDefinitions.accepts(.string("recentlyUsed"), for: "sessionRestorePolicy")
-        )
-        XCTAssertFalse(
-            AppSettingDefinitions.accepts(.string("forever"), for: "sessionRestorePolicy")
-        )
+    func testTypedValidationRejectsUnknownCasesAndOutOfRangeValues() {
+        XCTAssertTrue(AppSettingDefinitions.sessionRestoreWindowDays.accepts(7))
+        XCTAssertFalse(AppSettingDefinitions.sessionRestoreWindowDays.accepts(31))
+        XCTAssertTrue(AppSettingDefinitions.sessionRestorePolicy.accepts("recentlyUsed"))
+        XCTAssertFalse(AppSettingDefinitions.sessionRestorePolicy.accepts("forever"))
     }
 
-    func testEveryCurrentAndMigrationKeyKeepsItsStableSpelling() {
-        let expected = Set([
-            "appTextSize", "attentionAlertSound", "automaticUpdateChecksEnabled",
-            "bypassesCodexHookTrust", "capturesPageBeforeAgentActions", "chatNameMorphStyle",
-            "chromeFontFamily", "claudeRemoteControl", "claudeStartupSpeed",
-            "codexStartupSpeed", "compactsSidebarTree", "confirmsBeforeClosingRunningSession",
-            "conversationFontFamily", "convertsDroppedImages", "copiesTerminalSelection",
-            "defaultAgentKind", "defaultPermissionMode", "didMigrateClosingConfirmation",
-            "disabledAttachmentDetectionAgentKinds", "disabledAttentionAlerts",
-            "disabledToolGroupIDs", "discoversAccountAvatars", "discoversProjectIcons",
-            "followsCheckoutBranch", "githubAppClientID", "groupsLoneBranches",
-            "groupsSessionsByBranch", "harmonizesTerminalBackgrounds", "hiddenNotices",
-            "includesAttachmentsOutsideProject", "installsCodexHooks", "newChatOpeningMessage",
-            "notifiesOnAttention", "playsAttentionAlertSound", "promptReturnKey",
-            "readsClaudeLoginFromKeychain", "remoteAccessAllowsOwnerRelayFallback",
-            "remoteAccessConnectionMode", "remoteAccessEnabled", "remoteAccessKeepsRelayReady",
-            "remoteInputControlDefault", "reportsClaudeLifecycleEvents", "restoresLastSession",
-            "restoresRunningSessions", "sessionRestoreLimit", "sessionRestorePolicy",
-            "sessionRestoreWindowDays", "sidebarSessionOrder", "sidebarSessionOrderIsReversed",
-            "silencesAllSounds", "soundEventChoices", "suppressedConfirmations",
-            "suppressesClaudeStatusLine", "terminalBellSound", "usesContainedExtensionLauncher",
-            "usesTerminalTitleInSidebar", "workingOrbStyle", "workspaceNavigatorSelection"
-        ])
-        let actual = Set(AppSettingDefinitions.all.compactMap { $0.persistence?.key })
+    func testEveryPersistedIdentityKeepsItsStableKeyAndValueType() {
+        let expected: [AppSettingIdentity: PersistenceCompatibility] = [
+            .defaultAgentKind: .init(key: "defaultAgentKind", valueType: .string),
+            .githubAppClientID: .init(key: "githubAppClientID", valueType: .string),
+            .restoresLastSession: .init(key: "restoresLastSession", valueType: .boolean),
+            .restoresRunningSessions: .init(key: "restoresRunningSessions", valueType: .boolean),
+            .sessionRestorePolicy: .init(key: "sessionRestorePolicy", valueType: .string),
+            .sessionRestoreWindowDays: .init(key: "sessionRestoreWindowDays", valueType: .integer),
+            .sessionRestoreLimit: .init(key: "sessionRestoreLimit", valueType: .integer),
+            .newChatOpeningMessage: .init(key: "newChatOpeningMessage", valueType: .string),
+            .legacyClosingConfirmation: .init(
+                key: "confirmsBeforeClosingRunningSession",
+                valueType: .boolean
+            ),
+            .suppressedConfirmations: .init(
+                key: "suppressedConfirmations",
+                valueType: .stringArray
+            ),
+            .hiddenNotices: .init(key: "hiddenNotices", valueType: .stringArray),
+            .closingConfirmationMigration: .init(
+                key: "didMigrateClosingConfirmation",
+                valueType: .boolean
+            ),
+            .usesAgentTitleInSidebar: .init(
+                key: "usesTerminalTitleInSidebar",
+                valueType: .boolean
+            ),
+            .groupsSessionsByBranch: .init(key: "groupsSessionsByBranch", valueType: .boolean),
+            .groupsLoneBranches: .init(key: "groupsLoneBranches", valueType: .boolean),
+            .compactsSidebarTree: .init(key: "compactsSidebarTree", valueType: .boolean),
+            .followsCheckoutBranch: .init(key: "followsCheckoutBranch", valueType: .boolean),
+            .sidebarSessionOrder: .init(key: "sidebarSessionOrder", valueType: .string),
+            .sidebarSessionOrderIsReversed: .init(
+                key: "sidebarSessionOrderIsReversed",
+                valueType: .boolean
+            ),
+            .promptReturnKey: .init(key: "promptReturnKey", valueType: .string),
+            .discoversProjectIcons: .init(key: "discoversProjectIcons", valueType: .boolean),
+            .discoversAccountAvatars: .init(key: "discoversAccountAvatars", valueType: .boolean),
+            .harmonizesTerminalBackgrounds: .init(
+                key: "harmonizesTerminalBackgrounds",
+                valueType: .boolean
+            ),
+            .convertsDroppedImages: .init(key: "convertsDroppedImages", valueType: .boolean),
+            .copiesTerminalSelection: .init(key: "copiesTerminalSelection", valueType: .boolean),
+            .notifiesOnAttention: .init(key: "notifiesOnAttention", valueType: .boolean),
+            .disabledAttentionAlerts: .init(
+                key: "disabledAttentionAlerts",
+                valueType: .stringArray
+            ),
+            .legacyPlaysAttentionAlertSound: .init(
+                key: "playsAttentionAlertSound",
+                valueType: .boolean
+            ),
+            .attentionAlertSound: .init(key: "attentionAlertSound", valueType: .string),
+            .terminalBellSound: .init(key: "terminalBellSound", valueType: .string),
+            .soundEventChoices: .init(
+                key: "soundEventChoices",
+                valueType: .stringDictionary
+            ),
+            .silencesAllSounds: .init(key: "silencesAllSounds", valueType: .boolean),
+            .disabledAttachmentDetectionAgentKinds: .init(
+                key: "disabledAttachmentDetectionAgentKinds",
+                valueType: .stringArray
+            ),
+            .includesAttachmentsOutsideProject: .init(
+                key: "includesAttachmentsOutsideProject",
+                valueType: .boolean
+            ),
+            .capturesPageBeforeAgentActions: .init(
+                key: "capturesPageBeforeAgentActions",
+                valueType: .boolean
+            ),
+            .disabledToolGroupIDs: .init(key: "disabledToolGroupIDs", valueType: .stringArray),
+            .usesContainedExtensionLauncher: .init(
+                key: "usesContainedExtensionLauncher",
+                valueType: .boolean
+            ),
+            .workspaceNavigatorSelection: .init(
+                key: "workspaceNavigatorSelection",
+                valueType: .data
+            ),
+            .reportsClaudeLifecycleEvents: .init(
+                key: "reportsClaudeLifecycleEvents",
+                valueType: .boolean
+            ),
+            .installsCodexHooks: .init(key: "installsCodexHooks", valueType: .boolean),
+            .readsClaudeLoginFromKeychain: .init(
+                key: "readsClaudeLoginFromKeychain",
+                valueType: .boolean
+            ),
+            .suppressesClaudeStatusLine: .init(
+                key: "suppressesClaudeStatusLine",
+                valueType: .boolean
+            ),
+            .bypassesCodexHookTrust: .init(key: "bypassesCodexHookTrust", valueType: .boolean),
+            .claudeRemoteControl: .init(key: "claudeRemoteControl", valueType: .string),
+            .claudeStartupSpeed: .init(key: "claudeStartupSpeed", valueType: .string),
+            .codexStartupSpeed: .init(key: "codexStartupSpeed", valueType: .string),
+            .defaultPermissionMode: .init(key: "defaultPermissionMode", valueType: .string),
+            .remoteAccessEnabled: .init(key: "remoteAccessEnabled", valueType: .boolean),
+            .remoteAccessConnectionMode: .init(
+                key: "remoteAccessConnectionMode",
+                valueType: .string
+            ),
+            .remoteAccessAllowsOwnerRelayFallback: .init(
+                key: "remoteAccessAllowsOwnerRelayFallback",
+                valueType: .boolean
+            ),
+            .remoteAccessKeepsRelayReady: .init(
+                key: "remoteAccessKeepsRelayReady",
+                valueType: .boolean
+            ),
+            .remoteInputControlDefault: .init(
+                key: "remoteInputControlDefault",
+                valueType: .string
+            ),
+            .automaticUpdateChecksEnabled: .init(
+                key: "automaticUpdateChecksEnabled",
+                valueType: .boolean
+            ),
+            .workingOrbStyle: .init(key: "workingOrbStyle", valueType: .string),
+            .chatNameMorphStyle: .init(key: "chatNameMorphStyle", valueType: .string),
+            .chromeFontFamily: .init(key: "chromeFontFamily", valueType: .string),
+            .conversationFontFamily: .init(key: "conversationFontFamily", valueType: .string),
+            .appTextSize: .init(key: "appTextSize", valueType: .string)
+        ]
+
+        XCTAssertEqual(Set(expected.keys), Set(AppSettingIdentity.allCases))
+        var actual: [AppSettingIdentity: PersistenceCompatibility] = [:]
+        for descriptor in AppSettingDefinitions.persistedDescriptors {
+            guard let persistence = descriptor.definition.persistence else {
+                XCTFail("Persisted descriptor \(descriptor.identity.rawValue) has no persistence")
+                continue
+            }
+            actual[descriptor.identity] = .init(
+                key: persistence.key,
+                valueType: persistence.valueType
+            )
+        }
         XCTAssertEqual(actual, expected)
+    }
+
+    @MainActor
+    func testProductionGithubClientIDWriteCannotBypassDeclaredByteBound() throws {
+        let suite = "AppSettingDefinitionTests.github.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+
+        var notificationCount = 0
+        let observer = NotificationCenter.default.addObserver(
+            forName: AppSettingsDidChange.name,
+            object: nil,
+            queue: nil
+        ) { _ in
+            notificationCount += 1
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        settings.githubAppClientID = "truthful-client-id"
+        XCTAssertEqual(settings.githubAppClientID, "truthful-client-id")
+        XCTAssertEqual(notificationCount, 1)
+
+        settings.githubAppClientID = String(repeating: "é", count: 513)
+        XCTAssertEqual(settings.githubAppClientID, "truthful-client-id")
+        XCTAssertEqual(notificationCount, 1, "rejected writes must not announce a change")
+    }
+
+    @MainActor
+    func testRemoteMutationProjectsOwnerPolicyAndFailsClosed() throws {
+        let suite = "AppSettingDefinitionTests.remote.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let remote = LiveRemoteSettingsMutator(appSettings: settings)
 
         XCTAssertEqual(
-            AppSettingDefinitions.key("legacyClosingConfirmation"),
-            "confirmsBeforeClosingRunningSession"
+            remote.applyAppSetting(
+                identity: "remoteInputControlDefault",
+                value: .string("focusedOwner")
+            ),
+            .applied
+        )
+        XCTAssertEqual(settings.remoteInputControlDefault, .focusedOwner)
+
+        XCTAssertEqual(
+            remote.applyAppSetting(identity: "remoteAccessEnabled", value: .boolean(true)),
+            .notMutable,
+            "transport lifecycle settings require coordinator sequencing"
+        )
+        XCTAssertFalse(settings.remoteAccessEnabled)
+
+        XCTAssertEqual(
+            remote.applyAppSetting(identity: "githubAppClientID", value: .string("x")),
+            .notMutable
+        )
+        XCTAssertEqual(settings.githubAppClientID, "")
+
+        XCTAssertEqual(
+            remote.applyAppSetting(
+                identity: "remoteInputControlDefault",
+                value: .string("allDoorsOpen")
+            ),
+            .invalidValue
+        )
+        XCTAssertEqual(settings.remoteInputControlDefault, .focusedOwner)
+
+        XCTAssertEqual(
+            remote.applyAppSetting(
+                identity: "remoteInputControlDefault",
+                value: .boolean(true)
+            ),
+            .invalidValue
         )
         XCTAssertEqual(
-            AppSettingDefinitions.key("closingConfirmationMigration"),
-            "didMigrateClosingConfirmation"
-        )
-        XCTAssertEqual(
-            AppSettingDefinitions.key("legacyPlaysAttentionAlertSound"),
-            "playsAttentionAlertSound"
+            remote.applyAppSetting(
+                identity: "remoteInputControlDefualt",
+                value: .string("collaborative")
+            ),
+            .unknownSetting
         )
     }
 

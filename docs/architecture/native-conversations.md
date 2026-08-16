@@ -142,7 +142,10 @@ or loading the session, prompts, cancellation, permission answers, the malformed
 the synthesized failure when the child dies mid-turn. `ACPWireAdapter` reads the standard wire
 shapes — content, title, plan entries, tool kinds, tool input and result, the command catalog —
 and `JSONRPCLineEnvelope.swift` holds the newline-delimited framing this shares with Codex's
-app-server.
+app-server. ACP does not own broken-pipe signal policy: its stdin is the shared
+`AgentChildProcess` parent descriptor, protected with `F_SETNOSIGPIPE` at construction so a CLI
+that exits before `initialize` turns the write into an ordinary transport failure rather than a
+host-process `SIGPIPE`. Codex and Claude receive the same guarantee from the same boundary.
 
 `ACPProviderProfile` is the only place a provider is named. Its members are the display name used
 in turn-failure prose, the diagnostics label used in logs and `StreamParseDiagnostics`, the
@@ -892,6 +895,15 @@ coalesces that control's visibility refresh with the existing follow pass, so a 
 add another main-queue job or a walk over the transcript.
 
 ### iOS conversation boundary
+
+The Mac-side remote mirror consumes `RemoteConversationSurface`, not
+`ConversationViewController`. That MainActor capability exposes only the bounded provider-neutral
+snapshot/row revision and the ordinary authorized prompt-submission path. The projection values
+live in a Foundation-only Core contract; the AppKit controller is its adapter. `AgentRuntime`
+returns the existential specifically to Core/Remote, so paging, resync, broadcasts, notification
+suppression and prompt delivery cannot grow a dependency on the controller or its view hierarchy.
+The mirror registry and runtime are still singleton-backed and remain active injection debt; this
+edge removes presentation knowledge, not those globals.
 
 The iOS conversation is a UIKit route, not a SwiftUI composition around a UIKit timeline.
 `RemoteConversationViewController` owns the virtual collection, composer, command/skill results,

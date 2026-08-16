@@ -17,6 +17,9 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
     private var sessionAccess: RecordingRemoteSessionAccess!
     private var runtimeStatus: RecordingRemoteRuntimeStatus!
     private var settingsMutator: RecordingRemoteSettingsMutator!
+    private var appSettings: AppSettings!
+    private var appSettingsDefaults: UserDefaults!
+    private var appSettingsSuiteName: String!
     private var eventRecorder: RecordingRemoteEventRecorder!
     private var port: UInt16!
 
@@ -27,10 +30,13 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             RemoteAuthorization(shareID: "test", capability: .interact, scope: .allSessions),
             forToken: "goodtoken"
         )
-        let live = RemoteAccessCoordinator.makeServerServices()
+        appSettingsSuiteName = "RemoteServerIntegrationTests.\(UUID().uuidString)"
+        appSettingsDefaults = try! XCTUnwrap(UserDefaults(suiteName: appSettingsSuiteName))
+        appSettings = AppSettings(defaults: appSettingsDefaults)
+        let live = RemoteAccessCoordinator.makeServerServices(appSettings: appSettings)
         sessionAccess = RecordingRemoteSessionAccess(store: .shared)
         runtimeStatus = RecordingRemoteRuntimeStatus(runtime: .shared)
-        settingsMutator = RecordingRemoteSettingsMutator()
+        settingsMutator = RecordingRemoteSettingsMutator(appSettings: appSettings)
         eventRecorder = RecordingRemoteEventRecorder()
         server = RemoteAccessServer(services: RemoteAccessServerServices(
             sessionQueries: sessionAccess,
@@ -409,6 +415,11 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         server.stop()
         server = nil
         authority = nil
+        settingsMutator = nil
+        appSettings = nil
+        appSettingsDefaults.removePersistentDomain(forName: appSettingsSuiteName)
+        appSettingsDefaults = nil
+        appSettingsSuiteName = nil
         super.tearDown()
     }
 
@@ -1221,6 +1232,81 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             try XCTUnwrap(post("/api/session", bearer: "viewtoken", body: create)).status,
             403
         )
+    }
+
+    func testAppSettingMutationProjectsDescriptorPolicyAndFailsClosed() throws {
+        let focused = Data(#"{"value":"focusedOwner"}"#.utf8)
+        authority.set(
+            RemoteAuthorization(shareID: "view", capability: .view, scope: .allSessions),
+            forToken: "viewtoken"
+        )
+
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/settings/remoteInputControlDefault",
+                bearer: "viewtoken",
+                body: focused
+            )).status,
+            403
+        )
+        XCTAssertTrue(settingsMutator.appSettingMutations.isEmpty)
+
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/settings/remoteInputControlDefault",
+                bearer: "goodtoken",
+                body: focused
+            )).status,
+            200
+        )
+        XCTAssertEqual(appSettings.remoteInputControlDefault, .focusedOwner)
+
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/settings/remoteAccessEnabled",
+                bearer: "goodtoken",
+                body: Data(#"{"value":true}"#.utf8)
+            )).status,
+            403,
+            "transport lifecycle changes must stay behind coordinator sequencing"
+        )
+        XCTAssertFalse(appSettings.remoteAccessEnabled)
+
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/settings/githubAppClientID",
+                bearer: "goodtoken",
+                body: Data(#"{"value":"client"}"#.utf8)
+            )).status,
+            403
+        )
+        XCTAssertEqual(appSettings.githubAppClientID, "")
+
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/settings/remoteInputControlDefualt",
+                bearer: "goodtoken",
+                body: focused
+            )).status,
+            404
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/settings/remoteInputControlDefault",
+                bearer: "goodtoken",
+                body: Data(#"{"value":true}"#.utf8)
+            )).status,
+            422
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/settings/remoteInputControlDefault",
+                bearer: "goodtoken",
+                body: Data(#"{"value":"invented"}"#.utf8)
+            )).status,
+            422
+        )
+        XCTAssertTrue(eventRecorder.messages.contains("App setting changed remotely"))
     }
 
     func testUsageIsAdvertisedAndReadableOnlyToWholeHostOwner() throws {
@@ -2853,7 +2939,26 @@ private final class RecordingRemoteRuntimeStatus: RemoteRuntimeStatus {
 
 @MainActor
 private final class RecordingRemoteSettingsMutator: RemoteSettingsMutating {
+    struct AppSettingMutation: Equatable {
+        let identity: String
+        let value: AppSettingStoredValue
+    }
+
+    private let appSettings: AppSettings
     private(set) var appThemeIDs: [AppThemeID] = []
+    private(set) var appSettingMutations: [AppSettingMutation] = []
+
+    init(appSettings: AppSettings) {
+        self.appSettings = appSettings
+    }
+
+    func applyAppSetting(
+        identity: String,
+        value: AppSettingStoredValue
+    ) -> AppSettingRemoteMutationResult {
+        appSettingMutations.append(.init(identity: identity, value: value))
+        return appSettings.applyRemoteMutation(identity: identity, value: value)
+    }
 
     func applyAppTheme(id: AppThemeID) -> RemoteAppThemeMutationResult {
         appThemeIDs.append(id)
@@ -3490,9 +3595,25 @@ final class RemoteOwnerDeviceRegistryTests: XCTestCase {
 }
 
 @MainActor
-final class RemoteGuestSharePersistenceTests: XCTestCase {
+final class RemoteGuestSharePersistenceTests: HostedStoreTestCase {
 
     private let invitationToken = String(repeating: "c", count: 43)
+    private var appSettingsSuites: [(String, UserDefaults)] = []
+
+    override func tearDown() {
+        for (name, defaults) in appSettingsSuites {
+            defaults.removePersistentDomain(forName: name)
+        }
+        appSettingsSuites.removeAll()
+        super.tearDown()
+    }
+
+    private func isolatedRemoteAppSettings() -> AppSettings {
+        let name = "RemoteGuestSharePersistenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        appSettingsSuites.append((name, defaults))
+        return AppSettings(defaults: defaults)
+    }
 
     func testAcceptedGuestMembershipAndUnusedInvitationSurviveCoordinatorRecreation() throws {
         let sessionID = SessionID()
@@ -3508,6 +3629,7 @@ final class RemoteGuestSharePersistenceTests: XCTestCase {
         )])
         let first = RemoteAccessCoordinator(
             ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            appSettings: isolatedRemoteAppSettings(),
             guestShareStore: store
         )
         XCTAssertEqual(first.access(for: sessionID).links.count, 1)
@@ -3524,6 +3646,7 @@ final class RemoteGuestSharePersistenceTests: XCTestCase {
 
         let afterRestart = RemoteAccessCoordinator(
             ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            appSettings: isolatedRemoteAppSettings(),
             guestShareStore: store
         )
         XCTAssertTrue(afterRestart.access(for: sessionID).links.isEmpty)
@@ -3534,6 +3657,7 @@ final class RemoteGuestSharePersistenceTests: XCTestCase {
         let store = FailingGuestShareStore()
         let coordinator = RemoteAccessCoordinator(
             ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            appSettings: isolatedRemoteAppSettings(),
             guestShareStore: store
         )
 

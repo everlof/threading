@@ -11,7 +11,7 @@ import XCTest
 /// the window must be *able* to be small, and a saved frame must not be able to put it off
 /// screen.
 @MainActor
-final class MainWindowSizingTests: XCTestCase {
+final class MainWindowSizingTests: HostedStoreTestCase {
 
     private enum Fixture {
         /// A screen small enough that a window sized to a long conversation is obviously wrong.
@@ -63,7 +63,7 @@ final class MainWindowSizingTests: XCTestCase {
         let chosenWidth: CGFloat = 360
         SidebarWidth.record(chosenWidth)
 
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 1_200, height: 700))
@@ -100,7 +100,7 @@ final class MainWindowSizingTests: XCTestCase {
     /// a floor the user cannot drag through — the window stops, and from the outside that reads
     /// as the window being stuck rather than as a layout bug.
     func testTheWindowCanBeDraggedDownToItsOwnMinimum() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let window = try XCTUnwrap(controller.window)
 

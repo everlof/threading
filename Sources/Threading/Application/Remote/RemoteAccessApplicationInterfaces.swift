@@ -44,6 +44,10 @@ enum RemoteAppThemeMutationResult: Equatable {
 /// this boundary instead of being reconstructed in the HTTP adapter.
 @MainActor
 protocol RemoteSettingsMutating: Sendable {
+    func applyAppSetting(
+        identity: String,
+        value: AppSettingStoredValue
+    ) -> AppSettingRemoteMutationResult
     func applyAppTheme(id: AppThemeID) -> RemoteAppThemeMutationResult
     func setSessionTheme(
         id: TerminalThemeID?,
@@ -87,6 +91,19 @@ extension EventLog: RemoteEventRecording {
 
 @MainActor
 struct LiveRemoteSettingsMutator: RemoteSettingsMutating {
+    private let appSettings: AppSettings
+
+    init(appSettings: AppSettings) {
+        self.appSettings = appSettings
+    }
+
+    func applyAppSetting(
+        identity: String,
+        value: AppSettingStoredValue
+    ) -> AppSettingRemoteMutationResult {
+        appSettings.applyRemoteMutation(identity: identity, value: value)
+    }
+
     func applyAppTheme(id: AppThemeID) -> RemoteAppThemeMutationResult {
         guard let theme = AppThemeLibrary.theme(withID: id) else { return .unknownTheme }
         AppThemeLibrary.apply(theme)

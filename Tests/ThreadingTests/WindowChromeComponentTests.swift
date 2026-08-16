@@ -6,7 +6,7 @@ import XCTest
 /// and gestures, the three buttons that are its working parts, and the host that collapses all
 /// of it to nothing in native dress.
 @MainActor
-final class WindowChromeComponentTests: XCTestCase {
+final class WindowChromeComponentTests: HostedStoreTestCase {
     /// Render fixtures run hosted in the shipping app's defaults domain. A developer's chosen
     /// chrome font must not silently change historical conformance pixels, but running the
     /// suite must not erase that preference either.
@@ -1354,7 +1354,7 @@ final class WindowChromeComponentTests: XCTestCase {
         for (theme, name) in [(AppTheme.system, "window-chrome-native-window")]
             + AppThemeStyles.takeovers.map({ ($0, "window-chrome-\($0.id.rawValue)-window") }) {
             AppThemePalette.set(theme)
-            let controller = MainWindowController()
+            let controller = makeMainWindowController()
             let window = try XCTUnwrap(controller.window)
             window.setContentSize(NSSize(width: 1_100, height: 700))
             let content = try XCTUnwrap(window.contentView)

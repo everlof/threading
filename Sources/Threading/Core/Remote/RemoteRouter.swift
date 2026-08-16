@@ -79,6 +79,7 @@ struct RemoteRouter {
     static let invitationAcceptancePath = "/api/invitations/accept"
     static let hostedDeviceCredentialPath = "/api/hosted-device-credential"
     static let appThemePath = "/api/theme"
+    private static let appSettingPrefix = "/api/settings/"
     static let themeEventsPath = "/ws/events"
     /// Stored in `RemoteConnection.routedSessionID` to avoid a second upgrade-state field.
     static let themeEventsRouteID = "__theme_events__"
@@ -99,6 +100,14 @@ struct RemoteRouter {
         guard path.hasPrefix(prefix), path.hasSuffix(suffix) else { return nil }
         let id = path.dropFirst(prefix.count).dropLast(suffix.count)
         return id.isEmpty || id.contains("/") ? nil : String(id)
+    }
+
+    /// The stable setting identity in `/api/settings/<identity>`, else nil. The identity is
+    /// still authorized by its descriptor; this only keeps the route allowlist structural.
+    static func appSettingIdentity(forPath path: String) -> String? {
+        guard path.hasPrefix(appSettingPrefix) else { return nil }
+        let identity = path.dropFirst(appSettingPrefix.count)
+        return identity.isEmpty || identity.contains("/") ? nil : String(identity)
     }
 
     static func renameSessionID(forPath path: String) -> String? {

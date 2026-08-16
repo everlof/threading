@@ -226,7 +226,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
     /// restoration into the reveal correctly made the race deterministic and exposed the bad
     /// measurement. The next test owns the separate claim that the panel opens wide enough.
     func testThePanelHardFloorCostsOnlyItsOwnChrome() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let item = try XCTUnwrap(controller.splitViewController.splitViewItems.last)
 
         XCTAssertEqual(item.minimumThickness, DisplayPaneDefaults.slimmestWidth)
@@ -265,7 +265,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         SidebarWidth.reset()
         DisplayPaneWidth.stored = 420
 
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 1400, height: 800))
 
@@ -413,7 +413,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
     /// session header's copy of it and **View ▸ Display Panel** perform, through the one route
     /// the window already exposes for the last tab closing.
     func testTheCornerToggleCollapsesThePanel() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 1400, height: 800))
 
@@ -449,7 +449,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
     /// after the first of a chain to the view that took the first one, so the toggle answered
     /// one press and then nothing until the pointer moved. Hence the identity assertions here.
     func testThePanelsToggleKeepsItsPlaceWhenThePanelOpensUnderIt() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 1400, height: 800))
         window.layoutIfNeeded()
@@ -521,7 +521,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
     /// Driven through the window because the corner holds the *window's* one toggle: a pane
     /// standing on its own has the slot it moves into and nothing in it.
     func testTheCornerToggleKeepsTheTabsItHides() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 1400, height: 800))
         let pane = controller.displayPaneController
@@ -706,7 +706,7 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         defer { settings.disabledToolGroupIDs = previous }
         settings.setToolGroup(MCPToolCatalog.appearance.id, enabled: true)
 
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let container = try XCTUnwrap(
             controller.splitViewController.splitViewItems[1].viewController
                 as? TerminalContainerViewController

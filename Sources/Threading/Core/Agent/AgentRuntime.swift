@@ -468,6 +468,13 @@ final class AgentRuntime {
         conversations[sessionID]
     }
 
+    /// The projection/submission seam consumed by Core's remote transport. Other UI owners may
+    /// still ask for the concrete controller while that larger runtime ownership edge remains;
+    /// remote code deliberately cannot.
+    func remoteConversationSurface(for sessionID: SessionID) -> (any RemoteConversationSurface)? {
+        conversations[sessionID]
+    }
+
     func resolveRemotePermission(
         sessionID: SessionID,
         id: String,

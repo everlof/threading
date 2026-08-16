@@ -20,6 +20,38 @@ typealias RemoteUsageLimitLoader = @MainActor @Sendable (
     _ days: Int
 ) async -> RemoteUsageLimitDTO?
 
+/// One JSON value destined for a typed app-setting descriptor. The wire remains deliberately
+/// type-erased only until descriptor admission; unsupported JSON shapes fail before mutation.
+private struct RemoteAppSettingMutationRequest: Decodable {
+    private enum CodingKeys: String, CodingKey { case value }
+
+    let value: AppSettingStoredValue
+
+    init(from decoder: Decoder) throws {
+        let keyed = try decoder.container(keyedBy: CodingKeys.self)
+        let container = try keyed.superDecoder(forKey: .value).singleValueContainer()
+        if let value = try? container.decode(Bool.self) {
+            self.value = .boolean(value)
+        } else if let value = try? container.decode(Int.self) {
+            self.value = .integer(value)
+        } else if let value = try? container.decode(String.self) {
+            self.value = .string(value)
+        } else if let value = try? container.decode([String].self) {
+            self.value = .stringArray(value)
+        } else if let value = try? container.decode([String: String].self) {
+            self.value = .stringDictionary(value)
+        } else {
+            throw DecodingError.typeMismatch(
+                AppSettingStoredValue.self,
+                .init(
+                    codingPath: container.codingPath,
+                    debugDescription: "Unsupported app-setting value shape"
+                )
+            )
+        }
+    }
+}
+
 /// Cross-executor dependencies have their own synchronization because tests and the main-actor
 /// coordinator configure them while the server reads them from its network queue.
 private final class RemoteAccessServerDependencies: @unchecked Sendable {
@@ -431,6 +463,16 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         if request.method == "POST", path == RemoteRouter.appThemePath {
             handleAppTheme(request, respond: respond)
+            return
+        }
+
+        if request.method == "POST",
+           let identity = RemoteRouter.appSettingIdentity(forPath: path) {
+            handleAppSetting(
+                request,
+                identity: identity,
+                respond: respond
+            )
             return
         }
 
@@ -1119,6 +1161,47 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             respond(.respond(RemoteRouter.json(
                 self.services.mirrors.meResponse(for: authorization)
             )))
+        }
+    }
+
+    private func handleAppSetting(
+        _ request: HTTPRequest,
+        identity: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canManageHost else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        guard let mutation = try? JSONDecoder().decode(
+            RemoteAppSettingMutationRequest.self,
+            from: request.body
+        ) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        DispatchQueue.main.async {
+            switch self.services.settings.applyAppSetting(
+                identity: identity,
+                value: mutation.value
+            ) {
+            case .applied:
+                self.services.eventLog.recordRemoteEvent("App setting changed remotely", [
+                    "setting": identity,
+                    "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                ])
+                respond(.respond(RemoteRouter.json(
+                    self.services.mirrors.meResponse(for: authorization)
+                )))
+            case .unknownSetting:
+                respond(.respond(RemoteRouter.error(404, "Unknown Setting")))
+            case .notMutable:
+                respond(.respond(RemoteRouter.error(403, "Setting Not Mutable")))
+            case .invalidValue:
+                respond(.respond(RemoteRouter.error(422, "Invalid Setting Value")))
+            }
         }
     }
 

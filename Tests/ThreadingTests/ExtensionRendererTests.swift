@@ -8,7 +8,7 @@ import XCTest
 /// Pins the first extension boundary end to end: an SDK value tree enters the app, and only
 /// Threading-owned, themed controls leave the renderer.
 @MainActor
-final class ExtensionRendererTests: XCTestCase {
+final class ExtensionRendererTests: HostedStoreTestCase {
 
   override func tearDown() {
     AppThemeLibrary.apply(.system)
@@ -2951,7 +2951,7 @@ final class ExtensionRendererTests: XCTestCase {
       signalProvider: { _ in nil }
     )
 
-    let controller = MainWindowController()
+    let controller = makeMainWindowController()
     let window = try XCTUnwrap(controller.window)
     window.setContentSize(NSSize(width: 1_280, height: 800))
     window.contentView?.layoutSubtreeIfNeeded()

@@ -301,7 +301,7 @@ final class RemoteSessionMirrorRegistry {
                 sessionID: sessionID,
                 capability: authorization.capability
             )
-        } else if let conversation = AgentRuntime.shared.conversation(for: sessionID),
+        } else if let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID),
                   conversation.isRunning {
             attached = attachConversation(
                 connection,
@@ -397,7 +397,7 @@ final class RemoteSessionMirrorRegistry {
 
     private func attachConversation(
         _ connection: RemoteConnection,
-        to conversation: ConversationViewController,
+        to conversation: any RemoteConversationSurface,
         sessionID: SessionID,
         authorization: RemoteAuthorization
     ) -> Bool {
@@ -463,7 +463,7 @@ final class RemoteSessionMirrorRegistry {
     ) {
         guard mirrors[sessionID]?.surface == "conversation",
               mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
-              let conversation = AgentRuntime.shared.conversation(for: sessionID) else {
+              let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID) else {
             return
         }
         connection.sendText(encode(RemoteConversationWirePolicy.page(
@@ -481,7 +481,7 @@ final class RemoteSessionMirrorRegistry {
         guard let peer = connection.authenticatedPeer,
               mirrors[sessionID]?.surface == "conversation",
               mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
-              let conversation = AgentRuntime.shared.conversation(for: sessionID) else {
+              let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID) else {
             return
         }
         let projection = conversation.remoteProjection
@@ -693,7 +693,7 @@ final class RemoteSessionMirrorRegistry {
             status = .rejected
         } else if !RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)) {
             status = .unavailable
-        } else if let conversation = AgentRuntime.shared.conversation(for: sessionID),
+        } else if let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID),
                   conversation.isRunning {
             if !conversation.remoteSnapshot.canSend {
                 status = .busy
@@ -1057,7 +1057,7 @@ final class RemoteSessionMirrorRegistry {
         broadcastInputControl(sessionID)
         // Provider state did not change, but each viewer's authorised `canSend` may have.
         if mirrors[sessionID]?.surface == "conversation",
-           let conversation = AgentRuntime.shared.conversation(for: sessionID),
+           let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID),
            let mirror = mirrors[sessionID] {
             let revision = mirror.conversationRevision
             for connection in mirror.subscribers.values {
@@ -1256,7 +1256,9 @@ final class RemoteSessionMirrorRegistry {
 
     private func broadcastConversation(_ sessionID: SessionID) {
         guard var mirror = mirrors[sessionID], mirror.surface == "conversation",
-              let conversation = AgentRuntime.shared.conversation(for: sessionID) else { return }
+              let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID) else {
+            return
+        }
         let projection = conversation.remoteProjection
         let current = projection.snapshot
         let previous = mirror.conversationSnapshot

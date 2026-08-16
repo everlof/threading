@@ -8,7 +8,7 @@ import XCTest
 /// which is exactly the state the exchange must also survive (a hosted test's theme change
 /// must not order anything on screen).
 @MainActor
-final class WindowChromeTakeoverTests: XCTestCase {
+final class WindowChromeTakeoverTests: HostedStoreTestCase {
 
     private var previousTheme: AppTheme!
     private var controller: MainWindowController?
@@ -72,7 +72,7 @@ final class WindowChromeTakeoverTests: XCTestCase {
     /// flipped after the fact (`AppThemeLibrary.restore()` runs before the controller exists).
     func testAWindowCreatedUnderATakeoverThemeIsFramelessFromBirth() throws {
         AppThemePalette.set(try makeTakeoverTheme())
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let window = try window(of: controller)
 
@@ -92,7 +92,7 @@ final class WindowChromeTakeoverTests: XCTestCase {
     func testAWindowBornUnderAShapedThemeIsTransparentBehindIt() throws {
         for theme in [AppThemeStyles.aquaTiger, AppThemeStyles.beOS] {
             AppThemePalette.set(theme)
-            let controller = MainWindowController()
+            let controller = makeMainWindowController()
             self.controller = controller
             let window = try window(of: controller)
 
@@ -107,7 +107,7 @@ final class WindowChromeTakeoverTests: XCTestCase {
     /// takeover still hands the native frame the surface the window started with.
     func testAWindowBornUnderASquareTakeoverKeepsItsBackingAndRestoresIt() throws {
         AppThemePalette.set(try makeTakeoverTheme())
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let window = try window(of: controller)
         let coordinator = try XCTUnwrap(controller.chromeCoordinator)
@@ -126,7 +126,7 @@ final class WindowChromeTakeoverTests: XCTestCase {
 
     func testAThemeChangeExchangesTheFrameBothWaysPreservingTheWindow() throws {
         AppThemePalette.set(.system)
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let window = try window(of: controller)
         let coordinator = try XCTUnwrap(controller.chromeCoordinator)
@@ -162,7 +162,7 @@ final class WindowChromeTakeoverTests: XCTestCase {
     /// The exchange rides the theme notification itself — the coordinator observes, nobody
     /// has to remember to call it.
     func testTheLibraryNotificationDrivesTheExchange() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let coordinator = try XCTUnwrap(controller.chromeCoordinator)
         XCTAssertFalse(coordinator.isTakeoverActive)
@@ -179,7 +179,7 @@ final class WindowChromeTakeoverTests: XCTestCase {
     /// coordinator's own seam — AppKit refuses `.fullScreen` set on a real mask outside a
     /// genuine transition, loudly enough to fail a test that tries.
     func testAFullscreenWindowParksTheExchangeUntilExit() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let window = try window(of: controller)
         let coordinator = try XCTUnwrap(controller.chromeCoordinator)
@@ -215,7 +215,7 @@ final class WindowChromeTakeoverTests: XCTestCase {
     /// In takeover nothing floats over the panes — no traffic lights, no toolbar — so the
     /// sidebar's floor falls back to its own minimum instead of the window-controls clearance.
     func testTakeoverMeasurementsFallBackToTheSidebarsOwnMinimum() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let coordinator = try XCTUnwrap(controller.chromeCoordinator)
         let sidebarItem = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
@@ -241,7 +241,7 @@ final class WindowChromeTakeoverTests: XCTestCase {
     /// The product theme owns the complete frame, not only the colors inside AppKit's frame.
     /// This is the shipped path used by ordinary product captures.
     func testTheStockThreadingThemeTakesTheWindowOverAndHandsItBack() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let window = try window(of: controller)
         let coordinator = try XCTUnwrap(controller.chromeCoordinator)
@@ -272,7 +272,7 @@ final class WindowChromeTakeoverTests: XCTestCase {
     /// The stock Windows 98 theme is the first real user of the mechanism; the fixture
     /// themes above prove the mechanics, this proves the shipped theme actually engages them.
     func testTheStockWin98ThemeTakesTheWindowOverAndHandsItBack() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let window = try window(of: controller)
         let coordinator = try XCTUnwrap(controller.chromeCoordinator)
@@ -296,7 +296,7 @@ final class WindowChromeTakeoverTests: XCTestCase {
     /// takeover switch where the style mask itself does not change.
     func testAShapedTabOwnsAndRestoresTheWindowsBackingSurface() throws {
         AppThemePalette.set(.system)
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let window = try window(of: controller)
         let coordinator = try XCTUnwrap(controller.chromeCoordinator)
@@ -331,7 +331,7 @@ final class WindowChromeTakeoverTests: XCTestCase {
     /// answer for a window that has no titlebar to double-click.
     func testAFramelessWindowStillTakesKeyAndNeverClaimsATitlebarStrip() throws {
         AppThemePalette.set(try makeTakeoverTheme())
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let window = try window(of: controller)
 
@@ -356,7 +356,7 @@ final class WindowChromeTakeoverTests: XCTestCase {
     /// exchange, because the area is stated as constraints and has to follow a live theme flip.
     func testACoveringSurfaceClearsTheWindowsChromeInBothDresses() throws {
         AppThemePalette.set(.system)
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let window = try window(of: controller)
         let coordinator = try XCTUnwrap(controller.chromeCoordinator)

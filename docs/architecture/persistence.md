@@ -198,6 +198,45 @@ unregistered key, and `bool(forKey:)` answers `false`, which for every seeded se
 are registered by the readers themselves now; registration is idempotent, and an invariant that
 depends on instantiation order is not an invariant.
 
+### Typed application-setting descriptors
+
+Persisted app preferences have two representations with different jobs. `AppSettingIdentity` is
+the closed persisted identity set. Each identity is authored once as an
+`AppSettingDescriptor<Value>` such as `githubAppClientID` or `remoteAccessEnabled`; `Value`
+determines its stored property-list category, while typed absence/default, validation, and
+encoding factories make assigning a value of the wrong Swift type a compile error. The
+heterogeneous persisted registry repeats only references to those typed declarations.
+`AppSettingDefinition` is their derived type-erased projection, retained for catalogue
+enumeration, migration audits, Settings navigation and search, and the read-only `list_settings`
+wire result. Surface-only settings have no persisted Swift value and may be authored directly in
+that erased projection.
+
+The typed descriptor itself owns the stable defaults key, encoding, absence/default behavior,
+validation or normalization, change-notification policy, presentations, and remote policy.
+`AppSettings` reads and writes through descriptors, including
+migrations with notification deliberately suppressed during construction. Invalid production
+writes fail closed without replacing the previous value or announcing a change; notably the
+GitHub App client ID cannot bypass its declared 1,024-byte bound through the ordinary setter.
+Recoverable Codable preferences keep their specialized durable store, then ask their descriptor
+to apply the declared notification policy only after the save commits.
+
+Dynamic string identity is admitted only at the authenticated-owner mutation boundary. The
+`/api/settings/<identity>` route first requires a whole-host owner, then the application mutator
+projects authorization from `remotePolicy` and dispatches the admitted stored value to the same
+typed descriptor used locally. `.ownerMutable` therefore performs a validated descriptor write;
+view-only shares, `.catalogueOnly`, `.hidden`, unknown identities, wrong value shapes, and
+unrecognized enum values all fail closed. `remoteInputControlDefault` is owner-mutable because its
+effect is read when the next share is created. The transport enabled/mode/fallback settings remain
+catalogue-only: changing them requires `RemoteAccessCoordinator` lifecycle sequencing, so a raw
+remote persistence write would be dishonest. Adding a persisted identity without a typed
+definition, duplicating a key, or drifting a row anchor/order fails the catalogue audit.
+
+Scratch `AppSettings` fixtures own their exact `UserDefaults` suite names and remove those
+persistent domains in teardown. This does not disable construction-time migrations: it lets them
+exercise their real writes while ensuring the resulting marker is removed. cfprefsd may write a
+42-byte empty plist after the host exits; `scripts/test.sh` collects only those empty UUID-named
+domains on the next safe sweep.
+
 ## Two Writers, and the Reconcile That Trusted There Was One
 
 `save(_:)` reconciles rather than rewrites: upsert what is there, delete what has gone. That is
@@ -249,6 +288,12 @@ asserts `StateManager.sharedUsesHostedTestState` before erasing anything, so a b
 the redirect fails the suite instead of deleting the developer's projects on the way past.
 `HostedStoreIsolationTests` reproduces the loss directly — two connections, one adds a project,
 the stale one's reconcile must throw and leave that project standing.
+
+The main-window test composition helper is intentionally part of `HostedStoreTestCase`, not a
+general `XCTestCase` extension. Its controller receives the redirected shared hosted-test graph;
+those services are not independently constructed. The helper separately owns each UUID-scoped
+diagnostics directory until teardown releases the controller, environment, and `EventLog`, then
+removes only that exact directory.
 
 ### 2026-08-15 — The same race, one domain further out
 

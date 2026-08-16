@@ -2,20 +2,6 @@ import AppKit
 import ThreadingExtensionKit
 import ThreadingRemoteKit
 
-/// The identity of the projected row array, separate from live metadata such as streaming text.
-/// A new controller gets a new generation; exact row edits advance only its value. Remote
-/// broadcasting can therefore prove that thousands of settled rows are unchanged without
-/// comparing every one on each streaming frame.
-struct RemoteConversationRowsRevision: Equatable {
-    let generation: UUID
-    let value: Int
-}
-
-struct RemoteConversationProjection {
-    let snapshot: RemoteConversationSnapshotDTO
-    let rowsRevision: RemoteConversationRowsRevision
-}
-
 /// Incremental provider-neutral projection of the native timeline.
 ///
 /// Timeline changes already name the exact appended or result-bearing row. Mirroring that edit
@@ -185,7 +171,7 @@ enum ConversationTransportText {
 /// Renders an agent conversation natively, in place of the agent's terminal: user turns as
 /// bubbles, the agent's replies as markdown, tool calls as collapsible rows, approvals as
 /// inline cards. This controller drives the stream; the drawing lives in `ConversationRendering`.
-final class ConversationViewController: NSViewController {
+final class ConversationViewController: NSViewController, RemoteConversationSurface {
 
     // MARK: - Properties
 

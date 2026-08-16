@@ -39,7 +39,7 @@ final class AppSettings {
         let workspaceNavigatorPersistence =
             RecoverableDefaultsStore<WorkspaceNavigatorSelection>(
                 defaults: defaults,
-                key: AppSettingDefinitions.key("workspaceNavigatorSelection"),
+                key: AppSettingDefinitions.workspaceNavigatorSelection.persistenceKey,
                 criticality: .preference,
                 sizePolicy: .compactMetadata
             )
@@ -60,16 +60,12 @@ final class AppSettings {
     /// Agent used when creating a session without naming one explicitly.
     var defaultAgentKind: AgentKind {
         get {
-            guard let raw = AppSettingDefinitions.validatedString(
-                    defaults.string(forKey: AppSettingDefinitions.key("defaultAgentKind")),
-                    for: "defaultAgentKind"
-                  ),
+            guard let raw = AppSettingDefinitions.defaultAgentKind.read(from: defaults),
                   let kind = AgentKind(rawValue: raw) else { return AgentDefaults.defaultKind }
             return kind
         }
         set {
-            defaults.set(newValue.rawValue, forKey: AppSettingDefinitions.key("defaultAgentKind"))
-            notifyChanged()
+            AppSettingDefinitions.defaultAgentKind.write(newValue.rawValue, to: defaults)
         }
     }
 
@@ -78,19 +74,17 @@ final class AppSettings {
     /// Configuration rather than a secret — a client ID identifies the app, it grants
     /// nothing — so it lives beside the other behavioural settings, not in the Keychain.
     var githubAppClientID: String {
-        get { defaults.string(forKey: AppSettingDefinitions.key("githubAppClientID")) ?? "" }
+        get { AppSettingDefinitions.githubAppClientID.read(from: defaults) ?? "" }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("githubAppClientID"))
-            notifyChanged()
+            AppSettingDefinitions.githubAppClientID.write(newValue, to: defaults)
         }
     }
 
     /// Whether the previously selected session is reopened at launch.
     var restoresLastSession: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("restoresLastSession")) }
+        get { AppSettingDefinitions.restoresLastSession.read(from: defaults) ?? true }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("restoresLastSession"))
-            notifyChanged()
+            AppSettingDefinitions.restoresLastSession.write(newValue, to: defaults)
         }
     }
 
@@ -101,10 +95,9 @@ final class AppSettings {
     /// no registered default precisely so that an absent policy key can read this one instead.
     /// Nothing should write it any more.
     var restoresRunningSessions: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("restoresRunningSessions")) }
+        get { AppSettingDefinitions.restoresRunningSessions.read(from: defaults) ?? true }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("restoresRunningSessions"))
-            notifyChanged()
+            AppSettingDefinitions.restoresRunningSessions.write(newValue, to: defaults)
         }
     }
 
@@ -119,16 +112,12 @@ final class AppSettings {
     var sessionRestorePolicy: SessionRestorePolicy {
         get {
             SessionRestorePolicy.resolved(
-                stored: AppSettingDefinitions.validatedString(
-                    defaults.string(forKey: AppSettingDefinitions.key("sessionRestorePolicy")),
-                    for: "sessionRestorePolicy"
-                ),
+                stored: AppSettingDefinitions.sessionRestorePolicy.read(from: defaults),
                 legacyRestoresRunningSessions: restoresRunningSessions
             )
         }
         set {
-            defaults.set(newValue.rawValue, forKey: AppSettingDefinitions.key("sessionRestorePolicy"))
-            notifyChanged()
+            AppSettingDefinitions.sessionRestorePolicy.write(newValue.rawValue, to: defaults)
         }
     }
 
@@ -137,23 +126,10 @@ final class AppSettings {
     /// Clamped on the way in and on the way out: this is read on the launch path, where a value
     /// somebody typed into `defaults write` must not decide how many agents boot.
     var sessionRestoreWindowDays: Int {
-        get {
-            AppSettingDefinitions.normalizedInteger(
-                defaults.integer(forKey: AppSettingDefinitions.key("sessionRestoreWindowDays")),
-                for: "sessionRestoreWindowDays",
-                fallback: SessionRestoreDefaults.windowDays
-            )
-        }
+        get { AppSettingDefinitions.sessionRestoreWindowDays.read(from: defaults)
+            ?? SessionRestoreDefaults.windowDays }
         set {
-            defaults.set(
-                AppSettingDefinitions.normalizedInteger(
-                    newValue,
-                    for: "sessionRestoreWindowDays",
-                    fallback: SessionRestoreDefaults.windowDays
-                ),
-                forKey: AppSettingDefinitions.key("sessionRestoreWindowDays")
-            )
-            notifyChanged()
+            AppSettingDefinitions.sessionRestoreWindowDays.write(newValue, to: defaults)
         }
     }
 
@@ -163,23 +139,10 @@ final class AppSettings {
     /// what turns the policy into a promise the launch can keep. See
     /// `docs/architecture/performance.md`'s scaling gate.
     var sessionRestoreLimit: Int {
-        get {
-            AppSettingDefinitions.normalizedInteger(
-                defaults.integer(forKey: AppSettingDefinitions.key("sessionRestoreLimit")),
-                for: "sessionRestoreLimit",
-                fallback: SessionRestoreDefaults.limit
-            )
-        }
+        get { AppSettingDefinitions.sessionRestoreLimit.read(from: defaults)
+            ?? SessionRestoreDefaults.limit }
         set {
-            defaults.set(
-                AppSettingDefinitions.normalizedInteger(
-                    newValue,
-                    for: "sessionRestoreLimit",
-                    fallback: SessionRestoreDefaults.limit
-                ),
-                forKey: AppSettingDefinitions.key("sessionRestoreLimit")
-            )
-            notifyChanged()
+            AppSettingDefinitions.sessionRestoreLimit.write(newValue, to: defaults)
         }
     }
 
@@ -196,10 +159,9 @@ final class AppSettings {
     /// opening is what the provider persists in its own transcript. Resuming an existing chat
     /// never reads it.
     var newChatOpeningMessage: String {
-        get { defaults.string(forKey: AppSettingDefinitions.key("newChatOpeningMessage")) ?? "" }
+        get { AppSettingDefinitions.newChatOpeningMessage.read(from: defaults) ?? "" }
         set {
-            setOrRemove(newValue, forKey: AppSettingDefinitions.key("newChatOpeningMessage"))
-            notifyChanged()
+            AppSettingDefinitions.newChatOpeningMessage.write(newValue, to: defaults)
         }
     }
 
@@ -211,15 +173,14 @@ final class AppSettings {
     var harmonizesTerminalBackgrounds: Bool {
         get { Self.harmonizesTerminalBackgrounds }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("harmonizesTerminalBackgrounds"))
-            notifyChanged()
+            AppSettingDefinitions.harmonizesTerminalBackgrounds.write(newValue, to: defaults)
         }
     }
 
     /// Read where a terminal is being configured, which is not always on the main actor.
     nonisolated static var harmonizesTerminalBackgrounds: Bool {
         _ = registerStandardDefaults
-        return UserDefaults.standard.bool(forKey: AppSettingDefinitions.key("harmonizesTerminalBackgrounds"))
+        return AppSettingDefinitions.harmonizesTerminalBackgrounds.read(from: .standard) ?? true
     }
 
     /// Whether a session that wants the user posts a macOS notification — blocked on an
@@ -231,15 +192,14 @@ final class AppSettings {
     var notifiesOnAttention: Bool {
         get { Self.notifiesOnAttention }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("notifiesOnAttention"))
-            notifyChanged()
+            AppSettingDefinitions.notifiesOnAttention.write(newValue, to: defaults)
         }
     }
 
     /// Read by the alert center off the settings-change event, same pattern as its neighbours.
     nonisolated static var notifiesOnAttention: Bool {
         _ = registerStandardDefaults
-        return UserDefaults.standard.bool(forKey: AppSettingDefinitions.key("notifiesOnAttention"))
+        return AppSettingDefinitions.notifiesOnAttention.read(from: .standard) ?? true
     }
 
     /// The alert kinds switched *off*, stored that way for the same reason attachment
@@ -248,13 +208,15 @@ final class AppSettings {
     private var disabledAttentionAlerts: Set<AttentionAlert> {
         get {
             Set(
-                (defaults.stringArray(forKey: AppSettingDefinitions.key("disabledAttentionAlerts")) ?? [])
+                (AppSettingDefinitions.disabledAttentionAlerts.read(from: defaults) ?? [])
                     .compactMap(AttentionAlert.init(rawValue:))
             )
         }
         set {
-            defaults.set(newValue.map(\.rawValue).sorted(), forKey: AppSettingDefinitions.key("disabledAttentionAlerts"))
-            notifyChanged()
+            AppSettingDefinitions.disabledAttentionAlerts.write(
+                newValue.map(\.rawValue).sorted(),
+                to: defaults
+            )
         }
     }
 
@@ -282,13 +244,15 @@ final class AppSettings {
     private var suppressedConfirmations: Set<ConfirmationPrompt> {
         get {
             Set(
-                (defaults.stringArray(forKey: AppSettingDefinitions.key("suppressedConfirmations")) ?? [])
+                (AppSettingDefinitions.suppressedConfirmations.read(from: defaults) ?? [])
                     .compactMap(ConfirmationPrompt.init(rawValue:))
             )
         }
         set {
-            defaults.set(newValue.map(\.rawValue).sorted(), forKey: AppSettingDefinitions.key("suppressedConfirmations"))
-            notifyChanged()
+            AppSettingDefinitions.suppressedConfirmations.write(
+                newValue.map(\.rawValue).sorted(),
+                to: defaults
+            )
         }
     }
 
@@ -329,10 +293,9 @@ final class AppSettings {
     /// seed per key. Raw strings rather than an enum's raw values, because notice keys are
     /// dynamic (`AppNotice`).
     private var hiddenNotices: Set<String> {
-        get { Set(defaults.stringArray(forKey: AppSettingDefinitions.key("hiddenNotices")) ?? []) }
+        get { Set(AppSettingDefinitions.hiddenNotices.read(from: defaults) ?? []) }
         set {
-            defaults.set(newValue.sorted(), forKey: AppSettingDefinitions.key("hiddenNotices"))
-            notifyChanged()
+            AppSettingDefinitions.hiddenNotices.write(newValue.sorted(), to: defaults)
         }
     }
 
@@ -376,12 +339,11 @@ final class AppSettings {
     /// existed.
     var terminalBellSound: SoundChoice {
         get {
-            SoundChoice(storedValue: defaults.string(forKey: AppSettingDefinitions.key("terminalBellSound")))
+            SoundChoice(storedValue: AppSettingDefinitions.terminalBellSound.read(from: defaults))
                 ?? TerminalBellDefaults.sound
         }
         set {
-            defaults.set(newValue.storedValue, forKey: AppSettingDefinitions.key("terminalBellSound"))
-            notifyChanged()
+            AppSettingDefinitions.terminalBellSound.write(newValue.storedValue, to: defaults)
         }
     }
 
@@ -393,12 +355,11 @@ final class AppSettings {
     /// `silent` is what the retired "Play a sound" checkbox became.
     var attentionAlertSound: SoundChoice {
         get {
-            SoundChoice(storedValue: defaults.string(forKey: AppSettingDefinitions.key("attentionAlertSound")))
+            SoundChoice(storedValue: AppSettingDefinitions.attentionAlertSound.read(from: defaults))
                 ?? AttentionAlertDefaults.sound
         }
         set {
-            defaults.set(newValue.storedValue, forKey: AppSettingDefinitions.key("attentionAlertSound"))
-            notifyChanged()
+            AppSettingDefinitions.attentionAlertSound.write(newValue.storedValue, to: defaults)
         }
     }
 
@@ -414,11 +375,7 @@ final class AppSettings {
     /// Unseeded. An absent key is not "no sound" but "no entry": resolution widens to the kind
     /// level and then to the built-in answer — see `SoundResolution`.
     var soundEventChoices: [String: String] {
-        // `dictionary(forKey:)` answers `[String: Any]`, and a value that is not a string is
-        // not a `SoundChoice` anybody wrote. Dropping those rather than casting the whole
-        // dictionary keeps one corrupt entry from discarding the eight beside it.
-        (defaults.dictionary(forKey: AppSettingDefinitions.key("soundEventChoices")) ?? [:])
-            .compactMapValues { $0 as? String }
+        AppSettingDefinitions.soundEventChoices.read(from: defaults) ?? [:]
     }
 
     /// The entry for one event, or nil when this scope has nothing to say about it.
@@ -432,12 +389,7 @@ final class AppSettings {
     func setSoundChoice(_ choice: SoundChoice?, for event: SoundEvent) {
         var raw = soundEventChoices
         raw[event.rawValue] = choice?.storedValue
-        if raw.isEmpty {
-            defaults.removeObject(forKey: AppSettingDefinitions.key("soundEventChoices"))
-        } else {
-            defaults.set(raw, forKey: AppSettingDefinitions.key("soundEventChoices"))
-        }
-        notifyChanged()
+        AppSettingDefinitions.soundEventChoices.write(raw, to: defaults)
     }
 
     /// Clears every sound the app scope has been given — both pickers and the per-event map —
@@ -448,10 +400,9 @@ final class AppSettings {
     /// like one that never chose: absence is the default's own encoding here, and writing the
     /// value would leave a preference behind claiming somebody picked it.
     func resetSoundChoices() {
-        defaults.removeObject(forKey: AppSettingDefinitions.key("soundEventChoices"))
-        defaults.removeObject(forKey: AppSettingDefinitions.key("terminalBellSound"))
-        defaults.removeObject(forKey: AppSettingDefinitions.key("attentionAlertSound"))
-        notifyChanged()
+        AppSettingDefinitions.soundEventChoices.remove(from: defaults, notifying: false)
+        AppSettingDefinitions.terminalBellSound.remove(from: defaults, notifying: false)
+        AppSettingDefinitions.attentionAlertSound.remove(from: defaults)
     }
 
     /// Whether every sound the app can make is held — the global silence gate.
@@ -471,10 +422,9 @@ final class AppSettings {
     /// It persists across relaunch, which a hidden state could not honestly do: the speaker at
     /// the sidebar's foot is worn while it holds, so a quiet app is explicable from the window.
     var silencesAllSounds: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("silencesAllSounds")) }
+        get { AppSettingDefinitions.silencesAllSounds.read(from: defaults) ?? false }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("silencesAllSounds"))
-            notifyChanged()
+            AppSettingDefinitions.silencesAllSounds.write(newValue, to: defaults)
         }
     }
 
@@ -488,15 +438,14 @@ final class AppSettings {
     var convertsDroppedImages: Bool {
         get { Self.convertsDroppedImages }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("convertsDroppedImages"))
-            notifyChanged()
+            AppSettingDefinitions.convertsDroppedImages.write(newValue, to: defaults)
         }
     }
 
     /// Read inside the drop itself, which is a view's main-thread work rather than the actor's.
     nonisolated static var convertsDroppedImages: Bool {
         _ = registerStandardDefaults
-        return UserDefaults.standard.bool(forKey: AppSettingDefinitions.key("convertsDroppedImages"))
+        return AppSettingDefinitions.convertsDroppedImages.read(from: .standard) ?? true
     }
 
     /// Whether selecting text in a terminal with the mouse also puts it on the clipboard.
@@ -509,15 +458,14 @@ final class AppSettings {
     var copiesTerminalSelection: Bool {
         get { Self.copiesTerminalSelection }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("copiesTerminalSelection"))
-            notifyChanged()
+            AppSettingDefinitions.copiesTerminalSelection.write(newValue, to: defaults)
         }
     }
 
     /// Read at the end of the selection gesture, which is a view's main-thread work.
     nonisolated static var copiesTerminalSelection: Bool {
         _ = registerStandardDefaults
-        return UserDefaults.standard.bool(forKey: AppSettingDefinitions.key("copiesTerminalSelection"))
+        return AppSettingDefinitions.copiesTerminalSelection.read(from: .standard) ?? false
     }
 
     /// Whether the sidebar follows the agent's own name for the conversation — the terminal
@@ -525,8 +473,7 @@ final class AppSettings {
     var usesAgentTitleInSidebar: Bool {
         get { Self.usesAgentTitleInSidebar }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("usesAgentTitleInSidebar"))
-            notifyChanged()
+            AppSettingDefinitions.usesAgentTitleInSidebar.write(newValue, to: defaults)
         }
     }
 
@@ -541,14 +488,14 @@ final class AppSettings {
     /// renaming the key would silently reset the user's choice.
     nonisolated static var usesAgentTitleInSidebar: Bool {
         _ = registerStandardDefaults
-        return UserDefaults.standard.bool(forKey: AppSettingDefinitions.key("usesAgentTitleInSidebar"))
+        return AppSettingDefinitions.usesAgentTitleInSidebar.read(from: .standard) ?? true
     }
 
     /// Likewise for the sidebar's branch grouping, which `SidebarTreeBuilder` consults while
     /// building nodes from plain model values.
     nonisolated static var groupsSessionsByBranch: Bool {
         _ = registerStandardDefaults
-        return UserDefaults.standard.bool(forKey: AppSettingDefinitions.key("groupsSessionsByBranch"))
+        return AppSettingDefinitions.groupsSessionsByBranch.read(from: .standard) ?? true
     }
 
     /// Whether the sidebar gathers a project's sessions under the branch they ran on,
@@ -556,15 +503,14 @@ final class AppSettings {
     var groupsSessionsByBranch: Bool {
         get { Self.groupsSessionsByBranch }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("groupsSessionsByBranch"))
-            notifyChanged()
+            AppSettingDefinitions.groupsSessionsByBranch.write(newValue, to: defaults)
         }
     }
 
     /// Same access pattern as `groupsSessionsByBranch`, for the same reader.
     nonisolated static var groupsLoneBranches: Bool {
         _ = registerStandardDefaults
-        return UserDefaults.standard.bool(forKey: AppSettingDefinitions.key("groupsLoneBranches"))
+        return AppSettingDefinitions.groupsLoneBranches.read(from: .standard) ?? true
     }
 
     /// Whether a branch with a single session still earns a heading, once the project shows
@@ -580,8 +526,7 @@ final class AppSettings {
     var groupsLoneBranches: Bool {
         get { Self.groupsLoneBranches }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("groupsLoneBranches"))
-            notifyChanged()
+            AppSettingDefinitions.groupsLoneBranches.write(newValue, to: defaults)
         }
     }
 
@@ -592,10 +537,9 @@ final class AppSettings {
     /// which is main-actor code throughout — `SidebarTreeBuilder` never consults it, because
     /// the compact tree is the same tree presented differently.
     var compactsSidebarTree: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("compactsSidebarTree")) }
+        get { AppSettingDefinitions.compactsSidebarTree.read(from: defaults) ?? false }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("compactsSidebarTree"))
-            notifyChanged()
+            AppSettingDefinitions.compactsSidebarTree.write(newValue, to: defaults)
         }
     }
 
@@ -609,20 +553,16 @@ final class AppSettings {
     /// branch it last ran on until it next stops working, preserving what the conversation
     /// actually happened on.
     var followsCheckoutBranch: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("followsCheckoutBranch")) }
+        get { AppSettingDefinitions.followsCheckoutBranch.read(from: defaults) ?? true }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("followsCheckoutBranch"))
-            notifyChanged()
+            AppSettingDefinitions.followsCheckoutBranch.write(newValue, to: defaults)
         }
     }
 
     /// Same access pattern again; no seeding needed — an absent or unknown raw value reads
     /// as `.manual`, which is the documented default.
     nonisolated static var sidebarSessionOrder: SidebarSessionOrder {
-        let raw = AppSettingDefinitions.validatedString(
-            UserDefaults.standard.string(forKey: AppSettingDefinitions.key("sidebarSessionOrder")),
-            for: "sidebarSessionOrder"
-        )
+        let raw = AppSettingDefinitions.sidebarSessionOrder.read(from: .standard)
         return raw.flatMap(SidebarSessionOrder.init(rawValue:)) ?? .manual
     }
 
@@ -637,17 +577,20 @@ final class AppSettings {
         get { Self.sidebarSessionOrder }
         set {
             if newValue != Self.sidebarSessionOrder {
-                defaults.set(false, forKey: AppSettingDefinitions.key("sidebarSessionOrderIsReversed"))
+                AppSettingDefinitions.sidebarSessionOrderIsReversed.write(
+                    false,
+                    to: defaults,
+                    notifying: false
+                )
             }
-            defaults.set(newValue.rawValue, forKey: AppSettingDefinitions.key("sidebarSessionOrder"))
-            notifyChanged()
+            AppSettingDefinitions.sidebarSessionOrder.write(newValue.rawValue, to: defaults)
         }
     }
 
     /// Same access pattern; an absent key reads as `false`, which is the natural direction of
     /// whichever order is chosen.
     nonisolated static var sidebarSessionOrderIsReversed: Bool {
-        UserDefaults.standard.bool(forKey: AppSettingDefinitions.key("sidebarSessionOrderIsReversed"))
+        AppSettingDefinitions.sidebarSessionOrderIsReversed.read(from: .standard) ?? false
     }
 
     /// Whether the chosen order runs backwards: newest added first, least recently active
@@ -655,8 +598,7 @@ final class AppSettings {
     var sidebarSessionOrderIsReversed: Bool {
         get { Self.sidebarSessionOrderIsReversed }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("sidebarSessionOrderIsReversed"))
-            notifyChanged()
+            AppSettingDefinitions.sidebarSessionOrderIsReversed.write(newValue, to: defaults)
         }
     }
 
@@ -670,10 +612,7 @@ final class AppSettings {
     /// An absent or unknown raw value reads as `.matchesComposer`, which is the documented
     /// default, so nothing needs seeding.
     nonisolated static var promptReturnKey: PromptReturnKey {
-        let raw = AppSettingDefinitions.validatedString(
-            UserDefaults.standard.string(forKey: AppSettingDefinitions.key("promptReturnKey")),
-            for: "promptReturnKey"
-        )
+        let raw = AppSettingDefinitions.promptReturnKey.read(from: .standard)
         return raw.flatMap(PromptReturnKey.init(rawValue:)) ?? .matchesComposer
     }
 
@@ -681,8 +620,7 @@ final class AppSettings {
     var promptReturnKey: PromptReturnKey {
         get { Self.promptReturnKey }
         set {
-            defaults.set(newValue.rawValue, forKey: AppSettingDefinitions.key("promptReturnKey"))
-            notifyChanged()
+            AppSettingDefinitions.promptReturnKey.write(newValue.rawValue, to: defaults)
         }
     }
 
@@ -697,14 +635,17 @@ final class AppSettings {
     /// here — an absent key reads as `nil`, which *is* the documented default, so the seeding
     /// the `Bool` readers need would only restate it.
     nonisolated static var chromeFontFamily: String? {
-        UserDefaults.standard.string(forKey: AppSettingDefinitions.key("chromeFontFamily"))
+        AppSettingDefinitions.chromeFontFamily.read(from: .standard)
     }
 
     var chromeFontFamily: String? {
         get { Self.chromeFontFamily }
         set {
-            setOrRemove(newValue, forKey: AppSettingDefinitions.key("chromeFontFamily"))
-            notifyChanged()
+            if let newValue {
+                AppSettingDefinitions.chromeFontFamily.write(newValue, to: defaults)
+            } else {
+                AppSettingDefinitions.chromeFontFamily.remove(from: defaults)
+            }
         }
     }
 
@@ -716,14 +657,17 @@ final class AppSettings {
     /// different transport, so it gets the same say. Three layers, no special cases: surface,
     /// then app, then theme.
     nonisolated static var conversationFontFamily: String? {
-        UserDefaults.standard.string(forKey: AppSettingDefinitions.key("conversationFontFamily"))
+        AppSettingDefinitions.conversationFontFamily.read(from: .standard)
     }
 
     var conversationFontFamily: String? {
         get { Self.conversationFontFamily }
         set {
-            setOrRemove(newValue, forKey: AppSettingDefinitions.key("conversationFontFamily"))
-            notifyChanged()
+            if let newValue {
+                AppSettingDefinitions.conversationFontFamily.write(newValue, to: defaults)
+            } else {
+                AppSettingDefinitions.conversationFontFamily.remove(from: defaults)
+            }
         }
     }
 
@@ -734,24 +678,17 @@ final class AppSettings {
     /// setting automatically.
     nonisolated static var appTextSize: AppTextSize {
         _ = registerStandardDefaults
-        let raw = AppSettingDefinitions.validatedString(
-            UserDefaults.standard.string(forKey: AppSettingDefinitions.key("appTextSize")),
-            for: "appTextSize"
-        )
+        let raw = AppSettingDefinitions.appTextSize.read(from: .standard)
         return raw.flatMap(AppTextSize.init(rawValue:)) ?? .standard
     }
 
     var appTextSize: AppTextSize {
         get {
-            let raw = AppSettingDefinitions.validatedString(
-                defaults.string(forKey: AppSettingDefinitions.key("appTextSize")),
-                for: "appTextSize"
-            )
+            let raw = AppSettingDefinitions.appTextSize.read(from: defaults)
             return raw.flatMap(AppTextSize.init(rawValue:)) ?? .standard
         }
         set {
-            defaults.set(newValue.rawValue, forKey: AppSettingDefinitions.key("appTextSize"))
-            notifyChanged()
+            AppSettingDefinitions.appTextSize.write(newValue.rawValue, to: defaults)
         }
     }
 
@@ -759,52 +696,42 @@ final class AppSettings {
     /// favicon or app icon, then the repository's GitHub avatar or homepage favicon.
     /// The network sources only ever contact hosts the project itself points at.
     var discoversProjectIcons: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("discoversProjectIcons")) }
+        get { AppSettingDefinitions.discoversProjectIcons.read(from: defaults) ?? true }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("discoversProjectIcons"))
-            notifyChanged()
+            AppSettingDefinitions.discoversProjectIcons.write(newValue, to: defaults)
         }
     }
 
     /// Whether sessions show their account's avatar, looked up from its login email via
     /// Gravatar or GitHub's public-email search. Off sends nothing anywhere.
     var discoversAccountAvatars: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("discoversAccountAvatars")) }
+        get { AppSettingDefinitions.discoversAccountAvatars.read(from: defaults) ?? true }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("discoversAccountAvatars"))
-            notifyChanged()
+            AppSettingDefinitions.discoversAccountAvatars.write(newValue, to: defaults)
         }
     }
 
     /// The working indicator shown for each newly-started conversation turn.
     var workingOrbStyle: WorkingOrbStyle {
         get {
-            AppSettingDefinitions.validatedString(
-                defaults.string(forKey: AppSettingDefinitions.key("workingOrbStyle")),
-                for: "workingOrbStyle"
-            )
+            AppSettingDefinitions.workingOrbStyle.read(from: defaults)
                 .flatMap(WorkingOrbStyle.init(rawValue:))
                 ?? MotionPreferencesDefaults.workingOrbStyle
         }
         set {
-            defaults.set(newValue.rawValue, forKey: AppSettingDefinitions.key("workingOrbStyle"))
-            notifyChanged()
+            AppSettingDefinitions.workingOrbStyle.write(newValue.rawValue, to: defaults)
         }
     }
 
     /// The character animation used when the active chat's visible name changes.
     var chatNameMorphStyle: ChatNameMorphStyle {
         get {
-            AppSettingDefinitions.validatedString(
-                defaults.string(forKey: AppSettingDefinitions.key("chatNameMorphStyle")),
-                for: "chatNameMorphStyle"
-            )
+            AppSettingDefinitions.chatNameMorphStyle.read(from: defaults)
                 .flatMap(ChatNameMorphStyle.init(rawValue:))
                 ?? MotionPreferencesDefaults.chatNameMorphStyle
         }
         set {
-            defaults.set(newValue.rawValue, forKey: AppSettingDefinitions.key("chatNameMorphStyle"))
-            notifyChanged()
+            AppSettingDefinitions.chatNameMorphStyle.write(newValue.rawValue, to: defaults)
         }
     }
 
@@ -817,16 +744,15 @@ final class AppSettings {
     private var disabledAttachmentDetectionAgentKinds: Set<AgentKind> {
         get {
             Set(
-                (defaults.stringArray(forKey: AppSettingDefinitions.key("disabledAttachmentDetectionAgentKinds")) ?? [])
+                (AppSettingDefinitions.disabledAttachmentDetectionAgentKinds.read(from: defaults) ?? [])
                     .compactMap(AgentKind.init(rawValue:))
             )
         }
         set {
-            defaults.set(
+            AppSettingDefinitions.disabledAttachmentDetectionAgentKinds.write(
                 newValue.map(\.rawValue).sorted(),
-                forKey: AppSettingDefinitions.key("disabledAttachmentDetectionAgentKinds")
+                to: defaults
             )
-            notifyChanged()
         }
     }
 
@@ -844,10 +770,9 @@ final class AppSettings {
     /// value, and a machine the user has never opened this page on. Declared handoffs are not
     /// governed by it — see `SessionAttachmentStore`.
     var includesAttachmentsOutsideProject: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("includesAttachmentsOutsideProject")) }
+        get { AppSettingDefinitions.includesAttachmentsOutsideProject.read(from: defaults) ?? false }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("includesAttachmentsOutsideProject"))
-            notifyChanged()
+            AppSettingDefinitions.includesAttachmentsOutsideProject.write(newValue, to: defaults)
         }
     }
 
@@ -861,10 +786,9 @@ final class AppSettings {
     /// and separately bounded — see `BrowserAutoCaptureRing`, which is deliberately not the
     /// approved baseline library.
     var capturesPageBeforeAgentActions: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("capturesPageBeforeAgentActions")) }
+        get { AppSettingDefinitions.capturesPageBeforeAgentActions.read(from: defaults) ?? false }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("capturesPageBeforeAgentActions"))
-            notifyChanged()
+            AppSettingDefinitions.capturesPageBeforeAgentActions.write(newValue, to: defaults)
         }
     }
 
@@ -896,7 +820,7 @@ final class AppSettings {
             }
             guard workspaceNavigatorPersistence.save(newValue) else { return }
             cachedWorkspaceNavigatorSelection = newValue
-            notifyChanged()
+            AppSettingDefinitions.workspaceNavigatorSelection.notifyChange()
         }
     }
 
@@ -909,10 +833,9 @@ final class AppSettings {
     ///
     /// See `docs/extensions/SANDBOX_RUNNER.md`.
     var usesContainedExtensionLauncher: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("usesContainedExtensionLauncher")) }
+        get { AppSettingDefinitions.usesContainedExtensionLauncher.read(from: defaults) ?? false }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("usesContainedExtensionLauncher"))
-            notifyChanged()
+            AppSettingDefinitions.usesContainedExtensionLauncher.write(newValue, to: defaults)
         }
     }
 
@@ -926,10 +849,9 @@ final class AppSettings {
     /// observational hook on the next launch while leaving Native's required permission hook
     /// independent.
     var reportsClaudeLifecycleEvents: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("reportsClaudeLifecycleEvents")) }
+        get { AppSettingDefinitions.reportsClaudeLifecycleEvents.read(from: defaults) ?? true }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("reportsClaudeLifecycleEvents"))
-            notifyChanged()
+            AppSettingDefinitions.reportsClaudeLifecycleEvents.write(newValue, to: defaults)
         }
     }
 
@@ -940,10 +862,9 @@ final class AppSettings {
     /// merges rather than replaces, but the honest default for touching someone else's config
     /// is to ask first.
     var installsCodexHooks: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("installsCodexHooks")) }
+        get { AppSettingDefinitions.installsCodexHooks.read(from: defaults) ?? false }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("installsCodexHooks"))
-            notifyChanged()
+            AppSettingDefinitions.installsCodexHooks.write(newValue, to: defaults)
         }
     }
 
@@ -960,10 +881,9 @@ final class AppSettings {
     /// source — and "hide the line" must not quietly mean "starve the pill". Off by default:
     /// the line is the user's own configuration, and hiding it is a choice.
     var suppressesClaudeStatusLine: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("suppressesClaudeStatusLine")) }
+        get { AppSettingDefinitions.suppressesClaudeStatusLine.read(from: defaults) ?? false }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("suppressesClaudeStatusLine"))
-            notifyChanged()
+            AppSettingDefinitions.suppressesClaudeStatusLine.write(newValue, to: defaults)
         }
     }
 
@@ -978,10 +898,9 @@ final class AppSettings {
     /// off, usage falls back to the local caches the CLI leaves behind, which can be hours
     /// old or absent.
     var readsClaudeLoginFromKeychain: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("readsClaudeLoginFromKeychain")) }
+        get { AppSettingDefinitions.readsClaudeLoginFromKeychain.read(from: defaults) ?? false }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("readsClaudeLoginFromKeychain"))
-            notifyChanged()
+            AppSettingDefinitions.readsClaudeLoginFromKeychain.write(newValue, to: defaults)
         }
     }
 
@@ -1001,10 +920,9 @@ final class AppSettings {
     /// reach the hook through the environment, so the text in `hooks.json` never changes and a
     /// trust decision is not invalidated by the next app launch.
     var bypassesCodexHookTrust: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("bypassesCodexHookTrust")) }
+        get { AppSettingDefinitions.bypassesCodexHookTrust.read(from: defaults) ?? false }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("bypassesCodexHookTrust"))
-            notifyChanged()
+            AppSettingDefinitions.bypassesCodexHookTrust.write(newValue, to: defaults)
         }
     }
 
@@ -1023,16 +941,12 @@ final class AppSettings {
     /// A session that has chosen for itself (`AgentSession.remoteControl`) ignores this.
     var claudeRemoteControl: ClaudeRemoteControl {
         get {
-            guard let raw = AppSettingDefinitions.validatedString(
-                    defaults.string(forKey: AppSettingDefinitions.key("claudeRemoteControl")),
-                    for: "claudeRemoteControl"
-                  ),
+            guard let raw = AppSettingDefinitions.claudeRemoteControl.read(from: defaults),
                   let value = ClaudeRemoteControl(rawValue: raw) else { return .followClaude }
             return value
         }
         set {
-            defaults.set(newValue.rawValue, forKey: AppSettingDefinitions.key("claudeRemoteControl"))
-            notifyChanged()
+            AppSettingDefinitions.claudeRemoteControl.write(newValue.rawValue, to: defaults)
         }
     }
 
@@ -1045,21 +959,16 @@ final class AppSettings {
     /// providers have independent accounts, availability and usage costs. A session-level
     /// `AgentSession.fastMode` remains more specific and wins at launch.
     func startupSpeed(for kind: AgentKind) -> AgentStartupSpeed {
-        guard let definition = startupSpeedDefinition(for: kind),
-              let key = definition.persistence?.key,
-              let raw = AppSettingDefinitions.validatedString(
-                  defaults.string(forKey: key),
-                  for: definition.identity
-              ),
+        guard let descriptor = startupSpeedDescriptor(for: kind),
+              let raw = descriptor.read(from: defaults),
               let speed = AgentStartupSpeed(rawValue: raw)
         else { return .agentSetting }
         return speed
     }
 
     func setStartupSpeed(_ speed: AgentStartupSpeed, for kind: AgentKind) {
-        guard let key = startupSpeedDefinition(for: kind)?.persistence?.key else { return }
-        defaults.set(speed.rawValue, forKey: key)
-        notifyChanged()
+        guard let descriptor = startupSpeedDescriptor(for: kind) else { return }
+        descriptor.write(speed.rawValue, to: defaults)
     }
 
     // MARK: - Permission Mode
@@ -1077,19 +986,16 @@ final class AppSettings {
     /// "leave it alone" rather than to someone else's idea of a safe default.
     var defaultPermissionMode: AgentPermissionMode? {
         get {
-            guard let raw = AppSettingDefinitions.validatedString(
-                defaults.string(forKey: AppSettingDefinitions.key("defaultPermissionMode")),
-                for: "defaultPermissionMode"
-            ) else { return nil }
+            guard let raw = AppSettingDefinitions.defaultPermissionMode.read(from: defaults)
+            else { return nil }
             return AgentPermissionMode(rawValue: raw)
         }
         set {
             if let newValue {
-                defaults.set(newValue.rawValue, forKey: AppSettingDefinitions.key("defaultPermissionMode"))
+                AppSettingDefinitions.defaultPermissionMode.write(newValue.rawValue, to: defaults)
             } else {
-                defaults.removeObject(forKey: AppSettingDefinitions.key("defaultPermissionMode"))
+                AppSettingDefinitions.defaultPermissionMode.remove(from: defaults)
             }
-            notifyChanged()
         }
     }
 
@@ -1099,10 +1005,9 @@ final class AppSettings {
     /// default: even the loopback-only first milestone exposes interactive terminal access to
     /// any process holding its private link, so it exists only when the user turns it on.
     var remoteAccessEnabled: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("remoteAccessEnabled")) }
+        get { AppSettingDefinitions.remoteAccessEnabled.read(from: defaults) ?? false }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("remoteAccessEnabled"))
-            notifyChanged()
+            AppSettingDefinitions.remoteAccessEnabled.write(newValue, to: defaults)
         }
     }
 
@@ -1111,17 +1016,14 @@ final class AppSettings {
     /// tailnet access; an unknown future value must not silently enable an additional endpoint.
     var remoteAccessConnectionMode: RemoteAccessConnectionMode {
         get {
-            guard let raw = AppSettingDefinitions.validatedString(
-                defaults.string(forKey: AppSettingDefinitions.key("remoteAccessConnectionMode")),
-                for: "remoteAccessConnectionMode"
-            ) else {
+            guard let raw = AppSettingDefinitions.remoteAccessConnectionMode.read(from: defaults)
+            else {
                 return .relay
             }
             return RemoteAccessConnectionMode(rawValue: raw) ?? .relay
         }
         set {
-            defaults.set(newValue.rawValue, forKey: AppSettingDefinitions.key("remoteAccessConnectionMode"))
-            notifyChanged()
+            AppSettingDefinitions.remoteAccessConnectionMode.write(newValue.rawValue, to: defaults)
         }
     }
 
@@ -1129,10 +1031,9 @@ final class AppSettings {
     /// is unavailable in Private + Sharing mode. Off is deliberately fail-closed: enabling a
     /// public sharing door must not silently make private owner traffic use it too.
     var remoteAccessAllowsOwnerRelayFallback: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("remoteAccessAllowsOwnerRelayFallback")) }
+        get { AppSettingDefinitions.remoteAccessAllowsOwnerRelayFallback.read(from: defaults) ?? false }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("remoteAccessAllowsOwnerRelayFallback"))
-            notifyChanged()
+            AppSettingDefinitions.remoteAccessAllowsOwnerRelayFallback.write(newValue, to: defaults)
         }
     }
 
@@ -1140,10 +1041,9 @@ final class AppSettings {
     /// the privacy-preserving default; the coordinator otherwise starts it on the first public
     /// share and stops it after the final share is revoked or expires.
     var remoteAccessKeepsRelayReady: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("remoteAccessKeepsRelayReady")) }
+        get { AppSettingDefinitions.remoteAccessKeepsRelayReady.read(from: defaults) ?? false }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("remoteAccessKeepsRelayReady"))
-            notifyChanged()
+            AppSettingDefinitions.remoteAccessKeepsRelayReady.write(newValue, to: defaults)
         }
     }
 
@@ -1151,18 +1051,14 @@ final class AppSettings {
     /// the live session between collaborative and focused control at any time.
     var remoteInputControlDefault: RemoteInputControlDefault {
         get {
-            guard let raw = AppSettingDefinitions.validatedString(
-                    defaults.string(forKey: AppSettingDefinitions.key("remoteInputControlDefault")),
-                    for: "remoteInputControlDefault"
-                  ),
+            guard let raw = AppSettingDefinitions.remoteInputControlDefault.read(from: defaults),
                   let value = RemoteInputControlDefault(rawValue: raw) else {
                 return .collaborative
             }
             return value
         }
         set {
-            defaults.set(newValue.rawValue, forKey: AppSettingDefinitions.key("remoteInputControlDefault"))
-            notifyChanged()
+            AppSettingDefinitions.remoteInputControlDefault.write(newValue.rawValue, to: defaults)
         }
     }
 
@@ -1173,10 +1069,9 @@ final class AppSettings {
     /// registered default is `true` and this reads through it, so "never touched" and
     /// "deliberately off" stay distinguishable in the stored domain.
     var automaticUpdateChecksEnabled: Bool {
-        get { defaults.bool(forKey: AppSettingDefinitions.key("automaticUpdateChecksEnabled")) }
+        get { AppSettingDefinitions.automaticUpdateChecksEnabled.read(from: defaults) ?? true }
         set {
-            defaults.set(newValue, forKey: AppSettingDefinitions.key("automaticUpdateChecksEnabled"))
-            notifyChanged()
+            AppSettingDefinitions.automaticUpdateChecksEnabled.write(newValue, to: defaults)
         }
     }
 
@@ -1186,11 +1081,23 @@ final class AppSettings {
     /// not the enabled one, so a group added in a future release is on by default rather than
     /// absent — an omitted id reads as enabled.
     var disabledToolGroupIDs: Set<String> {
-        get { Set(defaults.stringArray(forKey: AppSettingDefinitions.key("disabledToolGroupIDs")) ?? []) }
+        get { Set(AppSettingDefinitions.disabledToolGroupIDs.read(from: defaults) ?? []) }
         set {
-            defaults.set(Array(newValue), forKey: AppSettingDefinitions.key("disabledToolGroupIDs"))
-            notifyChanged()
+            AppSettingDefinitions.disabledToolGroupIDs.write(Array(newValue), to: defaults)
         }
+    }
+
+    /// Dynamic identity is admitted only at the authenticated-owner boundary. Every other
+    /// production access uses the typed descriptors above.
+    func applyRemoteMutation(
+        identity: String,
+        value: AppSettingStoredValue
+    ) -> AppSettingRemoteMutationResult {
+        AppSettingDefinitions.applyRemoteMutation(
+            identity: identity,
+            value: value,
+            defaults: defaults
+        )
     }
 
     func isToolGroupEnabled(_ id: String) -> Bool {
@@ -1220,15 +1127,17 @@ final class AppSettings {
     /// enabled; a current choice to turn installation off also keeps the bypass off.
     /// This remains a narrow migration rather than a wholesale preferences import.
     private func migrateLegacyCodexHookPreferences(from legacyPreferences: [String: Any]) {
-        if defaults.object(forKey: AppSettingDefinitions.key("installsCodexHooks")) == nil,
-           legacyPreferences[AppSettingDefinitions.key("installsCodexHooks")] as? Bool == true {
-            defaults.set(true, forKey: AppSettingDefinitions.key("installsCodexHooks"))
+        let installsHooks = AppSettingDefinitions.installsCodexHooks
+        let bypassesTrust = AppSettingDefinitions.bypassesCodexHookTrust
+        if !installsHooks.containsValue(in: defaults),
+           legacyPreferences[installsHooks.persistenceKey] as? Bool == true {
+            installsHooks.write(true, to: defaults, notifying: false)
         }
 
-        if defaults.bool(forKey: AppSettingDefinitions.key("installsCodexHooks")),
-           defaults.object(forKey: AppSettingDefinitions.key("bypassesCodexHookTrust")) == nil,
-           legacyPreferences[AppSettingDefinitions.key("bypassesCodexHookTrust")] as? Bool == true {
-            defaults.set(true, forKey: AppSettingDefinitions.key("bypassesCodexHookTrust"))
+        if installsHooks.read(from: defaults) == true,
+           !bypassesTrust.containsValue(in: defaults),
+           legacyPreferences[bypassesTrust.persistenceKey] as? Bool == true {
+            bypassesTrust.write(true, to: defaults, notifying: false)
         }
     }
 
@@ -1250,19 +1159,22 @@ final class AppSettings {
     /// interrupted migration re-runs — which is safe because the carry is a union, and because
     /// a user who later switches a prompt back on is not undone by the next launch.
     ///
-    /// Writes `defaults` directly rather than through `suppressedConfirmations`: that setter
-    /// posts `AppSettingsDidChange`, and this runs while the singleton is still being built.
+    /// Writes through typed descriptors with notification suppressed because this runs while
+    /// the settings object is still being built.
     private func migrateClosingConfirmation() {
-        guard defaults.object(forKey: AppSettingDefinitions.key("closingConfirmationMigration")) == nil else { return }
+        let marker = AppSettingDefinitions.closingConfirmationMigration
+        let legacy = AppSettingDefinitions.legacyClosingConfirmation
+        let suppressed = AppSettingDefinitions.suppressedConfirmations
+        guard !marker.containsValue(in: defaults) else { return }
 
         // Seeded `true`, so a `false` here can only have been written by the old settings row.
-        if !defaults.bool(forKey: AppSettingDefinitions.key("legacyClosingConfirmation")) {
+        if legacy.read(from: defaults) == false {
             let carried = suppressedConfirmations
                 .union(ConfirmationPrompt.closingConfirmationSuccessors)
-            defaults.set(carried.map(\.rawValue).sorted(), forKey: AppSettingDefinitions.key("suppressedConfirmations"))
+            suppressed.write(carried.map(\.rawValue).sorted(), to: defaults, notifying: false)
         }
-        defaults.removeObject(forKey: AppSettingDefinitions.key("legacyClosingConfirmation"))
-        defaults.set(true, forKey: AppSettingDefinitions.key("closingConfirmationMigration"))
+        legacy.remove(from: defaults, notifying: false)
+        marker.write(true, to: defaults, notifying: false)
     }
 
     /// `playsAttentionAlertSound` was a checkbox for something the picker can now say itself.
@@ -1275,14 +1187,19 @@ final class AppSettings {
     /// The old key's **seed is gone**, which is what makes the removal the marker: with nothing
     /// registered, `object(forKey:)` answers non-nil only while a real stored value survives, so
     /// this runs once and every later launch returns on the first line. Written through
-    /// `defaults` rather than the property, because the setter posts `AppSettingsDidChange`
-    /// while the singleton is still being built.
+    /// The typed descriptors suppress notification because this runs while the settings object
+    /// is still being built.
     private func migrateAttentionAlertSoundSwitch() {
-        guard defaults.object(forKey: AppSettingDefinitions.key("legacyPlaysAttentionAlertSound")) != nil else { return }
-        if !defaults.bool(forKey: AppSettingDefinitions.key("legacyPlaysAttentionAlertSound")) {
-            defaults.set(SoundChoice.silent.storedValue, forKey: AppSettingDefinitions.key("attentionAlertSound"))
+        let legacy = AppSettingDefinitions.legacyPlaysAttentionAlertSound
+        guard legacy.containsValue(in: defaults) else { return }
+        if legacy.read(from: defaults) == false {
+            AppSettingDefinitions.attentionAlertSound.write(
+                SoundChoice.silent.storedValue,
+                to: defaults,
+                notifying: false
+            )
         }
-        defaults.removeObject(forKey: AppSettingDefinitions.key("legacyPlaysAttentionAlertSound"))
+        legacy.remove(from: defaults, notifying: false)
     }
 
     /// The seeded values, and the one place they are registered on the standard defaults.
@@ -1302,30 +1219,13 @@ final class AppSettings {
         AppSettingDefinitions.registeredDefaults
     }
 
-    private func notifyChanged() {
-        NotificationCenter.default.post(AppSettingsDidChange())
-    }
-
-    /// Stores a string-backed choice, or removes the key when its empty value means "none".
-    ///
-    /// Absence is the honest stored form for both optional font overrides and the optional
-    /// reusable opening message. It keeps `string(forKey:)` from returning a present-but-empty
-    /// value whose only meaning would have to be reinterpreted at every read.
-    private func setOrRemove(_ value: String?, forKey key: String) {
-        if let value, !value.isEmpty {
-            defaults.set(value, forKey: key)
-        } else {
-            defaults.removeObject(forKey: key)
-        }
-    }
-
     /// The setting is intentionally defined only for runtimes with a measured Fast mechanism.
     /// An exhaustive switch keeps adding a new runtime from silently borrowing another one's
     /// preference key.
-    private func startupSpeedDefinition(for kind: AgentKind) -> AppSettingDefinition? {
+    private func startupSpeedDescriptor(for kind: AgentKind) -> AppSettingDescriptor<String>? {
         switch kind {
-        case .claude: return AppSettingDefinitions.definition("claudeStartupSpeed")
-        case .codex: return AppSettingDefinitions.definition("codexStartupSpeed")
+        case .claude: return AppSettingDefinitions.claudeStartupSpeed
+        case .codex: return AppSettingDefinitions.codexStartupSpeed
         case .grok, .openCode, .cursor: return nil
         }
     }
@@ -1337,10 +1237,7 @@ final class AppSettings {
     private static func validateWorkspaceNavigatorSelection(
         _ selection: WorkspaceNavigatorSelection
     ) throws {
-        guard AppSettingDefinitions.accepts(
-            selection,
-            for: "workspaceNavigatorSelection"
-        ) else {
+        guard AppSettingDefinitions.accepts(selection) else {
             throw WorkspaceNavigatorValidationError.invalidIdentity
         }
     }

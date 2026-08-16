@@ -40,7 +40,7 @@ final class DisplayPanelTogglePressTests: HostedStoreTestCase {
             store.addSession(to: project.id, kind: .claude, usesNativeUI: false, title: "Toggle")
         )
 
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(Self.windowSize)
         window.contentView?.layoutSubtreeIfNeeded()

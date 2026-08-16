@@ -257,6 +257,84 @@ final class AgentChildProcessTests: XCTestCase {
         XCTAssertEqual(err, "err")
     }
 
+    // MARK: - Closed Standard Input
+
+    /// ACP writes `initialize` immediately after launch, Codex does the same, and Claude can
+    /// write its first user or control line just as quickly. The descriptor they all receive
+    /// must turn a child that already exited into EPIPE rather than SIGPIPE terminating the
+    /// XCTest host (or Threading itself).
+    func testAChildExitingBeforeTheFirstWriteReturnsAnErrorAndExitsOnce() throws {
+        let exited = expectation(description: "child exit")
+        let duplicateExit = expectation(description: "duplicate child exit")
+        duplicateExit.isInverted = true
+        let callbacks = ExitCallbackBox()
+
+        let child = try AgentChildProcess.launch(
+            executable: "/usr/bin/true",
+            arguments: [],
+            environment: [:],
+            sessionID: SessionID(),
+            ledger: ledger
+        ) { status in
+            if callbacks.record(status) == 1 {
+                exited.fulfill()
+            } else {
+                duplicateExit.fulfill()
+            }
+        }
+        defer {
+            try? child.standardInput.close()
+            try? child.standardOutput.close()
+            try? child.standardError.close()
+        }
+
+        wait(for: [exited], timeout: 5)
+        XCTAssertFalse(child.isRunning)
+        XCTAssertThrowsError(try child.standardInput.write(contentsOf: Data("initialize\n".utf8)))
+        wait(for: [duplicateExit], timeout: 0.1)
+        XCTAssertEqual(callbacks.count, 1)
+        XCTAssertEqual(callbacks.status, 0)
+        XCTAssertTrue(ledger.currentRecords.isEmpty)
+    }
+
+    /// The same descriptor stays signal-safe for its entire lifetime, not only for the startup
+    /// handshake. This child accepts one complete line, exits, and makes the next turn/control
+    /// write fail through the ordinary throwing API.
+    func testAChildExitingBetweenLaterWritesReturnsAnErrorAndExitsOnce() throws {
+        let exited = expectation(description: "child exit")
+        let duplicateExit = expectation(description: "duplicate child exit")
+        duplicateExit.isInverted = true
+        let callbacks = ExitCallbackBox()
+
+        let child = try AgentChildProcess.launch(
+            executable: "/bin/sh",
+            arguments: ["-c", "IFS= read -r first; exit 9"],
+            environment: [:],
+            sessionID: SessionID(),
+            ledger: ledger
+        ) { status in
+            if callbacks.record(status) == 1 {
+                exited.fulfill()
+            } else {
+                duplicateExit.fulfill()
+            }
+        }
+        defer {
+            try? child.standardInput.close()
+            try? child.standardOutput.close()
+            try? child.standardError.close()
+        }
+
+        XCTAssertNoThrow(try child.standardInput.write(contentsOf: Data("first\n".utf8)))
+        wait(for: [exited], timeout: 5)
+        XCTAssertFalse(child.isRunning)
+        XCTAssertThrowsError(try child.standardInput.write(contentsOf: Data("second\n".utf8)))
+        wait(for: [duplicateExit], timeout: 0.1)
+        XCTAssertEqual(callbacks.count, 1)
+        XCTAssertEqual(callbacks.status, 9)
+        XCTAssertTrue(ledger.currentRecords.isEmpty)
+    }
+
     // MARK: - Bounded One-Shot Children
 
     func testBoundedChildMergesOutputAndReportsANormalExit() throws {
@@ -351,5 +429,34 @@ private final class ExitStatusBox: @unchecked Sendable {
             storage = newValue
             lock.unlock()
         }
+    }
+}
+
+/// Exit count and status carried across the child process's serial reap queue.
+private final class ExitCallbackBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var countStorage = 0
+    private var statusStorage: Int32?
+
+    @discardableResult
+    func record(_ status: Int32) -> Int {
+        lock.lock()
+        countStorage += 1
+        statusStorage = status
+        let count = countStorage
+        lock.unlock()
+        return count
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return countStorage
+    }
+
+    var status: Int32? {
+        lock.lock()
+        defer { lock.unlock() }
+        return statusStorage
     }
 }

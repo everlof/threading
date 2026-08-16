@@ -216,7 +216,7 @@ final class WindowEdgeTests: HostedStoreTestCase {
             store.removeProject(id: project.id)
         }
 
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let window = try XCTUnwrap(controller.window)
         defer { window.close() }
 
@@ -350,7 +350,7 @@ final class WindowEdgeTests: HostedStoreTestCase {
         }
 
         let controllerStarted = DispatchTime.now().uptimeNanoseconds
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let controllerSetupElapsed = DispatchTime.now().uptimeNanoseconds - controllerStarted
         let window = try XCTUnwrap(controller.window)
         defer { window.close() }

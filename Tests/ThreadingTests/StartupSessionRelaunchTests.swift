@@ -467,13 +467,13 @@ final class RunningSessionRecordTests: XCTestCase {
 /// never shown, and the close is asked rather than performed, so nothing here can close a
 /// window under the test host.
 @MainActor
-final class WindowCloseQuitPathTests: XCTestCase {
+final class WindowCloseQuitPathTests: HostedStoreTestCase {
 
     /// Asserted through the affordance the user actually presses, not just the delegate method:
     /// the themed close button is the app's only close control, and it is the caller that has
     /// to honour the answer.
     func testTheCloseButtonAsksTheApplicationToQuitAndClosesNothingItself() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let window = try XCTUnwrap(controller.window)
         var quitRequests = 0
         controller.requestsApplicationQuit = { quitRequests += 1 }
@@ -500,7 +500,7 @@ final class WindowCloseQuitPathTests: XCTestCase {
 
     /// The delegate's own answer, so the contract holds for any future close affordance.
     func testTheDelegateDeclinesTheCloseItself() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let window = try XCTUnwrap(controller.window)
         var quitRequests = 0
         controller.requestsApplicationQuit = { quitRequests += 1 }

@@ -12,7 +12,7 @@ import XCTest
 /// together hand the click to the content view — past the titlebar that implements zoom. If Apple
 /// ever changes that, the test fails and `TitlebarActionWindow` can go with it.
 @MainActor
-final class TitlebarDoubleClickTests: XCTestCase {
+final class TitlebarDoubleClickTests: HostedStoreTestCase {
 
     private enum Fixture {
         static let size = NSSize(width: 700, height: 500)
@@ -183,7 +183,7 @@ final class TitlebarDoubleClickTests: XCTestCase {
     /// view pinned too high — would swallow it before the window is asked, and this is the only
     /// test that would notice.
     func testTheRealWindowZoomsFromTheStripAboveTheSidebar() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         self.controller = controller
         let window = try XCTUnwrap(controller.window as? TitlebarActionWindow)
         window.doubleClickAction = { .zoom }

@@ -193,7 +193,8 @@ final class RemoteNotificationService {
 
         // Native permission requests already have a dedicated, safer notification that names
         // the tool and reaches only people allowed to decide it.
-        if AgentRuntime.shared.conversation(for: sessionID)?.remoteSnapshot.permission != nil {
+        if AgentRuntime.shared.remoteConversationSurface(for: sessionID)?
+            .remoteSnapshot.permission != nil {
             return
         }
 

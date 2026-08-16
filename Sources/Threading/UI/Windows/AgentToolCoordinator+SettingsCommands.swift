@@ -1,25 +1,5 @@
 import AppKit
 
-/// What `list_settings` answers with: the catalogue, page by page.
-private struct SettingsCataloguePayload: Encodable {
-    struct SettingEntry: Encodable {
-        let title: String
-        let section: String?
-    }
-
-    struct PageEntry: Encodable {
-        let id: String
-        let title: String
-        let group: String
-        let terms: [String]
-        /// The page's individual settings, so an answer can name the row itself — the app
-        /// scrolls to a named setting rather than leaving the reader at the top of the page.
-        let settings: [SettingEntry]
-    }
-
-    let pages: [PageEntry]
-}
-
 @MainActor
 extension AgentToolCoordinator {
     // MARK: Settings Directory
@@ -33,29 +13,22 @@ extension AgentToolCoordinator {
     /// caller, and holds no values: which pages exist is not a secret, what is set on them
     /// stays behind the pages themselves.
     func listSettings() -> MCPToolResult {
-        let payload = SettingsCataloguePayload(
-            pages: SettingsPages.all.map { page in
-                SettingsCataloguePayload.PageEntry(
-                    id: page.id,
-                    title: page.title,
-                    group: page.group,
-                    terms: page.displayTerms,
-                    settings: page.entries.map {
-                        SettingsCataloguePayload.SettingEntry(
-                            title: $0.title,
-                            section: $0.section
-                        )
-                    }
-                )
-            }
-        )
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(payload),
-              let text = String(data: data, encoding: .utf8) else {
-            return .failure("Could not list the settings pages.")
+        let pages = SettingsPages.all.map { page in
+            SettingsCataloguePage(
+                id: page.id,
+                title: page.title,
+                group: page.group,
+                terms: page.displayTerms,
+                settings: page.entries.map {
+                    SettingsCataloguePage.Setting(title: $0.title, section: $0.section)
+                }
+            )
         }
-        return .success(text)
+        switch dependencies.settingsCatalogue.list(pages: pages) {
+        case .success(let text):
+            return .success(text)
+        case .failure(let message):
+            return .failure(message)
+        }
     }
 }

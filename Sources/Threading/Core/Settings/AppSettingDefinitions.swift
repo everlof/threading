@@ -1,5 +1,71 @@
 import Foundation
 
+/// Closed source identities for persisted app settings.
+///
+/// Persistence keys remain strings because they are a compatibility contract on disk. Production
+/// code never names an identity with a string, though: it receives an `AppSettingDescriptor<T>`
+/// from `AppSettingDefinitions`, so misspelling `githubAppClientID` is a compiler error.
+enum AppSettingIdentity: String, CaseIterable, Sendable {
+    case defaultAgentKind
+    case githubAppClientID
+    case restoresLastSession
+    case restoresRunningSessions
+    case sessionRestorePolicy
+    case sessionRestoreWindowDays
+    case sessionRestoreLimit
+    case newChatOpeningMessage
+    case legacyClosingConfirmation
+    case suppressedConfirmations
+    case hiddenNotices
+    case closingConfirmationMigration
+    case usesAgentTitleInSidebar
+    case groupsSessionsByBranch
+    case groupsLoneBranches
+    case compactsSidebarTree
+    case followsCheckoutBranch
+    case sidebarSessionOrder
+    case sidebarSessionOrderIsReversed
+    case promptReturnKey
+    case discoversProjectIcons
+    case discoversAccountAvatars
+    case harmonizesTerminalBackgrounds
+    case convertsDroppedImages
+    case copiesTerminalSelection
+    case notifiesOnAttention
+    case disabledAttentionAlerts
+    case legacyPlaysAttentionAlertSound
+    case attentionAlertSound
+    case terminalBellSound
+    case soundEventChoices
+    case silencesAllSounds
+    case disabledAttachmentDetectionAgentKinds
+    case includesAttachmentsOutsideProject
+    case capturesPageBeforeAgentActions
+    case disabledToolGroupIDs
+    case usesContainedExtensionLauncher
+    case workspaceNavigatorSelection
+    case reportsClaudeLifecycleEvents
+    case installsCodexHooks
+    case readsClaudeLoginFromKeychain
+    case suppressesClaudeStatusLine
+    case bypassesCodexHookTrust
+    case claudeRemoteControl
+    case claudeStartupSpeed
+    case codexStartupSpeed
+    case defaultPermissionMode
+    case remoteAccessEnabled
+    case remoteAccessConnectionMode
+    case remoteAccessAllowsOwnerRelayFallback
+    case remoteAccessKeepsRelayReady
+    case remoteInputControlDefault
+    case automaticUpdateChecksEnabled
+    case workingOrbStyle
+    case chatNameMorphStyle
+    case chromeFontFamily
+    case conversationFontFamily
+    case appTextSize
+}
+
 /// The property-list value category a setting persists.
 ///
 /// This is intentionally closed. `UserDefaults` accepts `Any`, but the settings catalogue does
@@ -46,6 +112,18 @@ enum AppSettingValueType: String, Equatable, Sendable {
     case data
 }
 
+/// How the Swift value becomes a value in the defaults domain.
+enum AppSettingEncoding: Equatable, Sendable {
+    /// Store the property-list value exactly as supplied.
+    case propertyList
+    /// Empty is absence; used by optional text overrides and the reusable opening message.
+    case removeEmptyString
+    /// An empty map is absence so broader sound-choice scopes remain authoritative.
+    case removeEmptyCollection
+    /// A recoverable Codable envelope owns quarantine and read-back verification.
+    case recoverableCodable
+}
+
 /// What an absent current key means. Absence is part of the persistence contract: several
 /// settings deliberately inherit, consult a legacy key, or ask macOS instead of registering a
 /// concrete value.
@@ -57,7 +135,7 @@ enum AppSettingAbsenceSemantics: Equatable, Sendable {
     case inherit
     case systemDefault
     case fallback(String)
-    case legacy(settingIdentity: String)
+    case legacy(settingIdentity: AppSettingIdentity)
 }
 
 enum AppSettingValidation: Equatable, Sendable {
@@ -108,6 +186,7 @@ enum AppSettingRemotePolicy: Equatable, Sendable {
 struct AppSettingPersistence: Equatable, Sendable {
     let key: String
     let valueType: AppSettingValueType
+    let encoding: AppSettingEncoding
     let absence: AppSettingAbsenceSemantics
     let validation: AppSettingValidation
 }
@@ -130,244 +209,886 @@ struct AppSettingDefinition: Equatable, Sendable {
     let remotePolicy: AppSettingRemotePolicy
 }
 
+/// A Swift type that has one exact property-list representation.
+protocol AppSettingValue: Sendable {
+    static var appSettingValueType: AppSettingValueType { get }
+    static func read(from defaults: UserDefaults, key: String) -> Self?
+    static func value(from stored: AppSettingStoredValue) -> Self?
+    var storedAppSettingValue: AppSettingStoredValue { get }
+}
+
+extension Bool: AppSettingValue {
+    static var appSettingValueType: AppSettingValueType { .boolean }
+
+    static func read(from defaults: UserDefaults, key: String) -> Bool? {
+        defaults.object(forKey: key) as? Bool
+    }
+
+    static func value(from stored: AppSettingStoredValue) -> Bool? {
+        guard case .boolean(let value) = stored else { return nil }
+        return value
+    }
+
+    var storedAppSettingValue: AppSettingStoredValue { .boolean(self) }
+}
+
+extension Int: AppSettingValue {
+    static var appSettingValueType: AppSettingValueType { .integer }
+
+    static func read(from defaults: UserDefaults, key: String) -> Int? {
+        defaults.object(forKey: key) as? Int
+    }
+
+    static func value(from stored: AppSettingStoredValue) -> Int? {
+        guard case .integer(let value) = stored else { return nil }
+        return value
+    }
+
+    var storedAppSettingValue: AppSettingStoredValue { .integer(self) }
+}
+
+extension String: AppSettingValue {
+    static var appSettingValueType: AppSettingValueType { .string }
+
+    static func read(from defaults: UserDefaults, key: String) -> String? {
+        defaults.string(forKey: key)
+    }
+
+    static func value(from stored: AppSettingStoredValue) -> String? {
+        guard case .string(let value) = stored else { return nil }
+        return value
+    }
+
+    var storedAppSettingValue: AppSettingStoredValue { .string(self) }
+}
+
+extension Array: AppSettingValue where Element == String {
+    static var appSettingValueType: AppSettingValueType { .stringArray }
+
+    static func read(from defaults: UserDefaults, key: String) -> [String]? {
+        defaults.stringArray(forKey: key)
+    }
+
+    static func value(from stored: AppSettingStoredValue) -> [String]? {
+        guard case .stringArray(let value) = stored else { return nil }
+        return value
+    }
+
+    var storedAppSettingValue: AppSettingStoredValue { .stringArray(self) }
+}
+
+extension Dictionary: AppSettingValue where Key == String, Value == String {
+    static var appSettingValueType: AppSettingValueType { .stringDictionary }
+
+    static func read(from defaults: UserDefaults, key: String) -> [String: String]? {
+        // Keep healthy siblings when one externally-written dictionary value has the wrong
+        // property-list type. This is the pre-existing sound-choice compatibility behavior.
+        defaults.dictionary(forKey: key)?.compactMapValues { $0 as? String }
+    }
+
+    static func value(from stored: AppSettingStoredValue) -> [String: String]? {
+        guard case .stringDictionary(let value) = stored else { return nil }
+        return value
+    }
+
+    var storedAppSettingValue: AppSettingStoredValue { .stringDictionary(self) }
+}
+
+extension Data: AppSettingValue {
+    static var appSettingValueType: AppSettingValueType { .data }
+
+    static func read(from defaults: UserDefaults, key: String) -> Data? {
+        defaults.data(forKey: key)
+    }
+
+    static func value(from stored: AppSettingStoredValue) -> Data? {
+        guard case .data(let value) = stored else { return nil }
+        return value
+    }
+
+    var storedAppSettingValue: AppSettingStoredValue { .data(self) }
+}
+
+/// A typed absence contract. The erased semantic is retained for catalogue and migration audits,
+/// while the generic value supplies the production read fallback. Consequently a Boolean
+/// descriptor cannot be given a String registered default, and an array cannot accidentally use
+/// the dictionary empty value.
+struct TypedAppSettingAbsence<Value: AppSettingValue>: Sendable {
+    let erased: AppSettingAbsenceSemantics
+    let value: Value?
+
+    static func registered(_ value: Value) -> Self {
+        Self(erased: .registered(value.storedAppSettingValue), value: value)
+    }
+
+    static func legacy(_ identity: AppSettingIdentity) -> Self {
+        Self(erased: .legacy(settingIdentity: identity), value: nil)
+    }
+}
+
+extension TypedAppSettingAbsence where Value == Bool {
+    static var falseValue: Self { Self(erased: .falseValue, value: false) }
+}
+
+extension TypedAppSettingAbsence where Value == String {
+    static var emptyString: Self { Self(erased: .emptyString, value: "") }
+    static var inherit: Self { Self(erased: .inherit, value: nil) }
+    static var systemDefault: Self { Self(erased: .systemDefault, value: nil) }
+    static func fallback(_ value: String) -> Self {
+        Self(erased: .fallback(value), value: value)
+    }
+}
+
+extension TypedAppSettingAbsence where Value == [String] {
+    static var emptyCollection: Self { Self(erased: .emptyCollection, value: []) }
+}
+
+extension TypedAppSettingAbsence where Value == [String: String] {
+    static var emptyCollection: Self { Self(erased: .emptyCollection, value: [:]) }
+}
+
+extension TypedAppSettingAbsence where Value == Data {
+    /// The recoverable Codable owner interprets this semantic fallback before it asks the raw
+    /// Data descriptor to read. There is intentionally no fabricated Data default.
+    static func recoverableFallback(_ identity: String) -> Self {
+        Self(erased: .fallback(identity), value: nil)
+    }
+}
+
+/// A typed validation contract. Its factories exist only on compatible Value specializations,
+/// so a byte-bounded string rule or integer range cannot be attached to the wrong descriptor.
+struct TypedAppSettingValidation<Value: AppSettingValue>: Sendable {
+    let erased: AppSettingValidation
+    private let normalizeValue: @Sendable (Value, Value?) -> Value?
+
+    static var any: Self {
+        Self(erased: .any) { value, _ in value }
+    }
+
+    func accepts(_ value: Value) -> Bool {
+        erased.accepts(value.storedAppSettingValue)
+    }
+
+    func normalize(_ value: Value, absenceValue: Value?) -> Value? {
+        normalizeValue(value, absenceValue)
+    }
+
+    private init(
+        erased: AppSettingValidation,
+        normalizeValue: @escaping @Sendable (Value, Value?) -> Value?
+    ) {
+        self.erased = erased
+        self.normalizeValue = normalizeValue
+    }
+}
+
+extension TypedAppSettingValidation where Value == String {
+    static func allowedStrings(_ values: Set<String>) -> Self {
+        Self(erased: .allowedStrings(values)) { value, _ in
+            values.contains(value) ? value : nil
+        }
+    }
+
+    static func maximumBytes(_ maximum: Int) -> Self {
+        Self(erased: .maximumStringBytes(maximum)) { value, _ in
+            value.utf8.count <= maximum ? value : nil
+        }
+    }
+}
+
+extension TypedAppSettingValidation where Value == Int {
+    static func range(_ range: ClosedRange<Int>) -> Self {
+        Self(erased: .integerRange(range)) { value, absenceValue in
+            if value <= 0 { return absenceValue }
+            return min(max(value, range.lowerBound), range.upperBound)
+        }
+    }
+}
+
+extension TypedAppSettingValidation where Value == Data {
+    static func workspaceNavigatorIdentity(
+        maximumIdentityBytes: Int,
+        maximumDataBytes: Int
+    ) -> Self {
+        Self(
+            erased: .workspaceNavigatorIdentity(
+                maximumIdentityBytes: maximumIdentityBytes,
+                maximumDataBytes: maximumDataBytes
+            )
+        ) { value, _ in
+            value.count <= maximumDataBytes ? value : nil
+        }
+    }
+}
+
+/// Typed persistence encoding. Factories for empty-as-absence and recoverable storage exist only
+/// for compatible Swift values; the erased encoding is a catalogue projection, not an authored
+/// type tag.
+struct TypedAppSettingEncoding<Value: AppSettingValue>: Sendable {
+    let erased: AppSettingEncoding
+    private let shouldRemoveValue: @Sendable (Value) -> Bool
+
+    static var propertyList: Self {
+        Self(erased: .propertyList) { _ in false }
+    }
+
+    func shouldRemove(_ value: Value) -> Bool {
+        shouldRemoveValue(value)
+    }
+
+    private init(
+        erased: AppSettingEncoding,
+        shouldRemoveValue: @escaping @Sendable (Value) -> Bool
+    ) {
+        self.erased = erased
+        self.shouldRemoveValue = shouldRemoveValue
+    }
+}
+
+extension TypedAppSettingEncoding where Value == String {
+    static var removeEmpty: Self {
+        Self(erased: .removeEmptyString, shouldRemoveValue: \.isEmpty)
+    }
+}
+
+extension TypedAppSettingEncoding where Value == [String] {
+    static var removeEmpty: Self {
+        Self(erased: .removeEmptyCollection, shouldRemoveValue: \.isEmpty)
+    }
+}
+
+extension TypedAppSettingEncoding where Value == [String: String] {
+    static var removeEmpty: Self {
+        Self(erased: .removeEmptyCollection, shouldRemoveValue: \.isEmpty)
+    }
+}
+
+extension TypedAppSettingEncoding where Value == Data {
+    static var recoverableCodable: Self {
+        Self(erased: .recoverableCodable) { _ in false }
+    }
+}
+
+/// The authored production contract for one persisted setting.
+///
+/// `Value` determines the stored value type. Identity, key, typed absence/default, typed
+/// validation, encoding, notification, presentations, and remote policy are supplied here once;
+/// `definition` is the erased projection consumed by catalogue-only clients.
+struct AppSettingDescriptor<Value: AppSettingValue>: Sendable {
+    let identity: AppSettingIdentity
+    let persistenceKey: String
+    let encoding: TypedAppSettingEncoding<Value>
+    let absence: TypedAppSettingAbsence<Value>
+    let validation: TypedAppSettingValidation<Value>
+    let notification: AppSettingChangeNotification
+    let presentations: [AppSettingPresentation]
+    let remotePolicy: AppSettingRemotePolicy
+
+    init(
+        identity: AppSettingIdentity,
+        persistenceKey: String,
+        absence: TypedAppSettingAbsence<Value>,
+        validation: TypedAppSettingValidation<Value> = .any,
+        encoding: TypedAppSettingEncoding<Value> = .propertyList,
+        notification: AppSettingChangeNotification = .appSettingsChanged,
+        presentations: [AppSettingPresentation] = [],
+        remotePolicy: AppSettingRemotePolicy? = nil
+    ) {
+        self.identity = identity
+        self.persistenceKey = persistenceKey
+        self.absence = absence
+        self.validation = validation
+        self.encoding = encoding
+        self.notification = notification
+        self.presentations = presentations
+        self.remotePolicy = remotePolicy
+            ?? (presentations.isEmpty ? .hidden : .catalogueOnly)
+    }
+
+    var definition: AppSettingDefinition {
+        AppSettingDefinition(
+            identity: identity.rawValue,
+            persistence: AppSettingPersistence(
+                key: persistenceKey,
+                valueType: Value.appSettingValueType,
+                encoding: encoding.erased,
+                absence: absence.erased,
+                validation: validation.erased
+            ),
+            presentations: presentations,
+            notification: notification,
+            remotePolicy: remotePolicy
+        )
+    }
+
+    func read(from defaults: UserDefaults) -> Value? {
+        if let value = Value.read(from: defaults, key: persistenceKey),
+           let normalized = validation.normalize(value, absenceValue: absence.value) {
+            return normalized
+        }
+        return absence.value
+    }
+
+    func accepts(_ value: Value) -> Bool {
+        validation.accepts(value)
+    }
+
+    /// Persists a validated value and applies this setting's declared notification policy.
+    /// Invalid input is fail-closed: the previous durable value remains in place and observers
+    /// are not told a change occurred.
+    @discardableResult
+    func write(
+        _ value: Value,
+        to defaults: UserDefaults,
+        notifying: Bool = true
+    ) -> Bool {
+        guard let normalized = validation.normalize(value, absenceValue: absence.value) else {
+            return false
+        }
+        if encoding.shouldRemove(normalized) {
+            defaults.removeObject(forKey: persistenceKey)
+        } else {
+            defaults.set(normalized.storedAppSettingValue.propertyListValue, forKey: persistenceKey)
+        }
+        postChangeIfNeeded(notifying: notifying)
+        return true
+    }
+
+    func remove(from defaults: UserDefaults, notifying: Bool = true) {
+        defaults.removeObject(forKey: persistenceKey)
+        postChangeIfNeeded(notifying: notifying)
+    }
+
+    func containsValue(in defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: persistenceKey) != nil
+    }
+
+    /// Applies the descriptor's notification policy after a specialised persistence adapter
+    /// has durably committed the value. Most settings use `write`; recoverable Codable stores
+    /// use this handoff so notification policy still has one owner.
+    func notifyChange() {
+        postChangeIfNeeded(notifying: true)
+    }
+
+    fileprivate func applyRemoteMutation(
+        _ storedValue: AppSettingStoredValue,
+        defaults: UserDefaults
+    ) -> AppSettingRemoteMutationResult {
+        guard let value = Value.value(from: storedValue), write(value, to: defaults) else {
+            return .invalidValue
+        }
+        return .applied
+    }
+
+    private func postChangeIfNeeded(notifying: Bool) {
+        guard notifying, notification == .appSettingsChanged else { return }
+        NotificationCenter.default.post(AppSettingsDidChange())
+    }
+}
+
+/// A heterogeneous reference to an authored typed descriptor. It copies no setting metadata:
+/// both its catalogue definition and remote writer are projections of the descriptor supplied
+/// at initialization.
+struct AnyAppSettingDescriptor: Sendable {
+    let identity: AppSettingIdentity
+    let definition: AppSettingDefinition
+    private let remoteWriter: @Sendable (AppSettingStoredValue, UserDefaults) -> AppSettingRemoteMutationResult
+
+    init<Value>(_ descriptor: AppSettingDescriptor<Value>) {
+        identity = descriptor.identity
+        definition = descriptor.definition
+        remoteWriter = { value, defaults in
+            descriptor.applyRemoteMutation(value, defaults: defaults)
+        }
+    }
+
+    func applyRemoteMutation(
+        _ value: AppSettingStoredValue,
+        defaults: UserDefaults
+    ) -> AppSettingRemoteMutationResult {
+        remoteWriter(value, defaults)
+    }
+}
+
+enum AppSettingRemoteMutationResult: Equatable {
+    case applied
+    case unknownSetting
+    case notMutable
+    case invalidValue
+}
+
 /// The single authored inventory for app settings.
 ///
-/// Call sites refer to a stable identity and project the key from here. They never repeat the
-/// current `UserDefaults` key, registered default, validation rule, page anchor, or remote policy.
+/// Each persisted setting is authored once as a typed descriptor. The heterogeneous registry
+/// below only references those declarations, and `all` erases them for catalogue consumers.
 enum AppSettingDefinitions {
-    static let all: [AppSettingDefinition] = [
-        stored("defaultAgentKind", "defaultAgentKind", .string,
-               .registered(.string(AgentDefaults.defaultKind.rawValue)),
-               .allowedStrings(Set(AgentKind.allCases.map(\.rawValue))),
-               presentations: [row("general", 0, "Sessions", "New sessions use",
-                                   ["agent", "Claude Code", "Codex"])]),
-        stored("githubAppClientID", "githubAppClientID", .string, .emptyString,
-               .maximumStringBytes(1_024),
-               presentations: [row("github", 0, "GitHub App", "Client ID",
-                                   ["client ID", "device flow", "connect", "app"])]),
-        stored("restoresLastSession", "restoresLastSession", .boolean,
-               .registered(.boolean(true)),
-               presentations: [row("general", 12, "Startup", "Reopen the last session at launch",
-                                   ["relaunch", "restore", "startup"])]),
-        stored("restoresRunningSessions", "restoresRunningSessions", .boolean,
-               .registered(.boolean(true))),
-        stored("sessionRestorePolicy", "sessionRestorePolicy", .string,
-               .legacy(settingIdentity: "restoresRunningSessions"),
-               .allowedStrings(Set(SessionRestorePolicy.allCases.map(\.rawValue))),
-               presentations: [row("general", 13, "Startup", "Bring back at launch",
-                                   ["reopen", "resume automatically", "running at quit", "restore"])]),
-        stored("sessionRestoreWindowDays", "sessionRestoreWindowDays", .integer,
-               .registered(.integer(SessionRestoreDefaults.windowDays)),
-               .integerRange(
-                   (SessionRestoreDefaults.windowDayChoices.first ?? 1)...(SessionRestoreDefaults.windowDayChoices.last ?? 30)
-               ),
-               presentations: [row("general", 14, "Startup", "Counts as recently used",
-                                   ["recently used", "days", "dormant"])]),
-        stored("sessionRestoreLimit", "sessionRestoreLimit", .integer,
-               .registered(.integer(SessionRestoreDefaults.limit)),
-               .integerRange(
-                   (SessionRestoreDefaults.limitChoices.first ?? 4)...(SessionRestoreDefaults.limitChoices.last ?? 32)
-               ),
-               presentations: [row("general", 15, "Startup", "Sessions brought back",
-                                   ["restore limit"])]),
-        stored("newChatOpeningMessage", "newChatOpeningMessage", .string, .emptyString,
-               .maximumStringBytes(1_048_576),
-               presentations: [row("general", 9, "Opening Message", "Add to every new chat",
-                                   ["first message", "instructions", "opening message"])]),
+    // MARK: Typed Persisted Descriptors
 
-        // Migration-only identities remain typed definitions so migrations never duplicate a
-        // retired key or marker spelling.
-        stored("legacyClosingConfirmation", "confirmsBeforeClosingRunningSession", .boolean,
-               .registered(.boolean(true)), notification: .none),
-        stored("suppressedConfirmations", "suppressedConfirmations", .stringArray,
-               .emptyCollection),
-        stored("hiddenNotices", "hiddenNotices", .stringArray, .emptyCollection,
-               presentations: [row("general", 16, "Confirmations", "Hidden extension messages",
-                                   ["notices"])]),
-        stored("closingConfirmationMigration", "didMigrateClosingConfirmation", .boolean,
-               .falseValue, notification: .none),
+    static let defaultAgentKind = AppSettingDescriptor<String>(
+        identity: .defaultAgentKind,
+        persistenceKey: "defaultAgentKind",
+        absence: .registered(AgentDefaults.defaultKind.rawValue),
+        validation: .allowedStrings(Set(AgentKind.allCases.map(\.rawValue))),
+        presentations: [row("general", 0, "Sessions", "New sessions use",
+                            ["agent", "Claude Code", "Codex"])]
+    )
+    static let githubAppClientID = AppSettingDescriptor<String>(
+        identity: .githubAppClientID,
+        persistenceKey: "githubAppClientID",
+        absence: .emptyString,
+        validation: .maximumBytes(1_024),
+        presentations: [row("github", 0, "GitHub App", "Client ID",
+                            ["client ID", "device flow", "connect", "app"])]
+    )
+    static let restoresLastSession = AppSettingDescriptor<Bool>(
+        identity: .restoresLastSession,
+        persistenceKey: "restoresLastSession",
+        absence: .registered(true),
+        presentations: [row("general", 12, "Startup", "Reopen the last session at launch",
+                            ["relaunch", "restore", "startup"])]
+    )
+    static let restoresRunningSessions = AppSettingDescriptor<Bool>(
+        identity: .restoresRunningSessions,
+        persistenceKey: "restoresRunningSessions",
+        absence: .registered(true)
+    )
+    static let sessionRestorePolicy = AppSettingDescriptor<String>(
+        identity: .sessionRestorePolicy,
+        persistenceKey: "sessionRestorePolicy",
+        absence: .legacy(.restoresRunningSessions),
+        validation: .allowedStrings(Set(SessionRestorePolicy.allCases.map(\.rawValue))),
+        presentations: [row("general", 13, "Startup", "Bring back at launch",
+                            ["reopen", "resume automatically", "running at quit", "restore"])]
+    )
+    static let sessionRestoreWindowDays = AppSettingDescriptor<Int>(
+        identity: .sessionRestoreWindowDays,
+        persistenceKey: "sessionRestoreWindowDays",
+        absence: .registered(SessionRestoreDefaults.windowDays),
+        validation: .range((SessionRestoreDefaults.windowDayChoices.first ?? 1)...(SessionRestoreDefaults.windowDayChoices.last ?? 30)),
+        presentations: [row("general", 14, "Startup", "Counts as recently used",
+                            ["recently used", "days", "dormant"])]
+    )
+    static let sessionRestoreLimit = AppSettingDescriptor<Int>(
+        identity: .sessionRestoreLimit,
+        persistenceKey: "sessionRestoreLimit",
+        absence: .registered(SessionRestoreDefaults.limit),
+        validation: .range((SessionRestoreDefaults.limitChoices.first ?? 4)...(SessionRestoreDefaults.limitChoices.last ?? 32)),
+        presentations: [row("general", 15, "Startup", "Sessions brought back",
+                            ["restore limit"])]
+    )
+    static let newChatOpeningMessage = AppSettingDescriptor<String>(
+        identity: .newChatOpeningMessage,
+        persistenceKey: "newChatOpeningMessage",
+        absence: .emptyString,
+        validation: .maximumBytes(1_048_576),
+        encoding: .removeEmpty,
+        presentations: [row("general", 9, "Opening Message", "Add to every new chat",
+                            ["first message", "instructions", "opening message"])]
+    )
 
-        stored("usesAgentTitleInSidebar", "usesTerminalTitleInSidebar", .boolean,
-               .registered(.boolean(true)),
-               presentations: [row("general", 1, "Sessions", "Name sessions after the agent's own title",
-                                   ["naming", "rename"])]),
-        stored("groupsSessionsByBranch", "groupsSessionsByBranch", .boolean,
-               .registered(.boolean(true)),
-               presentations: [row("general", 2, "Sessions", "Group sessions by branch",
-                                   ["branch"])]),
-        stored("groupsLoneBranches", "groupsLoneBranches", .boolean,
-               .registered(.boolean(true))),
-        stored("compactsSidebarTree", "compactsSidebarTree", .boolean, .falseValue,
-               presentations: [row("general", 3, "Sessions", "Compact tree",
-                                   ["indentation", "sidebar density"])]),
-        stored("followsCheckoutBranch", "followsCheckoutBranch", .boolean,
-               .registered(.boolean(true)),
-               presentations: [row("general", 4, "Sessions", "Follow the checkout's branch",
-                                   ["branch", "checkout"])]),
-        stored("sidebarSessionOrder", "sidebarSessionOrder", .string, .fallback("manual"),
-               .allowedStrings(Set(SidebarSessionOrder.allCases.map(\.rawValue)))),
-        stored("sidebarSessionOrderIsReversed", "sidebarSessionOrderIsReversed", .boolean,
-               .falseValue),
-        stored("promptReturnKey", "promptReturnKey", .string, .fallback("matchesComposer"),
-               .allowedStrings(Set(PromptReturnKey.allCases.map(\.rawValue))),
-               presentations: [row("keyboard", 0, "Composer", "When writing a prompt, press Return to",
-                                   ["return", "enter", "send", "new line"])]),
+    // Migration-only identities remain typed descriptors so migrations never duplicate a
+    // retired key or marker spelling.
+    static let legacyClosingConfirmation = AppSettingDescriptor<Bool>(
+        identity: .legacyClosingConfirmation,
+        persistenceKey: "confirmsBeforeClosingRunningSession",
+        absence: .registered(true),
+        notification: .none
+    )
+    static let suppressedConfirmations = AppSettingDescriptor<[String]>(
+        identity: .suppressedConfirmations,
+        persistenceKey: "suppressedConfirmations",
+        absence: .emptyCollection
+    )
+    static let hiddenNotices = AppSettingDescriptor<[String]>(
+        identity: .hiddenNotices,
+        persistenceKey: "hiddenNotices",
+        absence: .emptyCollection,
+        presentations: [row("general", 16, "Confirmations", "Hidden extension messages",
+                            ["notices"])]
+    )
+    static let closingConfirmationMigration = AppSettingDescriptor<Bool>(
+        identity: .closingConfirmationMigration,
+        persistenceKey: "didMigrateClosingConfirmation",
+        absence: .falseValue,
+        notification: .none
+    )
 
-        stored("discoversProjectIcons", "discoversProjectIcons", .boolean,
-               .registered(.boolean(true)),
-               presentations: [row("general", 5, "Sessions", "Discover project icons",
-                                   ["project icons", "favicon"])]),
-        stored("discoversAccountAvatars", "discoversAccountAvatars", .boolean,
-               .registered(.boolean(true)),
-               presentations: [row("general", 6, "Sessions", "Discover account avatars",
-                                   ["account avatars", "Gravatar"])]),
-        stored("harmonizesTerminalBackgrounds", "harmonizesTerminalBackgrounds", .boolean,
-               .registered(.boolean(true)),
-               presentations: [row("profiles", 3, "Colour", "Keep backgrounds in tune with the theme",
-                                   ["background", "colour", "colors"])]),
-        stored("convertsDroppedImages", "convertsDroppedImages", .boolean,
-               .registered(.boolean(true)),
-               presentations: [row("profiles", 6, "Dropped files", "Convert dropped images agents can't open",
-                                   ["dropped images", "HEIC", "TIFF"])]),
-        stored("copiesTerminalSelection", "copiesTerminalSelection", .boolean, .falseValue,
-               presentations: [row("profiles", 5, "Selection", "Copy selected text to the clipboard",
-                                   ["copy on select", "clipboard", "terminal selection"])]),
+    static let usesAgentTitleInSidebar = AppSettingDescriptor<Bool>(
+        identity: .usesAgentTitleInSidebar,
+        persistenceKey: "usesTerminalTitleInSidebar",
+        absence: .registered(true),
+        presentations: [row("general", 1, "Sessions", "Name sessions after the agent's own title",
+                            ["naming", "rename"])]
+    )
+    static let groupsSessionsByBranch = AppSettingDescriptor<Bool>(
+        identity: .groupsSessionsByBranch,
+        persistenceKey: "groupsSessionsByBranch",
+        absence: .registered(true),
+        presentations: [row("general", 2, "Sessions", "Group sessions by branch", ["branch"])]
+    )
+    static let groupsLoneBranches = AppSettingDescriptor<Bool>(
+        identity: .groupsLoneBranches,
+        persistenceKey: "groupsLoneBranches",
+        absence: .registered(true)
+    )
+    static let compactsSidebarTree = AppSettingDescriptor<Bool>(
+        identity: .compactsSidebarTree,
+        persistenceKey: "compactsSidebarTree",
+        absence: .falseValue,
+        presentations: [row("general", 3, "Sessions", "Compact tree",
+                            ["indentation", "sidebar density"])]
+    )
+    static let followsCheckoutBranch = AppSettingDescriptor<Bool>(
+        identity: .followsCheckoutBranch,
+        persistenceKey: "followsCheckoutBranch",
+        absence: .registered(true),
+        presentations: [row("general", 4, "Sessions", "Follow the checkout's branch",
+                            ["branch", "checkout"])]
+    )
+    static let sidebarSessionOrder = AppSettingDescriptor<String>(
+        identity: .sidebarSessionOrder,
+        persistenceKey: "sidebarSessionOrder",
+        absence: .fallback("manual"),
+        validation: .allowedStrings(Set(SidebarSessionOrder.allCases.map(\.rawValue)))
+    )
+    static let sidebarSessionOrderIsReversed = AppSettingDescriptor<Bool>(
+        identity: .sidebarSessionOrderIsReversed,
+        persistenceKey: "sidebarSessionOrderIsReversed",
+        absence: .falseValue
+    )
+    static let promptReturnKey = AppSettingDescriptor<String>(
+        identity: .promptReturnKey,
+        persistenceKey: "promptReturnKey",
+        absence: .fallback("matchesComposer"),
+        validation: .allowedStrings(Set(PromptReturnKey.allCases.map(\.rawValue))),
+        presentations: [row("keyboard", 0, "Composer", "When writing a prompt, press Return to",
+                            ["return", "enter", "send", "new line"])]
+    )
 
-        stored("notifiesOnAttention", "notifiesOnAttention", .boolean,
-               .registered(.boolean(true)),
-               presentations: [row("general", 17, "Notifications", "Notify when a session needs you",
-                                   ["notifications", "alerts", "needs attention"])]),
-        stored("disabledAttentionAlerts", "disabledAttentionAlerts", .stringArray,
-               .emptyCollection),
-        stored("legacyPlaysAttentionAlertSound", "playsAttentionAlertSound", .boolean,
-               .falseValue, notification: .none),
-        stored("attentionAlertSound", "attentionAlertSound", .string, .systemDefault,
-               presentations: [row("general", 18, "Notifications", "Alert sound",
-                                   ["sound", "alerts", "notifications"])]),
-        stored("terminalBellSound", "terminalBellSound", .string, .systemDefault,
-               presentations: [row("general", 20, "Terminal Bell", "Bell sound",
-                                   ["bell", "beep", "terminal bell", "alert sound"])]),
-        stored("soundEventChoices", "soundEventChoices", .stringDictionary, .emptyCollection,
-               presentations: [
-                   row("general", 19, "Notifications", "Sounds for each alert",
-                       ["custom sounds", "per-event sounds", "customize events", "override"]),
-                   row("general", 21, "Terminal Bell", "Sounds for each bell",
-                       ["custom sounds", "beep", "override"])
-               ]),
-        stored("silencesAllSounds", "silencesAllSounds", .boolean, .falseValue,
-               presentations: [row("general", 22, "Silence", "Silence every sound",
-                                   ["silence", "silence sounds", "mute"])]),
+    static let discoversProjectIcons = AppSettingDescriptor<Bool>(
+        identity: .discoversProjectIcons,
+        persistenceKey: "discoversProjectIcons",
+        absence: .registered(true),
+        presentations: [row("general", 5, "Sessions", "Discover project icons",
+                            ["project icons", "favicon"])]
+    )
+    static let discoversAccountAvatars = AppSettingDescriptor<Bool>(
+        identity: .discoversAccountAvatars,
+        persistenceKey: "discoversAccountAvatars",
+        absence: .registered(true),
+        presentations: [row("general", 6, "Sessions", "Discover account avatars",
+                            ["account avatars", "Gravatar"])]
+    )
+    static let harmonizesTerminalBackgrounds = AppSettingDescriptor<Bool>(
+        identity: .harmonizesTerminalBackgrounds,
+        persistenceKey: "harmonizesTerminalBackgrounds",
+        absence: .registered(true),
+        presentations: [row("profiles", 3, "Colour", "Keep backgrounds in tune with the theme",
+                            ["background", "colour", "colors"])]
+    )
+    static let convertsDroppedImages = AppSettingDescriptor<Bool>(
+        identity: .convertsDroppedImages,
+        persistenceKey: "convertsDroppedImages",
+        absence: .registered(true),
+        presentations: [row("profiles", 6, "Dropped files",
+                            "Convert dropped images agents can't open",
+                            ["dropped images", "HEIC", "TIFF"])]
+    )
+    static let copiesTerminalSelection = AppSettingDescriptor<Bool>(
+        identity: .copiesTerminalSelection,
+        persistenceKey: "copiesTerminalSelection",
+        absence: .falseValue,
+        presentations: [row("profiles", 5, "Selection",
+                            "Copy selected text to the clipboard",
+                            ["copy on select", "clipboard", "terminal selection"])]
+    )
 
-        stored("disabledAttachmentDetectionAgentKinds",
-               "disabledAttachmentDetectionAgentKinds", .stringArray, .emptyCollection),
-        stored("includesAttachmentsOutsideProject", "includesAttachmentsOutsideProject",
-               .boolean, .falseValue,
-               presentations: [row("general", 10, "Attachments", "Include files outside the project", ["attachments"])]),
-        stored("capturesPageBeforeAgentActions", "capturesPageBeforeAgentActions", .boolean,
-               .falseValue,
-               presentations: [row("general", 11, "Attachments", "Keep the page as it was before each agent action",
-                                   ["attachments", "browser"])]),
-        stored("disabledToolGroupIDs", "disabledToolGroupIDs", .stringArray, .emptyCollection),
+    static let notifiesOnAttention = AppSettingDescriptor<Bool>(
+        identity: .notifiesOnAttention,
+        persistenceKey: "notifiesOnAttention",
+        absence: .registered(true),
+        presentations: [row("general", 17, "Notifications", "Notify when a session needs you",
+                            ["notifications", "alerts", "needs attention"])]
+    )
+    static let disabledAttentionAlerts = AppSettingDescriptor<[String]>(
+        identity: .disabledAttentionAlerts,
+        persistenceKey: "disabledAttentionAlerts",
+        absence: .emptyCollection
+    )
+    static let legacyPlaysAttentionAlertSound = AppSettingDescriptor<Bool>(
+        identity: .legacyPlaysAttentionAlertSound,
+        persistenceKey: "playsAttentionAlertSound",
+        absence: .falseValue,
+        notification: .none
+    )
+    static let attentionAlertSound = AppSettingDescriptor<String>(
+        identity: .attentionAlertSound,
+        persistenceKey: "attentionAlertSound",
+        absence: .systemDefault,
+        presentations: [row("general", 18, "Notifications", "Alert sound",
+                            ["sound", "alerts", "notifications"])]
+    )
+    static let terminalBellSound = AppSettingDescriptor<String>(
+        identity: .terminalBellSound,
+        persistenceKey: "terminalBellSound",
+        absence: .systemDefault,
+        presentations: [row("general", 20, "Terminal Bell", "Bell sound",
+                            ["bell", "beep", "terminal bell", "alert sound"])]
+    )
+    static let soundEventChoices = AppSettingDescriptor<[String: String]>(
+        identity: .soundEventChoices,
+        persistenceKey: "soundEventChoices",
+        absence: .emptyCollection,
+        encoding: .removeEmpty,
+        presentations: [
+            row("general", 19, "Notifications", "Sounds for each alert",
+                ["custom sounds", "per-event sounds", "customize events", "override"]),
+            row("general", 21, "Terminal Bell", "Sounds for each bell",
+                ["custom sounds", "beep", "override"])
+        ]
+    )
+    static let silencesAllSounds = AppSettingDescriptor<Bool>(
+        identity: .silencesAllSounds,
+        persistenceKey: "silencesAllSounds",
+        absence: .falseValue,
+        presentations: [row("general", 22, "Silence", "Silence every sound",
+                            ["silence", "silence sounds", "mute"])]
+    )
 
-        stored("usesContainedExtensionLauncher", "usesContainedExtensionLauncher", .boolean,
-               .falseValue),
-        stored("workspaceNavigatorSelection", "workspaceNavigatorSelection", .data,
-               .fallback("native"),
-               .workspaceNavigatorIdentity(maximumIdentityBytes: 1_024,
-                                           maximumDataBytes: 65_536)),
+    static let disabledAttachmentDetectionAgentKinds = AppSettingDescriptor<[String]>(
+        identity: .disabledAttachmentDetectionAgentKinds,
+        persistenceKey: "disabledAttachmentDetectionAgentKinds",
+        absence: .emptyCollection
+    )
+    static let includesAttachmentsOutsideProject = AppSettingDescriptor<Bool>(
+        identity: .includesAttachmentsOutsideProject,
+        persistenceKey: "includesAttachmentsOutsideProject",
+        absence: .falseValue,
+        presentations: [row("general", 10, "Attachments",
+                            "Include files outside the project", ["attachments"])]
+    )
+    static let capturesPageBeforeAgentActions = AppSettingDescriptor<Bool>(
+        identity: .capturesPageBeforeAgentActions,
+        persistenceKey: "capturesPageBeforeAgentActions",
+        absence: .falseValue,
+        presentations: [row("general", 11, "Attachments",
+                            "Keep the page as it was before each agent action",
+                            ["attachments", "browser"])]
+    )
+    static let disabledToolGroupIDs = AppSettingDescriptor<[String]>(
+        identity: .disabledToolGroupIDs,
+        persistenceKey: "disabledToolGroupIDs",
+        absence: .emptyCollection
+    )
+    static let usesContainedExtensionLauncher = AppSettingDescriptor<Bool>(
+        identity: .usesContainedExtensionLauncher,
+        persistenceKey: "usesContainedExtensionLauncher",
+        absence: .falseValue
+    )
+    static let workspaceNavigatorSelection = AppSettingDescriptor<Data>(
+        identity: .workspaceNavigatorSelection,
+        persistenceKey: "workspaceNavigatorSelection",
+        absence: .recoverableFallback("native"),
+        validation: .workspaceNavigatorIdentity(
+            maximumIdentityBytes: 1_024,
+            maximumDataBytes: 65_536
+        ),
+        encoding: .recoverableCodable
+    )
 
-        stored("reportsClaudeLifecycleEvents", "reportsClaudeLifecycleEvents", .boolean,
-               .registered(.boolean(true)),
-               presentations: [row("general", 25, "Claude Hooks", "Report Claude turn and subagent activity", ["hooks"])]),
-        stored("installsCodexHooks", "installsCodexHooks", .boolean, .falseValue,
-               presentations: [row("general", 27, "Codex Hooks", "Report Codex turn boundaries",
-                                   ["Codex hooks", "hooks.json"])]),
-        stored("readsClaudeLoginFromKeychain", "readsClaudeLoginFromKeychain", .boolean,
-               .falseValue,
-               presentations: [row("privacy", 4, "Stored Credentials", "Live usage from your Claude login", ["keychain", "usage"])]),
-        stored("suppressesClaudeStatusLine", "suppressesClaudeStatusLine", .boolean,
-               .falseValue,
-               presentations: [row("general", 26, "Claude Hooks", "Hide Claude's status line in Threading terminals",
-                                   ["status line"])]),
-        stored("bypassesCodexHookTrust", "bypassesCodexHookTrust", .boolean, .falseValue,
-               presentations: [row("general", 28, "Codex Hooks", "Skip Codex hook review",
-                                   ["hooks"])]),
-        stored("claudeRemoteControl", "claudeRemoteControl", .string,
-               .fallback("followClaude"),
-               .allowedStrings(Set(ClaudeRemoteControl.allCases.map(\.rawValue))),
-               presentations: [row("general", 24, "Claude Remote Control", "Remote Control for new Claude sessions",
-                                   ["Claude Remote Control", "claude.ai", "mobile"])]),
-        stored("claudeStartupSpeed", "claudeStartupSpeed", .string,
-               .fallback("agentSetting"),
-               .allowedStrings(Set(AgentStartupSpeed.allCases.map(\.rawValue))),
-               presentations: [row("general", 7, "Conversation Speed", "Claude sessions start in",
-                                   ["fast mode", "standard mode", "credits", "conversation speed"])]),
-        stored("codexStartupSpeed", "codexStartupSpeed", .string,
-               .fallback("agentSetting"),
-               .allowedStrings(Set(AgentStartupSpeed.allCases.map(\.rawValue))),
-               presentations: [row("general", 8, "Conversation Speed", "Codex sessions start in",
-                                   ["service tier", "credits", "conversation speed"])]),
-        stored("defaultPermissionMode", "defaultPermissionMode", .string, .inherit,
-               .allowedStrings(Set(AgentPermissionMode.allCases.map(\.rawValue))),
-               presentations: [row("general", 23, "Permission Mode", "New sessions start in",
-                                   ["permission mode", "ask before"])]),
+    static let reportsClaudeLifecycleEvents = AppSettingDescriptor<Bool>(
+        identity: .reportsClaudeLifecycleEvents,
+        persistenceKey: "reportsClaudeLifecycleEvents",
+        absence: .registered(true),
+        presentations: [row("general", 25, "Claude Hooks",
+                            "Report Claude turn and subagent activity", ["hooks"])]
+    )
+    static let installsCodexHooks = AppSettingDescriptor<Bool>(
+        identity: .installsCodexHooks,
+        persistenceKey: "installsCodexHooks",
+        absence: .falseValue,
+        presentations: [row("general", 27, "Codex Hooks", "Report Codex turn boundaries",
+                            ["Codex hooks", "hooks.json"])]
+    )
+    static let readsClaudeLoginFromKeychain = AppSettingDescriptor<Bool>(
+        identity: .readsClaudeLoginFromKeychain,
+        persistenceKey: "readsClaudeLoginFromKeychain",
+        absence: .falseValue,
+        presentations: [row("privacy", 4, "Stored Credentials",
+                            "Live usage from your Claude login", ["keychain", "usage"])]
+    )
+    static let suppressesClaudeStatusLine = AppSettingDescriptor<Bool>(
+        identity: .suppressesClaudeStatusLine,
+        persistenceKey: "suppressesClaudeStatusLine",
+        absence: .falseValue,
+        presentations: [row("general", 26, "Claude Hooks",
+                            "Hide Claude's status line in Threading terminals", ["status line"])]
+    )
+    static let bypassesCodexHookTrust = AppSettingDescriptor<Bool>(
+        identity: .bypassesCodexHookTrust,
+        persistenceKey: "bypassesCodexHookTrust",
+        absence: .falseValue,
+        presentations: [row("general", 28, "Codex Hooks", "Skip Codex hook review", ["hooks"])]
+    )
+    static let claudeRemoteControl = AppSettingDescriptor<String>(
+        identity: .claudeRemoteControl,
+        persistenceKey: "claudeRemoteControl",
+        absence: .fallback("followClaude"),
+        validation: .allowedStrings(Set(ClaudeRemoteControl.allCases.map(\.rawValue))),
+        presentations: [row("general", 24, "Claude Remote Control",
+                            "Remote Control for new Claude sessions",
+                            ["Claude Remote Control", "claude.ai", "mobile"])]
+    )
+    static let claudeStartupSpeed = AppSettingDescriptor<String>(
+        identity: .claudeStartupSpeed,
+        persistenceKey: "claudeStartupSpeed",
+        absence: .fallback("agentSetting"),
+        validation: .allowedStrings(Set(AgentStartupSpeed.allCases.map(\.rawValue))),
+        presentations: [row("general", 7, "Conversation Speed", "Claude sessions start in",
+                            ["fast mode", "standard mode", "credits", "conversation speed"])]
+    )
+    static let codexStartupSpeed = AppSettingDescriptor<String>(
+        identity: .codexStartupSpeed,
+        persistenceKey: "codexStartupSpeed",
+        absence: .fallback("agentSetting"),
+        validation: .allowedStrings(Set(AgentStartupSpeed.allCases.map(\.rawValue))),
+        presentations: [row("general", 8, "Conversation Speed", "Codex sessions start in",
+                            ["service tier", "credits", "conversation speed"])]
+    )
+    static let defaultPermissionMode = AppSettingDescriptor<String>(
+        identity: .defaultPermissionMode,
+        persistenceKey: "defaultPermissionMode",
+        absence: .inherit,
+        validation: .allowedStrings(Set(AgentPermissionMode.allCases.map(\.rawValue))),
+        presentations: [row("general", 23, "Permission Mode", "New sessions start in",
+                            ["permission mode", "ask before"])]
+    )
 
-        stored("remoteAccessEnabled", "remoteAccessEnabled", .boolean, .falseValue,
-               presentations: [row("remote-access", 0, "Connection", "Remote Access",
-                                   ["iPhone", "remote", "sharing"])],
-               remotePolicy: .ownerMutable),
-        stored("remoteAccessConnectionMode", "remoteAccessConnectionMode", .string,
-               .fallback("relay"),
-               .allowedStrings(Set(RemoteAccessConnectionMode.allCases.map(\.rawValue))),
-               presentations: [
-                   row("remote-access", 1, "Connection", "Connection", ["relay", "Tailscale"]),
-                   row("remote-access", 2, "Connection", "Hosted Direct", ["direct", "introduce"])
-               ],
-               remotePolicy: .ownerMutable),
-        stored("remoteAccessAllowsOwnerRelayFallback", "remoteAccessAllowsOwnerRelayFallback",
-               .boolean, .registered(.boolean(false)),
-               presentations: [row("remote-access", 3, "Connection", "Owner Relay Fallback",
-                                   ["relay", "fallback"])], remotePolicy: .ownerMutable),
-        stored("remoteAccessKeepsRelayReady", "remoteAccessKeepsRelayReady", .boolean,
-               .registered(.boolean(false)),
-               presentations: [row("remote-access", 4, "Connection", "Keep Sharing Relay Ready",
-                                   ["relay", "share links"])], remotePolicy: .ownerMutable),
-        stored("remoteInputControlDefault", "remoteInputControlDefault", .string,
-               .registered(.string(RemoteInputControlDefault.collaborative.rawValue)),
-               .allowedStrings(Set(RemoteInputControlDefault.allCases.map(\.rawValue))),
-               presentations: [row("remote-access", 5, "Sharing & Security", "New shared chats",
-                                   ["security", "collaborative", "focused", "share"])],
-               remotePolicy: .ownerMutable),
+    static let remoteAccessEnabled = AppSettingDescriptor<Bool>(
+        identity: .remoteAccessEnabled,
+        persistenceKey: "remoteAccessEnabled",
+        absence: .falseValue,
+        presentations: [row("remote-access", 0, "Connection", "Remote Access",
+                            ["iPhone", "remote", "sharing"])]
+    )
+    static let remoteAccessConnectionMode = AppSettingDescriptor<String>(
+        identity: .remoteAccessConnectionMode,
+        persistenceKey: "remoteAccessConnectionMode",
+        absence: .fallback("relay"),
+        validation: .allowedStrings(Set(RemoteAccessConnectionMode.allCases.map(\.rawValue))),
+        presentations: [
+            row("remote-access", 1, "Connection", "Connection", ["relay", "Tailscale"]),
+            row("remote-access", 2, "Connection", "Hosted Direct", ["direct", "introduce"])
+        ]
+    )
+    static let remoteAccessAllowsOwnerRelayFallback = AppSettingDescriptor<Bool>(
+        identity: .remoteAccessAllowsOwnerRelayFallback,
+        persistenceKey: "remoteAccessAllowsOwnerRelayFallback",
+        absence: .registered(false),
+        presentations: [row("remote-access", 3, "Connection", "Owner Relay Fallback",
+                            ["relay", "fallback"])]
+    )
+    static let remoteAccessKeepsRelayReady = AppSettingDescriptor<Bool>(
+        identity: .remoteAccessKeepsRelayReady,
+        persistenceKey: "remoteAccessKeepsRelayReady",
+        absence: .registered(false),
+        presentations: [row("remote-access", 4, "Connection", "Keep Sharing Relay Ready",
+                            ["relay", "share links"])]
+    )
+    static let remoteInputControlDefault = AppSettingDescriptor<String>(
+        identity: .remoteInputControlDefault,
+        persistenceKey: "remoteInputControlDefault",
+        absence: .registered(RemoteInputControlDefault.collaborative.rawValue),
+        validation: .allowedStrings(Set(RemoteInputControlDefault.allCases.map(\.rawValue))),
+        presentations: [row("remote-access", 5, "Sharing & Security", "New shared chats",
+                            ["security", "collaborative", "focused", "share"])],
+        remotePolicy: .ownerMutable
+    )
 
-        stored("automaticUpdateChecksEnabled", "automaticUpdateChecksEnabled", .boolean,
-               .registered(.boolean(true)),
-               presentations: [row("general", 29, "Software Updates", "Check for updates automatically", ["updates", "Sparkle"])]),
-        stored("workingOrbStyle", "workingOrbStyle", .string,
-               .registered(.string(MotionPreferencesDefaults.workingOrbStyle.rawValue)),
-               .allowedStrings(Set(WorkingOrbStyle.allCases.map(\.rawValue))),
-               presentations: [row("motion", 0, "Working", "Working indicator",
-                                   ["orb", "animation", "spinner"])]),
-        stored("chatNameMorphStyle", "chatNameMorphStyle", .string,
-               .registered(.string(MotionPreferencesDefaults.chatNameMorphStyle.rawValue)),
-               .allowedStrings(Set(ChatNameMorphStyle.allCases.map(\.rawValue))),
-               presentations: [row("motion", 1, "Chat names", "Chat name transition",
-                                   ["transition", "animation", "morph"])]),
-        stored("chromeFontFamily", "chromeFontFamily", .string, .inherit,
-               .maximumStringBytes(1_024),
-               presentations: [row("themes", 4, "Fonts", "App font", ["typeface", "font"])]),
-        stored("conversationFontFamily", "conversationFontFamily", .string, .inherit,
-               .maximumStringBytes(1_024),
-               presentations: [row("themes", 5, "Fonts", "Conversation font",
-                                   ["typeface", "font", "chat"])]),
-        stored("appTextSize", "appTextSize", .string,
-               .registered(.string(AppTextSize.standard.rawValue)),
-               .allowedStrings(Set(AppTextSize.allCases.map(\.rawValue))),
-               presentations: [row("themes", 3, "Fonts", "Text size",
-                                   ["large text", "text size"])]),
+    static let automaticUpdateChecksEnabled = AppSettingDescriptor<Bool>(
+        identity: .automaticUpdateChecksEnabled,
+        persistenceKey: "automaticUpdateChecksEnabled",
+        absence: .registered(true),
+        presentations: [row("general", 29, "Software Updates",
+                            "Check for updates automatically", ["updates", "Sparkle"])]
+    )
+    static let workingOrbStyle = AppSettingDescriptor<String>(
+        identity: .workingOrbStyle,
+        persistenceKey: "workingOrbStyle",
+        absence: .registered(MotionPreferencesDefaults.workingOrbStyle.rawValue),
+        validation: .allowedStrings(Set(WorkingOrbStyle.allCases.map(\.rawValue))),
+        presentations: [row("motion", 0, "Working", "Working indicator",
+                            ["orb", "animation", "spinner"])]
+    )
+    static let chatNameMorphStyle = AppSettingDescriptor<String>(
+        identity: .chatNameMorphStyle,
+        persistenceKey: "chatNameMorphStyle",
+        absence: .registered(MotionPreferencesDefaults.chatNameMorphStyle.rawValue),
+        validation: .allowedStrings(Set(ChatNameMorphStyle.allCases.map(\.rawValue))),
+        presentations: [row("motion", 1, "Chat names", "Chat name transition",
+                            ["transition", "animation", "morph"])]
+    )
+    static let chromeFontFamily = AppSettingDescriptor<String>(
+        identity: .chromeFontFamily,
+        persistenceKey: "chromeFontFamily",
+        absence: .inherit,
+        validation: .maximumBytes(1_024),
+        encoding: .removeEmpty,
+        presentations: [row("themes", 4, "Fonts", "App font", ["typeface", "font"])]
+    )
+    static let conversationFontFamily = AppSettingDescriptor<String>(
+        identity: .conversationFontFamily,
+        persistenceKey: "conversationFontFamily",
+        absence: .inherit,
+        validation: .maximumBytes(1_024),
+        encoding: .removeEmpty,
+        presentations: [row("themes", 5, "Fonts", "Conversation font",
+                            ["typeface", "font", "chat"])]
+    )
+    static let appTextSize = AppSettingDescriptor<String>(
+        identity: .appTextSize,
+        persistenceKey: "appTextSize",
+        absence: .registered(AppTextSize.standard.rawValue),
+        validation: .allowedStrings(Set(AppTextSize.allCases.map(\.rawValue))),
+        presentations: [row("themes", 3, "Fonts", "Text size",
+                            ["large text", "text size"])]
+    )
 
-        // Rows backed by another typed store, a system capability, or an action still belong
-        // to the same presentation catalogue. `.catalogueOnly` means remote callers may learn
-        // the destination, never a value or mutation route.
+    // MARK: Erased Projections
+
+    /// This registry repeats only typed declaration names. It contains no authored setting
+    /// metadata and is therefore incapable of disagreeing with a descriptor's contract.
+    static let persistedDescriptors: [AnyAppSettingDescriptor] = [
+        .init(defaultAgentKind), .init(githubAppClientID), .init(restoresLastSession),
+        .init(restoresRunningSessions), .init(sessionRestorePolicy),
+        .init(sessionRestoreWindowDays), .init(sessionRestoreLimit),
+        .init(newChatOpeningMessage), .init(legacyClosingConfirmation),
+        .init(suppressedConfirmations), .init(hiddenNotices),
+        .init(closingConfirmationMigration), .init(usesAgentTitleInSidebar),
+        .init(groupsSessionsByBranch), .init(groupsLoneBranches), .init(compactsSidebarTree),
+        .init(followsCheckoutBranch), .init(sidebarSessionOrder),
+        .init(sidebarSessionOrderIsReversed), .init(promptReturnKey),
+        .init(discoversProjectIcons), .init(discoversAccountAvatars),
+        .init(harmonizesTerminalBackgrounds), .init(convertsDroppedImages),
+        .init(copiesTerminalSelection), .init(notifiesOnAttention),
+        .init(disabledAttentionAlerts), .init(legacyPlaysAttentionAlertSound),
+        .init(attentionAlertSound), .init(terminalBellSound), .init(soundEventChoices),
+        .init(silencesAllSounds), .init(disabledAttachmentDetectionAgentKinds),
+        .init(includesAttachmentsOutsideProject), .init(capturesPageBeforeAgentActions),
+        .init(disabledToolGroupIDs), .init(usesContainedExtensionLauncher),
+        .init(workspaceNavigatorSelection), .init(reportsClaudeLifecycleEvents),
+        .init(installsCodexHooks), .init(readsClaudeLoginFromKeychain),
+        .init(suppressesClaudeStatusLine), .init(bypassesCodexHookTrust),
+        .init(claudeRemoteControl), .init(claudeStartupSpeed), .init(codexStartupSpeed),
+        .init(defaultPermissionMode), .init(remoteAccessEnabled),
+        .init(remoteAccessConnectionMode), .init(remoteAccessAllowsOwnerRelayFallback),
+        .init(remoteAccessKeepsRelayReady), .init(remoteInputControlDefault),
+        .init(automaticUpdateChecksEnabled), .init(workingOrbStyle),
+        .init(chatNameMorphStyle), .init(chromeFontFamily), .init(conversationFontFamily),
+        .init(appTextSize)
+    ]
+
+    private static let surfaceDefinitions: [AppSettingDefinition] = [
         surfaced("keyboard.resetShortcuts", pageID: "keyboard", order: 1, section: nil,
                   title: "Reset Shortcuts", "reset", "defaults"),
         surfaced("themes.appTheme", pageID: "themes", order: 0, section: "App",
@@ -435,56 +1156,47 @@ enum AppSettingDefinitions {
                   "erase", "corrupt", "start over")
     ]
 
-    private static let catalogue = AppSettingDefinitionCatalogue(definitions: all)
+    static let all: [AppSettingDefinition] =
+        persistedDescriptors.map(\.definition) + surfaceDefinitions
 
-    static var issues: [String] { catalogue.issues }
+    private static let catalogue = AppSettingDefinitionCatalogue(definitions: all)
+    private static let persistedByIdentity = Dictionary(
+        persistedDescriptors.map { ($0.identity, $0) },
+        uniquingKeysWith: { first, _ in first }
+    )
+
+    static var issues: [String] {
+        var issues = catalogue.issues
+        let identities = Dictionary(grouping: persistedDescriptors, by: \.identity)
+        for identity in AppSettingIdentity.allCases where identities[identity]?.count != 1 {
+            issues.append(
+                "typed setting identity \(identity.rawValue) appears \(identities[identity]?.count ?? 0) times"
+            )
+        }
+        return issues.sorted()
+    }
 
     static var registeredDefaults: [String: Any] {
         catalogue.registeredDefaults
     }
 
-    static func definition(_ identity: String) -> AppSettingDefinition {
-        guard let definition = catalogue.definition(identity) else {
-            preconditionFailure("Missing app setting definition: \(identity)")
-        }
-        return definition
+    /// Applies an authenticated-owner mutation. Dynamic identity exists only at this wire-facing
+    /// boundary; authorization and typed decoding are projected from the authored descriptor.
+    static func applyRemoteMutation(
+        identity: String,
+        value: AppSettingStoredValue,
+        defaults: UserDefaults
+    ) -> AppSettingRemoteMutationResult {
+        guard let definition = catalogue.definition(identity) else { return .unknownSetting }
+        guard definition.remotePolicy == .ownerMutable,
+              let typedIdentity = AppSettingIdentity(rawValue: identity),
+              let descriptor = persistedByIdentity[typedIdentity] else { return .notMutable }
+        return descriptor.applyRemoteMutation(value, defaults: defaults)
     }
 
-    static func key(_ identity: String) -> String {
-        guard let key = definition(identity).persistence?.key else {
-            preconditionFailure("App setting has no persistence key: \(identity)")
-        }
-        return key
-    }
-
-    static func accepts(_ value: AppSettingStoredValue, for identity: String) -> Bool {
-        guard let persistence = definition(identity).persistence,
-              persistence.valueType == value.valueType else { return false }
-        return persistence.validation.accepts(value)
-    }
-
-    static func validatedString(_ value: String?, for identity: String) -> String? {
-        guard let value, accepts(.string(value), for: identity) else { return nil }
-        return value
-    }
-
-    static func normalizedInteger(_ value: Int, for identity: String, fallback: Int) -> Int {
-        guard let validation = definition(identity).persistence?.validation else { return fallback }
-        guard case .integerRange(let range) = validation else {
-            return accepts(.integer(value), for: identity) ? value : fallback
-        }
-        if value <= 0 { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
-    }
-
-    static func accepts(
-        _ selection: WorkspaceNavigatorSelection,
-        for identity: String
-    ) -> Bool {
-        guard let validation = definition(identity).persistence?.validation,
-              case .workspaceNavigatorIdentity(let maximumIdentityBytes, _) = validation else {
-            return false
-        }
+    static func accepts(_ selection: WorkspaceNavigatorSelection) -> Bool {
+        guard case .workspaceNavigatorIdentity(let maximumIdentityBytes, _) =
+            workspaceNavigatorSelection.validation.erased else { return false }
         guard case .extensionNavigator(let extensionIdentifier, let navigatorID) = selection else {
             return true
         }
@@ -492,32 +1204,6 @@ enum AppSettingDefinitions {
             && extensionIdentifier.utf8.count <= maximumIdentityBytes
             && !navigatorID.isEmpty
             && navigatorID.utf8.count <= maximumIdentityBytes
-    }
-
-    private static func stored(
-        _ identity: String,
-        _ key: String,
-        _ valueType: AppSettingValueType,
-        _ absence: AppSettingAbsenceSemantics,
-        _ validation: AppSettingValidation = .any,
-        presentations: [AppSettingPresentation] = [],
-        notification: AppSettingChangeNotification = .appSettingsChanged,
-        remotePolicy: AppSettingRemotePolicy = .hidden
-    ) -> AppSettingDefinition {
-        AppSettingDefinition(
-            identity: identity,
-            persistence: AppSettingPersistence(
-                key: key,
-                valueType: valueType,
-                absence: absence,
-                validation: validation
-            ),
-            presentations: presentations,
-            notification: notification,
-            remotePolicy: presentations.isEmpty && remotePolicy == .hidden
-                ? .hidden
-                : (remotePolicy == .hidden ? .catalogueOnly : remotePolicy)
-        )
     }
 
     private static func surfaced(
@@ -638,7 +1324,7 @@ struct AppSettingDefinitionCatalogue: Sendable {
         }
     }
 
-    func definition(_ identity: String) -> AppSettingDefinition? {
+    fileprivate func definition(_ identity: String) -> AppSettingDefinition? {
         definitionsByIdentity[identity]
     }
 }

@@ -38,6 +38,7 @@ session_coordinators=(
 conversation_controller="${repository_directory}/Sources/Threading/UI/Views/ConversationViewController.swift"
 conversation_scheduling="${repository_directory}/Sources/Threading/UI/Views/ConversationScheduling.swift"
 remote_access_server="${repository_directory}/Sources/Threading/Core/Remote/RemoteAccessServer.swift"
+remote_access_coordinator="${repository_directory}/Sources/Threading/Core/Remote/RemoteAccessCoordinator.swift"
 browser_controller="${repository_directory}/Sources/Threading/UI/Views/BrowserViewController.swift"
 agent_session_command_adapter="${repository_directory}/Sources/Threading/UI/Windows/AgentToolCoordinator+SessionCommands.swift"
 project_model="${repository_directory}/Sources/Threading/Models/Project.swift"
@@ -57,6 +58,44 @@ mcp_catalog="${repository_directory}/Sources/Threading/Core/MCP/MCPToolCatalog.s
 mcp_handler="${repository_directory}/Sources/Threading/UI/Windows/MainWindowMCPTools.swift"
 app_settings="${repository_directory}/Sources/Threading/Core/Settings/AppSettings.swift"
 settings_pages="${repository_directory}/Sources/Threading/UI/Preferences/SettingsPages.swift"
+app_setting_definitions="${repository_directory}/Sources/Threading/Core/Settings/AppSettingDefinitions.swift"
+main_window_test_support="${repository_directory}/Tests/ThreadingTests/MainWindowTestSupport.swift"
+
+# `AppEnvironment.live` is process composition, not a recovery value for feature code. Keeping
+# its construction in AppDelegate makes missing dependencies a compiler error in every window,
+# coordinator, and test instead of silently reconnecting them to the running app's singletons.
+if rg -n \
+  'AppEnvironment\.live\b|environment\s*=\s*\.live\b|environment:\s*\.live\b' \
+  "${repository_directory}/Sources/Threading" \
+  --glob '*.swift' \
+  --glob '!**/App/AppDelegate.swift'; then
+  echo "architecture-boundary: AppEnvironment.live may be constructed only by AppDelegate" >&2
+  echo "  feature controllers and services must receive explicit capabilities" >&2
+  failed=1
+fi
+
+# Authority ratchet for the tool hub. This counts every file that can add methods or state to
+# AgentToolCoordinator, including the main-window adapters whose filenames do not share the
+# AgentToolCoordinator prefix. A lower count is welcome; an increase has to move policy back out.
+agent_tool_authority="$(python3 - "${repository_directory}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]) / "Sources" / "Threading"
+declaration = re.compile(r"\b(?:class|extension)\s+AgentToolCoordinator\b")
+print(sum(
+    len(path.read_text(encoding="utf-8").splitlines())
+    for path in root.rglob("*.swift")
+    if declaration.search(path.read_text(encoding="utf-8"))
+))
+PY
+)"
+if (( agent_tool_authority > 8979 )); then
+  echo "architecture-boundary: AgentToolCoordinator authority grew to ${agent_tool_authority}" >&2
+  echo "  keep it at or below the 8,979-line application-service ratchet" >&2
+  failed=1
+fi
 
 if rg -n 'enum AgentCommand\b|func decodeArguments\s*\(' "${mcp_tools}" \
   || rg -n 'tool:\s*\.[A-Za-z]' "${mcp_catalog}" \
@@ -70,6 +109,32 @@ if rg -n 'private\s+enum\s+Keys\b|forKey:\s*"' "${app_settings}" \
   || rg -n '\bentry\s*\(' "${settings_pages}"; then
   echo "architecture-boundary: setting keys, defaults, validation, row anchors, and remote" >&2
   echo "  metadata must stay in AppSettingDefinitions" >&2
+  failed=1
+fi
+
+# A persisted setting is authored as one generic descriptor. Reconstructing descriptors from
+# erased definitions made the declared Swift type a runtime precondition and turned `all` into
+# the real source. The registry may only erase typed declarations.
+if rg -n \
+  'AppSettingDescriptor\s*\(\s*definition:|func descriptor<|private static func stored\(|preconditionFailure' \
+  "${app_setting_definitions}" \
+  || ! rg -q -F 'persistedDescriptors.map(\.definition)' "${app_setting_definitions}"; then
+  echo "architecture-boundary: persisted settings must be authored as typed descriptors" >&2
+  echo "  and AppSettingDefinitions.all must be their erased projection" >&2
+  failed=1
+fi
+
+# The main-window helper names ProjectStore.shared intentionally: it consumes the redirected
+# hosted-test graph. Defining it only on HostedStoreTestCase lets Swift reject every unsafe
+# caller, including free-function and indirect helpers, instead of relying on a class-name audit.
+if ! rg -q '^extension HostedStoreTestCase \{' "${main_window_test_support}" \
+  || rg -n '^extension XCTestCase \{' "${main_window_test_support}" \
+  || rg -n 'func makeMainWindowController\s*\(' \
+      "${repository_directory}/Tests/ThreadingTests" \
+      --glob '*.swift' \
+      --glob '!MainWindowTestSupport.swift'; then
+  echo "architecture-boundary: makeMainWindowController must exist only on HostedStoreTestCase" >&2
+  echo "  so every caller receives the hosted-store redirect and teardown" >&2
   failed=1
 fi
 
@@ -95,6 +160,14 @@ fi
 if rg -n '\b[A-Za-z][A-Za-z0-9_]*\.shared\b|\b(AppThemeLibrary|ThemeAssignments)\.' \
   "${remote_access_server}"; then
   echo "architecture-boundary: RemoteAccessServer must use its injected application interfaces" >&2
+  failed=1
+fi
+
+remote_settings_locator_count="$(rg -o 'AppSettings\.shared\b' \
+  "${remote_access_coordinator}" | wc -l | tr -d '[:space:]')"
+if (( remote_settings_locator_count > 1 )); then
+  echo "architecture-boundary: RemoteAccessCoordinator may name AppSettings.shared only" >&2
+  echo "  once at its explicit shared composition root; instance policy uses injected settings" >&2
   failed=1
 fi
 

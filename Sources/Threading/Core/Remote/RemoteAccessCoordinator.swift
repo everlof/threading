@@ -87,7 +87,10 @@ enum RemoteSharePreparationError: LocalizedError {
 @MainActor
 final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostCommanding {
 
-    static let shared = RemoteAccessCoordinator(ownerDeviceStore: defaultOwnerDeviceStore())
+    static let shared = RemoteAccessCoordinator(
+        ownerDeviceStore: defaultOwnerDeviceStore(),
+        appSettings: AppSettings.shared
+    )
 
     /// Posted whenever `status` changes, so a Settings page can redraw.
     static let statusDidChange = Notification.Name("RemoteAccessStatusDidChange")
@@ -124,6 +127,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private let tunnel = RemoteTunnel()
     private let tailscale = TailscaleRemoteTransport()
     private let hostedService: RemoteHostedServiceController
+    private let appSettings: AppSettings
     private let authority = RemoteAuthorityStore()
     private let ownerDevices: RemoteOwnerDeviceRegistry
     private let guestShareStore: RemoteGuestSharePersisting
@@ -146,12 +150,14 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     init(
         ownerDeviceStore: RemoteOwnerDevicePersisting,
+        appSettings: AppSettings,
         guestShareStore: RemoteGuestSharePersisting? = nil,
         hostedService: RemoteHostedServiceController? = nil,
         serverServices: RemoteAccessServerServices? = nil
     ) {
+        self.appSettings = appSettings
         server = RemoteAccessServer(
-            services: serverServices ?? Self.makeServerServices()
+            services: serverServices ?? Self.makeServerServices(appSettings: appSettings)
         )
         ownerDevices = RemoteOwnerDeviceRegistry(store: ownerDeviceStore)
         self.guestShareStore = guestShareStore ?? Self.defaultGuestShareStore()
@@ -174,7 +180,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     /// The remote transport's live composition root. No route may recover one of these process
     /// services on demand; tests replace the narrow interfaces while keeping the real socket.
-    static func makeServerServices() -> RemoteAccessServerServices {
+    static func makeServerServices(appSettings: AppSettings) -> RemoteAccessServerServices {
         let sessionStore = ProjectStore.shared
         let runtime = AgentRuntime.shared
         let eventLog = EventLog.shared
@@ -185,7 +191,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             sessionQueries: sessionStore,
             sessionMutations: sessionStore,
             runtimeStatus: runtime,
-            settings: LiveRemoteSettingsMutator(),
+            settings: LiveRemoteSettingsMutator(appSettings: appSettings),
             eventLog: eventLog,
             mirrors: .shared,
             notifications: .shared,
@@ -342,7 +348,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         let identity = RemoteHostIdentity.current
         guard authorization.canManageHost else { return identity }
 
-        let mode = AppSettings.shared.remoteAccessConnectionMode
+        let mode = appSettings.remoteAccessConnectionMode
         var endpoints: [RemoteHostEndpointDTO] = []
         if mode.usesTailscale, case .connected(let origin) = tailscaleStatus {
             endpoints.append(RemoteHostEndpointDTO(
@@ -353,7 +359,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
         let allowsRelay = mode == .relay
             || (mode == .tailscaleAndRelay
-                && AppSettings.shared.remoteAccessAllowsOwnerRelayFallback)
+                && appSettings.remoteAccessAllowsOwnerRelayFallback)
         if allowsRelay, case .connected(let origin) = relayStatus {
             endpoints.append(RemoteHostEndpointDTO(
                 kind: RemoteTransportKind.relay.rawValue,
@@ -369,7 +375,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         case .tailscale:
             policy = .privateOnly
         case .tailscaleAndRelay:
-            policy = AppSettings.shared.remoteAccessAllowsOwnerRelayFallback
+            policy = appSettings.remoteAccessAllowsOwnerRelayFallback
                 ? .preferPrivate
                 : .privateOnly
         }
@@ -489,7 +495,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     private var pairingOrigin: URL? {
-        switch AppSettings.shared.remoteAccessConnectionMode {
+        switch appSettings.remoteAccessConnectionMode {
         case .relay:
             if case .connected(let origin) = relayStatus { return origin }
         case .tailscale, .tailscaleAndRelay:
@@ -499,7 +505,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     private var invitationOrigin: URL? {
-        switch AppSettings.shared.remoteAccessConnectionMode {
+        switch appSettings.remoteAccessConnectionMode {
         case .relay, .tailscaleAndRelay:
             if case .connected(let origin) = relayStatus { return origin }
         case .tailscale:
@@ -1111,19 +1117,19 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     /// Called at launch. Starts the server only if the user has turned remote access on.
     func startIfEnabled() {
-        guard AppSettings.shared.remoteAccessEnabled else { return }
+        guard appSettings.remoteAccessEnabled else { return }
         start()
     }
 
     func setEnabled(_ enabled: Bool) {
-        AppSettings.shared.remoteAccessEnabled = enabled
+        appSettings.remoteAccessEnabled = enabled
         if enabled { start() } else { stop() }
     }
 
     func setConnectionMode(_ mode: RemoteAccessConnectionMode) {
-        guard AppSettings.shared.remoteAccessConnectionMode != mode else { return }
+        guard appSettings.remoteAccessConnectionMode != mode else { return }
         failPendingShares(.remoteAccessUnavailable)
-        AppSettings.shared.remoteAccessConnectionMode = mode
+        appSettings.remoteAccessConnectionMode = mode
         guard case .listening(let port) = status else {
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
             return
@@ -1132,15 +1138,15 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     func setAllowsOwnerRelayFallback(_ enabled: Bool) {
-        guard AppSettings.shared.remoteAccessAllowsOwnerRelayFallback != enabled else { return }
-        AppSettings.shared.remoteAccessAllowsOwnerRelayFallback = enabled
+        guard appSettings.remoteAccessAllowsOwnerRelayFallback != enabled else { return }
+        appSettings.remoteAccessAllowsOwnerRelayFallback = enabled
         reconcileRelayIfNeeded()
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
 
     func setKeepsRelayReady(_ enabled: Bool) {
-        guard AppSettings.shared.remoteAccessKeepsRelayReady != enabled else { return }
-        AppSettings.shared.remoteAccessKeepsRelayReady = enabled
+        guard appSettings.remoteAccessKeepsRelayReady != enabled else { return }
+        appSettings.remoteAccessKeepsRelayReady = enabled
         reconcileRelayIfNeeded()
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
@@ -1211,7 +1217,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         server.start { [weak self] port in
             guard let self else { return }
             guard self.lifecycleGeneration == generation,
-                  AppSettings.shared.remoteAccessEnabled else {
+                  appSettings.remoteAccessEnabled else {
                 return
             }
             if let port {
@@ -1252,7 +1258,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         relayStatus = .stopped
         tailscaleStatus = .stopped
 
-        let mode = AppSettings.shared.remoteAccessConnectionMode
+        let mode = appSettings.remoteAccessConnectionMode
         if mode.usesTailscale {
             startTailscale(port: port, generation: generation)
         }
@@ -1263,9 +1269,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     private var shouldRunRelay: Bool {
         Self.relayRequired(
-            mode: AppSettings.shared.remoteAccessConnectionMode,
-            allowsOwnerFallback: AppSettings.shared.remoteAccessAllowsOwnerRelayFallback,
-            keepsRelayReady: AppSettings.shared.remoteAccessKeepsRelayReady,
+            mode: appSettings.remoteAccessConnectionMode,
+            allowsOwnerFallback: appSettings.remoteAccessAllowsOwnerRelayFallback,
+            keepsRelayReady: appSettings.remoteAccessKeepsRelayReady,
             hasActiveShares: !sessionShares.isEmpty,
             hasPendingShares: !pendingPublicShares.isEmpty
         )
@@ -1322,7 +1328,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             failPendingShares(.remoteAccessUnavailable)
             return
         }
-        switch AppSettings.shared.remoteAccessConnectionMode {
+        switch appSettings.remoteAccessConnectionMode {
         case .relay, .tailscaleAndRelay:
             switch relayStatus {
             case .connected:
@@ -1470,7 +1476,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         generation: Int
     ) {
         guard transportGeneration == generation,
-              AppSettings.shared.remoteAccessEnabled,
+              appSettings.remoteAccessEnabled,
               case .listening = status else { return }
         switch kind {
         case .relay: relayStatus = state
@@ -1504,7 +1510,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 "transport": kind.rawValue,
                 "reason": Self.diagnosticReason(reason),
             ])
-            let mode = AppSettings.shared.remoteAccessConnectionMode
+            let mode = appSettings.remoteAccessConnectionMode
             let isInvitationTransport = kind == .relay
                 ? mode != .tailscale
                 : mode == .tailscale

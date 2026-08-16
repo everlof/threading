@@ -414,11 +414,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     // MARK: - Initialization
 
-    override init(window: NSWindow?) {
-        environment = .live
-        super.init(window: window)
-    }
-
     private init(window: NSWindow?, environment: AppEnvironment) {
         self.environment = environment
         super.init(window: window)
@@ -426,10 +421,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    convenience init() {
-        self.init(environment: .live)
     }
 
     convenience init(environment: AppEnvironment) {

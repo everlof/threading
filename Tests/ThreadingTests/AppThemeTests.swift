@@ -10,7 +10,7 @@ import XCTest
 /// default, and a user who never picks a style keeps light, dark and their own accent working
 /// exactly as they did.
 @MainActor
-final class AppThemeTests: XCTestCase {
+final class AppThemeTests: HostedStoreTestCase {
 
     /// These tests run hosted in the app, so `UserDefaults.standard` is the shipping app's own
     /// domain — clearing the font-override keys outright would delete the developer's actual
@@ -2139,7 +2139,7 @@ final class AppThemeTests: XCTestCase {
     /// computed. Read off `repaintedSeams` rather than the pixels: `cacheDisplay` redraws
     /// everything unconditionally, which is exactly the redraw this bug never got.
     func testRevealingTheDisplayPanelRepaintsTheSeamItArrivesAt() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         controller.window?.setContentSize(NSSize(width: 1200, height: 700))
         let split = try XCTUnwrap(controller.splitViewController.splitView as? ThemedSplitView)
         split.layoutSubtreeIfNeeded()
@@ -2170,7 +2170,7 @@ final class AppThemeTests: XCTestCase {
     func testTheWindowsOwnPanesAreSpacedByTheThemesRuleWeight() throws {
         AppThemePalette.set(AppThemeStyles.bauhaus)
 
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         controller.window?.setContentSize(NSSize(width: 1200, height: 700))
         let split = controller.splitViewController.splitView
         split.layoutSubtreeIfNeeded()

@@ -3638,7 +3638,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// which laid the sidebar out as a band across the top of the window with the terminal under
     /// it. Every other test passed, because a stacked layout is a perfectly valid layout.
     func testTheWindowLaysItsPanesOutSideBySide() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let splitView = controller.splitViewController.splitView
 
         XCTAssertTrue(
@@ -3680,7 +3680,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// sidebar toggle stays because it acts on the split rather than on either side of it; the
     /// selection-history pair stays because it retraces the window's page selection.
     func testWindowToolbarHoldsOnlyTheWindowsOwnControls() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let items = try XCTUnwrap(controller.window?.toolbar?.items)
 
         XCTAssertEqual(
@@ -3801,7 +3801,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     }
 
     func testPaneHeaderCarriesThePageItsActionsAndTracksPaneState() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let root = try XCTUnwrap(controller.window?.contentView)
         controller.window?.setContentSize(NSSize(width: 1200, height: 700))
         root.layoutSubtreeIfNeeded()
@@ -3860,7 +3860,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// document deliberately keeps one open with no session selected.
     @MainActor
     func testThePanelToggleIsUnavailableUntilThereIsASessionToShow() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         controller.window?.setContentSize(NSSize(width: 1200, height: 700))
         let toggle = try XCTUnwrap(controller.displayPaneToolbarButton)
 
@@ -3882,7 +3882,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// AppKit logs an unsatisfiable-constraints failure on every launch before settling on the
     /// exact same geometry. The equality must yield only during that transient pass.
     func testPaneHeaderSafeAreaConstraintYieldsDuringWindowAttachment() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let root = try XCTUnwrap(controller.window?.contentView)
         let pageTitle = controller.pageTitleView
         XCTAssertTrue(pageTitle.isDescendant(of: root))
@@ -3906,7 +3906,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// laid out against the pane's leading edge, so a divider drag carries it along instead of
     /// sliding the sidebar out from under it.
     func testPaneHeaderStaysInsideTheContentPaneWhenTheSidebarWidens() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 1200, height: 700))
         window.contentView?.layoutSubtreeIfNeeded()
@@ -4050,7 +4050,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// reason and would let this pass while saying nothing about Settings.
     @MainActor
     func testThePageTitleHidesWhileSettingsIsActive() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         controller.window?.contentView?.layoutSubtreeIfNeeded()
 
         let project = try XCTUnwrap(ProjectStore.shared.addProject(
@@ -4080,7 +4080,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// mode once and gives it an ordinary way out.
     @MainActor
     func testSettingsUsesAModeHeaderInsteadOfAClosablePageTab() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let container = try XCTUnwrap(
             controller.splitViewController.splitViewItems[1].viewController
                 as? TerminalContainerViewController
@@ -4115,7 +4115,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// way across an empty strip with nothing to belong to.
     @MainActor
     func testSettingsNamesItselfLeadingAndOffersDoneAtTheTrailingEdge() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         controller.window?.contentView?.layoutSubtreeIfNeeded()
         controller.toggleSettings()
         controller.window?.contentView?.layoutSubtreeIfNeeded()
@@ -4162,7 +4162,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// what takes it away again — there is no second window for ⌘W to mean.
     @MainActor
     func testTheSettingsCommandClosesWhatItOpened() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let container = try XCTUnwrap(
             controller.splitViewController.splitViewItems[1].viewController
                 as? TerminalContainerViewController
@@ -4213,7 +4213,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// project abandoned its first hand-rolled header.
     @MainActor
     func testHeaderStepsAsideForTheWindowControlsWhenTheSidebarCollapses() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 1200, height: 700))
         window.contentView?.layoutSubtreeIfNeeded()
@@ -4326,7 +4326,7 @@ final class ThemedControlTests: HostedStoreTestCase {
             dequeue: true
         ) != nil {}
 
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(DividerDragFixture.windowSize)
         window.contentView?.layoutSubtreeIfNeeded()
@@ -4753,7 +4753,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// so the floor is where they end and the next size down is collapsed.
     @MainActor
     func testSidebarStopsWhereTheWindowControlsEnd() throws {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 1200, height: 700))
         window.contentView?.layoutSubtreeIfNeeded()
@@ -7301,7 +7301,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     }
 
     func testMainWindowTreeContainsNoRawAppKitChrome() {
-        let controller = MainWindowController()
+        let controller = makeMainWindowController()
         let window = controller.window!
         window.setContentSize(NSSize(width: 1_200, height: 760))
 

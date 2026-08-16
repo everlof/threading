@@ -57,7 +57,7 @@ The application target currently approximates the other layers:
 | `Models/` | Provider capabilities and persisted records. Provider, session, workspace, project, and persisted-UI records have separate files; AppKit-bearing theme/profile values remain migration debt. |
 | `Core/Session`, `Core/Project`, `Core/Settings`, `Core/Logging` | Legacy persistence and application state. Stores and policies still share directories while injection advances boundary by boundary. |
 | `Core/Agent`, `Core/AI`, `Core/MCP`, `Core/Remote`, `Core/Extensions` | Runtime and transport. Core/Remote reaches session lifecycle only through injected `RemoteSessionCommands`; built-in MCP representation comes from one typed descriptor registry. |
-| `Application/` | Foundation-only use cases and policies extracted from UI adapters, including browser, session, extension-authoring, remote-session, and window-navigation capabilities. |
+| `Application/` | Foundation-only use cases and policies extracted from UI adapters, including browser, session, extension-authoring, remote-session, window-navigation, and settings-catalogue capabilities. |
 | `App/` | Process composition. `AppEnvironment` owns the legacy store/service instances passed into migrated coordinators. |
 | `UI/` | AppKit composition and presentation. Feature UI uses `UI/Design`; tool and browser controllers adapt application capabilities to windows and WebKit. |
 
@@ -70,22 +70,29 @@ permits only the ratcheted concrete-controller edges reported by
 - `Core/Agent/AgentRuntime.swift` constructs and retains agent-session and conversation view
   controllers.
 - `Core/Agent/LimitRecoveryCoordinator.swift` accepts concrete agent-session controllers.
-- `Core/Remote/RemoteSessionMirrorRegistry.swift` accepts a conversation controller while adapting
-  its live projection.
 - `Core/Session/ProjectTerminalRuntime.swift` constructs and retains a project-terminal controller.
 
 Session-context routing is no longer in this queue: Core targets the typed
 `SessionContextReceiving` capability and resolves it through `SessionContextDestinationQuerying`;
-the UI controller is only an adapter. The ratchet now permits 18 references across the four files
-above, down from 19 across five.
+the UI controller is only an adapter. Remote conversation mirroring now follows the same rule:
+`RemoteConversationSurface` owns the Foundation-only projection/submission contract and
+`ConversationViewController` adapts it, so Core/Remote never receives the controller. The ratchet
+now permits 17 references across the three files above, down from 19 across five.
 
 These are a migration queue, not exemptions. Remove one complete ownership edge, add a focused
 capability/projection test, and lower the ratchet in the same coherent commit.
 
 ## Composition and identity rules
 
-- `AppDelegate` constructs `AppEnvironment`; `MainWindowController` passes it into application
-  coordinators. A leaf must not add a new `.shared` lookup for an application-owned service.
+- `AppDelegate` is the only approved source composition root for `AppEnvironment.live`;
+  `MainWindowController` and feature controllers require an injected environment or narrower
+  capability and never recover a live environment. Main-window tests deliberately consume the
+  hosted process's redirected shared store/runtime/settings graph; their composition helper exists
+  only on `HostedStoreTestCase`, which makes the store redirect and teardown a compile-time
+  prerequisite for every caller. Their UUID-scoped `EventLog` directory has a fixture owner that
+  releases the controller and environment before removing it. The architecture gate rejects
+  `.live` construction anywhere else and rejects moving that helper back onto `XCTestCase`. A leaf
+  must not add a new `.shared` lookup for an application-owned service.
 - A conversation retains `SessionID` and consumes an injected current-session projection. Durable
   records are values and must not be retained as a substitute for current store state.
 - Main-window and tool coordinators keep composition, routing, and presentation. Command policy,
@@ -102,9 +109,41 @@ Inventories are projections of code-owned registries, not Markdown lists updated
 | Inventory | Source of truth | Projections and proof |
 |---|---|---|
 | Built-in MCP tools | `MCPTools.authoredDeclarations`; `MCPBuiltInToolRegistry.descriptors` is its fail-closed admitted projection | MCP `tools/list`, Tools settings, scoped catalogs, decoding, and typed execution routing derive from declarations; `MCPWireTests` enforces identity/decoder/schema/annotation/group/binding parity and rejects incomplete declarations. |
-| Settings | `AppSettingDefinitions.all`, projected through `SettingsPages.all`, plus the extension settings registry | Each built-in definition owns its stable identity, current or migration persistence key and value shape, absence/default semantics, validation, notification policy, page/row/search metadata, and remote policy. `AppSettings`, navigation, both search paths, and `list_settings` project from it; definition completeness and anchor-resolution tests prove key, order, and row parity. |
+| Settings | Closed `AppSettingIdentity` cases and typed `AppSettingDescriptor<Value>` declarations; `AppSettingDefinitions.all` is their type-erased catalogue projection, then `SettingsPages.all` adds page structure and the extension settings registry | Each descriptor owns stable persistence identity, Swift value type and encoding, absence/default semantics, validation/normalization, notification policy, and remote policy. `AppSettings` and authenticated owner mutation use typed descriptors; navigation, both search paths, migrations, audits, and `list_settings` use the one type-erased projection. Completeness, compatibility, production-validation, authorization, and anchor-resolution tests prevent drift. |
 | Commands and shortcuts | `AppCommands.all`, then `CommandRegistry` for extensions, project scripts, and overrides | Menus, Keyboard settings, the command palette, and host command plane consume registry descriptors; shortcut and command-policy tests enumerate them. |
 | Public extension components | `ThreadingComponentCatalog.document` | `ThreadingComponentCatalogGenerator` writes committed Markdown, JSON, and schemas under `docs/extensions/generated`; CI runs it with `--check`. |
 
 Add metadata to the owning registry and extend its completeness test. Do not create a second
 hand-maintained tool, settings, shortcut, or component inventory.
+
+## Current stabilization increment
+
+These measurements are the output of `scripts/report_architecture_health.py` against the truthful
+pre-change `HEAD` tree and the current source tree. The settings-catalogue command family moved
+from `AgentToolCoordinator` into the Foundation-only `SettingsCatalogueService`; the UI adapter
+now only maps and routes. `RemoteAccessCoordinator` also receives `AppSettings` explicitly and
+authorizes mutations from descriptor `remotePolicy`. The remote conversation mirror consumes the
+typed `RemoteConversationSurface` rather than a view controller. The architecture gate ratchets
+these moved ownership edges and the sole `AppEnvironment.live` composition root.
+
+| Metric | Before | Current | Change |
+|---|---:|---:|---:|
+| Threading Swift files / lines | 793 / 328,643 | 795 / 329,431 | +2 service/capability files / +788 net typed contracts, wiring, fixtures, and proofs |
+| `ThreadingDomain` Swift files / lines | 1 / 197 | 1 / 197 | unchanged |
+| `static … shared` declarations | 89 / 87 files | 89 / 87 files | unchanged |
+| `ProjectStore.shared` | 247 / 63 files | 247 / 63 files | unchanged |
+| `AgentRuntime.shared` | 102 / 31 files | 102 / 31 files | unchanged |
+| `AppSettings.shared` | 216 / 39 files | 196 / 39 files | −20 references at the remote ownership boundary |
+| `EventLog.shared` | 82 / 25 files | 82 / 25 files | unchanged |
+| Core `AppDelegate.shared` | 0 / 0 files | 0 / 0 files | unchanged |
+| Concrete UI-controller references in Core | 18 / 4 files | 17 / 3 files | −1 complete remote projection edge / −1 file; remains active debt |
+| UI-framework imports in Core/Models | 63 / 61 files | 63 / 61 files | unchanged; remains active debt |
+| `MainWindowController` authority | 5,107 / 4 files | 5,098 / 4 files | −9 fallback-construction lines |
+| `AgentToolCoordinator` authority | 9,005 / 15 files | 8,979 / 15 files | −26 settings-catalogue policy lines |
+| Capability extensions | 5,909 / 11 files | 5,882 / 11 files | −27 settings-catalogue policy lines |
+| `ThreadingTests` Swift files | 379 | 382 | +3 focused proof files; filesystem synchronized |
+
+The nine-line `MainWindowController` reduction removes a production composition escape hatch; it
+is not a controller decomposition. Likewise, moving 26 catalogue-policy lines out of
+`AgentToolCoordinator` is one coherent authority edge, not decomposition of the remaining hub.
+Both authorities stay in the active debt ledger at their full reported sizes.
