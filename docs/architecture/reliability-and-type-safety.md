@@ -95,18 +95,31 @@ facts needed to reconstruct a failure after restart. Logs must identify the subs
 stable identifiers, but must not copy prompts, bearer tokens, credentials, or arbitrary client
 log text.
 
-**Read a running child's output with `availableData`, never `FileHandle.read(upToCount:)`.** The
-count reads like a ceiling and is a *length to fill*: Foundation stays inside `read(2)` until that
-many bytes arrive or the writer closes the pipe. A child that prints a burst and keeps running
+**Read a running child's output through `ChildOutputStream`, never `FileHandle.read(upToCount:)`.**
+That count reads like a ceiling and is a *length to fill*: Foundation stays inside `read(2)` until
+that many bytes arrive or the writer closes the pipe. A child that prints a burst and keeps running
 therefore delivers nothing at all, and nothing reports it, because a blocked read is not a failure
 anybody counts. This shipped: the HTTPS relay asked for 16 KB, `cloudflared` printed roughly 3 KB
 of banner — the published address inside it — and then went quiet, so the very first readability
 callback blocked for the life of the app. The tunnel was live and serving real traffic over
 `trycloudflare.com` the whole time; the settings page said "Preparing your pairing code /
-Connecting…" and iPhone pairing was unreachable in Relay mode. `ChildOutputReader` is now the one
-place that knows this, and `RemoteRelayReadinessTests` fails by timeout if the primitive changes
-back. `BoundedChildProcess.captureSuffix` is the deliberate exception: it drains a finite helper
-to EOF behind a `ChildProcessDeadline`, so filling is what it wants.
+Connecting…" and iPhone pairing was unreachable in Relay mode. `BoundedChildProcess.captureSuffix`
+is the deliberate exception: it drains a finite helper to EOF behind a `ChildProcessDeadline`, so
+filling is what it wants.
+
+The two obvious repairs are both wrong, which is why this is a type and not a line. `availableData`
+has the right blocking semantics and reports failure by raising an Objective-C exception Swift
+cannot catch — and so does `FileHandle.fileDescriptor` itself, on a handle closed underneath it,
+which a reader racing `stop()` will hit. Trading a hang for a crash is not a fix. Caching the raw
+descriptor instead avoids the exception and buys a worse bug: `readabilityHandler = nil` cancels
+its source *asynchronously*, so a reader can still be mid-callback when the caller closes, and by
+then the kernel may have given that number to an unrelated file. `ChildOutputStream` is a dispatch
+read source over a non-blocking descriptor it owns: GCD's cancel handler runs after the event
+handler has finished and never twice, so the close happens exactly once with nobody reading, and
+`ChildOutputReader.read` returns an outcome rather than raising. Every teardown path cancels
+explicitly rather than relying on `deinit`. `RemoteRelayReadinessTests` covers the burst, end of
+file, a broken descriptor, and a spurious wake-up; the first fails by timeout if the primitive
+changes back.
 
 **A wait with no deadline is not a state, it is a hole in the ledger.** The same bug produced no
 evidence anywhere — the diagnostics journal records `relayConnected` and `relayFailed`, and a
@@ -117,6 +130,12 @@ a person reads (`RemoteRelayFailure`, as `TailscaleReadinessIssue` already did) 
 by cause rather than by localised prose. UI follows the same rule: a spinner is for work that is
 still arriving, and a surface that is up but unusable gets its own copy and a retry, never the
 progress branch — see `RemotePairingCardState`.
+
+Declaring a transport failed also ends its child. A relay this app has stopped tracking must not be
+left publishing the loopback listener, since an address serving real traffic that nothing in the
+app knows about is the shape of the original bug, not a convenient fallback. Recovery is the user's
+explicit retry, and the test asks the kernel whether the process is gone rather than asking the
+transport what it believes.
 
 A feature is not stable merely because its happy path works. Before calling one stable, it has:
 

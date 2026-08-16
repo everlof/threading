@@ -427,6 +427,15 @@ final class ChildPipe {
         return FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     }
 
+    /// The same transfer without Foundation in the middle, for `ChildOutputStream`, which closes
+    /// the descriptor from a dispatch cancel handler and must be its only owner.
+    func takeReadDescriptor() -> Int32 {
+        precondition(readEnd >= 0, "A pipe read end can be transferred once")
+        let descriptor = readEnd
+        readEnd = -1
+        return descriptor
+    }
+
     func takeWriteHandle() -> FileHandle {
         precondition(writeEnd >= 0, "A pipe write end can be transferred once")
         let descriptor = writeEnd

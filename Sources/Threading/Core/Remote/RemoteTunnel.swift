@@ -16,7 +16,7 @@ final class RemoteTunnel: RemoteAccessTransport {
     private(set) var lastFailure: RemoteRelayFailure?
     private let childLedger: AgentChildLedger
     private var process: SpawnedChildProcess?
-    private var outputHandle: FileHandle?
+    private var outputStream: ChildOutputStream?
     private var launchID: UUID?
     private var outputBuffer = Data()
     private var didReportOutputTruncation = false
@@ -28,8 +28,20 @@ final class RemoteTunnel: RemoteAccessTransport {
     private var shutdownEscalations: [pid_t: ChildProcessEscalation] = [:]
     private var onStateChange: (@MainActor @Sendable (State) -> Void)?
 
-    init(childLedger: AgentChildLedger = .shared) {
+    /// Both injectable for the same reason `TailscaleRemoteTransport` injects its locator: a test
+    /// must not depend on whether the machine running it has `cloudflared`, and the startup
+    /// deadline cannot be asserted at its shipping length.
+    private let locateExecutable: () -> URL?
+    private let startupTimeout: Duration
+
+    init(
+        childLedger: AgentChildLedger = .shared,
+        locateExecutable: @escaping () -> URL? = { RemoteTunnel.executableURL() },
+        startupTimeout: Duration = .seconds(RemoteTunnelDefaults.startupTimeoutSeconds)
+    ) {
         self.childLedger = childLedger
+        self.locateExecutable = locateExecutable
+        self.startupTimeout = startupTimeout
     }
 
     func start(
@@ -39,7 +51,7 @@ final class RemoteTunnel: RemoteAccessTransport {
         stop()
         self.onStateChange = onStateChange
 
-        guard let executable = Self.executableURL() else {
+        guard let executable = locateExecutable() else {
             ThreadingLogger.remote.notice("Cloudflare relay is unavailable because cloudflared is not installed")
             fail(.notInstalled, "Install cloudflared to connect away from this Mac.")
             return
@@ -101,14 +113,15 @@ final class RemoteTunnel: RemoteAccessTransport {
             return
         }
 
-        let output = pipe.takeReadHandle()
         self.launchID = launchID
         self.process = process
-        outputHandle = output
-        // Not a hand-rolled `read(upToCount:)`: that primitive blocks until it can fill the count,
-        // and `cloudflared` prints its banner and then goes quiet, so the address in it was never
-        // read. `ChildOutputReader` carries the whole account of that.
-        ChildOutputReader.deliver(from: output) { [weak self, weak process] data in
+        // Not a hand-rolled read of this pipe: the primitive that reads as "at most this much"
+        // blocks until it can fill the count, and `cloudflared` prints its banner and then goes
+        // quiet, so the address in it was never read. `ChildOutputStream` carries that account,
+        // and owns the descriptor so nothing here can close it out from under a read.
+        outputStream = ChildOutputStream(
+            readEnd: pipe.takeReadDescriptor()
+        ) { [weak self, weak process] data in
             Task { @MainActor in
                 guard let self, self.launchID == launchID, self.process === process else { return }
                 self.consume(data)
@@ -122,10 +135,9 @@ final class RemoteTunnel: RemoteAccessTransport {
                 guard let self else { return }
                 self.shutdownEscalations.removeValue(forKey: pid)?.complete()
                 guard self.launchID == launchID, self.process === process else { return }
-                self.outputHandle?.readabilityHandler = nil
-                try? self.outputHandle?.close()
+                self.outputStream?.cancel()
                 self.process = nil
-                self.outputHandle = nil
+                self.outputStream = nil
                 self.launchID = nil
                 if case .connected = self.state {
                     ThreadingLogger.remote.warning(
@@ -149,17 +161,21 @@ final class RemoteTunnel: RemoteAccessTransport {
 
         lastFailure = nil
         startupDeadline = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(RemoteTunnelDefaults.startupTimeoutSeconds))
+            try? await Task.sleep(for: startupTimeout)
             guard !Task.isCancelled, let self, self.launchID == launchID else { return }
             self.startupDeadline = nil
             guard case .starting = self.state else { return }
-            ThreadingLogger.remote.warning(
-                "Cloudflare relay published no address within \(RemoteTunnelDefaults.startupTimeoutSeconds, privacy: .public)s"
-            )
+            ThreadingLogger.remote.warning("Cloudflare relay published no address in time")
+            // Report first, so the state and its code reach the coordinator, then end the child.
+            // A relay this app has given up tracking must not keep a public endpoint pointed at
+            // the loopback listener: that is the exact shape of the bug being fixed here, an
+            // address serving real traffic that nothing in the app knew about. Retrying is the
+            // user's call, and `releaseChild` makes the next one a genuine restart.
             self.fail(
                 .startupTimedOut,
                 "The secure relay did not answer in time. Try connecting again."
             )
+            self.releaseChild()
         }
         setState(.starting)
     }
@@ -167,9 +183,19 @@ final class RemoteTunnel: RemoteAccessTransport {
     func stop() {
         startupDeadline?.cancel()
         startupDeadline = nil
-        outputHandle?.readabilityHandler = nil
-        try? outputHandle?.close()
-        outputHandle = nil
+        releaseChild()
+        onStateChange = nil
+        state = .stopped
+    }
+
+    /// Ends the relay process and its reader without touching the reported state.
+    ///
+    /// Clearing `launchID` is what makes this safe against work already in flight: the reader's
+    /// and the exit observer's main-actor continuations both check it, so neither can report on
+    /// behalf of a child this has already let go.
+    private func releaseChild() {
+        outputStream?.cancel()
+        outputStream = nil
         outputBuffer.removeAll(keepingCapacity: true)
         didReportOutputTruncation = false
 
@@ -181,9 +207,6 @@ final class RemoteTunnel: RemoteAccessTransport {
                 child: oldProcess
             )
         }
-
-        onStateChange = nil
-        state = .stopped
     }
 
     private func consume(_ data: Data) {
@@ -248,7 +271,7 @@ final class RemoteTunnel: RemoteAccessTransport {
     }
 }
 
-private enum RemoteTunnelDefaults {
+enum RemoteTunnelDefaults {
     static let maximumOutputBytes = 64 * 1024
     static let retainedOutputBytes = 32 * 1024
     /// A quick Tunnel publishes its address in five to ten seconds on a healthy network. This is

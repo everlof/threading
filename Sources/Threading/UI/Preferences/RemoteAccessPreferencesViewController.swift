@@ -801,7 +801,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 title: L10n.string("Pairing code unavailable"),
                 detail: L10n.string(
                     "The connection is ready, but Threading could not build a pairing code for "
-                        + "it. Retrying starts the connection again and mints a new code."
+                        + "it. Retrying starts the connection again."
                 ),
                 action: L10n.string("Retry Connection"),
                 actionEnabled: true,

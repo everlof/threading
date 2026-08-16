@@ -30,7 +30,7 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
 
     private var command: SpawnedChildProcess?
     private var cleanupCommand: SpawnedChildProcess?
-    private var outputHandle: FileHandle?
+    private var outputStream: ChildOutputStream?
     private var outputCollector: CommandOutputCollector?
     private var commandDeadline: ChildProcessDeadline?
     private var cleanupDeadline: ChildProcessDeadline?
@@ -244,14 +244,15 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
             return
         }
 
-        let output = pipe.takeReadHandle()
         outputCollector = collector
-        outputHandle = output
         command = process
-        // These commands print a line or two and exit, so a `read(upToCount:)` here only ever
-        // returned at exit — and the exit callback then closed this descriptor out from under
-        // that blocked read. `ChildOutputReader` explains why the primitive matters.
-        ChildOutputReader.deliver(from: output) { [weak self, weak process] data in
+        // These commands print a line or two and exit, so a read that waits to fill a buffer only
+        // ever returned at exit, and the exit callback then closed this descriptor out from under
+        // it. `ChildOutputStream` explains why the primitive matters, and owns the descriptor so
+        // that close can only happen once the reader has finished.
+        outputStream = ChildOutputStream(
+            readEnd: pipe.takeReadDescriptor()
+        ) { [weak self, weak process] data in
             guard self != nil, process != nil else { return }
             collector.append(data)
         }
@@ -262,8 +263,6 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         )
         let pid = process.processIdentifier
         process.observeExit { [weak self, weak process] status in
-            output.readabilityHandler = nil
-            try? output.close()
             Task { @MainActor in
                 guard let self else { return }
                 self.shutdownEscalations.removeValue(forKey: pid)?.complete()
@@ -276,7 +275,14 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
                     collector.append(Data("\nThreading command timeout".utf8))
                 }
                 let capturedOutput = collector.snapshot()
-                self.outputHandle = nil
+                // Ended here rather than left to reach end of file on its own: `serve --bg` can
+                // leave a descendant holding the write end, and waiting for that would hold a
+                // descriptor and a live read source for as long as the daemon runs. Output now
+                // arrives as the child writes it, so what this gives up is at most a final line
+                // racing the exit, and losing one degrades to `.statusUnavailable`, which is the
+                // safe answer.
+                self.outputStream?.cancel()
+                self.outputStream = nil
                 self.outputCollector = nil
                 self.command = nil
                 if timedOut {
@@ -298,9 +304,8 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
     }
 
     private func cancelActiveCommand() {
-        outputHandle?.readabilityHandler = nil
-        try? outputHandle?.close()
-        outputHandle = nil
+        outputStream?.cancel()
+        outputStream = nil
         outputCollector = nil
         _ = commandDeadline?.complete()
         commandDeadline = nil
@@ -332,7 +337,8 @@ final class TailscaleRemoteTransport: RemoteAccessTransport {
         _ = commandDeadline?.complete()
         commandDeadline = nil
         launchID = nil
-        outputHandle = nil
+        outputStream?.cancel()
+        outputStream = nil
         outputCollector = nil
         command = nil
         setState(state)
