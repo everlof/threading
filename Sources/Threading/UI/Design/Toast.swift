@@ -226,6 +226,19 @@ struct ToastRequest {
     /// For UI scripting and tests; the band and its action each take one.
     var identifier: String?
 
+    /// A determinate operation owned by the band, distinct from the dwell countdown along its
+    /// bottom edge. Nil keeps the ordinary receipt anatomy.
+    var progress: Double? = nil
+
+    /// Keeps a standing operation or blocked-state report visible until it is updated or the
+    /// user dismisses it. Completion requests turn this off and receive the ordinary dwell.
+    var persistsUntilDismissed: Bool = false
+
+    /// Requests with the same non-nil key update the standing band in place. This prevents a
+    /// directory-by-directory progress stream from replaying arrival motion and VoiceOver
+    /// announcements for every item.
+    var replacementID: String? = nil
+
     /// What VoiceOver is told when the band arrives. The band is transient and takes no focus,
     /// so nothing else would ever read it out.
     var announcement: String {
@@ -310,7 +323,7 @@ final class ToastView: NSView {
     /// clock when one is handed to it, and handing it two would spend the pause twice.
     private var isHeld = false
 
-    let request: ToastRequest
+    private(set) var request: ToastRequest
 
     /// Whether the band is showing a clock that is running.
     ///
@@ -326,6 +339,7 @@ final class ToastView: NSView {
     private let messageLabel: NSTextField
     private let detailLabel: NSTextField?
     private let actionButton: ThemedButton?
+    private let progressBar: ThemedProgressBar?
 
     /// The way out, as against the way back.
     ///
@@ -357,6 +371,13 @@ final class ToastView: NSView {
         actionButton = request.hasAction
             ? ThemedButton(title: request.actionTitle ?? "", target: nil, action: nil)
             : nil
+        progressBar = request.progress.map { progress in
+            let bar = ThemedProgressBar()
+            bar.translatesAutoresizingMaskIntoConstraints = false
+            bar.progress = progress
+            bar.setAccessibilityLabel(L10n.string("Cleanup progress"))
+            return bar
+        }
         closeButton = ThemedIconButton(
             symbolName: "xmark",
             accessibility: L10n.string("Dismiss"),
@@ -384,6 +405,23 @@ final class ToastView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    /// Restamps a structurally compatible operation band without replacing its view.
+    @discardableResult
+    func update(with request: ToastRequest) -> Bool {
+        guard (detailLabel != nil) == (request.detail != nil),
+              (actionButton != nil) == request.hasAction,
+              (progressBar != nil) == (request.progress != nil) else { return false }
+
+        self.request = request
+        messageLabel.stringValue = request.message
+        detailLabel?.stringValue = request.detail ?? ""
+        actionButton?.title = request.actionTitle ?? ""
+        progressBar?.progress = request.progress ?? 0
+        setAccessibilityLabel(request.announcement)
+        needsLayout = true
+        return true
     }
 
     // MARK: - Layout
@@ -773,6 +811,7 @@ final class ToastView: NSView {
         addSubview(messageLabel)
         detailLabel.map { addSubview($0) }
         actionButton.map { addSubview($0) }
+        progressBar.map { addSubview($0) }
         addSubview(closeButton)
         addSubview(dwellRail)
 
@@ -852,6 +891,19 @@ final class ToastView: NSView {
                 detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset)
             ]
             lastText = detailLabel
+        }
+
+        if let progressBar {
+            constraints += under(
+                lastText.bottomAnchor,
+                by: Design.Spacing.small,
+                clearingClose: lastText === messageLabel
+            )(progressBar.topAnchor)
+            constraints += [
+                progressBar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+                progressBar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset)
+            ]
+            lastText = progressBar
         }
 
         if let actionButton {
@@ -1702,6 +1754,19 @@ final class ToastPresenter {
         guard host != nil else { return }
 
         guard let current else { return show(request) }
+        if let replacementID = request.replacementID,
+           replacementID == current.request.replacementID {
+            let shouldAnnounce = current.request.message != request.message
+            guard current.update(with: request) else {
+                removeCurrent()
+                return show(request)
+            }
+            stopClock()
+            current.stopDwell()
+            scheduleDismissal()
+            if shouldAnnounce { announce(request) }
+            return
+        }
         guard current.request.hasAction else {
             removeCurrent()
             return show(request)
@@ -1952,8 +2017,8 @@ final class ToastPresenter {
     /// the one signal the view reports.
     private func makeToast(for request: ToastRequest) -> ToastView {
         let toast = ToastView(request: request)
-        toast.onAction = { [weak self] in
-            request.action?()
+        toast.onAction = { [weak self, weak toast] in
+            toast?.request.action?()
             self?.dismiss()
         }
         toast.onDismiss = { [weak self] departure in
@@ -2409,6 +2474,10 @@ final class ToastPresenter {
         let resumed = heldRemainder
         stopClock()
         guard let current else { return }
+        guard !current.request.persistsUntilDismissed else {
+            current.stopDwell()
+            return
+        }
         let interval = resumed ?? (current.request.dwell ?? dwell)
         scheduledDwell = interval
         dismissal = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) {

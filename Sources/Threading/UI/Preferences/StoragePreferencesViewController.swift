@@ -679,37 +679,37 @@ final class StoragePreferencesViewController: NSViewController {
             groups.filter { !$0.attribution.isScratch }.compactMap(\.attribution.project)
         )
 
-        // Deleting walks the directory too, so it never happens on the main thread — but at
-        // `.userInitiated`, unlike the passive scan: this one somebody is waiting on.
-        DispatchQueue.global(qos: .userInitiated).async {
-            // Only what actually went. `ArtifactScanner.remove` re-checks both gates and refuses
-            // what has stopped being disposable — an orphan whose workspace came back, most of
-            // all — and dropping a refusal from the cache anyway would take it off the page
-            // until the next full walk, which no rescan follows for the scratch scope.
-            let removed = artifacts.filter { ArtifactScanner.remove($0) }
+        // One coordinator serialises this surface with agent-approved cleanup, performs each
+        // directory walk off the main actor, and publishes one progress stream for both.
+        let started = ArtifactCleanupCoordinator.shared.remove(artifacts) { outcome in
+            // Only what actually went. The scanner re-checks both safety gates and refuses what
+            // stopped being disposable; a refusal therefore stays in the cache and on this page.
+            let removed = outcome.removed
 
             ThreadingLogger.storage.info(
                 "Reclaimed \(removed.count, privacy: .public) of \(artifacts.count, privacy: .public) artifacts"
             )
 
-            DispatchQueue.main.async {
-                // The caches are corrected from what actually went, so the page updates at once.
-                // A project is then re-measured, since removing one directory changes the size
-                // of nothing else but proves the reading is a moment old; the scratch scope is
-                // not, because re-walking `/private/tmp` to learn what a delete just did to it
-                // is the most expensive way to find out.
-                let scratch = removed.filter { scratchPaths.contains($0.url.path) }
-                if !scratch.isEmpty {
-                    ArtifactScanService.shared.forgetScratch(scratch)
-                }
-
-                let fromCheckouts = removed.filter { !scratchPaths.contains($0.url.path) }
-                guard !fromCheckouts.isEmpty else { return }
-                for project in checkoutProjects {
-                    ArtifactScanService.shared.forget(fromCheckouts, in: project.id)
-                    ArtifactScanService.shared.refresh(project, force: true)
-                }
+            // The caches are corrected from what actually went, so the page updates at once.
+            // A project is then re-measured; the scratch scope is not, because re-walking
+            // `/private/tmp` to learn what this delete just did is the most expensive answer.
+            let scratch = removed.filter { scratchPaths.contains($0.url.path) }
+            if !scratch.isEmpty {
+                ArtifactScanService.shared.forgetScratch(scratch)
             }
+
+            let fromCheckouts = removed.filter { !scratchPaths.contains($0.url.path) }
+            guard !fromCheckouts.isEmpty else { return }
+            for project in checkoutProjects {
+                ArtifactScanService.shared.forget(fromCheckouts, in: project.id)
+                ArtifactScanService.shared.refresh(project, force: true)
+            }
+        }
+        guard started else {
+            ThreadingLogger.storage.notice(
+                "Ignored duplicate cleanup request while another cleanup is running"
+            )
+            return
         }
     }
 

@@ -2869,6 +2869,13 @@ final class ComponentGalleryViewController: NSViewController {
                         + "archive nobody clicked — it names who did it, carries their reason, "
                         + "and holds more than twice as long.",
                     makeToastSample()
+                ),
+                story(
+                    "ToastView · operation progress",
+                    "A standing cleanup report at half progress. Its determinate bar is content, "
+                        + "not the dwell countdown on the card edge; completion updates this same "
+                        + "band and starts the ordinary receipt clock.",
+                    makeToastProgressSample()
                 )
             ]
         )
@@ -3175,6 +3182,53 @@ final class ComponentGalleryViewController: NSViewController {
         row.alignment = .bottom
         row.spacing = Design.Spacing.inset
         return row
+    }
+
+    private func makeToastProgressSample() -> NSView {
+        let pane = ThemedSurfaceView()
+        pane.applySurface(fill: Design.Surface.background, radius: .control)
+        pane.translatesAutoresizingMaskIntoConstraints = false
+
+        let footer = PaneFooterView()
+        pane.addSubview(footer)
+        let progress = ArtifactCleanupProgress(
+            phase: .removing,
+            totalCount: 4,
+            completedCount: 2,
+            removedCount: 2,
+            refusedCount: 0,
+            failedCount: 0,
+            reclaimedBytes: 8_000_000_000,
+            currentName: "DerivedData",
+            persistenceRecovery: .notNeeded
+        )
+        let toast = ToastView(request: StorageCleanupToast.request(for: progress))
+        pane.addSubview(toast, positioned: .above, relativeTo: footer)
+
+        NSLayoutConstraint.activate([
+            pane.widthAnchor.constraint(equalToConstant: SidebarDefaults.defaultWidth),
+            pane.heightAnchor.constraint(equalToConstant: 170),
+            footer.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
+            toast.leadingAnchor.constraint(
+                equalTo: pane.leadingAnchor,
+                constant: ToastDefaults.hostInset
+            ),
+            toast.trailingAnchor.constraint(
+                equalTo: pane.trailingAnchor,
+                constant: -ToastDefaults.hostInset
+            ),
+            toast.bottomAnchor.constraint(
+                equalTo: footer.topAnchor,
+                constant: -ToastDefaults.hostInset
+            ),
+            toast.topAnchor.constraint(
+                greaterThanOrEqualTo: pane.topAnchor,
+                constant: ToastDefaults.hostInset
+            )
+        ])
+        return pane
     }
 
     /// The archive receipt as the app actually builds it, rather than a second copy of its

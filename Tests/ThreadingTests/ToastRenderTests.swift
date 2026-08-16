@@ -54,12 +54,15 @@ final class ToastRenderTests: XCTestCase {
         /// to hold *words*: whether three stacked strips in a 240-point column read as a queue or
         /// as a wall over the list, whether a truncated message still names its session, and
         /// whether a way back set in a theme's own face still fits the strip it is standing in.
+        /// The cleanup story holds an in-flight operation at half progress: the determinate bar
+        /// must remain legible on every material without being confused for the dwell rail.
         enum Story: String, CaseIterable {
             case running
             case dormant
             case agent
             case queued
             case opened
+            case cleanup
         }
 
         /// What the cards in an opened deck stand for: three different sessions, one of them
@@ -181,6 +184,18 @@ final class ToastRenderTests: XCTestCase {
                 wasRunning: true,
                 undo: {}
             )
+        case .cleanup:
+            return StorageCleanupToast.request(for: ArtifactCleanupProgress(
+                phase: .removing,
+                totalCount: 4,
+                completedCount: 2,
+                removedCount: 2,
+                refusedCount: 0,
+                failedCount: 0,
+                reclaimedBytes: 8_000_000_000,
+                currentName: "DerivedData",
+                persistenceRecovery: .notNeeded
+            ))
         }
     }
 

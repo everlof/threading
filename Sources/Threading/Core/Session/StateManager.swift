@@ -12,11 +12,12 @@ enum ProjectsStateLoadResult {
 
 /// Whether this process may still treat the projects database as authoritative.
 ///
-/// Once any operation says the database cannot be trusted, writes stay disabled for the rest
-/// of the launch. A successful quarantine preserves the old bytes, but it does not turn the
-/// empty in-memory state produced by a failed load into a valid replacement.
-enum PersistenceHealth {
+/// A full volume is a refusal, not evidence that the database cannot be trusted. It gets its own
+/// state so an explicit integrity-and-write probe can safely restore service after cleanup;
+/// corruption, incompatible state and arbitrary I/O failures still fail closed for the launch.
+enum PersistenceHealth: Equatable {
     case healthy
+    case storageExhausted
     case recoveryRequired(quarantinedAt: URL?)
 }
 
@@ -213,7 +214,7 @@ final class StateManager {
             return false
         } catch {
             ThreadingLogger.agent.error("Failed to save projects state: \(error.localizedDescription, privacy: .private(mask: .hash))")
-            requireRecovery()
+            recordPersistenceFailure(error)
             return false
         }
     }
@@ -229,7 +230,7 @@ final class StateManager {
             ThreadingLogger.agent.error(
                 "Failed to save project: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
             return false
         }
     }
@@ -245,7 +246,7 @@ final class StateManager {
             ThreadingLogger.agent.error(
                 "Failed to save selected session: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
             return false
         }
     }
@@ -271,7 +272,7 @@ final class StateManager {
             ThreadingLogger.agent.error(
                 "Failed to remove session: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
             return false
         }
     }
@@ -298,7 +299,7 @@ final class StateManager {
             ThreadingLogger.agent.error(
                 "Failed to save running sessions: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
             return false
         }
     }
@@ -321,7 +322,7 @@ final class StateManager {
             ThreadingLogger.agent.error(
                 "Failed to read running sessions: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
             return []
         }
     }
@@ -359,6 +360,10 @@ final class StateManager {
             closeDatabase()
             requireRecovery()
             return .failed(quarantinedAt: nil)
+        } catch let failure as SQLiteDatabase.Failure where failure.isStorageExhausted {
+            ThreadingLogger.agent.error("Could not load projects state because storage is full")
+            recordPersistenceFailure(failure)
+            return .failed(quarantinedAt: nil)
         } catch {
             ThreadingLogger.agent.error(
                 "Failed to load projects state: \(error.localizedDescription, privacy: .private(mask: .hash))"
@@ -366,6 +371,44 @@ final class StateManager {
             let quarantinedAt = quarantineDatabase()
             requireRecovery(quarantinedAt: quarantinedAt)
             return .failed(quarantinedAt: quarantinedAt)
+        }
+    }
+
+    /// Reopens and proves the store after the user has reclaimed space.
+    ///
+    /// The refusal is cleared only after SQLite validates its pages, commits a real write, and
+    /// reloads the complete authoritative graph. A failed probe leaves the process refused; an
+    /// error other than `SQLITE_FULL` escalates to ordinary recovery rather than treating an
+    /// unknown storage fault as fixed.
+    func recoverFromStorageExhaustion() -> ProjectsStateLoadResult {
+        guard case .storageExhausted = persistenceHealth else {
+            if case .recoveryRequired(let quarantinedAt) = persistenceHealth {
+                return .failed(quarantinedAt: quarantinedAt)
+            }
+            return .failed(quarantinedAt: nil)
+        }
+
+        closeDatabase()
+        do {
+            let recovered = try ProjectDatabase(url: databaseURL)
+            try recovered.verifyIntegrityAndWritability()
+            let load = try recovered.load()
+            openDatabase = recovered
+            record(load.unreadable)
+            persistenceHealth = .healthy
+
+            let state = load.state
+            ThreadingLogger.agent.notice("Projects persistence recovered after storage cleanup")
+            return state.projects.isEmpty && state.selectedSessionID == nil
+                ? .missing
+                : .loaded(state)
+        } catch {
+            closeDatabase()
+            recordPersistenceFailure(error)
+            ThreadingLogger.agent.error(
+                "Projects persistence recovery probe failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return .failed(quarantinedAt: nil)
         }
     }
 
@@ -640,7 +683,7 @@ final class StateManager {
             ThreadingLogger.mcp.error(
                 "Could not load display panel: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
             return nil
         }
     }
@@ -671,7 +714,7 @@ final class StateManager {
             ThreadingLogger.mcp.error(
                 "Could not persist display panel: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
         }
     }
 
@@ -687,7 +730,7 @@ final class StateManager {
             ThreadingLogger.mcp.error(
                 "Could not prune display panels: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
         }
     }
 
@@ -701,7 +744,7 @@ final class StateManager {
             ThreadingLogger.mcp.error(
                 "Could not remove display panel: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
         }
     }
 
@@ -723,7 +766,7 @@ final class StateManager {
             ThreadingLogger.mcp.error(
                 "Could not load session attachments: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
             return nil
         }
     }
@@ -754,7 +797,7 @@ final class StateManager {
             ThreadingLogger.mcp.error(
                 "Could not persist session attachments: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
         }
     }
 
@@ -770,7 +813,7 @@ final class StateManager {
             ThreadingLogger.mcp.error(
                 "Could not prune session attachments: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
         }
     }
 
@@ -784,7 +827,7 @@ final class StateManager {
             ThreadingLogger.mcp.error(
                 "Could not remove session attachments: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
         }
     }
 
@@ -825,7 +868,7 @@ final class StateManager {
             ThreadingLogger.mcp.error(
                 "Could not inspect display panel storage: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
             return
         }
 
@@ -839,7 +882,7 @@ final class StateManager {
             ThreadingLogger.mcp.error(
                 "Could not inspect legacy display panels: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            requireRecovery()
+            recordPersistenceFailure(error)
             return
         }
         var imported = 0
@@ -868,7 +911,7 @@ final class StateManager {
                 ThreadingLogger.mcp.error(
                     "Could not import legacy display panel \(file.lastPathComponent, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
                 )
-                requireRecovery()
+                recordPersistenceFailure(error)
                 return
             }
         }
@@ -921,18 +964,36 @@ final class StateManager {
     // MARK: - Persistence Health
 
     private func writesAreAllowed(for operation: String) -> Bool {
-        guard case .healthy = persistenceHealth else {
+        switch persistenceHealth {
+        case .healthy:
+            return true
+        case .storageExhausted:
+            ThreadingLogger.agent.error(
+                "Refusing to write \(operation, privacy: .public) because storage is full"
+            )
+            return false
+        case .recoveryRequired:
             ThreadingLogger.agent.error(
                 "Refusing to write \(operation, privacy: .public) while persistence recovery is required"
             )
             return false
         }
-        return true
     }
 
     private func requireRecovery(quarantinedAt: URL? = nil) {
-        guard case .healthy = persistenceHealth else { return }
+        if case .recoveryRequired = persistenceHealth { return }
         persistenceHealth = .recoveryRequired(quarantinedAt: quarantinedAt)
+    }
+
+    private func recordPersistenceFailure(_ error: Error) {
+        if let failure = error as? SQLiteDatabase.Failure, failure.isStorageExhausted {
+            guard case .healthy = persistenceHealth else { return }
+            persistenceHealth = .storageExhausted
+            EventLog.shared.record(.app, "Persistence paused because storage is full")
+            return
+        }
+
+        requireRecovery()
     }
 
     // MARK: - Unreadable Auxiliary Rows

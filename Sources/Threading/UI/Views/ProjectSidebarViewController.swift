@@ -588,6 +588,9 @@ private extension ProjectSidebarViewController {
         appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
             self?.extensionSettingsDidChange()
         }
+        appEvents.observe(ArtifactCleanupDidChange.self) { [weak self] event in
+            self?.presentToast(StorageCleanupToast.request(for: event.progress))
+        }
         // Session rows have two independently customizable surfaces. Watching each one made
         // every visible row install two notification observers before extensions had published
         // any content. The list owns visibility, so it owns the one observer and wakes only
@@ -636,6 +639,71 @@ private extension ProjectSidebarViewController {
         themeBackdrop = backdrop
     }
 
+}
+
+@MainActor
+enum StorageCleanupToast {
+    private static let formatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter
+    }()
+
+    static func request(for progress: ArtifactCleanupProgress) -> ToastRequest {
+        switch progress.phase {
+        case .removing:
+            let position = L10n.format(
+                "%d of %d checked",
+                progress.completedCount,
+                progress.totalCount
+            )
+            let detail = [position, progress.currentName].compactMap { $0 }.joined(separator: " · ")
+            return ToastRequest(
+                message: L10n.string("Removing build output…"),
+                detail: detail,
+                identifier: "sidebar.toast.storage-cleanup",
+                progress: progress.fraction,
+                persistsUntilDismissed: true,
+                replacementID: "storage.cleanup"
+            )
+
+        case .completed:
+            var consequences: [String] = []
+            if progress.removedCount > 0 {
+                consequences.append(L10n.format(
+                    "Freed %@ from %d directories.",
+                    formatter.string(fromByteCount: progress.reclaimedBytes),
+                    progress.removedCount
+                ))
+            } else {
+                consequences.append(L10n.string("No directories were removed."))
+            }
+
+            let notRemoved = progress.refusedCount + progress.failedCount
+            if notRemoved > 0 {
+                consequences.append(L10n.format("%d could not be removed.", notRemoved))
+            }
+            switch progress.persistenceRecovery {
+            case .notNeeded:
+                break
+            case .restored:
+                consequences.append(L10n.string("Saving is available again."))
+            case .stillBlocked:
+                consequences.append(L10n.string("Saving is still paused; try recovery again."))
+            }
+
+            return ToastRequest(
+                message: progress.failedCount > 0
+                    ? L10n.string("Cleanup finished with errors")
+                    : L10n.string("Cleanup complete"),
+                detail: consequences.joined(separator: " "),
+                dwell: ToastDefaults.unattendedDwell,
+                identifier: "sidebar.toast.storage-cleanup",
+                progress: 1,
+                replacementID: "storage.cleanup"
+            )
+        }
+    }
 }
 
 // MARK: - Public Methods

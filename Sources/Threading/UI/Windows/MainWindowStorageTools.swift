@@ -218,11 +218,8 @@ extension AgentToolCoordinator {
                 return
             }
 
-            Task { @MainActor in
-                let removed = await Task.detached(priority: .userInitiated) {
-                    artifacts.filter { ArtifactScanner.remove($0) }
-                }.value
-                let reclaimed = removed.reduce(0) { $0 + $1.byteCount }
+            let started = ArtifactCleanupCoordinator.shared.remove(artifacts) { outcome in
+                let removed = outcome.removed
 
                 for project in ProjectStore.shared.projects {
                     ArtifactScanService.shared.forget(removed, in: project.id)
@@ -237,11 +234,12 @@ extension AgentToolCoordinator {
 
                 completion(.success(StorageToolStrings.approved(
                     count: removed.count,
-                    size: Self.storageSize.string(fromByteCount: reclaimed),
-                    refused: artifacts.count - removed.count,
+                    size: Self.storageSize.string(fromByteCount: outcome.reclaimedBytes),
+                    refused: outcome.refusedCount + outcome.failedCount,
                     unknown: unknown
                 )))
             }
+            guard started else { return completion(.failure(StorageToolStrings.cleanupAlreadyRunning)) }
         }
     }
 
@@ -291,6 +289,7 @@ enum StorageToolStrings {
     static let noPaths = "No paths were given. Pass one absolute path per line in `paths`."
     static let noWindow = "There is no window to ask the user in."
     static let declined = "The user declined. Nothing was removed."
+    static let cleanupAlreadyRunning = "Another approved storage cleanup is already running."
 
     static let approve = "Remove"
     static let decline = "Keep"

@@ -104,6 +104,15 @@ already in the findings** — everything there has passed the pair of gates its 
 is asked again at the moment of deletion. The tool answers only once the user has decided, so the
 agent's next turn knows the outcome rather than assuming it.
 
+**All approved removals share one operation.** `ArtifactCleanupCoordinator` is the single-flight
+owner for both the agent proposal and Storage settings; a second request is refused while the
+first still walks directories, so two surfaces cannot race to delete and report the same path.
+It removes one artifact at a time off the main actor, keeps safety refusal distinct from filesystem
+failure, and publishes bounded completed/total/bytes progress. The sidebar turns that stream into
+one persistent toast whose progress bar updates in place, then into an ordinary timed completion
+receipt. If persistence was paused by `SQLITE_FULL`, the coordinator also invokes the verified
+database recovery probe after the last removal, and the receipt says whether saving returned.
+
 **The instruction keys on the failure, not on a measurement.** An earlier version stated the disk's
 free space in the `initialize` instructions, so an agent would know it was short. Wrong twice: the
 reading is a snapshot taken at session start, while a session that fills the disk does so an hour

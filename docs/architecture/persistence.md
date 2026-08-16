@@ -35,6 +35,18 @@ failed database initializer closes the partly configured connection. Owners stil
 connection explicitly at storage boundaries—RAII is the backstop for an abandoned object, not the
 ordering primitive for moving a database and its sidecars.
 
+**A full disk pauses persistence; it does not condemn the database for the launch.** The SQLite
+wrapper preserves the primary and extended result codes, so `SQLITE_FULL` is not collapsed into
+the same string as corruption or an arbitrary I/O failure. `StateManager` records
+`storageExhausted`, and `ProjectStore` rolls the attempted mutation back to its last committed
+snapshot exactly as it does for every refused write. Recovery is explicit and evidence-based:
+close the old connection, reopen the same store, require `PRAGMA quick_check` to report `ok`,
+commit an insert-and-delete probe in `app_state`, and reload the complete authoritative graph.
+Only all four steps restore writes in-process. A second `SQLITE_FULL` leaves the recoverable pause
+standing; any other probe failure escalates to ordinary fail-closed recovery. The Start Session
+path reports the refusal while retaining the brief, so its button and Command-Return route cannot
+fail silently.
+
 **The import runs once and keeps its rollback.** A `projects.json` is read through the decoder
 and migration chain it always used, written into the database in a single transaction, and then
 *renamed* to `projects.json.migrated` — never deleted. opencode's own migration is the reason:

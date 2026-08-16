@@ -1,3 +1,4 @@
+import SQLite3
 import XCTest
 @testable import Threading
 
@@ -102,6 +103,44 @@ final class ProjectDatabaseTests: XCTestCase {
         let database = try makeDatabase()
         XCTAssertTrue(try database.isEmpty())
         XCTAssertTrue(try database.load().state.projects.isEmpty)
+    }
+
+    func testSQLiteFullKeepsItsTypedRecoverySignal() {
+        let full = SQLiteDatabase.Failure.step(.init(
+            code: SQLITE_FULL,
+            extendedCode: SQLITE_FULL,
+            message: "database or disk is full"
+        ))
+        let other = SQLiteDatabase.Failure.step(.init(
+            code: SQLITE_IOERR,
+            extendedCode: SQLITE_IOERR_WRITE,
+            message: "I/O error"
+        ))
+
+        XCTAssertTrue(full.isStorageExhausted)
+        XCTAssertFalse(other.isStorageExhausted)
+    }
+
+    func testRecoveryProbePreservesTheAuthoritativeGraphAndLeavesNoRow() throws {
+        let url = directory.appendingPathComponent("recovery-probe.db")
+        let database = try ProjectDatabase(url: url)
+        let state = ProjectsState(
+            projects: [makeProject("Kept")],
+            selectedSessionID: nil
+        )
+        try database.save(state)
+
+        try database.verifyIntegrityAndWritability()
+        XCTAssertEqual(try database.load().state.projects.map(\.name), ["Kept"])
+        database.close()
+
+        let inspection = try SQLiteDatabase(path: url.path)
+        XCTAssertEqual(
+            try inspection.scalar(
+                "SELECT COUNT(*) FROM app_state WHERE key = 'storageRecoveryProbe'"
+            ),
+            0
+        )
     }
 
     func testProjectsAndSessionsRoundTrip() throws {

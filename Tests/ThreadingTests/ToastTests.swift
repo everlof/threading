@@ -562,6 +562,55 @@ final class ToastTests: XCTestCase {
         XCTAssertEqual(descendants(of: host).compactMap { $0 as? ToastView }.count, 1)
     }
 
+    func testOperationProgressUpdatesOnePersistentBandInPlaceThenStartsItsDwell() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        let running = ToastRequest(
+            message: "Removing build output…",
+            detail: "0 of 2 checked · target",
+            identifier: "sidebar.toast.storage-cleanup",
+            progress: 0,
+            persistsUntilDismissed: true,
+            replacementID: "storage.cleanup"
+        )
+
+        presenter.present(running)
+        let standing = try XCTUnwrap(presenter.current)
+        XCTAssertNil(presenter.scheduledDwell)
+        XCTAssertEqual(
+            try XCTUnwrap(descendants(of: standing).compactMap { $0 as? ThemedProgressBar }.first)
+                .progress,
+            0
+        )
+
+        presenter.present(ToastRequest(
+            message: "Removing build output…",
+            detail: "1 of 2 checked · node_modules",
+            identifier: "sidebar.toast.storage-cleanup",
+            progress: 0.5,
+            persistsUntilDismissed: true,
+            replacementID: "storage.cleanup"
+        ))
+
+        XCTAssertTrue(presenter.current === standing)
+        XCTAssertEqual(presenter.current?.request.progress, 0.5)
+        XCTAssertNil(presenter.scheduledDwell)
+
+        presenter.present(ToastRequest(
+            message: "Cleanup complete",
+            detail: "Freed 8 GB from 2 directories.",
+            dwell: 30,
+            identifier: "sidebar.toast.storage-cleanup",
+            progress: 1,
+            replacementID: "storage.cleanup"
+        ))
+
+        XCTAssertTrue(presenter.current === standing)
+        XCTAssertEqual(presenter.current?.request.message, "Cleanup complete")
+        XCTAssertEqual(presenter.scheduledDwell, 30)
+        presenter.invalidate()
+    }
+
     /// A queue is measured in dwells, so it is bounded — and what falls off the end is the
     /// oldest receipt waiting, the one whose consequence the user has had longest to notice.
     func testABurstLongerThanTheQueueKeepsTheMostRecentReceipts() throws {

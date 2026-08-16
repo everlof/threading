@@ -18365,6 +18365,26 @@
         }
       }
     },
+    "%d could not be removed.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%d kunde inte tas bort."}}}},
+    "%d of %d checked": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%d av %d kontrollerade"}}}},
+    "Cleanup complete": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rensning klar"}}}},
+    "Cleanup finished with errors": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rensningen slutfördes med fel"}}}},
+    "Cleanup progress": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rensningsförlopp"}}}},
+    "Freed %@ from %d directories.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Frigjorde %@ från %d kataloger."}}}},
+    "No directories were removed.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inga kataloger togs bort."}}}},
+    "Removing build output…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tar bort byggutdata…"}}}},
+    "Saving is available again.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sparande är tillgängligt igen."}}}},
+    "Saving is still paused; try recovery again.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sparande är fortfarande pausat; försök återställa igen."}}}},
+    "ToastView · operation progress": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ToastView · åtgärdsförlopp"}}}},
+    "A standing cleanup report at half progress. Its determinate bar is content, not the dwell countdown on the card edge; completion updates this same band and starts the ordinary receipt clock.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En stående rensningsrapport halvvägs. Dess bestämda förloppsindikator är innehåll, inte nedräkningen längs kortets kant; när åtgärden är klar uppdateras samma band och kvittots vanliga klocka startar."}}}},
+    "Your brief is still here. Restart Threading normally to save changes.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Din brief finns kvar här. Starta om Threading normalt för att spara ändringarna."}}}},
+    "Session not started in Recovery Mode": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sessionen startades inte i återställningsläge"}}}},
+    "Session not started — disk full": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sessionen startades inte — disken är full"}}}},
+    "Session not started": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sessionen startades inte"}}}},
+    "Threading could not safely load project data. Your brief is still here; restart Threading to recover.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading kunde inte läsa in projektdata på ett säkert sätt. Din brief finns kvar; starta om Threading för att återställa."}}}},
+    "Threading could not safely save project data. Your brief is still here; restart Threading and try again.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading kunde inte spara projektdata på ett säkert sätt. Din brief finns kvar; starta om Threading och försök igen."}}}},
+    "Your brief is still here. Check the selected project and try again.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Din brief finns kvar här. Kontrollera det valda projektet och försök igen."}}}},
+    "Your brief is still here. Clear some disk space, then retry.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Din brief finns kvar här. Frigör diskutrymme och försök sedan igen."}}}},
     "Show or hide sidebar": {
       "extractionState": "stale",
       "localizations": {

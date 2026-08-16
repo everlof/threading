@@ -810,6 +810,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             if let managedWorkspace {
                 try? ManagedGitWorkspace.discardUnstarted(managedWorkspace)
             }
+            presentSessionStartFailure(in: composer)
             return false
         }
 
@@ -854,6 +855,28 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         sidebar.reload()
         sidebar.select(sessionID: session.id)
         return true
+    }
+
+    /// Turns every refused Start press — button or Command-Return, which share this path — into
+    /// visible feedback while leaving the brief intact. A full-volume refusal offers the only
+    /// recovery this process can safely perform; every other persistence refusal stays closed.
+    private func presentSessionStartFailure(in composer: SessionComposerViewController) {
+        let reason = environment.projectStore.persistenceBlockReason
+        let retry: (() -> Void)? = reason == .storageExhausted ? { [weak self, weak composer] in
+            // The presenter's action dismisses its current band after invoking this closure.
+            // Continue on the next main-actor turn so a recovery failure can put the standing
+            // report back without that dismissal immediately taking the replacement with it.
+            Task { @MainActor [weak self, weak composer] in
+                guard let self, let composer else { return }
+                guard self.environment.projectStore.recoverFromStorageExhaustion() else {
+                    self.presentSessionStartFailure(in: composer)
+                    return
+                }
+                composer.startTapped()
+            }
+        } : nil
+
+        sidebar.presentToast(Self.sessionStartFailureToast(reason: reason, retry: retry))
     }
 
     /// Starts a session requested by the paired owner device through the same one-shot prompt
@@ -1083,6 +1106,60 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             detail: [failure.localizedDescription, stopped].compactMap { $0 }.joined(separator: " "),
             identifier: "sidebar.toast.archive.failed"
         )
+    }
+
+    static func sessionStartFailureToast(
+        reason: ProjectStorePersistenceBlock?,
+        retry: (() -> Void)?
+    ) -> ToastRequest {
+        switch reason {
+        case .storageExhausted:
+            return ToastRequest(
+                message: L10n.string("Session not started — disk full"),
+                detail: L10n.string(
+                    "Your brief is still here. Clear some disk space, then retry."
+                ),
+                actionTitle: retry == nil ? nil : L10n.string("Retry"),
+                action: retry,
+                identifier: "sidebar.toast.session-start.storage-full",
+                persistsUntilDismissed: true,
+                replacementID: "storage.cleanup"
+            )
+        case .failedLoad:
+            return ToastRequest(
+                message: L10n.string("Session not started"),
+                detail: L10n.string(
+                    "Threading could not safely load project data. Your brief is still here; restart Threading to recover."
+                ),
+                identifier: "sidebar.toast.session-start.persistence",
+                persistsUntilDismissed: true,
+                replacementID: "persistence.blocked"
+            )
+        case .recoveryMode:
+            return ToastRequest(
+                message: L10n.string("Session not started in Recovery Mode"),
+                detail: L10n.string("Your brief is still here. Restart Threading normally to save changes."),
+                identifier: "sidebar.toast.session-start.persistence",
+                persistsUntilDismissed: true,
+                replacementID: "persistence.blocked"
+            )
+        case .failedWrite:
+            return ToastRequest(
+                message: L10n.string("Session not started"),
+                detail: L10n.string(
+                    "Threading could not safely save project data. Your brief is still here; restart Threading and try again."
+                ),
+                identifier: "sidebar.toast.session-start.persistence",
+                persistsUntilDismissed: true,
+                replacementID: "persistence.blocked"
+            )
+        case nil:
+            return ToastRequest(
+                message: L10n.string("Session not started"),
+                detail: L10n.string("Your brief is still here. Check the selected project and try again."),
+                identifier: "sidebar.toast.session-start.failed"
+            )
+        }
     }
 
     static func restoreFailureToast(

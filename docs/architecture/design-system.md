@@ -735,6 +735,14 @@ receipt takes `ToastDefaults.unattendedDwell`. It also names the agent in its me
 row that leaves the sidebar on its own is the one report where "what happened" without "who did
 it" is the wrong half of the sentence.
 
+**An operation updates one band; it does not arrive once per unit of work.** A request may carry a
+determinate `progress`, `persistsUntilDismissed`, and a `replacementID`. Matching identifiers
+restamp a structurally compatible `ToastView` in place: the themed progress bar changes value,
+the words may advance, and neither arrival motion nor a VoiceOver announcement replays for each
+directory. The final request keeps the same identifier and progress anatomy, changes the message,
+turns persistence off, and starts the ordinary dwell. This is separate from the bottom-edge dwell
+rail: one says how much work is done; the other says how long a completed receipt remains.
+
 **Nothing that can be taken back is dropped, so bursts queue.** One band at a time is still the
 rule — two of them in a 240-point column is a wall over the list they report on — but the band
 already up is no longer overwritten by the next arrival. Four archives in a row are four separate

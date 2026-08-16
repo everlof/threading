@@ -152,7 +152,9 @@ final class ProjectDatabase {
             default:
                 // Unreachable while `version` and the cases here are edited together, which is
                 // the point of failing loudly rather than silently skipping a step.
-                throw SQLiteDatabase.Failure.step("No migration to schema version \(version)")
+                throw SQLiteDatabase.Failure.syntheticStep(
+                    "No migration to schema version \(version)"
+                )
             }
         }
     }
@@ -163,6 +165,37 @@ final class ProjectDatabase {
     /// `projects.json` should be imported.
     func isEmpty() throws -> Bool {
         try database.scalar("SELECT COUNT(*) FROM project") == 0
+    }
+
+    /// Proves that the store is both readable and writable after a recoverable storage failure.
+    ///
+    /// Reopening alone is not proof: SQLite can open a database while the volume is still full,
+    /// and clearing the in-process refusal on that evidence would merely make the next user
+    /// action fail again. `quick_check` validates the pages we are about to trust; the
+    /// insert-and-delete transaction makes SQLite create and commit real WAL frames without
+    /// leaving recovery data behind.
+    func verifyIntegrityAndWritability() throws {
+        do {
+            let check = try database.prepare("PRAGMA quick_check")
+            defer { check.finalize() }
+            guard try check.step(), check.text(0)?.lowercased() == "ok" else {
+                throw SQLiteDatabase.Failure.syntheticStep(
+                    "SQLite quick_check did not report a healthy store"
+                )
+            }
+        }
+
+        let probeKey = ProjectDatabaseSchema.storageRecoveryProbeKey
+        try database.transaction {
+            let write = try database.prepare(ProjectDatabaseSchema.upsertAppState)
+            try write
+                .bind(1, probeKey)
+                .bind(2, UUID().uuidString)
+                .run()
+
+            let remove = try database.prepare("DELETE FROM app_state WHERE key = ?")
+            try remove.bind(1, probeKey).run()
+        }
     }
 
     func load() throws -> ProjectsStateLoad {
@@ -672,7 +705,7 @@ final class ProjectDatabase {
             lock.lock()
             defer { lock.unlock() }
             return storage.enumerated().map { index, result in
-                result ?? .failure(SQLiteDatabase.Failure.step(
+                result ?? .failure(SQLiteDatabase.Failure.syntheticStep(
                     "Session decode batch \(index) did not complete"
                 ))
             }
@@ -838,6 +871,9 @@ enum ProjectDatabaseSchema {
     static let selectedSessionKey = "selectedSessionID"
 
     static let runningSessionsKey = "runningSessionIDs"
+
+    /// Temporary row used only inside the recovery probe transaction.
+    static let storageRecoveryProbeKey = "storageRecoveryProbe"
 
     /// Counts changes to *which* rows exist, so a reconciling write can prove it is not working
     /// from a snapshot another writer has already moved past. Lives in `app_state` rather than a

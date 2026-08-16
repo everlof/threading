@@ -31,6 +31,32 @@ final class SessionLifecycleConfirmationTests: XCTestCase {
         XCTAssertTrue(request.message.contains("resumed"))
     }
 
+    func testDiskFullStartFailureKeepsTheBriefVisibleAndOffersVerifiedRetry() throws {
+        var retried = false
+        let toast = SessionCoordinator.sessionStartFailureToast(
+            reason: .storageExhausted,
+            retry: { retried = true }
+        )
+
+        XCTAssertTrue(toast.message.contains("disk full"))
+        XCTAssertTrue(try XCTUnwrap(toast.detail).contains("brief is still here"))
+        XCTAssertEqual(toast.actionTitle, "Retry")
+        XCTAssertTrue(toast.persistsUntilDismissed)
+        toast.action?()
+        XCTAssertTrue(retried)
+    }
+
+    func testUnknownWriteFailureDoesNotOfferUnsafeRecovery() {
+        let toast = SessionCoordinator.sessionStartFailureToast(
+            reason: .failedWrite,
+            retry: nil
+        )
+
+        XCTAssertFalse(toast.hasAction)
+        XCTAssertTrue(toast.persistsUntilDismissed)
+        XCTAssertTrue(toast.detail?.contains("restart Threading") == true)
+    }
+
     /// Archiving asks nothing, so everything the alert used to say has to survive in the
     /// receipt: which session, what stopped with it, and where it went — the sidebar lists no
     /// archived session at all, so nothing else on screen would say.

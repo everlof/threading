@@ -40,6 +40,18 @@ enum ProjectMutationResult: Equatable {
     }
 }
 
+/// Why durable project mutations are currently refused.
+///
+/// Storage exhaustion is separate because it has a verified in-process recovery path. Every
+/// other failed write remains fail-closed, and a failed load stays distinct because the visible
+/// in-memory graph is not authoritative.
+enum ProjectStorePersistenceBlock: Equatable {
+    case recoveryMode
+    case failedLoad
+    case storageExhausted
+    case failedWrite
+}
+
 /// Owns the project list and its persistence.
 ///
 /// This is the model layer only: it knows nothing about running processes. Live agent surfaces
@@ -52,6 +64,7 @@ final class ProjectStore {
         case allowed
         case recoveryMode
         case failedLoad
+        case storageExhausted
         case failedWrite
 
         var allowsWrites: Bool {
@@ -111,6 +124,16 @@ final class ProjectStore {
     /// cannot fail; callers must still inspect the mutation result.
     var acceptsDurableMutations: Bool { stateWritePolicy.allowsWrites }
 
+    var persistenceBlockReason: ProjectStorePersistenceBlock? {
+        switch stateWritePolicy {
+        case .allowed: return nil
+        case .recoveryMode: return .recoveryMode
+        case .failedLoad: return .failedLoad
+        case .storageExhausted: return .storageExhausted
+        case .failedWrite: return .failedWrite
+        }
+    }
+
     /// The session currently shown in the terminal pane.
     var selectedSessionID: SessionID? {
         didSet {
@@ -127,7 +150,7 @@ final class ProjectStore {
             if stateManager.saveSelectedSessionID(selectedSessionID) {
                 persistedSelectedSessionID = selectedSessionID
             } else {
-                stateWritePolicy = .failedWrite
+                recordFailedWritePolicy()
                 restorePersistedSelection()
                 notifyChanged()
             }
@@ -299,7 +322,7 @@ final class ProjectStore {
         if saved {
             recordPersistedProject(at: index)
         } else {
-            stateWritePolicy = .failedWrite
+            recordFailedWritePolicy()
             restorePersistedSnapshot()
             notifyChanged()
         }
@@ -1530,7 +1553,7 @@ final class ProjectStore {
             selectedSessionID: selectedSessionID
         )
         guard stateManager.saveProjectsState(state) else {
-            stateWritePolicy = .failedWrite
+            recordFailedWritePolicy()
             restorePersistedSnapshot()
             return false
         }
@@ -1566,7 +1589,7 @@ final class ProjectStore {
         )
         span.end(metadata: ["saved": String(saved)])
         guard saved else {
-            stateWritePolicy = .failedWrite
+            recordFailedWritePolicy()
             restorePersistedSnapshot()
             return false
         }
@@ -1586,6 +1609,10 @@ final class ProjectStore {
             case .failedLoad:
                 ThreadingLogger.agent.error(
                     "Refusing to save \(description, privacy: .public) because its earlier load was not authoritative"
+                )
+            case .storageExhausted:
+                ThreadingLogger.agent.error(
+                    "Refusing to save \(description, privacy: .public) because storage is full"
                 )
             case .failedWrite:
                 ThreadingLogger.agent.error(
@@ -1633,13 +1660,54 @@ final class ProjectStore {
                 StartupCheckpointDefaults.storeStateField: StartupCheckpointDefaults.storeFailed
             ])
             didLoadStateSuccessfully = false
-            stateWritePolicy = .failedLoad
+            stateWritePolicy = stateManager.persistenceHealth == .storageExhausted
+                ? .storageExhausted
+                : .failedLoad
             if let quarantinedAt {
                 ThreadingLogger.agent.error(
                     "Projects state requires recovery from \(quarantinedAt.path, privacy: .private(mask: .hash))"
                 )
             }
         }
+    }
+
+    /// Reloads the authoritative graph after `StateManager` has proved the database healthy and
+    /// writable. The UI can call this after approved cleanup or from an explicit Retry action;
+    /// no other refusal reason is weakened.
+    @discardableResult
+    func recoverFromStorageExhaustion() -> Bool {
+        guard case .storageExhausted = stateWritePolicy else {
+            return stateWritePolicy.allowsWrites
+        }
+
+        switch stateManager.recoverFromStorageExhaustion() {
+        case .missing:
+            isRestoringState = true
+            projects = []
+            selectedSessionID = nil
+            isRestoringState = false
+        case .loaded(let state):
+            isRestoringState = true
+            projects = state.projects
+            selectedSessionID = state.selectedSessionID
+            isRestoringState = false
+        case .failed:
+            recordFailedWritePolicy()
+            return false
+        }
+
+        didLoadStateSuccessfully = true
+        stateWritePolicy = .allowed
+        rebuildLookupIndexes()
+        recordPersistedSnapshot()
+        notifyChanged()
+        return true
+    }
+
+    private func recordFailedWritePolicy() {
+        stateWritePolicy = stateManager.persistenceHealth == .storageExhausted
+            ? .storageExhausted
+            : .failedWrite
     }
 
     /// Converts the tagged names decoded from old `projects.json` files into current IDs.

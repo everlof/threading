@@ -8,7 +8,7 @@ import Foundation
 ///
 /// The marker is not decoration. `build`, `dist` and `target` are ordinary English words, and
 /// a directory called `target` beside no `Cargo.toml` is somebody's data, not Cargo's cache.
-enum ArtifactKind: String, CaseIterable, Codable {
+enum ArtifactKind: String, CaseIterable, Codable, Sendable {
     case rust
     case node
     case swiftPackage
@@ -217,7 +217,7 @@ struct DerivedDataManifest: Equatable {
 /// directory in a project first, which is far too slow to repeat whenever a page opens. The
 /// record is a claim about the disk at a moment, not the disk itself, so everything that reads
 /// one back re-checks what matters (see `ArtifactScanner.isSafeToRemove`).
-struct ReclaimableArtifact: Identifiable, Equatable, Codable {
+struct ReclaimableArtifact: Identifiable, Equatable, Codable, Sendable {
     let url: URL
     let kind: ArtifactKind
 
@@ -559,11 +559,18 @@ enum ArtifactScanner {
     /// offered that a documented command cannot rebuild.
     @discardableResult
     static func remove(_ artifact: ReclaimableArtifact) -> Bool {
+        removeWithOutcome(artifact) == .removed
+    }
+
+    /// The typed result used by the cleanup coordinator. A refusal means the safety gates no
+    /// longer pass; a failure means the same vetted directory was still eligible but could not
+    /// be removed. Keeping those apart makes the final progress receipt honest.
+    static func removeWithOutcome(_ artifact: ReclaimableArtifact) -> ArtifactRemovalOutcome {
         guard isSafeToRemove(artifact) else {
             ThreadingLogger.storage.error(
                 "Refused to remove \(artifact.url.path, privacy: .private(mask: .hash)): no longer disposable"
             )
-            return false
+            return .refused
         }
 
         do {
@@ -571,12 +578,12 @@ enum ArtifactScanner {
             ThreadingLogger.storage.notice(
                 "Reclaimable artifact removed kind=\(artifact.kind.rawValue, privacy: .public) path=\(artifact.url.path, privacy: .private(mask: .hash)) bytes=\(artifact.byteCount, privacy: .public)"
             )
-            return true
+            return .removed
         } catch {
             ThreadingLogger.storage.error(
                 "Could not remove \(artifact.url.path, privacy: .private(mask: .hash)) — \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            return false
+            return .failed
         }
     }
 
@@ -627,6 +634,12 @@ enum ArtifactScanner {
 
         return (bytes, newest)
     }
+}
+
+enum ArtifactRemovalOutcome: Equatable, Sendable {
+    case removed
+    case refused
+    case failed
 }
 
 // MARK: - Artifact Defaults

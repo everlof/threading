@@ -11,7 +11,7 @@
       "title": "Design-system components",
       "description": "Every interactive Component Gallery story, captured independently so component states remain legible without finding them inside a whole application window.",
       "states": [
-        "Every checked-in gallery story",
+        "Every checked-in gallery story, including operation progress",
         "System light appearance",
         "System dark appearance"
       ],

@@ -14,19 +14,50 @@ final class SQLiteDatabase {
     // MARK: - Types
 
     enum Failure: LocalizedError {
-        case open(String)
-        case statement(String)
-        case step(String)
+        struct Diagnostic {
+            let code: Int32
+            let extendedCode: Int32
+            let message: String
+        }
+
+        case open(Diagnostic)
+        case statement(Diagnostic)
+        case step(Diagnostic)
         case newerSchema(found: Int, supported: Int)
+
+        /// `SQLITE_FULL` is recoverable once space has actually been reclaimed. Keeping the
+        /// native result code is what lets the state layer distinguish that condition from a
+        /// corrupt store, an unsupported schema, or an arbitrary I/O failure.
+        var isStorageExhausted: Bool {
+            guard let diagnostic else { return false }
+            return diagnostic.code == SQLITE_FULL
+                || (diagnostic.extendedCode & 0xff) == SQLITE_FULL
+        }
+
+        private var diagnostic: Diagnostic? {
+            switch self {
+            case .open(let diagnostic), .statement(let diagnostic), .step(let diagnostic):
+                return diagnostic
+            case .newerSchema:
+                return nil
+            }
+        }
 
         var errorDescription: String? {
             switch self {
-            case .open(let message): return "Could not open the database: \(message)"
-            case .statement(let message): return "Could not prepare a statement: \(message)"
-            case .step(let message): return "Database error: \(message)"
+            case .open(let diagnostic):
+                return "Could not open the database: \(diagnostic.message)"
+            case .statement(let diagnostic):
+                return "Could not prepare a statement: \(diagnostic.message)"
+            case .step(let diagnostic):
+                return "Database error: \(diagnostic.message)"
             case .newerSchema(let found, let supported):
                 return "Database schema \(found) is newer than supported schema \(supported)"
             }
+        }
+
+        static func syntheticStep(_ message: String) -> Failure {
+            .step(Diagnostic(code: SQLITE_ERROR, extendedCode: SQLITE_ERROR, message: message))
         }
     }
 
@@ -43,10 +74,16 @@ final class SQLiteDatabase {
         var handle: OpaquePointer?
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
 
-        guard sqlite3_open_v2(path, &handle, flags, nil) == SQLITE_OK, let handle else {
+        let result = sqlite3_open_v2(path, &handle, flags, nil)
+        guard result == SQLITE_OK, let handle else {
             let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown error"
+            let diagnostic = Failure.Diagnostic(
+                code: handle.map(sqlite3_errcode) ?? result,
+                extendedCode: handle.map(sqlite3_extended_errcode) ?? result,
+                message: message
+            )
             sqlite3_close_v2(handle)
-            throw Failure.open(message)
+            throw Failure.open(diagnostic)
         }
         self.handle = handle
 
@@ -92,17 +129,20 @@ final class SQLiteDatabase {
     /// Runs statements that return nothing.
     func execute(_ sql: String) throws {
         var error: UnsafeMutablePointer<CChar>?
-        guard sqlite3_exec(handle, sql, nil, nil, &error) == SQLITE_OK else {
+        let result = sqlite3_exec(handle, sql, nil, nil, &error)
+        guard result == SQLITE_OK else {
             let message = error.map { String(cString: $0) } ?? "unknown error"
+            let diagnostic = failureDiagnostic(result: result, message: message)
             sqlite3_free(error)
-            throw Failure.step(message)
+            throw Failure.step(diagnostic)
         }
     }
 
     func prepare(_ sql: String) throws -> Statement {
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-            throw Failure.statement(lastErrorMessage)
+        let result = sqlite3_prepare_v2(handle, sql, -1, &statement, nil)
+        guard result == SQLITE_OK, let statement else {
+            throw Failure.statement(failureDiagnostic(result: result, message: lastErrorMessage))
         }
         return Statement(statement, transient: Self.transient)
     }
@@ -150,6 +190,14 @@ final class SQLiteDatabase {
 
     var lastErrorMessage: String {
         handle.map { String(cString: sqlite3_errmsg($0)) } ?? "no database"
+    }
+
+    private func failureDiagnostic(result: Int32, message: String) -> Failure.Diagnostic {
+        Failure.Diagnostic(
+            code: handle.map(sqlite3_errcode) ?? result,
+            extendedCode: handle.map(sqlite3_extended_errcode) ?? result,
+            message: message
+        )
     }
 
     /// Releases the native connection exactly once. The app normally keeps one connection for
@@ -274,10 +322,18 @@ final class SQLiteDatabase {
         @discardableResult
         func step() throws -> Bool {
             let handle = activeHandle
-            switch sqlite3_step(handle) {
+            let result = sqlite3_step(handle)
+            switch result {
             case SQLITE_ROW: return true
             case SQLITE_DONE: return false
-            default: throw Failure.step(String(cString: sqlite3_errmsg(sqlite3_db_handle(handle))))
+            default:
+                let database = sqlite3_db_handle(handle)
+                throw Failure.step(Failure.Diagnostic(
+                    code: database.map(sqlite3_errcode) ?? result,
+                    extendedCode: database.map(sqlite3_extended_errcode) ?? result,
+                    message: database.map { String(cString: sqlite3_errmsg($0)) }
+                        ?? "unknown error"
+                ))
             }
         }
 
