@@ -1055,6 +1055,54 @@
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dess utcheckning har inte längre en fjärr som stöds för pull requests." } } }
     },
+    "Isolated worktree": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Isolerat worktree" } } }
+    },
+    "merges into %@": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "slås ihop med %@" } } }
+    },
+    "stays for review": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "behålls för granskning" } } }
+    },
+    "opens a draft change request": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "öppnar ett utkast till ändringsbegäran" } } }
+    },
+    "opens a change request": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "öppnar en ändringsbegäran" } } }
+    },
+    "Merged into %@": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sammanslagen med %@" } } }
+    },
+    "worktree removed": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "worktree borttaget" } } }
+    },
+    "Worktree kept": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Worktree behållet" } } }
+    },
+    "not merged into %@": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "inte sammanslagen med %@" } } }
+    },
+    "Published as #%lld": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Publicerad som #%lld" } } }
+    },
+    "Published for review": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Publicerad för granskning" } } }
+    },
+    "Needs attention": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Behöver ses över" } } }
+    },
     "Managed workspace needs attention": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den hanterade arbetsytan behöver ses över" } } }

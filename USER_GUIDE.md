@@ -2937,6 +2937,21 @@ the Review tab uses. A clean checkout shows just the branch; a project that is n
 shows no Git rows at all. The opaque themed surface and its shadow keep the card distinct from
 the terminal or conversation it covers.
 
+**A chat running in an isolated managed worktree says so on the card's top line**, above the
+branch, together with what happens to that checkout: `Isolated worktree · merges into master`,
+`· stays for review`, or `· opens a change request` when the draft asked for one. Present tense
+means it has not happened yet. Once it has, the line becomes the outcome: `Merged into master ·
+worktree removed`, `Worktree kept · not merged into master`, or `Published as #42 · worktree
+removed`. If Threading refused to finish — the checkout was dirty, the branch moved, the merge
+would not fast-forward — the line reads `Needs attention` followed by the reason, which is the
+same reason the toast gave and stays readable long after the toast has gone. Hover the row for
+the whole sentence when it is too long for the card.
+
+This is the only place the isolation is visible while you work. A managed checkout has a detached
+`HEAD`, so it has no branch for the line below to name, and the row that would otherwise say which
+checkout the pane is in is simply absent. Ordinary chats, which run in the project's own folder,
+show no such row.
+
 When the branch has a connected GitHub pull request or GitLab merge request, the card adds its
 number, title and current checks summary. Either row opens Git Review. It also shows the three
 most recent session attachments below a separator; click one to open it in Attachments, or use

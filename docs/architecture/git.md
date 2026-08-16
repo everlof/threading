@@ -587,6 +587,11 @@ joins the card and opens the Subagents display-pane tab. It remains visible even
 no Git sentence to show, making the surface a session status card rather than forcing child
 navigation back into the conversation.
 
+A session running in an isolated managed worktree adds one row **above** the branch, read from its
+stored record rather than from the checkout. That row is the case the monitor cannot serve at all:
+a managed worktree's `HEAD` is detached, so there is no branch to name and the card would otherwise
+open on its counters. See [managed-workspaces.md](managed-workspaces.md#where-the-state-is-visible).
+
 **The terminal owns the ground around the card; the active app theme owns the card itself.** It
 is an opaque rectangular interpretation of `AppTheme.Material.PopoverStyle`, resolved by
 `ThemedFloatingSurfaceChrome`: the same surface role, edge or bevel, depth, density, and semantic

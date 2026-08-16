@@ -1420,7 +1420,10 @@ final class ThemedIndicatorsTests: XCTestCase {
         let cards: [(String, @MainActor (GitStatusOverlayView) -> Void)] = [
             ("branch", { $0.update(with: .init(branch: "master", summary: .clean)) }),
             ("agent", { $0.updateModel(.init(name: "Opus 5")) }),
-            ("children", { $0.updateSubagents(workingCount: 0, doneCount: 9) })
+            ("children", { $0.updateSubagents(workingCount: 0, doneCount: 9) }),
+            ("workspace", { [self] in
+                $0.updateWorkspace(.init(workspace: managedWorkspace(state: .active)))
+            })
         ]
         for (name, state) in cards {
             let card = GitStatusOverlayView()
@@ -1491,6 +1494,301 @@ final class ThemedIndicatorsTests: XCTestCase {
 
         card.updateSubagents(workingCount: 0, doneCount: 0)
         XCTAssertTrue(card.isHidden)
+    }
+
+    // MARK: - The Card's Isolated Worktree
+
+    /// One managed workspace record, with only the fields this row reads varied.
+    private func managedWorkspace(
+        state: ManagedWorkspaceState,
+        delivery: ManagedWorkspaceDelivery = .mergeAndCleanUp,
+        publication: ManagedWorkspacePublication? = nil,
+        changeRequest: ManagedWorkspaceChangeRequest? = nil,
+        lastError: String? = nil
+    ) -> ManagedWorkspace {
+        ManagedWorkspace(
+            repositoryRoot: "/tmp/source",
+            sourceCheckoutPath: "/tmp/source",
+            worktreeRoot: "/tmp/managed/session",
+            executionPath: "/tmp/managed/session",
+            targetBranch: "master",
+            baseCommit: "0000000",
+            delivery: delivery,
+            publication: publication,
+            remoteBranch: nil,
+            finalCommit: nil,
+            changeRequest: changeRequest,
+            remoteBranchState: nil,
+            state: state,
+            lastError: lastError
+        )
+    }
+
+    /// A managed session works in a directory nobody opened, under a name nobody chose, and this
+    /// card said nothing about it: `HEAD` is detached in a managed worktree, so the branch row
+    /// cannot appear at all and the card opened on its counters.
+    ///
+    /// The row states both halves, because the state alone leaves the question it exists to
+    /// answer. Where the commits end up was decided once, in a composer closed an hour ago, and
+    /// the person now watching an agent commit into a checkout they cannot see is the one who
+    /// needs it back.
+    func testTheCardSaysWhatTheIsolatedWorktreeIsAndWhereItsWorkLands() {
+        let card = GitStatusOverlayView()
+        card.applyInk(WindowBackdrop.ink)
+
+        XCTAssertTrue(card.isHidden, "an ordinary session has no workspace row to show")
+
+        let cases: [(ManagedWorkspace, String)] = [
+            (
+                managedWorkspace(state: .active),
+                "Isolated worktree · merges into master"
+            ),
+            (
+                managedWorkspace(state: .active, delivery: .keepForReview),
+                "Isolated worktree · stays for review"
+            ),
+            (
+                // Publication outranks delivery while the session is running, because the finish
+                // handshake takes them in that order: a published workspace never reaches the
+                // local merge path at all.
+                managedWorkspace(state: .active, publication: .draft),
+                "Isolated worktree · opens a draft change request"
+            ),
+            (
+                managedWorkspace(state: .active, publication: .ready),
+                "Isolated worktree · opens a change request"
+            ),
+            (
+                managedWorkspace(state: .integrated),
+                "Merged into master · worktree removed"
+            ),
+            (
+                managedWorkspace(state: .kept, delivery: .keepForReview),
+                "Worktree kept · not merged into master"
+            ),
+            (
+                managedWorkspace(
+                    state: .published,
+                    publication: .draft,
+                    changeRequest: ManagedWorkspaceChangeRequest(
+                        provider: "github",
+                        repository: "everlof/threading",
+                        remote: "origin",
+                        branch: "threading/session",
+                        number: 42,
+                        url: URL(fileURLWithPath: "/tmp/review"),
+                        isDraft: true
+                    )
+                ),
+                "Published as #42 · worktree removed"
+            ),
+            (
+                managedWorkspace(
+                    state: .needsAttention,
+                    lastError: "The managed checkout has uncommitted changes."
+                ),
+                // Passed through rather than reworded: the toast carrying this was gone seconds
+                // after the finish was refused, and this row is what is left saying what to fix.
+                "Needs attention · The managed checkout has uncommitted changes."
+            )
+        ]
+
+        for (workspace, expected) in cases {
+            card.updateWorkspace(.init(workspace: workspace))
+            XCTAssertFalse(card.isHidden, "an isolated checkout is worth the card on its own")
+            XCTAssertEqual(card.accessibilityLabel(), expected)
+            // A card capped at 360 points cannot draw a refusal's reason in full, so the row that
+            // truncates carries the whole sentence for the pointer.
+            let rows = descendants(of: card).compactMap { $0 as? NSStackView }
+            XCTAssertTrue(
+                rows.contains { $0.toolTip == expected },
+                "the workspace row's hover does not carry \(expected)"
+            )
+        }
+
+        card.updateWorkspace(nil)
+        XCTAssertTrue(card.isHidden, "the row outlived the workspace it was describing")
+    }
+
+    /// The row leads the card, and keeps leading it once the other rows arrive.
+    ///
+    /// Order is the argument: it names the *checkout* every row under it is about. It is also the
+    /// row that has to survive a card whose branch line is structurally absent, which is every
+    /// managed session — so it is asserted against a reading with no branch, exactly as one
+    /// arrives from a detached head.
+    func testTheIsolatedWorktreeRowLeadsTheCard() throws {
+        let card = GitStatusOverlayView()
+        card.updateWorkspace(.init(workspace: managedWorkspace(state: .active)))
+        card.update(with: GitChangeMonitor.Reading(
+            branch: nil,
+            summary: GitChangeSummary(files: 2, added: 35, removed: 1)
+        ))
+        card.updateModel(GitStatusOverlayView.ModelReading(name: "Opus 5"))
+        card.applyInk(WindowBackdrop.ink)
+        card.frame = NSRect(origin: .zero, size: card.fittingSize)
+        card.layoutSubtreeIfNeeded()
+
+        let rows = descendants(of: card)
+            .compactMap { $0 as? NSTextField }
+            .filter { !$0.isHiddenOrHasHiddenAncestor }
+            .sorted { card.convert($0.bounds, from: $0).maxY > card.convert($1.bounds, from: $1).maxY }
+            .map(\.stringValue)
+        XCTAssertEqual(
+            rows.first,
+            "Isolated worktree · merges into master",
+            "the card led with \(rows.first ?? "nothing") rather than the checkout it runs in"
+        )
+
+        // Spoken in the same order the rows are stacked, the workspace first.
+        XCTAssertEqual(
+            card.accessibilityLabel(),
+            "Isolated worktree · merges into master  ·  2 files +35 −1  ·  Opus 5"
+        )
+
+        // The mark shares the one column every other row's mark is in.
+        let marks = descendants(of: card)
+            .compactMap { $0 as? ThemedFloatingGlyphView }
+            .filter { !$0.isHiddenOrHasHiddenAncestor }
+        XCTAssertEqual(
+            Set(marks.compactMap(\.semanticDescription)),
+            ["Isolated worktree", "Changes", "Model"]
+        )
+        let columns = marks.map { card.convert($0.bounds, from: $0).minX }
+        for column in columns {
+            XCTAssertEqual(column, columns[0], accuracy: 0.5,
+                           "a row's mark sits outside the column the others share: \(columns)")
+        }
+
+        // A theme change rebuilds every row from the readings the card is holding. The workspace
+        // row is one of those readings and must come back with the rest.
+        AppThemePalette.set(AppThemeStyles.swissMinimalist)
+        card.applyInk(WindowBackdrop.ink)
+        card.layoutSubtreeIfNeeded()
+        XCTAssertTrue(
+            descendants(of: card).compactMap { ($0 as? NSTextField)?.stringValue }.contains(
+                "Isolated worktree · merges into master"
+            ),
+            "the workspace row did not survive a theme change"
+        )
+    }
+
+    /// The row's two halves are weighted like the agent line's: what the workspace *is* leads in
+    /// the ink the branch row uses, and what happens to it follows one tier quieter. A refused
+    /// finish is the exception — it takes the loudest role the card has, because it is the one
+    /// state here that is not simply how things are going.
+    func testARefusedFinishIsTheLoudestThingOnTheCard() throws {
+        let card = GitStatusOverlayView()
+        card.applyInk(WindowBackdrop.ink)
+
+        func leadingColour() throws -> NSColor {
+            let label = try XCTUnwrap(
+                descendants(of: card)
+                    .compactMap { $0 as? NSTextField }
+                    .first { !$0.isHiddenOrHasHiddenAncestor }
+            )
+            return try XCTUnwrap(
+                label.attributedStringValue
+                    .attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+            )
+        }
+
+        card.updateWorkspace(.init(workspace: managedWorkspace(state: .active)))
+        let running = try leadingColour()
+
+        card.updateWorkspace(.init(
+            workspace: managedWorkspace(state: .needsAttention, lastError: "Refused")
+        ))
+        let refused = try leadingColour()
+
+        // The card resolves its own floating chrome rather than taking the backdrop's ink: it is
+        // an opaque app-owned surface over whatever the terminal is painting.
+        XCTAssertNotEqual(running, refused, "a refused finish reads exactly like an ordinary one")
+        XCTAssertEqual(refused, Design.Ink.chrome.label)
+        XCTAssertEqual(running, Design.Ink.chrome.secondary)
+    }
+
+    /// The picture, because this row's whole purpose is to be read at a glance over live terminal
+    /// text — and because the states differ by a sentence rather than by a shape, which is
+    /// exactly the kind of difference an assertion can pass while the card reads as a wall.
+    func testRendersTheIsolatedWorktreeCard() throws {
+        let directory: URL = {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+                return URL(fileURLWithPath: override)
+            }
+            return URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("ThreadingRenders", isDirectory: true)
+        }()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let states: [ManagedWorkspace] = [
+            managedWorkspace(state: .active),
+            managedWorkspace(state: .active, publication: .draft),
+            managedWorkspace(state: .integrated),
+            managedWorkspace(
+                state: .needsAttention,
+                lastError: "The managed checkout has uncommitted changes."
+            )
+        ]
+
+        var written = 0
+        // The third pass is a period theme, because the mark this row introduced has to be drawn
+        // twice: SF Symbols for modern chrome, and a one-bit box for the themes that select the
+        // classic glyph family. Only the second is hand-drawn, so only the second can be wrong in
+        // a way no assertion is watching.
+        for (appearanceName, appearanceID, theme) in [
+            ("light", NSAppearance.Name.aqua, AppTheme.system),
+            ("dark", NSAppearance.Name.darkAqua, AppTheme.system),
+            ("classic", NSAppearance.Name.aqua, AppThemeStyles.win98)
+        ] {
+            AppThemePalette.set(theme)
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceID))
+            var data: Data?
+
+            appearance.performAsCurrentDrawingAppearance {
+                MainActor.assumeIsolated {
+                    let inset = Design.Spacing.medium
+                    let host = NSView(frame: .zero)
+                    host.appearance = appearance
+                    host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+
+                    var y = inset
+                    var width: CGFloat = 0
+                    for workspace in states.reversed() {
+                        let card = GitStatusOverlayView()
+                        card.updateWorkspace(.init(workspace: workspace))
+                        // The rows a managed session actually shows beside it: no branch, because
+                        // its head is detached, and the agent line its terminal does not carry.
+                        card.update(with: GitChangeMonitor.Reading(
+                            branch: nil,
+                            summary: GitChangeSummary(files: 3, added: 128, removed: 12)
+                        ))
+                        card.updateModel(.init(name: "Opus 5", effort: "Extra High"))
+                        card.applyInk(WindowBackdrop.ink)
+                        let size = card.fittingSize
+                        card.frame = NSRect(x: inset, y: y, width: size.width, height: size.height)
+                        host.addSubview(card)
+                        y += size.height + inset
+                        width = max(width, size.width)
+                    }
+                    host.frame = NSRect(x: 0, y: 0, width: width + inset * 2, height: y)
+
+                    host.layoutSubtreeIfNeeded()
+                    guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+                        return
+                    }
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    data = rep.representation(using: .png, properties: [:])
+                }
+            }
+
+            try XCTUnwrap(data).write(
+                to: directory.appendingPathComponent("managed-worktree-card-\(appearanceName).png")
+            )
+            written += 1
+        }
+
+        XCTAssertEqual(written, 3)
+        print("Rendered the isolated worktree card to \(directory.path)")
     }
 
     // MARK: - The Card's Agent Line
@@ -1805,11 +2103,11 @@ final class ThemedIndicatorsTests: XCTestCase {
 
         let painted = try XCTUnwrap(NSColor(cgColor: fill)?.usingColorSpace(.sRGB))
         XCTAssertEqual(painted.hexString, "#FFFFE1")
-        // Branch, changes, model, speed — the card's whole semantic set, held whether or not the
-        // reading it was given draws each one.
+        // Workspace, branch, changes, model, speed — the card's whole semantic set, held whether
+        // or not the reading it was given draws each one.
         XCTAssertEqual(
             descendants(of: card).compactMap { $0 as? ThemedFloatingGlyphView }.count,
-            4,
+            5,
             "the themed card lost one of its semantic marks"
         )
     }
@@ -1879,10 +2177,13 @@ final class ThemedIndicatorsTests: XCTestCase {
         card.applyInk(WindowBackdrop.ink)
         host.layoutSubtreeIfNeeded()
 
-        // The card stacks one fact per row, so the pair being measured is the top row's — the
-        // counters are a line of their own below it.
+        // The card stacks one fact per row, so the pair being measured is the top *drawn* row's —
+        // the counters are a line of their own below it, and the rows this reading has nothing to
+        // say for (the isolated-worktree line above) are in the stack but hidden.
         let content = try XCTUnwrap(card.subviews.compactMap { $0 as? NSStackView }.first)
-        let summary = try XCTUnwrap(content.arrangedSubviews.compactMap { $0 as? NSStackView }.first)
+        let summary = try XCTUnwrap(
+            content.arrangedSubviews.compactMap { $0 as? NSStackView }.first { !$0.isHidden }
+        )
         let mark = try XCTUnwrap(
             summary.arrangedSubviews.compactMap { $0 as? ThemedFloatingGlyphView }.first
         )

@@ -159,6 +159,27 @@ final class ManagedWorkspaceLifecycleE2ETests: HostedStoreTestCase {
         container.view.layoutSubtreeIfNeeded()
         container.show(sessionID: session.id)
 
+        // The pane says which checkout it is working in and where that work is going to land.
+        // Asserted here rather than only against the card in isolation, because the row's whole
+        // reason to exist is that it cannot come from Git: `HEAD` is detached in a managed
+        // worktree, so the branch line is structurally absent and a card fed only by the checkout
+        // had nothing at all to say about the session on screen.
+        func firstDescendant(of view: NSView, identifier: String) -> NSView? {
+            if view.accessibilityIdentifier() == identifier { return view }
+            return view.subviews.lazy.compactMap { firstDescendant(of: $0, identifier: identifier) }
+                .first
+        }
+        let statusCard = try XCTUnwrap(
+            firstDescendant(of: container.view, identifier: "git.status.overlay"),
+            "the pane has no status card to report the managed checkout on"
+        )
+        XCTAssertTrue(
+            statusCard.accessibilityLabel()?.hasPrefix(
+                "Isolated worktree · merges into \(workspace.targetBranch)"
+            ) ?? false,
+            "the card said \(statusCard.accessibilityLabel() ?? "nothing") about a managed session"
+        )
+
         XCTAssertTrue(
             waitForMainRunLoop(timeout: 10) {
                 store.session(withID: session.id)?.isArchived == true

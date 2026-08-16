@@ -282,6 +282,10 @@ final class TerminalContainerViewController: NSViewController {
         // file having grown and answer off the main thread.
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
             self?.refreshGitStatusOverlayModel()
+            // The workspace row rides the same event because every managed state change is a
+            // store write: provisioning, the finish handshake's merge, a refusal. There is no
+            // separate notification to observe, and this read is one dictionary lookup.
+            self?.refreshGitStatusOverlayWorkspace()
             self?.refreshScheduledStateIfShowing()
         }
         appEvents.observe(ScheduledMessagesDidChange.self) { [weak self] _ in
@@ -1829,6 +1833,7 @@ private extension TerminalContainerViewController {
         gitStatusOverlay.showSession(currentSessionID?.uuidString.lowercased())
         refreshGitStatusOverlaySubagents()
         refreshGitStatusOverlayModel()
+        refreshGitStatusOverlayWorkspace()
         refreshGitStatusOverlayAudience()
         refreshGitStatusOverlayAttachments()
 
@@ -1898,6 +1903,23 @@ private extension TerminalContainerViewController {
             isActive: currentConversation?.isTurnInFlight ?? false,
             progress: currentConversation?.runProgress
         )
+    }
+
+    /// Says that the chat on screen is working inside an isolated checkout Threading made for it,
+    /// and what happens to that checkout when the agent says it is done.
+    ///
+    /// Read from the session record rather than from the directory: the states this row reports
+    /// are Threading's own, and the one thing Git could contribute — a detached `HEAD` — is
+    /// exactly why the card had nothing to say about a managed session before. See
+    /// `GitStatusOverlayView.WorkspaceReading`.
+    func refreshGitStatusOverlayWorkspace() {
+        guard let sessionID = currentSessionID,
+              let workspace = ProjectStore.shared.session(withID: sessionID)?.managedWorkspace
+        else {
+            gitStatusOverlay.updateWorkspace(nil)
+            return
+        }
+        gitStatusOverlay.updateWorkspace(.init(workspace: workspace))
     }
 
     /// Says whether anyone outside this Mac can see the chat on screen, and how many are looking.

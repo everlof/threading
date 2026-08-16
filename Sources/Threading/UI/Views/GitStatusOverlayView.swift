@@ -214,6 +214,44 @@ final class GitStatusOverlayView: BackdropOverlay {
         var isEmpty: Bool { name == nil && mode == nil && effort == nil && !isFast }
     }
 
+    /// What the card says about the isolated worktree a session was given, when it was given one.
+    ///
+    /// Read from the durable `ManagedWorkspace` record rather than from Git, because the five
+    /// states are Threading's own decisions and no Git command reports them: a detached checkout
+    /// on disk cannot say whether it is going to be merged, kept, or published. The one thing Git
+    /// *would* answer — that `HEAD` is detached — is the thing that made this session invisible
+    /// here in the first place: `GitInfo.currentBranch` returns nil in a managed worktree, so the
+    /// branch row goes away and the card said nothing about the checkout at all.
+    ///
+    /// Nil for every ordinary session, and therefore no row: the overwhelming majority of chats
+    /// run in the project's own directory, and a row saying so would be a line spent on the
+    /// default.
+    struct WorkspaceReading: Equatable {
+        let state: ManagedWorkspaceState
+        /// The checkout the work came from and, for a local delivery, returns to.
+        let targetBranch: String
+        let delivery: ManagedWorkspaceDelivery
+        let publication: ManagedWorkspacePublication?
+        /// The review this workspace already has, once publication has produced one.
+        let changeRequestNumber: Int?
+
+        /// Why a finish was refused, carried verbatim.
+        ///
+        /// It is already a sentence written for a person, and this row is where it stays visible:
+        /// the refusal's toast is gone within seconds, and the session it belongs to is still on
+        /// screen with a worktree that has not been merged.
+        let failureReason: String?
+
+        init(workspace: ManagedWorkspace) {
+            state = workspace.state
+            targetBranch = workspace.targetBranch
+            delivery = workspace.delivery
+            publication = workspace.publication
+            changeRequestNumber = workspace.changeRequest?.number
+            failureReason = workspace.lastError
+        }
+    }
+
     /// The provider-neutral remote review facts this compact surface can say without becoming
     /// Git Review itself. The complete workflow and all write actions remain in that pane.
     struct ChangeRequestReading: Equatable {
@@ -280,9 +318,12 @@ final class GitStatusOverlayView: BackdropOverlay {
         var isEmpty: Bool { following == 0 && !isShared && focusedControllerName == nil }
     }
 
-    /// The card's rows, top down: the summary line, the counters line, the agent line, the
-    /// children line.
+    /// The card's rows, top down: the workspace line, the summary line, the counters line, the
+    /// agent line, the children line.
     private let content = NSStackView()
+    /// The isolated-checkout line: which state this session's managed worktree is in, and what
+    /// Threading will do with it. Absent for every session running in its project's own folder.
+    private let workspaceRow = NSStackView()
     /// The first row — the mark and whichever sentence leads: branch, plan position, or, on a
     /// detached head, the counters themselves.
     private let summaryRow = NSStackView()
@@ -311,6 +352,14 @@ final class GitStatusOverlayView: BackdropOverlay {
         pointSize: GitStatusOverlayDefaults.markPointSize,
         accessibilityDescription: L10n.string("Model")
     )
+    /// A sealed box rather than a second branch mark: this row is about a *place* Threading made
+    /// and will take away again, and the row under it is the branch that place came from.
+    private let workspaceMark = ThemedFloatingGlyphView(
+        systemSymbolName: "shippingbox",
+        classicGlyph: .workspace,
+        pointSize: GitStatusOverlayDefaults.markPointSize,
+        accessibilityDescription: L10n.string("Isolated worktree")
+    )
     /// Fast mode, drawn rather than spelled: a bolt after the agent line's words is what the
     /// state *looks* like everywhere else in the app, and the word "Fast" spent a sixth of a
     /// capped row saying what the symbol says at a glance. It is the same `bolt.fill` the
@@ -332,6 +381,7 @@ final class GitStatusOverlayView: BackdropOverlay {
     private let checksButton: ThemedButton
     private let attachmentButtons: [ThemedButton]
     private let viewAllAttachmentsButton: ThemedButton
+    private var workspaceLabel: NSTextField?
     private var summaryLabel: NSTextField?
     private var filesLabel: NSTextField?
     private var countersLabel: NSTextField?
@@ -396,6 +446,7 @@ final class GitStatusOverlayView: BackdropOverlay {
     private var runProgress: RunProgress?
     private var subagentCounts = (working: 0, done: 0)
     private var modelReading: ModelReading?
+    private var workspaceReading: WorkspaceReading?
     private var audienceReading = AudienceReading()
     private var changeRequestReading: ChangeRequestReading?
     private var attachmentReading = AttachmentReading(attachments: [])
@@ -530,6 +581,19 @@ final class GitStatusOverlayView: BackdropOverlay {
             classicGlyph: .model,
             description: L10n.string("Model")
         )
+        configureMark(
+            workspaceMark,
+            symbol: "shippingbox",
+            classicGlyph: .workspace,
+            description: L10n.string("Isolated worktree")
+        )
+
+        workspaceRow.orientation = .horizontal
+        workspaceRow.alignment = .centerY
+        workspaceRow.spacing = GitStatusOverlayDefaults.markGap
+        workspaceRow.translatesAutoresizingMaskIntoConstraints = false
+        workspaceRow.isHidden = true
+        workspaceRow.addArrangedSubview(workspaceMark)
 
         summaryRow.orientation = .horizontal
         summaryRow.alignment = .centerY
@@ -581,6 +645,10 @@ final class GitStatusOverlayView: BackdropOverlay {
         content.spacing = GitStatusOverlayDefaults.rowGap
         content.alphaValue = GitStatusOverlayDefaults.restingContentAlpha
         content.translatesAutoresizingMaskIntoConstraints = false
+        // Above the branch, because it says which *checkout* every row below it is about — and
+        // because in a managed worktree the branch row is the one row that cannot appear: a
+        // detached head has no branch to name, so without this the card opened on its counters.
+        content.addArrangedSubview(workspaceRow)
         content.addArrangedSubview(summaryRow)
         content.addArrangedSubview(countersRow)
         // Under the checkout, over the children: the rows read outward from what this pane *is* —
@@ -717,7 +785,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         // keeps every row's *frame* at the content edge, so the button never has to hang
         // outside its parent to line up, which would leave its leading edge unclickable.
         let markInset = subagentsButton.opticalHorizontalInset
-        for row in [summaryRow, countersRow, modelRow] {
+        for row in [workspaceRow, summaryRow, countersRow, modelRow] {
             row.edgeInsets = NSEdgeInsets(top: 0, left: markInset, bottom: 0, right: markInset)
         }
         contentTopConstraint = contentTop
@@ -771,6 +839,20 @@ final class GitStatusOverlayView: BackdropOverlay {
             collapsedBottom
         ])
         NSLayoutConstraint.activate(Array(rowHeightConstraints.dropFirst(4)))
+
+        // The one row whose sentence is routinely longer than the card is wide, held to the
+        // column rather than allowed to overflow it.
+        //
+        // An inequality, and required, because both halves matter: under the cap the row is its
+        // own width and the card grows to fit it, exactly like every other row; at the cap the
+        // constraint outranks the label's compression resistance, so the words give way and
+        // truncate instead of being cut off by the card's bounds mid-glyph. Lowering the label's
+        // resistance instead looked like the same fix and was not — nothing then pushed the card
+        // out to its ceiling at all, so a sentence that would have fitted in 360 points was
+        // shortened to 320.
+        workspaceRow.widthAnchor.constraint(
+            lessThanOrEqualTo: content.widthAnchor
+        ).isActive = true
 
         // A menu cell is the column, not the words inside it. `NSStackView`'s width alignment
         // equalises intrinsic widths; it does not promise to consume the stack's externally
@@ -832,10 +914,13 @@ final class GitStatusOverlayView: BackdropOverlay {
         surfaceFill = chrome.fill
         chrome.apply(to: self)
 
-        for mark in [glyph, countersMark, modelMark, speedMark] {
+        for mark in [glyph, countersMark, modelMark, speedMark, workspaceMark] {
             mark.setPointSize(GitStatusOverlayDefaults.markPointSize)
         }
         glyph.tintColor = surfaceInk.secondary
+        // The same weight as the branch mark under it: both name the place this pane is working
+        // in, and one of the two is always the leading row.
+        workspaceMark.tintColor = surfaceInk.secondary
         countersMark.tintColor = surfaceInk.tertiary
         modelMark.tintColor = surfaceInk.tertiary
         // Tertiary with the row's other qualifiers: the bolt stands for a word that was set in
@@ -904,6 +989,14 @@ final class GitStatusOverlayView: BackdropOverlay {
         rebuild()
     }
 
+    /// States that this session runs in an isolated worktree, which state that worktree is in,
+    /// and what happens to it next. Nil for a session running in its project's own folder.
+    func updateWorkspace(_ reading: WorkspaceReading?) {
+        guard reading != workspaceReading else { return }
+        workspaceReading = reading
+        rebuild()
+    }
+
     /// States who can see this chat from outside this Mac, and how many are looking now.
     func updateAudience(_ reading: AudienceReading) {
         guard reading != audienceReading else { return }
@@ -933,6 +1026,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         runProgress = nil
         subagentCounts = (working: 0, done: 0)
         modelReading = nil
+        workspaceReading = nil
         audienceReading = AudienceReading()
         changeRequestReading = nil
         attachmentReading = AttachmentReading(attachments: [])
@@ -945,6 +1039,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         attachmentButtons.forEach { $0.isHidden = true }
         viewAllAttachmentsButton.isHidden = true
         modelRow.isHidden = true
+        workspaceRow.isHidden = true
         speedMark.isHidden = true
         hasContent = false
         applyVisibility(animated: false)
@@ -1071,6 +1166,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         let counters = Self.countersText(for: lastReading, ink: surfaceInk, diff: diff)
 
         let model = Self.modelText(for: modelReading, ink: surfaceInk)
+        let workspace = Self.workspaceText(for: workspaceReading, ink: surfaceInk)
         // The bolt is a row of its own right, not decoration on the words: a session whose only
         // agent fact is its speed still gets the agent line, the same way one with only a posture
         // does.
@@ -1082,9 +1178,9 @@ final class GitStatusOverlayView: BackdropOverlay {
         let hasChangeRequest = changeRequestReading != nil
         let hasAttachments = !attachmentReading.isEmpty
         let hasNativeReading = hasGitReceipt || hasSubagents || hasAudience || hasChangeRequest
-            || model != nil || isFast
+            || model != nil || isFast || workspace != nil
         guard hasGitReceipt || hasSubagents || hasAudience || hasChangeRequest
-            || hasAttachments || model != nil || isFast else {
+            || hasAttachments || model != nil || isFast || workspace != nil else {
             hasContent = false
             applyVisibility(animated: false)
             return
@@ -1092,13 +1188,24 @@ final class GitStatusOverlayView: BackdropOverlay {
 
         // Rebuilt rather than reassigned: a label measures itself at creation, and the helper
         // exists precisely because assigning attributed text afterwards does not re-measure.
-        for view in [summaryLabel, filesLabel, countersLabel, modelLabel] {
+        for view in [workspaceLabel, summaryLabel, filesLabel, countersLabel, modelLabel] {
             view?.removeFromSuperview()
         }
+        workspaceLabel = nil
         summaryLabel = nil
         filesLabel = nil
         countersLabel = nil
         modelLabel = nil
+
+        if let workspace {
+            let label = NSTextField.label(attributed: workspace)
+            workspaceLabel = label
+            workspaceRow.addArrangedSubview(label)
+        }
+        // The row is the only surface still carrying a refused finish once its toast has gone, and
+        // a refusal's reason is a sentence rather than a phrase — so it is also the row most
+        // likely to be reading half of itself. The pointer gets the whole thing.
+        workspaceRow.toolTip = Self.spokenWorkspaceText(for: workspaceReading)
 
         if let head {
             let label = NSTextField.label(attributed: head)
@@ -1142,6 +1249,7 @@ final class GitStatusOverlayView: BackdropOverlay {
             modelRow.insertArrangedSubview(label, at: 1)
         }
 
+        workspaceRow.isHidden = workspace == nil
         summaryRow.isHidden = head == nil
         countersRow.isHidden = counters == nil
         modelRow.isHidden = model == nil && !isFast
@@ -1161,7 +1269,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         // the padding back and the ink lands on the same rhythm as every other row's. Two of
         // them meeting give it back twice, once for each.
         let childrenInset = childrenRowInset
-        let textRows = [summaryRow, countersRow, modelRow].filter { !$0.isHidden }
+        let textRows = [workspaceRow, summaryRow, countersRow, modelRow].filter { !$0.isHidden }
         let nativeButtonRows = [
             changeRequestButton,
             checksButton,
@@ -1284,12 +1392,16 @@ final class GitStatusOverlayView: BackdropOverlay {
                 for: lastReading,
                 isRunActive: isRunActive,
                 progress: runProgress,
-                model: modelReading
+                model: modelReading,
+                workspace: workspaceReading
             ))
             toolTip = L10n.string("Open Git Review (⇧⌘R)")
         } else {
             setAccessibilityRole(.group)
             var parts: [String] = []
+            if let spoken = Self.spokenWorkspaceText(for: workspaceReading) {
+                parts.append(spoken)
+            }
             if hasSubagents {
                 parts.append(L10n.format("Subagents: %@", subagentsButton.title))
             }
@@ -1447,6 +1559,118 @@ final class GitStatusOverlayView: BackdropOverlay {
         return text.length == 0 ? nil : text
     }
 
+    /// The isolated-checkout row as two parts: what this worktree **is** right now, and what
+    /// Threading does with it **next**.
+    ///
+    /// Both halves are the point. The state alone leaves the question the row exists to answer —
+    /// a person watching an agent work in a checkout they cannot see wants to know where the
+    /// commits are going to end up, and the answer was chosen once, in a composer they closed an
+    /// hour ago. The transition is therefore stated while it is still pending and replaced by its
+    /// outcome once it has happened, so the row is never a promise about something already done.
+    ///
+    /// **Tense carries the timing, so no words have to.** A pending transition is present simple
+    /// ("merges into master") and a settled one is past ("Merged into master"), which is what let
+    /// "when it finishes" go: the card is 360 points wide at most, and that clause was four words
+    /// spent restating what the two halves already say — it also pushed the commonest state of
+    /// all, an ordinary isolated session, past the ceiling and into an ellipsis.
+    ///
+    /// Publication outranks delivery while active because that is the order the finish handshake
+    /// takes them in: a workspace with a publication never reaches the local delivery path.
+    private static func workspaceWords(
+        for reading: WorkspaceReading
+    ) -> (state: String, next: String?) {
+        switch reading.state {
+        case .active:
+            let next: String
+            switch reading.publication {
+            case .draft:
+                next = L10n.string("opens a draft change request")
+            case .ready:
+                next = L10n.string("opens a change request")
+            case nil:
+                switch reading.delivery {
+                case .mergeAndCleanUp:
+                    next = L10n.format("merges into %@", reading.targetBranch)
+                case .keepForReview:
+                    next = L10n.string("stays for review")
+                }
+            }
+            return (L10n.string("Isolated worktree"), next)
+
+        case .integrated:
+            return (
+                L10n.format("Merged into %@", reading.targetBranch),
+                L10n.string("worktree removed")
+            )
+
+        case .kept:
+            return (
+                L10n.string("Worktree kept"),
+                L10n.format("not merged into %@", reading.targetBranch)
+            )
+
+        case .published:
+            let state = reading.changeRequestNumber
+                .map { L10n.format("Published as #%lld", Int64($0)) }
+                ?? L10n.string("Published for review")
+            return (state, L10n.string("worktree removed"))
+
+        case .needsAttention:
+            // The reason is passed through rather than reworded. It is written for a person, it
+            // is the only thing on screen that says what to repair, and the toast carrying it
+            // was gone seconds after the finish was refused.
+            return (L10n.string("Needs attention"), reading.failureReason)
+        }
+    }
+
+    /// The isolated-checkout row's words: the state leading, then what happens to the worktree.
+    ///
+    /// Nil for an ordinary session, which is what removes the row. The split follows the agent
+    /// line's: the state takes `secondary` and the transition `tertiary`, so one fact reads as a
+    /// fact with a detail rather than two of equal weight. A refused finish is the exception and
+    /// takes `label` — the loudest role the card has, and the one state here that is not simply
+    /// how things are going.
+    private static func workspaceText(
+        for reading: WorkspaceReading?,
+        ink: Design.Ink
+    ) -> NSAttributedString? {
+        guard let reading else { return nil }
+        let font = GitStatusOverlayDefaults.font.resolved()
+        let words = workspaceWords(for: reading)
+        // Truncation lives in the string, not on the cell. A cell asked to draw an *attributed*
+        // value takes its line breaking from that string's paragraph style and ignores its own
+        // `lineBreakMode`, so the row that outgrew the card was cut mid-word with no ellipsis to
+        // say anything had been dropped — while every assertion about its text passed, because
+        // the label's value was the whole sentence the whole time. It is stated on both runs: the
+        // style applies where the layout manager finds it, which is wherever the line ends up
+        // breaking.
+        //
+        // Tail, unlike the branch line's middle: the state leads the row and what happens next
+        // follows it, so the half that must survive a narrow pane is the half at the front.
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let text = NSMutableAttributedString(string: words.state, attributes: [
+            .font: font,
+            .paragraphStyle: paragraph,
+            .foregroundColor: reading.state == .needsAttention ? ink.label : ink.secondary
+        ])
+        if let next = words.next {
+            text.append(NSAttributedString(string: " · \(next)", attributes: [
+                .font: font,
+                .paragraphStyle: paragraph,
+                .foregroundColor: ink.tertiary
+            ]))
+        }
+        return text
+    }
+
+    /// The isolated-checkout row as one spoken phrase, or nil when the card has no such row.
+    private static func spokenWorkspaceText(for reading: WorkspaceReading?) -> String? {
+        guard let reading else { return nil }
+        let words = workspaceWords(for: reading)
+        return [words.state, words.next].compactMap { $0 }.joined(separator: " · ")
+    }
+
     /// The audience row's words.
     ///
     /// A count while somebody is here, because the number is the fact; the bare state otherwise,
@@ -1508,9 +1732,11 @@ final class GitStatusOverlayView: BackdropOverlay {
         for reading: GitChangeMonitor.Reading?,
         isRunActive: Bool,
         progress: RunProgress?,
-        model: ModelReading?
+        model: ModelReading?,
+        workspace: WorkspaceReading?
     ) -> String {
         var parts: [String] = []
+        if let spoken = spokenWorkspaceText(for: workspace) { parts.append(spoken) }
         if isRunActive {
             parts.append(progress?.label ?? "Working…")
         } else if let branch = reading?.branch {

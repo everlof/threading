@@ -17,6 +17,7 @@ final class ThemedFloatingGlyphView: NSView, ThemedComponent {
         case model
         case plan
         case speed
+        case workspace
     }
 
     private var systemSymbolName: String
@@ -204,6 +205,19 @@ final class ThemedFloatingGlyphView: NSView, ThemedComponent {
                 context.move(to: CGPoint(x: rect.minX + box + 2, y: y))
                 context.addLine(to: CGPoint(x: rect.maxX, y: y))
             }
+            context.strokePath()
+
+        case .workspace:
+            // A sealed box: the checkout a session was handed for itself. Stroked like the
+            // folder above, because both marks stand for a place — the lid is what says this
+            // place is a copy set aside rather than the project's own directory.
+            let box = rect.insetBy(dx: 1, dy: 2)
+            context.stroke(box)
+            let lid = box.maxY - box.height * 0.34
+            context.move(to: CGPoint(x: box.minX, y: lid))
+            context.addLine(to: CGPoint(x: box.maxX, y: lid))
+            context.move(to: CGPoint(x: box.midX, y: lid))
+            context.addLine(to: CGPoint(x: box.midX, y: box.maxY))
             context.strokePath()
 
         case .speed:

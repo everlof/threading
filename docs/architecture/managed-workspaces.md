@@ -111,6 +111,36 @@ again when they fire. A schedule must fail visibly if its project, checkout, run
 Threading session tools are no longer available. Falling back to the ordinary project directory
 would silently discard the isolation the user asked for.
 
+## Where the state is visible
+
+The session pane's corner card (`GitStatusOverlayView`) carries one row for the managed checkout,
+above the branch line: what the workspace **is** now, and what happens to it **next**.
+
+The row exists because nothing else could answer that question. A managed worktree has a detached
+`HEAD`, so `GitInfo.currentBranch` returns nil, the card's branch line is structurally absent, and
+until this row the only trace of the isolation anywhere in the app was the checkout directory in
+the agent's own banner and status line. [Naming the checkout](#naming-the-checkout) made that path
+say what the session is about; it still cannot say that the path is temporary, where its commits
+are going, or that a finish was refused. The five states are Threading's decisions rather than repository facts, so the
+row reads the stored `ManagedWorkspace` (`GitStatusOverlayView.WorkspaceReading`) and never shells
+out; it refreshes on `ProjectsDidChange`, which is the event every managed state change already
+produces, because each one is a store write.
+
+Tense carries the timing so no words have to: a pending transition is present simple (`merges into
+master`), a settled one past (`Merged into master · worktree removed`). This matters at 360 points,
+the card's ceiling — spelling the timing out pushed the commonest state of all past it. A refusal
+keeps its recorded reason verbatim beside `Needs attention`, in the card's loudest ink, and the row
+holds the full sentence as its tooltip: the toast that first carried it is gone within seconds,
+while the unmerged checkout is still there.
+
+Two mechanics are load-bearing and were both found by looking at the rendered card rather than by
+an assertion. A cell drawing an **attributed** value takes line breaking from that string's
+paragraph style and ignores its own `lineBreakMode`, so the row was cut mid-glyph with no ellipsis
+while every assertion about its text passed. And the row is held to the content column by a
+required `lessThanOrEqualTo` inequality rather than by lowering the label's compression resistance:
+the inequality still lets the card grow to its ceiling first, whereas a weakened label let the card
+settle at its 320-point minimum and truncated a sentence that would have fitted.
+
 ## Finish handshake
 
 Provisioning is offered only when the chosen surface can receive Threading's session-scoped MCP
