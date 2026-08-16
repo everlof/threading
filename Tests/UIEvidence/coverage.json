@@ -565,13 +565,34 @@
       }
     },
     {
+      "id": "extensions-settings",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Extensions settings",
+      "description": "The real virtualized Extensions page with app-included Storm, an installed disabled local package, source/install controls, and no network discovery.",
+      "states": ["First-party package available", "Local package installed and disabled"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["System light/dark", "Authored fixed-theme appearances"],
+        "sizes": ["620×920-point settings page"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ExtensionsSettingsRenderTests.swift",
+        "test": "ThreadingTests/ExtensionsSettingsRenderTests/testRendersFirstPartyAndInstalledExtensionsUnderRepresentativeThemes"
+      },
+      "capture": {
+        "glob": "extensions-settings-*.png"
+      }
+    },
+    {
       "id": "remaining-settings-destinations",
       "kind": "surface",
       "status": "planned",
       "priority": "important",
       "title": "Remaining Settings destinations",
       "description": "Deterministic fixture seams and complete-page captures for the remaining data-backed Settings pages, without reading developer accounts, profiles, projects or installed extensions.",
-      "states": ["Keyboard", "Terminal profile", "Accounts", "Storage", "Archived", "Advanced", "Extensions", "Search results"],
+      "states": ["Keyboard", "Terminal profile", "Accounts", "Storage", "Archived", "Advanced", "Search results"],
       "matrix": {
         "themes": ["System", "Two contrasting authored themes"],
         "appearances": ["Light", "Dark"],

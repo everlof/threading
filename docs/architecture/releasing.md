@@ -63,6 +63,17 @@ setting at `Build/Products`, while an archive moves it under
 its input lists name `Package.resolved` as the remote dependency boundary, and the script validates
 every resolved license before copying it into the bundle.
 
+The app-owned extension catalogue is also a release artefact, not a source-tree promise. The
+Embed Extension SDK phase assembles
+`Contents/Resources/FirstPartyExtensions/codes.threading.storm.threadingextension` with the
+prebuilt inert WebAssembly registration module, theme resources, and rebuildable vendored source.
+`testBuiltAppShipsAnInspectableStormCatalogPackageAndItsSource` is the release gate: it resolves
+the production catalogue from `Bundle.main`, inspects the exact built package, matches its
+manifest to the host-owned entry, verifies the source snapshot, and runs registration through the
+product policy. Before adding a catalogue entry, add its package to that phase and extend this
+built-app gate. Never publish a Git-only entry: Git links are for inspection and are not cloned,
+built, or used as update authority.
+
 ## The version is injected, not committed
 
 Sparkle compares `CFBundleVersion`, so it has to increase per release. Threading's version fields

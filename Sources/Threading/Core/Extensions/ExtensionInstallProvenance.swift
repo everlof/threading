@@ -3,18 +3,21 @@ import Foundation
 /// Host-authored facts about how a package reached this installation.
 ///
 /// This is deliberately not a trust grant. Every package keeps the same runtime containment
-/// and capability checks. The first format records a local import and content digest; a future
-/// author signature may add identity, but may never turn into an "unsandbox this author" flag.
+/// and capability checks. Format 1 recorded a local import and content digest. Format 2 also
+/// records an app-catalogue origin and its inspectable source repository; neither is an author
+/// trust grant and neither may turn into an "unsandbox this author" flag.
 struct ExtensionInstallProvenance: Codable, Equatable, Sendable {
-    static let currentFormatVersion = 1
+    static let currentFormatVersion = 2
 
     enum Origin: String, Codable, Sendable {
         case localImport
+        case firstPartyCatalog
     }
 
     let formatVersion: Int
     let origin: Origin
     let sourceName: String
+    let repositoryURL: URL?
     let contentDigest: String
     let sdkVersion: String?
     let firstInstalledAt: Date
@@ -24,6 +27,7 @@ struct ExtensionInstallProvenance: Codable, Equatable, Sendable {
         case formatVersion
         case origin
         case sourceName
+        case repositoryURL
         case contentDigest
         case sdkVersion
         case firstInstalledAt
@@ -31,7 +35,7 @@ struct ExtensionInstallProvenance: Codable, Equatable, Sendable {
     }
 
     init(
-        origin: Origin = .localImport,
+        installSource: ExtensionInstallSource = .localImport,
         sourceName: String,
         contentDigest: String,
         sdkVersion: String?,
@@ -39,7 +43,14 @@ struct ExtensionInstallProvenance: Codable, Equatable, Sendable {
         lastUpdatedAt: Date
     ) {
         formatVersion = Self.currentFormatVersion
-        self.origin = origin
+        switch installSource {
+        case .localImport:
+            origin = .localImport
+            repositoryURL = nil
+        case .firstPartyCatalog(let repositoryURL):
+            origin = .firstPartyCatalog
+            self.repositoryURL = repositoryURL
+        }
         self.sourceName = sourceName
         self.contentDigest = contentDigest
         self.sdkVersion = sdkVersion
@@ -52,12 +63,13 @@ struct ExtensionInstallProvenance: Codable, Equatable, Sendable {
         formatVersion = try container.decode(Int.self, forKey: .formatVersion)
         origin = try container.decode(Origin.self, forKey: .origin)
         sourceName = try container.decode(String.self, forKey: .sourceName)
+        repositoryURL = try container.decodeIfPresent(URL.self, forKey: .repositoryURL)
         contentDigest = try container.decode(String.self, forKey: .contentDigest)
         sdkVersion = try container.decodeIfPresent(String.self, forKey: .sdkVersion)
         firstInstalledAt = try container.decode(Date.self, forKey: .firstInstalledAt)
         lastUpdatedAt = try container.decode(Date.self, forKey: .lastUpdatedAt)
 
-        guard formatVersion == Self.currentFormatVersion else {
+        guard formatVersion == 1 || formatVersion == Self.currentFormatVersion else {
             throw DecodingError.dataCorruptedError(
                 forKey: .formatVersion,
                 in: container,
@@ -94,6 +106,26 @@ struct ExtensionInstallProvenance: Codable, Equatable, Sendable {
                 debugDescription: "Provenance SDK version must not be blank"
             )
         }
+        switch origin {
+        case .localImport:
+            guard repositoryURL == nil else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .repositoryURL,
+                    in: container,
+                    debugDescription: "A local import must not carry a repository URL"
+                )
+            }
+        case .firstPartyCatalog:
+            guard formatVersion >= 2,
+                  let repositoryURL,
+                  ExtensionInstallSource.isSafeRepositoryURL(repositoryURL) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .repositoryURL,
+                    in: container,
+                    debugDescription: "First-party provenance needs a safe HTTPS repository URL"
+                )
+            }
+        }
         guard firstInstalledAt.timeIntervalSinceReferenceDate.isFinite,
               lastUpdatedAt.timeIntervalSinceReferenceDate.isFinite,
               firstInstalledAt <= lastUpdatedAt else {
@@ -107,7 +139,9 @@ struct ExtensionInstallProvenance: Codable, Equatable, Sendable {
 
     var presentation: String {
         var parts = [
-            L10n.string("Local import · unsigned"),
+            origin == .localImport
+                ? L10n.string("Local import · unsigned")
+                : L10n.string("From Threading · included copy"),
             L10n.format("SHA-256 %@", String(contentDigest.prefix(12)))
         ]
         if let sdkVersion {

@@ -458,6 +458,19 @@ types from the MCP core. A boundary test rejects direct `ThreadingExtensionKit`,
 An installed package is a directory with the `.threadingextension` suffix. Threading also accepts an
 unpacked development directory through the import panel.
 
+Extensions settings has two deliberately separate sources:
+
+- **From Threading** is a small catalogue compiled into the app. Its installable packages are
+  resources inside `Threading.app`, covered by the app's code signature, and opening Settings
+  performs no discovery request. At launch this catalogue contains Storm.
+- **Import…** accepts a package or unpacked development directory chosen by the user and records
+  it as a local unsigned import.
+
+A catalogue item's HTTPS Git URL is an inspectable project/source link, not a delivery
+mechanism. Threading never clones, builds, or executes repository contents. Adding or updating a
+first-party item therefore requires a new app build containing the reviewed prebuilt package;
+there is no remotely mutable launch repository or marketplace feed.
+
 ```text
 BuildWatch.threadingextension/
 ├── threading-extension.json
@@ -499,13 +512,14 @@ the SDK README's `../docs/extensions` links valid in all three supported layouts
 the app bundle's `ExtensionSDK`, and a scaffolded project's `Vendor` directory. Do not flatten or
 rewrite those package-relative links without changing all three layouts together.
 
-Import follows a strict sequence:
+Installation from either source follows a strict sequence:
 
 1. inspect the manifest without executing code;
 2. reject unsupported capabilities, escaping executables, symbolic links, oversized packages,
    and excessive entry counts;
-3. show that the package is local and unsigned, name its runtime, source availability, and full
-   capability set, then require the user to choose **Install Disabled**;
+3. show whether the package is an app-included copy or a local unsigned import, name its runtime,
+   source availability, and full capability set, then require the user to choose
+   **Install Disabled**;
 4. copy into a staging sibling under Application Support;
 5. inspect the copied package again;
 6. atomically move the complete package into
@@ -531,10 +545,12 @@ committed and target versions to the process, commits the target only after succ
 registration, and retries an interrupted migration on the next launch. Updates and launches
 which would decrease it are refused.
 
-Provenance is host-authored and shown in Extensions settings as local/unsigned, a SHA-256 prefix,
-and the vendored SDK version when present. It records identity and integrity; it never changes
-containment or capability approval. V1 intentionally has no package-author signing hierarchy
-and therefore no “trust anyway” escape hatch.
+Provenance is host-authored and shown in Extensions settings as either local/unsigned or
+“From Threading · included copy”, followed by a SHA-256 prefix and the vendored SDK version when
+present. Format 2 adds the first-party origin and safe HTTPS repository URL while continuing to
+read format-1 local records. It records source and integrity; it never changes containment,
+capability approval, or disabled-by-default behavior. There is no package-author signing
+hierarchy and therefore no “trust anyway” escape hatch.
 
 ## Two extension tiers
 

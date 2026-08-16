@@ -831,6 +831,7 @@
 			);
 			inputPaths = (
 				"$(SRCROOT)/Packages/ThreadingExtensionKit",
+				"$(SRCROOT)/Tests/Fixtures/Extensions/registration.wasm",
 				"$(SRCROOT)/scripts/embed_extension_sdk.sh",
 			);
 			name = "Embed Extension SDK";
@@ -838,6 +839,7 @@
 			);
 			outputPaths = (
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ExtensionSDK/ThreadingExtensionKit/SDK_VERSION",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/FirstPartyExtensions/codes.threading.storm.threadingextension/threading-extension.json",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;

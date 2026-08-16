@@ -35,7 +35,7 @@ import ThreadingExtensionKit
 //   is genuinely a different glyph, not merely different colours.
 
 let manifest = ExtensionManifest(
-    identifier: "codes.threading.examples.storm",
+    identifier: "codes.threading.storm",
     name: "Storm",
     version: "0.1.0",
     runtime: .webAssembly,

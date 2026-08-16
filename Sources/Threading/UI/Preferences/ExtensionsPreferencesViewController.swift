@@ -15,6 +15,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
         case update
         case reveal
         case remove
+        case installFirstParty
+        case updateFirstParty
+        case openFirstPartySource
     }
 
     private struct ControlAction {
@@ -44,6 +47,10 @@ final class ExtensionsPreferencesViewController: NSViewController {
     /// AppKit creates controls only for rows intersecting the viewport.
     private enum PresentationRow {
         case note
+        case firstPartyProblem
+        case firstPartyCaption
+        case firstPartyEntry(Int)
+        case installedCaption
         case identityResolvers
         case inventoryProblem
         case emptyInventory
@@ -54,6 +61,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
     }
 
     private let manager: ExtensionManager
+    private let firstPartyCatalog: FirstPartyExtensionCatalog
     private let identityRegistry: ExtensionIdentityResolverRegistry
     private let componentRegistry: ComponentCustomizationRegistry?
     private let appEvents = AppEventObservations()
@@ -61,6 +69,8 @@ final class ExtensionsPreferencesViewController: NSViewController {
     private var controlActions: [ObjectIdentifier: ControlAction] = [:]
     private var identityMenus: [ObjectIdentifier: IdentityFamily] = [:]
     private var isImporting = false
+    private var firstPartyOperationIdentifier: String?
+    private var firstPartyExtensions: [FirstPartyExtensionCatalog.Entry] = []
     private var installedExtensions: [InstalledExtensionSnapshot] = []
     private var installedNames: [String: String] = [:]
     private var inventoryProblem: String?
@@ -115,10 +125,12 @@ final class ExtensionsPreferencesViewController: NSViewController {
 
     init(
         manager: ExtensionManager? = nil,
+        firstPartyCatalog: FirstPartyExtensionCatalog? = nil,
         identityRegistry: ExtensionIdentityResolverRegistry? = nil,
         componentRegistry: ComponentCustomizationRegistry? = nil
     ) {
         self.manager = manager ?? .shared
+        self.firstPartyCatalog = firstPartyCatalog ?? .appOwned()
         self.identityRegistry = identityRegistry ?? .shared
         self.componentRegistry = componentRegistry
             ?? ComponentCustomizationProviderSlot.shared.provider
@@ -166,6 +178,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         controlActions.removeAll()
         identityMenus.removeAll()
         installedExtensions = manager.installedExtensions
+        firstPartyExtensions = firstPartyCatalog.entries
         installedNames = Dictionary(
             uniqueKeysWithValues: installedExtensions.map { ($0.identifier, $0.name) }
         )
@@ -181,7 +194,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         updateCardDecorations()
 
         importButton.title = L10n.string(isImporting ? "Importing…" : "Import…")
-        importButton.isEnabled = !isImporting
+        importButton.isEnabled = !isImporting && firstPartyOperationIdentifier == nil
 
         if let pageView {
             pageView.updateSummary(installedSummary(installedExtensions.count))
@@ -208,6 +221,15 @@ final class ExtensionsPreferencesViewController: NSViewController {
 
     private func makePresentationRows() -> [PresentationRow] {
         var rows: [PresentationRow] = [.note]
+        if firstPartyCatalog.problem != nil {
+            rows.append(.firstPartyProblem)
+        }
+        if !firstPartyExtensions.isEmpty {
+            rows.append(.firstPartyCaption)
+            rows.append(contentsOf: firstPartyExtensions.indices.map {
+                .firstPartyEntry($0)
+            })
+        }
         if providerCandidates.count > 1
             || accountCandidates.count > 1
             || sessionCandidates.count > 1 {
@@ -219,6 +241,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
         if installedExtensions.isEmpty, inventoryProblem == nil {
             rows.append(.emptyInventory)
         } else {
+            if !installedExtensions.isEmpty {
+                rows.append(.installedCaption)
+            }
             for (packageIndex, item) in installedExtensions.enumerated() {
                 rows.append(.packageHeader(packageIndex))
                 if expandedExtensions.contains(item.identifier) {
@@ -396,6 +421,91 @@ final class ExtensionsPreferencesViewController: NSViewController {
         )
     }
 
+    private enum FirstPartyEntryState {
+        case available
+        case updateAvailable
+        case installed
+    }
+
+    private func firstPartyState(
+        for entry: FirstPartyExtensionCatalog.Entry
+    ) -> FirstPartyEntryState {
+        guard let installed = installedExtensions.first(where: {
+            $0.identifier == entry.identifier
+        }) else {
+            return .available
+        }
+        guard let installedVersion = installed.version else { return .installed }
+        return ExtensionVersion(entry.version).compared(to: ExtensionVersion(installedVersion))
+            == .newer
+            ? .updateAvailable
+            : .installed
+    }
+
+    private func firstPartyRow(_ entry: FirstPartyExtensionCatalog.Entry) -> NSView {
+        let source = SettingsUI.button(
+            "Source",
+            target: self,
+            action: #selector(openFirstPartySource(_:))
+        )
+        source.setAccessibilityIdentifier(
+            "settings.extensions.first-party.source.\(entry.identifier)"
+        )
+        remember(source, action: .openFirstPartySource, identifier: entry.identifier)
+
+        let state = firstPartyState(for: entry)
+        let operation = SettingsUI.button(
+            state == .available
+                ? "Install…"
+                : state == .updateAvailable ? "Update…" : "Installed",
+            target: self,
+            action: state == .updateAvailable
+                ? #selector(updateFirstPartyExtension(_:))
+                : #selector(installFirstPartyExtension(_:))
+        )
+        let packageExists = FileManager.default.fileExists(atPath: entry.packageURL.path)
+        operation.isEnabled = state != .installed
+            && packageExists
+            && firstPartyOperationIdentifier == nil
+        if firstPartyOperationIdentifier == entry.identifier {
+            operation.title = L10n.string(
+                state == .updateAvailable ? "Updating…" : "Installing…"
+            )
+        }
+        operation.setAccessibilityIdentifier(
+            "settings.extensions.first-party."
+                + "\(state == .updateAvailable ? "update" : "install").\(entry.identifier)"
+        )
+        remember(
+            operation,
+            action: state == .updateAvailable ? .updateFirstParty : .installFirstParty,
+            identifier: entry.identifier
+        )
+
+        let versionLine: String
+        if !packageExists {
+            versionLine = L10n.format("Version %@ · Unavailable in this build", entry.version)
+        } else {
+            switch state {
+            case .available:
+                versionLine = L10n.format("Version %@ · Available from Threading", entry.version)
+            case .updateAvailable:
+                versionLine = L10n.format("Version %@ · Update available", entry.version)
+            case .installed:
+                versionLine = L10n.format("Version %@ · Installed", entry.version)
+            }
+        }
+        return SettingsUI.row(
+            title: entry.name,
+            subtitle: entry.summary + "\n" + versionLine,
+            control: SettingsUI.controlGroup(
+                [source, operation],
+                spacing: Design.Spacing.small
+            ),
+            localizes: false
+        )
+    }
+
     private func packageDetailRows(
         for item: InstalledExtensionSnapshot
     ) -> [PackageDetailRow] {
@@ -467,6 +577,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
 
     private func actionRow(for item: InstalledExtensionSnapshot) -> NSView {
         let isUpdating = item.status == .updating
+            || firstPartyOperationIdentifier == item.identifier
         let reload = SettingsUI.button("Reload", target: self, action: #selector(reloadExtension(_:)))
         reload.isEnabled = item.isEnabled && !isUpdating
         reload.setAccessibilityIdentifier("settings.extensions.reload.\(item.identifier)")
@@ -511,8 +622,80 @@ final class ExtensionsPreferencesViewController: NSViewController {
         return remembered.identifier
     }
 
+    private func firstPartyEntry(
+        for control: NSControl,
+        action: Action
+    ) -> FirstPartyExtensionCatalog.Entry? {
+        guard let identifier = identifier(for: control, action: action) else { return nil }
+        return firstPartyExtensions.first { $0.identifier == identifier }
+    }
+
+    @objc private func openFirstPartySource(_ sender: ThemedButton) {
+        guard let entry = firstPartyEntry(
+            for: sender,
+            action: .openFirstPartySource
+        ) else { return }
+        NSWorkspace.shared.open(entry.repositoryURL)
+    }
+
+    @objc private func installFirstPartyExtension(_ sender: ThemedButton) {
+        guard !isImporting,
+              firstPartyOperationIdentifier == nil,
+              let entry = firstPartyEntry(for: sender, action: .installFirstParty) else {
+            return
+        }
+        firstPartyOperationIdentifier = entry.identifier
+        render()
+        reviewAndInstall(
+            from: entry.packageURL,
+            installSource: entry.installSource,
+            expectedEntry: entry
+        )
+    }
+
+    @objc private func updateFirstPartyExtension(_ sender: ThemedButton) {
+        guard !isImporting,
+              firstPartyOperationIdentifier == nil,
+              let entry = firstPartyEntry(for: sender, action: .updateFirstParty),
+              let installed = installedExtensions.first(where: {
+                  $0.identifier == entry.identifier
+              }) else {
+            return
+        }
+        firstPartyOperationIdentifier = entry.identifier
+        render()
+        manager.updatePlan(from: entry.packageURL) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.finishFirstPartyOperation()
+                self.present(error: error)
+            case .success(let plan):
+                do {
+                    try entry.validate(plan)
+                } catch {
+                    self.finishFirstPartyOperation()
+                    self.present(error: error)
+                    return
+                }
+                self.confirmAndApply(
+                    plan,
+                    name: installed.name,
+                    source: entry.packageURL,
+                    installSource: entry.installSource,
+                    onFinish: { [weak self] in self?.finishFirstPartyOperation() }
+                )
+            }
+        }
+    }
+
+    private func finishFirstPartyOperation() {
+        firstPartyOperationIdentifier = nil
+        render()
+    }
+
     @objc private func importExtension() {
-        guard let window = view.window else { return }
+        guard firstPartyOperationIdentifier == nil, let window = view.window else { return }
 
         let panel = NSOpenPanel()
         panel.title = L10n.string("Import Threading Extension")
@@ -537,22 +720,33 @@ final class ExtensionsPreferencesViewController: NSViewController {
     /// This is intentionally the same `ExtensionInstallProposal` used by the MCP authoring flow:
     /// an extension cannot receive a quieter install path merely because it came through a file
     /// picker instead of an agent proposal.
-    private func reviewAndInstall(from source: URL) {
+    private func reviewAndInstall(
+        from source: URL,
+        installSource: ExtensionInstallSource = .localImport,
+        expectedEntry: FirstPartyExtensionCatalog.Entry? = nil
+    ) {
         DispatchQueue.global(qos: .userInitiated).async {
             let inspection = Result {
-                try ExtensionBundleInspector.inspect(at: source)
+                let bundle = try ExtensionBundleInspector.inspect(at: source)
+                try expectedEntry?.validate(bundle)
+                return bundle
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 switch inspection {
                 case .failure(let error):
                     self.isImporting = false
+                    if expectedEntry != nil {
+                        self.firstPartyOperationIdentifier = nil
+                    }
                     self.render()
                     self.present(error: error)
                 case .success(let bundle):
                     self.presentInstallProposal(
-                        ExtensionInstallProposal(bundle: bundle),
-                        source: source
+                        ExtensionInstallProposal(bundle: bundle, source: installSource),
+                        source: source,
+                        installSource: installSource,
+                        isFirstParty: expectedEntry != nil
                     )
                 }
             }
@@ -561,7 +755,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
 
     private func presentInstallProposal(
         _ proposal: ExtensionInstallProposal,
-        source: URL
+        source: URL,
+        installSource: ExtensionInstallSource,
+        isFirstParty: Bool
     ) {
         let request = ConfirmationRequest(
             prompt: .installUnsignedExtension,
@@ -575,12 +771,18 @@ final class ExtensionsPreferencesViewController: NSViewController {
             guard let self else { return }
             guard approved else {
                 self.isImporting = false
+                if isFirstParty {
+                    self.firstPartyOperationIdentifier = nil
+                }
                 self.render()
                 return
             }
-            self.manager.install(from: source) { [weak self] result in
+            self.manager.install(from: source, source: installSource) { [weak self] result in
                 guard let self else { return }
                 self.isImporting = false
+                if isFirstParty {
+                    self.firstPartyOperationIdentifier = nil
+                }
                 self.render()
                 switch result {
                 case .success(let installed):
@@ -666,7 +868,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
     private func confirmAndApply(
         _ plan: ExtensionUpdatePlan,
         name: String,
-        source: URL
+        source: URL,
+        installSource: ExtensionInstallSource = .localImport,
+        onFinish: (@MainActor @Sendable () -> Void)? = nil
     ) {
         let confirmation = plan.confirmation(name: name)
         let request = ConfirmationRequest(
@@ -676,10 +880,18 @@ final class ExtensionsPreferencesViewController: NSViewController {
             confirmTitle: confirmation.acceptTitle,
             style: plan.requiresApproval ? .warning : .informational
         )
-        guard ConfirmationAlert.ask(request) else { return }
+        guard ConfirmationAlert.ask(request) else {
+            onFinish?()
+            return
+        }
 
-        manager.update(from: source, approving: plan) { [weak self] result in
+        manager.update(
+            from: source,
+            approving: plan,
+            source: installSource
+        ) { [weak self] result in
             guard let self else { return }
+            onFinish?()
             switch result {
             case .success(let updated):
                 self.presentAlert(
@@ -808,11 +1020,28 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
         switch row {
         case .note:
             return SettingsUI.note(
-                "Extensions are copied into Threading before they can run. Import a "
-                    + ".threadingextension package or an unpacked development directory; "
-                    + "importing leaves one disabled, and enabling it starts a supervised "
-                    + "process with the capabilities declared in its manifest."
+                "Install an extension included with Threading, or import a "
+                    + ".threadingextension package or unpacked development directory. Every "
+                    + "package is reviewed before it is copied and remains disabled until you "
+                    + "enable it; Git source links are for inspection, never cloned or built."
             )
+        case .firstPartyProblem:
+            return SettingsUI.section(
+                "From Threading",
+                SettingsCard(rows: [
+                    SettingsUI.row(
+                        title: "Included extensions could not be read",
+                        subtitle: firstPartyCatalog.problem ?? ""
+                    )
+                ])
+            )
+        case .firstPartyCaption:
+            return SettingsUI.caption("From Threading")
+        case .firstPartyEntry(let entryIndex):
+            guard firstPartyExtensions.indices.contains(entryIndex) else { return NSView() }
+            return firstPartyRow(firstPartyExtensions[entryIndex])
+        case .installedCaption:
+            return SettingsUI.caption("Installed")
         case .identityResolvers:
             return identityResolverSection() ?? NSView()
         case .inventoryProblem:
@@ -998,8 +1227,16 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
     private func updateCardDecorations() {
         var packageBounds: [Int: (first: Int, last: Int)] = [:]
         var extensionBounds: [Int: (first: Int, last: Int)] = [:]
+        var firstPartyBounds: (first: Int, last: Int)?
         for (rowIndex, row) in presentationRows.enumerated() {
             switch row {
+            case .firstPartyEntry:
+                if var bounds = firstPartyBounds {
+                    bounds.last = rowIndex
+                    firstPartyBounds = bounds
+                } else {
+                    firstPartyBounds = (rowIndex, rowIndex)
+                }
             case .packageHeader(let packageIndex):
                 packageBounds[packageIndex] = (rowIndex, rowIndex)
             case .packageDetail(let packageIndex, _):
@@ -1014,13 +1251,24 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
                 } else {
                     extensionBounds[sectionIndex] = (rowIndex, rowIndex)
                 }
-            case .note, .identityResolvers, .inventoryProblem, .emptyInventory,
-                 .extensionCaption:
+            case .note, .firstPartyProblem, .firstPartyCaption, .installedCaption,
+                 .identityResolvers,
+                 .inventoryProblem, .emptyInventory, .extensionCaption:
                 break
             }
         }
 
-        var decorations = packageBounds.sorted { $0.key < $1.key }.map {
+        var decorations: [ThemedTableCardDecoration] = []
+        if let firstPartyBounds {
+            decorations.append(ThemedTableCardDecoration(
+                rows: firstPartyBounds.first...firstPartyBounds.last,
+                topInset: 0,
+                bottomInset: firstPartyBounds.last == presentationRows.count - 1
+                    ? Design.Spacing.large
+                    : 0
+            ))
+        }
+        decorations.append(contentsOf: packageBounds.sorted { $0.key < $1.key }.map {
             ThemedTableCardDecoration(
                 rows: $0.value.first...$0.value.last,
                 topInset: Design.Spacing.large,
@@ -1028,7 +1276,7 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
                     ? Design.Spacing.large
                     : 0
             )
-        }
+        })
         decorations.append(contentsOf: extensionBounds.sorted { $0.key < $1.key }.map {
             let section = extensionSections[$0.key]
             return ThemedTableCardDecoration(
@@ -1044,7 +1292,7 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
 
     private func topInset(for row: PresentationRow) -> CGFloat {
         switch row {
-        case .packageDetail:
+        case .packageDetail, .firstPartyEntry:
             return 0
         case .extensionField(let sectionIndex, let fieldIndex):
             guard fieldIndex == 0, extensionSections.indices.contains(sectionIndex) else {
@@ -1053,8 +1301,9 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
             return extensionSections[sectionIndex].visibleTitle == nil
                 ? Design.Spacing.large
                 : 0
-        case .note, .identityResolvers, .inventoryProblem, .emptyInventory,
-             .packageHeader, .extensionCaption:
+        case .note, .firstPartyProblem, .firstPartyCaption, .installedCaption,
+             .identityResolvers, .inventoryProblem, .emptyInventory, .packageHeader,
+             .extensionCaption:
             return Design.Spacing.large
         }
     }
@@ -1062,6 +1311,12 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
     private func bottomInset(forRowAt row: Int) -> CGFloat {
         guard presentationRows.indices.contains(row) else { return 0 }
         if case .extensionCaption = presentationRows[row] {
+            return Design.Spacing.small
+        }
+        if case .firstPartyCaption = presentationRows[row] {
+            return Design.Spacing.small
+        }
+        if case .installedCaption = presentationRows[row] {
             return Design.Spacing.small
         }
         return row == presentationRows.count - 1 ? Design.Spacing.large : 0

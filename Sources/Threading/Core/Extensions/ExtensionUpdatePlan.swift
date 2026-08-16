@@ -55,6 +55,9 @@ struct ExtensionVersion: Equatable {
 struct ExtensionUpdatePlan: Equatable {
     let identifier: String
     let installedVersion: String
+    /// Retained so a curated catalogue can prove that the package it reviewed is still the
+    /// named product it advertised, rather than merely another package with the same ID.
+    let candidateName: String
     let candidateVersion: String
     let versionChange: ExtensionVersion.Comparison
     let installedDataVersion: Int
@@ -171,6 +174,7 @@ struct ExtensionUpdatePlan: Equatable {
         self.sourceDigest = sourceDigest
         identifier = installed.identifier
         installedVersion = installed.version
+        candidateName = candidate.name
         candidateVersion = candidate.version
         installedDataVersion = installed.dataVersion
         candidateDataVersion = candidate.dataVersion

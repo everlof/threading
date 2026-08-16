@@ -1380,6 +1380,27 @@ final class ExtensionBundleLoaderTests: XCTestCase {
         ))
     }
 
+    func testBuiltAppShipsAnInspectableStormCatalogPackageAndItsSource() throws {
+        let catalog = FirstPartyExtensionCatalog.appOwned()
+        XCTAssertNil(catalog.problem)
+        let entry = try XCTUnwrap(catalog.entries.first)
+        XCTAssertEqual(catalog.entries.count, 1)
+        XCTAssertEqual(entry.identifier, "codes.threading.storm")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: entry.packageURL.path))
+
+        let bundle = try ExtensionBundleInspector.inspect(at: entry.packageURL)
+        XCTAssertNoThrow(try entry.validate(bundle))
+        XCTAssertEqual(bundle.manifest.capabilities, [.themeProvider])
+        XCTAssertEqual(bundle.manifest.themes.map(\.id), ["storm"])
+        XCTAssertNotNil(bundle.sourceURL)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: try XCTUnwrap(bundle.sourceURL)
+                .appendingPathComponent("Package.swift")
+                .path
+        ))
+        XCTAssertEqual(try ExtensionRegistrationLoader.load(from: bundle), .init())
+    }
+
     func testRegistrationProcessIsTerminatedWhenItTimesOut() throws {
         let directory = try makeBundle(
             capabilities: [],

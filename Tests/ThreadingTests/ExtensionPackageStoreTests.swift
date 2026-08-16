@@ -37,6 +37,107 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertTrue(provenance.presentation.contains("unsigned"))
     }
 
+    func testFirstPartyInstallRecordsItsAppOwnedOriginAndStillStaysDisabled() throws {
+        let source = try makePackage()
+        let repositoryURL = try XCTUnwrap(URL(
+            string: "https://github.com/everlof/threading/tree/master/Packages/Example"
+        ))
+        let entry = try FirstPartyExtensionCatalog.Entry(
+            identifier: "com.example.installed-test",
+            name: "Installed Test",
+            version: "1.0.0",
+            summary: "A package included with Threading.",
+            repositoryURL: repositoryURL,
+            packageURL: source.appendingPathExtension(
+                ExtensionPackageStore.packageExtension
+            )
+        )
+        try entry.validate(ExtensionBundleInspector.inspect(at: source))
+        let store = ExtensionPackageStore(rootURL: temporaryDirectory("first-party-store"))
+
+        _ = try store.install(from: source, source: entry.installSource)
+
+        XCTAssertEqual(store.enabledIdentifiers(), [])
+        let provenance = try XCTUnwrap(try store.inventory().first?.provenance)
+        XCTAssertEqual(provenance.formatVersion, 2)
+        XCTAssertEqual(provenance.origin, .firstPartyCatalog)
+        XCTAssertEqual(provenance.repositoryURL, repositoryURL)
+        XCTAssertTrue(provenance.presentation.contains("From Threading"))
+        XCTAssertTrue(provenance.presentation.contains("included copy"))
+        XCTAssertFalse(provenance.presentation.contains("unsigned"))
+    }
+
+    func testFirstPartyCatalogRejectsUnsafeSourcesMismatchesAndUnboundedInventory() throws {
+        let source = try makePackage()
+        let packageURL = source.appendingPathExtension(
+            ExtensionPackageStore.packageExtension
+        )
+        XCTAssertThrowsError(try FirstPartyExtensionCatalog.Entry(
+            identifier: "com.example.installed-test",
+            name: "Installed Test",
+            version: "1.0.0",
+            summary: "A package included with Threading.",
+            repositoryURL: try XCTUnwrap(URL(string: "http://example.com/source")),
+            packageURL: packageURL
+        )) { error in
+            XCTAssertEqual(
+                error as? FirstPartyExtensionCatalog.CatalogError,
+                .invalidRepositoryURL("http://example.com/source")
+            )
+        }
+
+        let entry = try FirstPartyExtensionCatalog.Entry(
+            identifier: "com.example.installed-test",
+            name: "Different name",
+            version: "1.0.0",
+            summary: "A package included with Threading.",
+            repositoryURL: try XCTUnwrap(URL(string: "https://example.com/source")),
+            packageURL: packageURL
+        )
+        let inspected = try ExtensionBundleInspector.inspect(at: source)
+        XCTAssertThrowsError(
+            try entry.validate(inspected)
+        ) { error in
+            XCTAssertEqual(
+                error as? FirstPartyExtensionCatalog.CatalogError,
+                .packageDoesNotMatch("com.example.installed-test")
+            )
+        }
+        XCTAssertThrowsError(try entry.validate(ExtensionUpdatePlan(
+            installed: inspected.manifest,
+            candidate: inspected.manifest
+        ))) { error in
+            XCTAssertEqual(
+                error as? FirstPartyExtensionCatalog.CatalogError,
+                .packageDoesNotMatch("com.example.installed-test")
+            )
+        }
+        XCTAssertThrowsError(try FirstPartyExtensionCatalog(
+            entries: Array(
+                repeating: entry,
+                count: FirstPartyExtensionCatalog.maximumEntries + 1
+            )
+        )) { error in
+            XCTAssertEqual(
+                error as? FirstPartyExtensionCatalog.CatalogError,
+                .tooManyEntries(maximum: FirstPartyExtensionCatalog.maximumEntries)
+            )
+        }
+
+        let store = ExtensionPackageStore(rootURL: temporaryDirectory("unsafe-first-party"))
+        XCTAssertThrowsError(try store.install(
+            from: source,
+            source: .firstPartyCatalog(
+                repositoryURL: try XCTUnwrap(URL(string: "http://example.com/source"))
+            )
+        )) { error in
+            guard case .invalidFirstPartySource = error as? ExtensionPackageStoreError else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+        XCTAssertEqual(try store.inventory().count, 0)
+    }
+
     func testImportRollsBackWhenItsProvenanceCannotBeSaved() throws {
         let source = try makePackage()
         let root = temporaryDirectory("provenance-write-failure")
@@ -229,6 +330,30 @@ final class ExtensionPackageStoreTests: XCTestCase {
             ) }
         )
         XCTAssertEqual(try Data(contentsOf: recovery), future)
+    }
+
+    func testFormatOneLocalProvenanceStillDecodesWithoutInventingCatalogTrust() throws {
+        let digest = String(repeating: "a", count: 64)
+        let data = Data("""
+        {
+          "formatVersion": 1,
+          "origin": "localImport",
+          "sourceName": "Legacy.threadingextension",
+          "contentDigest": "\(digest)",
+          "firstInstalledAt": 0,
+          "lastUpdatedAt": 1
+        }
+        """.utf8)
+
+        let provenance = try JSONDecoder().decode(
+            ExtensionInstallProvenance.self,
+            from: data
+        )
+
+        XCTAssertEqual(provenance.formatVersion, 1)
+        XCTAssertEqual(provenance.origin, .localImport)
+        XCTAssertNil(provenance.repositoryURL)
+        XCTAssertTrue(provenance.presentation.contains("unsigned"))
     }
 
     func testDuplicateIdentifierNeverOverwritesTheInstalledPackage() throws {
@@ -535,6 +660,53 @@ final class ExtensionPackageStoreTests: XCTestCase {
             .compactMap { ($0 as? NSTextField)?.stringValue }
         XCTAssertTrue(labels.contains("Agent-tool extension"))
         XCTAssertTrue(labels.contains("Agent tools"))
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
+    }
+
+    func testExtensionsSettingsListsAnAppOwnedExtensionWithSourceAndInstallControls() throws {
+        let source = try makePackage()
+        let container = temporaryDirectory("first-party-settings")
+        try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+        let package = container.appendingPathComponent(
+            "com.example.installed-test.threadingextension",
+            isDirectory: true
+        )
+        try FileManager.default.copyItem(at: source, to: package)
+        let entry = try FirstPartyExtensionCatalog.Entry(
+            identifier: "com.example.installed-test",
+            name: "Installed Test",
+            version: "1.0.0",
+            summary: "A package included with Threading.",
+            repositoryURL: try XCTUnwrap(URL(string: "https://example.com/source")),
+            packageURL: package
+        )
+        let catalog = try FirstPartyExtensionCatalog(entries: [entry])
+        let manager = ExtensionManager(
+            store: ExtensionPackageStore(rootURL: temporaryDirectory("catalog-settings-store"))
+        )
+        let controller = ExtensionsPreferencesViewController(
+            manager: manager,
+            firstPartyCatalog: catalog
+        )
+        _ = controller.view
+        let window = settingsWindow(controller.view)
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        let identifiers = Set(descendants(in: controller.view).compactMap {
+            $0.accessibilityIdentifier()
+        })
+        XCTAssertTrue(identifiers.contains(
+            "settings.extensions.first-party.source.com.example.installed-test"
+        ))
+        XCTAssertTrue(identifiers.contains(
+            "settings.extensions.first-party.install.com.example.installed-test"
+        ))
+        let labels = descendants(in: controller.view)
+            .compactMap { ($0 as? NSTextField)?.stringValue }
+        XCTAssertTrue(labels.contains("Installed Test"))
+        XCTAssertTrue(labels.contains {
+            $0.contains("Version 1.0.0 · Available from Threading")
+        })
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
     }
 
@@ -1918,6 +2090,33 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertTrue(proposal.message.contains("left disabled"))
     }
 
+    func testFirstPartyInstallProposalExplainsTheAppCopyAndNeverPromisesGitExecution() throws {
+        let root = temporaryDirectory("first-party-install-proposal")
+        let manifest = ExtensionManifest(
+            identifier: "com.example.first-party",
+            name: "First Party",
+            version: "1.0.0",
+            runtime: .webAssembly,
+            executable: "bin/first-party.wasm"
+        )
+        let repositoryURL = try XCTUnwrap(URL(string: "https://example.com/source"))
+        let proposal = ExtensionInstallProposal(
+            bundle: ThreadingExtensionBundle(
+                rootURL: root,
+                executableURL: root.appendingPathComponent("bin/first-party.wasm"),
+                sourceURL: root.appendingPathComponent("Source", isDirectory: true),
+                manifest: manifest
+            ),
+            source: .firstPartyCatalog(repositoryURL: repositoryURL)
+        )
+
+        XCTAssertTrue(proposal.message.contains("included with Threading"))
+        XCTAssertTrue(proposal.message.contains(repositoryURL.absoluteString))
+        XCTAssertTrue(proposal.message.contains("not cloned or built"))
+        XCTAssertTrue(proposal.message.contains("left disabled"))
+        XCTAssertFalse(proposal.message.contains("unsigned local import"))
+    }
+
     func testInstallProposalCallsOutExtensionSuppliedMetalSource() {
         let root = temporaryDirectory("metal-install-proposal")
         let manifest = ExtensionManifest(
@@ -2622,7 +2821,12 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertEqual(plan.versionChange, .newer)
         XCTAssertEqual(plan.addedCapabilities, [.keyValueStorage])
 
-        let updated = try store.update(from: second, approving: plan)
+        let repositoryURL = try XCTUnwrap(URL(string: "https://example.com/versioned"))
+        let updated = try store.update(
+            from: second,
+            approving: plan,
+            source: .firstPartyCatalog(repositoryURL: repositoryURL)
+        )
         XCTAssertEqual(updated.manifest.version, "1.1.0")
         XCTAssertEqual(try store.inventory().count, 1, "an update replaces rather than accumulates")
         XCTAssertEqual(
@@ -2631,6 +2835,9 @@ final class ExtensionPackageStoreTests: XCTestCase {
             )["state"],
             ExtensionJSONValue.string("kept")
         )
+        let provenance = try XCTUnwrap(try store.inventory().first?.provenance)
+        XCTAssertEqual(provenance.origin, .firstPartyCatalog)
+        XCTAssertEqual(provenance.repositoryURL, repositoryURL)
     }
 
     func testUpdateRefusesWhenTheSourceChangedAfterThePlanWasSeen() throws {

@@ -1,6 +1,6 @@
 # Extension system handoff
 
-Updated: 2026-07-26. Safe extension API v1 is now checked through its release checklist:
+Updated: 2026-08-16. Safe extension API v1 is now checked through its release checklist:
 WebAssembly containment, source-bundled packaging, provenance and migrations, the complete live
 Hello Status/Consumer pass, MCP-assisted scaffold and reviewed installation, a real
 scaffold-to-runner dogfood build, and the documented v1 compatibility freeze.
@@ -21,6 +21,10 @@ The experimental extension platform is usable end to end:
 
 - `.threadingextension` directories and unpacked development directories can be inspected and
   imported into app-owned storage.
+- Extensions settings also lists a bounded, app-owned **From Threading** catalogue. It performs
+  no network discovery: the reviewed package is shipped inside the signed app, while its HTTPS
+  Git URL is only an inspectable source link. Storm 0.1.0 is the first launch item; it follows the
+  same review flow and remains disabled after installation.
 - Extensions can be enabled, disabled, reloaded, revealed, and recoverably removed from the
   Extensions settings page.
 - Enabled extensions run as supervised JSONL processes. Crashes, protocol failures, reloads,
@@ -529,6 +533,22 @@ v1-blocking item here is complete.
   import provenance (source name, package SHA-256, SDK version, timestamps) and presents it as
   local/unsigned. There is no author-signing hierarchy and no “trust anyway”; provenance never
   weakens containment or grants authority.
+- [x] Ship a bounded first-party launch catalogue without creating a marketplace or remote code
+  delivery path. Format-2 provenance distinguishes the app-included source copy from local
+  imports; every catalogue entry points at an app resource and a safe HTTPS source link, package
+  identity is rechecked before review, and install/update still leave enablement to the user.
+- [x] Package Storm 0.1.0 into every app build with its theme resources, real inert WebAssembly
+  registration module, and rebuildable vendored source. A built-app test inspects and launches
+  that exact package rather than merely testing the source example.
+- [ ] Add another first-party catalogue entry only when its immutable package is present in the
+  app and the built-app gate covers it. Current readiness work, intentionally not represented as
+  dead Settings entries:
+  - **Checks:** productize the Hello Status capability set and create a named release package;
+  - **Session Inspector:** finish panel visibility, pushed refreshes, and action seams;
+  - **Lottie Preview:** clear the Swift 6 strict-concurrency warnings and create the release
+    package;
+  - **additional themes:** package them like Storm; users can continue using built-in or
+    self-authored themes in the meantime.
 - [x] Define versioned migrations for extension-owned settings/KV/cache data. `dataVersion` is
   monotonic; from/to values reach the process, the host commits only after successful
   registration, and interrupted idempotent migrations retry.
@@ -1007,9 +1027,10 @@ separately supervised process is the crash and permission boundary this tier exi
     normalized input, and worker health all passed. Next use the same primitives for the proxy
     and Claudex-shaped cases.
 
-The **safe extension v1 checklist is complete**. Broader marketplace distribution remains a
-separate product phase: author identity/signing, discovery, delivery, and update feeds are not
-part of local source-bundled v1 and do not weaken its containment.
+The **safe extension v1 checklist is complete**, and the first-party launch catalogue is a
+separate, bounded app-bundle feature rather than a marketplace. Broader third-party distribution
+remains a later product phase: author identity/signing, discovery, delivery, and update feeds are
+not part of local source-bundled v1 and do not weaken its containment.
 
 Two things are deliberately *not* claimed. The old prompt-capable App Sandbox helper is not a
 product policy, and `network.client` is not a safe WebAssembly v1 capability. A bounded future

@@ -35,6 +35,12 @@ Most extensions should use the standard portable runtime:
 3. execute inside the capability-scoped host;
 4. ask the host to render semantic interface output.
 
+At launch, Extensions settings also has a small **From Threading** section. These are reviewed
+packages included in the app rather than a public marketplace: the source link opens an HTTPS Git
+page for inspection, but Threading installs the app-bundled copy and never clones or builds from
+Git. Installation still shows the complete review and leaves the extension disabled until the
+user enables it. Storm is the initial included extension.
+
 Host-rendered components preserve accessibility, keyboard behavior, and theme
 compatibility. They also keep an extension from creating an unrelated second
 design system inside the app.
@@ -55,4 +61,3 @@ Extension developers should read
 [the authoring guide](../extensions/AGENT_AUTHORING.md) and
 [API v1 reference](../extensions/API_V1.md) before inferring behavior from
 application internals.
-

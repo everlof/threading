@@ -27,6 +27,7 @@ enum ExtensionPackageStoreError: LocalizedError {
     case updateChangedUnderneath(String)
     case packageCouldNotBeDigested(String)
     case dataVersionRollback(identifier: String, installed: Int, candidate: Int)
+    case invalidFirstPartySource
     case enablementStateCouldNotBeSaved
     case provenanceCouldNotBeSaved(String)
 
@@ -69,6 +70,8 @@ enum ExtensionPackageStoreError: LocalizedError {
                 Int64(candidate),
                 Int64(installed)
             )
+        case .invalidFirstPartySource:
+            return L10n.string("The included extension has an invalid source URL.")
         case .enablementStateCouldNotBeSaved:
             return L10n.string(
                 "Extension enablement could not be saved without risking its recovery copy."
@@ -209,7 +212,10 @@ final class ExtensionPackageStore: @unchecked Sendable {
     ///
     /// Copying into a staging sibling and moving only after the copy validates means discovery
     /// sees either the old complete inventory or the new complete package, never a half-copy.
-    func install(from sourceURL: URL) throws -> ThreadingExtensionBundle {
+    func install(
+        from sourceURL: URL,
+        source installSource: ExtensionInstallSource = .localImport
+    ) throws -> ThreadingExtensionBundle {
         let sourceBundle = try ExtensionBundleInspector.inspect(at: sourceURL)
         try validatePackageShape(at: sourceBundle.rootURL)
 
@@ -257,6 +263,7 @@ final class ExtensionPackageStore: @unchecked Sendable {
             try recordProvenance(
                 for: installed,
                 sourceName: sourceURL.lastPathComponent,
+                installSource: installSource,
                 preserving: nil
             )
             return installed
@@ -337,7 +344,8 @@ final class ExtensionPackageStore: @unchecked Sendable {
     @discardableResult
     func update(
         from sourceURL: URL,
-        approving plan: ExtensionUpdatePlan
+        approving plan: ExtensionUpdatePlan,
+        source installSource: ExtensionInstallSource = .localImport
     ) throws -> ThreadingExtensionBundle {
         lock.lock()
         defer { lock.unlock() }
@@ -407,6 +415,7 @@ final class ExtensionPackageStore: @unchecked Sendable {
             try recordProvenance(
                 for: installed,
                 sourceName: sourceURL.lastPathComponent,
+                installSource: installSource,
                 preserving: existingProvenance
             )
             do {
@@ -545,8 +554,13 @@ final class ExtensionPackageStore: @unchecked Sendable {
     private func recordProvenance(
         for bundle: ThreadingExtensionBundle,
         sourceName: String,
+        installSource: ExtensionInstallSource,
         preserving existing: ExtensionInstallProvenance?
     ) throws {
+        if case .firstPartyCatalog(let repositoryURL) = installSource,
+           !ExtensionInstallSource.isSafeRepositoryURL(repositoryURL) {
+            throw ExtensionPackageStoreError.invalidFirstPartySource
+        }
         guard let digest = ExtensionPackageDigest.compute(
             at: bundle.rootURL,
             fileManager: fileManager
@@ -571,6 +585,7 @@ final class ExtensionPackageStore: @unchecked Sendable {
                 .first { !$0.isEmpty }
         }
         let record = ExtensionInstallProvenance(
+            installSource: installSource,
             sourceName: sourceName,
             contentDigest: digest,
             sdkVersion: sdkVersion,

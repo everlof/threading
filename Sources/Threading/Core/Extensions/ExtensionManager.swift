@@ -1373,6 +1373,7 @@ final class ExtensionManager:
     /// Imports a package into app-owned storage. New installations are always disabled.
     func install(
         from sourceURL: URL,
+        source installSource: ExtensionInstallSource = .localImport,
         completion: @escaping @MainActor @Sendable (
             Result<InstalledExtensionSnapshot, Error>
         ) -> Void
@@ -1382,7 +1383,9 @@ final class ExtensionManager:
         )
         let store = self.store
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { try store.install(from: sourceURL) }
+            let result = Result {
+                try store.install(from: sourceURL, source: installSource)
+            }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.refreshInventory(postChange: true)
@@ -1449,6 +1452,7 @@ final class ExtensionManager:
     func update(
         from sourceURL: URL,
         approving plan: ExtensionUpdatePlan,
+        source installSource: ExtensionInstallSource = .localImport,
         completion: @escaping @MainActor @Sendable (
             Result<InstalledExtensionSnapshot, Error>
         ) -> Void
@@ -1471,7 +1475,13 @@ final class ExtensionManager:
 
         let store = self.store
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { try store.update(from: sourceURL, approving: plan) }
+            let result = Result {
+                try store.update(
+                    from: sourceURL,
+                    approving: plan,
+                    source: installSource
+                )
+            }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.updatingIdentifiers.remove(identifier)

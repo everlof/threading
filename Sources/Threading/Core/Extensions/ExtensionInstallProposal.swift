@@ -7,6 +7,7 @@ import ThreadingExtensionKit
 /// Settings import and MCP-assisted authoring on the same wording. Installation never grants
 /// execution: a newly copied package remains disabled until the user enables it in Settings.
 struct ExtensionInstallProposal: Equatable {
+    let source: ExtensionInstallSource
     let name: String
     let identifier: String
     let version: String
@@ -21,8 +22,12 @@ struct ExtensionInstallProposal: Equatable {
     let themesWithIconMarks: Int
     let fontFamilies: [String]
 
-    init(bundle: ThreadingExtensionBundle) {
+    init(
+        bundle: ThreadingExtensionBundle,
+        source: ExtensionInstallSource = .localImport
+    ) {
         let manifest = bundle.manifest
+        self.source = source
         name = manifest.name
         identifier = manifest.identifier
         version = manifest.version
@@ -42,8 +47,19 @@ struct ExtensionInstallProposal: Equatable {
     }
 
     var message: String {
+        let sourceDescription: String
+        switch source {
+        case .localImport:
+            sourceDescription =
+                "This is an unsigned local import: \(identifier), version \(version)."
+        case .firstPartyCatalog(let repositoryURL):
+            sourceDescription =
+                "This package is included with Threading: \(identifier), version \(version). "
+                + "Its source is at \(repositoryURL.absoluteString). The app bundle authenticates "
+                + "this copy; the repository is shown for inspection and is not cloned or built."
+        }
         var paragraphs = [
-            "This is an unsigned local import: \(identifier), version \(version).",
+            sourceDescription,
             runtime == .webAssembly
                 ? "It will run as WebAssembly in Threading’s capability-only runner."
                 : "It uses the deprecated native compatibility runner."
