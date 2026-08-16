@@ -16,7 +16,7 @@ state, and launch behaviour for every ordinary session and for records written b
 feature existed.
 
 There is no name field. A local managed session has no feature branch to name: Threading creates
-a locked detached worktree under its Application Support directory, named by the session UUID.
+a locked detached worktree under its Application Support directory, named after the session.
 The logical `Project` remains the sidebar, theme, grouping, and persistence owner. Only APIs that
 execute or inspect session files receive an `executionProject` copy whose folder points at the
 managed checkout.
@@ -72,9 +72,39 @@ agent commits, verifies, and calls archive_session after its final turn
     `--> any refused proof: retain checkout -> needsAttention (not archived)
 ```
 
-The session record is minted before provisioning so its UUID is also the stable directory name.
-The record is persisted only after provisioning succeeds; if session creation then fails, the
-untouched worktree is removed with an ordinary, non-forced Git operation.
+The session record is minted before provisioning so its identity is available to the directory
+name. The record is persisted only after provisioning succeeds; if session creation then fails,
+the untouched worktree is removed with an ordinary, non-forced Git operation.
+
+## Naming the checkout
+
+`ManagedWorkspaceNaming` builds the directory basename from the session's own title plus the
+first group of its UUID — `deliver-a-running-childs-63baa514`. The basename is not cosmetic: it
+is the agent's working directory, so it is what its status line, its shell prompt, `pwd`, and
+every path it prints for the whole session are made of. Named by the bare UUID, all of those read
+`63baa514-da0f-4789-9756-221dc0df3d89@HEAD`, which says nothing about the task and does not
+distinguish nine parallel workspaces of one repository from each other.
+
+The rules that are load-bearing rather than taste:
+
+- **Chosen once, at provisioning, and never recomputed.** Renaming the session later must not
+  move the checkout: the agent is running with that path as its cwd, and provider transcript
+  lookup can derive a conversation's identity from the working directory. This is the same
+  invariant Archive Undo restores.
+- **The UUID group stays.** It keeps two sessions started from the same sentence apart, and it
+  is the prefix a person matches against the full id in the session record and in the worktree's
+  own lock reason, which still carries it in full.
+- **Transliterate, then filter.** A title written outside ASCII is romanised and stripped of
+  diacritics *before* non-alphanumerics are dropped; filtering first empties exactly those
+  titles and quietly puts them back on a UUID.
+- **Never longer than the UUID it replaced**, so nothing that fitted on screen before stops
+  fitting: the words are capped at 24 characters and cut at a word boundary.
+- **A title that yields no letters or digits falls back to the plain UUID** — the pre-existing
+  name, which is still the correct answer when there is nothing to say.
+
+Publication branches are deliberately *not* named this way. `threading/<uuid>` is an opaque
+generated ref pushed to a shared remote; the readable name is for the local directory a person
+and an agent look at, not for something other people's clones fetch.
 
 Scheduled drafts freeze the optional plan with the rest of their launch choices and validate it
 again when they fire. A schedule must fail visibly if its project, checkout, runtime surface, or

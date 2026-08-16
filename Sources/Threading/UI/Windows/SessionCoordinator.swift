@@ -742,6 +742,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         )
 
         let sessionID = SessionID()
+        // Named once and used twice: the sidebar row and, for a managed session, the checkout
+        // the agent spends the whole conversation standing in.
+        let title = SessionNaming.promptTitle(from: task)
         let managedWorkspace: ManagedWorkspace?
         if let managedWorkspacePlan {
             guard ManagedWorkspaceEligibility.supportsFinishHandshake(
@@ -768,7 +771,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 managedWorkspace = try ManagedGitWorkspace.provision(
                     sessionID: sessionID,
                     from: targetProject,
-                    plan: managedWorkspacePlan
+                    plan: managedWorkspacePlan,
+                    title: title
                 )
                 opening = ManagedWorkspaceInstructions.append(
                     to: opening,
@@ -799,7 +803,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             fastMode: fastMode,
             usesNativeUI: usesNativeUI,
             permissionMode: permissionMode,
-            title: SessionNaming.promptTitle(from: task),
+            title: title,
             managedWorkspace: managedWorkspace,
             id: sessionID
         ) else {
@@ -919,6 +923,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         }
 
         let sessionID = plan.reservedSessionID ?? SessionID()
+        let sessionName = SessionNaming.promptTitle(from: title)
         if let existing = environment.projectStore.session(withID: sessionID) {
             guard !existing.hasLaunched, !existing.isArchived else { return nil }
 
@@ -938,7 +943,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             workspace = try? ManagedGitWorkspace.provision(
                 sessionID: sessionID,
                 from: targetProject,
-                plan: managedPlan
+                plan: managedPlan,
+                title: sessionName
             )
             guard workspace != nil else { return nil }
         } else {
@@ -967,7 +973,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             fastMode: plan.fastMode,
             usesNativeUI: plan.usesNativeUI,
             permissionMode: plan.permissionMode,
-            title: SessionNaming.promptTitle(from: title),
+            title: sessionName,
             managedWorkspace: workspace,
             id: sessionID
         )

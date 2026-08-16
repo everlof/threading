@@ -232,10 +232,15 @@ enum ManagedGitWorkspace {
 
     /// Makes the directory before the session is persisted, so a failed setup cannot leave a
     /// sidebar row that points at nowhere.
+    ///
+    /// `title` is the session's own name, and it names the checkout too: see
+    /// `ManagedWorkspaceNaming` for why the directory the agent spends the session inside is
+    /// worth more than a UUID. It is read once, here, and never again.
     static func provision(
         sessionID: SessionID,
         from project: Project,
         plan: ManagedWorkspacePlan,
+        title: String? = nil,
         rootDirectory: URL? = nil
     ) throws -> ManagedWorkspace {
         ThreadingLogger.git.info(
@@ -261,7 +266,7 @@ enum ManagedGitWorkspace {
                 isDirectory: true
             )
         let worktreeRoot = parent.appendingPathComponent(
-            sessionID.uuidString.lowercased(),
+            ManagedWorkspaceNaming.directoryName(for: sessionID, title: title),
             isDirectory: true
         )
         guard !FileManager.default.fileExists(atPath: worktreeRoot.path) else {

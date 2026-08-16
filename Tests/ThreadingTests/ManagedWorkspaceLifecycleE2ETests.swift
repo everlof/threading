@@ -260,6 +260,42 @@ final class ManagedWorkspaceLifecycleE2ETests: HostedStoreTestCase {
         )
     }
 
+    /// The checkout the agent is handed is named after the work, not after the session's UUID —
+    /// and Git, which is the thing that has to find it again, is registered against that name.
+    func testProvisioningNamesTheCheckoutAfterTheSessionAndGitAgrees() throws {
+        let fixture = try ManagedWorkspaceScenarioRepository()
+        defer { fixture.remove() }
+
+        let sessionID = SessionID()
+        let workspace = try fixture.provision(
+            sessionID: sessionID,
+            title: "Rename the worktree"
+        )
+
+        let name = URL(fileURLWithPath: workspace.worktreeRoot, isDirectory: true)
+            .lastPathComponent
+        XCTAssertEqual(
+            name,
+            "rename-the-worktree-\(sessionID.uuidString.lowercased().prefix(8))"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: workspace.worktreeRoot))
+        XCTAssertTrue(
+            try fixture.output("worktree", "list", "--porcelain")
+                .contains(workspace.worktreeRoot)
+        )
+        // Execution still routes to the project's own folder inside the renamed checkout, and
+        // the lock reason keeps the whole id the short group in the name is a prefix of.
+        XCTAssertEqual(
+            workspace.executionURL.lastPathComponent,
+            fixture.project.lastPathComponent
+        )
+        XCTAssertTrue(workspace.executionURL.path.hasPrefix(workspace.worktreeRoot + "/"))
+        XCTAssertTrue(
+            try fixture.output("worktree", "list", "--porcelain")
+                .contains("locked Threading managed session \(sessionID.uuidString.lowercased())")
+        )
+    }
+
     func testKeepForReviewRetainsTheExactWorkspaceAndRestoreMakesItActive() throws {
         let fixture = try ManagedWorkspaceScenarioRepository()
         defer { fixture.remove() }
@@ -706,12 +742,14 @@ private final class ManagedWorkspaceScenarioRepository {
 
     func provision(
         sessionID: SessionID,
-        plan: ManagedWorkspacePlan = ManagedWorkspacePlan()
+        plan: ManagedWorkspacePlan = ManagedWorkspacePlan(),
+        title: String? = nil
     ) throws -> ManagedWorkspace {
         try ManagedGitWorkspace.provision(
             sessionID: sessionID,
             from: Project(name: "Fixture Package", folderURL: project),
             plan: plan,
+            title: title,
             rootDirectory: workspaces
         )
     }
