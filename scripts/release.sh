@@ -14,6 +14,9 @@
 # Usage:
 #   scripts/release.sh                 # build, export, verify (no upload)
 #   scripts/release.sh --notarize      # also submit to Apple, staple, and Gatekeeper-check
+#   scripts/release.sh --install       # also install the result over /Applications/Threading.app
+#                                      # (scripts/install-app.sh does the work, and can be run on
+#                                      # its own against any bundle — see its header)
 #   scripts/release.sh --channel nightly
 #                                      # stamp a channel other than release into the bundle;
 #                                      # the app shows it as the sidebar badge (BuildChannelBadge)
@@ -46,10 +49,12 @@ say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 fail() { printf '\033[31merror: %s\033[0m\n' "$1" >&2; exit 1; }
 
 NOTARIZE=0
+INSTALL=0
 CHANNEL="release"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --notarize) NOTARIZE=1 ;;
+        --install) INSTALL=1 ;;
         --channel)
             shift
             CHANNEL="${1:-}"
@@ -249,12 +254,25 @@ zip="$BUILD_DIR/$SCHEME-$version.zip"
 ditto -c -k --keepParent --sequesterRsrc "$APP" "$zip"
 echo "  $zip"
 
+# MARK: - Install
+#
+# A function rather than a tail, because this script has two endings — the un-notarized one below
+# and the stapled one at the bottom — and an install step reachable from only one of them would
+# be a flag that silently does nothing half the time.
+
+install_if_asked() {
+    [[ $INSTALL -eq 1 ]] || return 0
+    say "Installing over /Applications"
+    "$ROOT/scripts/install-app.sh" --app "$APP"
+}
+
 # MARK: - Notarize
 
 if [[ $NOTARIZE -eq 0 ]]; then
     say "Done (not notarized)"
     echo "The bundle is signed and verified but Gatekeeper will still warn until it is"
     echo "notarized. Re-run with --notarize to submit it."
+    install_if_asked
     exit 0
 fi
 
@@ -276,3 +294,5 @@ spctl -a -vvv -t install "$APP"
 say "Ready: $SCHEME $version ($build, $channel)"
 echo "  app: $APP"
 echo "  zip: $zip"
+
+install_if_asked
