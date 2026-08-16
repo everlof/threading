@@ -422,12 +422,15 @@ report_status() {
     fi
 
     if [[ -d "$INSTALL_DIR/$SCHEME.app" ]]; then
-        # The mtime is the build product's, which ditto preserves: it says when this bundle was
-        # built, not when it was copied here, and that is the more useful of the two.
+        # The executable's mtime, not the bundle directory's. ditto preserves both, and a rebuild
+        # that relinks and re-signs the binary leaves the directory's mtime on whenever the
+        # product folder itself last changed — which is how this line came to say a build was
+        # 23 minutes older than the commit it had just installed.
         printf '  bundle:     %s, built %s\n' \
             "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
                 "$INSTALL_DIR/$SCHEME.app/Contents/Info.plist" 2>/dev/null || echo '?')" \
-            "$(date -r "$INSTALL_DIR/$SCHEME.app" "+%Y-%m-%d %H:%M" 2>/dev/null || echo '?')"
+            "$(date -r "$INSTALL_DIR/$SCHEME.app/Contents/MacOS/$SCHEME" "+%Y-%m-%d %H:%M" \
+                2>/dev/null || echo '?')"
     fi
     if app_is_running; then
         printf '  running:    yes — it stays on its launched build until you reopen it\n'
