@@ -231,6 +231,41 @@ final class ThemedIndicatorsTests: XCTestCase {
         )
     }
 
+    /// A press takes the focus so the arrow keys work on the fold the hand just left, and focus
+    /// is drawn in the pointer's accent — so a released fold stayed lit after every drag, the one
+    /// divider in the window that did (`ThemedSplitView` and `ShellDrawerDivider` never take
+    /// focus). The accent stays only for a focus that arrived by keyboard, where there is no
+    /// pointer to say where the fold is.
+    func testTheFoldPutsItsSeamOutWhenTheHandLetsGoUnlessTheKeyboardPutFocusThere() throws {
+        let fold = PaneFoldDivider()
+        fold.frame = NSRect(x: 0, y: 0, width: 40, height: fold.intrinsicContentSize.height)
+        let window = try XCTUnwrap(hosted(fold).window)
+        let rest = try colour(of: fold, atPointX: 20, y: 0.5)
+
+        let press = try clickEvent(in: fold, clicks: 1)
+        fold.mouseDown(with: press)
+        XCTAssertTrue(window.firstResponder === fold, "a press did not take the focus")
+        fold.mouseUp(with: press)
+
+        XCTAssertFalse(fold.showsKeyboardFocus, "a press counted as keyboard traversal")
+        XCTAssertEqual(
+            try colour(of: fold, atPointX: 20, y: 0.5).hexString,
+            rest.hexString,
+            "the seam stayed lit after the hand let go of it"
+        )
+
+        fold.focusArrived(from: arrowEvent(down: true, fine: false))
+        XCTAssertTrue(fold.showsKeyboardFocus)
+        XCTAssertNotEqual(
+            try colour(of: fold, atPointX: 20, y: 0.5).hexString,
+            rest.hexString,
+            "keyboard traversal left focus with nothing to see"
+        )
+
+        window.makeFirstResponder(nil)
+        XCTAssertFalse(fold.showsKeyboardFocus, "resigning kept the keyboard's origin")
+    }
+
     /// A drag reports travel, and the release does not: only the pane knows what floor and
     /// ceiling the travel has to be answered against, so the fold hands over points and stops.
     /// The keyboard reports the same points, because a key press moving nothing is a control a

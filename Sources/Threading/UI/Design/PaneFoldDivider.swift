@@ -49,6 +49,20 @@ final class PaneFoldDivider: ThemedControl {
         }
     }
 
+    private var focusOrigin = KeyboardFocusOrigin()
+
+    /// Whether the seam is lit for the keyboard — see `KeyboardFocusOrigin`.
+    ///
+    /// A press takes the focus so the arrow keys work on the fold the hand just left, and focus is
+    /// drawn in the same accent the pointer lights, because a ring around a 7pt band reads as a
+    /// bar. Together those two made every drag end with the seam still lit: the pointer had gone,
+    /// the hand had let go, and the fold was still first responder. No other divider in the window
+    /// does that — `ThemedSplitView` and `ShellDrawerDivider` never take focus at all — so the
+    /// accent here follows the split's rule and goes out with the pointer, and stays only for a
+    /// focus that arrived by Tab or an arrow: the one case where there is no pointer to say
+    /// where the fold is.
+    var showsKeyboardFocus: Bool { hasKeyboardFocus && focusOrigin.isFromKeyboard }
+
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
@@ -74,10 +88,11 @@ final class PaneFoldDivider: ThemedControl {
         }
 
         // The seam takes the accent wherever a drag would attach to it — under the pointer, under
-        // the hand, or under the keyboard's focus. That is what the accent already means on
+        // the hand, or under a focus the keyboard placed. That is what the accent already means on
         // `ThemedSplitView`'s divider, and the reason focus is shown this way rather than as a
-        // ring: a ring around a band this thin reads as a bar, not as a ring.
-        let ink = isActive || hasKeyboardFocus ? Design.Surface.accent : Design.Surface.divider
+        // ring: a ring around a band this thin reads as a bar, not as a ring. Only a *keyboard*
+        // focus, though — see `showsKeyboardFocus`.
+        let ink = isActive || showsKeyboardFocus ? Design.Surface.accent : Design.Surface.divider
         ink.setFill()
         let weight = Design.Radius.border
         NSRect(
@@ -90,6 +105,31 @@ final class PaneFoldDivider: ThemedControl {
 
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .resizeUpDown)
+    }
+
+    // MARK: - Focus
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { focusArrived(from: NSApp.currentEvent) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            focusOrigin.resigned()
+            needsDisplay = true
+        }
+        return resigned
+    }
+
+    /// Internal rather than private so a fixture can state the event that moved focus:
+    /// `NSApp.currentEvent` is whatever the run loop last pulled off the queue, and an unshown
+    /// test window pulls nothing.
+    func focusArrived(from event: NSEvent?) {
+        focusOrigin.arrived(from: event)
+        needsDisplay = true
     }
 
     // MARK: - Pointer
