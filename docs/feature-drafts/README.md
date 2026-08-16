@@ -60,6 +60,14 @@ reshuffling it is a line move.
   Codex, Grok and OpenCode, and add native read-only asides for Codex and Grok first. High-frequency
   session workflow with direct upstream operations; Claude native aside remains a measured later
   slice rather than blocking the ready paths.
+- [Orchestrator role and grants](orchestrator-role-and-grants.md) — a session whose job is to run
+  the others: an explicit authority axis (`ControlOperation` × `ControlGrant`) on the shipped
+  control plane, a manager *role* conferred only by the user, targeted archive/rename, resume,
+  spawn over the same launch plan the composer uses (managed worktrees included), read-only
+  accounts and usage, `best`-account choice through the limit-escape ranker (so the user's own
+  limits hold), guarded account moves, and a durable supervision record with pushed child
+  notices. Regular sessions keep exactly today's self-scoped tools and never see the manager's.
+  Slices two and four of `control-plane.md`, designed 2026-08-16.
 - [Browser Focus](browser-focus.md) — let the live browser fill the main window while retaining a
   compact, live conversation dock. Implementation-ready and self-contained.
 - [CCS launch profiles and GLM](ccs-launch-profiles-and-glm.md) — adopt CCS-managed launch
