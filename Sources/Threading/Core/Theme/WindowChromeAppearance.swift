@@ -60,6 +60,15 @@ enum WindowChromeAppearance {
         let frameWidth: CGFloat
         let frameCornerRadius: CGFloat
         let frameAntialiasesCorners: Bool
+
+        /// The radius the frame's silhouette actually turns through: the stated corner radius
+        /// under a full-width band, and none under a leading tab, whose application body is
+        /// rectangular below the tab. The host's clip, the well's inner clip and the frame's own
+        /// drawing all take this one answer, so a shape can never round the content and square
+        /// the outline — or the reverse.
+        var frameSilhouetteCornerRadius: CGFloat {
+            shape == .fullWidth ? frameCornerRadius : 0
+        }
     }
 
     /// What the current theme asks the frame to draw, or nil while the window is native —

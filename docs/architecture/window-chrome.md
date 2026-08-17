@@ -821,7 +821,21 @@ The same transparent-backing path is used when `chrome.frame.corner_radius` is n
 permanent content root receives the radius and clips the workspace, while `WindowChromeFrameView`
 clears and strokes the matching rounded outline. `chrome.frame.antialiases_corners` controls
 whether that outline has smooth coverage or a one-bit stepped turn; older documents default to
-smooth, and a zero radius remains the backwards-compatible square default.
+smooth, and a zero radius remains the backwards-compatible square default. Both take the radius
+from one answer, `Resolved.frameSilhouetteCornerRadius` (the stated radius under a full-width
+band, none under a leading tab), so the clip and the drawing cannot disagree.
+
+**The margin keeps its width through the corner.** The band, the command band and the workspace
+sit in a content well inset by `frame.width`, and under a rounded frame the well is clipped to the
+*inner* curve — radius minus width, concentric with the outline. Without that, content inset only
+on its four sides reached square into every corner and covered the curved run of the seat, so the
+outline read as two straight lines that stopped short of each other with the band's own clipped
+edge (the root's mask) between them. That is what was reported, under the Threading theme's
+twelve-point frame, as the window not having a proper edge. `WindowChromeTakeoverTests` renders
+the corner and sorts its pixels by where their centres fall against the seat's centreline: on it
+they must be seat ink, beyond it transparent, inside it content — a per-pixel-centre claim rather
+than a walk down the diagonal, because an unshown window renders at whichever scale the process
+is on and at 1x the exact 45° pixel holds only a sliver of a one-point seat.
 
 **The backing is stated at birth as well as at the flip.** A shaped theme active at launch never
 runs `enterTakeover` — `createWindow` builds the window frameless already and the coordinator
@@ -831,9 +845,21 @@ just cleared. Measured under Tiger, launched with the theme on: the seven-point 
 and stroked correctly, and the window's own backing filled the quarter behind it, so every corner
 wore a white wedge inside a square outline; the same launch under BeOS left the shoulders beside
 the title tab filled. It reads as a drawing bug in the corner and is not one — nothing above the
-backing is wrong. The coordinator's initializer therefore captures `isOpaque`/`backgroundColor`
-and applies the takeover surface when it finds itself already frameless, which is also what makes
-a later theme change out of takeover hand the native frame the surface the window started with.
+backing is wrong. The coordinator's initializer therefore states the surface for whichever dress
+it finds the window in.
+
+**The backing has one owner.** `window.backgroundColor` is written by `WindowChromeCoordinator`
+and nothing else. In native dress it paints `WindowBackdrop.color` — the pane's backdrop, a
+terminal palette's background or the chrome's ground, which is what runs into AppKit's rounded
+corners and under the transparent titlebar; a shaped takeover keeps it clear; a square takeover
+is opaque over the same backdrop, unseen beneath the frame the app draws edge to edge. It
+repaints on `WindowBackdropDidChange` (a session swap) and on `AppThemeDidChange`, and a flip
+back to native paints the pane's *current* colour rather than a snapshot from before the takeover.
+`TerminalContainerViewController.applyPaneBackground` only records the ground; for as long as it
+also wrote the window itself, every session swap under the Threading theme's rounded frame put
+an opaque square of the terminal's black back behind the corners the coordinator had cleared —
+captured on a 1x display as a square outline round a rounded band, which is the other half of
+the "no proper edge" report. `testAPaneBackdropChangeNeverPaintsBehindAShapedFrame` holds it.
 
 `WindowChromeButton` (window menu/close/minimize/zoom/depth) calls the **semantic**
 operations — `zoom(nil)`, `miniaturize(nil)`, `orderBack(nil)`, delegate-consulted `close()` — because the

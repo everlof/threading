@@ -16,6 +16,16 @@ import AppKit
 /// both are captured before and re-asserted after. And a window inside fullscreen never has
 /// its mask touched: the change is parked and completed from `windowDidExitFullScreen`,
 /// because a mid-fullscreen mask flip detaches the window from its space.
+///
+/// **The window's backing has one owner, and it is this one.** What AppKit paints under the
+/// content depends on the dress: in native dress it is the pane's backdrop (`WindowBackdrop`),
+/// so a terminal palette runs into the platform's rounded corners and under the transparent
+/// titlebar; under a shaped takeover it must be nothing at all, or AppKit fills the corners the
+/// frame cleared. Two writers to `backgroundColor` was the bug: the coordinator cleared it for
+/// the Threading theme's rounded frame and the pane painted it opaque again on the next session
+/// swap, so a window that should have shown the desktop past its curve showed a square of the
+/// terminal's black instead. The pane now records its colour through `WindowBackdrop`, and the
+/// colour reaches the window only through `applyBackingSurface`.
 @MainActor
 final class WindowChromeCoordinator {
 
@@ -69,8 +79,6 @@ final class WindowChromeCoordinator {
     /// The collection behaviour the window had before takeover inserted `.fullScreenPrimary`,
     /// put back exactly on exit.
     private var savedCollectionBehavior: NSWindow.CollectionBehavior?
-    private var savedIsOpaque: Bool?
-    private var savedBackgroundColor: NSColor?
 
     /// How the coordinator asks whether the window is inside fullscreen. A closure because a
     /// test cannot put a real window there: AppKit refuses `.fullScreen` set on a mask
@@ -91,17 +99,17 @@ final class WindowChromeCoordinator {
         // should, and the window's opaque backing painted the quarter it had just given up,
         // so each corner wore a white wedge inside a square outline. The same launch under
         // BeOS left the shoulders beside the title tab opaque. The surface is therefore
-        // stated here as well as in the flip, and the values `exitTakeover` puts back are
-        // captured with it — otherwise a theme change later in that launch hands a native
-        // frame a transparent backing.
-        if isTakeoverActive {
-            savedIsOpaque = window.isOpaque
-            savedBackgroundColor = window.backgroundColor
-            applyTakeoverSurface(to: window)
-        }
+        // stated at birth in either dress, not only in the flip.
+        applyBackingSurface(to: window, takeover: isTakeoverActive)
 
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             self?.applyCurrentTheme()
+        }
+        // The pane's backdrop moved — another session, another palette. Native dress paints
+        // it; a takeover keeps whatever its shape needs.
+        appEvents.observe(WindowBackdropDidChange.self) { [weak self] _ in
+            guard let self, let window = self.window else { return }
+            self.applyBackingSurface(to: window, takeover: self.isTakeoverActive)
         }
     }
 
@@ -114,10 +122,11 @@ final class WindowChromeCoordinator {
         guard wanted != isTakeoverActive else {
             // A parked change the theme has since walked back — un-park it.
             pendingChange = nil
-            if wanted, let window {
-                // Takeover → takeover can still exchange a full-width band for a shaped tab.
-                // The mask stays put, but the window's opaque backing must follow the shape.
-                applyTakeoverSurface(to: window)
+            if let window {
+                // The dress stays, but not necessarily the surface: takeover → takeover can
+                // still exchange a full-width band for a shaped tab, and native → native
+                // re-colours the ground the backing shows.
+                applyBackingSurface(to: window, takeover: wanted)
             }
             return
         }
@@ -153,8 +162,6 @@ final class WindowChromeCoordinator {
 
         // The toolbar first: it may only exist on a titled window.
         callbacks.removeToolbar()
-        savedIsOpaque = window.isOpaque
-        savedBackgroundColor = window.backgroundColor
         window.styleMask = Self.takeoverMask
         // The mask assignment can nudge the frame (titled and frameless content geometry
         // differ); the window the user had is the window they keep.
@@ -164,7 +171,7 @@ final class WindowChromeCoordinator {
         // still have to work. Saved so exit restores whatever the window had.
         savedCollectionBehavior = window.collectionBehavior
         window.collectionBehavior.insert(.fullScreenPrimary)
-        applyTakeoverSurface(to: window)
+        applyBackingSurface(to: window, takeover: true)
 
         isTakeoverActive = true
         callbacks.takeoverDidChange(true)
@@ -194,14 +201,8 @@ final class WindowChromeCoordinator {
             window.collectionBehavior = saved
             savedCollectionBehavior = nil
         }
-        if let savedIsOpaque {
-            window.isOpaque = savedIsOpaque
-            self.savedIsOpaque = nil
-        }
-        if let savedBackgroundColor {
-            window.backgroundColor = savedBackgroundColor
-            self.savedBackgroundColor = nil
-        }
+        applyBackingSurface(to: window, takeover: false)
+        // The silhouette just went from whatever the theme drew back to a titled rectangle.
         window.invalidateShadow()
 
         isTakeoverActive = false
@@ -212,19 +213,35 @@ final class WindowChromeCoordinator {
         }
     }
 
-    /// A shaped title tab or rounded app-drawn frame needs a transparent backing so the window
-    /// shadow follows the actual outline. Square full-width takeovers retain the original one.
-    private func applyTakeoverSurface(to window: TitlebarActionWindow) {
-        let appearance = WindowChromeAppearance.resolve()
+    // MARK: - The Backing
+
+    /// States what AppKit paints under the content, for the dress the window is about to wear.
+    ///
+    /// A shaped takeover — a leading title tab, a rounded frame — needs a transparent backing so
+    /// the window's silhouette and its shadow follow the outline the frame draws; anything else
+    /// there is painted over the corners the frame cleared. Every other dress is opaque and shows
+    /// the pane's backdrop: under a native frame that colour is visible in the titlebar strip and
+    /// the platform's rounded corners, and under a square takeover it lies unseen beneath the
+    /// frame the app draws edge to edge, where it is simply the least surprising thing to flash
+    /// during a live resize.
+    ///
+    /// `takeover` is passed rather than read from `isTakeoverActive` because both flips state
+    /// the surface *before* they record the dress, in the same order the mask changed.
+    private func applyBackingSurface(to window: TitlebarActionWindow, takeover: Bool) {
+        let appearance = takeover ? WindowChromeAppearance.resolve() : nil
         let isShaped = appearance?.shape == .leadingTab
-            || (appearance?.frameCornerRadius ?? 0) > 0
+            || (appearance?.frameSilhouetteCornerRadius ?? 0) > 0
         if isShaped {
             window.isOpaque = false
             window.backgroundColor = .clear
         } else {
-            window.isOpaque = savedIsOpaque ?? true
-            window.backgroundColor = savedBackgroundColor ?? Design.Surface.ground
+            window.isOpaque = true
+            window.backgroundColor = WindowBackdrop.color
         }
-        window.invalidateShadow()
+        // The shadow is computed from the silhouette; a titled window's is AppKit's own and
+        // follows its frame without being asked.
+        if takeover {
+            window.invalidateShadow()
+        }
     }
 }

@@ -15,6 +15,15 @@ import AppKit
 final class WindowChromeHostViewController: NSViewController {
 
     private let workspaceViewController: NSViewController
+
+    /// Everything the theme's frame surrounds — the band, the command band and the workspace —
+    /// held as one thing so a rounded frame can clip them to its *inner* curve. The frame's
+    /// margin is `frameWidth` wide on the straight runs, and it has to stay that wide through
+    /// the corner: content inset only on its four sides reaches square into a rounded corner and
+    /// covers the curved run of the seat `WindowChromeFrameView` draws there. Measured under the
+    /// Threading theme's twelve-point frame, the border read as two straight lines that stopped
+    /// short of each other, with the band's own rounded edge (the host's clip) between them.
+    private let contentWell = NSView()
     private let bandHost = NSView()
     private let commandBandHost = NSView()
     private var installedBandView: WindowTitleBandView?
@@ -40,12 +49,10 @@ final class WindowChromeHostViewController: NSViewController {
 
     private var bandHeight: NSLayoutConstraint?
     private var commandBandHeight: NSLayoutConstraint?
-    private var bandTop: NSLayoutConstraint?
-    private var bandLeading: NSLayoutConstraint?
-    private var bandTrailing: NSLayoutConstraint?
-    private var workspaceLeading: NSLayoutConstraint?
-    private var workspaceTrailing: NSLayoutConstraint?
-    private var workspaceBottom: NSLayoutConstraint?
+    private var wellTop: NSLayoutConstraint?
+    private var wellLeading: NSLayoutConstraint?
+    private var wellTrailing: NSLayoutConstraint?
+    private var wellBottom: NSLayoutConstraint?
 
     /// Where a covering surface may sit — see `InWindowOverlayHosting`.
     private let overlayAreaGuide = NSLayoutGuide()
@@ -74,37 +81,42 @@ final class WindowChromeHostViewController: NSViewController {
         addChild(workspaceViewController)
         let workspace = workspaceViewController.view
         workspace.translatesAutoresizingMaskIntoConstraints = false
+        contentWell.translatesAutoresizingMaskIntoConstraints = false
         bandHost.translatesAutoresizingMaskIntoConstraints = false
         commandBandHost.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(bandHost)
-        view.addSubview(commandBandHost)
-        view.addSubview(workspace)
+        view.addSubview(contentWell)
+        contentWell.addSubview(bandHost)
+        contentWell.addSubview(commandBandHost)
+        contentWell.addSubview(workspace)
 
-        let bandTop = bandHost.topAnchor.constraint(equalTo: view.topAnchor)
-        let bandLeading = bandHost.leadingAnchor.constraint(equalTo: view.leadingAnchor)
-        let bandTrailing = bandHost.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        // The frame's inset is the well's; band and workspace fill the well edge to edge.
+        let wellTop = contentWell.topAnchor.constraint(equalTo: view.topAnchor)
+        let wellLeading = contentWell.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+        let wellTrailing = contentWell.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        let wellBottom = contentWell.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         let bandHeight = bandHost.heightAnchor.constraint(equalToConstant: 0)
         let commandBandHeight = commandBandHost.heightAnchor.constraint(equalToConstant: 0)
-        let workspaceLeading = workspace.leadingAnchor.constraint(equalTo: view.leadingAnchor)
-        let workspaceTrailing = workspace.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        let workspaceBottom = workspace.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        self.bandTop = bandTop
-        self.bandLeading = bandLeading
-        self.bandTrailing = bandTrailing
+        self.wellTop = wellTop
+        self.wellLeading = wellLeading
+        self.wellTrailing = wellTrailing
+        self.wellBottom = wellBottom
         self.bandHeight = bandHeight
         self.commandBandHeight = commandBandHeight
-        self.workspaceLeading = workspaceLeading
-        self.workspaceTrailing = workspaceTrailing
-        self.workspaceBottom = workspaceBottom
 
         NSLayoutConstraint.activate([
-            bandTop, bandLeading, bandTrailing, bandHeight,
+            wellTop, wellLeading, wellTrailing, wellBottom,
+            bandHost.topAnchor.constraint(equalTo: contentWell.topAnchor),
+            bandHost.leadingAnchor.constraint(equalTo: contentWell.leadingAnchor),
+            bandHost.trailingAnchor.constraint(equalTo: contentWell.trailingAnchor),
+            bandHeight,
             commandBandHost.topAnchor.constraint(equalTo: bandHost.bottomAnchor),
             commandBandHost.leadingAnchor.constraint(equalTo: bandHost.leadingAnchor),
             commandBandHost.trailingAnchor.constraint(equalTo: bandHost.trailingAnchor),
             commandBandHeight,
             workspace.topAnchor.constraint(equalTo: commandBandHost.bottomAnchor),
-            workspaceLeading, workspaceTrailing, workspaceBottom
+            workspace.leadingAnchor.constraint(equalTo: contentWell.leadingAnchor),
+            workspace.trailingAnchor.constraint(equalTo: contentWell.trailingAnchor),
+            workspace.bottomAnchor.constraint(equalTo: contentWell.bottomAnchor)
         ])
 
         installOverlayArea(around: workspace)
@@ -223,18 +235,25 @@ final class WindowChromeHostViewController: NSViewController {
             materializeTakeoverChromeIfNeeded()
         }
 
-        let cornerRadius = resolved?.frameCornerRadius ?? 0
+        let cornerRadius = resolved?.frameSilhouetteCornerRadius ?? 0
         if cornerRadius > 0 { view.wantsLayer = true }
         view.layer?.cornerRadius = cornerRadius
         view.layer?.masksToBounds = cornerRadius > 0
 
         let inset = resolved?.frameWidth ?? 0
-        bandTop?.constant = inset
-        bandLeading?.constant = inset
-        bandTrailing?.constant = -inset
-        workspaceLeading?.constant = inset
-        workspaceTrailing?.constant = -inset
-        workspaceBottom?.constant = -inset
+        wellTop?.constant = inset
+        wellLeading?.constant = inset
+        wellTrailing?.constant = -inset
+        wellBottom?.constant = -inset
+
+        // The margin keeps its width through the corner: the content turns `inset` inside the
+        // silhouette, concentric with it, which is exactly the run the frame's seat occupies.
+        // Under a square frame — or one whose radius is swallowed by its own width — nothing is
+        // clipped, and native dress never grows a layer here at all.
+        let wellRadius = max(0, cornerRadius - inset)
+        if wellRadius > 0 { contentWell.wantsLayer = true }
+        contentWell.layer?.cornerRadius = wellRadius
+        contentWell.layer?.masksToBounds = wellRadius > 0
 
         bandHeight?.constant = resolved?.bandHeight ?? 0
         commandBandHeight?.constant = resolved == nil ? 0 : WindowCommandBandView.bandHeight

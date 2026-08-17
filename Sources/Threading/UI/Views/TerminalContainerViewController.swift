@@ -1442,15 +1442,15 @@ final class TerminalContainerViewController: NSViewController {
         }
         view.applyLayerBackground(color)
 
-        // Also paint the window itself, so the terminal's colour is the backdrop the whole
-        // right side sits on: it fills the strip beneath the transparent toolbar and runs into
-        // the window's rounded corners, instead of a neutral chrome meeting the terminal in a
-        // hard edge. The sidebar covers its own column with an opaque ground, so this reaches
-        // only the panes that want it — and the split view's divider is the seam between them.
-        view.window?.backgroundColor = color
-
-        // And tell whatever is drawn on it. The toolbar sits over this colour rather than over
-        // the chrome's ground, so its ink has to come from here — see `WindowBackdrop`.
+        // And record it as the window's backdrop, which reaches two readers. Whatever is drawn
+        // directly on the window — the toolbar sits over this colour rather than over the
+        // chrome's ground, so its ink comes from here. And the window itself: under a native
+        // frame the terminal's colour is the backdrop the whole right side sits on, filling the
+        // strip beneath the transparent toolbar and running into the window's rounded corners
+        // instead of meeting the terminal in a hard edge. That painting is
+        // `WindowChromeCoordinator`'s, not this pane's — under a shaped takeover the backing has
+        // to stay clear behind the frame's curve, and a pane writing `window.backgroundColor`
+        // on every session swap was painting the cleared corners opaque again.
         WindowBackdrop.set(ground)
     }
 

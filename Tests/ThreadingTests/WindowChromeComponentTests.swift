@@ -1094,8 +1094,11 @@ final class WindowChromeComponentTests: HostedStoreTestCase {
             WindowChromeStyleLimits.defaultBandHeight
         )
         XCTAssertEqual(commandBandFrame.height, WindowCommandBandView.bandHeight)
-        XCTAssertEqual(workspace.view.frame.maxY, commandBandFrame.minY)
-        XCTAssertEqual(workspace.view.frame.minX, 4, "the frame's width insets the workspace")
+        // Measured in the host's space, as the bands are: the workspace lives in the content well
+        // with them, and the well is what the frame's width insets.
+        var workspaceFrame = host.view.convert(workspace.view.bounds, from: workspace.view)
+        XCTAssertEqual(workspaceFrame.maxY, commandBandFrame.minY)
+        XCTAssertEqual(workspaceFrame.minX, 4, "the frame's width insets the workspace")
         XCTAssertEqual(
             host.view.bounds.maxY - bandFrame.maxY,
             4,
@@ -1106,7 +1109,8 @@ final class WindowChromeComponentTests: HostedStoreTestCase {
         host.view.layoutSubtreeIfNeeded()
         XCTAssertTrue(host.bandView.isHidden)
         XCTAssertTrue(host.commandBandView.isHidden)
-        XCTAssertEqual(workspace.view.frame, host.view.bounds)
+        workspaceFrame = host.view.convert(workspace.view.bounds, from: workspace.view)
+        XCTAssertEqual(workspaceFrame, host.view.bounds)
     }
 
     /// The command band is a pane band, laid out by `PaneHeaderView`: its first control's ink

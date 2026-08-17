@@ -2,12 +2,17 @@ import AppKit
 
 /// The colour the window is painted with, the ink that reads on it — and *whose* colour it is.
 ///
-/// The window's backdrop is **not** the chrome's ground. A terminal pane paints the window with
-/// the *terminal* palette's background, so the colour runs into the window's rounded corners and
-/// under the transparent toolbar instead of meeting the chrome in a hard seam — see
+/// The window's backdrop is **not** the chrome's ground. A terminal pane records the *terminal*
+/// palette's background here, so the colour runs into the window's rounded corners and under the
+/// transparent toolbar instead of meeting the chrome in a hard seam — see
 /// `TerminalContainerViewController.applyPaneBackground`. That is the effect worth keeping, and
 /// it has one consequence: everything drawn directly on the window is over a colour the app theme
 /// knows nothing about.
+///
+/// The pane records; it does not paint. `window.backgroundColor` belongs to
+/// `WindowChromeCoordinator`, which reads `color` for a native frame and keeps the backing clear
+/// behind a shaped app-drawn one — the pane writing the window itself on every session swap is
+/// how a rounded takeover's transparent corners came back as opaque squares.
 ///
 /// The toolbar is the whole of that "everything" today — the session title, the usage pill, the
 /// pane toggles. They read their ink from here rather than from `Design.Text`, which answers for

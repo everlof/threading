@@ -9,6 +9,13 @@ import AppKit
 /// corners and the terminal-palette backdrop showing through the titlebar strip are load-bearing
 /// there (`TerminalContainerViewController.applyPaneBackground`), and an opaque fill here would
 /// paint over both.
+///
+/// The margin is the same width the whole way round, corners included: under a rounded frame
+/// the host clips the content to the frame's *inner* curve (`WindowChromeHostViewController`),
+/// so the seat drawn here stays visible where the outline turns. Before that clip the band and
+/// workspace, inset only on their four sides, reached square into every corner and covered the
+/// curved run of the seat — the outline read as two straight lines that stopped short of each
+/// other, with the content's own rounded edge between them.
 final class WindowChromeFrameView: NSView, ThemedComponent {
 
     /// The faintest an outer edge may be before it stops separating the window from its
@@ -52,9 +59,7 @@ final class WindowChromeFrameView: NSView, ThemedComponent {
             )
         }
 
-        let cornerRadius = resolved.shape == .fullWidth
-            ? resolved.frameCornerRadius
-            : 0
+        let cornerRadius = resolved.frameSilhouetteCornerRadius
         let framePath = NSBezierPath(
             roundedRect: frameRect,
             xRadius: cornerRadius,

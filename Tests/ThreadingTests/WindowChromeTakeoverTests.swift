@@ -13,9 +13,12 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
     private var previousTheme: AppTheme!
     private var controller: MainWindowController?
 
+    private var previousBackdrop: WindowBackdrop.Ground = .chrome
+
     override func setUp() {
         super.setUp()
         previousTheme = AppThemeLibrary.current
+        previousBackdrop = WindowBackdrop.ground
     }
 
     override func tearDown() {
@@ -24,6 +27,7 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
         // `apply` early-returns when the library already held this theme, so a palette a test
         // set directly would survive it. Resync explicitly.
         AppThemePalette.set(previousTheme)
+        WindowBackdrop.set(previousBackdrop)
         super.tearDown()
     }
 
@@ -66,6 +70,36 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
     }
 
+    /// A colour as the window would paint it: `WindowBackdrop.color` for the chrome ground is a
+    /// dynamic role — a fresh `NSColor(name:)` on every read — so two reads compare unequal as
+    /// objects while resolving to the same pixels. The pixels are the claim.
+    private func resolved(_ color: NSColor, in window: NSWindow) throws -> [CGFloat] {
+        var components: [CGFloat] = []
+        window.effectiveAppearance.performAsCurrentDrawingAppearance {
+            if let srgb = color.usingColorSpace(.sRGB) {
+                components = [
+                    srgb.redComponent, srgb.greenComponent, srgb.blueComponent, srgb.alphaComponent
+                ]
+            }
+        }
+        XCTAssertEqual(components.count, 4, "\(color) did not resolve to sRGB")
+        return components
+    }
+
+    private func assertBacking(
+        of window: NSWindow,
+        resolvesTo expected: NSColor,
+        _ message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let actual = try resolved(window.backgroundColor, in: window)
+        let wanted = try resolved(expected, in: window)
+        for (a, w) in zip(actual, wanted) {
+            XCTAssertEqual(a, w, accuracy: 0.002, message, file: file, line: line)
+        }
+    }
+
     // MARK: - Creation
 
     /// A theme active at launch is honoured at creation — the window is born frameless, never
@@ -102,9 +136,9 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
         }
     }
 
-    /// And the square takeover keeps the opaque backing it was born with — the transparency is
-    /// for the shapes that need it, not for every app-drawn frame — while a theme change out of
-    /// takeover still hands the native frame the surface the window started with.
+    /// And the square takeover keeps an opaque backing — the transparency is for the shapes
+    /// that need it, not for every app-drawn frame — painted with the pane's backdrop, which is
+    /// also what a theme change out of takeover hands the native frame.
     func testAWindowBornUnderASquareTakeoverKeepsItsBackingAndRestoresIt() throws {
         AppThemePalette.set(try makeTakeoverTheme())
         let controller = makeMainWindowController()
@@ -113,13 +147,67 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
         let coordinator = try XCTUnwrap(controller.chromeCoordinator)
 
         XCTAssertTrue(window.isOpaque)
-        let bornBackground = window.backgroundColor
+        try assertBacking(of: window, resolvesTo: WindowBackdrop.color,
+                          "a square takeover's backing is the pane's backdrop")
 
         AppThemePalette.set(.system)
         coordinator.applyCurrentTheme()
         XCTAssertEqual(window.styleMask, WindowChromeCoordinator.nativeMask)
         XCTAssertTrue(window.isOpaque)
-        XCTAssertEqual(window.backgroundColor, bornBackground)
+        try assertBacking(of: window, resolvesTo: WindowBackdrop.color,
+                          "the native frame is handed the pane's backdrop")
+    }
+
+    /// The backing has one owner. `TerminalContainerViewController` records its colour through
+    /// `WindowBackdrop` on every session swap, and for as long as it painted the window itself
+    /// that write landed on top of the coordinator's: launched under the Threading theme's
+    /// rounded frame, every swap made the four cleared corners opaque again — captured, each
+    /// wore a square of the terminal palette's black past the frame's curve. Now a backdrop
+    /// change reaches the window only through the coordinator, which knows the dress: painted
+    /// under a native frame, ignored behind a shape, and the pane's *current* colour is what a
+    /// flip back to native paints, not a snapshot from before the takeover.
+    func testAPaneBackdropChangeNeverPaintsBehindAShapedFrame() throws {
+        AppThemePalette.set(AppThemeStyles.threading)
+        let controller = makeMainWindowController()
+        self.controller = controller
+        let window = try window(of: controller)
+        let coordinator = try XCTUnwrap(controller.chromeCoordinator)
+        XCTAssertFalse(window.isOpaque)
+        XCTAssertEqual(window.backgroundColor.alphaComponent, 0, accuracy: 0.001)
+
+        // The path that shipped the defect: a pane inside this window swapping its surface.
+        // `showComposer` applies the chrome ground the way every swap does, and used to write
+        // the window with it — from inside the shaped frame, on every selection change.
+        let pane = TerminalContainerViewController()
+        let root = try XCTUnwrap(window.contentView)
+        pane.view.frame = root.bounds
+        root.addSubview(pane.view)
+        pane.showComposer(projectID: nil)
+        XCTAssertFalse(window.isOpaque, "a surface swap must not paint behind the frame")
+        XCTAssertEqual(window.backgroundColor.alphaComponent, 0, accuracy: 0.001,
+                       "the pane painted the corners the frame cleared")
+        pane.view.removeFromSuperview()
+
+        // And the recorded backdrop moving on its own — a session with another palette.
+        WindowBackdrop.set(.terminal(.red))
+        XCTAssertFalse(window.isOpaque, "a session swap must not paint behind the frame")
+        XCTAssertEqual(window.backgroundColor.alphaComponent, 0, accuracy: 0.001,
+                       "the terminal palette was painted into the corners the frame cleared")
+
+        AppThemePalette.set(.system)
+        coordinator.applyCurrentTheme()
+        XCTAssertTrue(window.isOpaque)
+        try assertBacking(of: window, resolvesTo: .red,
+                          "native dress paints the backdrop the pane recorded during takeover")
+
+        WindowBackdrop.set(.terminal(.blue))
+        try assertBacking(of: window, resolvesTo: .blue,
+                          "a session swap under a native frame repaints the window")
+
+        AppThemePalette.set(AppThemeStyles.threading)
+        coordinator.applyCurrentTheme()
+        XCTAssertFalse(window.isOpaque)
+        XCTAssertEqual(window.backgroundColor.alphaComponent, 0, accuracy: 0.001)
     }
 
     // MARK: - The Exchange
@@ -300,8 +388,9 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
         self.controller = controller
         let window = try window(of: controller)
         let coordinator = try XCTUnwrap(controller.chromeCoordinator)
-        let originalOpaque = window.isOpaque
-        let originalBackground = window.backgroundColor
+        XCTAssertTrue(window.isOpaque)
+        try assertBacking(of: window, resolvesTo: WindowBackdrop.color,
+                          "a native window is painted with the pane's backdrop")
 
         AppThemePalette.set(AppThemeStyles.beOS)
         coordinator.applyCurrentTheme()
@@ -311,8 +400,9 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
         AppThemePalette.set(AppThemeStyles.win98)
         coordinator.applyCurrentTheme()
         XCTAssertEqual(window.styleMask, WindowChromeCoordinator.takeoverMask)
-        XCTAssertEqual(window.isOpaque, originalOpaque)
-        XCTAssertEqual(window.backgroundColor, originalBackground)
+        XCTAssertTrue(window.isOpaque)
+        try assertBacking(of: window, resolvesTo: WindowBackdrop.color,
+                          "a square takeover is opaque again, over the pane's backdrop")
 
         AppThemePalette.set(AppThemeStyles.beOS)
         coordinator.applyCurrentTheme()
@@ -320,8 +410,114 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
 
         AppThemePalette.set(.system)
         coordinator.applyCurrentTheme()
-        XCTAssertEqual(window.isOpaque, originalOpaque)
-        XCTAssertEqual(window.backgroundColor, originalBackground)
+        XCTAssertTrue(window.isOpaque)
+        try assertBacking(of: window, resolvesTo: WindowBackdrop.color,
+                          "the native frame is handed the pane's backdrop")
+    }
+
+    // MARK: - The Corner
+
+    /// A rounded frame's seat runs the whole way round, corner included.
+    ///
+    /// The frame draws its one-point seat along a rounded outline and the host clips the content
+    /// to the same radius — but the band and the workspace were inset from the four edges only,
+    /// so their square corners reached into the curve and covered the seat there. Under the
+    /// Threading theme's twelve-point frame the border ran along the top and down the left edge,
+    /// stopped where the arc began, and the band's own clipped corner filled in between: two
+    /// straight lines that never met, which is what was reported as the window having no proper
+    /// edge. The content is now held `frameWidth` inside the outline through the corner too, so
+    /// every pixel centred on the seat's curve is seat ink, everything beyond it is transparent,
+    /// and everything inside it is content — with nothing of the band on the curve.
+    func testTheFrameSeatRunsThroughARoundedCorner() throws {
+        AppThemePalette.set(AppThemeStyles.threading)
+        let controller = makeMainWindowController()
+        self.controller = controller
+        let window = try window(of: controller)
+        window.setContentSize(NSSize(width: 800, height: 600))
+        let content = try XCTUnwrap(window.contentView)
+        content.layoutSubtreeIfNeeded()
+
+        let appearance = try XCTUnwrap(WindowChromeAppearance.resolve())
+        let radius = appearance.frameSilhouetteCornerRadius
+        XCTAssertGreaterThan(radius, 0, "the Threading theme states a rounded frame")
+
+        let rep = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+        content.cacheDisplay(in: content.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / content.bounds.width
+
+        // The three inks a corner pixel can be nearest to, resolved as the frame drew them. The
+        // band is pictured inactive (an unshown window is never key), but both gradients' top
+        // stops are candidates so the claim does not rest on which one a fixture happens to draw.
+        let seat = try resolved(Design.Surface.border, in: window)
+        let ground = try resolved(Design.Surface.ground, in: window)
+        var bands: [[CGFloat]] = []
+        for color in [appearance.activeGradient.colors, appearance.inactiveGradient.colors]
+            .compactMap(\.first) {
+            bands.append(try resolved(color, in: window))
+        }
+        func distance(_ a: [CGFloat], _ b: [CGFloat]) -> CGFloat {
+            zip(a.prefix(3), b.prefix(3)).map { ($0 - $1) * ($0 - $1) }.reduce(0, +)
+        }
+        func classify(_ pixel: [CGFloat]) -> String {
+            guard pixel[3] >= 0.05 else { return "outside" }
+            let candidates: [(String, CGFloat)] = [("seat", distance(pixel, seat)),
+                                                   ("ground", distance(pixel, ground))]
+                + bands.map { ("band", distance(pixel, $0)) }
+            return candidates.min { $0.1 < $1.1 }!.0
+        }
+
+        // Every pixel of the corner square, sorted by where its centre falls against the seat's
+        // centreline (half a point inside the silhouette). Not a walk down the diagonal: at 1x
+        // the pixel on the exact 45° line straddles the one-point seat with its centre a full
+        // point away, and reads as a dim blend — the seat is unmistakable one pixel to either
+        // side. Which scale an unshown window renders at depends on the process, so the claim
+        // is made per pixel centre and holds at 1x and 2x alike.
+        let centre = radius * scale
+        let seatRadius = (radius - 0.5) * scale
+        let tolerance = 0.2 * scale
+        var onSeat: [String] = []
+        var beyond: [String] = []
+        var within: [String] = []
+        for y in 0..<Int(centre) {
+            for x in 0..<Int(centre) {
+                let dx = centre - (CGFloat(x) + 0.5)
+                let dy = centre - (CGFloat(y) + 0.5)
+                let distance = (dx * dx + dy * dy).squareRoot()
+                let angle = atan2(dy, dx) * 180 / .pi
+                // The curve only: the straight runs are asserted separately below.
+                guard angle > 10, angle < 80 else { continue }
+                let color = try XCTUnwrap(rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB))
+                let kind = classify([
+                    color.redComponent, color.greenComponent, color.blueComponent,
+                    color.alphaComponent
+                ])
+                if abs(distance - seatRadius) <= tolerance {
+                    onSeat.append(kind)
+                } else if distance > radius * scale + 0.7 * scale {
+                    beyond.append(kind)
+                } else if distance < seatRadius - 0.5 * scale - 0.7 * scale {
+                    within.append(kind)
+                }
+            }
+        }
+
+        XCTAssertGreaterThanOrEqual(onSeat.count, 2, "no pixel centres landed on the seat's curve")
+        XCTAssertEqual(onSeat.filter { $0 == "seat" }.count, onSeat.count,
+                       "the seat does not run through the corner — the content covers it: \(onSeat)")
+        XCTAssertFalse(beyond.isEmpty)
+        XCTAssertEqual(beyond.filter { $0 == "outside" }.count, beyond.count,
+                       "the frame's outer corner was not cleared: \(beyond)")
+        XCTAssertFalse(within.isEmpty)
+        XCTAssertFalse(within.contains("seat") || within.contains("outside"),
+                       "the seat bleeds into the content, or the content is missing: \(within)")
+
+        // And on a straight run the picture is unchanged: seat at the very edge, content one
+        // frame-width in.
+        let midY = Int((content.bounds.height / 2 * scale).rounded())
+        let edge = try XCTUnwrap(rep.colorAt(x: 0, y: midY)?.usingColorSpace(.sRGB))
+        XCTAssertEqual(classify([edge.redComponent, edge.greenComponent, edge.blueComponent,
+                                 edge.alphaComponent]), "seat",
+                       "the straight run lost its seat")
     }
 
     // MARK: - The Window Itself
