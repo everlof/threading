@@ -327,6 +327,106 @@ final class StateManager {
         }
     }
 
+    // MARK: - Control Authority Persistence
+
+    /// Loads grants for one actor. A read failure is fail-closed: stored authority is never
+    /// reconstructed from partial data.
+    func controlGrants(for sessionID: SessionID) -> [ControlGrant]? {
+        do {
+            return try database().controlGrants(for: sessionID)
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not load control grants: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func saveControlGrant(_ grant: ControlGrant) -> Bool {
+        guard writesAreAllowed(for: "control grant") else { return false }
+        do {
+            try database().saveControlGrant(grant)
+            return true
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not persist control grant: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return false
+        }
+    }
+
+    func activeManagerSessionIDs() -> Set<SessionID>? {
+        do {
+            return try database().allActiveManagerSessionIDs()
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not load manager identities: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return nil
+        }
+    }
+
+    func supervisions(
+        managerID: SessionID? = nil,
+        childID: SessionID? = nil
+    ) -> [Supervision]? {
+        do {
+            return try database().supervisions(managerID: managerID, childID: childID)
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not load supervision records: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func saveSupervision(_ supervision: Supervision) -> Bool {
+        guard writesAreAllowed(for: "supervision record") else { return false }
+        do {
+            try database().saveSupervision(supervision)
+            return true
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not persist supervision record: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return false
+        }
+    }
+
+    func supervisionEvents(for supervisionID: SupervisionID) -> [SupervisionEvent]? {
+        do {
+            return try database().supervisionEvents(for: supervisionID)
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not load supervision events: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func saveSupervisionEvent(_ event: SupervisionEvent) -> Bool {
+        guard writesAreAllowed(for: "supervision event") else { return false }
+        do {
+            try database().saveSupervisionEvent(event)
+            return true
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Could not persist supervision event: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return false
+        }
+    }
+
     /// Restores the store, importing a legacy `projects.json` the first time.
     ///
     /// Three outcomes, and the contract is the one the JSON document had: a missing store starts

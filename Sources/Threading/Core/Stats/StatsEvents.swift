@@ -34,6 +34,12 @@ struct CustomLimitsDidChange: AppEvent {
     static let name = Notification.Name("ThreadingCustomLimitsDidChange")
 }
 
+/// One of the user's account thresholds crossed and was durably entered in the fired ledger.
+struct CustomLimitDidFire: AppEvent {
+    static let name = Notification.Name("ThreadingCustomLimitDidFire")
+    let accountID: AccountID
+}
+
 /// The usage-window poke's schedule was edited.
 struct UsageWindowScheduleDidChange: AppEvent {
     static let name = Notification.Name("ThreadingUsageWindowScheduleDidChange")

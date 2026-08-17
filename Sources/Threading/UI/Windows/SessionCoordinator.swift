@@ -14,7 +14,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     let sidebar: ProjectSidebarViewController
     let container: TerminalContainerViewController
     let environment: AppEnvironment
-    private let onPresentationChanged: () -> Void
+    let onPresentationChanged: () -> Void
 
     /// Consumed by the next selected session exactly once.
     private var pendingPrompt: String?
@@ -45,7 +45,11 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         // controller, which would only be passing it straight back down. See
         // `archiveAtAgentRequest(_:reason:)`.
         appEvents.observe(SessionArchiveRequestDidBecomeDue.self) { [weak self] event in
-            self?.archiveAtAgentRequest(event.sessionID, reason: event.reason)
+            self?.archiveAtAgentRequest(
+                event.sessionID,
+                reason: event.reason,
+                requestedByManagerID: event.requestedByManagerID
+            )
         }
 
         // The same arrangement, one feature along: `ScheduledMessageScheduler` is in Core and
@@ -170,13 +174,18 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     ///
     /// Arriving here at all means the request already waited for the turn to end
     /// (`SessionArchiveScheduler`); this is only the archive.
-    func archiveAtAgentRequest(_ sessionID: SessionID, reason: String?) {
+    func archiveAtAgentRequest(
+        _ sessionID: SessionID,
+        reason: String?,
+        requestedByManagerID managerID: SessionID? = nil
+    ) {
         if let workspace = environment.projectStore.session(withID: sessionID)?.managedWorkspace {
             if workspace.publication != nil {
                 publishManagedWorkspaceAndArchive(
                     workspace,
                     sessionID: sessionID,
-                    reason: reason
+                    reason: reason,
+                    requestedByManagerID: managerID
                 )
                 return
             }
@@ -205,10 +214,18 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             }
         }
 
-        finishAgentRequestedArchive(sessionID, reason: reason)
+        finishAgentRequestedArchive(
+            sessionID,
+            reason: reason,
+            requestedByManagerID: managerID
+        )
     }
 
-    private func finishAgentRequestedArchive(_ sessionID: SessionID, reason: String?) {
+    private func finishAgentRequestedArchive(
+        _ sessionID: SessionID,
+        reason: String?,
+        requestedByManagerID managerID: SessionID?
+    ) {
         archive(
             sessionID,
             receipt: { session, wasRunning, undo in
@@ -220,6 +237,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 )
             },
             onArchived: {
+                if let managerID {
+                    _ = ControlGrantStore.shared.archive(childID: sessionID, by: managerID)
+                }
                 // The band is on screen for fourteen seconds and then the row is simply gone. A
                 // session filed away by something other than a click is exactly the change the
                 // durable journal exists to answer for afterwards.
@@ -241,7 +261,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     private func publishManagedWorkspaceAndArchive(
         _ workspace: ManagedWorkspace,
         sessionID: SessionID,
-        reason: String?
+        reason: String?,
+        requestedByManagerID managerID: SessionID?
     ) {
         guard managedWorkspacePublications.insert(sessionID).inserted else { return }
         let publisher = ManagedWorkspacePublisher.live()
@@ -282,7 +303,11 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 environment.projectStore.update(sessionID: sessionID) {
                     $0.managedWorkspace = completed
                 }
-                self.finishAgentRequestedArchive(sessionID, reason: reason)
+                self.finishAgentRequestedArchive(
+                    sessionID,
+                    reason: reason,
+                    requestedByManagerID: managerID
+                )
             } catch {
                 self.recordManagedWorkspaceFailure(
                     sessionID: sessionID,
@@ -696,6 +721,16 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             in: environment.projectStore
         ) else { return false }
 
+        if case .newSession(let plan) = message.target,
+           plan.role == .manager,
+           ControlGrantStore.shared.conferManager(
+               sessionID: session.id,
+               origin: .newManagerTemplate
+           ) == nil {
+            _ = environment.projectStore.removeSession(id: session.id)
+            return false
+        }
+
         environment.eventLog.record(.composer, "Scheduled session reserved", [
             "session": session.id.uuidString,
             "prompt": message.text
@@ -726,6 +761,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         usesNativeUI: Bool,
         permissionMode: AgentPermissionMode?,
         managedWorkspacePlan: ManagedWorkspacePlan?,
+        role: SessionRole,
         prompt: String,
         attachmentPaths: [String]
     ) -> Bool {
@@ -810,6 +846,17 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             if let managedWorkspace {
                 try? ManagedGitWorkspace.discardUnstarted(managedWorkspace)
             }
+            presentSessionStartFailure(in: composer)
+            return false
+        }
+
+        if role == .manager,
+           ControlGrantStore.shared.conferManager(
+               sessionID: session.id,
+               origin: .newManagerTemplate
+           ) == nil {
+            _ = environment.projectStore.removeSession(id: session.id)
+            if let managedWorkspace { try? ManagedGitWorkspace.discardUnstarted(managedWorkspace) }
             presentSessionStartFailure(in: composer)
             return false
         }

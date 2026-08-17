@@ -14,7 +14,7 @@ import Foundation
 ///
 /// Never something the caller typed: for an agent session the id is the one its MCP URL token
 /// resolved to, so a caller cannot claim to be a session it is not.
-enum ControlActor: Equatable, Sendable {
+enum ControlActor: Codable, Equatable, Hashable, Sendable {
     /// An agent session, calling through Threading's own MCP server.
     case agentSession(SessionID)
 }
@@ -24,9 +24,15 @@ enum ControlActor: Equatable, Sendable {
 /// Slice one grants every actor exactly its own project. The cases this enum is missing —
 /// a session subtree, an explicit project set, the whole workspace — are the point of it being
 /// an enum: a broader grant is a new case with its own membership rule, not a loosened check.
-enum ControlScope: Equatable, Sendable {
+enum ControlScope: Codable, Equatable, Hashable, Sendable {
     /// Every unarchived session in one project.
     case project(ProjectID)
+    /// An explicit bounded set of sessions. Used for the implicit self grant today and for
+    /// deliberately narrow delegated authority later.
+    case sessions(Set<SessionID>)
+    /// Several explicit projects. No manager template creates this; it is available only to a
+    /// future user-authored grant so cross-project reach never arrives by implication.
+    case projects(Set<ProjectID>)
 }
 
 /// One session, as the control plane describes it to a caller inside its scope.
@@ -50,6 +56,7 @@ struct ControlSessionOverview: Equatable, Sendable {
     let surface: Surface
     let isCaller: Bool
     let forkedFrom: SessionID?
+    let supervision: ControlSupervisionOverview
 }
 
 /// Why the control plane refused, as a value the adapter turns into words.
@@ -70,6 +77,21 @@ enum ControlRefusal: Error, Equatable, Sendable {
     /// login shell of a CLI that has not finished starting — so it is refused rather than
     /// delivered somewhere unintended.
     case targetBusy
+    /// The target is in a scope the actor may know about, but this operation was never granted.
+    case notPermitted(ControlOperation)
+    /// A dormant terminal cannot be safely woken unattended: its opening screen may require an
+    /// answer that only the user can provide.
+    case terminalCannotBeWoken
+    case planExceedsGrant(field: String)
+    case childrenAtCapacity(limit: Int)
+    case ceilingReached(reason: String)
+    case sendRateReached(limit: Int)
+    case messageIsRelay
+    case accountUnknown
+    case accountUnavailable(reason: String)
+    case accountMoveBudgetReached(limit: Int)
+    case workspaceUnavailable
+    case supervisionUnknown
     case messageEmpty
     case messageTooLong(limit: Int)
     /// One of the **user's own** limits is holding the target's account. Carries the rule's own
@@ -136,6 +158,30 @@ enum ControlWatchOutcome: Equatable, Sendable {
     /// should read its state instead of waiting for an edge that has already gone by. Not a
     /// refusal — nothing was wrong with the ask, the answer is simply already available.
     case targetAlreadySettled(ControlSessionOverview)
+    case refused(ControlRefusal)
+}
+
+/// What became of a targeted archive request.
+enum ControlArchiveOutcome: Equatable, Sendable {
+    case scheduled(ControlSessionOverview)
+    case alreadyPending(ControlSessionOverview)
+    case cancelled(ControlSessionOverview)
+    case nothingPending(ControlSessionOverview)
+    case refused(ControlRefusal)
+}
+
+/// What became of a targeted rename request.
+enum ControlRenameOutcome: Equatable, Sendable {
+    case renamed(ControlSessionOverview, visibleTitle: String)
+    case protectedByUserTitle(ControlSessionOverview, visibleTitle: String)
+    case refused(ControlRefusal)
+}
+
+/// What became of adopting or releasing an existing session.
+enum ControlSupervisionMutationOutcome: Equatable, Sendable {
+    case adopted(Supervision)
+    case released(Supervision)
+    case alreadyManaged(Supervision)
     case refused(ControlRefusal)
 }
 

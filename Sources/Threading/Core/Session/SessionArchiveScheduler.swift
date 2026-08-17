@@ -33,6 +33,9 @@ struct PendingSessionArchive: Sendable, Equatable {
     /// gave none.
     let reason: String?
 
+    /// Present only when a user-appointed manager targeted another session.
+    let requestedByManagerID: SessionID?
+
     let requestedAt: Date
 }
 
@@ -128,7 +131,11 @@ final class SessionArchiveScheduler {
     /// Refuses rather than pretends for the two cases where there would be nothing to do, since
     /// an agent told "it is scheduled" will go on to tell the user the same thing.
     @discardableResult
-    func request(sessionID: SessionID, reason: String?) -> SessionArchiveRequestOutcome {
+    func request(
+        sessionID: SessionID,
+        reason: String?,
+        requestedByManagerID: SessionID? = nil
+    ) -> SessionArchiveRequestOutcome {
         guard let session = session(sessionID) else {
             return .refused("This session is not in Threading's sidebar.")
         }
@@ -140,6 +147,7 @@ final class SessionArchiveScheduler {
         pending[sessionID] = PendingSessionArchive(
             sessionID: sessionID,
             reason: Self.trimmed(reason),
+            requestedByManagerID: requestedByManagerID,
             requestedAt: Date()
         )
         return wasPending ? .alreadyPending : .scheduled
@@ -199,7 +207,8 @@ final class SessionArchiveScheduler {
         center.post(
             SessionArchiveRequestDidBecomeDue(
                 sessionID: sessionID,
-                reason: request.reason
+                reason: request.reason,
+                requestedByManagerID: request.requestedByManagerID
             )
         )
     }

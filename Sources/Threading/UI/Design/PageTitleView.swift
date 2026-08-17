@@ -44,6 +44,7 @@ final class PageTitleView: BackdropThemedControl {
 
     private let iconView = GlyphView()
     private let titleLabel = MorphingTitleLabel()
+    private let roleIconView = GlyphView()
     private let actionsButton: ThemedIconButton
     private var isPressed = false { didSet { needsDisplay = true } }
 
@@ -86,6 +87,9 @@ final class PageTitleView: BackdropThemedControl {
         titleLabel.applyFont(.control)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        roleIconView.isHidden = true
+        roleIconView.tint = Design.Text.secondary
+        roleIconView.setContentHuggingPriority(.required, for: .horizontal)
 
         // **This view hugs; the header's spacer is what takes the slack.** A tab is often held
         // wider than it wants to be and hands the extra width to its title, and copying that here
@@ -103,7 +107,7 @@ final class PageTitleView: BackdropThemedControl {
         }
         actionsButton.translatesAutoresizingMaskIntoConstraints = false
 
-        let content = NSStackView(views: [iconView, titleLabel, actionsButton])
+        let content = NSStackView(views: [iconView, titleLabel, roleIconView, actionsButton])
         content.orientation = .horizontal
         content.alignment = .centerY
         content.spacing = Design.Spacing.small
@@ -153,6 +157,7 @@ final class PageTitleView: BackdropThemedControl {
             + trailingContentInset
             + Design.Size.tabIconSlot
             + Design.Spacing.small
+            + (roleIconView.isHidden ? 0 : Design.Size.tabIconSlot + Design.Spacing.small)
             + spacingBeforeActions
             + Design.Size.inlineButtonTarget
     }
@@ -225,6 +230,21 @@ final class PageTitleView: BackdropThemedControl {
         iconView.image = image
     }
 
+    /// A quiet fact beside the title, distinct from the provider mark that identifies the chat.
+    func setRoleSymbol(_ symbolName: String?, accessibility: String? = nil) {
+        if let symbolName {
+            roleIconView.setSymbol(symbolName, slot: Design.Size.tabIconSlot, role: .control)
+            roleIconView.isHidden = false
+            roleIconView.setAccessibilityElement(accessibility != nil)
+            roleIconView.setAccessibilityLabel(accessibility)
+        } else {
+            roleIconView.isHidden = true
+            roleIconView.clearSymbol()
+            roleIconView.setAccessibilityElement(false)
+        }
+        invalidateIntrinsicContentSize()
+    }
+
     var title: String { titleLabel.stringValue }
 
     /// The `⋯` itself: what the actions menu hangs off, and what the window's own state pass
@@ -253,6 +273,7 @@ final class PageTitleView: BackdropThemedControl {
         // accent means "this needs you" everywhere else in the app.
         titleLabel.textColor = ink.label
         iconView.tint = isHovered ? ink.label : ink.secondary
+        roleIconView.tint = ink.secondary
     }
 
     // MARK: - Interaction

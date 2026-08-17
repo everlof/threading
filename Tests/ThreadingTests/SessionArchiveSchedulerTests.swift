@@ -94,6 +94,26 @@ final class SessionArchiveSchedulerTests: XCTestCase {
         )
     }
 
+    func testManagerAttributionSurvivesTheSettleBoundary() {
+        let scheduler = scheduler()
+        let managerID = SessionID()
+        XCTAssertEqual(
+            scheduler.request(
+                sessionID: session.id,
+                reason: "review complete",
+                requestedByManagerID: managerID
+            ),
+            .scheduled
+        )
+
+        reportActivity(.idle)
+        settle()
+
+        XCTAssertEqual(due.first?.sessionID, session.id)
+        XCTAssertEqual(due.first?.requestedByManagerID, managerID)
+        XCTAssertEqual(due.first?.reason, "review complete")
+    }
+
     /// A finished turn nobody was looking at ends up unread rather than idle, and a session whose
     /// agent exited ends up dormant. Neither is still answering, so both are the end of the turn.
     func testAnyFinishedTurnIsTheEndOfTheTurn() {

@@ -39,7 +39,7 @@ struct AgentLaunchFlag: Equatable {
 /// (`--ask-for-approval`) and what may happen without asking (`--sandbox`) — so each case
 /// carries the pair it translates to. The six land on six *distinct* Codex configurations,
 /// which is what makes one shared vocabulary honest rather than a menu with duplicate items.
-enum AgentPermissionMode: String, Codable, CaseIterable {
+enum AgentPermissionMode: String, Codable, CaseIterable, Sendable {
     /// Ask before anything. Claude's internal name for this one is `default`; `manual` is the
     /// external name its own `--help` documents, and the raw value has to be the external one.
     case manual

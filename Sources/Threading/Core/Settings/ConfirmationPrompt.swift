@@ -51,6 +51,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case quitWithRunningAgents
     case removeExtension
     case revokeAllWebsiteAccess
+    case revokeAllManagerRoles
     case storeTestCredential
 
     // MARK: Irreversible
@@ -82,6 +83,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case approveAgentExtensionInstall
     case shareChatLink
     case approveSystemPermissionPrompt
+    case conferManagerRole
 
     // MARK: Software updates
 
@@ -227,6 +229,10 @@ enum ConfirmationPrompt: String, CaseIterable {
              // behaves as though nothing brings it back: Return on Cancel, the verb on a
              // destructive button.
              .stopSessionProcess,
+             // Regranting authority is possible, but the complete supervision graph this
+             // operation closes has no one-step restore in the app. Default to Cancel like
+             // the other broad removals whose recovery requires rebuilding state by hand.
+             .revokeAllManagerRoles,
              // A reset keeps what it took, in a dated folder — but restoring it means quitting
              // and dragging directories back, so nothing in the app brings it back and the
              // alert must behave as though nothing does. It also restarts the app under the
@@ -241,6 +247,7 @@ enum ConfirmationPrompt: String, CaseIterable {
              .updateExtensionCapabilities,
              .approveAgentExtensionInstall,
              .shareChatLink,
+             .conferManagerRole,
              // Storing a test credential is the moment an origin gains the right to be signed
              // in to unattended, so it belongs with the other grants rather than with the
              // reversible edits: removing the entry later does not un-ring whatever an agent

@@ -56,6 +56,15 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case listSessions
   case sendToSession
   case watchSession
+  case listAccounts
+  case sessionCost
+  case resumeSession
+  case spawnSession
+  case moveSessionToAccount
+  case finishWorkspace
+  case adoptSession
+  case releaseSession
+  case subscribeToChildren
   case listReclaimableStorage
   case proposeStorageCleanup
   case listSettings
@@ -84,6 +93,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
     case project
     case session
     case workspace
+    case supervision
     case storage
     case notifications
     case appearance

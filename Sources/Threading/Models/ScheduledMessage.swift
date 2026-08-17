@@ -57,6 +57,8 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
     let usesNativeUI: Bool
     let permissionMode: AgentPermissionMode?
     let managedWorkspacePlan: ManagedWorkspacePlan?
+    /// Optional so schedules written before roles existed continue to decode as ordinary chats.
+    let role: SessionRole?
 
     var accountHandle: AccountHandle { AccountHandle(storedName: accountHandleName) }
 
@@ -71,7 +73,8 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
         branch: String?,
         usesNativeUI: Bool,
         permissionMode: AgentPermissionMode?,
-        managedWorkspacePlan: ManagedWorkspacePlan? = nil
+        managedWorkspacePlan: ManagedWorkspacePlan? = nil,
+        role: SessionRole = .chat
     ) {
         self.reservedSessionID = reservedSessionID
         self.projectID = projectID
@@ -84,6 +87,7 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
         self.usesNativeUI = usesNativeUI
         self.permissionMode = permissionMode
         self.managedWorkspacePlan = managedWorkspacePlan
+        self.role = role
     }
 }
 

@@ -77,6 +77,7 @@ final class PaneTab {
     case attachments(SessionAttachmentsViewController)
     case subagents(SubagentTranscriptViewController)
     case sharing(SessionSharingViewController)
+    case supervision(SupervisionListViewController)
     case extensionPanel(ExtensionPanelViewController)
     case compare(CompareViewController)
     case browserComparison(BrowserComparisonViewController)
@@ -168,6 +169,11 @@ final class PaneTab {
     return nil
   }
 
+  var supervision: SupervisionListViewController? {
+    if case .supervision(let supervision) = body { return supervision }
+    return nil
+  }
+
   var extensionPanel: ExtensionPanelViewController? {
     if case .extensionPanel(let panel) = body { return panel }
     return nil
@@ -199,6 +205,7 @@ final class PaneTab {
     case .attachments(let attachments): return attachments
     case .subagents(let subagents): return subagents
     case .sharing(let sharing): return sharing
+    case .supervision(let supervision): return supervision
     case .extensionPanel(let panel): return panel
     case .compare(let compare): return compare
     case .browserComparison(let comparison): return comparison
@@ -232,6 +239,8 @@ final class PaneTab {
     case .sharing:
       // The same eye the corner card's row leads with: this pane is who is looking.
       return "eye"
+    case .supervision:
+      return "person.3"
     case .extensionPanel:
       return "puzzlepiece.extension"
     case .compare:
@@ -273,6 +282,8 @@ final class PaneTab {
       return "Subagents"
     case .sharing:
       return "Sharing"
+    case .supervision:
+      return L10n.string("Chats")
     case .extensionPanel(let panel):
       return panel.panelTitle
     case .compare:

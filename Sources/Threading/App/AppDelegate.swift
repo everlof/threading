@@ -2202,6 +2202,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard mainWindowController?.currentSessionID != nil else {
                 return .unavailable(reason: L10n.string("Select a session first."))
             }
+        case AppCommands.ID.newManager:
+            guard mainWindowController?.currentProjectID != nil else {
+                return .unavailable(reason: L10n.string("Select a project first."))
+            }
+        case AppCommands.ID.makeManager:
+            guard let sessionID = mainWindowController?.currentSessionID else {
+                return .unavailable(reason: L10n.string("Select a session first."))
+            }
+            guard !ControlGrantStore.shared.isManager(sessionID) else {
+                return .unavailable(reason: L10n.string("The selected chat is already a manager."))
+            }
+        case AppCommands.ID.revokeManager:
+            guard let sessionID = mainWindowController?.currentSessionID else {
+                return .unavailable(reason: L10n.string("Select a session first."))
+            }
+            guard ControlGrantStore.shared.isManager(sessionID) else {
+                return .unavailable(reason: L10n.string("The selected chat is not a manager."))
+            }
         default:
             break
         }
@@ -2245,6 +2263,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         switch id {
         case AppCommands.ID.commandPalette: showCommandPalette()
         case AppCommands.ID.newSession: mainWindowController?.newSession()
+        case AppCommands.ID.newManager: mainWindowController?.newManager()
+        case AppCommands.ID.makeManager: mainWindowController?.makeCurrentSessionManager()
+        case AppCommands.ID.revokeManager: mainWindowController?.revokeCurrentManagerRole()
         case AppCommands.ID.newProject: mainWindowController?.newProject()
         case AppCommands.ID.addProject: mainWindowController?.addProject()
         case AppCommands.ID.closeSession: mainWindowController?.closeCurrentSession()

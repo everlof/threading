@@ -107,6 +107,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// Inserted into the arranged content only for a pinned session. Most rows are unpinned, so
     /// resolving this SF Symbol (and carrying an empty arranged slot) belongs behind that state.
     private var pinnedIndicator: NSImageView?
+    private var managerIndicator: NSImageView?
     /// Says that this chat behaves differently from the ones around it — it continues at its
     /// reset, or it says nothing when it finishes. Materialized on the same terms as the pin,
     /// and for the same reason: nearly every row carries no override, and absent content must
@@ -536,6 +537,39 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         pinnedIndicator = indicator
     }
 
+    private func setManager(_ isManager: Bool) {
+        guard isManager else {
+            managerIndicator?.isHidden = true
+            return
+        }
+        if let managerIndicator {
+            managerIndicator.isHidden = false
+            return
+        }
+
+        let indicator = NSImageView()
+        indicator.holdSymbol("person.3", slot: Design.Size.inlineButtonGlyph)
+        indicator.imageScaling = .scaleProportionallyDown
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        indicator.setContentHuggingPriority(.required, for: .horizontal)
+        indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
+        indicator.setAccessibilityElement(true)
+        indicator.setAccessibilityRole(.image)
+        indicator.setAccessibilityLabel(L10n.string("Manager"))
+        indicator.setAccessibilityIdentifier("sidebar.session.manager")
+        indicator.toolTip = L10n.string("Manager")
+
+        let insertionIndex = afterTitleSlotIsMaterialized
+            ? max(0, rowContentStack.arrangedSubviews.count - 1)
+            : rowContentStack.arrangedSubviews.count
+        rowContentStack.insertArrangedSubview(indicator, at: insertionIndex)
+        NSLayoutConstraint.activate([
+            indicator.widthAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
+            indicator.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph)
+        ])
+        managerIndicator = indicator
+    }
+
     /// Adds the settings mark only once a row behaves differently, on the pin's terms exactly.
     ///
     /// Drawn in the secondary ink rather than the accent the pin uses: the pin is a decision the
@@ -918,7 +952,19 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         nativeTitle = session.displayTitle
         nativeToolTip = nil
         setPinned(session.isPinned)
+        let supervision = ControlGrantStore.shared.overview(for: session.id)
+        setManager(ControlGrantStore.shared.isManager(session.id))
         setConductMark(conduct)
+        if let managerID = supervision.managedBy,
+           let manager = ProjectStore.shared.session(withID: managerID) {
+            titleLabel.setAccessibilityLabel(
+                L10n.format("%@, managed by %@", session.displayTitle, manager.displayTitle)
+            )
+        } else if ControlGrantStore.shared.isManager(session.id) {
+            titleLabel.setAccessibilityLabel(L10n.format("%@, manager", session.displayTitle))
+        } else {
+            titleLabel.setAccessibilityLabel(session.displayTitle)
+        }
         if isScheduledStart {
             let label = attentionLabelForPresentation()
             label.stringValue = L10n.string("Scheduled")
@@ -1325,6 +1371,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         pinnedIndicator?.contentTintColor = backgroundStyle == .emphasized
             ? Design.Ink.selection.label
             : Design.Surface.accent
+        managerIndicator?.contentTintColor = backgroundStyle == .emphasized
+            ? Design.Ink.selection.secondary
+            : Design.Text.secondary
         attentionOverlayLabel?.textColor = backgroundStyle == .emphasized
             ? Design.Ink.selection.secondary
             : Design.Text.tertiary

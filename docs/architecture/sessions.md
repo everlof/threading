@@ -1366,6 +1366,48 @@ emptying the pane. The scheduler stays in Core and knows nothing about sidebars:
 `SessionArchiveRequestDidBecomeDue`, and the coordinator that already owns every other lifecycle
 decision observes it directly rather than having the window controller relay it back down.
 
+### Manager is a role, and supervision is the lineage
+
+The project composer offers `Chat` and `Manager` as roles, but the stored session remains the same
+`AgentSession` in both cases. Starting a manager creates the ordinary session and confers a durable
+project grant before launch, so its first MCP initialization sees the correct catalogue. **New
+Manager…** is the preset path; an existing row can be given or stripped of the same role through
+**Make Manager** / **Revoke Manager Role**. Only user-authored commands confer authority, and
+revocation leaves the conversation intact.
+
+`Supervision` — manager id, child id, brief, assignment, state and outcome — is distinct from
+`forkedFrom` and `ConversationHandoff`. It means **who is currently responsible for this chat**,
+not where the transcript came from. Spawn creates it atomically with the child; adoption attaches
+an existing project chat; release, archive, completion and manager revocation close it without
+rewriting history. Its bounded `SupervisionEvent` stream is the recovery record after manager
+context compaction or application relaunch.
+
+The user-visible surfaces all project that record. A manager row and its pane header carry the
+quiet group role mark; the hover card says how many chats it manages. A child hover card says
+**Managed by …** and shows the brief, but the sidebar does not decorate every child. Selecting a
+manager adds the host-owned **Chats** tab, whose virtualized rows read the supervision store rather
+than the manager transcript. Moves leave a dismissible PaneNotice with Undo, and manager-archived
+children retain **by <manager>** attribution in Settings ▸ Archived. Lifecycle notices in either
+transcript are Threading-framed; a brief written by the manager keeps the cross-session provenance
+header.
+
+**Customization boundary.** The manager mark and start-composer presentation remain inside the
+existing `sidebar.session-row@1` and `composer.session-start@1` component shells, so extensions may
+still use those contracts' established properties and protected slots. The **Chats** tab,
+Make/Revoke commands, Tools and Advanced grant controls, and Archived attribution are deliberately
+host-only: they display or mutate effective authority, and allowing replacement could conceal a
+grant, misstate who performed an action, or remove the user's revocation path. Threading retains
+grant issuance and revocation, scope and refusal decisions, supervision lifecycle, audit
+provenance, confirmation, and navigation even where the surrounding row or composer presentation
+is customizable.
+
+Targeted archive is the same delayed `SessionArchiveScheduler` operation described above, now
+authorized against the child and refused while it is working. Targeted rename still protects a
+title the user wrote. Resume is native-chat only — a dormant terminal may open on a prompt that
+requires the user, so it cannot be woken unattended. Spawn reuses `ScheduledSessionPlan`, including
+managed-workspace delivery and permission-mode caps, rather than defining another launch
+vocabulary.
+
 **Continuation lineage is a durable path, not a launch-mode bit.** A side chat's `forkedFrom`
 points at a provider-native child that can resume the same transcript semantics. A cross-provider
 session instead owns a `ConversationHandoff`: ordered provider/model endpoints ending at itself,

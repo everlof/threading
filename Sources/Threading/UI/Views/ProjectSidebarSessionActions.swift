@@ -784,6 +784,12 @@ extension ProjectSidebarViewController {
         }
         if let move = moveToAccountEntry(for: session) { entries.append(move) }
         if let cont = continueWithProviderEntry(for: session) { entries.append(cont) }
+        entries.append(action(
+            ControlGrantStore.shared.isManager(sessionID)
+                ? L10n.string("Revoke Manager Role")
+                : L10n.string("Make Manager"),
+            symbol: ControlGrantStore.shared.isManager(sessionID) ? "person.3.sequence.fill" : "person.3"
+        ) { [weak self] in self?.toggleManagerRoleClicked() })
 
         appendGroupSeparator(&entries)
         entries.append(action(L10n.string("Delete Session"), symbol: "trash") { [weak self] in
@@ -801,6 +807,36 @@ extension ProjectSidebarViewController {
             )
         ))
         return entries
+    }
+
+    private func toggleManagerRoleClicked() {
+        guard let sessionID = actionSessionID,
+              let session = projectStore.session(withID: sessionID) else { return }
+
+        if ControlGrantStore.shared.isManager(sessionID) {
+            guard ControlGrantStore.shared.revokeManager(sessionID: sessionID) else { return }
+            reload()
+            return
+        }
+
+        let projectName = projectStore.project(forSessionID: sessionID)?.name
+            ?? L10n.string("this project")
+        let request = ConfirmationRequest(
+            prompt: .conferManagerRole,
+            title: L10n.format("Make “%@” a manager?", session.displayTitle),
+            message: L10n.format(
+                "This chat may archive, rename, start, resume and move chats in %@, and read account usage. It cannot widen this itself. You can revoke it any time.",
+                projectName
+            ),
+            confirmTitle: L10n.string("Make Manager"),
+            style: .informational
+        )
+        guard ConfirmationAlert.ask(request) else { return }
+        guard ControlGrantStore.shared.conferManager(
+            sessionID: sessionID,
+            origin: .user(command: "Make Manager")
+        ) != nil else { return }
+        reload()
     }
 
     /// One plain action row, with the mark that names it.

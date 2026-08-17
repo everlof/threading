@@ -169,10 +169,28 @@ struct JSONRPCResponse: Encodable, Sendable {
 /// hopping to main, and the one cross-queue value (`port`) has its own lock.
 final class MCPServer: @unchecked Sendable {
 
+    static let toolsListChangedEvent = Data("""
+        event: message
+        data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}
+
+
+        """.utf8)
+
     // MARK: - Singleton
 
     static let shared = MCPServer()
-    private init() {}
+    private init() {
+        grantObserver = NotificationCenter.default.addObserver(
+            forName: ControlGrantsDidChange.name,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let event = notification.object as? ControlGrantsDidChange else { return }
+            self?.queue.async { [weak self] in
+                self?.sendToolsListChanged(to: event.sessionID)
+            }
+        }
+    }
 
     // MARK: - Properties
 
@@ -196,6 +214,8 @@ final class MCPServer: @unchecked Sendable {
 
     private var listener: NWListener?
     private var connectionsByID: [ObjectIdentifier: MCPConnection] = [:]
+    private var eventStreamSessionByConnection: [ObjectIdentifier: SessionID] = [:]
+    private var grantObserver: NSObjectProtocol? = nil
 
     private let queue = DispatchQueue(label: "codes.threading.mcp", qos: .userInitiated)
 
@@ -281,6 +301,7 @@ final class MCPServer: @unchecked Sendable {
                 connection.cancel()
             }
             connectionsByID.removeAll()
+            eventStreamSessionByConnection.removeAll()
 
             listener?.cancel()
             listener = nil
@@ -294,11 +315,13 @@ final class MCPServer: @unchecked Sendable {
         let connection = MCPConnection(
             connection: nwConnection,
             queue: queue,
-            handler: { [weak self] request, respond in
-                self?.route(request, respond: respond)
+            handler: { [weak self] connection, request, respond in
+                self?.route(request, connection: connection, respond: respond)
             },
             onClose: { [weak self] closed in
-                self?.connectionsByID.removeValue(forKey: ObjectIdentifier(closed))
+                let identifier = ObjectIdentifier(closed)
+                self?.connectionsByID.removeValue(forKey: identifier)
+                self?.eventStreamSessionByConnection.removeValue(forKey: identifier)
             }
         )
 
@@ -309,11 +332,25 @@ final class MCPServer: @unchecked Sendable {
     /// Resolves the request's session and hands the JSON-RPC message on.
     private func route(
         _ request: HTTPRequest,
+        connection: MCPConnection,
         respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
+        if request.method == "GET" {
+            guard request.path.hasPrefix(MCPDefaults.pathPrefix) else {
+                respond(.status(404, "Not Found"))
+                return
+            }
+            let token = String(request.path.dropFirst(MCPDefaults.pathPrefix.count))
+            guard let sessionID = MCPSessionRegistry.session(forToken: token),
+                  request.header("accept")?.contains("text/event-stream") == true else {
+                respond(.status(404, "Not Found"))
+                return
+            }
+            eventStreamSessionByConnection[ObjectIdentifier(connection)] = sessionID
+            respond(.eventStream)
+            return
+        }
         guard request.method == "POST" else {
-            // GET opens the optional server-to-client SSE stream, which this server does not
-            // offer. The spec allows refusing it outright.
             respond(.status(405, "Method Not Allowed"))
             return
         }
@@ -365,6 +402,12 @@ final class MCPServer: @unchecked Sendable {
             }
 
             respond(.json(data))
+        }
+    }
+
+    private func sendToolsListChanged(to sessionID: SessionID) {
+        for (identifier, owner) in eventStreamSessionByConnection where owner == sessionID {
+            connectionsByID[identifier]?.sendServerEvent(Self.toolsListChangedEvent)
         }
     }
 
@@ -449,7 +492,7 @@ final class MCPServer: @unchecked Sendable {
             DispatchQueue.main.async { [weak self] in
                 let scope = MCPSessionRegistry.adHocScope(for: sessionID)
                 let base = scope.map(MCPToolCatalog.scopedInstructions)
-                    ?? MCPToolCatalog.instructions
+                    ?? MCPToolCatalog.instructions(for: sessionID)
                 let addendum = scope == nil
                     ? (self?.handler?.panelState(for: sessionID) ?? "")
                     : ""
@@ -476,7 +519,7 @@ final class MCPServer: @unchecked Sendable {
             DispatchQueue.main.async {
                 let tools = MCPSessionRegistry.adHocScope(for: sessionID)
                     .map(MCPToolCatalog.scopedDefinitions)
-                    ?? MCPToolCatalog.enabledDefinitions
+                    ?? MCPToolCatalog.definitions(for: sessionID)
                 completion(Self.result(
                     id: id,
                     .toolsList(ToolsListResult(tools: tools))
@@ -539,7 +582,7 @@ final class MCPServer: @unchecked Sendable {
             if let scope = MCPSessionRegistry.adHocScope(for: sessionID) {
                 admitted = MCPToolCatalog.scopedAdmits(call, allowedTools: scope)
             } else {
-                admitted = MCPToolCatalog.admits(call)
+                admitted = MCPToolCatalog.admits(call, for: sessionID)
             }
             guard admitted else {
                 finish(.failure("Tool \(call.name) is unavailable or disabled in Threading."))

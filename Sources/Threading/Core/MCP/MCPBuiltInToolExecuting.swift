@@ -155,7 +155,9 @@ protocol MCPBuiltInToolExecuting: AnyObject {
   func archiveSession(
     _ arguments: ArchiveSessionArguments, for sessionID: SessionID
   ) -> MCPToolResult
-  func cancelSessionArchive(for sessionID: SessionID) -> MCPToolResult
+  func cancelSessionArchive(
+    _ arguments: CancelSessionArchiveArguments, for sessionID: SessionID
+  ) -> MCPToolResult
   func setSessionName(
     _ arguments: SetSessionNameArguments, for sessionID: SessionID
   ) -> MCPToolResult
@@ -166,6 +168,30 @@ protocol MCPBuiltInToolExecuting: AnyObject {
   )
   func watchSession(
     _ arguments: WatchSessionArguments, for sessionID: SessionID
+  ) -> MCPToolResult
+  func listAccounts(_ arguments: ListAccountsArguments, for sessionID: SessionID) -> MCPToolResult
+  func sessionCost(_ arguments: SessionCostArguments, for sessionID: SessionID) -> MCPToolResult
+  func resumeSession(
+    _ arguments: ResumeSessionArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func spawnSession(
+    _ arguments: SpawnSessionArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func moveSessionToAccount(
+    _ arguments: MoveSessionToAccountArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func finishWorkspace(
+    _ arguments: SessionReferenceArguments, for sessionID: SessionID
+  ) -> MCPToolResult
+  func adoptSession(_ arguments: AdoptSessionArguments, for sessionID: SessionID) -> MCPToolResult
+  func releaseSession(
+    _ arguments: ReleaseSessionArguments, for sessionID: SessionID
+  ) -> MCPToolResult
+  func subscribeToChildren(
+    _ arguments: SubscribeToChildrenArguments, for sessionID: SessionID
   ) -> MCPToolResult
   func listReclaimableStorage() -> MCPToolResult
   func proposeStorageCleanup(

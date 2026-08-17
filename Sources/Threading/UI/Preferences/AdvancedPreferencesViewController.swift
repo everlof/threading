@@ -61,6 +61,14 @@ final class AdvancedPreferencesViewController: NSViewController {
                     action: #selector(clearOnboardingFlag)
                 )
             ])),
+            SettingsUI.section(AdvancedStrings.authoritySection, SettingsCard(rows: [
+                resetRow(
+                    title: AdvancedStrings.managerRolesTitle,
+                    detail: AdvancedStrings.managerRolesDetail,
+                    button: AdvancedStrings.revokeManagersButton,
+                    action: #selector(revokeAllManagerRoles)
+                )
+            ])),
             SettingsUI.section(AdvancedStrings.resetSection, SettingsCard(rows: [
                 resetRow(
                     title: AdvancedStrings.resetSettingsTitle,
@@ -193,6 +201,23 @@ final class AdvancedPreferencesViewController: NSViewController {
               confirm: AdvancedStrings.resetEverythingButton)
     }
 
+    @objc private func revokeAllManagerRoles() {
+        guard !(StateManager.shared.activeManagerSessionIDs() ?? []).isEmpty else { return }
+        let request = ConfirmationRequest(
+            prompt: .revokeAllManagerRoles,
+            title: AdvancedStrings.confirmRevokeManagersTitle,
+            message: AdvancedStrings.confirmRevokeManagersBody,
+            confirmTitle: AdvancedStrings.revokeManagersConfirm,
+            cancelTitle: L10n.string("Cancel")
+        )
+        guard ConfirmationAlert.ask(request) else { return }
+        guard ControlGrantStore.shared.revokeAllManagers() else {
+            presentFailure(ControlGrantStoreError.revocationFailed)
+            return
+        }
+        rebuild()
+    }
+
     /// Confirms, resets, and restarts.
     ///
     /// The restart is not a convenience. Every store here is a singleton holding its state in
@@ -278,6 +303,24 @@ enum AdvancedStrings {
     }
     static var tourFlagButton: String { L10n.string("Clear Flag") }
 
+    static var authoritySection: String { L10n.string("Agent Authority") }
+    static var managerRolesTitle: String { L10n.string("Manager roles") }
+    static var managerRolesDetail: String {
+        L10n.string(
+            "Immediately removes every manager grant and releases all chats they supervise. "
+                + "Regular chat tools are unchanged."
+        )
+    }
+    static var revokeManagersButton: String { L10n.string("Revoke All…") }
+    static var confirmRevokeManagersTitle: String { L10n.string("Revoke all manager roles?") }
+    static var confirmRevokeManagersBody: String {
+        L10n.string(
+            "Every manager loses its extra tools immediately, and every supervised chat is "
+                + "released. You can make individual chats managers again later."
+        )
+    }
+    static var revokeManagersConfirm: String { L10n.string("Revoke All Roles") }
+
     static var resetSection: String { L10n.string("Start Over") }
     static var resetSettingsTitle: String { L10n.string("Reset settings") }
     static var resetSettingsDetail: String {
@@ -324,4 +367,14 @@ enum AdvancedStrings {
     }
 
     static var resetFailedTitle: String { L10n.string("Could not reset") }
+}
+
+private enum ControlGrantStoreError: LocalizedError {
+    case revocationFailed
+
+    var errorDescription: String? {
+        L10n.string(
+            "One or more manager roles could not be revoked. Roles already revoked remain revoked."
+        )
+    }
 }

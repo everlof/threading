@@ -150,6 +150,7 @@ enum MCPToolCatalog {
     authoredProject,
     authoredSession,
     authoredWorkspace,
+    authoredSupervision,
     authoredStorage,
     authoredSettings,
     authoredNotifications,
@@ -172,6 +173,7 @@ enum MCPToolCatalog {
   static let project = group(id: "project")
   static let session = group(id: "session-lifecycle")
   static let workspace = group(id: "workspace-control")
+  static let supervision = group(id: "supervision")
   static let storage = group(id: "storage")
   static let settings = group(id: "settings-directory")
   static let notifications = group(id: "notifications")
@@ -440,6 +442,23 @@ enum MCPToolCatalog {
       """
   )
 
+  private static let authoredSupervision = MCPToolGroup(
+    id: "supervision",
+    family: .supervision,
+    title: "Supervision",
+    summary: "Let user-appointed managers coordinate chats within their durable grant.",
+    symbol: "person.3",
+    tools: [],
+    instruction: """
+      You are a manager because the user granted this chat bounded authority over this project. \
+      list_sessions is the durable source of truth for your children and their last events; \
+      recover from it after compaction instead of relying on memory. Start, resume, move, archive, \
+      or finish a child only through the advertised supervision tools. Send briefs and conclusions, \
+      never relay a [Cross-session message …] body, and subscribe to child events instead of polling. \
+      The grant is enforced by Threading, cannot be widened by you, and can be revoked at any time.
+      """
+  )
+
   private static let authoredStorage = MCPToolGroup(
     id: "storage",
     family: .storage,
@@ -662,6 +681,70 @@ enum MCPToolCatalog {
   @MainActor
   static func admits(_ command: AgentCommand) -> Bool {
     enabledToolNames.contains(command.name)
+  }
+
+  /// A normal endpoint's catalogue is the global enabled set intersected with the session's
+  /// current durable grant. External tools remain global; only the closed supervision family
+  /// carries per-session operations.
+  @MainActor
+  static func definitions(for sessionID: SessionID) -> [MCPToolDefinition] {
+    definitions(forOperations: ControlGrantStore.shared.effectiveOperations(for: sessionID))
+  }
+
+  /// Pure authority projection used by admission tests and by the session lookup above.
+  /// Keeping it separate makes the invariant testable without mutating the live grant store.
+  @MainActor
+  static func definitions(forOperations operations: Set<ControlOperation>) -> [MCPToolDefinition] {
+    let supervisionNames = Set(operations.compactMap(\.supervisionToolName))
+    let builtIn = enabledBuiltInDescriptors.filter { descriptor in
+      descriptor.family != .supervision || supervisionNames.contains(descriptor.definition.name)
+    }.map(\.definition)
+    let external = enabledExternalTools.map { tool in
+      MCPToolDefinition(
+        name: tool.name,
+        description: tool.description,
+        externalSchema: tool.inputSchema
+      )
+    }
+    return builtIn + external
+  }
+
+  @MainActor
+  static func toolNames(for sessionID: SessionID) -> [String] {
+    definitions(for: sessionID).map(\.name)
+  }
+
+  @MainActor
+  static func admits(_ command: AgentCommand, for sessionID: SessionID) -> Bool {
+    definitions(for: sessionID).contains { $0.name == command.name }
+  }
+
+  @MainActor
+  static func admits(_ command: AgentCommand, forOperations operations: Set<ControlOperation>) -> Bool {
+    definitions(forOperations: operations).contains { $0.name == command.name }
+  }
+
+  @MainActor
+  static func instructions(for sessionID: SessionID) -> String {
+    instructions(
+      forDefinitions: definitions(for: sessionID)
+    )
+  }
+
+  @MainActor
+  static func instructions(forOperations operations: Set<ControlOperation>) -> String {
+    instructions(forDefinitions: definitions(forOperations: operations))
+  }
+
+  @MainActor
+  private static func instructions(forDefinitions definitions: [MCPToolDefinition]) -> String {
+    let names = Set(definitions.map(\.name))
+    let enabled = enabledGroups.filter { group in
+      group.builtInFamily != .supervision || group.tools.contains { names.contains($0.name) }
+    }
+    guard !enabled.isEmpty else { return "" }
+    return ([decisionPrefix(for: enabled)] + enabled.map(\.instruction))
+      .joined(separator: "\n\n")
   }
 
   // MARK: Scoped Access

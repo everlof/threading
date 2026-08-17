@@ -196,6 +196,19 @@ final class AppCommandTests: XCTestCase {
         XCTAssertEqual(command.scope, .session)
         XCTAssertTrue(command.isEditable)
     }
+
+    func testManagerCommandsDeclareTheirScopeAndRisk() throws {
+        let newManager = try XCTUnwrap(AppCommands.command(id: AppCommands.ID.newManager))
+        XCTAssertEqual(newManager.scope, .project)
+        XCTAssertEqual(newManager.risk, .ordinary)
+
+        for id in [AppCommands.ID.makeManager, AppCommands.ID.revokeManager] {
+            let command = try XCTUnwrap(AppCommands.command(id: id))
+            XCTAssertEqual(command.scope, .session)
+            XCTAssertEqual(command.risk, .destructive)
+            XCTAssertTrue(command.isEditable)
+        }
+    }
 }
 
 // MARK: - Dynamic Registry

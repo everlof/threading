@@ -53,6 +53,7 @@ struct SessionArchiveRequestDidBecomeDue: AppEvent {
     static let name = Notification.Name("sessionArchiveRequestDidBecomeDue")
     let sessionID: SessionID
     let reason: String?
+    let requestedByManagerID: SessionID?
 }
 
 /// A local archive flag changed through provider synchronization.

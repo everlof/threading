@@ -28,6 +28,9 @@ struct HTTPResponse: Sendable {
     var extraHeaders: [String: String] = [:]
     /// Used by the remote-access server for bounded large bodies. MCP responses stay persistent.
     var closesConnection = false
+    /// Starts an unbounded server-sent-event response. Such a response has no Content-Length;
+    /// later event frames are written by `MCPConnection.sendServerEvent`.
+    var opensEventStream = false
 
     static func json(_ body: Data) -> HTTPResponse {
         HTTPResponse(status: 200, reason: "OK", contentType: "application/json", body: body)
@@ -40,6 +43,17 @@ struct HTTPResponse: Sendable {
         HTTPResponse(status: status, reason: reason, contentType: nil, body: Data())
     }
 
+    static var eventStream: HTTPResponse {
+        HTTPResponse(
+            status: 200,
+            reason: "OK",
+            contentType: "text/event-stream",
+            body: Data(),
+            extraHeaders: ["Cache-Control": "no-cache"],
+            opensEventStream: true
+        )
+    }
+
     var serialized: Data {
         var head = "HTTP/1.1 \(status) \(reason)\r\n"
         if let contentType {
@@ -48,7 +62,9 @@ struct HTTPResponse: Sendable {
         for (name, value) in extraHeaders.sorted(by: { $0.key < $1.key }) {
             head += "\(name): \(value)\r\n"
         }
-        head += "Content-Length: \(body.count)\r\n"
+        if !opensEventStream {
+            head += "Content-Length: \(body.count)\r\n"
+        }
         head += "Connection: \(closesConnection ? "close" : "keep-alive")\r\n\r\n"
 
         return Data(head.utf8) + body
@@ -59,10 +75,8 @@ struct HTTPResponse: Sendable {
 
 /// One client connection, speaking just enough HTTP/1.1 to carry MCP's streamable transport.
 ///
-/// Only the request half of that transport is implemented: the client POSTs a JSON-RPC message
-/// and gets its response in the same exchange. The optional SSE stream, which exists so a
-/// server can push messages the client did not ask for, is refused — Threading never originates
-/// traffic, it only answers.
+/// POST carries client requests and GET may hold the optional SSE stream used for server
+/// notifications such as a grant changing a running session's tool list.
 /// Mutable parser and socket state is confined to `queue`; passing the connection as an
 /// identity is safe because every asynchronous response returns to that queue before mutation.
 final class MCPConnection: @unchecked Sendable {
@@ -72,6 +86,7 @@ final class MCPConnection: @unchecked Sendable {
     private let connection: NWConnection
     private let queue: DispatchQueue
     private let handler: @Sendable (
+        MCPConnection,
         HTTPRequest,
         @escaping @Sendable (HTTPResponse) -> Void
     ) -> Void
@@ -83,6 +98,7 @@ final class MCPConnection: @unchecked Sendable {
     /// asynchronously, so without this a pipelined second request could be parsed and
     /// answered out of order.
     private var isHandling = false
+    private var isEventStream = false
 
     // MARK: - Initialization
 
@@ -90,6 +106,7 @@ final class MCPConnection: @unchecked Sendable {
         connection: NWConnection,
         queue: DispatchQueue,
         handler: @escaping @Sendable (
+            MCPConnection,
             HTTPRequest,
             @escaping @Sendable (HTTPResponse) -> Void
         ) -> Void,
@@ -119,6 +136,13 @@ final class MCPConnection: @unchecked Sendable {
 
     func cancel() {
         connection.cancel()
+    }
+
+    func sendServerEvent(_ data: Data) {
+        queue.async { [weak self] in
+            guard let self, self.isEventStream else { return }
+            self.connection.send(content: data, completion: .contentProcessed { _ in })
+        }
     }
 
     // MARK: - Private Methods
@@ -184,7 +208,7 @@ final class MCPConnection: @unchecked Sendable {
         buffer = Data(buffer.dropFirst(consumed))
         isHandling = true
 
-        handler(request) { [weak self] response in
+        handler(self, request) { [weak self] response in
             guard let self else { return }
 
             // Back onto the connection's own queue: the handler answered from the main queue.
@@ -199,6 +223,7 @@ final class MCPConnection: @unchecked Sendable {
     }
 
     private func send(_ response: HTTPResponse, thenClose shouldClose: Bool) {
+        if response.opensEventStream { isEventStream = true }
         connection.send(content: response.serialized, completion: .contentProcessed { [weak self] _ in
             if shouldClose {
                 self?.close()

@@ -67,12 +67,6 @@ final class ProjectSidebarViewController: NSViewController {
         scroll.hasVerticalScroller = true
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.automaticallyAdjustsContentInsets = false
-        // Inside the well, not as a layout gap above it: outside the scroll view the pane's
-        // ground shows, and it is the same colour as the header's — a sliver of it below the
-        // header's rule read as the band bleeding through its own border.
-        scroll.contentBreathing = NSEdgeInsets(
-            top: SidebarDefaults.contentTopInset, left: 0, bottom: 0, right: 0
-        )
         return scroll
     }()
     private var scrollViewBottomConstraint: NSLayoutConstraint?
@@ -452,10 +446,10 @@ private extension ProjectSidebarViewController {
         let bottomConstraint = scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor)
         scrollViewBottomConstraint = bottomConstraint
         NSLayoutConstraint.activate([
-            // Flush to the header's rule: the first row's breathing is the scroll view's own
-            // `contentBreathing`, inside the navigator well, so the well's fill meets the rule
-            // with no strip of pane ground between them.
-            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
+            scrollView.topAnchor.constraint(
+                equalTo: header.bottomAnchor,
+                constant: SidebarDefaults.contentTopInset
+            ),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             bottomConstraint
@@ -615,6 +609,13 @@ private extension ProjectSidebarViewController {
             // setting rather than its own press. It repaints only on a real change —
             // `ThemedIconButton.isSelected` guards that for it.
             self?.applySilenceState()
+        }
+        appEvents.observe(ControlGrantsDidChange.self) { [weak self] event in
+            self?.refreshRow(sessionID: event.sessionID)
+        }
+        appEvents.observe(SupervisionDidChange.self) { [weak self] event in
+            self?.refreshRow(sessionID: event.managerID)
+            self?.refreshRow(sessionID: event.childID)
         }
     }
 
@@ -2590,6 +2591,11 @@ private extension ProjectSidebarViewController {
                     onChoose: pinnedAction(row) { $0.newProjectChatClicked() }
                 )),
                 .item(ThemedMenuItem(
+                    title: L10n.string("New Manager…"),
+                    image: ThemedMenuIcon.symbol("person.3"),
+                    onChoose: pinnedAction(row) { $0.newProjectManagerClicked() }
+                )),
+                .item(ThemedMenuItem(
                     title: L10n.string("New Terminal"),
                     image: ThemedMenuIcon.symbol("terminal"),
                     onChoose: pinnedAction(row) { $0.newProjectTerminalClicked() }
@@ -2609,6 +2615,11 @@ private extension ProjectSidebarViewController {
     @objc private func newProjectChatClicked() {
         guard let projectID = contextProjectID() else { return }
         select(projectID: projectID)
+    }
+
+    @objc private func newProjectManagerClicked() {
+        guard let projectID = contextProjectID() else { return }
+        delegate?.projectSidebar(self, newManagerIn: projectID)
     }
 
     @objc private func newProjectTerminalClicked() {
@@ -3545,6 +3556,10 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectTerminal terminalID: TerminalID)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectProject projectID: ProjectID)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didAddProject project: Project)
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        newManagerIn projectID: ProjectID
+    )
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
         setArchived archived: Bool,

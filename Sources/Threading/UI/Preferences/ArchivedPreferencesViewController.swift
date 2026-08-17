@@ -172,7 +172,13 @@ final class ArchivedPreferencesViewController: NSViewController {
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let when = Self.relativeDate.localizedString(for: entry.session.lastActiveAt, relativeTo: Date())
-        let captionLabel = NSTextField(labelWithString: "\(entry.project.name) · \(when)")
+        let manager = ControlGrantStore.shared.supervisions(forChild: entry.session.id)
+            .last(where: { $0.state == .archived })
+            .flatMap { ProjectStore.shared.session(withID: $0.managerID)?.displayTitle }
+        let caption = manager.map {
+            L10n.format("%1$@ · %2$@ · by %3$@", entry.project.name, when, $0)
+        } ?? "\(entry.project.name) · \(when)"
+        let captionLabel = NSTextField(labelWithString: caption)
         captionLabel.applyFont(.subheading)
         captionLabel.textColor = Design.Text.secondary
         captionLabel.lineBreakMode = .byTruncatingTail

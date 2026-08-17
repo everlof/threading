@@ -47,6 +47,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// submission closures, so neither UI surface reaches into account or diagnostic state.
     var issueReportSubmitter: MacIssueReportSubmitter?
     private var isSendingCrashReport = false
+    private var presentedManagerMoveSessionID: SessionID?
 
     // MARK: - Properties
 
@@ -833,6 +834,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 with: self.currentWorkspaceNavigatorDestination
             )
         }
+        appEvents.observe(ControlGrantsDidChange.self) { [weak self] event in
+            guard event.sessionID == self?.currentSessionID else { return }
+            self?.updateSessionTitleItem()
+        }
+        appEvents.observe(ManagerActionNoticeDidChange.self) { [weak self] event in
+            guard event.sessionID == self?.currentSessionID else { return }
+            self?.presentManagerMoveNoticeIfNeeded(for: event.sessionID)
+        }
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
             self?.workspaceSidebarViewController.refreshDocument()
         }
@@ -885,6 +894,110 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     private func setupAgentToolCoordinator() {
         _ = agentToolCoordinator
+        SupervisionActionRegistry.shared.register(.init(
+            spawn: { [weak self] plan, brief, sideChatParentID, managerID in
+                guard let self else {
+                    return .failure(.init(L10n.string(
+                        "The workspace window is no longer available."
+                    )))
+                }
+                return self.sessionCoordinator.spawnSupervisedSession(
+                    plan: plan,
+                    brief: brief,
+                    sideChatParentID: sideChatParentID,
+                    managerID: managerID
+                )
+            },
+            resume: { [weak self] sessionID in
+                self?.sessionCoordinator.resumeSupervisedSession(sessionID) ?? false
+            },
+            move: { [weak self] sessionID, account, managerID in
+                guard let self else {
+                    return .failure(.init(L10n.string(
+                        "The workspace window is no longer available."
+                    )))
+                }
+                return self.sessionCoordinator.moveSupervisedSession(
+                    sessionID,
+                    to: account,
+                    managerID: managerID
+                )
+            },
+            finish: { [weak self] sessionID, managerID in
+                self?.sessionCoordinator.finishSupervisedWorkspace(
+                    sessionID,
+                    managerID: managerID
+                ) ?? false
+            }
+        ))
+    }
+
+    private func presentManagerMoveNoticeIfNeeded(for sessionID: SessionID) {
+        if let presentedManagerMoveSessionID, presentedManagerMoveSessionID != sessionID {
+            containerViewController.dismissNotice()
+            self.presentedManagerMoveSessionID = nil
+        }
+        guard containerViewController.noticeView == nil,
+              let move = ManagerActionNoticeStore.shared.move(for: sessionID) else { return }
+        let manager = environment.projectStore.session(withID: move.managerID)?.displayTitle
+            ?? L10n.string("Manager")
+        let message = L10n.format(
+            "Moved to %1$@ by %2$@",
+            move.destination.displayName,
+            manager
+        )
+        let notice = PaneNoticeView(
+            tone: .informational,
+            message: message,
+            actions: [
+                PaneNoticeAction(title: L10n.string("Undo")) { [weak self] in
+                    self?.undoManagerMove(move)
+                }
+            ],
+            onDismiss: { [weak self] in
+                ManagerActionNoticeStore.shared.dismissMove(for: sessionID)
+                self?.presentedManagerMoveSessionID = nil
+                self?.containerViewController.dismissNotice()
+            }
+        )
+        presentedManagerMoveSessionID = sessionID
+        containerViewController.showNotice(notice)
+    }
+
+    private func undoManagerMove(_ move: ManagerActionNoticeStore.Move) {
+        guard let source = move.source else {
+            showManagerMoveUndoFailure(L10n.string("The previous account is no longer available."))
+            return
+        }
+        AccountUsageService.shared.refresh(source, force: true) { [weak self] in
+            guard let self else { return }
+            let candidate = LimitEscapeRanking.Candidate(
+                accountID: source.id,
+                usage: AccountUsageService.shared.usage(for: source),
+                limits: CustomLimitSettings.shared.rules(for: source.id)
+            )
+            guard case .current = AccountUsageService.shared.reading(for: source),
+                  LimitEscapeRanking.hasHeadroom(candidate, metering: nil) else {
+                self.showManagerMoveUndoFailure(
+                    L10n.string("The previous account has no fresh reading with headroom.")
+                )
+                return
+            }
+            guard self.sessionCoordinator.moveSessionWithoutConfirmation(move.sessionID, to: source) else {
+                return
+            }
+            ManagerActionNoticeStore.shared.dismissMove(for: move.sessionID)
+            self.presentedManagerMoveSessionID = nil
+            self.containerViewController.dismissNotice()
+        }
+    }
+
+    private func showManagerMoveUndoFailure(_ detail: String) {
+        let alert = ThemedAlert()
+        alert.alertStyle = .warning
+        alert.messageText = L10n.string("Couldn't undo the account move")
+        alert.informativeText = detail
+        alert.runModal()
     }
 
     /// Adds the panel agents display content in, collapsed until something arrives.
@@ -911,6 +1024,23 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         displayPaneController.onShareSession = { sessionID in
             ShareChatSheet.run(for: sessionID)
+        }
+        displayPaneController.onOpenSupervisedChat = { [weak self] sessionID in
+            self?.sidebarViewController.select(sessionID: sessionID)
+        }
+        displayPaneController.onMessageSupervisedChat = { [weak self] sessionID in
+            self?.sidebarViewController.select(sessionID: sessionID)
+        }
+        displayPaneController.onArchiveSupervisedChat = { [weak self] sessionID in
+            self?.sessionCoordinator.setArchived(true, for: sessionID)
+        }
+        displayPaneController.onReleaseSupervisedChat = { sessionID in
+            guard let supervision = ControlGrantStore.shared.activeManager(of: sessionID) else { return }
+            _ = ControlGrantStore.shared.release(
+                childID: sessionID,
+                by: supervision.managerID,
+                outcome: "Released from Chats tab"
+            )
         }
         appEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
             guard let self,
@@ -1815,6 +1945,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 // The agent's own mark rather than a symbol, which is what the sidebar row beside
                 // it shows for the same session.
                 icon: session.kind.icon,
+                roleSymbol: ControlGrantStore.shared.isManager(sessionID) ? "person.3" : nil,
                 toolTip: project.map { "\($0.name) — \(session.displayTitle)" }
             )
         } else if let terminalID = containerViewController.currentTerminalID,
@@ -1845,6 +1976,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         symbolName: String,
         identity: AnyHashable,
         icon: NSImage? = nil,
+        roleSymbol: String? = nil,
         toolTip: String? = nil
     ) {
         setSettingsModeChrome(visible: false)
@@ -1858,6 +1990,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         if let icon {
             pageTitleView.setIcon(icon)
         }
+        pageTitleView.setRoleSymbol(
+            roleSymbol,
+            accessibility: roleSymbol == nil ? nil : L10n.string("Manager")
+        )
         pageTitleView.toolTip = toolTip ?? title
     }
 
@@ -3374,6 +3510,46 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         sessionCoordinator.newSession()
     }
 
+    /// The command-palette route to the same preset composer the project's `+` menu opens.
+    func newManager() {
+        guard !showRecoverySurfaceIfActive(), let projectID = currentProjectID else { return }
+        sidebarViewController.select(projectID: projectID)
+        containerViewController.showManagerComposer(projectID: projectID)
+        syncDisplayPane(to: nil)
+        recordVisit(.composer(projectID))
+        updateSessionTitleItem()
+        updateWindowTitle()
+    }
+
+    func makeCurrentSessionManager() {
+        guard let sessionID = currentSessionID,
+              !ControlGrantStore.shared.isManager(sessionID),
+              let session = environment.projectStore.session(withID: sessionID)
+        else { return }
+        let projectName = environment.projectStore.project(forSessionID: sessionID)?.name
+            ?? L10n.string("this project")
+        let request = ConfirmationRequest(
+            prompt: .conferManagerRole,
+            title: L10n.format("Make “%@” a manager?", session.displayTitle),
+            message: L10n.format(
+                "This chat may archive, rename, start, resume and move chats in %@, and read account usage. It cannot widen this itself. You can revoke it any time.",
+                projectName
+            ),
+            confirmTitle: L10n.string("Make Manager"),
+            style: .informational
+        )
+        guard ConfirmationAlert.ask(request) else { return }
+        _ = ControlGrantStore.shared.conferManager(
+            sessionID: sessionID,
+            origin: .user(command: "Make Manager")
+        )
+    }
+
+    func revokeCurrentManagerRole() {
+        guard let sessionID = currentSessionID else { return }
+        _ = ControlGrantStore.shared.revokeManager(sessionID: sessionID)
+    }
+
 #if DEBUG
     /// Opens the chat a development build's report is sent to. Lives here rather than in
     /// `MainWindowInspector`, which raises the sheets, because `sessionCoordinator` is private
@@ -3547,6 +3723,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         let previousTerminalID = containerViewController.currentTerminalID
 
         containerViewController.show(sessionID: sessionID, initialPrompt: prompt)
+        presentManagerMoveNoticeIfNeeded(for: sessionID)
         syncDisplayPane(to: sessionID)
         recordVisit(.session(sessionID))
         workspaceSidebarViewController.synchronizeSelection(
@@ -3615,6 +3792,14 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     /// a project's first session is still a session, and still worth choosing.
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didAddProject project: Project) {
         sidebar.select(projectID: project.id)
+    }
+
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        newManagerIn projectID: ProjectID
+    ) {
+        sidebar.select(projectID: projectID)
+        containerViewController.showManagerComposer(projectID: projectID)
     }
 
     /// Archiving and closing are lifecycle decisions, so both route through the coordinator,

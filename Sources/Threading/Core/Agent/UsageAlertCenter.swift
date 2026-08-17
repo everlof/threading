@@ -131,6 +131,7 @@ final class UsageAlertCenter {
         for evaluation in evaluations where evaluation.wantsNotification {
             post(evaluation, account: account, usage: usage)
             ledger.record(evaluation, for: accountID)
+            NotificationCenter.default.post(CustomLimitDidFire(accountID: accountID))
         }
     }
 

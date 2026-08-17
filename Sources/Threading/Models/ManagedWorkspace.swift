@@ -7,7 +7,7 @@ import Foundation
 /// A remote review is deliberately not one of these cases. Publishing a branch and opening a
 /// PR/MR is a separate optional decision on `ManagedWorkspacePlan`; keeping it out of the
 /// default is what makes enabling isolation mean only local, reversible repository work.
-enum ManagedWorkspaceDelivery: String, Codable, Sendable, Equatable, CaseIterable {
+enum ManagedWorkspaceDelivery: String, Codable, Sendable, Equatable, Hashable, CaseIterable {
   case mergeAndCleanUp
   case keepForReview
 }

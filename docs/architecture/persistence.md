@@ -19,6 +19,16 @@ same fact two homes is how one of them goes stale. Standalone `ProjectTerminal` 
 embedded in that project payload: they are small project-owned sidebar destinations with no
 transcript or independently queried lifecycle, so a separate relational row buys nothing.
 
+**Schema version 4 owns control authority.** `control_grant`, `supervision` and
+`supervision_event` are normalized beside the project graph because their identities, indexes and
+lifetimes differ from a session payload. Grants index the actor and revocation time while keeping
+the full bounded `ControlGrant` as JSON. Supervision indexes both manager/state/order and child;
+its events are ordered relational rows with a bounded JSON payload. Every relationship is foreign
+keyed with `ON DELETE CASCADE`, so deleting either session cannot leave usable authority or an
+orphaned audit stream. Revocation updates `revoked_at` rather than deleting the grant, and closing
+a supervision changes its state rather than erasing its history. Event insertion and pruning to
+`SupervisionDefaults.maximumEvents` happen in one transaction.
+
 Writes are **per row, in one transaction**: upsert what is there, delete what has gone. That is
 the actual gain over the document — the store is no longer rewritten in full every time an agent
 renames a chat or standalone terminal — and it retires the rolling `projects.json.bak`, whose whole job was

@@ -149,6 +149,8 @@ final class ProjectDatabase {
                 try database.execute(ProjectDatabaseSchema.version2)
             case 3:
                 try database.execute(ProjectDatabaseSchema.version3)
+            case 4:
+                try database.execute(ProjectDatabaseSchema.version4)
             default:
                 // Unreachable while `version` and the cases here are edited together, which is
                 // the point of failing loudly rather than silently skipping a step.
@@ -529,6 +531,159 @@ final class ProjectDatabase {
         )
     }
 
+    // MARK: - Public Methods — Control Authority
+
+    /// Every durable grant for an actor, including revoked rows so the audit trail survives.
+    func controlGrants(for sessionID: SessionID) throws -> [ControlGrant] {
+        let statement = try database.prepare(
+            "SELECT data FROM \(ProjectDatabaseSchema.controlGrantTable) "
+                + "WHERE actor_session_id = ? ORDER BY conferred_at"
+        )
+        defer { statement.finalize() }
+        statement.bind(1, sessionID.uuidString)
+
+        var grants: [ControlGrant] = []
+        while try statement.step() {
+            guard let payload = statement.text(0) else {
+                throw corruptRow(
+                    ProjectDatabaseSchema.controlGrantTable,
+                    id: sessionID.uuidString,
+                    reason: "missing grant payload"
+                )
+            }
+            do {
+                grants.append(try Self.decoder.decode(ControlGrant.self, from: Data(payload.utf8)))
+            } catch {
+                throw corruptRow(
+                    ProjectDatabaseSchema.controlGrantTable,
+                    id: sessionID.uuidString,
+                    reason: "invalid JSON payload: \(error.localizedDescription)"
+                )
+            }
+        }
+        return grants
+    }
+
+    func saveControlGrant(_ grant: ControlGrant) throws {
+        guard case .agentSession(let actorSessionID) = grant.actor else {
+            throw SQLiteDatabase.Failure.syntheticStep(
+                "Only session actors can be stored by this schema version"
+            )
+        }
+        try database.prepare(ProjectDatabaseSchema.upsertControlGrant)
+            .bind(1, grant.id.uuidString)
+            .bind(2, actorSessionID.uuidString)
+            .bind(3, grant.conferredAt.timeIntervalSince1970)
+            .bind(4, grant.revokedAt?.timeIntervalSince1970)
+            .bind(5, try Self.encodeValidated(grant))
+            .run()
+    }
+
+    func allActiveManagerSessionIDs() throws -> Set<SessionID> {
+        let statement = try database.prepare(
+            "SELECT DISTINCT actor_session_id FROM \(ProjectDatabaseSchema.controlGrantTable) "
+                + "WHERE revoked_at IS NULL"
+        )
+        defer { statement.finalize() }
+        var result: Set<SessionID> = []
+        while try statement.step() {
+            if let raw = statement.text(0), let id = SessionID(uuidString: raw) {
+                result.insert(id)
+            }
+        }
+        return result
+    }
+
+    // MARK: - Public Methods — Supervision
+
+    func supervisions(managerID: SessionID? = nil, childID: SessionID? = nil) throws -> [Supervision] {
+        var clauses: [String] = []
+        if managerID != nil { clauses.append("manager_session_id = ?") }
+        if childID != nil { clauses.append("child_session_id = ?") }
+        let suffix = clauses.isEmpty ? "" : " WHERE " + clauses.joined(separator: " AND ")
+        let statement = try database.prepare(
+            "SELECT data FROM \(ProjectDatabaseSchema.supervisionTable)"
+                + suffix + " ORDER BY assigned_at"
+        )
+        defer { statement.finalize() }
+        var binding: Int32 = 1
+        if let managerID {
+            statement.bind(binding, managerID.uuidString)
+            binding += 1
+        }
+        if let childID {
+            statement.bind(binding, childID.uuidString)
+        }
+
+        var result: [Supervision] = []
+        while try statement.step() {
+            guard let payload = statement.text(0) else { continue }
+            do {
+                result.append(try Self.decoder.decode(Supervision.self, from: Data(payload.utf8)))
+            } catch {
+                throw corruptRow(
+                    ProjectDatabaseSchema.supervisionTable,
+                    id: nil,
+                    reason: "invalid JSON payload: \(error.localizedDescription)"
+                )
+            }
+        }
+        return result
+    }
+
+    func saveSupervision(_ supervision: Supervision) throws {
+        try database.prepare(ProjectDatabaseSchema.upsertSupervision)
+            .bind(1, supervision.id.uuidString)
+            .bind(2, supervision.managerID.uuidString)
+            .bind(3, supervision.childID.uuidString)
+            .bind(4, supervision.assignedAt.timeIntervalSince1970)
+            .bind(5, supervision.state.rawValue)
+            .bind(6, try Self.encodeValidated(supervision))
+            .run()
+    }
+
+    func supervisionEvents(for supervisionID: SupervisionID) throws -> [SupervisionEvent] {
+        let statement = try database.prepare(
+            "SELECT data FROM \(ProjectDatabaseSchema.supervisionEventTable) "
+                + "WHERE supervision_id = ? ORDER BY at"
+        )
+        defer { statement.finalize() }
+        statement.bind(1, supervisionID.uuidString)
+        var result: [SupervisionEvent] = []
+        while try statement.step() {
+            guard let payload = statement.text(0) else { continue }
+            do {
+                result.append(try Self.decoder.decode(SupervisionEvent.self, from: Data(payload.utf8)))
+            } catch {
+                throw corruptRow(
+                    ProjectDatabaseSchema.supervisionEventTable,
+                    id: nil,
+                    reason: "invalid JSON payload: \(error.localizedDescription)"
+                )
+            }
+        }
+        return result
+    }
+
+    /// Appends one event and prunes older rows in the same transaction. The durable drop marker
+    /// is inserted by `ControlGrantStore` before this call when the cap is crossed.
+    func saveSupervisionEvent(_ event: SupervisionEvent) throws {
+        try database.transaction {
+            try database.prepare(ProjectDatabaseSchema.insertSupervisionEvent)
+                .bind(1, event.id.uuidString.lowercased())
+                .bind(2, event.supervisionID.uuidString)
+                .bind(3, event.at.timeIntervalSince1970)
+                .bind(4, event.kind.rawValue)
+                .bind(5, try Self.encodeValidated(event))
+                .run()
+            try database.prepare(ProjectDatabaseSchema.pruneSupervisionEvents)
+                .bind(1, event.supervisionID.uuidString)
+                .bind(2, event.supervisionID.uuidString)
+                .bind(3, SupervisionDefaults.maximumEvents)
+                .run()
+        }
+    }
+
     // MARK: - Private Methods — Rows
 
     private func upsert(_ project: Project, position: Int) throws {
@@ -866,7 +1021,7 @@ final class ProjectDatabase {
 
 enum ProjectDatabaseSchema {
 
-    static let version = 3
+    static let version = 4
 
     static let selectedSessionKey = "selectedSessionID"
 
@@ -885,6 +1040,9 @@ enum ProjectDatabaseSchema {
     static let panelTable = "panel_layout"
 
     static let attachmentsTable = "session_attachments"
+    static let controlGrantTable = "control_grant"
+    static let supervisionTable = "supervision"
+    static let supervisionEventTable = "supervision_event"
 
     /// Columns exist to be ordered by, filtered on, or joined; everything else is in `data`.
     /// `kind` and `last_active_at` are duplicated out of the payload on purpose — they are what
@@ -959,6 +1117,81 @@ enum ProjectDatabaseSchema {
             session_id TEXT PRIMARY KEY,
             data       TEXT NOT NULL
         );
+        """
+
+    /// Control authority is normalized beside the project graph rather than embedded in one
+    /// session's payload: grants and manager/child records have their own lifetimes and foreign
+    /// keys, and session deletion removes every row that could otherwise retain authority.
+    static let version4 = """
+        CREATE TABLE control_grant (
+            id               TEXT PRIMARY KEY,
+            actor_session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+            conferred_at     REAL NOT NULL,
+            revoked_at       REAL,
+            data             TEXT NOT NULL
+        );
+
+        CREATE INDEX control_grant_actor ON control_grant (actor_session_id, revoked_at);
+
+        CREATE TABLE supervision (
+            id                 TEXT PRIMARY KEY,
+            manager_session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+            child_session_id   TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+            assigned_at        REAL NOT NULL,
+            state              TEXT NOT NULL,
+            data               TEXT NOT NULL,
+            UNIQUE(manager_session_id, child_session_id)
+        );
+
+        CREATE INDEX supervision_manager ON supervision (manager_session_id, state, assigned_at);
+        CREATE INDEX supervision_child ON supervision (child_session_id, state);
+
+        CREATE TABLE supervision_event (
+            id             TEXT PRIMARY KEY,
+            supervision_id TEXT NOT NULL REFERENCES supervision(id) ON DELETE CASCADE,
+            at             REAL NOT NULL,
+            kind           TEXT NOT NULL,
+            data           TEXT NOT NULL
+        );
+
+        CREATE INDEX supervision_event_order ON supervision_event (supervision_id, at);
+        """
+
+    static let upsertControlGrant = """
+        INSERT INTO control_grant (id, actor_session_id, conferred_at, revoked_at, data)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            actor_session_id = excluded.actor_session_id,
+            conferred_at = excluded.conferred_at,
+            revoked_at = excluded.revoked_at,
+            data = excluded.data
+        """
+
+    static let upsertSupervision = """
+        INSERT INTO supervision (
+            id, manager_session_id, child_session_id, assigned_at, state, data
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            manager_session_id = excluded.manager_session_id,
+            child_session_id = excluded.child_session_id,
+            assigned_at = excluded.assigned_at,
+            state = excluded.state,
+            data = excluded.data
+        """
+
+    static let insertSupervisionEvent = """
+        INSERT INTO supervision_event (id, supervision_id, at, kind, data)
+        VALUES (?, ?, ?, ?, ?)
+        """
+
+    static let pruneSupervisionEvents = """
+        DELETE FROM supervision_event
+        WHERE supervision_id = ? AND id NOT IN (
+            SELECT id FROM supervision_event
+            WHERE supervision_id = ?
+            ORDER BY at DESC
+            LIMIT ?
+        )
         """
 
     static let upsertAttachments = """

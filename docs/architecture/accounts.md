@@ -911,6 +911,27 @@ What each seam does with it:
   session outside its scope has a limit on it. The plane asks through a `Dependencies` closure
   like every other fact it needs, so the refusal matrix stays a table test.
 
+### Manager account decisions use the same readings
+
+A Manager grant exposes two read-only views rather than a second account model. `list_accounts`
+returns enabled same-provider logins, their metering windows, own-limit holds and the shared
+`LimitEscapeRanking`; a missing reading remains **unknown**, never synthetic headroom.
+`session_cost` reads the transcript usage ledger for one chat or the project and preserves its
+priced/unpriced provenance.
+
+`"best"` in a manager's spawn, resume or move request is one choice at one moment. The control
+plane force-refreshes the candidate readings, asks `LimitEscapeRanking`, and returns both the
+chosen login and exclusions such as **excluded by your limit**. It does not install an automatic
+failover policy. A named destination follows the same fresh-reading and `CustomLimitBounds.hold`
+guards, so manual, scheduled and manager-initiated spend cannot disagree about whether a login is
+available.
+
+Moving a managed child is allowed only while it is idle and is capped at three account moves per
+child per day. The manager never answers the user's running-session confirmation and never reaches
+an upgrade-plan action. An optional `SpendCeiling` on the grant adds an admission line for work the
+manager starts; it selects an account/window and maximum fraction, but window semantics and the
+underlying readings remain owned here by the account system.
+
 ### Window instances, and why a rule re-arms
 
 A rule re-arms when its window does, and "when its window does" cannot be read from the

@@ -22,6 +22,7 @@ final class SessionComposerViewController: NSViewController {
     /// bottom-flush composer leaves, and hides when a short pane leaves none.
     private let heroMark = ThreadingMarkView()
     private let greetingLabel = MorphingTitleLabel()
+    private let managerGreetingLabel = ThemedMultilineTitleLabel()
     private let heroStack = NSStackView()
     private let heroRegion = NSLayoutGuide()
     private var hasPlayedHeroDrawIn = false
@@ -31,6 +32,7 @@ final class SessionComposerViewController: NSViewController {
 
     /// Who it runs as: the agent, and the login inside it.
     private let identityChip = ChipView()
+    private let roleChip = ChipView()
 
     private let modelChip = ChipView()
     private let effortChip = ChipView()
@@ -277,6 +279,7 @@ final class SessionComposerViewController: NSViewController {
     /// `AppSettings.defaultPermissionMode`, and the CLI's own configuration beyond that.
     var selectedPermissionMode: AgentPermissionMode?
     var selectedManagedWorkspacePlan: ManagedWorkspacePlan?
+    var selectedRole: SessionRole = .chat
 
     weak var delegate: SessionComposerViewControllerDelegate?
 
@@ -314,12 +317,21 @@ final class SessionComposerViewController: NSViewController {
         // greeting to one glyph and an ellipsis.
         greetingLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
+        managerGreetingLabel.applyFont(.heading)
+        managerGreetingLabel.alignment = .center
+        managerGreetingLabel.isHidden = true
+        managerGreetingLabel.setContentCompressionResistancePriority(
+            .defaultHigh,
+            for: .horizontal
+        )
+
         heroMark.setAccessibilityElement(false)
         heroStack.orientation = .vertical
         heroStack.alignment = .centerX
         heroStack.spacing = Design.Spacing.inset
         heroStack.addArrangedSubview(heroMark)
         heroStack.addArrangedSubview(greetingLabel)
+        heroStack.addArrangedSubview(managerGreetingLabel)
         heroStack.translatesAutoresizingMaskIntoConstraints = false
 
         // The quietest tier there is. With the primary gone from this screen, a bordered import
@@ -346,13 +358,14 @@ final class SessionComposerViewController: NSViewController {
         // here at all: it belongs to the words being written, so it sits on the prompt box's own
         // bottom row (see `wirePrompt`). Placement is what carries the meaning now — above the
         // box is who and where, inside it is what with.
-        let chips = NSStackView(views: [locationChip, identityChip, chipSpacer])
+        let chips = NSStackView(views: [locationChip, identityChip, roleChip, chipSpacer])
         chips.orientation = .horizontal
         chips.alignment = .centerY
         chips.spacing = Design.Spacing.small
 
         locationChip.setAccessibilityIdentifier("composer.session-start.location")
         identityChip.setAccessibilityIdentifier("composer.session-start.identity")
+        roleChip.setAccessibilityIdentifier("composer.session-start.role")
         managedWorkspaceCheckbox.setAccessibilityIdentifier(
             "composer.session-start.managed-workspace"
         )
@@ -377,6 +390,7 @@ final class SessionComposerViewController: NSViewController {
             for: .horizontal
         )
         identityChip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        roleChip.setContentCompressionResistancePriority(.required, for: .horizontal)
         // The one chip made to shorten: a long location truncates before it can push the
         // identity out of the row. A hard cap rather than a lowered priority, because a chip's
         // width comes from its internal label's required edge pins — both labels resist
@@ -700,6 +714,13 @@ final class SessionComposerViewController: NSViewController {
             self.refreshChips()
         }
 
+        roleChip.itemsProvider = { [weak self] in self?.roleItems() ?? [] }
+        roleChip.onSelect = { [weak self] item in
+            guard let self, let role = item.representedValue as? SessionRole else { return }
+            self.selectedRole = role
+            self.refreshChips()
+        }
+
         modelChip.itemsProvider = { [weak self] in self?.modelItems() ?? [] }
         modelChip.onSelect = { [weak self] item in
             guard let self else { return }
@@ -803,6 +824,7 @@ final class SessionComposerViewController: NSViewController {
         selectedBranch = nil
         selectedPermissionMode = nil
         selectedManagedWorkspacePlan = nil
+        selectedRole = .chat
         managedWorkspaceCheckbox.state = .off
         setManagedWorkspaceOptionsAttached(false)
 
@@ -846,6 +868,17 @@ final class SessionComposerViewController: NSViewController {
     /// A fresh line each time the composer is pointed somewhere, morphing in place when a
     /// greeting is already up.
     private func refreshGreeting() {
+        if selectedRole == .manager {
+            managerGreetingLabel.stringValue = L10n.string(
+                "Coordinate this project\nStart and guide chats\nStop when the brief is done"
+            )
+            greetingLabel.isHidden = true
+            managerGreetingLabel.isHidden = false
+            return
+        }
+
+        managerGreetingLabel.isHidden = true
+        greetingLabel.isHidden = false
         let message = ComposerGreeting.message()
         guard message != greetingLabel.stringValue else { return }
         greetingLabel.setStringValue(message, animated: !greetingLabel.stringValue.isEmpty)
@@ -873,6 +906,12 @@ final class SessionComposerViewController: NSViewController {
     /// usage reading to age out, so a composer returned to must state them again.
     func refreshDerivedState() {
         refreshChips()
+    }
+
+    func presetManagerRole() {
+        selectedRole = .manager
+        refreshRolePresentation()
+        focusPrompt()
     }
 
     /// Keeps component targeting separate from project lookup so the shell can be exercised
@@ -972,6 +1011,11 @@ final class SessionComposerViewController: NSViewController {
                 account: accounts.count < 2 ? nil : account.map(AccountName.display)
             )
         )
+        roleChip.configure(
+            symbolName: selectedRole == .manager ? "person.3" : "bubble.left",
+            title: selectedRole.displayName
+        )
+        refreshRolePresentation()
 
         let models = AgentModels.available(for: selectedAgent, account: account)
         modelChip.isHidden = models.isEmpty
@@ -1716,6 +1760,34 @@ final class SessionComposerViewController: NSViewController {
         )
     }
 
+    private func roleItems() -> [ThemedMenuEntry] {
+        SessionRole.allCases.map { role in
+            .item(ThemedMenuItem(
+                title: role.displayName,
+                image: ThemedMenuIcon.symbol(role == .manager ? "person.3" : "bubble.left"),
+                representedValue: role,
+                isSelected: role == selectedRole
+            ))
+        }
+    }
+
+    private func refreshRolePresentation() {
+        guard isViewLoaded else { return }
+        roleChip.configure(
+            symbolName: selectedRole == .manager ? "person.3" : "bubble.left",
+            title: selectedRole.displayName
+        )
+        refreshGreeting()
+        promptView.placeholder = projectID == nil
+            ? ComposerDefaults.chooseProjectFirstReason
+            : (selectedRole == .manager
+                ? L10n.string("Write the brief: what to run, on which accounts, when to stop")
+                : ComposerDefaults.promptPlaceholder)
+        startButton.title = selectedRole == .manager
+            ? L10n.string("Start manager")
+            : L10n.string("Start session")
+    }
+
     private func speedItems() -> [ThemedMenuEntry] {
         ConversationSpeedPresentation.rows(
             selected: selectedFastMode,
@@ -1746,6 +1818,7 @@ final class SessionComposerViewController: NSViewController {
             usesNativeUI: usesNativeUI,
             permissionMode: selectedAgent.supportsPermissionModes ? selectedPermissionMode : nil,
             managedWorkspacePlan: selectedManagedWorkspacePlan,
+            role: selectedRole,
             prompt: prompt,
             attachmentPaths: attachmentPaths
         ) ?? false
@@ -1916,6 +1989,7 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
         usesNativeUI: Bool,
         permissionMode: AgentPermissionMode?,
         managedWorkspacePlan: ManagedWorkspacePlan?,
+        role: SessionRole,
         prompt: String,
         attachmentPaths: [String]
     ) -> Bool

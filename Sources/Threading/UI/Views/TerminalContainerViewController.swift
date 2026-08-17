@@ -651,6 +651,11 @@ final class TerminalContainerViewController: NSViewController {
         composerViewController.focusPrompt()
     }
 
+    func showManagerComposer(projectID: ProjectID) {
+        showComposer(projectID: projectID)
+        composerViewController.presetManagerRole()
+    }
+
     /// Shows a settings page centred in the pane, replacing whatever session or composer was on
     /// screen. The section list lives in the sidebar; this only draws the chosen page.
     ///

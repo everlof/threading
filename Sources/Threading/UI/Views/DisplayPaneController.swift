@@ -295,6 +295,11 @@ final class DisplayPaneController: NSViewController {
   /// grant choice and its copy behaviour stay where the sidebar's Share Chat… already put them.
   var onShareSession: ((SessionID) -> Void)?
 
+  var onOpenSupervisedChat: ((SessionID) -> Void)?
+  var onMessageSupervisedChat: ((SessionID) -> Void)?
+  var onArchiveSupervisedChat: ((SessionID) -> Void)?
+  var onReleaseSupervisedChat: ((SessionID) -> Void)?
+
   /// Reports an active review's background read and main-thread render as one operation.
   var onReviewLoadingChange: ((SessionID, Bool) -> Void)?
 
@@ -321,6 +326,15 @@ final class DisplayPaneController: NSViewController {
 
     appEvents.observe(SessionAttachmentsDidChange.self) { [weak self] event in
       self?.ensureAttachmentsTab(for: event.sessionID)
+    }
+    appEvents.observe(ControlGrantsDidChange.self) { [weak self] event in
+      guard let self, event.sessionID == self.currentSessionID else { return }
+      self.reconcileSupervisionTab(for: event.sessionID)
+      self.render()
+    }
+    appEvents.observe(SupervisionDidChange.self) { [weak self] event in
+      self?.tabsBySession[event.managerID]?.first(where: { $0.supervision != nil })?
+        .supervision?.refresh()
     }
   }
 
@@ -413,7 +427,7 @@ final class DisplayPaneController: NSViewController {
       tabs(for: sessionID).lazy.filter { $0.browser != nil }.count
       < DisplayPaneDefaults.maximumBrowserTabs
 
-    let choices: [(String, String, Bool, () -> Void)] = [
+    var choices: [(String, String, Bool, () -> Void)] = [
       (
         "Terminal", "terminal", true,
         {
@@ -470,6 +484,15 @@ final class DisplayPaneController: NSViewController {
         }
       ),
     ]
+    if ControlGrantStore.shared.isManager(sessionID) {
+      choices.insert(
+        (
+          L10n.string("Chats"), "person.3", true,
+          { [weak self] in _ = self?.activateSupervision(for: sessionID) }
+        ),
+        at: 0
+      )
+    }
     var entries = choices.map { title, symbol, isEnabled, action in
       ThemedMenuEntry.item(
         ThemedMenuItem(
@@ -1358,6 +1381,53 @@ final class DisplayPaneController: NSViewController {
     return controller
   }
 
+  // MARK: - Public — Supervision Tab
+
+  /// The host-owned fleet view. It is ephemeral and exists only while the durable grant does;
+  /// unlike an agent-created document, revoking the role removes this surface immediately.
+  @discardableResult
+  func activateSupervision(for sessionID: SessionID) -> SupervisionListViewController? {
+    restoreIfNeeded(sessionID)
+    reconcileSupervisionTab(for: sessionID)
+    guard let tab = tabsBySession[sessionID]?.first(where: { $0.supervision != nil }),
+          let controller = tab.supervision else { return nil }
+    activeTabIDBySession[sessionID] = tab.id
+    controller.refresh()
+    if sessionID == currentSessionID { render() }
+    return controller
+  }
+
+  private func reconcileSupervisionTab(for sessionID: SessionID) {
+    var tabs = tabsBySession[sessionID] ?? []
+    if ControlGrantStore.shared.isManager(sessionID) {
+      if let existing = tabs.first(where: { $0.supervision != nil }) {
+        existing.supervision?.refresh()
+        return
+      }
+      let controller = SupervisionListViewController(managerID: sessionID)
+      controller.onOpen = { [weak self] in self?.onOpenSupervisedChat?($0) }
+      controller.onMessage = { [weak self] in self?.onMessageSupervisedChat?($0) }
+      controller.onArchive = { [weak self] in self?.onArchiveSupervisedChat?($0) }
+      controller.onRelease = { [weak self] in self?.onReleaseSupervisedChat?($0) }
+      addChild(controller)
+      let tab = DisplayTab(body: .supervision(controller), owningSessionID: sessionID)
+      tabs.insert(tab, at: 0)
+      tabsBySession[sessionID] = tabs
+      if activeTabIDBySession[sessionID] == nil { activeTabIDBySession[sessionID] = tab.id }
+      return
+    }
+
+    let removed = tabs.filter { $0.supervision != nil }
+    guard !removed.isEmpty else { return }
+    removed.forEach(teardownHosted)
+    let removedIDs = Set(removed.map(\.id))
+    tabs.removeAll { removedIDs.contains($0.id) }
+    tabsBySession[sessionID] = tabs
+    if let active = activeTabIDBySession[sessionID], removedIDs.contains(active) {
+      activeTabIDBySession[sessionID] = tabs.first?.id
+    }
+  }
+
   // MARK: - Public — Subagents Tab
 
   /// Opens the session's ephemeral child-agent transcript surface and selects one child.
@@ -1667,7 +1737,10 @@ final class DisplayPaneController: NSViewController {
   /// preserves it.
   func showSessionTabs(_ sessionID: SessionID?) {
     currentSessionID = sessionID
-    if let sessionID { restoreIfNeeded(sessionID) }
+    if let sessionID {
+      restoreIfNeeded(sessionID)
+      reconcileSupervisionTab(for: sessionID)
+    }
     isShowingCurrentTheme = false
     render()
   }
@@ -1675,13 +1748,17 @@ final class DisplayPaneController: NSViewController {
   /// Switches the panel to a session's tabs. Passing nil empties it.
   func showSession(_ sessionID: SessionID?) {
     currentSessionID = sessionID
-    if let sessionID { restoreIfNeeded(sessionID) }
+    if let sessionID {
+      restoreIfNeeded(sessionID)
+      reconcileSupervisionTab(for: sessionID)
+    }
     render()
   }
 
   /// Whether a session has any tab, which is what decides if the panel opens.
   func hasContent(for sessionID: SessionID) -> Bool {
     restoreIfNeeded(sessionID)
+    reconcileSupervisionTab(for: sessionID)
     return !(tabsBySession[sessionID]?.isEmpty ?? true)
   }
 
@@ -2087,6 +2164,15 @@ final class DisplayPaneController: NSViewController {
       installHosted(sharing)
       sharing.refresh()
 
+    case .supervision(let supervision):
+      imageView.image = nil
+      imageView.isHidden = true
+      hideHTML()
+      captionLabel.isHidden = true
+      contentMenuButton.isHidden = true
+      installHosted(supervision)
+      supervision.refresh()
+
     case .extensionPanel(let panel):
       imageView.image = nil
       imageView.isHidden = true
@@ -2209,6 +2295,7 @@ final class DisplayPaneController: NSViewController {
     case .attachments: return "attachments"
     case .subagents: return "subagents"
     case .sharing: return "sharing"
+    case .supervision: return "supervision"
     case .extensionPanel: return "extension-panel"
     case .compare: return "compare"
     case .browserComparison: return "browser-comparison"

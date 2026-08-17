@@ -2032,7 +2032,7 @@ final class ExtensionHostService {
         let connection = MCPConnection(
             connection: nwConnection,
             queue: queue,
-            handler: { [weak self] request, respond in
+            handler: { [weak self] _, request, respond in
                 Task { @MainActor in
                     self?.route(request, respond: respond)
                 }

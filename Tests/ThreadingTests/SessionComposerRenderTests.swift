@@ -295,12 +295,13 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         }
     }
 
-    /// The chip row above the box answers where and who — two questions, two chips. It held
+    /// The chip row above the box answers where, who, and authority — three questions, three
+    /// chips. It held
     /// four, and a project and its checkout are one place, an agent and its login one identity;
     /// the reader was assembling each answer out of parts. Everything the session *runs with*
     /// is inside the box, and a chip standing in both places would be two controls for one
     /// decision.
-    func testTheChipRowAboveTheBoxHoldsOnlyWhereAndWho() throws {
+    func testTheChipRowAboveTheBoxHoldsOnlyWhereWhoAndAuthority() throws {
         let composer = SessionComposerViewController()
         _ = composer.view
 
@@ -314,9 +315,10 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
             names(all.filter { !$0.isDescendant(of: prompt) }),
             [
                 "composer.session-start.location",
-                "composer.session-start.identity"
+                "composer.session-start.identity",
+                "composer.session-start.role"
             ],
-            "the row above the box is where and who, and nothing else"
+            "the row above the box is where, who, and authority — and nothing else"
         )
         XCTAssertEqual(
             names(all.filter { $0.isDescendant(of: prompt) }),
@@ -1760,6 +1762,7 @@ private final class StartRecorder: SessionComposerViewControllerDelegate {
         usesNativeUI: Bool,
         permissionMode: AgentPermissionMode?,
         managedWorkspacePlan: ManagedWorkspacePlan?,
+        role: SessionRole,
         prompt: String,
         attachmentPaths: [String]
     ) -> Bool {

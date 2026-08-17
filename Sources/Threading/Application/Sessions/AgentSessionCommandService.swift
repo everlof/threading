@@ -10,15 +10,18 @@ final class AgentSessionCommandService {
     private let projects: ProjectStore
     private let archiveScheduler: SessionArchiveScheduler
     private let usesAgentTitleInSidebar: () -> Bool
+    private let control: WorkspaceControlPlane?
 
     init(
         projects: ProjectStore,
         archiveScheduler: SessionArchiveScheduler,
-        usesAgentTitleInSidebar: @escaping () -> Bool
+        usesAgentTitleInSidebar: @escaping () -> Bool,
+        control: WorkspaceControlPlane? = nil
     ) {
         self.projects = projects
         self.archiveScheduler = archiveScheduler
         self.usesAgentTitleInSidebar = usesAgentTitleInSidebar
+        self.control = control
     }
 
     /// Arms an archive for after the current turn. Archiving inside the tool call would stop the
@@ -27,6 +30,17 @@ final class AgentSessionCommandService {
         _ arguments: ArchiveSessionArguments,
         for sessionID: SessionID
     ) -> MCPToolResult {
+        if let target = targetID(arguments.sessionID) {
+            switch (control ?? .live).archive(target, reason: arguments.reason, from: .agentSession(sessionID)) {
+            case .scheduled(let row), .alreadyPending(let row):
+                return .success("“\(row.title)” will be archived after its settle grace.")
+            case .cancelled, .nothingPending:
+                return .failure("The archive request changed before it could be recorded.")
+            case .refused(let refusal): return .failure(refusal.toolWords)
+            }
+        } else if arguments.sessionID?.isEmpty == false {
+            return .failure("session_id must be a Threading UUID from list_sessions.")
+        }
         let title = projects.session(withID: sessionID)?.displayTitle
 
         switch archiveScheduler.request(sessionID: sessionID, reason: arguments.reason) {
@@ -52,6 +66,18 @@ final class AgentSessionCommandService {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !requested.isEmpty else {
             return .failure("Provide a name: two to five words describing this conversation.")
+        }
+
+        if let target = targetID(arguments.sessionID) {
+            switch (control ?? .live).rename(target, to: requested, from: .agentSession(sessionID)) {
+            case .renamed(let row, let title):
+                return .success("“\(row.title)” is now called “\(title)”.")
+            case .protectedByUserTitle(_, let title):
+                return .success("The user's title “\(title)” still wins, so the visible name did not change.")
+            case .refused(let refusal): return .failure(refusal.toolWords)
+            }
+        } else if arguments.sessionID?.isEmpty == false {
+            return .failure("session_id must be a Threading UUID from list_sessions.")
         }
 
         let name = String(requested.prefix(ImportDefaults.titleLimit))
@@ -94,7 +120,20 @@ final class AgentSessionCommandService {
     }
 
     /// Cancels only a pending request. An archive that already landed remains a user-owned Undo.
-    func cancelSessionArchive(for sessionID: SessionID) -> MCPToolResult {
+    func cancelSessionArchive(
+        _ arguments: CancelSessionArchiveArguments = .init(),
+        for sessionID: SessionID
+    ) -> MCPToolResult {
+        if let target = targetID(arguments.sessionID) {
+            switch (control ?? .live).cancelArchive(target, from: .agentSession(sessionID)) {
+            case .cancelled(let row): return .success("“\(row.title)” is no longer going to be archived.")
+            case .nothingPending(let row): return .success("“\(row.title)” had no pending archive.")
+            case .scheduled, .alreadyPending: return .failure("The archive state changed unexpectedly.")
+            case .refused(let refusal): return .failure(refusal.toolWords)
+            }
+        } else if arguments.sessionID?.isEmpty == false {
+            return .failure("session_id must be a Threading UUID from list_sessions.")
+        }
         switch archiveScheduler.cancel(sessionID: sessionID) {
         case .cancelled:
             return .success("This session is no longer going to be archived.")
@@ -105,5 +144,9 @@ final class AgentSessionCommandService {
                 Settings ▸ Archived.
                 """)
         }
+    }
+
+    private func targetID(_ raw: String?) -> SessionID? {
+        raw.flatMap { SessionID(uuidString: $0.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 }

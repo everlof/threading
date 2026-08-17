@@ -287,6 +287,13 @@ final class SQLiteDatabase {
             return self
         }
 
+        @discardableResult
+        func bind(_ index: Int32, _ value: Double?) -> Statement {
+            if let value { return bind(index, value) }
+            sqlite3_bind_null(activeHandle, index)
+            return self
+        }
+
         // MARK: Reading — 0-based, as SQLite counts them
 
         func text(_ column: Int32) -> String? {

@@ -166,7 +166,8 @@ extension SessionComposerViewController {
             branch: selectedBranch,
             usesNativeUI: usesNativeUI,
             permissionMode: selectedAgent.supportsPermissionModes ? selectedPermissionMode : nil,
-            managedWorkspacePlan: selectedManagedWorkspacePlan
+            managedWorkspacePlan: selectedManagedWorkspacePlan,
+            role: selectedRole
         )
     }
 
@@ -288,6 +289,7 @@ extension SessionComposerViewController {
         usesNativeUI = plan.usesNativeUI
         selectedPermissionMode = plan.permissionMode
         selectedManagedWorkspacePlan = plan.managedWorkspacePlan
+        selectedRole = plan.role ?? .chat
         managedWorkspaceCheckbox.state = plan.managedWorkspacePlan == nil ? .off : .on
         refreshChips()
     }

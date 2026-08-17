@@ -19,15 +19,16 @@ The agreed sequencing, so later slices land in order:
 
 1. Typed operations, scope, refusals — `ControlContract.swift` (**this slice**, with MCP as
    the first adapter: `list_sessions`, `send_to_session`).
-2. Richer actor identity and grants — per-session/per-extension authority beyond the default
-   project scope, and a durable audit of who controlled whom, through which grant, and why.
+2. Richer actor identity and grants — **done for session actors**: explicit operations, durable
+   per-session grants, grant-derived MCP catalogues, and revocation. Extension, CLI and remote
+   actors remain separate future slices.
 3. Queue/steer/wait as first-class operations — **done**: `queue` and `steer` dispositions on
    `send_to_session`, and `watch_session` as the wait boundary, built on the
    `SessionActivityDidChange` edge with `SessionArchiveScheduler` as the shape copied. A
    completed notice therefore reaches a parent on request; sending one *unasked* waits for the
    supervision record in slice four.
-4. A project "manager" as a **role, not a session type**: an ordinary session granted
-   `project` scope, dogfooded over this contract. Manager state lives in a durable supervision
+4. A project "manager" as a **role, not a session type** — **done**: an ordinary session granted
+   project scope, dogfooded over this contract. Manager state lives in a durable supervision
    record owned by the plane, never only in the manager's own transcript.
 5. Environments as first-class records (managed worktrees with provenance and cleanup rules),
    then remote hosts — only after the contract above is stable.
@@ -43,9 +44,14 @@ cleanup, and a publicly reachable HTTP server as the first interface.
 - **`ControlActor`** — who is asking. For an agent session the id comes from the MCP URL token
   (`MCPSessionRegistry`), never from an argument, so a caller cannot claim to be a session it
   is not. Future cases: the user's own UI, an extension identity, a CLI, a remote device.
-- **`ControlScope`** — what the actor may see and touch. Slice one grants exactly
-  `.project(theCallersOwn)`. Broader grants are new enum cases with their own membership
-  rules, not loosened checks.
+- **`ControlScope`** — what the actor may see and touch. `.project`, `.sessions` and `.projects`
+  each own their membership rule. The implicit regular-session grant remains its own project plus
+  self-only lifecycle operations; the Manager template writes only one `.project` grant. No UI
+  creates a cross-project grant by implication.
+- **`ControlOperation` and `ControlGrant`** — the closed operation vocabulary and durable,
+  revocable authority joining an actor, scope, exact operation set, permission-mode ceiling,
+  managed-workspace delivery cap and optional spend ceiling. `GrantOrigin` has no agent-authored
+  case: only the user's Make Manager command or New Manager template can confer one.
 - **Typed outcomes** — `ControlSessionOverview`, `ControlSendOutcome`, `ControlRefusal`.
   Refusals are values; prose belongs to adapters.
 
@@ -63,6 +69,40 @@ Two refusal decisions worth their words:
 - **A busy terminal refuses rather than delivers** (`.targetBusy`). Text typed into a working
   TUI lands inside whatever is on screen — a permission prompt, a half-typed composer line —
   the same rule `SessionCoordinator.canAskAgentToRename` applies to the rename request.
+
+## Manager grants and durable supervision
+
+A manager is an ordinary `AgentSession`; no launch, transcript or resume path branches on a new
+session kind. `ControlGrantStore` resolves the active grant and owns the durable relationship
+between manager and child. Revocation timestamps the grant instead of deleting it, releases its
+active children, invalidates the cached catalogue, and causes the live MCP connection to emit
+`notifications/tools/list_changed`. The next call reads current authority even if a client ignores
+that notification.
+
+Regular sessions retain the implicit contract they had before grants: list, send, steer and watch
+within their own project, and archive or rename themselves. A Manager grant adds the complete
+operation set. Nine grant-derived tools form the **Supervision** catalogue: `list_accounts`,
+`session_cost`, `resume_session`, `spawn_session`, `move_session_to_account`,
+`finish_workspace`, `adopt_session`, `release_session` and `subscribe_to_children`. Targeted
+archive, cancel-archive and rename extend the existing lifecycle tools. Tool listing and
+admission are derived from the same effective-operation set; listing is still only ergonomics,
+because every call authorizes again in `WorkspaceControlPlane`.
+
+The plane keeps destructive unattended work narrow. Scope is tested before permission, so an
+out-of-scope target remains indistinguishable from a nonexistent one. A working child cannot be
+archived or moved; a dormant terminal cannot be resumed; a child plan cannot exceed the manager's
+permission mode or allowed workspace delivery; and account choice honours fresh readings and the
+user's own limit holds. Work is bounded at eight live children, 128 retained events per
+supervision, 20 managed sends per minute and three account moves per child per day. Optional
+`SpendCeiling` admission guards work the manager starts without changing provider-limit semantics.
+
+`Supervision` is the durable source of truth for manager, child, brief, state and outcome;
+`SupervisionEvent` records the bounded event stream. It is created by spawn or adoption and closed
+by release, archive, completion or revocation. `subscribe_to_children` uses
+`SupervisionSubscriptionCenter` to deliver bounded Threading-framed notices over the same
+receipt-backed delivery seam as one-shot watches. `list_sessions`, the Chats host tab, row/hover
+attribution and Archived attribution all read this record rather than trying to recover fleet
+state from the manager's transcript.
 
 ## Delivery is per surface, and the outcome is the surface's own answer
 
@@ -144,8 +184,10 @@ exact.
 
 ## The MCP adapter
 
-Two tools in one new catalog group (`workspace-control`, family `.workspace`, title "Other
-sessions" — the deliberate sibling of "This session"): `list_sessions` and `send_to_session`.
+The base plane has two tools in the `workspace-control` catalog group (`family: .workspace`, title
+"Other sessions" — the deliberate sibling of "This session"): `list_sessions` and
+`send_to_session`. The grant-derived Supervision group described above is its authority-bearing
+sibling, visible only to managers.
 The group follows the catalog's standing policy — absent from the disabled set means enabled —
 and the Tools page switch is the off switch; what made "on by default" defensible is that
 every consequence is visible (transcript echo, queue rail, receipt in the ledger) and scoped
@@ -271,15 +313,16 @@ reach it, what it is called elsewhere — and one text for both surfaces:
 The third sentence always closes with the runtime's own id and transcript marked as *not*
 Threading ids — the whole reason a hand-typed version of this went wrong.
 
-## What slice one deliberately does not do
+## Default-role boundaries that remain
 
 - **No auto-resume of dormant targets.** Booting an agent process is the user's decision;
   the scheduled-messages feature departs from this deliberately for its own actor — the user,
   in advance and in writing — and documents where it still refuses.
 - **No reply channel.** A send is fire-and-forget; the receiving session answers into its own
   conversation. Report-back is another `send_to_session` in the other direction.
-- **No cross-project scope, no workspace scope, no grants UI.** The enum has one case on
-  purpose; slice two adds identity and grants before anything broadens.
+- **No implied cross-project or workspace scope.** The contract can represent explicit project
+  sets, but the shipped Manager UI grants exactly the selected project. A broader grant requires
+  a future user-authored consent surface.
 
 ## Known boundaries, named rather than implied
 

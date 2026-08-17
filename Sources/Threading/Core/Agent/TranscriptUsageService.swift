@@ -40,6 +40,9 @@ struct TranscriptUsageReport: Codable, Equatable, Sendable {
     struct Cell: Codable, Equatable, Sendable {
         let day: Date
         let origin: UsageOrigin
+        /// Provider transcript identity retained so a manager can ask for one session's exact
+        /// ledger slice instead of receiving every conversation in the same checkout.
+        var sessionID: String? = nil
         let accountID: String
         let accountName: String
         let model: String
@@ -303,6 +306,7 @@ enum UsageLedgerBuilder {
     private struct CellKey: Hashable {
         let day: Date
         let origin: UsageOrigin
+        let sessionID: String
         let accountID: String
         let model: String
         let checkoutPath: String
@@ -354,6 +358,7 @@ enum UsageLedgerBuilder {
                 let key = CellKey(
                     day: day,
                     origin: priced.origin,
+                    sessionID: priced.sessionID,
                     accountID: priced.accountID,
                     model: priced.model,
                     checkoutPath: root
@@ -361,6 +366,7 @@ enum UsageLedgerBuilder {
                 var cell = byCell[key] ?? .init(
                     day: day,
                     origin: priced.origin,
+                    sessionID: priced.sessionID,
                     accountID: priced.accountID,
                     accountName: priced.accountName,
                     model: priced.model,

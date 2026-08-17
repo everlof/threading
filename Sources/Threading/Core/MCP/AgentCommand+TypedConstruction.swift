@@ -122,7 +122,7 @@ extension AgentCommand {
   static func archiveSession(_ value: ArchiveSessionArguments) -> Self {
     builtIn(.archiveSession, value)
   }
-  static func cancelSessionArchive(_ value: EmptyToolArguments) -> Self {
+  static func cancelSessionArchive(_ value: CancelSessionArchiveArguments) -> Self {
     builtIn(.cancelSessionArchive, value)
   }
   static func setSessionName(_ value: SetSessionNameArguments) -> Self {
@@ -133,6 +133,23 @@ extension AgentCommand {
     builtIn(.sendToSession, value)
   }
   static func watchSession(_ value: WatchSessionArguments) -> Self { builtIn(.watchSession, value) }
+  static func listAccounts(_ value: ListAccountsArguments) -> Self { builtIn(.listAccounts, value) }
+  static func sessionCost(_ value: SessionCostArguments) -> Self { builtIn(.sessionCost, value) }
+  static func resumeSession(_ value: ResumeSessionArguments) -> Self { builtIn(.resumeSession, value) }
+  static func spawnSession(_ value: SpawnSessionArguments) -> Self { builtIn(.spawnSession, value) }
+  static func moveSessionToAccount(_ value: MoveSessionToAccountArguments) -> Self {
+    builtIn(.moveSessionToAccount, value)
+  }
+  static func finishWorkspace(_ value: SessionReferenceArguments) -> Self {
+    builtIn(.finishWorkspace, value)
+  }
+  static func adoptSession(_ value: AdoptSessionArguments) -> Self { builtIn(.adoptSession, value) }
+  static func releaseSession(_ value: ReleaseSessionArguments) -> Self {
+    builtIn(.releaseSession, value)
+  }
+  static func subscribeToChildren(_ value: SubscribeToChildrenArguments) -> Self {
+    builtIn(.subscribeToChildren, value)
+  }
   static func listReclaimableStorage(_ value: EmptyToolArguments) -> Self {
     builtIn(.listReclaimableStorage, value)
   }

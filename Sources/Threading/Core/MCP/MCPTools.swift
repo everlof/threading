@@ -1444,10 +1444,137 @@ struct EmptyToolArguments: Codable, Sendable {}
 /// is not the agent's to choose — see `SessionArchiveScheduler`.
 struct ArchiveSessionArguments: Codable, Sendable {
   let reason: String?
+  let sessionID: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case reason
+    case sessionID = "session_id"
+  }
+
+  init(reason: String?, sessionID: String? = nil) {
+    self.reason = reason
+    self.sessionID = sessionID
+  }
 }
 
 struct SetSessionNameArguments: Codable, Sendable {
   let name: String?
+  let sessionID: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case name
+    case sessionID = "session_id"
+  }
+
+  init(name: String?, sessionID: String? = nil) {
+    self.name = name
+    self.sessionID = sessionID
+  }
+}
+
+struct CancelSessionArchiveArguments: Codable, Sendable {
+  let sessionID: String?
+
+  private enum CodingKeys: String, CodingKey { case sessionID = "session_id" }
+  init(sessionID: String? = nil) { self.sessionID = sessionID }
+}
+
+struct SessionReferenceArguments: Codable, Sendable {
+  let sessionID: String?
+  private enum CodingKeys: String, CodingKey { case sessionID = "session_id" }
+  init(sessionID: String? = nil) { self.sessionID = sessionID }
+}
+
+struct ListAccountsArguments: Codable, Sendable {
+  let model: String?
+}
+
+struct SessionCostArguments: Codable, Sendable {
+  let sessionID: String?
+  let project: Bool?
+  private enum CodingKeys: String, CodingKey {
+    case sessionID = "session_id"
+    case project
+  }
+  init(sessionID: String? = nil, project: Bool? = nil) {
+    self.sessionID = sessionID
+    self.project = project
+  }
+}
+
+struct ResumeSessionArguments: Codable, Sendable {
+  let sessionID: String?
+  let brief: String?
+  let account: String?
+  private enum CodingKeys: String, CodingKey {
+    case sessionID = "session_id"
+    case brief, account
+  }
+}
+
+/// Wire mirror of `ScheduledSessionPlan`; the application adapter freezes this into that one
+/// launch value after applying the manager's project and account defaults.
+struct SpawnSessionPlanArguments: Codable, Sendable {
+  let kind: AgentKind?
+  let account: String?
+  let model: String?
+  let reasoningEffort: String?
+  let fastMode: Bool?
+  let branch: String?
+  let usesNativeUI: Bool?
+  let permissionMode: AgentPermissionMode?
+  let managedWorkspacePlan: ManagedWorkspacePlan?
+
+  private enum CodingKeys: String, CodingKey {
+    case kind, account, model, branch
+    case reasoningEffort = "reasoning_effort"
+    case fastMode = "fast_mode"
+    case usesNativeUI = "uses_native_ui"
+    case permissionMode = "permission_mode"
+    case managedWorkspacePlan = "managed_workspace_plan"
+  }
+}
+
+struct SpawnSessionArguments: Codable, Sendable {
+  let plan: SpawnSessionPlanArguments?
+  let brief: String?
+  let asSideChatOf: String?
+  private enum CodingKeys: String, CodingKey {
+    case plan, brief
+    case asSideChatOf = "as_side_chat_of"
+  }
+}
+
+struct MoveSessionToAccountArguments: Codable, Sendable {
+  let sessionID: String?
+  let accountID: String?
+  private enum CodingKeys: String, CodingKey {
+    case sessionID = "session_id"
+    case accountID = "account_id"
+  }
+}
+
+struct AdoptSessionArguments: Codable, Sendable {
+  let sessionID: String?
+  let brief: String?
+  private enum CodingKeys: String, CodingKey {
+    case sessionID = "session_id"
+    case brief
+  }
+}
+
+struct ReleaseSessionArguments: Codable, Sendable {
+  let sessionID: String?
+  let outcome: String?
+  private enum CodingKeys: String, CodingKey {
+    case sessionID = "session_id"
+    case outcome
+  }
+}
+
+struct SubscribeToChildrenArguments: Codable, Sendable {
+  let sessionID: String?
+  private enum CodingKeys: String, CodingKey { case sessionID = "session_id" }
 }
 
 /// A message for another session in this project, addressed by its Threading id.
@@ -2178,6 +2305,15 @@ enum MCPTools {
   static let archiveSession = MCPBuiltInTool.archiveSession.rawValue
   static let cancelSessionArchive = MCPBuiltInTool.cancelSessionArchive.rawValue
   static let setSessionName = MCPBuiltInTool.setSessionName.rawValue
+  static let listAccounts = MCPBuiltInTool.listAccounts.rawValue
+  static let sessionCost = MCPBuiltInTool.sessionCost.rawValue
+  static let resumeSession = MCPBuiltInTool.resumeSession.rawValue
+  static let spawnSession = MCPBuiltInTool.spawnSession.rawValue
+  static let moveSessionToAccount = MCPBuiltInTool.moveSessionToAccount.rawValue
+  static let finishWorkspace = MCPBuiltInTool.finishWorkspace.rawValue
+  static let adoptSession = MCPBuiltInTool.adoptSession.rawValue
+  static let releaseSession = MCPBuiltInTool.releaseSession.rawValue
+  static let subscribeToChildren = MCPBuiltInTool.subscribeToChildren.rawValue
 
   static let listReclaimableStorage = MCPBuiltInTool.listReclaimableStorage.rawValue
   static let proposeStorageCleanup = MCPBuiltInTool.proposeStorageCleanup.rawValue
@@ -2211,6 +2347,7 @@ enum MCPTools {
   static let projectTools = names(in: .project)
   static let sessionTools = names(in: .session)
   static let workspaceTools = names(in: .workspace)
+  static let supervisionTools = names(in: .supervision)
   static let storageTools = names(in: .storage)
   static let notificationTools = names(in: .notifications)
   static let themeTools = [
@@ -5139,7 +5276,7 @@ enum MCPTools {
       symbol: "archivebox",
       decodeArguments: { container in
         try container.decodeIfPresent(ArchiveSessionArguments.self, forKey: .arguments)
-          ?? ArchiveSessionArguments(reason: nil)
+          ?? ArchiveSessionArguments(reason: nil, sessionID: nil)
       },
       observesPanel: false,
       executeArguments: { handler, arguments, sessionID, completion in
@@ -5179,6 +5316,10 @@ enum MCPTools {
               receipt — for example "committed and pushed the parser fix". One \
               fragment, not a summary of the session.
               """
+          ),
+          "session_id": MCPPropertySchema(
+            type: .string,
+            description: "Manager-only target id. Omit to archive this session."
           )
         ],
         required: []
@@ -5199,12 +5340,12 @@ enum MCPTools {
       detail: "Take back an archive the session asked for, before it happens.",
       symbol: "arrow.uturn.backward",
       decodeArguments: { container in
-        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
-          ?? EmptyToolArguments()
+        try container.decodeIfPresent(CancelSessionArchiveArguments.self, forKey: .arguments)
+          ?? CancelSessionArchiveArguments()
       },
       observesPanel: false,
-      executeArguments: { handler, _, sessionID, completion in
-        completion(handler.cancelSessionArchive(for: sessionID))
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.cancelSessionArchive(arguments, for: sessionID))
       },
       description: """
         Take back an archive this session asked for, while it is still pending. Use it when \
@@ -5212,7 +5353,12 @@ enum MCPTools {
         reports whether there was anything to cancel, and never un-archives a session that \
         has already gone — the user's own Undo on the receipt does that.
         """,
-      inputSchema: MCPInputSchema(properties: [:], required: [])
+      inputSchema: MCPInputSchema(properties: [
+        "session_id": MCPPropertySchema(
+          type: .string,
+          description: "Manager-only target id. Omit to cancel this session's archive."
+        )
+      ], required: [])
     ),
     MCPToolDefinition(
       tool: .setSessionName,
@@ -5230,7 +5376,7 @@ enum MCPTools {
       symbol: "character.cursor.ibeam",
       decodeArguments: { container in
         try container.decodeIfPresent(SetSessionNameArguments.self, forKey: .arguments)
-          ?? SetSessionNameArguments(name: nil)
+          ?? SetSessionNameArguments(name: nil, sessionID: nil)
       },
       observesPanel: false,
       executeArguments: { handler, arguments, sessionID, completion in
@@ -5262,6 +5408,10 @@ enum MCPTools {
               The new name for this session — two to five words describing the \
               conversation, not the agent, account or project.
               """
+          ),
+          "session_id": MCPPropertySchema(
+            type: .string,
+            description: "Manager-only target id. Omit to name this session."
           )
         ],
         required: ["name"]
@@ -5421,6 +5571,279 @@ enum MCPTools {
         ],
         required: ["session_id"]
       )
+    ),
+    MCPToolDefinition(
+      tool: .listAccounts,
+      name: "list_accounts",
+      groupID: "supervision",
+      family: .supervision,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false
+      ),
+      title: "List accounts",
+      detail: "Read enabled logins, usage windows, own-limit holds, and best-account ranking.",
+      symbol: "person.crop.circle.badge.checkmark",
+      decodeArguments: { container in
+        try container.decodeIfPresent(ListAccountsArguments.self, forKey: .arguments)
+          ?? ListAccountsArguments(model: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.listAccounts(arguments, for: sessionID))
+      },
+      description: """
+        List enabled logins for this manager's provider with current metering windows and any \
+        user-authored limit holding the account. Unknown readings remain unknown. When model is \
+        supplied, the result also states the same best-account ranking Threading uses.
+        """,
+      inputSchema: MCPInputSchema(properties: [
+        "model": MCPPropertySchema(
+          type: .string, description: "Optional model identifier used to rank eligible accounts."
+        )
+      ], required: [])
+    ),
+    MCPToolDefinition(
+      tool: .sessionCost,
+      name: "session_cost",
+      groupID: "supervision",
+      family: .supervision,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false
+      ),
+      title: "Read session cost",
+      detail: "Read priced and unpriced transcript usage for one chat or this project.",
+      symbol: "chart.bar.doc.horizontal",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SessionCostArguments.self, forKey: .arguments)
+          ?? SessionCostArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.sessionCost(arguments, for: sessionID))
+      },
+      description: """
+        Read the transcript ledger's token and priced-cost answer. Pass session_id for one chat; \
+        pass project=true for every visible session in this manager's project. Omit both for the \
+        manager itself. Unpriced usage is named rather than silently treated as free.
+        """,
+      inputSchema: MCPInputSchema(properties: [
+        "session_id": MCPPropertySchema(type: .string, description: "Optional Threading session id."),
+        "project": MCPPropertySchema(type: .boolean, description: "Aggregate this project when true.")
+      ], required: [])
+    ),
+    MCPToolDefinition(
+      tool: .resumeSession,
+      name: "resume_session",
+      groupID: "supervision",
+      family: .supervision,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true
+      ),
+      title: "Resume session",
+      detail: "Wake a dormant native chat in the background and optionally deliver a brief.",
+      symbol: "play.circle",
+      decodeArguments: { container in
+        try container.decodeIfPresent(ResumeSessionArguments.self, forKey: .arguments)
+          ?? ResumeSessionArguments(sessionID: nil, brief: nil, account: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.resumeSession(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Resume a dormant native chat without selecting it. Dormant terminal surfaces are refused. \
+        account may be an enabled login or best; a brief is delivered after launch with manager \
+        provenance and its delivery outcome reported separately.
+        """,
+      inputSchema: MCPInputSchema(properties: [
+        "session_id": MCPPropertySchema(type: .string, description: "Dormant child session id."),
+        "brief": MCPPropertySchema(type: .string, description: "Optional opening brief."),
+        "account": MCPPropertySchema(type: .string, description: "Optional login id or best.")
+      ], required: ["session_id"])
+    ),
+    MCPToolDefinition(
+      tool: .spawnSession,
+      name: "spawn_session",
+      groupID: "supervision",
+      family: .supervision,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true
+      ),
+      title: "Spawn session",
+      detail: "Start a supervised child from the same frozen plan the composer schedules.",
+      symbol: "plus.bubble",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SpawnSessionArguments.self, forKey: .arguments)
+          ?? SpawnSessionArguments(plan: nil, brief: nil, asSideChatOf: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.spawnSession(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Start one supervised child in this project. plan mirrors the project composer and is \
+        capped by the manager grant. account defaults to the manager's login and may be best. \
+        Managed workspaces resolve their checkout at launch. as_side_chat_of creates a fork.
+        """,
+      inputSchema: MCPInputSchema(properties: [
+        "plan": MCPPropertySchema(
+          type: .object,
+          description: "Frozen launch choices.",
+          properties: [
+            "kind": MCPPropertySchema(type: .string, description: "Agent kind; defaults to the manager's."),
+            "account": MCPPropertySchema(type: .string, description: "Login id, best, or omit for the manager's."),
+            "model": MCPPropertySchema(type: .string, description: "Optional model identifier."),
+            "reasoning_effort": MCPPropertySchema(type: .string, description: "Optional reasoning effort."),
+            "fast_mode": MCPPropertySchema(type: .boolean, description: "Optional fast-mode choice."),
+            "branch": MCPPropertySchema(type: .string, description: "Optional existing checkout branch."),
+            "uses_native_ui": MCPPropertySchema(type: .boolean, description: "Use Threading's native chat surface."),
+            "permission_mode": MCPPropertySchema(type: .string, description: "Permission mode capped by the grant."),
+            "managed_workspace_plan": MCPPropertySchema(
+              type: .object,
+              description: "Optional isolated workspace delivery.",
+              properties: [
+                "delivery": MCPPropertySchema(type: .string, description: "keepForReview or mergeAndCleanUp."),
+                "publication": MCPPropertySchema(type: .string, description: "Optional draft or ready change request.")
+              ],
+              required: ["delivery"]
+            )
+          ],
+          required: []
+        ),
+        "brief": MCPPropertySchema(type: .string, description: "The child's opening brief."),
+        "as_side_chat_of": MCPPropertySchema(type: .string, description: "Optional parent session id.")
+      ], required: ["plan", "brief"])
+    ),
+    MCPToolDefinition(
+      tool: .moveSessionToAccount,
+      name: "move_session_to_account",
+      groupID: "supervision",
+      family: .supervision,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false
+      ),
+      title: "Move session to account",
+      detail: "Move an idle child after a fresh usage check and within its hop budget.",
+      symbol: "person.crop.circle.badge.arrow.forward",
+      decodeArguments: { container in
+        try container.decodeIfPresent(MoveSessionToAccountArguments.self, forKey: .arguments)
+          ?? MoveSessionToAccountArguments(sessionID: nil, accountID: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.moveSessionToAccount(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Move an idle supervised child to an enabled same-provider login. The target reading is \
+        force-refreshed first; stale or held accounts are refused and no fallback account is used. \
+        A per-child daily hop budget prevents account loops. account_id may be best.
+        """,
+      inputSchema: MCPInputSchema(properties: [
+        "session_id": MCPPropertySchema(type: .string, description: "Child session id."),
+        "account_id": MCPPropertySchema(type: .string, description: "Enabled login id or best.")
+      ], required: ["session_id", "account_id"])
+    ),
+    MCPToolDefinition(
+      tool: .finishWorkspace,
+      name: "finish_workspace",
+      groupID: "supervision",
+      family: .supervision,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true
+      ),
+      title: "Finish managed workspace",
+      detail: "Run an idle child's configured finish handshake.",
+      symbol: "checkmark.seal",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SessionReferenceArguments.self, forKey: .arguments)
+          ?? SessionReferenceArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.finishWorkspace(arguments, for: sessionID))
+      },
+      description: "Run the child's existing managed-workspace finish plan. Busy or conflicted children are refused.",
+      inputSchema: MCPInputSchema(properties: [
+        "session_id": MCPPropertySchema(type: .string, description: "Child session id.")
+      ], required: ["session_id"])
+    ),
+    MCPToolDefinition(
+      tool: .adoptSession,
+      name: "adopt_session",
+      groupID: "supervision",
+      family: .supervision,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false
+      ),
+      title: "Adopt session",
+      detail: "Create durable supervision for an existing project chat.",
+      symbol: "person.badge.plus",
+      decodeArguments: { container in
+        try container.decodeIfPresent(AdoptSessionArguments.self, forKey: .arguments)
+          ?? AdoptSessionArguments(sessionID: nil, brief: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.adoptSession(arguments, for: sessionID))
+      },
+      description: "Adopt an existing in-scope chat as a child, with a durable bounded brief.",
+      inputSchema: MCPInputSchema(properties: [
+        "session_id": MCPPropertySchema(type: .string, description: "Session id to adopt."),
+        "brief": MCPPropertySchema(type: .string, description: "What this child owns and when it is done.")
+      ], required: ["session_id", "brief"])
+    ),
+    MCPToolDefinition(
+      tool: .releaseSession,
+      name: "release_session",
+      groupID: "supervision",
+      family: .supervision,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false
+      ),
+      title: "Release session",
+      detail: "End supervision while leaving the chat and its work intact.",
+      symbol: "person.badge.minus",
+      decodeArguments: { container in
+        try container.decodeIfPresent(ReleaseSessionArguments.self, forKey: .arguments)
+          ?? ReleaseSessionArguments(sessionID: nil, outcome: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.releaseSession(arguments, for: sessionID))
+      },
+      description: "Release one child from supervision. The chat remains and the outcome is retained in the ledger.",
+      inputSchema: MCPInputSchema(properties: [
+        "session_id": MCPPropertySchema(type: .string, description: "Child session id."),
+        "outcome": MCPPropertySchema(type: .string, description: "Optional short result retained with supervision.")
+      ], required: ["session_id"])
+    ),
+    MCPToolDefinition(
+      tool: .subscribeToChildren,
+      name: "subscribe_to_children",
+      groupID: "supervision",
+      family: .supervision,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true
+      ),
+      title: "Subscribe to children",
+      detail: "Receive bounded Threading-framed notices when supervised chats change state.",
+      symbol: "bell.badge",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SubscribeToChildrenArguments.self, forKey: .arguments)
+          ?? SubscribeToChildrenArguments(sessionID: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.subscribeToChildren(arguments, for: sessionID))
+      },
+      description: """
+        Subscribe to every active child, or one child by session_id. State edges arrive as \
+        Threading-framed notices and spend this manager's own next turn. Notices are bounded and \
+        an undeliverable notice is recorded rather than assumed delivered.
+        """,
+      inputSchema: MCPInputSchema(properties: [
+        "session_id": MCPPropertySchema(type: .string, description: "Optional child id; omit for every active child.")
+      ], required: [])
     ),
     MCPToolDefinition(
       tool: .panelActivateTab,

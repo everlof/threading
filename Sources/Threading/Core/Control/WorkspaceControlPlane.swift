@@ -44,9 +44,36 @@ final class WorkspaceControlPlane {
         /// admission rules stay a pure function of what it was handed, which is what lets the
         /// refusal matrix be a table test rather than a fixture with a preferences suite in it.
         var heldByOwnLimit: (SessionID) -> String? = { _ in nil }
+
+        /// Stored grants only. The plane adds the implicit regular-session grants itself so an
+        /// absent or unreadable store reproduces slice one's behavior exactly and never grants
+        /// more authority by failing open.
+        var grants: (ControlActor) -> [ControlGrant] = { _ in [] }
+        var allProjects: () -> [Project] = { [] }
+        var supervisionOverview: (SessionID) -> ControlSupervisionOverview = { _ in
+            ControlSupervisionOverview(managedBy: nil, children: [], brief: nil, lastEvent: nil)
+        }
+        var adopt: (SessionID, SessionID, String) -> ControlSupervisionMutationOutcome = {
+            _, _, _ in .refused(.deliveryFailed)
+        }
+        var release: (SessionID, SessionID, String?) -> ControlSupervisionMutationOutcome = {
+            _, _, _ in .refused(.deliveryFailed)
+        }
+        var requestArchive: (SessionID, String?) -> SessionArchiveRequestOutcome = {
+            _, _ in .refused("Archiving is unavailable.")
+        }
+        var requestManagerArchive: (SessionID, String?, SessionID) -> SessionArchiveRequestOutcome = {
+            _, _, _ in .refused("Archiving is unavailable.")
+        }
+        var cancelArchive: (SessionID) -> SessionArchiveCancellation = { _ in .nothingPending }
+        var rename: (SessionID, String) -> AgentTitleMutationResult = { _, _ in .persistenceRefused }
+        /// Returns the user's own sentence when a grant ceiling currently bars new spend.
+        var ceilingRefusal: (SpendCeiling, AgentSession) -> String? = { _, _ in nil }
+        var accountMoveCount: (SessionID, SessionID, Date) -> Int = { _, _, _ in 0 }
     }
 
     private let dependencies: Dependencies
+    private var recentSends: [SessionID: [Date]] = [:]
 
     init(dependencies: Dependencies) {
         self.dependencies = dependencies
@@ -75,6 +102,42 @@ final class WorkspaceControlPlane {
                 )
                 guard hold.isHolding else { return nil }
                 return CustomLimitReceipt.holdReason(hold)
+            },
+            grants: {
+                // The Tools switch is a true global master: grants remain durable and visible,
+                // but the plane ignores them on every admission while Supervision is off.
+                guard MCPToolCatalog.isEnabled(MCPToolCatalog.supervision) else { return [] }
+                return ControlGrantStore.shared.storedGrants(for: $0)
+            },
+            allProjects: { ProjectStore.shared.projects },
+            supervisionOverview: { ControlGrantStore.shared.overview(for: $0) },
+            adopt: { childID, managerID, brief in
+                ControlGrantStore.shared.adopt(childID: childID, by: managerID, brief: brief)
+            },
+            release: { childID, managerID, outcome in
+                ControlGrantStore.shared.release(
+                    childID: childID,
+                    by: managerID,
+                    outcome: outcome
+                )
+            },
+            requestArchive: { SessionArchiveScheduler.shared.request(sessionID: $0, reason: $1) },
+            requestManagerArchive: {
+                SessionArchiveScheduler.shared.request(
+                    sessionID: $0,
+                    reason: $1,
+                    requestedByManagerID: $2
+                )
+            },
+            cancelArchive: { SessionArchiveScheduler.shared.cancel(sessionID: $0) },
+            rename: { ProjectStore.shared.updateAgentTitle($1, for: $0, source: .chosen) },
+            ceilingRefusal: { ceiling, session in
+                ControlSpendCeiling.currentRefusal(ceiling: ceiling, session: session)
+            },
+            accountMoveCount: { managerID, childID, since in
+                guard let supervision = ControlGrantStore.shared.activeManager(of: childID),
+                      supervision.managerID == managerID else { return 0 }
+                return ControlGrantStore.shared.moveCount(for: supervision, since: since)
             }
         )
     )
@@ -90,6 +153,47 @@ final class WorkspaceControlPlane {
         }
     }
 
+    /// The one authorization boundary for every control-plane operation.
+    ///
+    /// Membership is resolved before operation authority. A target outside every scope is
+    /// therefore always `.targetUnknown`, even when the actor lacks the requested operation —
+    /// the caller cannot use a denied operation to probe another project.
+    func authorize(
+        _ actor: ControlActor,
+        operation: ControlOperation,
+        target targetID: SessionID? = nil
+    ) -> ControlRefusal? {
+        guard case .agentSession(let callerID) = actor,
+              let caller = dependencies.session(callerID),
+              !caller.isArchived,
+              let callerProject = dependencies.projectForSession(callerID) else {
+            return .callerUnknown
+        }
+
+        let authority = effectiveAuthority(
+            for: actor,
+            callerID: callerID,
+            callerProjectID: callerProject.id
+        )
+        if let targetID {
+            guard let target = dependencies.session(targetID),
+                  authority.contains(where: {
+                      scope($0.scope, contains: target, sessionID: targetID)
+                  }) else {
+                return .targetUnknown
+            }
+            guard authority.contains(where: {
+                $0.operations.contains(operation)
+                    && scope($0.scope, contains: target, sessionID: targetID)
+            }) else {
+                return .notPermitted(operation)
+            }
+        } else if !authority.contains(where: { $0.operations.contains(operation) }) {
+            return .notPermitted(operation)
+        }
+        return nil
+    }
+
     // MARK: - Listing
 
     /// The sessions an actor may know about: every unarchived session in its scope, the
@@ -102,8 +206,22 @@ final class WorkspaceControlPlane {
             return .failure(.callerUnknown)
         }
 
-        let rows = project.sessions
-            .filter { !$0.isArchived }
+        if let refusal = authorize(actor, operation: .listSessions) {
+            return .failure(refusal)
+        }
+
+        let authority = effectiveAuthority(
+            for: actor,
+            callerID: callerID,
+            callerProjectID: project.id
+        ).filter { $0.operations.contains(.listSessions) }
+        let projects = dependencies.allProjects()
+        let rows = (projects.isEmpty ? [project] : projects).flatMap(\.sessions)
+            .filter { session in
+                !session.isArchived && authority.contains {
+                    scope($0.scope, contains: session, sessionID: session.id)
+                }
+            }
             .map { overview(of: $0, caller: callerID) }
         return .success(rows)
     }
@@ -126,21 +244,34 @@ final class WorkspaceControlPlane {
         guard case .agentSession(let callerID) = actor,
               let caller = dependencies.session(callerID),
               !caller.isArchived,
-              let callerProject = dependencies.projectForSession(callerID) else {
+              dependencies.projectForSession(callerID) != nil else {
             return completion(.refused(.callerUnknown))
+        }
+
+        let operation: ControlOperation = disposition == .steer ? .steer : .sendMessage
+        if let refusal = authorize(actor, operation: operation, target: targetID) {
+            return completion(.refused(refusal))
         }
 
         let trimmed = Self.sanitized(message).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return completion(.refused(.messageEmpty)) }
 
+        guard !trimmed.hasPrefix("[Cross-session message ") else {
+            return completion(.refused(.messageIsRelay))
+        }
+
         guard targetID != callerID else { return completion(.refused(.targetIsCaller)) }
 
-        // Membership is asked of the caller's own project, not of the target's record: a
-        // session outside the scope answers exactly as one that does not exist.
-        guard let target = callerProject.sessions.first(where: { $0.id == targetID }) else {
+        guard let target = dependencies.session(targetID) else {
             return completion(.refused(.targetUnknown))
         }
         guard !target.isArchived else { return completion(.refused(.targetArchived)) }
+
+        guard admitSend(from: callerID) else {
+            return completion(.refused(.sendRateReached(
+                limit: SupervisionDefaults.maximumSendsPerMinute
+            )))
+        }
 
         // A message from one agent to another is Threading-initiated spend on the target's
         // account, which is exactly what a tier-3 rule stands down. Refused in the plane's own
@@ -207,13 +338,17 @@ final class WorkspaceControlPlane {
         guard case .agentSession(let callerID) = actor,
               let caller = dependencies.session(callerID),
               !caller.isArchived,
-              let callerProject = dependencies.projectForSession(callerID) else {
+              dependencies.projectForSession(callerID) != nil else {
             return .refused(.callerUnknown)
+        }
+
+        if let refusal = authorize(actor, operation: .watch, target: targetID) {
+            return .refused(refusal)
         }
 
         guard targetID != callerID else { return .refused(.targetIsCaller) }
 
-        guard let target = callerProject.sessions.first(where: { $0.id == targetID }) else {
+        guard let target = dependencies.session(targetID) else {
             return .refused(.targetUnknown)
         }
         guard !target.isArchived else { return .refused(.targetArchived) }
@@ -231,6 +366,198 @@ final class WorkspaceControlPlane {
         case .invalidTimeout:
             return .refused(.invalidWatchTimeout)
         }
+    }
+
+    // MARK: - Targeted Lifecycle
+
+    func archive(
+        _ targetID: SessionID,
+        reason: String?,
+        from actor: ControlActor
+    ) -> ControlArchiveOutcome {
+        guard case .agentSession(let callerID) = actor else { return .refused(.callerUnknown) }
+        if let refusal = authorize(actor, operation: .archiveSession, target: targetID) {
+            return .refused(refusal)
+        }
+        guard let target = dependencies.session(targetID), !target.isArchived else {
+            return .refused(targetID == callerID ? .callerUnknown : .targetArchived)
+        }
+        if targetID != callerID, dependencies.activity(targetID).hasTurnInFlight {
+            return .refused(.targetBusy)
+        }
+        let row = overview(of: target, caller: callerID)
+        let request = targetID == callerID
+            ? dependencies.requestArchive(targetID, reason)
+            : dependencies.requestManagerArchive(targetID, reason, callerID)
+        switch request {
+        case .scheduled: return .scheduled(row)
+        case .alreadyPending: return .alreadyPending(row)
+        case .refused: return .refused(.deliveryFailed)
+        }
+    }
+
+    func cancelArchive(
+        _ targetID: SessionID,
+        from actor: ControlActor
+    ) -> ControlArchiveOutcome {
+        guard case .agentSession(let callerID) = actor else { return .refused(.callerUnknown) }
+        if let refusal = authorize(actor, operation: .archiveSession, target: targetID) {
+            return .refused(refusal)
+        }
+        guard let target = dependencies.session(targetID) else { return .refused(.targetUnknown) }
+        let row = overview(of: target, caller: callerID)
+        switch dependencies.cancelArchive(targetID) {
+        case .cancelled: return .cancelled(row)
+        case .nothingPending: return .nothingPending(row)
+        }
+    }
+
+    func rename(
+        _ targetID: SessionID,
+        to name: String,
+        from actor: ControlActor
+    ) -> ControlRenameOutcome {
+        guard case .agentSession(let callerID) = actor else { return .refused(.callerUnknown) }
+        if let refusal = authorize(actor, operation: .renameSession, target: targetID) {
+            return .refused(refusal)
+        }
+        guard dependencies.session(targetID) != nil else { return .refused(.targetUnknown) }
+        switch dependencies.rename(targetID, name) {
+        case .accepted:
+            guard let updated = dependencies.session(targetID) else {
+                return .refused(.targetUnknown)
+            }
+            let row = overview(of: updated, caller: callerID)
+            if let userTitle = updated.customTitle, !userTitle.isEmpty {
+                return .protectedByUserTitle(row, visibleTitle: userTitle)
+            }
+            return .renamed(row, visibleTitle: updated.displayTitle)
+        case .protectedByStrongerSource:
+            guard let updated = dependencies.session(targetID) else {
+                return .refused(.targetUnknown)
+            }
+            return .protectedByUserTitle(
+                overview(of: updated, caller: callerID),
+                visibleTitle: updated.displayTitle
+            )
+        case .sessionNotFound: return .refused(.targetUnknown)
+        case .persistenceRefused: return .refused(.deliveryFailed)
+        case .refusedAsNoise, .cleared: return .refused(.messageEmpty)
+        }
+    }
+
+    // MARK: - Supervision
+
+    func admitResume(
+        _ targetID: SessionID,
+        from actor: ControlActor
+    ) -> ControlRefusal? {
+        if let refusal = authorize(actor, operation: .resumeSession, target: targetID) {
+            return refusal
+        }
+        guard let target = dependencies.session(targetID), !target.isArchived else {
+            return .targetUnknown
+        }
+        guard !dependencies.activity(targetID).hasTurnInFlight else { return .targetBusy }
+        guard target.usesNativeUI else { return .terminalCannotBeWoken }
+        if let held = dependencies.heldByOwnLimit(targetID) {
+            return .targetHeldByOwnLimit(reason: held)
+        }
+        return ceilingRefusal(for: actor, operation: .resumeSession, target: target)
+    }
+
+    func admitSpawn(
+        _ plan: ScheduledSessionPlan,
+        from actor: ControlActor
+    ) -> ControlRefusal? {
+        if let refusal = authorize(actor, operation: .spawnSession) { return refusal }
+        guard case .agentSession(let managerID) = actor,
+              let manager = dependencies.session(managerID),
+              let managerProject = dependencies.projectForSession(managerID),
+              plan.projectID == managerProject.id else { return .callerUnknown }
+        guard dependencies.supervisionOverview(managerID).children.count
+                < SupervisionDefaults.maximumLiveChildren else {
+            return .childrenAtCapacity(limit: SupervisionDefaults.maximumLiveChildren)
+        }
+        guard let grant = storedGrant(for: actor, operation: .spawnSession) else {
+            return .notPermitted(.spawnSession)
+        }
+        if let requested = plan.permissionMode,
+           permissionRank(requested) > permissionRank(grant.maximumPermissionMode) {
+            return .planExceedsGrant(field: "permission_mode")
+        }
+        if let delivery = plan.managedWorkspacePlan?.delivery,
+           !grant.allowedDeliveries.contains(delivery) {
+            return .planExceedsGrant(field: "managed_workspace_plan.delivery")
+        }
+        if let held = dependencies.heldByOwnLimit(managerID) {
+            return .targetHeldByOwnLimit(reason: held)
+        }
+        return grant.ceiling.flatMap { dependencies.ceilingRefusal($0, manager) }
+            .map(ControlRefusal.ceilingReached(reason:))
+    }
+
+    func admitMove(
+        _ targetID: SessionID,
+        from actor: ControlActor,
+        at now: Date = Date()
+    ) -> ControlRefusal? {
+        if let refusal = authorize(actor, operation: .moveSessionToAccount, target: targetID) {
+            return refusal
+        }
+        guard case .agentSession(let managerID) = actor,
+              dependencies.session(targetID) != nil else { return .callerUnknown }
+        guard !dependencies.activity(targetID).hasTurnInFlight else { return .targetBusy }
+        let since = Calendar(identifier: .gregorian).date(byAdding: .day, value: -1, to: now)
+            ?? now.addingTimeInterval(-86_400)
+        guard dependencies.accountMoveCount(managerID, targetID, since)
+                < SupervisionDefaults.maximumAccountMovesPerDay else {
+            return .accountMoveBudgetReached(limit: SupervisionDefaults.maximumAccountMovesPerDay)
+        }
+        return nil
+    }
+
+    func admitFinish(
+        _ targetID: SessionID,
+        from actor: ControlActor
+    ) -> ControlRefusal? {
+        if let refusal = authorize(actor, operation: .finishWorkspace, target: targetID) {
+            return refusal
+        }
+        guard let target = dependencies.session(targetID),
+              let workspace = target.managedWorkspace else { return .workspaceUnavailable }
+        guard !dependencies.activity(targetID).hasTurnInFlight else { return .targetBusy }
+        guard workspace.state != .needsAttention else { return .workspaceUnavailable }
+        guard let grant = storedGrant(for: actor, operation: .finishWorkspace),
+              grant.allowedDeliveries.contains(workspace.delivery) else {
+            return .planExceedsGrant(field: "managed_workspace.delivery")
+        }
+        return nil
+    }
+
+    func adopt(
+        _ childID: SessionID,
+        brief: String,
+        from actor: ControlActor
+    ) -> ControlSupervisionMutationOutcome {
+        guard case .agentSession(let managerID) = actor else { return .refused(.callerUnknown) }
+        if let refusal = authorize(actor, operation: .adoptSession, target: childID) {
+            return .refused(refusal)
+        }
+        guard childID != managerID else { return .refused(.targetIsCaller) }
+        return dependencies.adopt(childID, managerID, brief)
+    }
+
+    func release(
+        _ childID: SessionID,
+        outcome: String?,
+        from actor: ControlActor
+    ) -> ControlSupervisionMutationOutcome {
+        guard case .agentSession(let managerID) = actor else { return .refused(.callerUnknown) }
+        if let refusal = authorize(actor, operation: .releaseSession, target: childID) {
+            return .refused(refusal)
+        }
+        return dependencies.release(childID, managerID, outcome)
     }
 
     // MARK: - Provenance
@@ -306,7 +633,82 @@ final class WorkspaceControlPlane {
             activity: dependencies.activity(session.id),
             surface: dependencies.surface(session.id),
             isCaller: session.id == caller,
-            forkedFrom: session.forkedFrom
+            forkedFrom: session.forkedFrom,
+            supervision: dependencies.supervisionOverview(session.id)
         )
+    }
+
+    private struct EffectiveGrant {
+        let scope: ControlScope
+        let operations: Set<ControlOperation>
+    }
+
+    private func effectiveAuthority(
+        for actor: ControlActor,
+        callerID: SessionID,
+        callerProjectID: ProjectID
+    ) -> [EffectiveGrant] {
+        var result = [
+            EffectiveGrant(
+                scope: .project(callerProjectID),
+                operations: ControlOperation.regularProjectOperations
+            ),
+            EffectiveGrant(
+                scope: .sessions([callerID]),
+                operations: ControlOperation.regularSelfOperations
+            ),
+        ]
+        result.append(contentsOf: dependencies.grants(actor).filter(\.isActive).map {
+            EffectiveGrant(scope: $0.scope, operations: $0.operations)
+        })
+        return result
+    }
+
+    private func storedGrant(
+        for actor: ControlActor,
+        operation: ControlOperation
+    ) -> ControlGrant? {
+        dependencies.grants(actor).first { $0.isActive && $0.operations.contains(operation) }
+    }
+
+    private func ceilingRefusal(
+        for actor: ControlActor,
+        operation: ControlOperation,
+        target: AgentSession
+    ) -> ControlRefusal? {
+        guard let ceiling = storedGrant(for: actor, operation: operation)?.ceiling,
+              let reason = dependencies.ceilingRefusal(ceiling, target) else { return nil }
+        return .ceilingReached(reason: reason)
+    }
+
+    private func permissionRank(_ mode: AgentPermissionMode) -> Int {
+        AgentPermissionMode.allCases.firstIndex(of: mode) ?? .max
+    }
+
+    private func scope(
+        _ scope: ControlScope,
+        contains session: AgentSession,
+        sessionID: SessionID
+    ) -> Bool {
+        switch scope {
+        case .sessions(let ids):
+            return ids.contains(sessionID)
+        case .project(let projectID):
+            return dependencies.projectForSession(sessionID)?.id == projectID
+        case .projects(let projectIDs):
+            guard let projectID = dependencies.projectForSession(sessionID)?.id else { return false }
+            return projectIDs.contains(projectID)
+        }
+    }
+
+    private func admitSend(from callerID: SessionID) -> Bool {
+        let cutoff = Date().addingTimeInterval(-60)
+        let retained = (recentSends[callerID] ?? []).filter { $0 >= cutoff }
+        guard retained.count < SupervisionDefaults.maximumSendsPerMinute else {
+            recentSends[callerID] = retained
+            return false
+        }
+        recentSends[callerID] = retained + [Date()]
+        return true
     }
 }

@@ -112,6 +112,9 @@ enum AppCommands {
     /// silently never picks up its override.
     enum ID {
         static let newSession = "session.new"
+        static let newManager = "session.newManager"
+        static let makeManager = "session.makeManager"
+        static let revokeManager = "session.revokeManager"
         static let newProject = "project.new"
         static let addProject = "project.add"
         static let closeSession = "session.close"
@@ -171,6 +174,18 @@ enum AppCommands {
         AppCommand(id: ID.newSession, group: .session, title: "New Session",
                    defaultShortcut: KeyboardShortcut(key: "n", modifiers: .command), isEditable: true,
                    scope: .project),
+        AppCommand(id: ID.newManager, group: .session, title: "New Manager…",
+                   detail: "Opens this project's composer with the Manager role selected.",
+                   defaultShortcut: nil, isEditable: true, scope: .project,
+                   risk: .ordinary, iconName: "person.3"),
+        AppCommand(id: ID.makeManager, group: .session, title: "Make Manager",
+                   detail: "Grants the selected chat authority to coordinate this project.",
+                   defaultShortcut: nil, isEditable: true, scope: .session,
+                   risk: .destructive, iconName: "person.3"),
+        AppCommand(id: ID.revokeManager, group: .session, title: "Revoke Manager Role",
+                   detail: "Immediately removes the selected manager's extra authority.",
+                   defaultShortcut: nil, isEditable: true, scope: .session,
+                   risk: .destructive, iconName: "person.3.sequence.fill"),
         AppCommand(id: ID.newProject, group: .session, title: "New Project…",
                    defaultShortcut: nil, isEditable: true),
         AppCommand(id: ID.addProject, group: .session, title: "Add Existing Project…",

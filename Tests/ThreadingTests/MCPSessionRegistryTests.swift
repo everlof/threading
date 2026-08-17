@@ -104,6 +104,27 @@ final class MCPSessionRegistryTests: XCTestCase {
     XCTAssertEqual(parsed.header("Accept"), "text/event-stream")
   }
 
+  func testEventStreamHandshakeAndGrantNotificationAreValidSSE() throws {
+    let serialized = String(
+      decoding: HTTPResponse.eventStream.serialized,
+      as: UTF8.self
+    )
+    XCTAssertTrue(serialized.contains("Content-Type: text/event-stream\r\n"))
+    XCTAssertTrue(serialized.contains("Cache-Control: no-cache\r\n"))
+    XCTAssertFalse(serialized.contains("Content-Length:"))
+
+    let event = String(decoding: MCPServer.toolsListChangedEvent, as: UTF8.self)
+    XCTAssertTrue(event.hasPrefix("event: message\n"))
+    let dataLine = try XCTUnwrap(event.split(separator: "\n").first {
+      $0.hasPrefix("data: ")
+    })
+    let json = Data(dataLine.dropFirst("data: ".count).utf8)
+    let object = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: String])
+    XCTAssertEqual(object["jsonrpc"], "2.0")
+    XCTAssertEqual(object["method"], "notifications/tools/list_changed")
+    XCTAssertTrue(event.hasSuffix("\n\n"), "an SSE event ends with one empty line")
+  }
+
   func testConcurrentMintAndLookupPreservesBidirectionalMapping() {
     let sessionIDs = (0..<128).map { _ in SessionID() }
     let resultLock = NSLock()
@@ -223,6 +244,38 @@ final class MCPSessionRegistryTests: XCTestCase {
       instructions.contains("display panel"),
       "a scoped helper was told about a session surface it cannot reach"
     )
+  }
+
+  @MainActor
+  func testDurableAuthorityProjectsExactlyIntoListingAdmissionAndInstructions() throws {
+    let wasEnabled = AppSettings.shared.isToolGroupEnabled(MCPToolCatalog.supervision.id)
+    AppSettings.shared.setToolGroup(MCPToolCatalog.supervision.id, enabled: true)
+    defer {
+      AppSettings.shared.setToolGroup(MCPToolCatalog.supervision.id, enabled: wasEnabled)
+    }
+
+    let regular = ControlOperation.regularProjectOperations
+      .union(ControlOperation.regularSelfOperations)
+    let regularNames = Set(MCPToolCatalog.definitions(forOperations: regular).map(\.name))
+    XCTAssertTrue(regularNames.isDisjoint(with: MCPTools.supervisionTools))
+    XCTAssertFalse(MCPToolCatalog.instructions(forOperations: regular).contains("You are a manager"))
+
+    let managerNames = Set(
+      MCPToolCatalog.definitions(forOperations: ControlOperation.managerOperations).map(\.name)
+    )
+    XCTAssertEqual(managerNames.intersection(MCPTools.supervisionTools), Set(MCPTools.supervisionTools))
+    XCTAssertTrue(
+      MCPToolCatalog.instructions(forOperations: ControlOperation.managerOperations)
+        .contains("You are a manager")
+    )
+
+    let id = UUID().uuidString.lowercased()
+    let call = try JSONDecoder().decode(
+      MCPToolCallParameters.self,
+      from: Data(#"{"name":"resume_session","arguments":{"session_id":"\#(id)"}}"#.utf8)
+    ).call
+    XCTAssertFalse(MCPToolCatalog.admits(call, forOperations: regular))
+    XCTAssertTrue(MCPToolCatalog.admits(call, forOperations: ControlOperation.managerOperations))
   }
 }
 

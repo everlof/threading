@@ -162,6 +162,75 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertFalse(try database.isEmpty())
     }
 
+    func testAuthorityAndSupervisionRoundTripAndCascadeWithSessions() throws {
+        let database = try makeDatabase()
+        let manager = AgentSession(kind: .claude, title: "Manager")
+        let child = AgentSession(kind: .codex, title: "Child")
+        let project = makeProject("alpha", sessions: [manager, child])
+        try database.save(ProjectsState(projects: [project]))
+
+        let grant = ControlGrant.manager(
+            sessionID: manager.id,
+            projectID: project.id,
+            maximumPermissionMode: .manual,
+            origin: .newManagerTemplate,
+            at: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let supervision = Supervision(
+            managerID: manager.id,
+            childID: child.id,
+            brief: "Run the focused tests",
+            assignedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        let event = SupervisionEvent(
+            supervisionID: supervision.id,
+            at: Date(timeIntervalSince1970: 1_700_000_200),
+            kind: .settled,
+            detail: "idle"
+        )
+        try database.saveControlGrant(grant)
+        try database.saveSupervision(supervision)
+        try database.saveSupervisionEvent(event)
+
+        XCTAssertEqual(try database.controlGrants(for: manager.id), [grant])
+        XCTAssertEqual(try database.supervisions(managerID: manager.id), [supervision])
+        XCTAssertEqual(try database.supervisions(childID: child.id), [supervision])
+        XCTAssertEqual(try database.supervisionEvents(for: supervision.id), [event])
+        XCTAssertEqual(try database.allActiveManagerSessionIDs(), Set([manager.id]))
+
+        try database.save(ProjectsState(projects: [makeProject("alpha", sessions: [child])]))
+        XCTAssertEqual(try rowCount(ProjectDatabaseSchema.controlGrantTable), 0)
+        XCTAssertEqual(try rowCount(ProjectDatabaseSchema.supervisionTable), 0)
+        XCTAssertEqual(try rowCount(ProjectDatabaseSchema.supervisionEventTable), 0)
+    }
+
+    func testSupervisionEventRetentionIsBoundedAndSchemaVersionIsCurrent() throws {
+        let database = try makeDatabase()
+        let manager = AgentSession(kind: .claude, title: "Manager")
+        let child = AgentSession(kind: .codex, title: "Child")
+        let project = makeProject("alpha", sessions: [manager, child])
+        try database.save(ProjectsState(projects: [project]))
+        let supervision = Supervision(managerID: manager.id, childID: child.id, brief: "Brief")
+        try database.saveSupervision(supervision)
+
+        for index in 0..<(SupervisionDefaults.maximumEvents + 12) {
+            try database.saveSupervisionEvent(SupervisionEvent(
+                supervisionID: supervision.id,
+                at: Date(timeIntervalSince1970: TimeInterval(index)),
+                kind: .reportReceived,
+                detail: "event \(index)"
+            ))
+        }
+        let retained = try database.supervisionEvents(for: supervision.id)
+        XCTAssertEqual(retained.count, SupervisionDefaults.maximumEvents)
+        XCTAssertEqual(retained.first?.detail, "event 12")
+        XCTAssertEqual(retained.last?.detail, "event \(SupervisionDefaults.maximumEvents + 11)")
+
+        database.close()
+        let sqlite = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        XCTAssertEqual(try sqlite.scalar("PRAGMA user_version"), ProjectDatabaseSchema.version)
+    }
+
     func testStandaloneTerminalsRoundTripInsideTheirProject() throws {
         let database = try makeDatabase()
         var terminal = ProjectTerminal(currentDirectory: "/tmp/alpha/Sources")

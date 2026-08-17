@@ -38,6 +38,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "quitWithRunningAgents",
             "removeExtension",
             "revokeAllWebsiteAccess",
+            "revokeAllManagerRoles",
             "storeTestCredential",
             "removeProject",
             "revokeChatAccess",
@@ -63,6 +64,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "approveAgentExtensionInstall",
             "shareChatLink",
             "approveSystemPermissionPrompt",
+            "conferManagerRole",
             "installUpdate",
             "installUpdateAndRelaunch"
         ])

@@ -140,6 +140,7 @@ final class ComponentGalleryViewController: NSViewController {
         "SplitButtonView",
         "SplitIconButtonView",
         "SubagentSummaryView",
+        "SupervisionRowView",
         "SubmissionStatusView",
         "ThreadingMarkView",
         "ThemeSwatchImage",
@@ -191,6 +192,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemeRedraw",
         "ThemedIconButton",
         "ThemedImagePreview",
+        "ThemedMultilineTitleLabel",
         "AnnotatedImageView",
         "ImageAnnotationRailView",
         "ToastPresenter",
@@ -860,6 +862,18 @@ final class ComponentGalleryViewController: NSViewController {
                     row([activeSession])
                 ),
                 story(
+                    "ThemedMultilineTitleLabel",
+                    "A theme-owned heading whose authored line break remains visible and "
+                        + "meaningful.",
+                    makeMultilineTitleStory()
+                ),
+                story(
+                    "SupervisionRowView",
+                    "A manager's virtualized chat row: hover for direct actions or press "
+                        + "anywhere to open it.",
+                    makeSupervisionRowStory()
+                ),
+                story(
                     "ThemedIconButton",
                     "A selected pane action, filled while its pane is on screen.",
                     row([selectedToolbarButton])
@@ -914,6 +928,69 @@ final class ComponentGalleryViewController: NSViewController {
     private enum GalleryNotice {
         static let paneWidth: CGFloat = 560
         @MainActor static var paneHeight: CGFloat { PaneHeaderView.bandHeight * 3 }
+    }
+
+    private func makeMultilineTitleStory() -> NSView {
+        let title = ThemedMultilineTitleLabel()
+        title.stringValue = L10n.string(
+            "Coordinate this project\nStart and guide chats\nStop when the brief is done"
+        )
+        title.alignment = .center
+        title.applyFont(.heading)
+        title.widthAnchor.constraint(equalToConstant: 360).isActive = true
+
+        let compact = ThemedCheckbox(title: L10n.string("Use compact title")) {
+            [weak self, weak title] state in
+            title?.stringValue = state == .on
+                ? L10n.string("Manager roles")
+                : L10n.string(
+                    "Coordinate this project\nStart and guide chats\nStop when the brief is done"
+                )
+            self?.showReceipt(title?.stringValue ?? "")
+        }
+
+        let stack = NSStackView(views: [title, compact])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = Design.Spacing.medium
+        return stack
+    }
+
+    private func makeSupervisionRowStory() -> NSView {
+        let supervision = SupervisionRowView()
+        let title = L10n.string("Chats")
+        let activity = L10n.string("Working")
+        let brief = L10n.string(
+            "Briefs and events are read from Threading's supervision record, not this "
+                + "manager's transcript."
+        )
+        let event = L10n.string("Assigned")
+        supervision.configure(.init(
+            title: title,
+            agentImage: NSImage(
+                systemSymbolName: "person.crop.circle",
+                accessibilityDescription: L10n.string("Agent")
+            ),
+            activity: activity,
+            brief: brief,
+            event: event,
+            accessibility: L10n.format(
+                "%1$@, %2$@, brief: %3$@, last event: %4$@",
+                title,
+                activity,
+                brief,
+                event
+            )
+        ))
+        supervision.onOpen = { [weak self] in self?.showReceipt(L10n.string("Open chat")) }
+        supervision.onMessage = { [weak self] in self?.showReceipt(L10n.string("Message chat")) }
+        supervision.onArchive = { [weak self] in self?.showReceipt(L10n.string("Archive chat")) }
+        supervision.onRelease = { [weak self] in self?.showReceipt(L10n.string("Release chat")) }
+        NSLayoutConstraint.activate([
+            supervision.widthAnchor.constraint(equalToConstant: 560),
+            supervision.heightAnchor.constraint(equalToConstant: 76),
+        ])
+        return supervision
     }
 
     /// The strip wired to its live model: every gesture mutates `stripTabs` and re-renders,

@@ -59,6 +59,33 @@ row, name, directory, branch and theme survive relaunch; its process and scrollb
 **Account** — a distinct agent login. If you have more than one, each is offered separately
 when creating a session. See [Accounts](#accounts).
 
+### Manager sessions
+
+A **Manager** is a normal chat with user-granted authority to coordinate other chats in one
+project. Start one from a project's **+ ▸ New Manager…**, or choose **Manager** in the composer's
+role chip. The composer explains the role, asks for a brief, and labels the action **Start
+manager**. To promote an existing chat, open its row menu and choose **Make Manager**; Threading
+shows the exact authority before applying it.
+
+A manager can read project chats and account usage, start or resume native chats, adopt existing
+chats, move an idle child to an eligible login, finish a managed workspace, archive or rename an
+idle child, and subscribe to child state changes. Its **Chats** tab lists the fleet from
+Threading's durable supervision record — title, activity, brief and latest event — so it survives
+context compaction and app relaunch. The sidebar and pane header mark the manager; hover cards say
+**Manages …** or **Managed by …**. A manager-initiated account move leaves an Undo notice, and an
+archived child keeps **by <manager>** attribution under Settings ▸ Archived.
+
+Authority is enforced by Threading, not by the manager's prompt. Working chats cannot be archived
+or moved, dormant terminals cannot be resumed unattended, user-defined account limits remain in
+force, child plans cannot exceed the manager's permission/workspace caps, and all operations are
+audited and bounded. Regular chats do not see the Supervision tools and retain their existing
+project messaging plus self-only lifecycle tools.
+
+Choose **Revoke Manager Role** from the chat's row menu to remove the extra authority immediately;
+the conversation stays. **Settings ▸ Tools ▸ Supervision** is the global master switch — grants
+remain stored but inert while it is off — and **Settings ▸ Advanced ▸ Revoke All…** removes every
+manager grant and releases all supervised chats.
+
 ## Projects
 
 ### Adding

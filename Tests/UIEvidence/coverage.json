@@ -652,6 +652,37 @@
       }
     },
     {
+      "id": "manager-role-and-grants",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Manager role and grants",
+      "description": "The complete user-visible manager story: role creation, supervision fleet, durable authority controls, archive attribution, commands, and session menus.",
+      "states": [
+        "Manager composer",
+        "Managed chats fleet and attribution",
+        "Supervision tool master",
+        "Global revocation",
+        "Archived child attribution",
+        "Command palette",
+        "New Manager menu",
+        "Make Manager menu",
+        "Revoke Manager Role menu"
+      ],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Full pane", "Settings page", "Command palette", "Context menu"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ManagerRoleRenderTests.swift",
+        "test": "ThreadingTests/ManagerRoleRenderTests/testRendersEveryManagerRoleSurface"
+      },
+      "capture": {
+        "glob": "manager-role-*.png"
+      }
+    },
+    {
       "id": "file-change-relaunch",
       "kind": "journey",
       "status": "implemented",

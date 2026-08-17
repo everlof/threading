@@ -19,6 +19,7 @@ final class SessionInfoPopoverViewController: NSViewController {
         let agentLine: String
         let agentIcon: NSImage?
         let handoffLine: String?
+        let roleLine: String?
         let path: String
         let branch: String?
         /// The linked worktree's name, or nil for an ordinary checkout.
@@ -79,6 +80,33 @@ final class SessionInfoPopoverViewController: NSViewController {
                 handoffLine = stops.joined(separator: " → ")
             } else {
                 handoffLine = nil
+            }
+
+            let supervision = ControlGrantStore.shared.overview(for: session.id)
+            if ControlGrantStore.shared.isManager(session.id) {
+                let activities = supervision.children.map { AgentRuntime.shared.activity(sessionID: $0) }
+                let working = activities.filter(\.hasTurnInFlight).count
+                let waiting = activities.filter { $0 == .awaitingUser || $0 == .needsAttention }.count
+                let detail = [
+                    working > 0 ? L10n.format("%lld working", Int64(working)) : nil,
+                    waiting > 0 ? L10n.format("%lld waiting", Int64(waiting)) : nil,
+                ].compactMap { $0 }.joined(separator: ", ")
+                let count = supervision.children.count
+                roleLine = count == 0
+                    ? L10n.string("Manages no chats yet")
+                    : L10n.format(
+                        "Manages %lld chats%@",
+                        Int64(count),
+                        detail.isEmpty ? "" : " · \(detail)"
+                    )
+            } else if let managerID = supervision.managedBy,
+                      let manager = ProjectStore.shared.session(withID: managerID) {
+                let brief = supervision.brief?
+                    .split(whereSeparator: \.isNewline).first.map(String.init)
+                roleLine = [L10n.format("Managed by %@", manager.displayTitle), brief]
+                    .compactMap { $0 }.joined(separator: " · ")
+            } else {
+                roleLine = nil
             }
 
             let project = ProjectStore.shared.executionProject(forSessionID: session.id)
@@ -206,6 +234,14 @@ final class SessionInfoPopoverViewController: NSViewController {
                 symbol: SessionPopoverDefaults.handoffSymbol,
                 classicGlyph: .handoff,
                 text: handoffLine
+            ))
+        }
+
+        if let roleLine = info.roleLine {
+            rows.append(wrappingRow(
+                symbol: "person.3",
+                classicGlyph: .status,
+                text: roleLine
             ))
         }
 

@@ -14,7 +14,9 @@ extension AgentToolCoordinator {
         dependencies.sessionCommands.setSessionName(arguments, for: sessionID)
     }
 
-    func cancelSessionArchive(for sessionID: SessionID) -> MCPToolResult {
-        dependencies.sessionCommands.cancelSessionArchive(for: sessionID)
+    func cancelSessionArchive(
+        _ arguments: CancelSessionArchiveArguments, for sessionID: SessionID
+    ) -> MCPToolResult {
+        dependencies.sessionCommands.cancelSessionArchive(arguments, for: sessionID)
     }
 }

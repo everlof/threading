@@ -39,6 +39,7 @@ final class ToolsPreferencesViewController: NSViewController {
         case note
         case group(Int)
         case tool(group: Int, tool: Int)
+        case groupFooter(Int)
         case browserSignInCaption
         case browserSignInProvider
         case browserSignInOnePasswordEmpty
@@ -199,6 +200,9 @@ final class ToolsPreferencesViewController: NSViewController {
                 rows.append(contentsOf: group.tools.indices.map {
                     .tool(group: groupIndex, tool: $0)
                 })
+                if group.id == MCPToolCatalog.supervision.id {
+                    rows.append(.groupFooter(groupIndex))
+                }
             }
         }
         rows.append(contentsOf: [.browserSignInCaption, .browserSignInProvider])
@@ -253,8 +257,9 @@ final class ToolsPreferencesViewController: NSViewController {
         var decorations: [ThemedTableCardDecoration] = presentationRows.indices.compactMap { index in
             guard case .group(let groupIndex) = presentationRows[index],
                   displayedGroups.indices.contains(groupIndex) else { return nil }
-            let toolRows = expandedGroups.contains(displayedGroups[groupIndex].id)
-                ? displayedGroups[groupIndex].tools.count
+            let group = displayedGroups[groupIndex]
+            let toolRows = expandedGroups.contains(group.id)
+                ? group.tools.count + (group.id == MCPToolCatalog.supervision.id ? 1 : 0)
                 : 0
             return ThemedTableCardDecoration(
                 rows: index...(index + toolRows),
@@ -290,7 +295,7 @@ final class ToolsPreferencesViewController: NSViewController {
                 } else {
                     extensionBounds[sectionIndex] = (rowIndex, rowIndex)
                 }
-            case .note, .group, .tool, .browserSignInCaption, .chromeAutomation,
+            case .note, .group, .tool, .groupFooter, .browserSignInCaption, .chromeAutomation,
                  .websiteAccessCaption, .extensionCaption:
                 break
             }
@@ -359,18 +364,19 @@ final class ToolsPreferencesViewController: NSViewController {
 
         if expanded {
             expandedGroups.insert(groupID)
-            if !group.tools.isEmpty {
-                let range = (header + 1)..<(header + 1 + group.tools.count)
-                presentationRows.insert(
-                    contentsOf: group.tools.indices.map { .tool(group: groupIndex, tool: $0) },
-                    at: header + 1
-                )
+            let rows: [PresentationRow] = group.tools.indices.map {
+                .tool(group: groupIndex, tool: $0)
+            } + (group.id == MCPToolCatalog.supervision.id ? [.groupFooter(groupIndex)] : [])
+            if !rows.isEmpty {
+                let range = (header + 1)..<(header + 1 + rows.count)
+                presentationRows.insert(contentsOf: rows, at: header + 1)
                 tableView.insertRows(at: IndexSet(integersIn: range), withAnimation: [])
             }
         } else {
             expandedGroups.remove(groupID)
-            if !group.tools.isEmpty {
-                let range = (header + 1)..<(header + 1 + group.tools.count)
+            let count = group.tools.count + (group.id == MCPToolCatalog.supervision.id ? 1 : 0)
+            if count > 0 {
+                let range = (header + 1)..<(header + 1 + count)
                 presentationRows.removeSubrange(range)
                 tableView.removeRows(at: IndexSet(integersIn: range), withAnimation: [])
             }
@@ -429,6 +435,17 @@ final class ToolsPreferencesViewController: NSViewController {
         row.distribution = .fill
         row.spacing = Design.Spacing.medium
         return row
+    }
+
+    private func supervisionFooter() -> NSView {
+        let label = NSTextField(wrappingLabelWithString: L10n.string(
+            "This switch is the global master. Manager grants stay stored but are inert while "
+                + "it is off. Start a manager from a project's + menu, or make and revoke one "
+                + "from a chat's menu."
+        ))
+        label.applyFont(.subheading)
+        label.textColor = Design.Text.secondary
+        return SettingsUI.fullRow(label)
     }
 
     /// The one place the signed-in Chrome profile can be created, because creating it is the one
@@ -700,6 +717,13 @@ final class ToolsPreferencesViewController: NSViewController {
         guard displayedGroups.indices.contains(sender.tag) else { return }
         let group = displayedGroups[sender.tag]
         AppSettings.shared.setToolGroup(group.id, enabled: sender.state == .on)
+        if group.id == MCPToolCatalog.supervision.id {
+            // Existing connections receive tools/list_changed and the plane's next admission
+            // reads the switch directly. Stored role presentation deliberately remains intact.
+            for sessionID in StateManager.shared.activeManagerSessionIDs() ?? [] {
+                NotificationCenter.default.post(ControlGrantsDidChange(sessionID: sessionID))
+            }
+        }
         pageView?.updateSummary(enabledSummary)
 
         guard let header = presentationRows.firstIndex(where: {
@@ -1056,7 +1080,7 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
 
     private func topInset(for row: PresentationRow) -> CGFloat {
         switch row {
-        case .tool:
+        case .tool, .groupFooter:
             return 0
         case .browserSignInProvider, .browserSignInOnePasswordEmpty,
              .browserSignInOnePasswordIdentity, .browserSignInOnePasswordAdd,
@@ -1098,6 +1122,8 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
                 ? 1
                 : ToolsPreferencesDefaults.disabledAlpha
             return SettingsUI.fullRow(content)
+        case .groupFooter:
+            return supervisionFooter()
         case .browserSignInCaption:
             return SettingsUI.caption("Browser Sign-In")
         case .browserSignInProvider:
