@@ -496,6 +496,14 @@ tool added in a future release prompts rather than slipping through unasked. Cla
 broker through its blocking `PreToolUse` hook; Codex app-server approval requests are answered
 over the same JSON-RPC connection.
 
+For shell execution, the tool name alone cannot make that decision. `ShellCommandPolicy` admits
+only vetted reader commands and rejects every segment if an argument can write or execute. Process
+lookup belongs to that reader vocabulary: `pgrep` only inspects the process table, so probes such
+as `pgrep -fl xctest` proceed without raising an approval card. Cross-session messages are not a
+substitute for this classification: a message to a chat waiting on permission queues behind the
+blocked turn and cannot answer the card, and no agent-facing control operation grants one session
+authority to approve another session's arbitrary command.
+
 Claude's two views come from the CLI: `stream_event` deltas while tokens arrive, and complete
 `assistant`/`user` messages once each finishes. The finished message is authoritative — the
 streaming label is thrown away and replaced when it lands, rather than reconstructing state

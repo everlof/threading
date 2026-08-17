@@ -29,7 +29,8 @@ final class ShellCommandPolicyTests: XCTestCase {
             "ls", "ls -la", "pwd", "cat README.md", "head -20 file.txt",
             "wc -l src/main.swift", "grep -rn TODO Sources", "rg --json pattern",
             "find . -name '*.swift'", "du -sh .", "file binary", "stat -f %z x",
-            "diff a.txt b.txt", "date", "whoami", "jq .name package.json"
+            "diff a.txt b.txt", "date", "whoami", "jq .name package.json",
+            "pgrep -fl xctest"
         ] {
             assertReadOnly(command)
         }
