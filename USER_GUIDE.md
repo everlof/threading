@@ -468,6 +468,22 @@ which creates one on a new branch and adds it as its own project. A branch nothi
 checked out on is not offered — there would be nowhere to run — so making a worktree is how
 you get one.
 
+**Run in an isolated managed worktree**, under the chips, starts the session in a detached
+checkout Threading creates, owns and later disposes of, so the agent's edits never appear in the
+folder you are working in. It is off unless you turn it on, and turning it on reveals what
+happens to that checkout when the agent says it is done: merge into the checkout you started
+from and clean up, keep it for review, or — for a GitHub.com or GitLab.com `origin` — open a
+change request. It needs a git project whose checkout is on a branch, and an agent surface that
+receives Threading's session tools; the checkbox's tooltip says which of the two is missing when
+it is unavailable.
+
+**Your own uncommitted work is not in the way of starting one.** The isolated checkout is made
+from the current commit, so what you have in progress is neither copied into it nor at risk from
+it — which is the situation the isolation is most useful in. Only the merge at the end needs your
+folder clean: if it is still dirty when the agent finishes, Threading keeps the isolated checkout
+instead, the status card reads `Needs attention` with the reason, and nothing is lost. Commit or
+stash, and let the agent ask to finish again.
+
 The prompt box **grows as you type**, up to about eight lines, then scrolls. **Return breaks the
 line here**, because a brief is usually several of them; **⌘Return** sends, and so does the
 **Start session** button under the box, which says the same chord on its face. A reply inside a

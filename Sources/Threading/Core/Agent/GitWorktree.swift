@@ -249,7 +249,19 @@ enum ManagedGitWorkspace {
         guard let sourceRoot = GitInfo.repositoryRoot(for: project.folderPath)?.standardizedFileURL
         else { throw Failure.notARepository }
 
-        guard try isClean(sourceRoot) else { throw Failure.checkoutIsDirty }
+        // A dirty source checkout is deliberately **not** refused here. The worktree is cut from
+        // `HEAD` — a commit — so uncommitted work in the source cannot reach it and is not put at
+        // risk by it, and a person with work in progress is the person most in need of somewhere
+        // else for an agent to run. Refusing at this end also refused deliveries that never touch
+        // the source at all: keep-for-review and publication only ever read this checkout.
+        //
+        // The clean-source requirement is real, and it lives at the other end, in
+        // `integrateAndClean`, which re-checks it beside the recorded target branch immediately
+        // before the fast-forward. That is the only moment it decides anything, and the only
+        // moment it can be asked about the tree that actually exists then: this preflight
+        // answered for a working tree that a session lasting an hour would not be merged into.
+        // A source still dirty at the handshake refuses the merge, keeps the checkout, and marks
+        // the workspace `needsAttention` — a recoverable end, not a lost one.
         let branch = try symbolicBranch(in: sourceRoot)
         let baseCommit = try run(["rev-parse", "HEAD"], in: sourceRoot)
             .trimmingCharacters(in: .whitespacesAndNewlines)

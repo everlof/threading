@@ -50,7 +50,7 @@ owning checkout association is discarded, while Archive/Restore leaves it intact
 draft opt-in
     |
     v
-validate Git + clean source + finish-handshake capability
+validate Git + source on a branch + finish-handshake capability
     |
     v
 create detached worktree -> copy selected ignored setup files -> lock it
@@ -71,6 +71,26 @@ agent commits, verifies, and calls archive_session after its final turn
     |
     `--> any refused proof: retain checkout -> needsAttention (not archived)
 ```
+
+## A dirty source checkout starts a workspace
+
+Provisioning does not require a clean source, and refusing one was a mistake worth naming: it
+refused at exactly the moment isolation is most useful. The worktree is created from `HEAD` with
+`git worktree add --detach`, so uncommitted work in the source cannot reach it and is not put at
+risk by it; the source is read, never written. The old preflight ran
+`status --porcelain --untracked-files=all`, so a single untracked scratch file was enough, and it
+applied to keep-for-review and publication too — deliveries that never touch the source at all.
+It also failed *silently* for scheduled starts, which provision through `try?`.
+
+The clean-source requirement is real but belongs to the merge. `integrateAndClean` re-checks it
+beside the recorded target branch immediately before the fast-forward, which is the only moment
+it decides anything and the only moment it can be asked about the working tree the merge will
+actually land in — a session lasting an hour is not merged into the tree that existed when it
+started. A source still dirty at the handshake refuses the merge, retains the checkout and marks
+the workspace `needsAttention`; committing or stashing and finishing again succeeds.
+
+What provisioning still requires is a repository whose source checkout is **on a branch**, since
+the branch is recorded as the delivery target and re-proved before the fast-forward.
 
 The session record is minted before provisioning so its identity is available to the directory
 name. The record is persisted only after provisioning succeeds; if session creation then fails,

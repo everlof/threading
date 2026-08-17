@@ -376,6 +376,107 @@ final class ManagedWorkspaceLifecycleE2ETests: HostedStoreTestCase {
         )
     }
 
+    /// Work in progress is the *reason* to isolate, not a reason to refuse.
+    ///
+    /// Provisioning used to run `status --porcelain --untracked-files=all` over the source and
+    /// refuse on any output, so one untracked scratch file stopped a session whose entire point
+    /// was to run somewhere else. Nothing about the checkout needs it: the worktree is cut from
+    /// `HEAD`, a commit, so uncommitted work can neither reach it nor be endangered by it. The
+    /// clean-source requirement belongs to the merge, which asks about the tree that exists then
+    /// rather than the one that existed an hour earlier — and refusing there keeps the checkout.
+    func testADirtySourceIsIsolatedAndTheMergeStillWaitsForItToBeClean() throws {
+        let fixture = try ManagedWorkspaceScenarioRepository()
+        defer { fixture.remove() }
+
+        let sourceHead = try fixture.output("rev-parse", "HEAD")
+        let seed = fixture.project.appendingPathComponent("seed.txt")
+        let scratch = fixture.project.appendingPathComponent("scratch.txt")
+        // Both kinds of dirt the preflight counted: an edit to a tracked file, and an untracked
+        // file, which `--untracked-files=all` weighed exactly as heavily.
+        try "seed, half-rewritten\n".write(to: seed, atomically: true, encoding: .utf8)
+        try "not committed\n".write(to: scratch, atomically: true, encoding: .utf8)
+
+        let workspace = try fixture.provision(sessionID: SessionID())
+
+        XCTAssertEqual(
+            try fixture.output("rev-parse", "HEAD", in: workspace.worktreeURL),
+            sourceHead,
+            "the isolated checkout must start from the commit, not from the working tree"
+        )
+        XCTAssertEqual(
+            try String(
+                contentsOf: workspace.executionURL.appendingPathComponent("seed.txt"),
+                encoding: .utf8
+            ),
+            "seed\n",
+            "uncommitted work in the source leaked into the isolated checkout"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: workspace.executionURL.appendingPathComponent("scratch.txt").path
+            ),
+            "an untracked source file leaked into the isolated checkout"
+        )
+
+        _ = try ManagedWorkspaceFixtureAgent.run(.commit, in: workspace.executionURL)
+
+        guard case .needsAttention(let refused) =
+                ManagedGitWorkspace.finishLocalDelivery(workspace) else {
+            return XCTFail("a merge into a dirty checkout must be refused, not performed")
+        }
+        XCTAssertEqual(refused.state, .needsAttention)
+        XCTAssertNotNil(refused.lastError)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: refused.worktreeRoot))
+        XCTAssertEqual(try fixture.output("rev-parse", "HEAD"), sourceHead)
+        XCTAssertEqual(
+            try String(contentsOf: seed, encoding: .utf8),
+            "seed, half-rewritten\n",
+            "the refused merge must leave the work in progress exactly as it was"
+        )
+
+        // Committing or stashing is the whole of what the merge was ever waiting for.
+        try "seed\n".write(to: seed, atomically: true, encoding: .utf8)
+        try FileManager.default.removeItem(at: scratch)
+
+        guard case .completed(let integrated) =
+                ManagedGitWorkspace.finishLocalDelivery(workspace) else {
+            return XCTFail("a clean checkout must merge when the finish is retried")
+        }
+        XCTAssertEqual(integrated.state, .integrated)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: integrated.worktreeRoot))
+        XCTAssertEqual(try fixture.output("rev-parse", "HEAD"), integrated.finalCommit)
+        XCTAssertEqual(
+            try String(
+                contentsOf: fixture.project.appendingPathComponent("agent-change.txt"),
+                encoding: .utf8
+            ),
+            ManagedWorkspaceFixtureAgent.changeContents + "\n"
+        )
+    }
+
+    /// Keeping and publishing never write to the source checkout at all, so its state is not
+    /// theirs to have an opinion about: the old preflight refused these two for a dirtiness that
+    /// nothing downstream would ever read.
+    func testADirtySourceAlsoProvisionsForTheDeliveriesThatNeverTouchIt() throws {
+        let fixture = try ManagedWorkspaceScenarioRepository(withRemote: true)
+        defer { fixture.remove() }
+
+        try "seed, half-rewritten\n".write(
+            to: fixture.project.appendingPathComponent("seed.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        for plan in [
+            ManagedWorkspacePlan(delivery: .keepForReview),
+            ManagedWorkspacePlan(publication: .draft)
+        ] {
+            let workspace = try fixture.provision(sessionID: SessionID(), plan: plan)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: workspace.worktreeRoot))
+            XCTAssertEqual(workspace.state, .active)
+        }
+    }
+
     func testFixtureAgentPublishesLocallyAndAnOpenReviewRetainsItsBranch() async throws {
         let published = try await makePublishedFixture()
         defer { published.repository.remove() }
@@ -919,5 +1020,9 @@ private enum ManagedWorkspaceFixtureAgent {
 private extension ManagedWorkspace {
     var executionURL: URL {
         URL(fileURLWithPath: executionPath, isDirectory: true)
+    }
+
+    var worktreeURL: URL {
+        URL(fileURLWithPath: worktreeRoot, isDirectory: true)
     }
 }
