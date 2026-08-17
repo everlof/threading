@@ -92,8 +92,8 @@ final class DemoSessionScript {
         deliver(RemoteHelloDTO(
             surface: session.surface,
             capability: RemoteCapability.interact.rawValue,
-            cols: session.surface == "terminal" ? 80 : 0,
-            rows: session.surface == "terminal" ? 24 : 0,
+            cols: session.surface == .terminal ? 80 : 0,
+            rows: session.surface == .terminal ? 24 : 0,
             title: session.title,
             theme: RemoteAppModel.demoTheme,
             terminalTheme: RemoteAppModel.demoTerminalTheme,
@@ -103,7 +103,7 @@ final class DemoSessionScript {
                 RemoteWebSocketFeature.atomicTerminalSubmission.rawValue,
             ]
         ))
-        if session.surface == "terminal" {
+        if session.surface == .terminal {
             connection.receiveDemoTerminalOutput(Data(Self.terminalSeed.utf8))
         } else {
             deliverSnapshot()

@@ -2187,6 +2187,13 @@ The iPhone still shows that Mac once even when it knows both a Tailscale and rel
 follows the connection policy chosen on the Mac, shows the active route beside its connection
 status, and can fail over or adopt an advertised stable relay address without being paired again.
 
+Each chat in the iPhone list is named by its agent, not by its screen: the row carries the agent's
+own mark, and a login other than the CLI's default one adds its chip on the mark's corner and its
+name beside the chat's state — the same two facts the Mac sidebar carries. A small glyph after the
+connection icon says which surface you will land in: a terminal for the agent's own UI, a speech
+bubble for a Native conversation. Rows are two lines tall, so a long chat title is shortened here
+and shown in full once the chat is open.
+
 You can also pair one iPhone with several Macs. **Devices** shows the current Mac and compact
 switch targets for the others; choosing one swaps the session list without re-pairing. The app
 remembers the selected Mac and the last open session. Because continuity uses the paired host
@@ -2234,12 +2241,14 @@ another person or one of your other devices does not inherit half-written text o
 away from where you left it. Drafts are retained until sent or cleared; older position-only records
 may be pruned.
 
-Agent-UI terminals use **Independent terminal drafts** on iPhone by default. Type in the composer
-below the terminal and send when the line is ready; the entire line and Return reach Claude Code
-or Codex as one PTY write, so another phone cannot mix its keystrokes into yours. The key bar's
-controls remain immediate. In the iPhone notification settings, **In-app collaboration** lets you
-independently hide people presence, hide typing indicators, or turn off independent drafts to
-restore raw direct terminal typing. These in-app indicators never create a push notification.
+Agent-UI terminals with another reply-capable participant use **Independent terminal drafts** on
+iPhone by default. Type in the composer below the terminal and send when the line is ready; the
+entire line and Return reach Claude Code or Codex as one PTY write, so another person cannot mix
+their keystrokes into yours. An owner-only terminal instead types directly into the target TUI,
+and an unused invitation does not change that. The key bar's controls remain immediate. In the
+iPhone notification settings, **In-app collaboration** lets you independently hide people
+presence, hide typing indicators, or turn off independent drafts for shared terminals. These
+in-app indicators never create a push notification.
 
 The key bar under the terminal is customizable per agent, per device — a Termius-style keyboard
 that goes further than Termius's fixed catalogue. Every bar starts from a stock layout for its
@@ -2251,7 +2260,9 @@ relabel any key, drag to reorder with Edit, swipe to delete, and reset to the st
 ⌃ and ⌥ keys latch: tap once to apply to the next key — from the bar or typed on the system
 keyboard — tap twice to lock, tap again to release. Arrows, Home and End follow the TUI's
 application-cursor mode, so full-screen programs receive the sequences they asked for. Layouts
-are stored only on the device that authored them; an iPhone and an iPad keep separate bars.
+are stored only on the device that authored them; an iPhone and an iPad keep separate bars. This
+bar is the only one over the keyboard: the terminal emulator's own fixed accessory row is
+removed, and the bar carries the control that puts the keyboard away.
 
 Focused control is enforced on the Mac, not merely by disabling a button. A watcher may edit a
 draft, select and scroll terminal output, and follow the session, but raw keys, paste/drop, mouse
@@ -2302,9 +2313,10 @@ the top or choose **Load earlier messages** to fetch older pages without losing 
 position. A permission whose edit diff is too large for a bounded remote snapshot must be
 reviewed on the Mac, so a remote device can never approve from a partial preview.
 
-On iPhone, use the toolbar's **Workspace** button for **Browser**, **Review**, **Files**, and
-**Attachments**. If an agent opens a page, Threading does not pull you away from the chat. The
-Workspace icon gives one subtle pulse and keeps a small dot until you open Browser. Browser is a
+On iPhone, open the session's **…** menu and choose **Workspace** for **Browser**, **Review**,
+**Files**, and **Attachments**; a swipe in from the right edge of the session opens the same
+thing. If an agent opens a page, Threading does not pull you away from the chat. The **…**
+control gives one subtle pulse and keeps a small dot until you open Browser. Browser is a
 read-only follow view of the Mac tab: the Mac still owns navigation and interaction, and private
 tabs never send a preview. The Workspace is available only to a paired owner device, not one-chat
 guest links. Attachment files are still fetched only when you choose one, and only if the file
@@ -2345,6 +2357,29 @@ phase does not provision the planned named Cloudflare Tunnel. Without `cloudflar
 without a signed-in Tailscale installation, Tailscale is unavailable. **Open in Browser** still
 works locally. See [Remote access](docs/REMOTE_ACCESS.md) for
 pairing, notifications, the complete security model, and beta limitations.
+
+### Reporting a problem from your iPhone
+
+Shake the phone to open a report sheet: describe what happened, keep or drop the screenshot, then
+send it to Threading privately or share the files. On a paired owner device that can manage
+sessions, **Send to Mac** instead starts a chat on your Mac with the whole report, screenshot path
+included, as its opening prompt.
+
+That chat is configured on the Mac, not on the phone. It comes up on the same agent, login, model,
+reasoning level, speed and permission mode as the chat you used most recently in that project, so
+it arrives ready to work rather than needing to be reconfigured.
+
+Where it works is your choice, under **Settings > Remote Access > Reports from your phone**:
+
+- **The project's own checkout** — the default, and what this button has always done.
+- **Their own workspace, merged when finished** — the chat gets an isolated worktree of its own,
+  which Threading fast-forwards into the checkout it started from once the agent finishes.
+- **Their own workspace, kept for review** — the same isolation, kept afterwards so you can read
+  the work before it lands.
+
+The two isolated choices need a Git project whose agent has Threading's session tools; elsewhere
+the report still starts its chat in the project's own checkout. The phone tells you which one you
+got. Reports from a phone never open a pull or merge request.
 
 ## Display Panel
 

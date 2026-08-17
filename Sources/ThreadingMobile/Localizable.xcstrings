@@ -43,9 +43,6 @@
     "Jump to latest message": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hoppa till senaste meddelandet" } } }
     },
-    "New": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ny" } } }
-    },
     "Open a session to continue it here. Long press a session for pin, rename, share, snooze, interface and archive actions.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppna en session för att fortsätta den här. Håll ned en session för att fästa, byta namn, dela, skjuta upp, välja gränssnitt eller arkivera den." } } }
     },
@@ -273,8 +270,8 @@
     "Paste a pairing link, or a chat link someone shared with you.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Klistra in en parkopplingslänk eller en chattlänk som någon delat med dig." } } }
     },
-    "Presence stays inside the live session. Independent drafts keep devices from mixing keystrokes in the same terminal.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Närvaro visas bara i livesessionen. Separata utkast hindrar enheter från att blanda tangenttryckningar i samma terminal." } } }
+    "Presence stays inside the live session. Independent drafts keep people from mixing keystrokes once someone else joins; owner-only terminals always type directly in the TUI.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Närvaro visas bara i livesessionen. Separata utkast hindrar personer från att blanda tangenttryckningar när någon annan har gått med; terminaler med bara ägaren skriver alltid direkt i TUI:n." } } }
     },
     "Scan the code on your Mac": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skanna koden på din Mac" } } }
@@ -510,8 +507,8 @@
     "Send terminal line": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skicka terminalrad" } } }
     },
-    "Presence stays inside the live session and never creates push notifications. Independent drafts prevent devices from mixing keystrokes; turn them off for direct terminal typing.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Närvaro stannar i den aktiva sessionen och skapar aldrig pushnotiser. Oberoende utkast hindrar enheter från att blanda tangenttryckningar; stäng av dem för att skriva direkt i terminalen." } } }
+    "Presence stays inside the live session and never creates push notifications. Independent drafts keep people from mixing keystrokes once someone else joins; owner-only terminals always type directly in the TUI.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Närvaro stannar i den aktiva sessionen och skapar aldrig pushnotiser. Oberoende utkast hindrar personer från att blanda tangenttryckningar när någon annan har gått med; terminaler med bara ägaren skriver alltid direkt i TUI:n." } } }
     },
     "The Mac rejected this line. Your draft is still here.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn avvisade raden. Ditt utkast finns kvar." } } }
@@ -2061,6 +2058,16 @@
         }
       }
     },
+    "New session in %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ny session i %@"
+          }
+        }
+      }
+    },
     "No Mac": {
       "localizations": {
         "sv": {
@@ -2721,6 +2728,16 @@
         }
       }
     },
+    "Session actions, new browser activity": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessionsåtgärder, ny webbläsaraktivitet"
+          }
+        }
+      }
+    },
     "Session closed on Mac": {
       "localizations": {
         "sv": {
@@ -2757,16 +2774,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sessionen är inte tillgänglig"
-          }
-        }
-      }
-    },
-    "Session workspace": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sessionens arbetsyta"
           }
         }
       }
@@ -3721,16 +3728,6 @@
         }
       }
     },
-    "Session workspace, new browser activity": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sessionens arbetsyta, ny webbläsaraktivitet"
-          }
-        }
-      }
-    },
     "The Mac returned an unreadable preview.": {
       "localizations": {
         "sv": {
@@ -3991,6 +3988,16 @@
         }
       }
     },
+    "It has a workspace of its own, so the checkout on your Mac is untouched.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den har en egen arbetsyta, så utcheckningen på din Mac är orörd."
+          }
+        }
+      }
+    },
     "A new %@ task is investigating this report in %@.": {
       "localizations": {
         "sv": {
@@ -4087,6 +4094,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Anpassa tangenter"
+          }
+        }
+      }
+    },
+    "Hide keyboard": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dölj tangentbordet"
           }
         }
       }

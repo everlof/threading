@@ -956,25 +956,61 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         fastMode: Bool?,
         permissionMode: AgentPermissionMode?,
         usesNativeUI: Bool,
+        managedWorkspacePlan: ManagedWorkspacePlan?,
         prompt: String
     ) -> AgentSession? {
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        let opening = NewChatOpeningMessage.compose(
+        var opening = NewChatOpeningMessage.compose(
             prompt: task,
             reusableMessage: environment.settings.newChatOpeningMessage
         )
-        guard !task.isEmpty,
-              let session = environment.projectStore.addSession(
-                to: projectID,
-                kind: kind,
-                accountHandle: accountHandle,
-                model: model,
-                reasoningEffort: reasoningEffort,
-                fastMode: fastMode,
-                usesNativeUI: usesNativeUI,
-                permissionMode: permissionMode,
-                title: SessionNaming.promptTitle(from: task)
-              ) else { return nil }
+        guard !task.isEmpty else { return nil }
+
+        // Named once and used twice, as in the composer: the sidebar row, and the checkout a
+        // managed session stands in for the whole conversation.
+        let sessionID = SessionID()
+        let title = SessionNaming.promptTitle(from: task)
+
+        // The server has already refused an ineligible request, so a failure here is the
+        // repository saying no — a locked index, a missing branch — and the honest answer is no
+        // session rather than one silently running in the checkout the workspace was meant to
+        // protect.
+        let managedWorkspace: ManagedWorkspace?
+        if let managedWorkspacePlan {
+            guard let project = environment.projectStore.project(withID: projectID),
+                  let provisioned = try? ManagedGitWorkspace.provision(
+                      sessionID: sessionID,
+                      from: project,
+                      plan: managedWorkspacePlan,
+                      title: title
+                  ) else { return nil }
+            managedWorkspace = provisioned
+            opening = ManagedWorkspaceInstructions.append(
+                to: opening,
+                plan: managedWorkspacePlan
+            )
+        } else {
+            managedWorkspace = nil
+        }
+
+        guard let session = environment.projectStore.addSession(
+            to: projectID,
+            kind: kind,
+            accountHandle: accountHandle,
+            model: model,
+            reasoningEffort: reasoningEffort,
+            fastMode: fastMode,
+            usesNativeUI: usesNativeUI,
+            permissionMode: permissionMode,
+            title: title,
+            managedWorkspace: managedWorkspace,
+            id: sessionID
+        ) else {
+            if let managedWorkspace {
+                try? ManagedGitWorkspace.discardUnstarted(managedWorkspace)
+            }
+            return nil
+        }
 
         environment.eventLog.record(.remote, "Session started remotely", [
             "session": session.id.uuidString,
@@ -982,6 +1018,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             "agent": kind.rawValue,
             "speed": fastMode.map { $0 ? "fast" : "standard" } ?? "inherit",
             "permissionMode": permissionMode?.rawValue ?? "inherit",
+            "workspace": managedWorkspace?.delivery.rawValue ?? "projectCheckout",
             "prompt": opening ?? "",
         ])
 

@@ -7,6 +7,40 @@ private enum RemoteMobileConnectionDefaults {
     static let acknowledgedSubmissionRetrySeconds: TimeInterval = 4 * 60
 }
 
+enum MobileCollaborationPresentation {
+    /// Input control coordinates distinct people, not multiple devices owned by the same person.
+    /// The host roster contains accepted reply-capable members (including members who are away),
+    /// always includes the current interactive identity, and gives an unused invitation no row.
+    static func hasOtherParticipant(_ state: RemoteInputControlStateDTO) -> Bool {
+        state.participants.count > 1
+    }
+
+    static func showsInputControl(
+        featureSupported: Bool,
+        capability: RemoteCapability,
+        state: RemoteInputControlStateDTO?
+    ) -> Bool {
+        guard featureSupported, capability == .interact, let state else { return false }
+        return hasOtherParticipant(state)
+    }
+
+    static func usesIndependentTerminalComposer(
+        settingEnabled: Bool,
+        supportsAtomicSubmission: Bool,
+        capability: RemoteCapability,
+        inputControlFeatureSupported: Bool,
+        state: RemoteInputControlStateDTO?
+    ) -> Bool {
+        guard settingEnabled, supportsAtomicSubmission, capability == .interact else {
+            return false
+        }
+        // Preserve the safe atomic path until a new host sends its authoritative roster, and
+        // with an older host that cannot state whether another participant has joined.
+        guard inputControlFeatureSupported, let state else { return true }
+        return hasOtherParticipant(state)
+    }
+}
+
 struct RemotePromptSubmissionFeedback: Equatable {
     let requestID: String
     let text: String
@@ -42,7 +76,7 @@ final class RemoteSessionConnection: ObservableObject {
 
     @Published private(set) var phase: Phase = .connecting
     @Published private(set) var title: String
-    @Published private(set) var surface: String
+    @Published private(set) var surface: RemoteSessionSurface
     @Published private(set) var capability: RemoteCapability = .view
     @Published private(set) var theme: RemoteThemeDTO?
     @Published private(set) var terminalTheme: RemoteTerminalThemeDTO?
@@ -101,6 +135,24 @@ final class RemoteSessionConnection: ObservableObject {
         }
     }
     var onWorkspaceChanged: ((RemoteWorkspaceChangedDTO) -> Void)?
+
+    var shouldPresentInputControl: Bool {
+        MobileCollaborationPresentation.showsInputControl(
+            featureSupported: supportsFocusedInputControl,
+            capability: capability,
+            state: inputControl
+        )
+    }
+
+    func usesIndependentTerminalComposer(settingEnabled: Bool) -> Bool {
+        MobileCollaborationPresentation.usesIndependentTerminalComposer(
+            settingEnabled: settingEnabled,
+            supportsAtomicSubmission: supportsAtomicTerminalSubmission,
+            capability: capability,
+            inputControlFeatureSupported: supportsFocusedInputControl,
+            state: inputControl
+        )
+    }
 
     init(
         session: RemoteSessionSummaryDTO,
@@ -584,7 +636,7 @@ final class RemoteSessionConnection: ObservableObject {
             MobileDiagnostics.record(.socketConnected, fields: [
                 .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
                 .capability: hello.capability,
-                .surface: hello.surface,
+                .surface: hello.surface.rawValue,
             ])
             if let pendingViewport, capability == .interact {
                 try? send(RemoteClientMessage(
@@ -660,7 +712,7 @@ final class RemoteSessionConnection: ObservableObject {
                 let gainedControl = inputControl?.canWrite != true && update.canWrite
                 inputControl = update
                 if gainedControl, let pendingViewport,
-                   surface == "terminal", capability == .interact {
+                   surface == .terminal, capability == .interact {
                     try? send(RemoteClientMessage(
                         type: "viewport",
                         cols: pendingViewport.cols,
@@ -866,6 +918,25 @@ final class RemoteSessionConnection: ObservableObject {
     }
 
 #if DEBUG
+    private static func ownerOnlyInputControlState() -> RemoteInputControlStateDTO {
+        RemoteInputControlStateDTO(
+            mode: .collaborative,
+            currentParticipantID: RemoteCollaborationParticipantDTO.ownerID,
+            canWrite: true,
+            canManage: true,
+            canHandOff: false,
+            participants: [
+                .init(
+                    id: RemoteCollaborationParticipantDTO.ownerID,
+                    displayName: "David",
+                    role: "owner",
+                    isOnline: true
+                ),
+            ],
+            revision: 0
+        )
+    }
+
     static func demoTerminal() -> RemoteSessionConnection {
         let demoMode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] ?? ""
         let isCodexFixture = demoMode == "terminal-ansi"
@@ -875,7 +946,7 @@ final class RemoteSessionConnection: ObservableObject {
             id: "f50c77da-5716-470b-933c-d68310644b4f",
             title: "\(agentName) · AnotherTerminal",
             agentKind: isCodexFixture ? "codex" : "claude",
-            surface: "terminal",
+            surface: .terminal,
             state: "running",
             projectName: "AnotherTerminal"
         )
@@ -885,7 +956,7 @@ final class RemoteSessionConnection: ObservableObject {
             client: RemoteClient(link: link)
         )
         connection.phase = .connected
-        connection.surface = "terminal"
+        connection.surface = .terminal
         connection.capability = .interact
         let usesThreadingTheme = ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"]
             == "threading"
@@ -901,6 +972,7 @@ final class RemoteSessionConnection: ObservableObject {
         connection.supportsAtomicTerminalSubmission = true
         connection.supportsAttentionRequests = true
         connection.supportsFocusedInputControl = true
+        connection.inputControl = ownerOnlyInputControlState()
         let lines: [String]
         switch demoMode {
         case "terminal-ansi":
@@ -1011,7 +1083,7 @@ final class RemoteSessionConnection: ObservableObject {
             memberID: "member-anna",
             displayName: "Anna",
             deviceName: "iPhone",
-            surface: "terminal",
+            surface: .terminal,
             state: "typing"
         )
         let ipad = RemotePresenceDTO(
@@ -1019,7 +1091,7 @@ final class RemoteSessionConnection: ObservableObject {
             memberID: "member-david",
             displayName: "David",
             deviceName: "iPad",
-            surface: "terminal",
+            surface: .terminal,
             state: "viewing"
         )
         connection.presence = [anna.id: anna, ipad.id: ipad]
@@ -1069,7 +1141,7 @@ final class RemoteSessionConnection: ObservableObject {
             id: "5de80220-2172-4fbe-8ed7-a707572fc922",
             title: "Review the new remote access feature",
             agentKind: "codex",
-            surface: "conversation",
+            surface: .conversation,
             state: "idle",
             projectName: "AnotherTerminal"
         )
@@ -1079,11 +1151,12 @@ final class RemoteSessionConnection: ObservableObject {
             client: RemoteClient(link: link)
         )
         connection.phase = .connected
-        connection.surface = "conversation"
+        connection.surface = .conversation
         connection.capability = .interact
         connection.serverFeatures = Set(RemoteWebSocketFeature.allCases.map(\.rawValue))
         connection.supportsAttentionRequests = true
         connection.supportsFocusedInputControl = true
+        connection.inputControl = ownerOnlyInputControlState()
         switch environment["THREADING_MOBILE_THEME"] {
         case "light":
             connection.theme = RemoteAppModel.demoLightTheme
@@ -1437,7 +1510,7 @@ final class RemoteSessionConnection: ObservableObject {
                 memberID: "member-anna",
                 displayName: "Anna",
                 deviceName: "Anna’s iPhone",
-                surface: "conversation",
+                surface: .conversation,
                 state: "typing"
             )
             let ipad = RemotePresenceDTO(
@@ -1445,7 +1518,7 @@ final class RemoteSessionConnection: ObservableObject {
                 memberID: "owner-ipad",
                 displayName: "David’s iPad",
                 deviceName: "David’s iPad",
-                surface: "conversation",
+                surface: .conversation,
                 state: "viewing"
             )
             connection.presence = [anna.id: anna, ipad.id: ipad]

@@ -99,6 +99,18 @@ enum AccountBadge {
         AccountAvatarStore.cachedEmail(for: account) ?? account.id.rawValue
     }
 
+    /// The disc's hue as a fraction of the wheel.
+    ///
+    /// Public because a remote client draws this chip too, from `RemoteSessionAccountDTO`, and the
+    /// two must agree by construction rather than by two copies of the same hash.
+    static func hue(for account: AgentAccount) -> CGFloat {
+        hue(seed: colourSeed(for: account))
+    }
+
+    private static func hue(seed: String) -> CGFloat {
+        CGFloat(GeneratedProjectIcon.stableHash(seed) % 360) / 360
+    }
+
     private static func drawEmoji(_ emoji: String) -> NSImage {
         chipImage { bounds in
             drawCentred(
@@ -125,9 +137,8 @@ enum AccountBadge {
     /// less area to make its colour read than a 16pt tile, and the letter is what the chip
     /// is *for*.
     private static func drawInitial(_ glyph: String, seed: String) -> NSImage {
-        let hue = CGFloat(GeneratedProjectIcon.stableHash(seed) % 360) / 360
         let fill = NSColor(
-            hue: hue,
+            hue: hue(seed: seed),
             saturation: AccountBadgeDefaults.saturation,
             brightness: AccountBadgeDefaults.brightness,
             alpha: 1

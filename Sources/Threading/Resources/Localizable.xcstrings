@@ -3727,6 +3727,21 @@
     "New shared chats": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nya delade chattar" } } }
     },
+    "Reports from your phone": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Rapporter från din telefon" } } }
+    },
+    "Shake to report, then Send to Mac, starts a chat here while you are away from it. Its own workspace keeps that chat out of the checkout you left open. Available for a Git project whose agent has session tools.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skaka för att rapportera och sedan Skicka till Mac startar en chatt här medan du är borta från den. En egen arbetsyta håller chatten utanför utcheckningen du lämnade öppen. Tillgängligt för ett Git-projekt vars agent har sessionsverktyg." } } }
+    },
+    "The project’s own checkout": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Projektets egen utcheckning" } } }
+    },
+    "Their own workspace, merged when finished": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En egen arbetsyta, sammanfogad när den är klar" } } }
+    },
+    "Their own workspace, kept for review": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En egen arbetsyta, sparad för granskning" } } }
+    },
     "Online": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Online" } } }
     },

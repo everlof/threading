@@ -208,6 +208,10 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "remoteInputControlDefault",
                 valueType: .string
             ),
+            .phoneReportWorkspace: .init(
+                key: "phoneReportWorkspace",
+                valueType: .string
+            ),
             .automaticUpdateChecksEnabled: .init(
                 key: "automaticUpdateChecksEnabled",
                 valueType: .boolean
@@ -335,7 +339,7 @@ final class AppSettingDefinitionTests: XCTestCase {
     @MainActor
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
-        XCTAssertEqual(authoredRows.count, 74)
+        XCTAssertEqual(authoredRows.count, 75)
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
             authoredRows.count
@@ -394,7 +398,7 @@ final class AppSettingDefinitionTests: XCTestCase {
         ])
         XCTAssertEqual(actual["remote-access"], [
             "Remote Access", "Connection", "Hosted Direct", "Owner Relay Fallback",
-            "Keep Sharing Relay Ready", "New shared chats"
+            "Keep Sharing Relay Ready", "New shared chats", "Reports from your phone"
         ])
         XCTAssertEqual(actual["github"], ["Client ID", "gh CLI", "Git credential helper"])
         XCTAssertEqual(actual["privacy"], [

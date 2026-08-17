@@ -207,7 +207,7 @@ final class RemoteProtocolTests: XCTestCase {
             memberID: "member-1",
             displayName: "Kalle",
             deviceName: "Kalle’s iPhone",
-            surface: "conversation",
+            surface: .conversation,
             state: "typing",
             updatedAt: 123
         )
@@ -305,7 +305,7 @@ final class RemoteProtocolTests: XCTestCase {
             serverProtocol: RemoteProtocolInfo(),
             share: .init(label: "l", scope: "all", capability: "interact", expiresAt: nil),
             sessions: [RemoteSessionSummaryDTO(
-                id: "s", title: "t", agentKind: "claude", surface: "terminal",
+                id: "s", title: "t", agentKind: "claude", surface: .terminal,
                 state: "idle", projectName: "p", isAvailable: false, lastActiveAt: 123,
                 isPinned: true,
                 terminalTheme: terminalTheme,
@@ -397,7 +397,7 @@ final class RemoteProtocolTests: XCTestCase {
             id: "s",
             title: "Session",
             agentKind: "codex",
-            surface: "conversation",
+            surface: .conversation,
             state: "working",
             projectName: "Project",
             snoozedAt: start,
@@ -553,7 +553,7 @@ final class RemoteProtocolTests: XCTestCase {
                 id: "session-1",
                 title: "Changed",
                 agentKind: "codex",
-                surface: "conversation",
+                surface: .conversation,
                 state: "working",
                 projectName: "Threading"
             )
@@ -627,7 +627,7 @@ final class RemoteProtocolTests: XCTestCase {
         )
 
         let hello = RemoteHelloDTO(
-            surface: "conversation",
+            surface: .conversation,
             capability: "interact",
             cols: 0,
             rows: 0,
@@ -747,7 +747,7 @@ final class RemoteProtocolTests: XCTestCase {
             reasoningEffort: "high",
             fastMode: true,
             permissionMode: "acceptEdits",
-            surface: "conversation",
+            surface: .conversation,
             prompt: "Review remote access"
         )
         XCTAssertEqual(
@@ -799,7 +799,7 @@ final class RemoteProtocolTests: XCTestCase {
             ),
             snoozed
         )
-        let surface = RemoteSetSessionSurfaceRequestDTO(surface: "conversation")
+        let surface = RemoteSetSessionSurfaceRequestDTO(surface: .conversation)
         XCTAssertEqual(
             try JSONDecoder().decode(
                 RemoteSetSessionSurfaceRequestDTO.self,

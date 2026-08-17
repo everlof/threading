@@ -614,7 +614,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             isOwnerDevice: false,
             capability: .interact,
             canApprovePermissions: false,
-            surface: "terminal",
+            surface: .terminal,
             viewport: (cols: 46, rows: 35),
             watchingSince: Date(),
             isTyping: false
@@ -680,7 +680,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 isOwnerDevice: true,
                 capability: .interact,
                 canApprovePermissions: true,
-                surface: "conversation",
+                surface: .conversation,
                 viewport: nil,
                 watchingSince: Date(timeIntervalSinceNow: -180),
                 isTyping: false
@@ -694,7 +694,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 isOwnerDevice: false,
                 capability: .interact,
                 canApprovePermissions: false,
-                surface: "terminal",
+                surface: .terminal,
                 viewport: (cols: 46, rows: 35),
                 watchingSince: Date(timeIntervalSinceNow: -90),
                 isTyping: true
@@ -1058,7 +1058,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         let create = try JSONEncoder().encode(RemoteCreateSessionRequestDTO(
             projectID: project.id.uuidString,
             agentKind: AgentKind.codex.rawValue,
-            surface: "terminal",
+            surface: .terminal,
             prompt: "Inspect the dependency boundary"
         ))
 
@@ -1095,6 +1095,107 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertTrue(runtimeStatus.runningSessionIDs.contains(dormant.id))
     }
 
+    /// A phone may ask for the isolated worktree the Mac offered it, and nothing else.
+    ///
+    /// The offer itself is made in the catalogue, where the owner's setting is read; this is the
+    /// door it comes back through, and it trusts the request no more than any other. The
+    /// refusals matter more than the acceptance: a workspace that could not be delivered would
+    /// otherwise be discovered as a failed provision after the session record existed.
+    func testAnIsolatedWorkspaceIsAcceptedOnlyWhereItCouldBeDelivered() throws {
+        let plain = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-workspace-plain-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let repository = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-workspace-repo-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: plain, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: plain)
+            try? FileManager.default.removeItem(at: repository)
+        }
+        _ = try GitProcess.run(["init", "--quiet"], in: repository)
+
+        let plainProject = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: plain))
+        let gitProject = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: repository))
+        sessionCommands.createdSessionID = SessionID()
+
+        func create(
+            in projectID: ProjectID,
+            workspace: RemoteManagedWorkspacePlanDTO?
+        ) throws -> Int {
+            let body = try JSONEncoder().encode(RemoteCreateSessionRequestDTO(
+                projectID: projectID.uuidString,
+                agentKind: AgentKind.codex.rawValue,
+                surface: .terminal,
+                managedWorkspace: workspace,
+                prompt: "Look at the report"
+            ))
+            return try XCTUnwrap(post("/api/session", bearer: "goodtoken", body: body)).status
+        }
+
+        // Nothing to branch from: the report is still worth more than the workspace, but that
+        // decision belongs to the catalogue, which never offers one here. A request anyway is a
+        // client asking for something this Mac cannot do.
+        XCTAssertEqual(
+            try create(
+                in: plainProject.id,
+                workspace: RemoteManagedWorkspacePlanDTO(delivery: "mergeAndCleanUp")
+            ),
+            422,
+            "a worktree was accepted for a folder with no Git checkout"
+        )
+
+        XCTAssertEqual(
+            try create(in: gitProject.id, workspace: RemoteManagedWorkspacePlanDTO(
+                delivery: "rebaseOntoMain"
+            )),
+            422,
+            "an unrecognised delivery was accepted rather than refused"
+        )
+
+        // Publishing is a decision made while looking at the repository. A phone in somebody's
+        // pocket does not open change requests.
+        XCTAssertEqual(
+            try create(in: gitProject.id, workspace: RemoteManagedWorkspacePlanDTO(
+                delivery: "mergeAndCleanUp",
+                publication: "draft"
+            )),
+            422,
+            "a phone was allowed to publish a change request"
+        )
+
+        XCTAssertTrue(
+            sessionCommands.launches.isEmpty,
+            "a refused workspace still reached the application"
+        )
+
+        // The plain request keeps working exactly as it did before the field existed.
+        XCTAssertEqual(try create(in: gitProject.id, workspace: nil), 201)
+        XCTAssertNil(
+            try XCTUnwrap(sessionCommands.launches.last).managedWorkspacePlan,
+            "a session nobody asked to isolate was given a worktree"
+        )
+
+        try XCTSkipUnless(
+            ManagedWorkspaceEligibility.supportsFinishHandshake(kind: .codex, usesNativeUI: false),
+            "this build cannot hand a terminal session the session tools"
+        )
+        XCTAssertEqual(
+            try create(in: gitProject.id, workspace: RemoteManagedWorkspacePlanDTO(
+                delivery: "keepForReview"
+            )),
+            201
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(sessionCommands.launches.last).managedWorkspacePlan?.delivery,
+            .keepForReview,
+            "the delivery the phone asked for did not survive the door"
+        )
+    }
+
     func testSessionRefreshesRouteThroughInjectedApplicationCommands() throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
             "remote-session-refresh-\(UUID().uuidString)",
@@ -1126,7 +1227,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(sessionAccess.pinnedMutations.last?.isPinned, true)
 
         let surface = try JSONEncoder().encode(
-            RemoteSetSessionSurfaceRequestDTO(surface: "conversation")
+            RemoteSetSessionSurfaceRequestDTO(surface: .conversation)
         )
         XCTAssertEqual(
             try XCTUnwrap(post(
@@ -1225,7 +1326,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         let create = try JSONEncoder().encode(RemoteCreateSessionRequestDTO(
             projectID: UUID().uuidString,
             agentKind: "codex",
-            surface: "conversation",
+            surface: .conversation,
             prompt: "Do work"
         ))
         XCTAssertEqual(
@@ -1388,7 +1489,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             403
         )
         let surface = try JSONEncoder().encode(
-            RemoteSetSessionSurfaceRequestDTO(surface: "conversation")
+            RemoteSetSessionSurfaceRequestDTO(surface: .conversation)
         )
         XCTAssertEqual(
             try XCTUnwrap(post(

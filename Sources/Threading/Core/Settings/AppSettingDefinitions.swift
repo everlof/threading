@@ -58,6 +58,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case remoteAccessAllowsOwnerRelayFallback
     case remoteAccessKeepsRelayReady
     case remoteInputControlDefault
+    case phoneReportWorkspace
     case automaticUpdateChecksEnabled
     case preventsIdleSystemSleepWhileAgentsWork
     case workingOrbStyle
@@ -996,6 +997,14 @@ enum AppSettingDefinitions {
         presentations: [row("remote-access", 4, "Connection", "Keep Sharing Relay Ready",
                             ["relay", "share links"])]
     )
+    static let phoneReportWorkspace = AppSettingDescriptor<String>(
+        identity: .phoneReportWorkspace,
+        persistenceKey: "phoneReportWorkspace",
+        absence: .registered(PhoneReportWorkspacePolicy.sameCheckout.rawValue),
+        validation: .allowedStrings(Set(PhoneReportWorkspacePolicy.allCases.map(\.rawValue))),
+        presentations: [row("remote-access", 6, "Sharing & Security", "Reports from your phone",
+                            ["shake", "report", "worktree", "workspace", "isolated"])]
+    )
     static let remoteInputControlDefault = AppSettingDescriptor<String>(
         identity: .remoteInputControlDefault,
         persistenceKey: "remoteInputControlDefault",
@@ -1093,6 +1102,7 @@ enum AppSettingDefinitions {
         .init(defaultPermissionMode), .init(remoteAccessEnabled),
         .init(remoteAccessConnectionMode), .init(remoteAccessAllowsOwnerRelayFallback),
         .init(remoteAccessKeepsRelayReady), .init(remoteInputControlDefault),
+        .init(phoneReportWorkspace),
         .init(automaticUpdateChecksEnabled), .init(preventsIdleSystemSleepWhileAgentsWork),
         .init(workingOrbStyle),
         .init(chatNameMorphStyle), .init(chromeFontFamily), .init(conversationFontFamily),

@@ -826,7 +826,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               creation.model.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
               creation.reasoningEffort.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
               creation.permissionMode.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
-              creation.surface == "terminal" || creation.surface == "conversation" else {
+              creation.surface.isKnown else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
@@ -882,10 +882,33 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     return
                 }
             }
-            let usesNativeUI = creation.surface == "conversation"
+            let usesNativeUI = creation.surface == .conversation
             guard !usesNativeUI || kind.supportsNativeUI else {
                 respond(.respond(RemoteRouter.error(422, "Unsupported Surface")))
                 return
+            }
+
+            // An isolated workspace is checked the same way the composer's checkbox is gated,
+            // rather than being discovered as a failed provision after the session record
+            // exists: the checkout has to be able to host a worktree, and the agent has to be
+            // able to hand it back. Publication is refused outright — opening a change request
+            // is a decision made while looking at the repository, not one a phone may post.
+            let managedWorkspacePlan: ManagedWorkspacePlan?
+            if let requested = creation.managedWorkspace {
+                guard let delivery = ManagedWorkspaceDelivery(rawValue: requested.delivery),
+                      requested.publication == nil,
+                      let project = self.services.sessionQueries.project(withID: projectID),
+                      ManagedGitWorkspace.canProvision(from: project),
+                      ManagedWorkspaceEligibility.supportsFinishHandshake(
+                          kind: kind,
+                          usesNativeUI: usesNativeUI
+                      ) else {
+                    respond(.respond(RemoteRouter.error(422, "Unsupported Workspace")))
+                    return
+                }
+                managedWorkspacePlan = ManagedWorkspacePlan(delivery: delivery)
+            } else {
+                managedWorkspacePlan = nil
             }
 
             let launch = RemoteSessionLaunch(
@@ -897,6 +920,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 fastMode: creation.fastMode,
                 permissionMode: permissionMode,
                 usesNativeUI: usesNativeUI,
+                managedWorkspacePlan: managedWorkspacePlan,
                 prompt: prompt
             )
             guard let sessionID = self.sessionCommands?.startRemoteSession(launch) else {
@@ -1476,7 +1500,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         guard let choice = try? JSONDecoder().decode(
             RemoteSetSessionSurfaceRequestDTO.self,
             from: request.body
-        ), choice.surface == "terminal" || choice.surface == "conversation" else {
+        ), choice.surface.isKnown else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
@@ -1487,7 +1511,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
-            let usesNativeUI = choice.surface == "conversation"
+            let usesNativeUI = choice.surface == .conversation
             guard !usesNativeUI || session.kind.supportsNativeUI else {
                 respond(.respond(RemoteRouter.error(422, "Unsupported Surface")))
                 return
@@ -1520,7 +1544,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
             self.services.eventLog.recordRemoteEvent("Session UI changed remotely", [
                 "session": sessionID.uuidString,
-                "surface": choice.surface,
+                "surface": choice.surface.rawValue,
                 "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
             respond(.respond(RemoteRouter.json(

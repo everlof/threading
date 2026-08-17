@@ -80,6 +80,7 @@ struct TerminalKeyBar: View {
     let customize: () -> Void
     @EnvironmentObject private var keyboards: MobileTerminalKeyboardStore
     @Environment(\.remoteTheme) private var theme
+    @State private var isKeyboardVisible = false
 
     private enum Metrics {
         static let keyHeight: CGFloat = 34
@@ -103,14 +104,15 @@ struct TerminalKeyBar: View {
                 .fill(theme.divider)
                 .frame(width: theme.borderWidth, height: Metrics.keyHeight)
 
+            if isKeyboardVisible {
+                Button(action: Self.dismissKeyboard) {
+                    trailingIcon("keyboard.chevron.compact.down")
+                }
+                .accessibilityLabel(MobileL10n.string("Hide keyboard"))
+            }
+
             Button(action: customize) {
-                Image(systemName: "keyboard.badge.ellipsis")
-                    .font(.subheadline)
-                    .foregroundStyle(theme.secondaryLabel)
-                    .frame(
-                        width: MobileDesign.Size.minimumTapTarget,
-                        height: Metrics.keyHeight
-                    )
+                trailingIcon("keyboard.badge.ellipsis")
             }
             .accessibilityLabel(MobileL10n.string("Customize keys"))
         }
@@ -118,6 +120,39 @@ struct TerminalKeyBar: View {
         .overlay(alignment: .top) {
             Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
         }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillShowNotification
+            )
+        ) { _ in isKeyboardVisible = true }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillHideNotification
+            )
+        ) { _ in isKeyboardVisible = false }
+    }
+
+    private func trailingIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.subheadline)
+            .foregroundStyle(theme.secondaryLabel)
+            .frame(
+                width: MobileDesign.Size.minimumTapTarget,
+                height: Metrics.keyHeight
+            )
+    }
+
+    /// The terminal is a first responder rather than a focusable SwiftUI field, so there is no
+    /// `@FocusState` to clear. SwiftTerm's own accessory used to carry the way back from the
+    /// keyboard; this bar replaces that accessory, so it carries the control too.
+    @MainActor
+    private static func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
     }
 
     private var canSend: Bool {

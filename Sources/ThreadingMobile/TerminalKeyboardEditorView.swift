@@ -4,13 +4,7 @@ import ThreadingRemoteKit
 /// The display name a key-bar surface uses for an agent kind. The wire sends the raw kind
 /// string; anything unknown keeps a readable capitalized form rather than disappearing.
 func terminalKeyboardAgentName(for agentKind: String) -> String {
-    switch agentKind {
-    case "claude": return "Claude Code"
-    case "codex": return "Codex"
-    case "grok": return "Grok"
-    case "opencode": return "OpenCode"
-    default: return agentKind.capitalized
-    }
+    MobileAgentIdentity.resolve(agentKind).displayName
 }
 
 /// The sheet the key bar opens: the editor content under its own navigation stack, with
@@ -156,8 +150,6 @@ struct TerminalKeyboardEditorContent: View {
         .background(theme.ground)
         .navigationTitle(MobileL10n.string("Terminal Keys"))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(theme.surface, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { EditButton() }
         }

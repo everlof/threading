@@ -61,14 +61,14 @@ private enum DashboardSessionAction {
     case archive
     case restore
     case snooze(Date?)
-    case surface(String)
+    case surface(RemoteSessionSurface)
     case share
     case stopSharing
 }
 
 private struct SurfaceChangeRequest {
     let session: RemoteSessionSummaryDTO
-    let surface: String
+    let surface: RemoteSessionSurface
 }
 
 struct SharedSessionLink: Identifiable {
@@ -183,7 +183,7 @@ struct SessionDashboard: View {
                         )
                     }
                 } else {
-                    LazyVStack(spacing: 10) {
+                    LazyVStack(spacing: MobileDesign.Spacing.small) {
                         ForEach(sessions) { session in
                             SessionListItem(
                                 session: session,
@@ -418,7 +418,10 @@ struct SessionDashboard: View {
                 }
             } label: {
                 Image(systemName: "line.3.horizontal")
-                    .frame(width: 34, height: 34)
+                    .frame(
+                        width: MobileDesign.Size.compactControl,
+                        height: MobileDesign.Size.compactControl
+                    )
                     .background(theme.controlResting, in: Circle())
             }
             .accessibilityLabel("Choose Mac")
@@ -432,7 +435,10 @@ struct SessionDashboard: View {
                 showsNewSession = true
             } label: {
                 Image(systemName: "plus")
-                    .frame(width: 34, height: 34)
+                    .frame(
+                        width: MobileDesign.Size.compactControl,
+                        height: MobileDesign.Size.compactControl
+                    )
                     .background(theme.controlResting, in: Circle())
             }
             .accessibilityLabel("New session")
@@ -526,7 +532,10 @@ struct SessionDashboard: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .frame(width: 34, height: 34)
+                    .frame(
+                        width: MobileDesign.Size.compactControl,
+                        height: MobileDesign.Size.compactControl
+                    )
                     .background(theme.controlResting, in: Circle())
             }
             .accessibilityLabel("Remote access options")
@@ -593,11 +602,14 @@ struct SessionDashboard: View {
         }
     }
 
-    private func surfaceTitle(_ surface: String, session: RemoteSessionSummaryDTO) -> String {
-        if surface == "conversation" {
+    private func surfaceTitle(
+        _ surface: RemoteSessionSurface,
+        session: RemoteSessionSummaryDTO
+    ) -> String {
+        if surface == .conversation {
             return MobileL10n.string("Native (Experimental)")
         }
-        return MobileL10n.string(session.agentKind == "claude" ? "Claude Code UI" : "Codex UI")
+        return MobileAgentIdentity.resolve(session.agentKind).originalUITitle
     }
 
     private var sharingDialogMessage: String {
@@ -705,23 +717,10 @@ struct SessionDashboard: View {
     }
 
     private func projectNewSessionButton(project: String?) -> some View {
-        Button {
+        NewSessionButton(accessibilityLabel: MobileL10n.string("New session")) {
             newSessionProjectName = project
             showsNewSession = true
-        } label: {
-            Label("New", systemImage: "plus")
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, MobileDesign.Spacing.small)
-                .frame(minHeight: 34)
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(theme.accent)
-        .background(theme.controlResting, in: RoundedRectangle(cornerRadius: theme.controlRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: theme.controlRadius)
-                .strokeBorder(theme.border, lineWidth: theme.borderWidth)
-        }
-        .accessibilityLabel("New session")
     }
 
     private var statusColor: Color {
@@ -828,6 +827,40 @@ private struct DashboardMacPickerView: View {
     }
 }
 
+/// Starts a chat, in a project header or beside the connection card.
+///
+/// It carries no caption. The word sat next to a plus in a header that already names the
+/// project, which said the same thing twice and pushed the folder name into truncation on a
+/// phone-width row; the glyph alone is the same control the toolbar shows.
+struct NewSessionButton: View {
+    let accessibilityLabel: String
+    let action: () -> Void
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "plus")
+                .font(.subheadline.weight(.semibold))
+                .frame(
+                    width: MobileDesign.Size.compactControl,
+                    height: MobileDesign.Size.compactControl
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(theme.accent)
+        .background(
+            theme.controlResting,
+            in: RoundedRectangle(cornerRadius: theme.controlRadius)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.controlRadius)
+                .strokeBorder(theme.border, lineWidth: theme.borderWidth)
+        }
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
 private struct ProjectSessionGroup: View {
     let project: String
     let sessions: [RemoteSessionSummaryDTO]
@@ -846,26 +879,13 @@ private struct ProjectSessionGroup: View {
                     .foregroundStyle(theme.label)
                 Spacer()
                 if showsActions, !isArchived {
-                    Button(action: startNewSession) {
-                        Label("New", systemImage: "plus")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, MobileDesign.Spacing.small)
-                            .frame(minHeight: 34)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(theme.accent)
-                    .background(
-                        theme.controlResting,
-                        in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                    NewSessionButton(
+                        accessibilityLabel: MobileL10n.string("New session in %@", project),
+                        action: startNewSession
                     )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: theme.controlRadius)
-                            .strokeBorder(theme.border, lineWidth: theme.borderWidth)
-                    }
-                    .accessibilityLabel("New session in \(project)")
                 }
             }
-            VStack(spacing: 10) {
+            VStack(spacing: MobileDesign.Spacing.small) {
                 ForEach(sessions) { session in
                     SessionListItem(
                         session: session,
@@ -887,8 +907,8 @@ enum MobileSessionNavigationTransition: Equatable {
     /// A terminal transition cannot manufacture intermediate widths. Every width becomes a
     /// SwiftTerm grid, a remote viewport lease, a PTY resize and a full-screen agent repaint.
     /// Native conversations own width-independent rows and keep the platform transition.
-    static func forSurface(_ surface: String) -> Self {
-        surface == "terminal" ? .immediate : .standard
+    static func forSurface(_ surface: RemoteSessionSurface) -> Self {
+        surface == .terminal ? .immediate : .standard
     }
 }
 
@@ -992,24 +1012,22 @@ private struct SessionListItem: View {
             }
             Section("Interface") {
                 Button {
-                    action(.surface("conversation"), session)
+                    action(.surface(.conversation), session)
                 } label: {
                     Label(
                         "Native",
-                        systemImage: session.surface == "conversation"
+                        systemImage: session.surface == .conversation
                             ? "checkmark"
                             : "bubble.left.and.bubble.right"
                     )
                 }
                 .accessibilityLabel("Native, experimental")
                 Button {
-                    action(.surface("terminal"), session)
+                    action(.surface(.terminal), session)
                 } label: {
                     Label(
-                        MobileL10n.string(session.agentKind == "claude"
-                            ? "Claude Code UI"
-                            : "Codex UI"),
-                        systemImage: session.surface == "terminal"
+                        MobileAgentIdentity.resolve(session.agentKind).originalUITitle,
+                        systemImage: session.surface == .terminal
                             ? "checkmark"
                             : "terminal"
                     )
@@ -1115,65 +1133,114 @@ struct SharedSessionLinkView: View {
     }
 }
 
+enum MobileSessionAgeFormat {
+    private static let relativeCutoff: TimeInterval = 7 * 24 * 60 * 60
+
+    /// A compact age whose direction is stated as language rather than as a signed quantity.
+    ///
+    /// `RelativeDateTimeFormatter.UnitsStyle.abbreviated` renders yesterday as `−1 d` in
+    /// Swedish. That is a valid quantity, but it reads as broken beside the session title and
+    /// unlike the rest of Threading's relative-time vocabulary. `.short` retains compact units
+    /// while spelling the direction (`för 1 d sedan`, `1 day ago`).
+    static func string(
+        since date: Date,
+        relativeTo now: Date = Date(),
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        let seconds = max(0, now.timeIntervalSince(date))
+        if seconds < 60 { return MobileL10n.string("now") }
+        if seconds < relativeCutoff {
+            let formatter = RelativeDateTimeFormatter()
+            formatter.locale = locale
+            formatter.unitsStyle = .short
+            return formatter.localizedString(for: date, relativeTo: now)
+        }
+        return date.formatted(.dateTime.day().month(.abbreviated))
+    }
+}
+
+/// One chat in the dashboard list.
+///
+/// **The tile identifies the runtime, not the surface.** Every row used to draw `terminal`, because
+/// a natively rendered conversation is still the experimental opt-in and everything else is the
+/// agent's own TUI mirrored from the Mac — so a list of Claude and Codex chats looked like a list of
+/// shells, and said nothing about which provider or which login each one was on. It now carries the
+/// same two facts the Mac sidebar carries, the same way: the provider's mark, with an alternate
+/// account's chip on its corner. `MobileAgentIdentity` holds that vocabulary.
+///
+/// **It is two lines high, and stays two lines high.** A three-line title plus a 46-point tile put
+/// rows between 74 and 110 points, which is a card, not a list row: five chats filled the screen.
+/// The title takes one line and the tile no longer sets the height, so the list is scannable and
+/// every row is the same height. The full title is one tap away in the session's own screen.
 private struct SessionRow: View {
     let session: RemoteSessionSummaryDTO
     var showsChevron = true
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
-        HStack(spacing: 13) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 13).fill(theme.controlResting)
-                Image(systemName: session.surface == "conversation" ? "text.bubble" : "terminal")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(theme.secondaryLabel)
-            }
-            .frame(width: 46, height: 46)
+        HStack(spacing: MobileDesign.Spacing.medium) {
+            MobileSessionMark(
+                agentKind: session.agentKind,
+                account: session.account,
+                isDimmed: !session.isAvailable || session.isArchived
+            )
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
                 Text(session.title)
-                    .font(.body.weight(.medium))
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .layoutPriority(1)
-                HStack(spacing: 5) {
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(theme.label)
+                HStack(spacing: MobileDesign.Spacing.tight) {
+                    // Decorative: the state it stands for is spelled in the words beside it, and a
+                    // second reading of "Disconnected" is noise in a row VoiceOver already reads.
                     Image(systemName: session.isAvailable
                         ? "laptopcomputer"
                         : "laptopcomputer.slash")
-                    Text("\(availabilityLabel) · \(surfaceLabel)")
+                        .foregroundStyle(stateStyle)
+                        .accessibilityHidden(true)
+                    // The surface is a glyph and the runtime is the mark, because spelling both in
+                    // words cost about ninety points and truncated the one fact the row gained: the
+                    // line read "Connected · Claude Code UI · Ver…" while the tile was already
+                    // showing Claude's mark. `terminal` here means a terminal — the runtime's own
+                    // TUI, mirrored from the Mac — and the mark beside it says whose.
+                    Image(systemName: session.surface == .conversation
+                        ? "text.bubble"
+                        : "terminal")
+                        .foregroundStyle(theme.tertiaryLabel)
+                        .accessibilityLabel(surfaceLabel)
+                    metaText
                 }
-                .font(.caption)
-                .foregroundStyle(
-                    session.isAvailable && !session.isArchived
-                        ? theme.positive
-                        : theme.secondaryLabel
-                )
+                .font(.caption2)
                 .lineLimit(1)
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: MobileDesign.Spacing.small) {
+
+            Spacer(minLength: MobileDesign.Spacing.tight)
+
+            HStack(spacing: MobileDesign.Spacing.tight) {
                 if session.isPinned {
                     Image(systemName: "pin.fill")
                         .font(.caption2)
                         .foregroundStyle(theme.accent)
                         .accessibilityLabel("Pinned")
                 }
-                Spacer(minLength: 0)
                 if let lastActiveAt = session.lastActiveAt {
-                    Text(compactAge(since: Date(timeIntervalSince1970: lastActiveAt)))
+                    Text(MobileSessionAgeFormat.string(
+                        since: Date(timeIntervalSince1970: lastActiveAt)
+                    ))
                         .font(.caption2)
                         .foregroundStyle(theme.tertiaryLabel)
                         .fixedSize()
                 }
-            }
-            if showsChevron {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(theme.tertiaryLabel)
+                if showsChevron {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(theme.tertiaryLabel)
+                }
             }
         }
-        .padding(14)
+        .padding(.horizontal, MobileDesign.Spacing.medium)
+        .padding(.vertical, MobileDesign.Spacing.small)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
         .overlay(
@@ -1183,9 +1250,35 @@ private struct SessionRow: View {
         .remoteThemeGlow(theme)
         .overlay(alignment: .topLeading) {
             if session.state == "needsAttention" {
-                Circle().fill(theme.warning).frame(width: 8, height: 8).offset(x: 42, y: -2)
+                Circle()
+                    .fill(theme.warning)
+                    .frame(
+                        width: MobileDesign.Size.rowAttentionDot,
+                        height: MobileDesign.Size.rowAttentionDot
+                    )
+                    // On the mark's top-trailing corner: the account chip owns the other one, and
+                    // both facts belong to the tile they are badging.
+                    .offset(
+                        x: MobileDesign.Spacing.medium
+                            + MobileDesign.Size.rowMark
+                            - MobileDesign.Size.rowAttentionDot / 2,
+                        y: MobileDesign.Spacing.small
+                            - MobileDesign.Size.rowAttentionDot / 2
+                    )
             }
         }
+    }
+
+    /// The state in its own colour, then the login when it is not the CLI's default one. One `Text`,
+    /// so a long account name truncates the line rather than pushing the age out of the row.
+    private var metaText: Text {
+        let state = Text(availabilityLabel).foregroundStyle(stateStyle)
+        guard let account = session.account else { return state }
+        return state + Text(" · " + account.name).foregroundStyle(theme.secondaryLabel)
+    }
+
+    private var stateStyle: Color {
+        session.isAvailable && !session.isArchived ? theme.positive : theme.secondaryLabel
     }
 
     private var stateLabel: String {
@@ -1208,20 +1301,11 @@ private struct SessionRow: View {
         return session.isAvailable ? stateLabel : MobileL10n.string("Disconnected")
     }
 
+    /// What you are looking at, not who is talking — the mark already says that. A terminal surface
+    /// is named after the runtime's own TUI, so it can never be read as a plain shell.
     private var surfaceLabel: String {
-        if session.surface == "conversation" { return MobileL10n.string("Native") }
-        return MobileL10n.string(session.agentKind == "claude" ? "Claude Code UI" : "Codex UI")
-    }
-
-    private func compactAge(since date: Date) -> String {
-        let seconds = max(0, Date().timeIntervalSince(date))
-        if seconds < 60 { return MobileL10n.string("now") }
-        if seconds < 604_800 {
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .abbreviated
-            return formatter.localizedString(for: date, relativeTo: Date())
-        }
-        return date.formatted(.dateTime.day().month(.abbreviated))
+        if session.surface == .conversation { return MobileL10n.string("Native") }
+        return MobileAgentIdentity.resolve(session.agentKind).originalUITitle
     }
 }
 
@@ -1237,7 +1321,7 @@ struct NewRemoteSessionView: View {
     @State private var speedID = ""
     @State private var permissionID = ""
     /// The agent's supported UI is the safe default; Native stays an explicit experimental opt-in.
-    @State private var surface = "terminal"
+    @State private var surface = RemoteSessionSurface.terminal
     @State private var prompt = ""
     @State private var isSubmitting = false
     @State private var errorMessage: String?
@@ -1446,7 +1530,7 @@ struct NewRemoteSessionView: View {
 
     private var launchOverview: some View {
         VStack(spacing: MobileDesign.Spacing.medium) {
-            Image(systemName: surface == "conversation"
+            Image(systemName: surface == .conversation
                 ? "bubble.left.and.bubble.right.fill"
                 : "terminal.fill")
                 .font(.system(size: 34, weight: .light))
@@ -1578,26 +1662,26 @@ struct NewRemoteSessionView: View {
     private var surfaceMenu: some View {
         Menu {
             Button {
-                surface = "conversation"
+                surface = .conversation
             } label: {
                 Label(
                     "Native (Experimental)",
-                    systemImage: surface == "conversation"
+                    systemImage: surface == .conversation
                         ? "checkmark"
                         : "bubble.left.and.bubble.right"
                 )
             }
             Button {
-                surface = "terminal"
+                surface = .terminal
             } label: {
                 Label(
                     originalUISurfaceTitle,
-                    systemImage: surface == "terminal" ? "checkmark" : "terminal"
+                    systemImage: surface == .terminal ? "checkmark" : "terminal"
                 )
             }
         } label: {
             CompactChoiceLabel(
-                symbol: surface == "conversation"
+                symbol: surface == .conversation
                     ? "bubble.left.and.bubble.right"
                     : "terminal",
                 title: selectedSurfaceTitle
@@ -1613,7 +1697,7 @@ struct NewRemoteSessionView: View {
     }
 
     private var selectedSurfaceTitle: String {
-        surface == "conversation"
+        surface == .conversation
             ? MobileL10n.string("Native · Experimental")
             : originalUISurfaceTitle
     }
@@ -1804,7 +1888,7 @@ struct NewRemoteSessionView: View {
                 ?? accounts.first?.id
                 ?? ""
         }
-        if !selectedAgent.supportsConversation { surface = "terminal" }
+        if !selectedAgent.supportsConversation { surface = .terminal }
         if !(selectedAgent.permissionModes ?? []).contains(where: { $0.id == permissionID }) {
             permissionID = ""
         }

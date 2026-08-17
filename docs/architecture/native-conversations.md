@@ -921,6 +921,16 @@ submission keeps its PTY-before-replay-receipt ordering. `AppEnvironment` builds
 capability from its injected runtime and `AppDelegate` installs it before the listener starts;
 Core/Remote never obtains an `AgentSessionViewController`, `TerminalSession`, or window.
 
+The iOS input surface follows the host's participant roster, not the mere presence of protocol
+features. Input-control chrome and the atomic terminal-line composer appear only after another
+reply-capable participant identity has accepted access; an unused invitation and another device
+belonging to the same owner do not turn an owner-only terminal into collaboration UI. Owner-only
+terminals therefore type directly into SwiftTerm's target TUI. During reconnect, before a capable
+host has supplied its authoritative roster, and with an older host that cannot supply one, an
+enabled independent-draft setting conservatively keeps the atomic composer until the client can
+prove the session is owner-only. Accepted members who are away remain participants, so their
+temporary absence does not change input mode or hide a device-local draft.
+
 The iOS conversation is a UIKit route, not a SwiftUI composition around a UIKit timeline.
 `RemoteConversationViewController` owns the virtual collection, composer, command/skill results,
 presence, input authority, submission receipts and keyboard constraint. It subscribes to the

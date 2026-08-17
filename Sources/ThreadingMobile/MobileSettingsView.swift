@@ -271,8 +271,9 @@ struct CollaborationSettingsView: View {
 
                 Text(MobileL10n.string(
                     """
-                    Presence stays inside the live session. Independent drafts keep devices \
-                    from mixing keystrokes in the same terminal.
+                    Presence stays inside the live session. Independent drafts keep people from \
+                    mixing keystrokes once someone else joins; owner-only terminals always type \
+                    directly in the TUI.
                     """
                 ))
                 .font(.footnote)
@@ -308,19 +309,11 @@ struct MacAppearanceSettingsView: View {
                                 .overlay {
                                     Circle().stroke(theme.border, lineWidth: theme.borderWidth)
                                 }
-                            Text(option.name)
-                                .foregroundStyle(theme.label)
-                            Spacer()
-                            if pendingThemeID == option.id {
-                                ProgressView().controlSize(.small)
-                            } else if model.me?.theme?.id == option.id {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(theme.accent)
                             }
                         }
+                        .buttonStyle(.plain)
+                        .disabled(pendingThemeID != nil)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(pendingThemeID != nil)
                 }
             }
 

@@ -29,6 +29,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             font: UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         )
         view.terminalDelegate = context.coordinator
+        view.dropBuiltInKeyboardAccessory()
         view.autocorrectionType = .no
         view.autocapitalizationType = .none
         view.smartQuotesType = .no
@@ -262,6 +263,16 @@ final class RemoteTerminalView: TerminalView {
 
     override var canBecomeFirstResponder: Bool {
         allowsKeyboardInput && super.canBecomeFirstResponder
+    }
+
+    /// Drops SwiftTerm's own `TerminalAccessory` — esc, ctrl, tab, arrows.
+    ///
+    /// `TerminalKeyBar` occupies that same strip above the keyboard with the customizable,
+    /// per-agent run this app ships, so leaving SwiftTerm's in place stacked two rows of nearly
+    /// the same keys over the keyboard. Assignment is SwiftTerm's own documented seam here, and
+    /// once is enough: it installs the accessory from its initializer and never again.
+    func dropBuiltInKeyboardAccessory() {
+        inputAccessoryView = nil
     }
 
     func setAllowsKeyboardInput(_ allowed: Bool) {

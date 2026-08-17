@@ -18,6 +18,69 @@ enum RemoteInputControlDefault: String, CaseIterable {
     }
 }
 
+/// Where a report sent from a paired phone does its work.
+///
+/// Every other route into a managed workspace is a decision somebody makes while looking at the
+/// composer. A shake report is not: it starts a session while its owner is away from the Mac, in
+/// whichever checkout they happened to leave open, and the first they see of it is a sidebar row
+/// that has already been editing for ten minutes. So the choice is made once, in advance, on the
+/// Mac that owns the checkout — not on the phone, where the whole point is that the report costs
+/// one tap.
+///
+/// `.sameCheckout` is the default because it is what this route has always done, and because the
+/// two isolated answers are only reachable for a Git project whose agent has the finish
+/// handshake. `RemoteSessionMirrorRegistry` resolves that per project before publishing anything,
+/// so a phone is never offered a workspace the Mac would then refuse.
+enum PhoneReportWorkspacePolicy: String, CaseIterable, Sendable {
+
+    /// The project's own checkout, alongside whatever the Mac is doing in it.
+    case sameCheckout
+
+    /// A locked worktree of its own, fast-forwarded into the checkout it started from once the
+    /// agent finishes.
+    case ownWorkspaceMerged
+
+    /// A locked worktree of its own, kept afterwards so the work can be read before it lands.
+    case ownWorkspaceKept
+
+    /// The plan this policy asks for before any project is considered.
+    var requestedPlan: ManagedWorkspacePlan? {
+        switch self {
+        case .sameCheckout: return nil
+        case .ownWorkspaceMerged: return ManagedWorkspacePlan(delivery: .mergeAndCleanUp)
+        case .ownWorkspaceKept: return ManagedWorkspacePlan(delivery: .keepForReview)
+        }
+    }
+
+    /// The plan a report chat in one project may actually run under.
+    ///
+    /// Both conditions are the composer's own, asked here instead of there: a worktree needs a
+    /// Git checkout to branch from, and the delivery at the end of it needs an agent that can
+    /// perform the finish handshake. A report is worth more than the workspace it wanted, so a
+    /// project that fails either one still receives its chat — in the project's own checkout,
+    /// which is where every phone report has always run.
+    ///
+    /// Takes the two answers rather than a `Project` so the rule can be exercised without a
+    /// repository on disk, and so the caller pays for `canProvision` once per catalogue.
+    func resolvedPlan(
+        canProvisionWorkspace: Bool,
+        supportsFinishHandshake: Bool
+    ) -> ManagedWorkspacePlan? {
+        guard canProvisionWorkspace, supportsFinishHandshake else { return nil }
+        return requestedPlan
+    }
+
+    /// The settings pop-up's wording, read as the end of its row's title: "Reports from your
+    /// phone ▸ Their own workspace, merged when finished".
+    var settingsTitle: String {
+        switch self {
+        case .sameCheckout: return L10n.string("The project’s own checkout")
+        case .ownWorkspaceMerged: return L10n.string("Their own workspace, merged when finished")
+        case .ownWorkspaceKept: return L10n.string("Their own workspace, kept for review")
+        }
+    }
+}
+
 /// Which sessions a share reaches.
 enum RemoteScope: Equatable, Sendable {
     /// The owner's own devices: every live session in the app.

@@ -131,6 +131,32 @@ again when they fire. A schedule must fail visibly if its project, checkout, run
 Threading session tools are no longer available. Falling back to the ordinary project directory
 would silently discard the isolation the user asked for.
 
+### A workspace nobody chose in a composer
+
+A report sent from a paired phone — shake, then **Send to Mac** — is the one session started by
+somebody who is not at the Mac, in whichever checkout they left open. It is therefore the first
+route whose workspace is decided **in advance and on the host**, by
+`PhoneReportWorkspacePolicy` in Remote Access settings, rather than by a checkbox at the moment
+of asking.
+
+The choice is resolved twice, and both times on the Mac:
+
+- **Before it is offered.** `RemoteSessionMirrorRegistry.reportLaunch(for:)` publishes a plan on
+  the project only when `ManagedGitWorkspace.canProvision(from:)` and
+  `ManagedWorkspaceEligibility.supportsFinishHandshake(kind:usesNativeUI:)` both hold for the
+  agent that project's report would inherit. A phone is never shown an isolation this Mac would
+  refuse.
+- **When it comes back.** `handleCreateSession` re-checks the same two conditions and maps the
+  wire's `delivery` string to `ManagedWorkspaceDelivery`, refusing anything else with 422. The
+  request is not trusted because the catalogue produced it.
+
+Two deliberate asymmetries with the composer. **Publication is refused outright** on this route:
+opening a change request is a decision made while looking at a repository, and a report filed
+from a pocket is not that. And where a project cannot host a worktree the *catalogue* silently
+offers none, so the report still becomes a chat in the project's own checkout — a report is worth
+more than the isolation it wanted — while an explicit request for an impossible workspace is
+still an error rather than a downgrade.
+
 ## Where the state is visible
 
 The session pane's corner card (`GitStatusOverlayView`) carries one row for the managed checkout,

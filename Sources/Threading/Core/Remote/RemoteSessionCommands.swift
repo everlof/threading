@@ -13,6 +13,10 @@ struct RemoteSessionLaunch {
     let fastMode: Bool?
     let permissionMode: AgentPermissionMode?
     let usesNativeUI: Bool
+    /// An isolated worktree to run in, already validated against the project and the runtime.
+    /// Nil is the project's own checkout, which is where every remotely started session ran
+    /// before a phone could ask for anything else.
+    let managedWorkspacePlan: ManagedWorkspacePlan?
     let prompt: String
 }
 

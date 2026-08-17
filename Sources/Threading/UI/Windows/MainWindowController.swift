@@ -1784,6 +1784,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         fastMode: Bool?,
         permissionMode: AgentPermissionMode?,
         usesNativeUI: Bool,
+        managedWorkspacePlan: ManagedWorkspacePlan?,
         prompt: String
     ) -> AgentSession? {
         sessionCoordinator.startRemoteSession(
@@ -1795,6 +1796,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             fastMode: fastMode,
             permissionMode: permissionMode,
             usesNativeUI: usesNativeUI,
+            managedWorkspacePlan: managedWorkspacePlan,
             prompt: prompt
         )
     }

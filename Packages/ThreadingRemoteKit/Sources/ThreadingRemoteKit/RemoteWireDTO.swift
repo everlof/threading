@@ -155,13 +155,85 @@ public struct RemoteThemeCatalogDTO: Codable, Equatable, Sendable {
     }
 }
 
+/// What a session is currently showing: the runtime's own TUI in a mirrored terminal, or
+/// Threading's natively rendered conversation.
+///
+/// This was a bare `"terminal"` / `"conversation"` string on the wire *and* in both apps, compared
+/// against literals at eighty call sites. Nothing named the set of values, a misspelling was a
+/// silently wrong screen rather than a build error, and the two words carry a distinction the code
+/// has to keep straight: `terminal` here is the **provider's TUI**, not a shell.
+///
+/// It stays a string *on the wire* — a `RawRepresentable` rather than an enum — for the reason the
+/// string existed in the first place: a newer Mac may show a surface this build has never heard of,
+/// and a phone must decode, list and round-trip that row rather than fail the whole listing on it.
+/// An unknown value therefore equals neither of the known ones and survives re-encoding intact.
+public struct RemoteSessionSurface: RawRepresentable, Codable, Hashable, Sendable {
+    public let rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    /// The runtime's own interactive TUI, hosted in a terminal on the Mac and mirrored here.
+    public static let terminal = Self(rawValue: "terminal")
+    /// Threading's own conversation rendering, driven by a headless provider transport.
+    public static let conversation = Self(rawValue: "conversation")
+
+    /// The surfaces this build can host.
+    public static let known: [Self] = [.terminal, .conversation]
+
+    /// Whether this build knows what to do with the surface.
+    ///
+    /// Leniency runs one way on purpose: an unknown surface must not fail a *listing*, and it must
+    /// not be *launched* either. An inbound request naming something this host cannot host is
+    /// refused rather than guessed at.
+    public var isKnown: Bool { Self.known.contains(self) }
+
+    public init(from decoder: Decoder) throws {
+        rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+/// Which login a session runs on, drawn the way the Mac sidebar draws it.
+///
+/// The host resolves the chip rather than the client, because the inputs are all on the Mac: the
+/// account's chosen emoji, the login address behind its initial, and the hash that gives the disc
+/// its colour. Sending the resolved glyph and hue keeps a phone row and a sidebar row showing the
+/// same account the same way, instead of two hash implementations that agree until one is edited.
+///
+/// A discovered avatar is deliberately not carried: it would be image bytes per row, and per
+/// `AccountBadge` the hashed initial is the working case rather than the fallback.
+public struct RemoteSessionAccountDTO: Codable, Equatable, Sendable {
+    /// The name the Mac's own account menu shows — a person's name where one can be derived,
+    /// else the login address, else the CLI alias.
+    public let name: String
+    /// One emoji or one letter. Never a word: this is drawn in a 12-point chip.
+    public let glyph: String
+    /// Whether `glyph` brings its own colour, in which case `hue` is nil and the chip draws no disc.
+    public let isEmoji: Bool
+    /// Fraction of the colour wheel for the initial's disc, hashed from the login address so one
+    /// person keeps one colour across the agents they are logged into.
+    public let hue: Double?
+
+    public init(name: String, glyph: String, isEmoji: Bool, hue: Double?) {
+        self.name = name
+        self.glyph = glyph
+        self.isEmoji = isEmoji
+        self.hue = hue
+    }
+}
+
 /// One session as it appears to a remote client's session list.
 public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let title: String
     public let agentKind: String
-    /// "terminal" or "conversation".
-    public let surface: String
+    public let surface: RemoteSessionSurface
     /// The activity state — "dormant" / "idle" / "working" / "needsAttention".
     public let state: String
     public let projectName: String
@@ -188,12 +260,15 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     public let inheritedTerminalThemeName: String?
     /// The resolved palette that clearing the session assignment would reveal.
     public let inheritedTerminalTheme: RemoteTerminalThemeDTO?
+    /// The login this session runs on, or nil when the row has nothing extra to say: a runtime
+    /// without account routing, the CLI's default login, or a host predating this field.
+    public let account: RemoteSessionAccountDTO?
 
     public init(
         id: String,
         title: String,
         agentKind: String,
-        surface: String,
+        surface: RemoteSessionSurface,
         state: String,
         projectName: String,
         isAvailable: Bool = true,
@@ -208,7 +283,8 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         terminalTheme: RemoteTerminalThemeDTO? = nil,
         terminalThemeAssignmentID: String? = nil,
         inheritedTerminalThemeName: String? = nil,
-        inheritedTerminalTheme: RemoteTerminalThemeDTO? = nil
+        inheritedTerminalTheme: RemoteTerminalThemeDTO? = nil,
+        account: RemoteSessionAccountDTO? = nil
     ) {
         self.id = id
         self.title = title
@@ -229,6 +305,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         self.terminalThemeAssignmentID = terminalThemeAssignmentID
         self.inheritedTerminalThemeName = inheritedTerminalThemeName
         self.inheritedTerminalTheme = inheritedTerminalTheme
+        self.account = account
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -236,7 +313,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         case isPinned, isArchived, isShared
         case snoozedAt, snoozedUntil, wokeReason, wokeAt
         case terminalTheme, terminalThemeAssignmentID, inheritedTerminalThemeName
-        case inheritedTerminalTheme
+        case inheritedTerminalTheme, account
     }
 
     public init(from decoder: Decoder) throws {
@@ -244,7 +321,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         id = try container.decode(String.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
         agentKind = try container.decode(String.self, forKey: .agentKind)
-        surface = try container.decode(String.self, forKey: .surface)
+        surface = try container.decode(RemoteSessionSurface.self, forKey: .surface)
         state = try container.decode(String.self, forKey: .state)
         projectName = try container.decode(String.self, forKey: .projectName)
         // The first wire build listed only live sessions, so a missing field means available.
@@ -273,6 +350,10 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
             RemoteTerminalThemeDTO.self,
             forKey: .inheritedTerminalTheme
         )
+        account = try container.decodeIfPresent(
+            RemoteSessionAccountDTO.self,
+            forKey: .account
+        )
     }
 
     /// Derived on the client as well as the host, so a missed refresh cannot keep an expired
@@ -291,12 +372,84 @@ public struct RemoteProjectChoiceDTO: Codable, Equatable, Identifiable, Sendable
     public let name: String
     public let branch: String?
     public let checkoutLabel: String
+    /// What a chat this project is *given* rather than configured for comes up as: today, a
+    /// shake report sent to the Mac. Absent from an older host, and from a client that has no
+    /// business starting one.
+    public let reportLaunch: RemoteReportLaunchDTO?
 
-    public init(id: String, name: String, branch: String?, checkoutLabel: String) {
+    public init(
+        id: String,
+        name: String,
+        branch: String?,
+        checkoutLabel: String,
+        reportLaunch: RemoteReportLaunchDTO? = nil
+    ) {
         self.id = id
         self.name = name
         self.branch = branch
         self.checkoutLabel = checkoutLabel
+        self.reportLaunch = reportLaunch
+    }
+}
+
+/// An isolated workspace a session runs in, and what becomes of it when the agent finishes.
+///
+/// Strings rather than closed enumerations for the same reason `surface` was: a host that grows
+/// a third delivery must not make an older client fail to decode the whole catalogue. The Mac
+/// maps them back to its own types and refuses what it does not recognise.
+public struct RemoteManagedWorkspacePlanDTO: Codable, Equatable, Sendable {
+    /// `mergeAndCleanUp` or `keepForReview`.
+    public let delivery: String
+    /// `draft` or `ready` when finishing should also open a change request; absent for local
+    /// delivery, which is every workspace a phone can currently ask for.
+    public let publication: String?
+
+    public init(delivery: String, publication: String? = nil) {
+        self.delivery = delivery
+        self.publication = publication
+    }
+}
+
+/// The launch a report sent from a paired device would receive in one project.
+///
+/// **The Mac decides all of it and the client forwards it.** The choices are inherited from the
+/// chat most recently used in that project, and the workspace comes from the owner's Remote
+/// Access setting after the project's checkout and that agent's own capabilities have been
+/// checked against it. A phone that picked these itself is how this route ended up starting
+/// Codex on people who had not used it in weeks, and is how it could ask for a worktree this Mac
+/// would then refuse.
+///
+/// Every field is still validated on arrival. This is a convenience for the client, not a
+/// licence: `handleCreateSession` trusts the request no more than it did before.
+public struct RemoteReportLaunchDTO: Codable, Equatable, Sendable {
+    public let agentID: String
+    /// `default`, or an alternate account handle. Absent for a runtime without logins.
+    public let accountID: String?
+    public let model: String?
+    public let reasoningEffort: String?
+    public let fastMode: Bool?
+    public let permissionMode: String?
+    public let surface: RemoteSessionSurface
+    public let managedWorkspace: RemoteManagedWorkspacePlanDTO?
+
+    public init(
+        agentID: String,
+        accountID: String? = nil,
+        model: String? = nil,
+        reasoningEffort: String? = nil,
+        fastMode: Bool? = nil,
+        permissionMode: String? = nil,
+        surface: RemoteSessionSurface,
+        managedWorkspace: RemoteManagedWorkspacePlanDTO? = nil
+    ) {
+        self.agentID = agentID
+        self.accountID = accountID
+        self.model = model
+        self.reasoningEffort = reasoningEffort
+        self.fastMode = fastMode
+        self.permissionMode = permissionMode
+        self.surface = surface
+        self.managedWorkspace = managedWorkspace
     }
 }
 
@@ -1156,8 +1309,11 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
     public let reasoningEffort: String?
     public let fastMode: Bool?
     public let permissionMode: String?
-    /// "terminal" or "conversation".
-    public let surface: String
+    public let surface: RemoteSessionSurface
+    /// An isolated worktree to run in, normally the one the catalogue's `reportLaunch` offered.
+    /// Absent means the project's own checkout, which is what every client asked for before
+    /// this field existed.
+    public let managedWorkspace: RemoteManagedWorkspacePlanDTO?
     public let prompt: String
 
     public init(
@@ -1168,7 +1324,8 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         reasoningEffort: String? = nil,
         fastMode: Bool? = nil,
         permissionMode: String? = nil,
-        surface: String,
+        surface: RemoteSessionSurface,
+        managedWorkspace: RemoteManagedWorkspacePlanDTO? = nil,
         prompt: String
     ) {
         self.projectID = projectID
@@ -1179,6 +1336,7 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         self.fastMode = fastMode
         self.permissionMode = permissionMode
         self.surface = surface
+        self.managedWorkspace = managedWorkspace
         self.prompt = prompt
     }
 }
@@ -1228,10 +1386,9 @@ public struct RemoteSetSessionSnoozeRequestDTO: Codable, Equatable, Sendable {
 }
 
 public struct RemoteSetSessionSurfaceRequestDTO: Codable, Equatable, Sendable {
-    /// `terminal` is the agent's original UI; `conversation` is Threading's Native UI.
-    public let surface: String
+    public let surface: RemoteSessionSurface
 
-    public init(surface: String) {
+    public init(surface: RemoteSessionSurface) {
         self.surface = surface
     }
 }
@@ -1516,7 +1673,7 @@ public struct RemoteUpgradeRequiredDTO: Codable, Equatable, Sendable {
 /// Sent once, immediately after a socket authenticates, describing the surface it is watching.
 public struct RemoteHelloDTO: Codable, Equatable, Sendable {
     public let type: String        // "hello"
-    public let surface: String     // "terminal" | "conversation"
+    public let surface: RemoteSessionSurface
     public let capability: String  // "view" | "interact"
     public let cols: Int
     public let rows: Int
@@ -1529,7 +1686,7 @@ public struct RemoteHelloDTO: Codable, Equatable, Sendable {
     public let features: [String]?
 
     public init(
-        surface: String,
+        surface: RemoteSessionSurface,
         capability: String,
         cols: Int,
         rows: Int,
@@ -1644,7 +1801,7 @@ public struct RemotePresenceDTO: Codable, Equatable, Identifiable, Sendable {
     public let memberID: String
     public let displayName: String
     public let deviceName: String?
-    public let surface: String?
+    public let surface: RemoteSessionSurface?
     /// `viewing`, `typing`, or `left`. Older clients may still send `idle`.
     public let state: String
     public let updatedAt: Double
@@ -1656,7 +1813,7 @@ public struct RemotePresenceDTO: Codable, Equatable, Identifiable, Sendable {
         memberID: String,
         displayName: String,
         deviceName: String? = nil,
-        surface: String? = nil,
+        surface: RemoteSessionSurface? = nil,
         state: String,
         updatedAt: Double = Date().timeIntervalSince1970
     ) {

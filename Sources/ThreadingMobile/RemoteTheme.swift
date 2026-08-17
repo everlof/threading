@@ -27,6 +27,9 @@ enum MobileDesign {
 
     enum Size {
         static let minimumTapTarget: CGFloat = 44
+        /// The icon-only chrome control: the dashboard's toolbar circles and the plus that
+        /// starts a chat in a project. One size keeps them reading as the same kind of thing.
+        static let compactControl: CGFloat = 34
         static let toggleTrackWidth: CGFloat = 52
         static let toggleTrackHeight: CGFloat = 32
         static let toggleThumb: CGFloat = 26
@@ -42,10 +45,45 @@ enum MobileDesign {
         static let badgeStroke: CGFloat = 2
         /// Fixed leading column used by the stacked terminal presence/control/activity rows.
         static let terminalStatusIconColumn: CGFloat = 24
+
+        /// The session row's identity tile, its ink, and the account chip riding its corner.
+        ///
+        /// Sized against the row's two lines of text rather than against the old 46-point tile: a
+        /// dashboard is a list to scan, and the tile was setting a row height no content asked for.
+        /// A title line and a caption line come to roughly this, so the tile no longer decides.
+        static let rowMark: CGFloat = 30
+        static let rowMarkRadius: CGFloat = 9
+        static let rowMarkGlyph: CGFloat = 16
+        static let accountChip: CGFloat = 15
+        static let accountChipGlyph: CGFloat = 9
+        /// An emoji's glyph outgrows its point size, so it is set below the letter's.
+        static let accountChipEmoji: CGFloat = 10
+        static let accountChipRing: CGFloat = 1.5
+        static let rowAttentionDot: CGFloat = 8
     }
 
     enum Offset {
         static let workspaceActivityDot: CGFloat = 3
+        /// How far the account chip hangs past the mark's corner. Flush inside the tile it covered
+        /// the middle of the mark; hanging it out keeps the mark recognisable underneath.
+        static let accountChipOverhang: CGFloat = 3
+    }
+
+    /// Identity colour that is content rather than chrome, so it does not come from a theme role.
+    ///
+    /// A generated account disc has to stay legible under every authored theme, and it means the
+    /// same thing under all of them. The values match `AccountBadgeDefaults` on the Mac so one
+    /// login looks like one login on both screens.
+    enum Colour {
+        static let accountChipSaturation: Double = 0.72
+        static let accountChipBrightness: Double = 0.78
+        static let accountChipMinimumScale: Double = 0.6
+    }
+
+    enum Opacity {
+        /// Dims a mark whose session has no live surface, standing in for the tertiary tint that
+        /// dims the symbols beside it.
+        static let dormantMark: Double = 0.55
     }
 
     enum Typography {

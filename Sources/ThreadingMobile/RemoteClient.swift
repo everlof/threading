@@ -205,7 +205,7 @@ struct RemoteClient {
 
     func setSessionSurface(
         sessionID: String,
-        surface: String,
+        surface: RemoteSessionSurface,
         requestID: String = UUID().uuidString.lowercased()
     ) async throws -> RemoteMeDTO {
         try await post(

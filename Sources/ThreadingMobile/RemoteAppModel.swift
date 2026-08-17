@@ -590,7 +590,8 @@ final class RemoteAppModel: ObservableObject {
         reasoningEffort: String?,
         fastMode: Bool?,
         permissionMode: String?,
-        surface: String,
+        surface: RemoteSessionSurface,
+        managedWorkspace: RemoteManagedWorkspacePlanDTO? = nil,
         prompt: String
     ) async throws -> RemoteSessionSummaryDTO {
         guard canManageSessions, let host = activeHost else {
@@ -606,6 +607,7 @@ final class RemoteAppModel: ObservableObject {
             fastMode: fastMode,
             permissionMode: permissionMode,
             surface: surface,
+            managedWorkspace: managedWorkspace,
             prompt: prompt
         )
         if isDemo {
@@ -690,7 +692,10 @@ final class RemoteAppModel: ObservableObject {
         me = response
     }
 
-    func setSurface(_ surface: String, for session: RemoteSessionSummaryDTO) async throws {
+    func setSurface(
+        _ surface: RemoteSessionSurface,
+        for session: RemoteSessionSummaryDTO
+    ) async throws {
         guard canManageSessions, let host = activeHost else {
             throw RemoteClientError.unauthorized
         }
@@ -1497,7 +1502,7 @@ final class RemoteAppModel: ObservableObject {
                     id: "5de80220-2172-4fbe-8ed7-a707572fc922",
                     title: "Review the new remote access feature",
                     agentKind: "codex",
-                    surface: "conversation",
+                    surface: .conversation,
                     state: "working",
                     projectName: "AnotherTerminal",
                     isAvailable: true,
@@ -1511,7 +1516,7 @@ final class RemoteAppModel: ObservableObject {
                     id: "ff9f4a47-4c3b-466b-bcc5-a864b0657423",
                     title: "Finish remote access review",
                     agentKind: "claude",
-                    surface: "terminal",
+                    surface: .terminal,
                     state: "idle",
                     projectName: "AnotherTerminal",
                     isAvailable: true,
@@ -1519,13 +1524,22 @@ final class RemoteAppModel: ObservableObject {
                     terminalTheme: demoTerminalTheme,
                     terminalThemeAssignmentID: demoTerminalTheme.id,
                     inheritedTerminalThemeName: demoTerminalTheme.name,
-                    inheritedTerminalTheme: demoTerminalTheme
+                    inheritedTerminalTheme: demoTerminalTheme,
+                    // Both chip forms are represented on purpose: a login with a chosen emoji and
+                    // one falling back to its initial on a hashed disc are drawn differently, and
+                    // the evidence capture is where that difference is reviewed.
+                    account: .init(
+                        name: "Vera Lundborg",
+                        glyph: "V",
+                        isEmoji: false,
+                        hue: 0.72
+                    )
                 ),
                 .init(
                     id: "164182ac-7908-4c2d-89a2-fe8f040c4b50",
                     title: "Theme polish",
                     agentKind: "codex",
-                    surface: "conversation",
+                    surface: .conversation,
                     state: "dormant",
                     projectName: "AnotherTerminal",
                     isAvailable: false,
@@ -1536,7 +1550,7 @@ final class RemoteAppModel: ObservableObject {
                     id: "f13fc835-763c-4d9f-a54e-099bdd5927d1",
                     title: "Roadmap implementation",
                     agentKind: "claude",
-                    surface: "conversation",
+                    surface: .conversation,
                     state: "needsAttention",
                     projectName: "Strom",
                     isAvailable: true,
@@ -1547,12 +1561,18 @@ final class RemoteAppModel: ObservableObject {
                     id: "359b4bcd-f8ed-43a6-a42e-48f44536be96",
                     title: "Release to TestFlight",
                     agentKind: "codex",
-                    surface: "terminal",
+                    surface: .terminal,
                     state: "dormant",
                     projectName: "Strom",
                     isAvailable: false,
                     lastActiveAt: now - 604_800,
-                    terminalTheme: demoTerminalTheme
+                    terminalTheme: demoTerminalTheme,
+                    account: .init(
+                        name: "Sandbox",
+                        glyph: "🧪",
+                        isEmoji: true,
+                        hue: nil
+                    )
                 ),
             ],
             host: RemoteHostDTO(id: "demo-mac", name: "David’s MacBook Pro"),
@@ -1761,7 +1781,10 @@ private extension RemoteMeDTO {
         )
     }
 
-    func replacingSessionSurface(sessionID: String, surface: String) -> RemoteMeDTO {
+    func replacingSessionSurface(
+        sessionID: String,
+        surface: RemoteSessionSurface
+    ) -> RemoteMeDTO {
         func replace(_ session: RemoteSessionSummaryDTO) -> RemoteSessionSummaryDTO {
             guard session.id == sessionID else { return session }
             return RemoteSessionSummaryDTO(
@@ -1778,7 +1801,10 @@ private extension RemoteMeDTO {
                 terminalTheme: session.terminalTheme,
                 terminalThemeAssignmentID: session.terminalThemeAssignmentID,
                 inheritedTerminalThemeName: session.inheritedTerminalThemeName,
-                inheritedTerminalTheme: session.inheritedTerminalTheme
+                inheritedTerminalTheme: session.inheritedTerminalTheme,
+                // Everything this rebuild forgets is a fact the row visibly loses until the next
+                // refresh. Switching surface must not blank the chat's account chip.
+                account: session.account
             )
         }
 

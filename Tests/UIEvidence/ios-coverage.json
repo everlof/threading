@@ -26,6 +26,7 @@
     {"id": "pairing-keyboard-open-custom-dark", "entryID": "ios-pairing", "demo": "pairing", "appearance": "dark", "theme": "custom", "keyboardState": "open", "captureMode": "display", "assertions": ["editorFocused", "keyboardShown"]},
     {"id": "pairing-keyboard-dismissed-custom-dark", "entryID": "ios-pairing", "demo": "pairing", "appearance": "dark", "theme": "custom", "keyboardState": "dismissed-after-open", "captureMode": "app", "assertions": ["keyboardShownOnce", "keyboardHidden", "noFirstResponder", "safeAreaRestored", "editorFrameRestored"]},
     {"id": "session-dashboard-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "dark", "theme": "custom"},
+    {"id": "session-dashboard-custom-light", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "light", "theme": "custom-light"},
     {"id": "conversation-custom-dark", "entryID": "ios-native-conversation", "demo": "conversation", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
     {"id": "conversation-custom-light", "entryID": "ios-native-conversation", "demo": "conversation", "appearance": "light", "theme": "custom-light"},
     {"id": "conversation-collaboration-custom-dark", "entryID": "ios-native-conversation", "demo": "conversation-collaboration", "appearance": "dark", "theme": "custom"},
@@ -142,7 +143,7 @@
       "states": ["Paired owner", "Mixed session activity", "Project grouping"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/session-dashboard-*.png"},
-      "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}
+      "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Light", "Dark"], "themes": ["Mac-supplied"]}
     },
     {
       "id": "ios-native-conversation",

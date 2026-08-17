@@ -225,7 +225,7 @@ struct RootView: View {
                 }
             case "terminal":
                 model.startDemo()
-                if let terminal = model.me?.sessions.first(where: { $0.surface == "terminal" }) {
+                if let terminal = model.me?.sessions.first(where: { $0.surface == .terminal }) {
                     model.navigationPath = [terminal.id]
                 }
             default:
@@ -292,7 +292,7 @@ struct RootView: View {
         id: "workspace-demo",
         title: "Remote access review",
         agentKind: "codex",
-        surface: "conversation",
+        surface: .conversation,
         state: "idle",
         projectName: "Threading"
     )

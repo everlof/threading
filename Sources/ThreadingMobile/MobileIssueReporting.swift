@@ -259,12 +259,20 @@ struct MobileIssueReportView: View {
     private struct DeveloperDestination {
         let project: RemoteProjectChoiceDTO
         let agent: RemoteAgentChoiceDTO
+        let launch: RemoteReportLaunchDTO?
         let accountHandle: String?
     }
 
     /// The shortcut is intentionally absent unless this owner device can see the Threading
     /// checkout. Ordinary customers therefore get the public inbox and Share, while a maintainer
     /// with a paired development Mac gets the one-tap agent handoff as well.
+    ///
+    /// **How the chat is configured is the Mac's answer, not this device's.** The project
+    /// publishes the launch a report would receive there — inherited from the chat most recently
+    /// used in it, and carrying whatever isolated workspace the owner chose in Remote Access
+    /// settings — and this sheet forwards it. The literals below are the fallback for a host too
+    /// old to say, and they are exactly the guess that made this button start Codex at people
+    /// who had not used it in weeks.
     private var developerDestination: DeveloperDestination? {
         guard model.canManageSessions, let catalog = model.me?.newSessionCatalog else { return nil }
         let project = catalog.projects.first { project in
@@ -274,16 +282,31 @@ struct MobileIssueReportView: View {
                 || checkout == "threading"
                 || checkout == "anotherterminal"
         }
-        guard let project,
-              let agent = catalog.agents.first(where: { $0.id == "codex" })
-                ?? catalog.agents.first else {
+        guard let project else { return nil }
+
+        let launch = project.reportLaunch
+        guard let agent = launch.flatMap({ launch in
+            catalog.agents.first { $0.id == launch.agentID }
+        })
+            ?? catalog.agents.first(where: { $0.id == "codex" })
+            ?? catalog.agents.first else {
             return nil
         }
+
         let accounts = agent.accounts ?? []
-        let account = accounts.first(where: { $0.id == "default" }) ?? accounts.first
+        let inheritedAccount = launch?.accountID.flatMap { id in
+            accounts.first { $0.id == id }
+        }
+        let account = inheritedAccount
+            ?? accounts.first(where: { $0.id == "default" })
+            ?? accounts.first
         return DeveloperDestination(
             project: project,
             agent: agent,
+            // Kept only when the Mac's answer is the one being used: a launch describing an
+            // agent this catalogue no longer lists must not carry its model or its workspace
+            // onto whichever agent was chosen instead.
+            launch: launch?.agentID == agent.id ? launch : nil,
             accountHandle: account?.id
         )
     }
@@ -362,24 +385,33 @@ struct MobileIssueReportView: View {
             do {
                 let submission = try makeSubmission(destination: "pairedMac")
                 let prompt = try developerPrompt(for: submission)
+                let launch = destination.launch
                 let session = try await model.createSession(
                     projectID: destination.project.id,
                     agentKind: destination.agent.id,
                     accountHandle: destination.accountHandle,
-                    model: nil,
-                    reasoningEffort: nil,
-                    fastMode: nil,
-                    permissionMode: nil,
-                    surface: "terminal",
+                    model: launch?.model,
+                    reasoningEffort: launch?.reasoningEffort,
+                    fastMode: launch?.fastMode,
+                    permissionMode: launch?.permissionMode,
+                    surface: launch?.surface ?? .terminal,
+                    managedWorkspace: launch?.managedWorkspace,
                     prompt: prompt
                 )
+                // Worth its own line: an isolated workspace is the difference between a task
+                // that may edit the checkout on the Mac right now and one that cannot.
+                let workspaceNote = launch?.managedWorkspace == nil
+                    ? ""
+                    : "\n\n" + MobileL10n.string(
+                        "It has a workspace of its own, so the checkout on your Mac is untouched."
+                    )
                 notice = Notice(
                     title: MobileL10n.string("Sent to your Mac"),
                     message: MobileL10n.string(
                         "A new %@ task is investigating this report in %@.",
                         destination.agent.name,
                         destination.project.name
-                    ) + "\n\n" + session.title,
+                    ) + "\n\n" + session.title + workspaceNote,
                     dismissReport: true
                 )
             } catch is CancellationError {

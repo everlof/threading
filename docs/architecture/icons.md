@@ -49,6 +49,24 @@ gets no chip**: its agent's mark already says everything the row knows.
 row configure and rows reconfigure constantly while an agent works, where the uncached answer
 is a file read and a JWT decode for a value that cannot change while the app runs.
 
+**The phone draws the same two facts, from the same decisions.** `MobileSessionMark` is the iOS
+tile: the runtime's mark from `MobileAgentIdentity`, with `MobileAccountChip` on its corner. The
+marks are the same PNGs, added to the iOS asset catalogue as universal image sets (the Codex knot
+keeps its template rendering intent, so SwiftUI tints it and it survives a light theme). Nothing
+about the *account* is decided there: `RemoteAccountBridge` resolves the chip on the Mac and sends
+`RemoteSessionAccountDTO` — glyph, whether it is an emoji, and the hue — because every input is here
+(the account directories, the login address, the user's chosen emoji, the hash). `AccountBadge.hue`
+exists for that reason: one hash, used by the drawn chip and the wire, rather than two that agree
+until one is edited. A discovered avatar is deliberately not carried; it would be image bytes per
+row, and per the coverage note above the hashed initial is the working case anyway. The default
+login sends no chip, matching the sidebar rule and keeping the projection off the account
+directories for most rows.
+
+`AgentKind.symbolName` and its iOS twin must stay in step; the phone keeps its own table rather than
+waiting on bytes it would have to draw an empty slot for. What the phone must never do is take a
+*surface* glyph as an identity — every chat row drew `terminal` before this, so no row named its
+provider (see [`REMOTE_ACCESS.md`](../REMOTE_ACCESS.md)).
+
 **Project icons** (`ProjectIcon` on `Project`; files owned by `ProjectIconStore`): the
 project row shows the project's own mark, else a folder symbol. Every stored icon is
 normalised through ImageIO — largest frame (`.ico` carries several), capped at 64px,

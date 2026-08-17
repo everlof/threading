@@ -673,7 +673,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     }
 
     private func updateInputControl() {
-        guard connection.supportsFocusedInputControl, let state = connection.inputControl else {
+        guard connection.shouldPresentInputControl, let state = connection.inputControl else {
             controlBar.isHidden = true
             return
         }

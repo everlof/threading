@@ -1,0 +1,210 @@
+import SwiftUI
+import ThreadingRemoteKit
+
+// MARK: - Mobile Agent Identity
+
+/// Who is talking in a chat, resolved from the raw runtime name the wire sends.
+///
+/// The phone deliberately keeps its own small table instead of asking the Mac for a name and an
+/// image per row: the marks are ours, they ship in this app's asset catalogue, and a row that had
+/// to wait for bytes would draw an empty slot on every cold open. `unknown` keeps a readable name
+/// for a runtime added to the Mac before this app ships again, rather than dropping the row's
+/// identity entirely.
+///
+/// ## Marks and surface glyphs are different questions
+///
+/// A **mark** says *who is talking* — Claude's starburst, OpenAI's knot — and belongs to a session
+/// row, exactly as it does in the Mac sidebar. A **surface glyph** says *what you are looking at*:
+/// `terminal` for a terminal, `bubble.left.and.bubble.right` for a natively rendered conversation.
+///
+/// Those two were the same glyph here until now, and the reading was wrong in both directions: an
+/// agent's own TUI mirrored from the Mac is a *provider* TUI, not a shell, so every chat on the
+/// phone showed a terminal and no chat showed its provider. Reserve `terminal` for a terminal a
+/// person would call a terminal — a plain shell — and let the mark carry identity.
+enum MobileAgentIdentity: Equatable {
+    case claude
+    case codex
+    case grok
+    case openCode
+    case cursor
+    case unknown(String)
+
+    // MARK: - Properties
+
+    /// The runtime's own mark, or the SF Symbol standing in for one we do not bundle.
+    ///
+    /// Mirrors `AgentKind.icon` on the Mac, including which marks keep their own colour: OpenAI's
+    /// knot is monochrome by design and ships as a template so it tints with its context, while
+    /// Claude's coral starburst is drawn as authored.
+    enum Mark: Equatable {
+        /// An image in this app's asset catalogue. `keepsItsOwnColour` is false for a template
+        /// mark, which takes the tint of the slot it is drawn in.
+        case brand(asset: String, keepsItsOwnColour: Bool)
+        case symbol(String)
+    }
+
+    var displayName: String {
+        switch self {
+        case .claude: return MobileL10n.string("Claude Code")
+        case .codex: return "Codex"
+        case .grok: return "Grok"
+        case .openCode: return "OpenCode"
+        case .cursor: return "Cursor"
+        case .unknown(let kind): return kind.capitalized
+        }
+    }
+
+    /// The name of this runtime's own interactive TUI, hosted in a mirrored terminal. The Mac
+    /// spells it the same way, through the same catalogue key.
+    var originalUITitle: String {
+        MobileL10n.string("%@ UI", displayName)
+    }
+
+    var mark: Mark {
+        switch self {
+        case .claude:
+            return .brand(asset: MobileAgentMarkAssets.claude, keepsItsOwnColour: true)
+        case .codex:
+            return .brand(asset: MobileAgentMarkAssets.codex, keepsItsOwnColour: false)
+        case .grok: return .symbol("bolt.circle")
+        case .openCode: return .symbol("curlybraces.square")
+        case .cursor: return .symbol("cursorarrow")
+        case .unknown: return .symbol("sparkle")
+        }
+    }
+
+    // MARK: - Public Methods
+
+    /// The identity behind a wire `agentKind`. Unknown names are kept rather than mapped onto a
+    /// runtime we happen to know, which is how a Grok session came to be labelled "Codex UI".
+    static func resolve(_ agentKind: String) -> Self {
+        switch agentKind {
+        case "claude": return .claude
+        case "codex": return .codex
+        case "grok": return .grok
+        case "opencode": return .openCode
+        case "cursor": return .cursor
+        default: return .unknown(agentKind)
+        }
+    }
+}
+
+// MARK: - Mobile Agent Mark Assets
+
+enum MobileAgentMarkAssets {
+    static let claude = "AgentIconClaude"
+    static let codex = "AgentIconCodex"
+}
+
+// MARK: - Mobile Session Mark
+
+/// The tile that identifies a chat: its runtime's mark, with an alternate account's chip on the
+/// bottom-trailing corner.
+///
+/// Both facts a row must carry are shown at once, at the weights they deserve — the same split the
+/// Mac sidebar arrived at after giving the account the whole slot and hiding the agent on every row
+/// that was not on the default login. The chip is an overlay rather than a second arranged view, so
+/// rows with and without one still align, and it hangs past the tile because flush inside it
+/// covered the middle of the mark.
+struct MobileSessionMark: View {
+    let agentKind: String
+    let account: RemoteSessionAccountDTO?
+    var isDimmed = false
+    @Environment(\.remoteTheme) private var theme
+
+    private var identity: MobileAgentIdentity { .resolve(agentKind) }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: MobileDesign.Size.rowMarkRadius, style: .continuous)
+                .fill(theme.controlResting)
+            mark
+        }
+        .frame(width: MobileDesign.Size.rowMark, height: MobileDesign.Size.rowMark)
+        .opacity(isDimmed ? MobileDesign.Opacity.dormantMark : 1)
+        .overlay(alignment: .bottomTrailing) {
+            if let account {
+                MobileAccountChip(account: account)
+                    .offset(
+                        x: MobileDesign.Offset.accountChipOverhang,
+                        y: MobileDesign.Offset.accountChipOverhang
+                    )
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    // MARK: - Private Properties
+
+    @ViewBuilder
+    private var mark: some View {
+        switch identity.mark {
+        case .brand(let asset, let keepsItsOwnColour):
+            // A template mark takes the slot's tint the way the symbols beside it do, which is what
+            // keeps the monochrome knot visible in both a light and a dark theme.
+            Image(asset)
+                .renderingMode(keepsItsOwnColour ? .original : .template)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(
+                    width: MobileDesign.Size.rowMarkGlyph,
+                    height: MobileDesign.Size.rowMarkGlyph
+                )
+                .foregroundStyle(theme.secondaryLabel)
+        case .symbol(let name):
+            Image(systemName: name)
+                .font(.system(size: MobileDesign.Size.rowMarkGlyph, weight: .medium))
+                .foregroundStyle(theme.secondaryLabel)
+        }
+    }
+
+    private var accessibilityLabel: String {
+        guard let account else { return identity.displayName }
+        return "\(identity.displayName) · \(account.name)"
+    }
+}
+
+// MARK: - Mobile Account Chip
+
+/// An alternate account's chip: the emoji it was given, else the initial of its login on a disc
+/// coloured by the hue the Mac hashed from that address.
+///
+/// Neither the glyph nor the hue is decided here. Both arrive on the wire already resolved, so this
+/// chip and the one in the Mac sidebar cannot drift apart — see `RemoteAccountBridge`.
+struct MobileAccountChip: View {
+    let account: RemoteSessionAccountDTO
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        ZStack {
+            if let hue = account.hue {
+                Circle().fill(Color(
+                    hue: hue,
+                    saturation: MobileDesign.Colour.accountChipSaturation,
+                    brightness: MobileDesign.Colour.accountChipBrightness
+                ))
+            }
+            Text(account.glyph)
+                .font(.system(
+                    size: account.isEmoji
+                        ? MobileDesign.Size.accountChipEmoji
+                        : MobileDesign.Size.accountChipGlyph,
+                    weight: .heavy
+                ))
+                .foregroundStyle(account.isEmoji ? theme.label : Color.white)
+                .minimumScaleFactor(MobileDesign.Colour.accountChipMinimumScale)
+                .lineLimit(1)
+        }
+        .frame(
+            width: MobileDesign.Size.accountChip,
+            height: MobileDesign.Size.accountChip
+        )
+        // The ring is the row's own panel, not a neutral: a chip hanging off the mark has to read
+        // as a badge on it rather than as a second glyph beside it, under every authored theme.
+        .overlay(
+            Circle().strokeBorder(theme.panel, lineWidth: MobileDesign.Size.accountChipRing)
+        )
+        .accessibilityHidden(true)
+    }
+}

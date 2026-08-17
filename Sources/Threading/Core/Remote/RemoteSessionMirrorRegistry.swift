@@ -64,7 +64,7 @@ final class RemoteSessionMirrorRegistry {
 
     private struct Mirror {
         var ring: RemoteRingBuffer
-        let surface: String
+        let surface: RemoteSessionSurface
         var subscribers: [ObjectIdentifier: RemoteConnection] = [:]
         /// Complete provider-neutral state and its live wire revision. The complete rows stay
         /// on the Mac; clients receive only a recent window plus requested older pages.
@@ -170,7 +170,7 @@ final class RemoteSessionMirrorRegistry {
             id: session.id.uuidString,
             title: session.displayTitle,
             agentKind: session.kind.rawValue,
-            surface: session.usesNativeUI ? "conversation" : "terminal",
+            surface: session.usesNativeUI ? .conversation : .terminal,
             state: String(describing: AgentRuntime.shared.activity(sessionID: session.id)),
             projectName: projectName,
             isAvailable: available,
@@ -189,7 +189,8 @@ final class RemoteSessionMirrorRegistry {
             inheritedTerminalThemeName: ThemeAssignments.inheritedName(forSession: session.id),
             inheritedTerminalTheme: RemoteThemeBridge.terminalTheme(
                 ThemeAssignments.inheritedTheme(forSession: session.id)
-            )
+            ),
+            account: RemoteAccountBridge.identity(for: session)
         )
     }
 
@@ -207,7 +208,8 @@ final class RemoteSessionMirrorRegistry {
                 id: project.id.uuidString,
                 name: project.name,
                 branch: GitInfo.currentBranch(for: project.folderPath),
-                checkoutLabel: project.folderURL.lastPathComponent
+                checkoutLabel: project.folderURL.lastPathComponent,
+                reportLaunch: reportLaunch(for: project)
             )
         }
 
@@ -289,6 +291,77 @@ final class RemoteSessionMirrorRegistry {
         }
 
         return RemoteNewSessionCatalogDTO(projects: projects, agents: agents)
+    }
+
+    /// What a report sent from a paired phone would come up as in one project.
+    ///
+    /// Two answers the Mac owns and the phone used to guess: the launch choices, inherited from
+    /// the chat most recently used here, and the workspace, from the owner's Remote Access
+    /// setting once this checkout and that agent have been checked against it.
+    ///
+    /// Every inherited value is measured against what this Mac would accept before it is
+    /// published, because `handleCreateSession` refuses an account, model, level or speed that
+    /// no longer exists — and a refusal here costs somebody their bug report. A login that has
+    /// been signed out, or a model the account stopped offering, is therefore dropped rather
+    /// than forwarded, which lands the chat on that agent's own defaults.
+    private func reportLaunch(for project: Project) -> RemoteReportLaunchDTO {
+        let inherited = InheritedLaunchConfiguration.resolve(
+            sessions: project.sessions,
+            defaultKind: AppSettings.shared.defaultAgentKind
+        )
+        let kind = inherited.kind
+
+        // The standard handle needs no proof: the server resolves it to whichever login is
+        // default at the time. A named one must still exist.
+        let discoveredAccounts = AgentAccountDiscovery.accounts(for: kind)
+        let account: AgentAccount? = inherited.accountHandle.isStandard
+            ? discoveredAccounts.first(where: \.isDefault)
+            : discoveredAccounts.first { $0.handle == inherited.accountHandle }
+        let accountID: String? = {
+            guard kind.supportsAccounts else { return nil }
+            if inherited.accountHandle.isStandard { return AccountHandle.standardName }
+            return account == nil ? nil : inherited.accountHandle.name
+        }()
+
+        let modelOptions = AgentModels.options(for: kind, account: account)
+        let model = inherited.model.flatMap { identifier in
+            modelOptions.contains { $0.identifier == identifier } ? identifier : nil
+        }
+        let reasoningEffort = model.flatMap { identifier in
+            inherited.reasoningEffort.flatMap { effort in
+                modelOptions.first { $0.identifier == identifier }?
+                    .supports(reasoningEffort: effort) == true ? effort : nil
+            }
+        }
+        let fastMode = inherited.fastMode.flatMap { requested in
+            AgentModels.supportsFastMode(kind: kind, model: model, account: account)
+                ? requested
+                : nil
+        }
+
+        let workspace = AppSettings.shared.phoneReportWorkspace.resolvedPlan(
+            canProvisionWorkspace: ManagedGitWorkspace.canProvision(from: project),
+            supportsFinishHandshake: ManagedWorkspaceEligibility.supportsFinishHandshake(
+                kind: kind,
+                usesNativeUI: inherited.usesNativeUI
+            )
+        )
+
+        return RemoteReportLaunchDTO(
+            agentID: kind.rawValue,
+            accountID: accountID,
+            model: model,
+            reasoningEffort: reasoningEffort,
+            fastMode: fastMode,
+            permissionMode: inherited.permissionMode?.rawValue,
+            surface: inherited.usesNativeUI ? .conversation : .terminal,
+            managedWorkspace: workspace.map {
+                RemoteManagedWorkspacePlanDTO(
+                    delivery: $0.delivery.rawValue,
+                    publication: $0.publication?.rawValue
+                )
+            }
+        )
     }
 
     // MARK: - Subscription
@@ -386,7 +459,7 @@ final class RemoteSessionMirrorRegistry {
         sessionByConnection[key] = sessionID
 
         let hello = RemoteHelloDTO(
-            surface: "terminal",
+            surface: .terminal,
             capability: capability.rawValue,
             cols: snapshot.grid.cols,
             rows: snapshot.grid.rows,
@@ -414,7 +487,7 @@ final class RemoteSessionMirrorRegistry {
                 // Conversation mirrors carry typed snapshots, not PTY history. The shared
                 // mirror shape still owns a ring, kept at its smallest valid capacity.
                 ring: RemoteRingBuffer(capacity: 1),
-                surface: "conversation"
+                surface: .conversation
             )
         }
 
@@ -443,7 +516,7 @@ final class RemoteSessionMirrorRegistry {
         mirrors[sessionID]?.subscribers[key] = connection
         sessionByConnection[key] = sessionID
         connection.sendText(encode(RemoteHelloDTO(
-            surface: "conversation",
+            surface: .conversation,
             capability: authorization.capability.rawValue,
             cols: 0,
             rows: 0,
@@ -469,7 +542,7 @@ final class RemoteSessionMirrorRegistry {
         beforeRowID: String?,
         limit: Int?
     ) {
-        guard mirrors[sessionID]?.surface == "conversation",
+        guard mirrors[sessionID]?.surface == .conversation,
               mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
               let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID) else {
             return
@@ -487,7 +560,7 @@ final class RemoteSessionMirrorRegistry {
         sessionID: SessionID
     ) {
         guard let peer = connection.authenticatedPeer,
-              mirrors[sessionID]?.surface == "conversation",
+              mirrors[sessionID]?.surface == .conversation,
               mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
               let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID) else {
             return
@@ -523,10 +596,10 @@ final class RemoteSessionMirrorRegistry {
             // no viewer. Otherwise reconnecting later would show only bytes produced after the
             // new socket attached — often an apparently blank TUI.
             let keepsTerminalCapture =
-                mirrors[sessionID]?.surface == "terminal"
+                mirrors[sessionID]?.surface == .terminal
                 && AppSettings.shared.remoteAccessEnabled
             if !keepsTerminalCapture {
-                if mirrors[sessionID]?.surface == "terminal" {
+                if mirrors[sessionID]?.surface == .terminal {
                     removeTap(sessionID: sessionID)
                 }
                 mirrors[sessionID] = nil
@@ -573,7 +646,7 @@ final class RemoteSessionMirrorRegistry {
         // feeds with blank cells as NUL, which a client renders as a staircase of run-together
         // words. See `RemoteScreenSeed`.
         ring.append(snapshot.screenSeed)
-        mirrors[sessionID] = Mirror(ring: ring, surface: "terminal")
+        mirrors[sessionID] = Mirror(ring: ring, surface: .terminal)
         return snapshot.state
     }
 
@@ -592,7 +665,7 @@ final class RemoteSessionMirrorRegistry {
 
     /// Releases idle capture as well as subscribers when the master switch is turned off.
     func remoteAccessStopped() {
-        for sessionID in mirrors.keys where mirrors[sessionID]?.surface == "terminal" {
+        for sessionID in mirrors.keys where mirrors[sessionID]?.surface == .terminal {
             _ = terminalApplication?.setViewport(nil, for: sessionID)
             removeTap(sessionID: sessionID)
         }
@@ -648,7 +721,7 @@ final class RemoteSessionMirrorRegistry {
               canWrite(sessionID: sessionID, authorization: authorization),
               (20...240).contains(cols),
               (4...160).contains(rows),
-              mirrors[sessionID]?.surface == "terminal",
+              mirrors[sessionID]?.surface == .terminal,
               mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
               let terminalApplication,
               case .available = terminalApplication.state(for: sessionID) else {
@@ -775,7 +848,7 @@ final class RemoteSessionMirrorRegistry {
         let status: RemotePromptSubmissionStatus
         if !canWrite(sessionID: sessionID, authorization: authorization) {
             status = .rejected
-        } else if mirrors[sessionID]?.surface == "terminal",
+        } else if mirrors[sessionID]?.surface == .terminal,
            RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
            terminalApplication?.sendInput(
                Array((text + "\r").utf8),
@@ -1066,7 +1139,7 @@ final class RemoteSessionMirrorRegistry {
     }
 
     private func inputControlChanged(_ sessionID: SessionID) {
-        if var mirror = mirrors[sessionID], mirror.surface == "terminal" {
+        if var mirror = mirrors[sessionID], mirror.surface == .terminal {
             let subscribers = mirror.subscribers
             mirror.viewportRequests = mirror.viewportRequests.filter { key, _ in
                 guard let authorization = subscribers[key]?.authenticatedPeer?.authorization
@@ -1078,7 +1151,7 @@ final class RemoteSessionMirrorRegistry {
         }
         broadcastInputControl(sessionID)
         // Provider state did not change, but each viewer's authorised `canSend` may have.
-        if mirrors[sessionID]?.surface == "conversation",
+        if mirrors[sessionID]?.surface == .conversation,
            let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID),
            let mirror = mirrors[sessionID] {
             let revision = mirror.conversationRevision
@@ -1265,7 +1338,7 @@ final class RemoteSessionMirrorRegistry {
     /// Streaming providers can call this for every token, so updates are coalesced to one frame
     /// per display refresh.
     func sessionConversationChanged(_ sessionID: SessionID) {
-        guard mirrors[sessionID]?.surface == "conversation",
+        guard mirrors[sessionID]?.surface == .conversation,
               pendingConversationBroadcasts[sessionID] == nil else { return }
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
@@ -1277,7 +1350,7 @@ final class RemoteSessionMirrorRegistry {
     }
 
     private func broadcastConversation(_ sessionID: SessionID) {
-        guard var mirror = mirrors[sessionID], mirror.surface == "conversation",
+        guard var mirror = mirrors[sessionID], mirror.surface == .conversation,
               let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID) else {
             return
         }
@@ -1512,8 +1585,8 @@ final class RemoteSessionMirrorRegistry {
         let isOwnerDevice: Bool
         let capability: RemoteCapability
         let canApprovePermissions: Bool
-        /// `terminal` or `conversation` — which of the chat's two faces they are looking at.
-        let surface: String
+        /// Which of the chat's two faces they are looking at.
+        let surface: RemoteSessionSurface
         /// The grid this follower is holding the shared PTY at, when it holds one.
         let viewport: (cols: Int, rows: Int)?
         let watchingSince: Date?
@@ -1797,7 +1870,7 @@ final class RemoteSessionMirrorRegistry {
     private func presenceUpdate(
         for connection: RemoteConnection,
         key: ObjectIdentifier,
-        surface: String,
+        surface: RemoteSessionSurface,
         state: String
     ) -> RemotePresenceDTO {
         let peer = connection.authenticatedPeer

@@ -20,6 +20,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private let hostedStatusLabel = NSTextField(labelWithString: "")
     private let hostedAccountControls = NSStackView()
     private let inputControlDefault = ThemedSegmentedControl()
+    private let phoneReportWorkspacePopUp = ThemedPopUp()
     private let openLocallyButton = ThemedButton()
     private let pairingActionButton = ThemedButton()
     private let pairedDevicesStack = NSStackView()
@@ -149,6 +150,21 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         inputControlDefault.widthAnchor.constraint(
             equalToConstant: SettingsUIDefaults.wideSegmentedControlWidth
         ).isActive = true
+
+        for policy in PhoneReportWorkspacePolicy.allCases {
+            phoneReportWorkspacePopUp.addItem(
+                ThemedMenuItem(title: policy.settingsTitle, representedValue: policy)
+            )
+        }
+        phoneReportWorkspacePopUp.selectItem(
+            at: PhoneReportWorkspacePolicy.allCases
+                .firstIndex(of: AppSettings.shared.phoneReportWorkspace) ?? 0
+        )
+        phoneReportWorkspacePopUp.target = self
+        phoneReportWorkspacePopUp.action = #selector(phoneReportWorkspaceChanged)
+        phoneReportWorkspacePopUp.setAccessibilityIdentifier(
+            "settings.remote-access.phone-report-workspace"
+        )
 
         openLocallyButton.title = L10n.string("Open in Browser")
         openLocallyButton.target = self
@@ -415,6 +431,13 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                     + "with the Mac owner in control. You can switch a live chat at any time.",
                 control: inputControlDefault
             ),
+            SettingsUI.row(
+                title: "Reports from your phone",
+                subtitle: "Shake to report, then Send to Mac, starts a chat here while you are "
+                    + "away from it. Its own workspace keeps that chat out of the checkout you "
+                    + "left open. Available for a Git project whose agent has session tools.",
+                control: phoneReportWorkspacePopUp
+            ),
             SettingsUI.detailRow(
                 symbol: "lock.shield",
                 title: "Your own devices",
@@ -459,6 +482,10 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         inputControlDefault.selectedIndex = RemoteInputControlDefault.allCases.firstIndex(
             of: AppSettings.shared.remoteInputControlDefault
         ) ?? 0
+        phoneReportWorkspacePopUp.selectItem(
+            at: PhoneReportWorkspacePolicy.allCases
+                .firstIndex(of: AppSettings.shared.phoneReportWorkspace) ?? 0
+        )
         tailscaleReadinessSection?.isHidden =
             AppSettings.shared.remoteAccessConnectionMode == .relay
         updateTailscaleReadiness(coordinator.tailscaleReadiness)
@@ -1059,6 +1086,14 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     @objc private func keepRelayReadyChanged() {
         RemoteAccessCoordinator.shared.setKeepsRelayReady(keepRelayReadyToggle.state == .on)
         refresh()
+    }
+
+    /// Recorded on the Mac and read again the next time a phone asks what is available, so a
+    /// report already on its way keeps the answer it was given.
+    @objc private func phoneReportWorkspaceChanged() {
+        guard let value = phoneReportWorkspacePopUp.selectedItem?.representedValue
+            as? PhoneReportWorkspacePolicy else { return }
+        AppSettings.shared.phoneReportWorkspace = value
     }
 
     @objc private func openLocally() {

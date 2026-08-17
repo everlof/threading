@@ -1062,6 +1062,24 @@ final class AppSettings {
         }
     }
 
+    /// Where a report sent from a paired phone does its work.
+    ///
+    /// A shake report is the one session nobody watches start: it arrives while its owner is
+    /// away from the Mac, in whichever checkout they left open. This is the choice that says
+    /// whether it may touch that checkout.
+    var phoneReportWorkspace: PhoneReportWorkspacePolicy {
+        get {
+            guard let raw = AppSettingDefinitions.phoneReportWorkspace.read(from: defaults),
+                  let value = PhoneReportWorkspacePolicy(rawValue: raw) else {
+                return .sameCheckout
+            }
+            return value
+        }
+        set {
+            AppSettingDefinitions.phoneReportWorkspace.write(newValue.rawValue, to: defaults)
+        }
+    }
+
     /// Whether Threading may ask its release feed whether a newer version exists.
     ///
     /// Defaults to **on**, and `defaults.bool` cannot express that — an unset key reads `false`,

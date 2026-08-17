@@ -92,44 +92,35 @@ enum DeveloperReportChat {
 
     /// The configuration a report chat inherits: the most recently used chat in that project.
     ///
-    /// Not the app defaults, and not a runtime chosen here. The person filing the report is the
-    /// person who was working in that project a moment ago, and a chat that comes up on a
-    /// different agent, login, model or permission mode than the one they have used all day is a
-    /// chat they have to reconfigure before it can do anything. Archived rows are skipped —
-    /// those are the ones deliberately put away.
+    /// The rule itself is `InheritedLaunchConfiguration`, shared with the report a paired phone
+    /// sends to this Mac, because both are chats created for somebody rather than by them and
+    /// disagreeing about what they come up as is how the phone ended up launching Codex at
+    /// people who had not used it in weeks.
     ///
     /// **Never a managed workspace, and never a branch.** A UI report is read against the tree
     /// the build came from; a detached worktree would put the agent somewhere the screenshot is
-    /// not about.
-    ///
-    /// The two clamps are `AgentSessionConfiguration`'s own rules, applied here rather than
-    /// discovered as a nil session later: an account handle only means something for a runtime
-    /// with logins, and a permission mode only for one with modes. Inheriting them from a
-    /// session of the same kind keeps both valid, and the defaults path is where they would
-    /// otherwise go wrong.
+    /// not about. That is this route's own decision rather than the shared rule's, which says
+    /// nothing about where a chat runs.
     static func plan(
         projectID: ProjectID,
         sessions: [AgentSession],
         defaultKind: AgentKind
     ) -> ScheduledSessionPlan {
-        let latest = sessions
-            .filter { !$0.isArchived }
-            .max { $0.lastUsedAt < $1.lastUsedAt }
-        let kind = latest?.kind ?? defaultKind
-        let inherited = latest?.kind == kind ? latest : nil
+        let inherited = InheritedLaunchConfiguration.resolve(
+            sessions: sessions,
+            defaultKind: defaultKind
+        )
 
         return ScheduledSessionPlan(
             projectID: projectID,
-            kind: kind,
-            accountHandle: kind.supportsAccounts
-                ? (inherited?.accountHandle ?? .standard)
-                : .standard,
-            model: inherited?.model,
-            reasoningEffort: inherited?.reasoningEffort,
-            fastMode: inherited?.fastMode,
+            kind: inherited.kind,
+            accountHandle: inherited.accountHandle,
+            model: inherited.model,
+            reasoningEffort: inherited.reasoningEffort,
+            fastMode: inherited.fastMode,
             branch: nil,
-            usesNativeUI: inherited?.usesNativeUI ?? kind.supportsNativeUI,
-            permissionMode: kind.supportsPermissionModes ? inherited?.permissionMode : nil,
+            usesNativeUI: inherited.usesNativeUI,
+            permissionMode: inherited.permissionMode,
             managedWorkspacePlan: nil
         )
     }

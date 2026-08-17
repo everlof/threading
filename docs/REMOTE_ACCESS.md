@@ -78,6 +78,31 @@ private-only. Guest shares never receive the Mac's private endpoint list.
 The iOS app shows all unarchived
 sessions grouped by project or ordered by recent activity, including dormant sessions. Pinned sessions
 stay at the top on both Mac and iPhone, and the archive is available from the dashboard.
+
+**A row says who is talking, the way the Mac sidebar does.** Its tile is the runtime's own mark —
+Claude's starburst, OpenAI's knot, an SF Symbol for a runtime we bundle no artwork for — with an
+alternate account's chip on the bottom-trailing corner and the account's name beside the state. The
+Mac resolves that chip (`RemoteAccountBridge` → `RemoteSessionAccountDTO`: the emoji the login was
+given, else its initial and the hue `AccountBadge` hashes from the login address), so one login looks
+the same on both screens instead of two hash implementations agreeing until one is edited. A
+discovered avatar stays on the Mac: it would be image bytes per row. As in the sidebar, the CLI's
+**default** login sends no chip at all, which is also what keeps the projection off the account
+directories for most rows.
+
+Before this the tile was a **terminal glyph on every chat**, because a mirrored agent TUI and a plain
+shell were drawn with the same icon — so a list of Claude and Codex chats looked like a list of
+shells and named neither provider nor login. `terminal` now means a terminal: it marks the *surface*
+in the row's second line, beside a speech bubble for a natively rendered conversation, and
+`MobileAgentIdentity` owns the runtime half of that vocabulary. The row is also two lines tall and
+fixed — a three-line title over a 46-point tile made rows up to 110 points, and five chats filled a
+phone screen.
+
+**The surface is a type, not a string.** `RemoteSessionSurface` (`.terminal` / `.conversation`)
+replaces the `surface == "conversation"` comparisons that were spread across both apps and five
+DTOs. It stays a string *on the wire*: a newer Mac may show a surface an installed phone has never
+heard of, and that row must decode, list and round-trip rather than fail the whole payload. Leniency
+runs one way — an inbound create or switch naming an unknown surface is refused (`isKnown`) rather
+than guessed at.
 On a paired owner device, the dashboard's options menu also offers **Usage** when the Mac
 advertises support. It opens the Mac's prepared 7-, 30- and 90-day Overview and Limit History in a
 native iPhone sheet. The phone receives bounded semantic totals and chart points, not transcripts,
@@ -116,8 +141,14 @@ are pushed immediately so another open device follows the switch without waiting
 
 A session's iPhone **Workspace** gathers **Browser**, **Review**, the read-only repository
 **Files** browser, and **Attachments** under one route so companion surfaces do not accumulate as
-toolbar buttons. When an agent opens or navigates a browser tab, the phone never changes screens:
-the Workspace button receives one quiet pulse and an unread dot. Opening **Browser** follows the
+toolbar buttons. The session screen keeps a single trailing **…** control for the same reason:
+Workspace and the terminal palette are entries in that menu rather than glyphs of their own,
+because three of them plus a back button left the session's name a truncated stub at phone width.
+A swipe in from the right edge opens Workspace without the menu, and the menu still appears for
+any of the three permissions that used to reveal a button of its own — a share that may recolour
+a terminal without managing the session still gets it. When an agent opens or navigates a browser
+tab, the phone never changes screens: the **…** control receives one quiet pulse and an unread
+dot. Opening **Browser** follows the
 Mac-owned tab through bounded, read-only snapshots; clicks, scrolling, and form entry continue to
 run only on the Mac and merely refresh an already visible follow view. Routine browser mutations
 do not repeatedly animate the badge. Private tabs remain generic in the list and never send
@@ -288,6 +319,33 @@ device id with a pseudonym, and appends the result to the Mac's separate share-s
 journal. Messages, prompts, terminal output, paths, URLs, notification text and credentials are
 never eligible. Guest and view-only links cannot upload diagnostics.
 
+## Reporting a problem from the phone
+
+Shaking the iPhone opens a report sheet. Everyone can send it to Threading's private intake or
+share the files. An owner device that may manage sessions, and that can see the Threading project
+on the paired Mac, also gets **Send to Mac**: the report becomes the opening prompt of a new chat
+in that project, screenshot path and all.
+
+**What that chat comes up as is the Mac's answer, forwarded by the phone.** The phone used to
+choose out of two literals — Codex, and the standard login — which is how a report could land on
+an agent nobody had used in weeks. The catalogue now publishes the answer per project, as
+`RemoteProjectChoiceDTO.reportLaunch`:
+
+- **Launch choices inherited from the chat most recently used in that project**
+  (`InheritedLaunchConfiguration`, shared with the development build's own report chat): agent,
+  login, model, reasoning level, speed, permission mode and surface. Anything this Mac would
+  refuse on arrival is dropped before it is published, so a signed-out login or a retired model
+  costs the reporter nothing.
+- **The workspace chosen in Remote Access settings** under *Reports from your phone*: the
+  project's own checkout, or a worktree of its own that is either merged when the agent finishes
+  or kept for review. It is offered only where the checkout can host a worktree and the agent can
+  perform the finish handshake. See
+  [managed-workspaces.md](architecture/managed-workspaces.md).
+
+The request carries the workspace back as `RemoteCreateSessionRequestDTO.managedWorkspace` and
+`handleCreateSession` validates it again rather than trusting what the catalogue produced.
+Publication is refused on this route: a phone cannot open a change request.
+
 ## Notifications
 
 Notification preferences can be set before pairing from the iPhone's Settings. If permission is
@@ -406,6 +464,14 @@ agent kind returns on reset. The archive has one 1 MiB encoded ceiling plus layo
 cardinality checks; duplicate key identities and oversized actions are refused without replacing
 the active or durable layout. Keys ride the existing `input` frame, so the server's
 capability/Focused-mode/size checks apply unchanged and no protocol bump was needed.
+
+It is the only bar over the keyboard. SwiftTerm fits its own `TerminalAccessory` — a fixed
+esc/ctrl/tab/arrow row — from `TerminalView`'s initializer, which stacked a second row of nearly
+the same keys under this one; `RemoteTerminalView.dropBuiltInKeyboardAccessory()` clears it
+through SwiftTerm's own documented assignment seam, once, because that is the only place it is
+installed. The dismiss control that row carried moves onto the key bar, where it appears only
+while a keyboard is actually up: the terminal is a first responder rather than a focusable
+SwiftUI field, so there is no other way back from the keyboard.
 
 iPhone and browser continuity is scoped to the exact saved Mac and session. Native and atomic
 terminal drafts are written locally as they change, pending request ids survive a reconnect, and

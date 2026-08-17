@@ -2,6 +2,32 @@ import ThreadingRemoteKit
 import SwiftUI
 import UIKit
 
+/// What the session screen's single trailing menu contains, and therefore whether it is shown.
+///
+/// Workspace, the terminal palette and the session actions were three separate toolbar buttons.
+/// They are gathered under one control now, which means each of the three permissions that used
+/// to reveal its own button has to keep revealing its entry — a share that may recolour a
+/// terminal but not manage the session still needs the menu to appear.
+enum MobileSessionChrome {
+    static func canOpenWorkspace(canManageSessions: Bool, hasClient: Bool) -> Bool {
+        canManageSessions && hasClient
+    }
+
+    /// A palette belongs to a terminal. A native conversation is drawn in the app theme, so the
+    /// entry is absent there rather than present and inert.
+    static func canChooseTerminalTheme(
+        canManageThemes: Bool,
+        surface: RemoteSessionSurface,
+        hasThemeCatalog: Bool
+    ) -> Bool {
+        canManageThemes && surface == .terminal && hasThemeCatalog
+    }
+
+    static func showsSessionMenu(canManageSessions: Bool, canChooseTerminalTheme: Bool) -> Bool {
+        canManageSessions || canChooseTerminalTheme
+    }
+}
+
 struct SessionDetailView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
@@ -16,7 +42,7 @@ struct SessionDetailView: View {
     @State private var sessionActionError: String?
     @State private var isMutatingSession = false
     @State private var isConfirmingSurfaceSwitch = false
-    @State private var pendingSurface = "terminal"
+    @State private var pendingSurface = RemoteSessionSurface.terminal
     @State private var isShowingWorkspace = false
     @State private var initialWorkspaceDestination: RemoteNotificationDestinationDTO?
     @State private var initialWorkspaceEventID: String?
@@ -36,7 +62,7 @@ struct SessionDetailView: View {
     var body: some View {
         Group {
             if let connection {
-                if connection.surface == "conversation" {
+                if connection.surface == .conversation {
                     ConversationRemoteView(connection: connection)
                 } else {
                     TerminalRemoteView(connection: connection)
@@ -65,149 +91,24 @@ struct SessionDetailView: View {
         .navigationTitle(connection?.title ?? currentSession.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if model.canManageSessions, model.client != nil {
+            if showsSessionMenu {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        initialWorkspaceDestination = nil
-                        initialWorkspaceEventID = nil
-                        isShowingWorkspace = true
+                    Menu {
+                        sessionMenuContent
                     } label: {
-                        WorkspaceToolbarIcon(activity: workspaceActivity)
+                        SessionActionsToolbarIcon(activity: workspaceActivity)
                     }
                     .accessibilityLabel(
                         MobileL10n.string(
                             workspaceActivity.hasUnseenBrowser
-                                ? "Session workspace, new browser activity"
-                                : "Session workspace"
+                                ? "Session actions, new browser activity"
+                                : "Session actions"
                         )
                     )
                 }
             }
-            if model.canManageThemes,
-               currentSession.surface == "terminal",
-               let catalog = model.me?.themeCatalog {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button {
-                            chooseTerminalTheme(nil)
-                        } label: {
-                            let label = MobileL10n.string(
-                                "Inherit (%@)",
-                                currentSession.inheritedTerminalThemeName
-                                    ?? MobileL10n.string("Default")
-                            )
-                            if currentSession.terminalThemeAssignmentID == nil {
-                                Label(label, systemImage: "checkmark")
-                            } else {
-                                Text(label)
-                            }
-                        }
-                        Divider()
-                        ForEach(catalog.terminalThemes, id: \.id) { option in
-                            Button {
-                                chooseTerminalTheme(option.id)
-                            } label: {
-                                if currentSession.terminalThemeAssignmentID == option.id {
-                                    Label(option.name, systemImage: "checkmark")
-                                } else {
-                                    Text(option.name)
-                                }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "paintpalette")
-                    }
-                    .disabled(isChangingTheme)
-                    .accessibilityLabel("Terminal theme")
-                }
-            }
-            if model.canManageSessions {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button {
-                            mutate {
-                                try await model.setPinned(
-                                    !currentSession.isPinned,
-                                    for: currentSession
-                                )
-                            }
-                        } label: {
-                            Label(
-                                MobileL10n.string(currentSession.isPinned ? "Unpin" : "Pin"),
-                                systemImage: currentSession.isPinned ? "pin.slash" : "pin"
-                            )
-                        }
-                        Button {
-                            renameText = currentSession.title
-                            isRenaming = true
-                        } label: {
-                            Label("Rename", systemImage: "pencil")
-                        }
-                        if currentSession.isSnoozed() {
-                            Button {
-                                mutate {
-                                    try await model.setSnoozed(
-                                        until: nil,
-                                        for: currentSession
-                                    )
-                                }
-                            } label: {
-                                Label("Unsnooze", systemImage: "sun.max")
-                            }
-                        } else {
-                            Menu {
-                                ForEach(MobileSnoozePresets.choices()) { choice in
-                                    Button(choice.title) {
-                                        mutate {
-                                            try await model.setSnoozed(
-                                                until: choice.deadline,
-                                                for: currentSession
-                                            )
-                                        }
-                                    }
-                                }
-                            } label: {
-                                Label("Snooze", systemImage: "moon.zzz")
-                            }
-                        }
-                        Section("Interface") {
-                            Button {
-                                confirmSurfaceSwitch(to: "conversation")
-                            } label: {
-                                Label(
-                                    "Native",
-                                    systemImage: currentSession.surface == "conversation"
-                                        ? "checkmark"
-                                        : "bubble.left.and.bubble.right"
-                                )
-                            }
-                            .accessibilityLabel("Native, experimental")
-                            Button {
-                                confirmSurfaceSwitch(to: "terminal")
-                            } label: {
-                                Label(
-                                    originalUISurfaceTitle,
-                                    systemImage: currentSession.surface == "terminal"
-                                        ? "checkmark"
-                                        : "terminal"
-                                )
-                            }
-                        }
-                        Button(role: .destructive) {
-                            mutate(dismissAfterward: true) {
-                                try await model.setArchived(true, for: currentSession)
-                            }
-                        } label: {
-                            Label("Archive", systemImage: "archivebox")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                    }
-                    .disabled(isMutatingSession)
-                    .accessibilityLabel("Session actions")
-                }
-            }
         }
+        .onScreenEdgeSwipe(from: .right, perform: openWorkspace)
         .toolbarBackground(theme.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .background(theme.ground)
@@ -300,6 +201,164 @@ struct SessionDetailView: View {
         )
     }
 
+    /// Everything the session's own chrome can do, gathered under the one trailing control.
+    ///
+    /// Workspace and the terminal palette used to sit beside it as separate toolbar buttons.
+    /// Three glyphs plus a back button left the title a truncated stub on a phone, and neither
+    /// of the two is reached often enough to spend a permanent slot on.
+    @ViewBuilder
+    private var sessionMenuContent: some View {
+        if canOpenWorkspace {
+            Button(action: openWorkspace) {
+                Label("Workspace", systemImage: "square.grid.2x2")
+            }
+            Divider()
+        }
+        if model.canManageSessions {
+            Group {
+                Button {
+                    mutate {
+                        try await model.setPinned(!currentSession.isPinned, for: currentSession)
+                    }
+                } label: {
+                    Label(
+                        MobileL10n.string(currentSession.isPinned ? "Unpin" : "Pin"),
+                        systemImage: currentSession.isPinned ? "pin.slash" : "pin"
+                    )
+                }
+                Button {
+                    renameText = currentSession.title
+                    isRenaming = true
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+                if currentSession.isSnoozed() {
+                    Button {
+                        mutate {
+                            try await model.setSnoozed(until: nil, for: currentSession)
+                        }
+                    } label: {
+                        Label("Unsnooze", systemImage: "sun.max")
+                    }
+                } else {
+                    Menu {
+                        ForEach(MobileSnoozePresets.choices()) { choice in
+                            Button(choice.title) {
+                                mutate {
+                                    try await model.setSnoozed(
+                                        until: choice.deadline,
+                                        for: currentSession
+                                    )
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Snooze", systemImage: "moon.zzz")
+                    }
+                }
+                Section("Interface") {
+                    Button {
+                        confirmSurfaceSwitch(to: .conversation)
+                    } label: {
+                        Label(
+                            "Native",
+                            systemImage: currentSession.surface == .conversation
+                                ? "checkmark"
+                                : "bubble.left.and.bubble.right"
+                        )
+                    }
+                    .accessibilityLabel("Native, experimental")
+                    Button {
+                        confirmSurfaceSwitch(to: .terminal)
+                    } label: {
+                        Label(
+                            originalUISurfaceTitle,
+                            systemImage: currentSession.surface == .terminal
+                                ? "checkmark"
+                                : "terminal"
+                        )
+                    }
+                }
+            }
+            .disabled(isMutatingSession)
+        }
+        if let catalog = model.me?.themeCatalog, canChooseTerminalTheme {
+            terminalThemeMenu(catalog)
+        }
+        if model.canManageSessions {
+            Button(role: .destructive) {
+                mutate(dismissAfterward: true) {
+                    try await model.setArchived(true, for: currentSession)
+                }
+            } label: {
+                Label("Archive", systemImage: "archivebox")
+            }
+            .disabled(isMutatingSession)
+        }
+    }
+
+    private func terminalThemeMenu(_ catalog: RemoteThemeCatalogDTO) -> some View {
+        Menu {
+            Button {
+                chooseTerminalTheme(nil)
+            } label: {
+                let label = MobileL10n.string(
+                    "Inherit (%@)",
+                    currentSession.inheritedTerminalThemeName ?? MobileL10n.string("Default")
+                )
+                if currentSession.terminalThemeAssignmentID == nil {
+                    Label(label, systemImage: "checkmark")
+                } else {
+                    Text(label)
+                }
+            }
+            Divider()
+            ForEach(catalog.terminalThemes, id: \.id) { option in
+                Button {
+                    chooseTerminalTheme(option.id)
+                } label: {
+                    if currentSession.terminalThemeAssignmentID == option.id {
+                        Label(option.name, systemImage: "checkmark")
+                    } else {
+                        Text(option.name)
+                    }
+                }
+            }
+        } label: {
+            Label("Terminal theme", systemImage: "paintpalette")
+        }
+        .disabled(isChangingTheme)
+    }
+
+    private var showsSessionMenu: Bool {
+        MobileSessionChrome.showsSessionMenu(
+            canManageSessions: model.canManageSessions,
+            canChooseTerminalTheme: canChooseTerminalTheme
+        )
+    }
+
+    private var canOpenWorkspace: Bool {
+        MobileSessionChrome.canOpenWorkspace(
+            canManageSessions: model.canManageSessions,
+            hasClient: model.client != nil
+        )
+    }
+
+    private var canChooseTerminalTheme: Bool {
+        MobileSessionChrome.canChooseTerminalTheme(
+            canManageThemes: model.canManageThemes,
+            surface: currentSession.surface,
+            hasThemeCatalog: model.me?.themeCatalog != nil
+        )
+    }
+
+    private func openWorkspace() {
+        guard canOpenWorkspace else { return }
+        initialWorkspaceDestination = nil
+        initialWorkspaceEventID = nil
+        isShowingWorkspace = true
+    }
+
     private func openPendingNotificationDestination() {
         guard let request = model.notificationOpenRequest,
               request.sessionID == session.id else { return }
@@ -373,24 +432,22 @@ struct SessionDetailView: View {
     }
 
     private var originalUISurfaceTitle: String {
-        MobileL10n.string(
-            currentSession.agentKind == "claude" ? "Claude Code UI" : "Codex UI"
-        )
+        MobileAgentIdentity.resolve(currentSession.agentKind).originalUITitle
     }
 
-    private func surfaceTitle(_ surface: String) -> String {
-        surface == "conversation"
+    private func surfaceTitle(_ surface: RemoteSessionSurface) -> String {
+        surface == .conversation
             ? MobileL10n.string("Native (Experimental)")
             : originalUISurfaceTitle
     }
 
-    private func confirmSurfaceSwitch(to surface: String) {
+    private func confirmSurfaceSwitch(to surface: RemoteSessionSurface) {
         guard surface != currentSession.surface else { return }
         pendingSurface = surface
         isConfirmingSurfaceSwitch = true
     }
 
-    private func switchSurface(to surface: String) {
+    private func switchSurface(to surface: RemoteSessionSurface) {
         guard !isMutatingSession else { return }
         isMutatingSession = true
         connection?.disconnect(markEnded: false)
@@ -436,7 +493,11 @@ struct SessionDetailView: View {
     }
 }
 
-private struct WorkspaceToolbarIcon: View {
+/// The session's one trailing toolbar control.
+///
+/// It carries the workspace's unseen-browser dot, because Workspace now lives inside the menu
+/// this opens: a milestone the phone was not watching still has to be visible from the outside.
+private struct SessionActionsToolbarIcon: View {
     @ObservedObject var activity: MobileWorkspaceActivity
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -471,7 +532,7 @@ private struct WorkspaceToolbarIcon: View {
 
     @ViewBuilder
     private var symbol: some View {
-        let image = Image(systemName: "square.grid.2x2")
+        let image = Image(systemName: "ellipsis")
         if reduceMotion {
             image
         } else {
@@ -552,8 +613,15 @@ struct TerminalRemoteView: View {
     }
 
     private var usesIndependentComposer: Bool {
-        notifications.independentTerminalDraftsEnabled
-            && connection.supportsAtomicTerminalSubmission
+        connection.usesIndependentTerminalComposer(
+            settingEnabled: notifications.independentTerminalDraftsEnabled
+        )
+    }
+
+    private var allowsDirectInput: Bool {
+        connection.capability == .interact
+            && !usesIndependentComposer
+            && connection.inputControl?.canWrite != false
     }
 
     var body: some View {
@@ -561,8 +629,7 @@ struct TerminalRemoteView: View {
             TerminalViewRepresentable(
                 connection: connection,
                 theme: connection.terminalTheme,
-                allowsDirectInput: !usesIndependentComposer
-                    && connection.inputControl?.canWrite != false,
+                allowsDirectInput: allowsDirectInput,
                 keyBridge: keyBridge,
                 initialScrollProgress: terminalContinuity?.terminalViewportProgress,
                 onScrollProgress: saveTerminalViewport
@@ -1346,7 +1413,7 @@ private struct InputControlBar: View {
     @State private var resultNotice: String?
 
     var body: some View {
-        if connection.supportsFocusedInputControl, let state = connection.inputControl {
+        if connection.shouldPresentInputControl, let state = connection.inputControl {
             VStack(spacing: 0) {
                 HStack(spacing: MobileDesign.Spacing.small) {
                     Image(systemName: state.mode == .collaborative ? "person.2" : "hand.raised")

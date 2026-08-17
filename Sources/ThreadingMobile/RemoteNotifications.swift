@@ -1411,8 +1411,9 @@ struct NotificationSettingsView: View {
                 } footer: {
                     Text(
                         "Presence stays inside the live session and never creates push "
-                            + "notifications. Independent drafts prevent devices from mixing "
-                            + "keystrokes; turn them off for direct terminal typing."
+                            + "notifications. Independent drafts keep people from mixing "
+                            + "keystrokes once someone else joins; owner-only terminals always "
+                            + "type directly in the TUI."
                     )
                 }
 
