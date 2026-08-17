@@ -343,6 +343,146 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertTrue(fold.needsDisplay, "a theme change left the fold undrawn")
     }
 
+    // MARK: - Pane Fold — The Corner
+
+    /// Two panes with a fold running edge to edge inside the trailing one: the attachments pane's
+    /// own arrangement, and the reason the fold's leading end lands *on* the window's split seam.
+    ///
+    /// In a window, because the corner is resolved through the view tree and a press carries
+    /// window coordinates. Unshown — nothing here needs to be on screen.
+    private func cornerFixture() -> (split: ThemedSplitView, fold: PaneFoldDivider) {
+        let frame = NSRect(x: 0, y: 0, width: 400, height: 200)
+        let split = ThemedSplitView(frame: frame)
+        split.addArrangedSubview(NSView())
+        split.addArrangedSubview(NSView())
+        split.adjustSubviews()
+
+        let window = NSWindow(
+            contentRect: frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = split
+        windows.append(window)
+
+        let fold = PaneFoldDivider()
+        return (split, fold)
+    }
+
+    /// Hangs the fold inside the split's trailing pane, `inset` points in from both its edges.
+    private func install(
+        _ fold: PaneFoldDivider,
+        in split: ThemedSplitView,
+        inset: CGFloat = 0
+    ) {
+        let pane = split.arrangedSubviews[1]
+        pane.addSubview(fold)
+        NSLayoutConstraint.activate([
+            fold.leadingAnchor.constraint(equalTo: pane.leadingAnchor, constant: inset),
+            fold.trailingAnchor.constraint(equalTo: pane.trailingAnchor, constant: -inset),
+            fold.centerYAnchor.constraint(equalTo: pane.centerYAnchor)
+        ])
+        split.layoutSubtreeIfNeeded()
+    }
+
+    /// A fold that runs edge to edge ends on the window's split seam, and holding the point where
+    /// they cross while moving only one of them is the gesture arriving at half its meaning: the
+    /// hand is on both.
+    func testTheFoldsEndOnItsPanesEdgeHoldsTheSeamThere() throws {
+        let (split, fold) = cornerFixture()
+        install(fold, in: split)
+        let seam = try XCTUnwrap(split.arrangedSubviews.first).frame.maxX
+
+        let corner = NSPoint(x: fold.bounds.minX + 2, y: fold.bounds.midY)
+        XCTAssertEqual(fold.cornerSide(at: corner), .leading)
+        XCTAssertNil(
+            fold.cornerSide(at: NSPoint(x: fold.bounds.midX, y: fold.bounds.midY)),
+            "the middle of the band claimed a seam it is nowhere near"
+        )
+        XCTAssertNil(
+            fold.cornerSide(at: NSPoint(x: fold.bounds.maxX - 2, y: fold.bounds.midY)),
+            "the window's own edge grew a seam to grab"
+        )
+
+        fold.mouseDown(with: try clickEvent(in: fold, at: corner, clicks: 1))
+        XCTAssertEqual(
+            split.activeDividerIndex,
+            0,
+            "a press in the corner did not take hold of the seam beside it"
+        )
+
+        split.moveHeldSeam(by: -40)
+        XCTAssertEqual(
+            try XCTUnwrap(split.arrangedSubviews.first).frame.maxX,
+            seam - 40,
+            accuracy: 1,
+            "the seam did not travel across with the corner"
+        )
+
+        fold.mouseUp(with: try clickEvent(in: fold, at: corner, clicks: 1))
+        let released = try XCTUnwrap(split.arrangedSubviews.first).frame.maxX
+        split.moveHeldSeam(by: -40)
+        XCTAssertEqual(
+            try XCTUnwrap(split.arrangedSubviews.first).frame.maxX,
+            released,
+            accuracy: 0.5,
+            "the seam was still being moved after the hand let go of the corner"
+        )
+    }
+
+    /// The rest of the band is a plain fold, and has to stay one: a press anywhere along it moves
+    /// the fold and nothing else, however wide the corner at either end is allowed to be.
+    func testAPressAlongTheBandTakesNoSeamWithIt() throws {
+        let (split, fold) = cornerFixture()
+        install(fold, in: split)
+        let seam = try XCTUnwrap(split.arrangedSubviews.first).frame.maxX
+
+        fold.mouseDown(with: try clickEvent(
+            in: fold,
+            at: NSPoint(x: fold.bounds.midX, y: fold.bounds.midY),
+            clicks: 1
+        ))
+
+        XCTAssertNil(split.activeDividerIndex, "the band lit a seam no press had attached to")
+        split.moveHeldSeam(by: -40)
+        XCTAssertEqual(
+            try XCTUnwrap(split.arrangedSubviews.first).frame.maxX,
+            seam,
+            accuracy: 0.5,
+            "a press along the band moved the pane beside it"
+        )
+    }
+
+    /// A corner is where two seams meet, and a fold inset from its pane's edge meets nothing. A
+    /// grip there would move a divider the pointer is a dozen points away from.
+    func testAFoldInsetFromItsPanesEdgeHasNoCornerToHold() throws {
+        let (split, fold) = cornerFixture()
+        install(fold, in: split, inset: Design.Spacing.inset)
+
+        XCTAssertNil(fold.cornerRect(on: .leading), "an inset fold offered a corner it has not got")
+        XCTAssertNil(fold.cornerRect(on: .trailing))
+
+        fold.mouseDown(with: try clickEvent(
+            in: fold,
+            at: NSPoint(x: fold.bounds.minX + 2, y: fold.bounds.midY),
+            clicks: 1
+        ))
+        XCTAssertNil(split.activeDividerIndex, "an inset fold took hold of a seam anyway")
+    }
+
+    /// A fold in no split view at all — the gallery's own sample, and every fold in a pane that is
+    /// not one of a window's — is a fold and nothing more.
+    func testAFoldOutsideASplitViewIsJustAFold() throws {
+        let fold = PaneFoldDivider()
+        fold.frame = NSRect(x: 0, y: 0, width: 120, height: fold.intrinsicContentSize.height)
+        _ = hosted(fold)
+
+        XCTAssertNil(fold.cornerSide(at: NSPoint(x: 1, y: fold.bounds.midY)))
+        XCTAssertNil(fold.cornerSide(at: NSPoint(x: 119, y: fold.bounds.midY)))
+    }
+
     /// Draws the fold between two halves at rest and under the pointer, light and dark.
     ///
     /// The assertions above pin the seam's ink apart; this is what says whether it reads apart. A
@@ -453,9 +593,19 @@ final class ThemedIndicatorsTests: XCTestCase {
     /// event can carry — `deltaY` is not, which is why the travel above is driven through the
     /// keyboard and the pane's own seam.
     private func clickEvent(in view: NSView, clicks: Int) throws -> NSEvent {
+        try clickEvent(
+            in: view,
+            at: NSPoint(x: view.bounds.midX, y: view.bounds.midY),
+            clicks: clicks
+        )
+    }
+
+    /// And a press at a stated point, for the one thing about a fold that depends on *where*
+    /// along the band the hand landed: its corners.
+    private func clickEvent(in view: NSView, at point: NSPoint, clicks: Int) throws -> NSEvent {
         try XCTUnwrap(NSEvent.mouseEvent(
             with: .leftMouseDown,
-            location: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil),
+            location: view.convert(point, to: nil),
             modifierFlags: [],
             timestamp: 0,
             windowNumber: view.window?.windowNumber ?? 0,

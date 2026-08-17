@@ -540,6 +540,41 @@ would swallow the accent by stepping to the measured neutral instead, and never 
 collapsed pane, whose hidden divider is not a target. `AppThemeTests`' pointer sweep asserts the
 hint against `hitTest`'s answer point by point, so the two cannot disagree.
 
+### The corner where two seams meet
+
+A pane can hold a fold of its own (`PaneFoldDivider` — the attachments chronology above its
+preview), and a fold that runs edge to edge **ends on the split view's seam**. Holding the point
+where the two cross while moving only one of them is the gesture arriving at half its meaning: the
+hand is on both. So a press within `PaneFoldDivider.Layout.cornerReach` of either end asks the
+split view for the seam beside that pane and holds it for the drag —
+`ThemedSplitView.holdSeam(beside:on:)`, `moveHeldSeam(by:)`, `releaseSeam()` — and the two axes
+move independently, `deltaX` across and `deltaY` down. A corner drag straight down is a plain fold
+drag with nothing across it, which is what makes the corner safe to be generous with.
+
+Four things it deliberately does not do.
+
+- **It does not restate which divider is beside a pane.** The split view resolves that from
+  `arrangedSubviews` and the pane the fold is a descendant of, and refuses when the fold does not
+  actually reach that pane's edge (`seamReach` is one point: content here is either edge to edge
+  or inset by a token, never a near miss) or when the neighbouring pane is collapsed, whose hidden
+  divider is not a target either way.
+- **It does not report the release to `dividerDragDidEnd`.** That callback is how a divider pushed
+  past its neighbour's floor *shuts* that pane, and a grip inside the pane is not somewhere to shut
+  it from — a hand overshooting here is aiming at a corner, not pushing a pane away.
+- **It does not accumulate.** `moveHeldSeam` places the seam from where it currently stands, so a
+  pane held at its own floor leaves no overshoot for the drag back to cross — the fold's rule on
+  the other axis.
+- **It does not make anything pointer-only.** Both seams are draggable on their own; the corner is
+  a shortcut, which is why there is no keyboard equivalent for the across axis and the fold's
+  arrow keys still mean only the fold.
+
+The cursor is the affordance: `NSCursor.frameResize` on macOS 15 and up, a crosshair below it —
+not "resize", but not "up and down" either, which is the one thing a corner must not say. Three
+non-overlapping cursor rects rather than one over another, because AppKit does not promise an order
+for overlapping ones. The gallery's `PaneFoldDivider` story sits in a real `ThemedSplitView` for
+this reason: in a bare host there is no seam beside the fold and half of what it answers for cannot
+be tried.
+
 Three things the behaviour supplied and now have to be stated, each found by losing it:
 
 - **The ground.** `ProjectSidebarViewController.applySidebarSurface` installs a

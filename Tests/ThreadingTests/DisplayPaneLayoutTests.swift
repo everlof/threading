@@ -280,6 +280,87 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         )
     }
 
+    // MARK: - The Corner Between the Two Seams
+
+    /// The attachments fold runs edge to edge, so its leading end lands on the window's own split
+    /// seam — but that is four constraints and three levels of hosting away from where either
+    /// component is tested, and a component asserted outside the container it ships in can pass
+    /// while being unusable. So the claim is made *in the window*: the corner exists there, and
+    /// what it holds is the panel's divider.
+    func testTheAttachmentsFoldsCornerHoldsTheWindowsOwnSeam() throws {
+        let previousWidth = DisplayPaneWidth.stored
+        let previousSidebar = SidebarWidth.stored
+        defer {
+            DisplayPaneWidth.stored = previousWidth
+            if let previousSidebar { SidebarWidth.record(previousSidebar) } else { SidebarWidth.reset() }
+        }
+        SidebarWidth.reset()
+        DisplayPaneWidth.stored = 420
+
+        let fixture = try projectAndSession()
+        defer { fixture.tearDown() }
+        SessionAttachmentStore.shared.record(
+            declared: try writePNG(in: fixture.folder, named: "chart.png", color: .systemBlue),
+            sessionID: fixture.sessionID,
+            projectRoot: fixture.folder,
+            origin: .agent
+        )
+
+        let controller = makeMainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1400, height: 800))
+        controller.setDisplayPaneVisible(true)
+        window.layoutIfNeeded()
+        settle()
+        window.layoutIfNeeded()
+
+        controller.displayPaneController.showSession(fixture.sessionID)
+        let attachments = try XCTUnwrap(
+            controller.displayPaneController.activateAttachments(for: fixture.sessionID),
+            "the panel opened no Attachments tab"
+        )
+        window.layoutIfNeeded()
+
+        let fold = try XCTUnwrap(
+            descendants(of: attachments.view).compactMap { $0 as? PaneFoldDivider }.first,
+            "the attachments pane grew no fold"
+        )
+        let split = try XCTUnwrap(controller.splitViewController.splitView as? ThemedSplitView)
+        let panel = controller.displayPaneController.view.bounds.width
+
+        let corner = NSPoint(x: fold.bounds.minX + 2, y: fold.bounds.midY)
+        XCTAssertEqual(
+            fold.cornerSide(at: corner),
+            .leading,
+            "the fold's leading end does not reach the panel's own edge in the window"
+        )
+        XCTAssertNil(
+            fold.cornerSide(at: NSPoint(x: fold.bounds.midX, y: fold.bounds.midY)),
+            "the middle of the fold claimed the panel's divider"
+        )
+
+        fold.mouseDown(with: try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: fold.convert(corner, to: nil),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        )))
+        split.moveHeldSeam(by: -60)
+        window.layoutIfNeeded()
+
+        XCTAssertEqual(
+            controller.displayPaneController.view.bounds.width,
+            panel + 60,
+            accuracy: 1,
+            "the corner did not widen the panel it stands in the edge of"
+        )
+    }
+
     /// The panel is written to on every divider move, and the test bundle is hosted in the app —
     /// so this has to be the *scratch* suite, or a fixture window's idea of how wide the panel is
     /// lands in the preferences of the app the developer is running. That is not hypothetical:

@@ -1099,10 +1099,15 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         )
     }
 
-    /// Past the last row there is nothing more to show, so the travel stops there rather than
-    /// running on. An overshoot the fold cannot express is a dead zone the drag back has to cross
-    /// before anything moves again.
-    func testTheFoldCannotBeDraggedPastTheRowsThereAre() throws {
+    /// The travel used to stop at the last row, on the reasoning that past the rows there is
+    /// nothing more to show. What was under the hand was still a divider, though, and a divider
+    /// that stops halfway down a pane with room plainly left under it reads as broken rather than
+    /// as considerate — reported as "can't be expanded beyond the cells, feels buggy".
+    ///
+    /// The drag back still moves on its first point, which is what the old clamp was protecting:
+    /// the running total is held between limits the fold can express, so there is no overshoot to
+    /// cross before anything happens.
+    func testTheFoldCanBeDraggedPastTheRowsThereAre() throws {
         let pane = try laidOutPane(
             showing: try writePNGs(count: 3, size: NSSize(width: 40, height: 40)),
             size: NSSize(width: 353, height: 900)
@@ -1110,15 +1115,20 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         let list = try list(in: pane.view)
         let rows = list.frame.height
 
-        pane.foldDragged(by: 400)
+        pane.foldDragged(by: 200)
         pane.view.layoutSubtreeIfNeeded()
-        XCTAssertEqual(list.frame.height, rows, accuracy: 1, "the list grew past its own rows")
+        XCTAssertEqual(
+            list.frame.height,
+            rows + 200,
+            accuracy: 1,
+            "the fold stopped at the last row with pane still left under it"
+        )
 
         pane.foldDragged(by: -40)
         pane.view.layoutSubtreeIfNeeded()
         XCTAssertEqual(
             list.frame.height,
-            rows - 40,
+            rows + 160,
             accuracy: 1,
             "the drag back had to cross an overshoot that was never on screen"
         )
@@ -1149,9 +1159,11 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         )
     }
 
-    /// A remembered fold is still a *ceiling*: the list is as tall as its rows, and a session
-    /// with one attachment is a one-row list however much room the last one was given.
-    func testARememberedFoldNeverGivesAListMoreThanItsRows() throws {
+    /// A fold the reader placed is a **position**, and the pane's own opening answer is the only
+    /// thing that is content-sized. A one-attachment session therefore opens at the fold with room
+    /// under its row, rather than snapping back to the row — which is the same springing-back the
+    /// case above removes, seen one session later.
+    func testARememberedFoldIsWhereAOneRowListOpensTo() throws {
         AttachmentsListHeight.record(300)
 
         let pane = try laidOutPane(
@@ -1159,10 +1171,27 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             size: NSSize(width: 353, height: 900)
         )
 
+        XCTAssertEqual(
+            try list(in: pane.view).frame.height,
+            300,
+            accuracy: 1,
+            "a one-row list was pulled back to its row rather than opening at the fold"
+        )
+    }
+
+    /// And the pane's *own* answer stays content-sized, which is the half of the old rule that was
+    /// right: a session with three attachments opens as three rows, not as half a blank pane.
+    func testAPaneWhoseFoldHasNeverMovedOpensOnItsRows() throws {
+        let height: CGFloat = 900
+        let pane = try laidOutPane(
+            showing: try writePNGs(count: 3, size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: height)
+        )
+
         XCTAssertLessThan(
             try list(in: pane.view).frame.height,
-            SessionAttachmentsDefaults.rowHeight * 2,
-            "a one-row list was given the height a longer session's fold was left at"
+            height * SessionAttachmentsDefaults.listShareOfPane,
+            "an untouched fold opened on the pane's share rather than on the rows there are"
         )
     }
 

@@ -21,6 +21,9 @@ import AppKit
 ///
 /// The seam also answers the pointer: wherever a press would begin dragging it, it takes the
 /// accent — see `drawDivider(in:)` for why that zone is asked of `hitTest` rather than restated.
+///
+/// A seam can also be held from *inside* a pane, by something standing on that pane's own edge —
+/// `PaneFoldDivider`'s corner. See "A Seam Held From Inside the Pane".
 final class ThemedSplitView: NSSplitView {
 
     /// Called when a divider drag ends, with the divider's index and where the pointer was let
@@ -395,6 +398,94 @@ final class ThemedSplitView: NSSplitView {
             return point.x >= seam - Self.dividerGrab
                 && point.x <= seam + dividerThickness + Self.dividerGrab
         }
+    }
+
+    // MARK: - A Seam Held From Inside the Pane
+
+    /// Which side of a pane a seam is on, in this view's own order: `arrangedSubviews` run
+    /// leading to trailing, and the seam between two of them is indexed by the pane before it.
+    enum Side {
+        case leading
+        case trailing
+    }
+
+    /// How far a view's own edge may sit from its pane's and still be *on* it.
+    ///
+    /// A corner is where two seams meet, and a fold inset from the pane's edge meets nothing:
+    /// offering a grip there would move a divider the pointer is nowhere near. One point, because
+    /// the answer is either "edge to edge" or "inset by a token", never a near miss.
+    private static let seamReach: CGFloat = 1
+
+    /// The seam a drag that began somewhere else is holding, for as long as it holds it.
+    private var heldSeamIndex: Int?
+
+    /// Whether something inside a pane, at `descendant`'s own edge, has a seam beside it to move.
+    func hasMovableSeam(beside descendant: NSView, on side: Side) -> Bool {
+        seamIndex(beside: descendant, on: side) != nil
+    }
+
+    /// Takes hold of that seam for the length of a drag that began off it.
+    ///
+    /// The seam lights exactly as a press on it would and stays lit — out of the hover logic's
+    /// reach, like a divider under the hand — until `releaseSeam()`. What this deliberately does
+    /// **not** do is report the release to `dividerDragDidEnd`: a divider pushed past its
+    /// neighbour's floor shuts that pane, and a grip *inside* the pane is not somewhere to shut
+    /// it from — the hand that overshoots here is aiming a corner, not pushing a pane away.
+    @discardableResult
+    func holdSeam(beside descendant: NSView, on side: Side) -> Bool {
+        guard let index = seamIndex(beside: descendant, on: side) else { return false }
+        heldSeamIndex = index
+        isDraggingDivider = true
+        activeDividerIndex = index
+        return true
+    }
+
+    /// Moves the held seam, positive as the pointer travels **trailing**.
+    ///
+    /// Placed from where the seam currently stands rather than from a running total, so a pane
+    /// held at its own floor leaves no overshoot for the drag back to cross — `PaneFoldDivider`'s
+    /// rule on the other axis, and the whole point of grabbing the two together.
+    func moveHeldSeam(by travel: CGFloat) {
+        guard let index = heldSeamIndex, arrangedSubviews.indices.contains(index) else { return }
+        layoutSubtreeIfNeeded()
+        setPosition(arrangedSubviews[index].frame.maxX + travel, ofDividerAt: index)
+        layoutSubtreeIfNeeded()
+    }
+
+    /// Lets go, and hands the highlight back to wherever the pointer actually is — the same
+    /// correction `updateTrackingAreas` makes, for the same reason: the seam moved out from under
+    /// a pointer that never left the pane.
+    func releaseSeam() {
+        guard heldSeamIndex != nil else { return }
+        heldSeamIndex = nil
+        isDraggingDivider = false
+        let pointer = window.map { convert($0.mouseLocationOutsideOfEventStream, from: nil) }
+        activeDividerIndex = pointer.flatMap(attachedDividerIndex(at:))
+    }
+
+    /// The seam beside the pane holding `descendant`, when `descendant` reaches that pane's edge
+    /// and the seam is one a drag could move at all.
+    private func seamIndex(beside descendant: NSView, on side: Side) -> Int? {
+        guard let paneIndex = arrangedSubviews.firstIndex(where: descendant.isDescendant(of:))
+        else { return nil }
+
+        let pane = arrangedSubviews[paneIndex]
+        let edge = descendant.convert(descendant.bounds, to: pane)
+        let index: Int
+        switch side {
+        case .leading:
+            guard abs(edge.minX - pane.bounds.minX) <= Self.seamReach else { return nil }
+            index = paneIndex - 1
+        case .trailing:
+            guard abs(edge.maxX - pane.bounds.maxX) <= Self.seamReach else { return nil }
+            index = paneIndex
+        }
+
+        guard arrangedSubviews.indices.contains(index),
+              arrangedSubviews.indices.contains(index + 1),
+              dividerIsGrabbable(at: index)
+        else { return nil }
+        return index
     }
 
     // MARK: - Private Methods

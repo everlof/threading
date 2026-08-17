@@ -89,7 +89,7 @@ final class SessionAttachmentsViewController: NSViewController {
     /// as it has been answered, so a later reload does not keep dragging the selection back.
     private var revealPath: String?
 
-    /// The list's height — its *rows'* height, capped at its share of the pane.
+    /// The list's height — its *rows'* height until the fold is moved, and the fold's afterwards.
     ///
     /// It used to be a constant three rows tall, so a session with eight attachments read
     /// through a letterbox; and this list is the session's whole visual history, which a fixed
@@ -575,13 +575,25 @@ final class SessionAttachmentsViewController: NSViewController {
         if constraint.constant != target { constraint.constant = target }
     }
 
-    /// The list's rows, under whichever cap is in force.
+    /// The list's rows, or the fold wherever the reader put it.
+    ///
+    /// Two different sentences, and which one is in force is whether the fold has been moved. The
+    /// pane's *own* answer is content-sized — one row is a one-row list, and a session with three
+    /// attachments should not open with two thirds of the pane blank. A fold the reader placed is
+    /// a **position**: it stays where they left it, rows or no rows, because a divider that
+    /// springs back to the last row the moment the hand lets go is a divider that does not work.
+    /// (It read as exactly that: the drag stopped dead partway down with pane left under it.)
     private func resolvedListHeight() -> CGFloat {
         let rows = listRowHeights()
+        // Nothing to stand a fold between. The list is hidden here anyway (`refresh()`), and a
+        // floor measured off a nonexistent row would give an empty pane a row of blank to hold.
+        guard rows.content > 0 else { return 0 }
         // Before the pane has a height there is nothing to take a share of, so the content
         // stands in and `viewDidLayout` corrects it the moment the height is real.
         guard view.bounds.height > 0 else { return rows.content }
-        return min(rows.content, listCap(noSmallerThan: rows.oneRow))
+
+        let cap = listCap(noSmallerThan: rows.oneRow)
+        return AttachmentsListHeight.stored == nil ? min(rows.content, cap) : cap
     }
 
     /// What the rows ask for, and what one of them costs — the two numbers every cap here is
@@ -615,8 +627,9 @@ final class SessionAttachmentsViewController: NSViewController {
         return (oneRow, max(ceiling, oneRow))
     }
 
-    /// The tallest the list may stand: the fold where the user left it, or half the pane while
-    /// they have never moved it, held between those limits either way.
+    /// Where the fold stands: where the user left it, or half the pane while they have never
+    /// moved it, held between those limits either way. A ceiling on the rows in the second case
+    /// and the list's height outright in the first — see `resolvedListHeight()`.
     private func listCap(noSmallerThan oneRow: CGFloat) -> CGFloat {
         let limits = listLimits(oneRow: oneRow)
         let chosen = AttachmentsListHeight.stored
@@ -628,12 +641,12 @@ final class SessionAttachmentsViewController: NSViewController {
 
     /// The fold under the hand, travelling down as the pointer does.
     ///
-    /// The list is content-sized, so what a drag moves is the *ceiling* on it rather than a
-    /// position between two panes — and the running total is clamped to what the fold can
-    /// actually express rather than carried on past it. An overshoot the fold cannot show is a
-    /// dead zone the drag back has to cross before anything moves again, which is the shell
-    /// drawer's overshoot problem inverted: there the travel past the floor is the answer, here
-    /// there is nothing below the last row for it to mean.
+    /// The travel is held between the pane's two limits and nothing else. It used to stop at the
+    /// last row as well, on the reasoning that past the rows there is nothing more to show — but
+    /// the thing under the hand is a divider, and a divider that stops halfway down a pane with
+    /// room plainly left below it reads as broken rather than as considerate. Room under the last
+    /// row is what a reader asking for it gets, and the same drag back moves immediately, because
+    /// the running total is still clamped to something the fold can express.
     ///
     /// Internal rather than private, like `TerminalContainerViewController`'s pair and for the
     /// same reason: a synthesized `NSEvent` carries no `deltaY`, so the fold's own tests drive
@@ -646,9 +659,7 @@ final class SessionAttachmentsViewController: NSViewController {
         // move at all.
         let limits = listLimits(oneRow: rows.oneRow)
         let proposed = (listHeightConstraint?.constant ?? rows.content) + travel
-        AttachmentsListHeight.record(
-            min(max(proposed, limits.floor), min(rows.content, limits.ceiling))
-        )
+        AttachmentsListHeight.record(min(max(proposed, limits.floor), limits.ceiling))
         updateListHeight()
     }
 

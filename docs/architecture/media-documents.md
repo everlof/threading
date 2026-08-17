@@ -330,20 +330,30 @@ which half a reader needs, so the fold between them moved (`PaneFoldDivider`).
 
 Three decisions hold it together.
 
-- **A drag moves the list's ceiling, not a position.** The list is content-sized — it is as tall as
-  its rows — so a session with one attachment stays a one-row list whatever the fold was left at,
-  and the height the pane resolves is still `min(rows, cap)`. That is also why this is not an
-  `NSSplitView`: a split view places two flexible panes, and one of these two states its own
-  height.
-- **The travel is clamped to what the fold can express.** Past the last row there is nothing more
-  to show, so a downward drag stops there rather than accumulating into a stored value nothing on
-  screen reflects. The alternative is a dead zone: the drag back has to cross the overshoot before
-  anything moves. (The shell drawer keeps its overshoot deliberately, because *there* the travel
-  past the floor is the answer — it shuts the drawer.)
+- **The pane's own answer is content-sized; a fold the reader placed is a position.** Until the
+  fold is moved the list is as tall as its rows under a cap — a session with three attachments
+  opens as three rows, not as half a blank pane. Once it *has* been moved, the height is where
+  they left it, rows or no rows. The two used to be one rule (`min(rows, cap)` always), which
+  meant a drag downwards stopped dead at the last row with pane plainly left underneath: reported
+  as "can't expand it beyond the cells, feels buggy", and correctly so — the thing under the hand
+  is a divider, and a divider that springs back is a divider that does not work. This is still not
+  an `NSSplitView`: what a drag moves is a constraint on a content-sized half, which a split view
+  has nowhere to say.
+- **The travel is clamped to what the fold can express.** The running total is held between the
+  pane's limits rather than accumulated past them, so the drag back moves on its first point
+  instead of crossing an overshoot nothing on screen reflected. (The shell drawer keeps its
+  overshoot deliberately, because *there* the travel past the floor is the answer — it shuts the
+  drawer.)
 - **The pane keeps two limits the user cannot see past.** Never below one row, and never past
   `maximumListShareOfPane`, because a stored height is a point value read back in a pane that may
   be much shorter than the one it was chosen in. A double-click on the fold hands the position back
   to the pane, and `WindowLayoutReset` clears it with the window's other geometry.
+
+The fold runs edge to edge, so its leading end lands on the window's split seam — and holding the
+point where two seams cross while moving only one of them is the gesture arriving at half its
+meaning. A press within `PaneFoldDivider.Layout.cornerReach` of that end therefore takes the seam
+beside the pane as well (`ThemedSplitView.holdSeam(beside:on:)`), and one diagonal drag moves the
+fold down and the panel wider. See [`window-chrome.md`](window-chrome.md#the-corner-where-two-seams-meet).
 
 `AttachmentsListHeight` keeps one value app-wide, in `PreferenceStore` — a fold is how someone
 wants to read their attachments rather than a fact about one conversation, and the scratch suite is

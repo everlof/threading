@@ -2930,7 +2930,9 @@ final class ComponentGalleryViewController: NSViewController {
                     "The fold between a pane's two halves, and the grip that moves it. Drag it: "
                         + "the seam takes the accent wherever a drag would attach, the band under "
                         + "the rule is the part the pointer can hold, and the arrow keys move it "
-                        + "too. Double-click hands the position back to the pane.",
+                        + "too. Double-click hands the position back to the pane. Its leading end "
+                        + "reaches the pane's own edge, and that corner holds both seams — drag it "
+                        + "diagonally to move the fold and the split beside it at once.",
                     makePaneFoldDividerSample()
                 ),
                 story(
@@ -3891,6 +3893,11 @@ final class ComponentGalleryViewController: NSViewController {
     /// Two halves and the fold between them, wired the way a pane wires it: the travel moves the
     /// upper half's height constraint between a floor and a ceiling, and the double-click puts it
     /// back where the sample opened.
+    ///
+    /// Inside a split view, because half of what the fold answers for only exists there. The fold
+    /// runs edge to edge, so its leading end lands on the seam beside its pane, and that corner
+    /// holds both — a fold in a bare host has no seam to offer and the gesture could not be tried.
+    /// The pane on the left is the thing the corner moves.
     private func makePaneFoldDividerSample() -> NSView {
         let opening: CGFloat = 36
         let floor: CGFloat = 12
@@ -3910,14 +3917,12 @@ final class ComponentGalleryViewController: NSViewController {
         }
         fold.onReset = { upperHeight.constant = opening }
 
+        // Placed by the split view, so it states no size of its own — the pane it stands in is
+        // what has a width here, and it is the divider beside it that decides what that is.
         let host = NSView()
-        host.translatesAutoresizingMaskIntoConstraints = false
         for half in [upper, fold, lower] { host.addSubview(half) }
 
         NSLayoutConstraint.activate([
-            host.widthAnchor.constraint(equalToConstant: 260),
-            host.heightAnchor.constraint(equalToConstant: ceiling + Design.Spacing.large),
-
             upper.topAnchor.constraint(equalTo: host.topAnchor),
             upper.leadingAnchor.constraint(equalTo: host.leadingAnchor),
             upper.trailingAnchor.constraint(equalTo: host.trailingAnchor),
@@ -3933,7 +3938,20 @@ final class ComponentGalleryViewController: NSViewController {
             lower.bottomAnchor.constraint(equalTo: host.bottomAnchor)
         ])
 
-        return host
+        let neighbour = NSView()
+        neighbour.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+
+        let split = ThemedSplitView()
+        split.translatesAutoresizingMaskIntoConstraints = false
+        split.addArrangedSubview(neighbour)
+        split.addArrangedSubview(host)
+
+        NSLayoutConstraint.activate([
+            split.widthAnchor.constraint(equalToConstant: 340),
+            split.heightAnchor.constraint(equalToConstant: ceiling + Design.Spacing.large)
+        ])
+
+        return split
     }
 
     /// The three components that dress a live web view.

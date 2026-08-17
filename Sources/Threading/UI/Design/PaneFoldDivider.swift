@@ -12,6 +12,14 @@ import AppKit
 /// hairline is a one-point target, and a fold given its own thick strip moves everything below it
 /// the day it becomes draggable. Neither happens here: the rule keeps the theme's own weight at
 /// the top edge, and the gap that was already there becomes the part the pointer can hold.
+///
+/// **Where the fold reaches its pane's own edge, the two seams meet, and the corner holds both.**
+/// A fold that runs edge to edge ends *on* the window's split divider, and holding the point where
+/// they cross while moving only one of them is the gesture arriving at half its meaning: the hand
+/// is on both. So a press within `Layout.cornerReach` of an edge with a seam beside it takes that
+/// seam as well (`ThemedSplitView.holdSeam(beside:on:)`), and the drag moves the fold down and the
+/// pane wider in one movement. Pointer-only on purpose — both seams are already draggable on their
+/// own, so the corner is a shortcut rather than the only way to either.
 final class PaneFoldDivider: ThemedControl {
 
     // MARK: - Geometry
@@ -19,6 +27,14 @@ final class PaneFoldDivider: ThemedControl {
     enum Layout {
         /// The clear space under the rule — the pane's own gap, and the grip.
         static let grip: CGFloat = Design.Spacing.small
+
+        /// How far in from a pane's own edge this band is also that pane's *corner*.
+        ///
+        /// A whole `large` rather than the band's own height: the corner is aimed at along a strip
+        /// seven points tall, and a square that small is a target only a steady hand finds. It is
+        /// still a twentieth of the panel at the width it opens to, so the fold is a plain fold
+        /// for all but its very ends.
+        static let cornerReach: CGFloat = Design.Spacing.large
 
         /// How far one key press moves the fold, and the fine step under Shift. A fold has no
         /// unit of its own, so these are points: what the pane does with them is its business.
@@ -50,6 +66,11 @@ final class PaneFoldDivider: ThemedControl {
     }
 
     private var focusOrigin = KeyboardFocusOrigin()
+
+    /// The split view whose seam this drag is also moving, held from the press that began in a
+    /// corner until the hand lets go. Nil for a drag that began anywhere else along the band,
+    /// which is every drag on a fold with no pane edge under either of its ends.
+    private var heldSplitView: ThemedSplitView?
 
     /// Whether the seam is lit for the keyboard — see `KeyboardFocusOrigin`.
     ///
@@ -103,8 +124,72 @@ final class PaneFoldDivider: ThemedControl {
         ).fill()
     }
 
+    /// Three rects rather than one over another: overlapping cursor rects are resolved by an order
+    /// AppKit does not promise, and the corner's whole job is to say it is not the plain fold.
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .resizeUpDown)
+        var band = bounds
+        for side in [ThemedSplitView.Side.leading, .trailing] {
+            guard let corner = cornerRect(on: side) else { continue }
+            addCursorRect(corner, cursor: Self.cornerCursor(on: side))
+            if side == .leading { band.origin.x = corner.maxX }
+            band.size.width -= corner.width
+        }
+        guard band.width > 0 else { return }
+        addCursorRect(band, cursor: .resizeUpDown)
+    }
+
+    // MARK: - The Corner
+
+    /// The corner's own square at one end of the band, or nil where there is no seam beside it.
+    ///
+    /// Asked live rather than configured: whether a pane has a seam on a given side is the split
+    /// view's answer and it changes — a collapsed neighbour has no divider to grab
+    /// (`ThemedSplitView.hasMovableSeam(beside:on:)`), and a fold inset from its pane's edge has
+    /// no corner at all.
+    func cornerRect(on side: ThemedSplitView.Side) -> NSRect? {
+        guard let split = paneSplitView, split.hasMovableSeam(beside: self, on: side) else {
+            return nil
+        }
+        // Never more than half the band: a fold narrower than two corners is all corner and no
+        // fold, and the plain drag is the one that must survive.
+        let reach = min(Layout.cornerReach, bounds.width / 2)
+        guard reach > 0 else { return nil }
+        return NSRect(
+            x: side == .leading ? bounds.minX : bounds.maxX - reach,
+            y: bounds.minY,
+            width: reach,
+            height: bounds.height
+        )
+    }
+
+    /// The side a press at `point` would take the seam of, or nil for the plain fold.
+    ///
+    /// Internal so a fixture can ask what the band believes about a point without a cursor rect,
+    /// which an unshown window never resolves.
+    func cornerSide(at point: NSPoint) -> ThemedSplitView.Side? {
+        // Leading first, so a band too narrow for two full corners resolves rather than overlaps.
+        [ThemedSplitView.Side.leading, .trailing].first {
+            cornerRect(on: $0)?.contains(point) == true
+        }
+    }
+
+    /// The split view this fold's pane belongs to, if it belongs to one.
+    private var paneSplitView: ThemedSplitView? {
+        var next: NSView? = superview
+        while let view = next {
+            if let split = view as? ThemedSplitView { return split }
+            next = view.superview
+        }
+        return nil
+    }
+
+    /// The diagonal a corner grip has worn since windows had them.
+    ///
+    /// `NSCursor.frameResize` is macOS 15, and the crosshair is the honest stand-in below it: not
+    /// "resize", but not "up and down" either — which is the one thing this corner must not say.
+    private static func cornerCursor(on side: ThemedSplitView.Side) -> NSCursor {
+        guard #available(macOS 15.0, *) else { return .crosshair }
+        return .frameResize(position: side == .leading ? .topLeft : .topRight, directions: .all)
     }
 
     // MARK: - Focus
@@ -143,18 +228,45 @@ final class PaneFoldDivider: ThemedControl {
             return
         }
         isDragging = true
+
+        // Resolved at the press and held for the whole drag, not re-asked per event: the seam
+        // moves out from under the pointer as it goes, and a corner re-tested mid-drag would let
+        // go of the thing the hand is still moving.
+        let pressed = convert(event.locationInWindow, from: nil)
+        if let side = cornerSide(at: pressed),
+           let split = paneSplitView,
+           split.holdSeam(beside: self, on: side) {
+            heldSplitView = split
+        }
     }
 
     /// Tracked through the ordinary drag events rather than a tracking loop: the pointer leaves
     /// this band on the first point of travel, and the events keep arriving here for as long as
     /// the button is down, which is exactly the span the fold is being moved over.
+    ///
+    /// Both axes, independently. A corner drag straight down is a fold drag with nothing across
+    /// it, which is what makes the corner safe to be generous with: aiming at it costs nothing.
     override func mouseDragged(with event: NSEvent) {
         guard isEnabled, isDragging else { return }
+        heldSplitView?.moveHeldSeam(by: event.deltaX)
         onDrag?(event.deltaY)
     }
 
     override func mouseUp(with event: NSEvent) {
+        releaseHeldSeam()
         isDragging = false
+    }
+
+    /// A drag can also end without a mouse-up reaching this view — the window resigning key
+    /// mid-drag is the ordinary way — and a seam left held would stay lit under no hand at all.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { releaseHeldSeam() }
+    }
+
+    private func releaseHeldSeam() {
+        heldSplitView?.releaseSeam()
+        heldSplitView = nil
     }
 
     // MARK: - Keyboard
