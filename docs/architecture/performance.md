@@ -1885,6 +1885,18 @@ full-index p95 at **27.614 and 35.636 ms**. Every resize sample retained
 The spread in forced bitmap drawing remains the already-recorded Debug tail, while resize geometry
 and the ordinary workload remain coherent with the established warm range.
 
+The 2026-08-17 file-card silhouette and hunk-disclosure follow-up keeps collapse state in the
+virtual file-row model and hides only the mounted hunk body. A toggle invalidates that one row;
+offscreen expanded files still remain booleans and estimates rather than constructed disclosure
+or TextKit views. The complete-index resize estimator also takes a zero-collapse fast path, so its
+normal 8,985-file width pass does not derive hunk identities or allocate per-hunk state. A clean
+standard run measured the 174-file/400-line forced scroll at **11.234 ms/frame**. Two sequential
+warm massive-index runs measured resize p95 at **9.005 and 8.091 ms** (max **11.425 and
+12.502 ms**), continuous-scroll p95 at **20.026 and 18.088 ms**, and full-index p95 at **19.525
+and 16.012 ms**. Both retained `max_width_delta_drift=0.000` and
+`pending_layout_frames=0`; the standard and massive opt-in workloads passed. Rounded-card clipping
+therefore does not change the existing virtualization or live-resize coherence boundary.
+
 The generated workload is the regression boundary, but it cannot reproduce the object database,
 index and history shape of Linux-scale repositories. `git-repository-stress` accepts an existing
 checkout and runs three complementary layers without modifying it:
