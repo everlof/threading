@@ -2603,14 +2603,28 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
         scrollerStyle = desired
     }
 
+    /// Extra room the caller states between the surface's edge and its content — breathing
+    /// that belongs *inside* the drawn well. Stated here rather than as a layout gap outside
+    /// the scroll view, because outside the well's fill the pane's own ground shows: the
+    /// sidebar's header ground reappeared in a four-point sliver on the wrong side of the
+    /// header's rule, reading as the band bleeding through its border. The scrollers keep the
+    /// well's own edge — they span the surface, not the content's breathing.
+    var contentBreathing: NSEdgeInsets = NSEdgeInsets() {
+        didSet { applySurfaceRole() }
+    }
+
     private func applySurfaceRole() {
         let well = surfaceRole == .sidebarNavigator
             ? SidebarAppearance.navigatorWell(for: effectiveAppearance)
             : nil
         let inset = well?.edgeWidth ?? 0
-        let edges = NSEdgeInsets(top: inset, left: inset, bottom: inset, right: inset)
-        contentInsets = edges
-        scrollerInsets = edges
+        contentInsets = NSEdgeInsets(
+            top: inset + contentBreathing.top,
+            left: inset + contentBreathing.left,
+            bottom: inset + contentBreathing.bottom,
+            right: inset + contentBreathing.right
+        )
+        scrollerInsets = NSEdgeInsets(top: inset, left: inset, bottom: inset, right: inset)
         needsLayout = true
         tile()
         needsDisplay = true

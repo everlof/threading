@@ -915,7 +915,13 @@ to `SidebarDefaults.minWidth`. The zero safe area becomes steady state: the cont
 transient) now size the strip permanently, and `WindowChromeTakeoverTests` states it so it stops
 being luck. The window's own
 controls (sidebar toggle, history pair) rehome into `WindowCommandBandView`, a button-face row
-below the title bar, as fresh `ThemedIconButton`s inked from `InkSource.chrome`. The title band
+below the title bar, as fresh `ThemedIconButton`s inked from `InkSource.chrome`. The row is laid
+out by `PaneHeaderView` (`margin: .paneEdge`), not by a stack of its own: the band's height, its
+edge-to-edge rule, the twelve-point ink-aligned margin and the item spacing are the pane bands'
+one statement of band geometry. The band re-derived them once, with a four-point inset that sat
+the sidebar toggle's active box in the window's corner while every band below started its ink
+twelve points in — `WindowChromeComponentTests/testCommandBandLaysItsControlsOutAsAPaneBand`
+pins the column so the drift cannot return. The title band
 therefore carries only app icon/title and caption buttons, matching the structural distinction
 the native toolbar previously supplied and avoiding a toolbar button's required 28pt height
 conflicting with the caption row's compact height. The controller's weak references re-point so

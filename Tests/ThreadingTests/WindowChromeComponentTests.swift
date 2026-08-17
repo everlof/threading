@@ -1109,6 +1109,48 @@ final class WindowChromeComponentTests: HostedStoreTestCase {
         XCTAssertEqual(workspace.view.frame, host.view.bounds)
     }
 
+    /// The command band is a pane band, laid out by `PaneHeaderView`: its first control's ink
+    /// starts on the same column every band below starts at, and siblings keep the band's item
+    /// spacing. It used to state its own four-point inset, which sat the sidebar toggle's
+    /// active box in the window's corner while the rest of the window aligned twelve points in.
+    func testCommandBandLaysItsControlsOutAsAPaneBand() {
+        let band = WindowCommandBandView()
+        let sidebar = ThemedIconButton(
+            symbolName: "sidebar.leading",
+            accessibility: "Show or hide sidebar",
+            inkSource: .chrome
+        )
+        let back = ThemedIconButton(
+            symbolName: "chevron.left",
+            accessibility: "Go back",
+            inkSource: .chrome
+        )
+        band.setLeadingControls([sidebar, back])
+        NSLayoutConstraint.activate([
+            band.widthAnchor.constraint(equalToConstant: 420),
+            band.heightAnchor.constraint(equalToConstant: WindowCommandBandView.bandHeight)
+        ])
+        band.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            WindowCommandBandView.bandHeight,
+            PaneHeaderView.bandHeight,
+            "the command band takes the pane bands' measure, not one of its own"
+        )
+        XCTAssertEqual(
+            sidebar.frame.minX + sidebar.opticalHorizontalInset,
+            Design.Spacing.inset,
+            accuracy: 0.5,
+            "the first control's ink starts on the column every band below starts at"
+        )
+        XCTAssertEqual(
+            back.frame.minX - sidebar.frame.maxX,
+            Design.Spacing.small,
+            accuracy: 0.5,
+            "siblings keep the band's item spacing"
+        )
+    }
+
     // MARK: - Renders
 
     /// System plus two deliberately different themes, light and dark: the band with its

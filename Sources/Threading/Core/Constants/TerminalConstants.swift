@@ -386,7 +386,10 @@ enum SidebarDefaults {
     /// would read as a box around the group rather than a fold between two.
     static let compactGroupRuleHeight: CGFloat = 1
 
-    /// Breathing room between the header band's hairline and the first row.
+    /// Breathing room between the header band's hairline and the first row — applied as the
+    /// navigator's own `contentBreathing`, inside the well's fill, never as a layout gap
+    /// above the scroll view: outside the well the pane's ground shows, and a strip of it
+    /// below the header's rule reads as the band bleeding through its border.
     static let contentTopInset: CGFloat = 4
 
     /// The header's arrangement control — the platform's "use groups" glyph, which is the
