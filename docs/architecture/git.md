@@ -329,6 +329,13 @@ one changed-line ink for both sign and body, so the compact `DiffView` gives bot
 ink; its semantic wash and the `+`/`−` shape still carry the change until that renderer gains
 separate fields.
 
+Pointer targeting is paint on that same TextKit surface, not another row tree. The hovered logical
+source line gets a full-width translucent wash derived from the theme's control-hover role, while
+the `+` action plate stays drawn over the gutter. A one-pixel rule looked like a clipping seam and
+did not identify the line as the target. Moving the pointer invalidates only the old and new
+logical-line rectangles, including wrapped fragments; it neither mounts per-line views nor redraws
+the complete hunk.
+
 Both wash and base ink are frozen colours derived from the surface underneath, so a virtual row
 resolves them inside its own effective appearance and rebuilds the attributed document when it
 joins a window or that appearance changes; ambient drawing state during row construction must
@@ -531,12 +538,16 @@ not spelled as a feature-owned Core Animation mask.
 Each visible `Lines …` heading is a real compact `ThemedDisclosureRow`, so its familiar chevron
 actually hides and reveals that hunk. Collapse state is keyed by the changed-line endpoints rather
 than the surrounding context range, survives virtual-row recycling, and is cleared when the
-comparison identity changes. Toggling hides the already-materialized hunk body and invalidates
-only its file row; it never constructs another file or rebuilds the complete table. Find navigation
-reopens a collapsed destination before revealing it. The source-line identity, staging eligibility,
-collapse persistence, and exact virtual height remain deliberately host-owned correctness
-behaviour; themes may change their shared disclosure and surface presentation, but extensions do
-not replace this review-state machinery.
+comparison identity changes. Its compact hover uses the next filled surface step: the standard
+disclosure hover is correct on plain ground, but a hunk heading already rests on a filled band and
+must not disappear into that same colour. Toggling hides the already-materialized hunk body, updates
+the row estimate, and settles the mounted viewport non-animated in the same input event. The first
+pass adopts the new model height and the second adopts the exact TextKit measurement; this avoids
+showing an old-height row between display frames. It never constructs another file or rebuilds the
+complete table. Find navigation reopens a collapsed destination before revealing it. The
+source-line identity, staging eligibility, collapse persistence, and exact virtual height remain
+deliberately host-owned correctness behaviour; themes may change their shared disclosure and
+surface presentation, but extensions do not replace this review-state machinery.
 
 A two-line path makes the file name and directory one visual identity. The trailing change counts,
 staging action and disclosure therefore centre on that identity's complete height in both ordinary

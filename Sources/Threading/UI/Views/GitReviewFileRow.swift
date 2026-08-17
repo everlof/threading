@@ -1289,6 +1289,9 @@ final class GitReviewFileRow: NSView {
             action: #selector(expandContextClicked(_:))
         )
         button.isBordered = false
+        // This button fills a surface that is already `controlResting`; the default plain-button
+        // hover would draw that same colour again and visually erase the target under the pointer.
+        button.hoverFill = Design.Surface.controlHover
         button.applyFont(.caption)
         button.contentTintColor = Design.Text.secondary
         button.isEnabled = !contextExpansionIsPending
@@ -1512,8 +1515,12 @@ final class GitReviewFileRow: NSView {
         }
         body.isHidden = !expanded
         hunkDisclosures[identity]?.isExpanded = expanded
-        layoutSubtreeIfNeeded()
         onHunkExpansionGeometryChange?(identity, expanded)
+        // The virtual-table owner settles its estimated and exact row heights synchronously.
+        // A standalone row has no such owner, so it still resolves its own hidden-view layout.
+        if onHunkExpansionGeometryChange == nil {
+            layoutSubtreeIfNeeded()
+        }
         onHeightChange?()
     }
 

@@ -1897,6 +1897,17 @@ and 16.012 ms**. Both retained `max_width_delta_drift=0.000` and
 `pending_layout_frames=0`; the standard and massive opt-in workloads passed. Rounded-card clipping
 therefore does not change the existing virtualization or live-resize coherence boundary.
 
+The 2026-08-17 pointer and disclosure-settling follow-up keeps those same bounds. Source-line hover
+is one cached TextKit logical-line rectangle and invalidates only the old and new pointer targets;
+there is still no view per source line. A hunk toggle performs two non-animated mounted-viewport
+layout passes in the input event — model estimate, then exact TextKit height — so no old-height
+table frame reaches display. Offscreen files remain estimates and neither pass constructs them. The
+174-file/400-line workload measured **10.654 ms/frame** and its disclosure cycle completed without
+a pending layout frame. Two sequential warm 8,985-file runs measured resize p95 at **8.421 and
+8.790 ms** (max **11.580 and 12.303 ms**), continuous-scroll p95 at **16.505 and 17.318 ms**, and
+full-index p95 at **15.606 and 15.491 ms**. Both recorded `max_width_delta_drift=0.000` and
+`pending_layout_frames=0`; the standard and massive opt-in workloads passed.
+
 The generated workload is the regression boundary, but it cannot reproduce the object database,
 index and history shape of Linux-scale repositories. `git-repository-stress` accepts an existing
 checkout and runs three complementary layers without modifying it:

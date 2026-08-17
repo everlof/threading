@@ -707,6 +707,73 @@ final class GitReviewRenderTests: XCTestCase {
         try XCTUnwrap(stickyData, "failed to render sticky heading actions")
             .write(to: directory.appendingPathComponent("git-review-pane-sticky-dark.png"))
 
+        for (suffix, theme) in [
+            ("dark", AppTheme.system),
+            ("threading-dark", AppThemeStyles.threading),
+        ] {
+            AppThemePalette.set(theme)
+            var lineHoverData: Data?
+            let renderLineHover = {
+                let pane = self.laidOutPane(files, appearance: stickyAppearance)
+                guard let diff = self.descendants(in: pane.view)
+                    .compactMap({ $0 as? GitReviewDiffTextView })
+                    .first,
+                      let action = diff.lineActionRectForTesting(atDisplayedLine: 2),
+                      let event = NSEvent.mouseEvent(
+                        with: .mouseMoved,
+                        location: diff.convert(
+                            NSPoint(x: action.midX, y: action.midY),
+                            to: nil
+                        ),
+                        modifierFlags: [],
+                        timestamp: 0,
+                        windowNumber: diff.window?.windowNumber ?? 0,
+                        context: nil,
+                        eventNumber: 0,
+                        clickCount: 0,
+                        pressure: 0
+                      ) else { return }
+                diff.onAddContextAttachment = { _ in }
+                diff.mouseMoved(with: event)
+                XCTAssertEqual(diff.hoveredLineIndex, 2)
+                lineHoverData = self.png(of: pane.view)
+            }
+            stickyAppearance?.performAsCurrentDrawingAppearance(renderLineHover)
+            try XCTUnwrap(lineHoverData, "failed to render \(suffix) source-line hover")
+                .write(to: directory.appendingPathComponent(
+                    "git-review-pane-line-hover-\(suffix).png"
+                ))
+
+            var hunkHoverData: Data?
+            let renderHunkHover = {
+                let pane = self.laidOutPane(files, appearance: stickyAppearance)
+                guard let disclosure = self.descendants(in: pane.view)
+                    .compactMap({ $0 as? ThemedDisclosureRow })
+                    .first,
+                      let event = NSEvent.enterExitEvent(
+                        with: .mouseEntered,
+                        location: disclosure.convert(
+                            NSPoint(x: disclosure.bounds.midX, y: disclosure.bounds.midY),
+                            to: nil
+                        ),
+                        modifierFlags: [],
+                        timestamp: 0,
+                        windowNumber: disclosure.window?.windowNumber ?? 0,
+                        context: nil,
+                        eventNumber: 0,
+                        trackingNumber: 0,
+                        userData: nil
+                      ) else { return }
+                disclosure.mouseEntered(with: event)
+                hunkHoverData = self.png(of: pane.view)
+            }
+            stickyAppearance?.performAsCurrentDrawingAppearance(renderHunkHover)
+            try XCTUnwrap(hunkHoverData, "failed to render \(suffix) hunk-heading hover")
+                .write(to: directory.appendingPathComponent(
+                    "git-review-pane-hunk-hover-\(suffix).png"
+                ))
+        }
+
         print("Rendered the review pane to \(directory.path)")
     }
 

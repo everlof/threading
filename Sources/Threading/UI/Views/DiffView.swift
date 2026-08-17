@@ -261,7 +261,8 @@ final class GitReviewDiffTextView: ThemedTextView {
     private(set) var hoveredLineIndex: Int? {
         didSet {
             guard hoveredLineIndex != oldValue else { return }
-            needsDisplay = true
+            invalidateLineHover(at: oldValue)
+            invalidateLineHover(at: hoveredLineIndex)
         }
     }
 
@@ -382,6 +383,7 @@ final class GitReviewDiffTextView: ThemedTextView {
 
     override func draw(_ dirtyRect: NSRect) {
         drawChangeBackgrounds(in: dirtyRect)
+        drawHoveredLineBackground(in: dirtyRect)
         super.draw(dirtyRect)
         drawHoveredLineAction(in: dirtyRect)
     }
@@ -678,6 +680,17 @@ final class GitReviewDiffTextView: ThemedTextView {
         }
     }
 
+    /// A row wash is the pointer's primary answer. The previous one-pixel divider looked like a
+    /// rendering seam and made the plus plate feel detached from the source it would act on.
+    /// This still draws into the one TextKit surface: no line-sized view or constraint is added.
+    private func drawHoveredLineBackground(in dirtyRect: NSRect) {
+        guard let hoveredLineIndex,
+              let rect = lineHoverRect(for: hoveredLineIndex),
+              rect.intersects(dirtyRect) else { return }
+        Design.Surface.diffLineHoverWash.setFill()
+        NSBezierPath(rect: rect.intersection(dirtyRect)).fill()
+    }
+
     /// The line action is drawn, not mounted, so a 400-line file still has one view. It covers
     /// the hovered line number the same way review tools do: the location stays stable while
     /// the affordance answers what a click there will do.
@@ -685,15 +698,6 @@ final class GitReviewDiffTextView: ThemedTextView {
         guard let hoveredLineIndex,
               let rect = lineActionRect(for: hoveredLineIndex),
               rect.intersects(dirtyRect) else { return }
-
-        let line = NSBezierPath(rect: NSRect(
-            x: bounds.minX,
-            y: rect.midY - 0.5,
-            width: bounds.width,
-            height: 1
-        ))
-        Design.Surface.divider.setFill()
-        line.fill()
 
         let plate = NSBezierPath(
             roundedRect: rect,
@@ -716,6 +720,53 @@ final class GitReviewDiffTextView: ThemedTextView {
         plus.move(to: NSPoint(x: rect.midX, y: rect.midY - arm))
         plus.line(to: NSPoint(x: rect.midX, y: rect.midY + arm))
         plus.stroke()
+    }
+
+    private func invalidateLineHover(at index: Int?) {
+        guard let index, let rect = lineHoverRect(for: index) else {
+            needsDisplay = true
+            return
+        }
+        setNeedsDisplay(rect)
+    }
+
+    /// The full visual height of one logical source line, including every wrapped fragment and
+    /// its paragraph spacing. Width is the source surface, not the glyph run: the action applies
+    /// to the line however short its text happens to be.
+    private func lineHoverRect(for index: Int) -> NSRect? {
+        guard lineRanges.indices.contains(index),
+              let layoutManager else { return nil }
+        let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: lineRanges[index],
+            actualCharacterRange: nil
+        )
+        guard glyphRange.length > 0 else { return nil }
+
+        var minY = CGFloat.greatestFiniteMagnitude
+        var maxY = -CGFloat.greatestFiniteMagnitude
+        layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) {
+            lineRect, _, _, _, _ in
+            minY = min(minY, lineRect.minY)
+            maxY = max(maxY, lineRect.maxY + 2)
+        }
+        guard minY.isFinite, maxY.isFinite, maxY > minY else { return nil }
+        var rect = NSRect(
+            x: bounds.minX,
+            y: minY + textContainerOrigin.y,
+            width: bounds.width,
+            height: maxY - minY
+        )
+        // The minimum 18pt action plate can be a fraction taller than a compact code fragment.
+        // Keep the plate inside the hover cue instead of leaving one-pixel caps floating above
+        // and below it.
+        if let actionRect = lineActionRect(for: index) {
+            rect = rect.union(actionRect)
+        }
+        rect = rect.intersection(bounds)
+        // A just-created Auto Layout text view deliberately starts at zero height. AppKit
+        // represents that empty intersection as the non-finite `NSRect.null`; it must never
+        // reach invalidation or drawing as though it were a usable source-row rectangle.
+        return rect.isNull ? nil : rect
     }
 
     private func lineActionRect(for index: Int) -> NSRect? {
@@ -806,6 +857,10 @@ final class GitReviewDiffTextView: ThemedTextView {
 
     func lineActionRectForTesting(atDisplayedLine index: Int) -> NSRect? {
         lineActionRect(for: index)
+    }
+
+    func lineHoverRectForTesting(atDisplayedLine index: Int) -> NSRect? {
+        lineHoverRect(for: index)
     }
 
     /// The top of a durable source line in this document's coordinates. Used to preserve the

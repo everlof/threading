@@ -44,6 +44,16 @@ final class ThemedDisclosureRow: ThemedControl {
             case .compact: Design.Spacing.tight
             }
         }
+
+        /// A standard row rests on bare card ground, while a compact source heading already
+        /// sits on its own filled band. The latter must climb to the next surface step or its
+        /// hover is the same colour as what it covers.
+        @MainActor var hoverFill: NSColor {
+            switch self {
+            case .standard: Design.Surface.controlResting
+            case .compact: Design.Surface.controlHover
+            }
+        }
     }
 
     // MARK: - Properties
@@ -155,7 +165,7 @@ final class ThemedDisclosureRow: ThemedControl {
         if isPressed {
             ThemedSurface.draw(bounds, fill: Design.Surface.controlHover, radius: 0)
         } else if isHovered {
-            ThemedSurface.draw(bounds, fill: Design.Surface.controlResting, radius: 0)
+            ThemedSurface.draw(bounds, fill: density.hoverFill, radius: 0)
         }
 
         // The row is a rectangle spanning its card, so the ring restates that silhouette; the
