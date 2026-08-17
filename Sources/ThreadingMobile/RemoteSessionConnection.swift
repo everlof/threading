@@ -7,11 +7,12 @@ private enum RemoteMobileConnectionDefaults {
     static let acknowledgedSubmissionRetrySeconds: TimeInterval = 4 * 60
     /// How long a socket may stay open without the Mac greeting it.
     ///
-    /// `URLSessionWebSocketTask` does not honour `timeoutIntervalForResource`, so nothing in
-    /// URLSession bounds "the TCP connection was accepted and no frame ever arrived". Without
-    /// this the receive loop awaits forever: no failure, no reconnect, and no terminal event in
-    /// the diagnostics journal, which is exactly the shape the 2026-08-17 report could not
-    /// explain. Long enough for a slow cellular handshake, far shorter than a person's patience.
+    /// Nothing in URLSession is relied on to bound "the TCP connection was accepted and no
+    /// frame ever arrived": whether `URLSessionWebSocketTask` honours
+    /// `timeoutIntervalForResource` is not established, and the 2026-08-17 hang was never
+    /// reproduced. Without this deadline the receive loop can await forever: no failure, no
+    /// reconnect, and no terminal event in the diagnostics journal, which is exactly the shape
+    /// that report could not explain. Long enough for a slow cellular handshake, far shorter than a person's patience.
     static let helloDeadline: Duration = .seconds(15)
 }
 

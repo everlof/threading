@@ -228,11 +228,12 @@ struct RemoteClient {
     /// The WebSocket half deliberately does not share the request session's configuration.
     ///
     /// `waitsForConnectivity` turns an unreachable host into an indefinite wait rather than an
-    /// error, and `URLSessionWebSocketTask` does not honour `timeoutIntervalForResource`, so a
-    /// socket opened through the request session had no failure path at all: the receive loop
-    /// awaited a message that never came, nothing reconnected, and the phone showed
-    /// "Connecting…" until the user gave up. Here the connect fails immediately when there is no
-    /// route, and the hello deadline in `RemoteSessionConnection` is what bounds a host that
+    /// error, and whether `URLSessionWebSocketTask` honours `timeoutIntervalForResource` is not
+    /// established (the 2026-08-17 hang was never reproduced), so a socket opened through the
+    /// request session had no failure path anyone could rely on: the receive loop awaited a
+    /// message that never came, nothing reconnected, and the phone showed "Connecting…" until
+    /// the user gave up. Here the connect fails immediately when there is no route, and the
+    /// hello deadline in `RemoteSessionConnection` is the authority that bounds a host which
     /// accepts the connection and then says nothing. The resource timeout is left at its default
     /// on purpose: a healthy session socket is long-lived, and the request session's 30 seconds
     /// would be a ceiling on the conversation rather than on the handshake.
