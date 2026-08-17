@@ -1891,30 +1891,9 @@ class ThemedTimeSeriesChartView: ThemedControl {
     ) {
         let text = inspectionLines(for: value, series: series).joined(separator: "\n")
         guard !text.isEmpty else { return }
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: Design.Typography.detail(),
-            .foregroundColor: Design.Text.label
-        ]
-        let string = NSAttributedString(string: text, attributes: attributes)
-        let measured = string.boundingRect(
-            with: NSSize(width: Design.Chart.tooltipMaxWidth, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading]
-        ).integral
-        let size = NSSize(
-            width: min(Design.Chart.tooltipMaxWidth, measured.width) + Design.Chart.tooltipInset * 2,
-            height: measured.height + Design.Chart.tooltipInset * 2
-        )
-        var origin = NSPoint(
-            x: location.x + Design.Chart.tooltipOffset,
-            y: location.y + Design.Chart.tooltipOffset
-        )
-        if origin.x + size.width > bounds.maxX - Design.Spacing.inset {
-            origin.x = location.x - Design.Chart.tooltipOffset - size.width
-        }
-        if origin.y + size.height > bounds.maxY - Design.Spacing.inset {
-            origin.y = location.y - Design.Chart.tooltipOffset - size.height
-        }
-        let rect = NSRect(origin: origin, size: size)
+        let string = NSAttributedString(string: text, attributes: Self.tooltipAttributes)
+        let size = Self.tooltipSize(for: string)
+        let rect = Self.tooltipRect(size: size, near: location, in: bounds)
         _ = ThemedSurface.draw(
             rect,
             fill: Design.Surface.elevated,
@@ -1923,8 +1902,84 @@ class ThemedTimeSeriesChartView: ThemedControl {
         )
         string.draw(
             with: rect.insetBy(dx: Design.Chart.tooltipInset, dy: Design.Chart.tooltipInset),
-            options: [.usesLineFragmentOrigin, .usesFontLeading]
+            options: Self.tooltipDrawingOptions
         )
+    }
+
+    // MARK: - Tooltip Geometry
+
+    /// The tooltip's arithmetic, kept apart from its drawing — the split `CodeStatsBar` uses,
+    /// and for the same reason: what a tooltip clipped is not something an assertion about
+    /// drawing would have caught, but it is exactly what these two functions decide.
+
+    static let tooltipDrawingOptions: NSString.DrawingOptions = [
+        .usesLineFragmentOrigin, .usesFontLeading
+    ]
+
+    static var tooltipAttributes: [NSAttributedString.Key: Any] {
+        [.font: Design.Typography.detail(), .foregroundColor: Design.Text.label]
+    }
+
+    /// The whole box for a block of tooltip text, insets included.
+    ///
+    /// One measurement is enough, and it is worth saying why, because measuring again at the
+    /// narrower width the box settles on looks like the obvious guard against a clipped last
+    /// line. It is not: line breaking is greedy, so every fragment produced at the maximum width
+    /// is by definition no wider than the widest one, and laying the same text out at exactly
+    /// that width reproduces the same fragments. The second pass cannot change the height.
+    ///
+    /// The clipped tooltip this was checked against was the right size all along — see
+    /// `tooltipRect`, which is where it actually went wrong.
+    static func tooltipSize(for string: NSAttributedString) -> NSSize {
+        let measured = string.boundingRect(
+            with: NSSize(
+                width: Design.Chart.tooltipMaxWidth,
+                height: .greatestFiniteMagnitude
+            ),
+            options: tooltipDrawingOptions
+        ).integral
+
+        return NSSize(
+            width: min(Design.Chart.tooltipMaxWidth, measured.width) + Design.Chart.tooltipInset * 2,
+            height: measured.height + Design.Chart.tooltipInset * 2
+        )
+    }
+
+    /// Convenience for the tests and for callers holding plain text.
+    static func tooltipSize(for text: String) -> NSSize {
+        tooltipSize(for: NSAttributedString(string: text, attributes: tooltipAttributes))
+    }
+
+    /// Where that box sits for a pointer at `location`.
+    ///
+    /// **Flipping alone is not placement.** The box is offered up and to the right of the
+    /// pointer, and flipped to the other side when that would cross the far edge — but flipping
+    /// is what creates the opposite problem: a pointer low in the view, or close to its left,
+    /// sends the box off *that* side instead, where nothing moves it and the view simply clips
+    /// what falls outside. That is how a four-line reading whose detail wrapped lost its last
+    /// line: the tooltip was the right size and in the wrong place.
+    ///
+    /// So the flip is followed by a clamp, and the clamp is last. A box larger than the view
+    /// then starts at the near inset and overflows the far edge, which is at least legible from
+    /// its first line, rather than being centred on nothing.
+    static func tooltipRect(size: NSSize, near location: NSPoint, in bounds: NSRect) -> NSRect {
+        let margin = Design.Spacing.inset
+        var origin = NSPoint(
+            x: location.x + Design.Chart.tooltipOffset,
+            y: location.y + Design.Chart.tooltipOffset
+        )
+
+        if origin.x + size.width > bounds.maxX - margin {
+            origin.x = location.x - Design.Chart.tooltipOffset - size.width
+        }
+        if origin.y + size.height > bounds.maxY - margin {
+            origin.y = location.y - Design.Chart.tooltipOffset - size.height
+        }
+
+        origin.x = max(bounds.minX + margin, min(origin.x, bounds.maxX - margin - size.width))
+        origin.y = max(bounds.minY + margin, min(origin.y, bounds.maxY - margin - size.height))
+
+        return NSRect(origin: origin, size: size)
     }
 
     private func draw(
