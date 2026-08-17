@@ -362,6 +362,7 @@ final class SilenceGateFooterTests: XCTestCase {
     // MARK: - Where It Is
 
     func testTheGateSitsInTheFooterBandAtItsTrailingEdge() throws {
+        AppSettings.shared.silencesAllSounds = false
         let sidebar = makeSidebar()
         let button = try XCTUnwrap(gateButton(in: sidebar), "the footer carries no silence gate")
         let band = try XCTUnwrap(footer(in: sidebar))
