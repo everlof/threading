@@ -557,10 +557,13 @@ final class RemoteSessionConnection: ObservableObject {
             Task { @MainActor in
                 guard let self, self.connectionGeneration == expectedGeneration,
                       self.stopped == false, self.task === task else { return }
-                self.fail(with: RemoteConnectionFailure.transport(
-                    error,
-                    host: self.destinationHost
-                ))
+                self.fail(
+                    with: RemoteConnectionFailure.transport(
+                        error,
+                        host: self.destinationHost
+                    ),
+                    httpStatus: Self.httpStatus(of: task)
+                )
                 self.scheduleReconnect(generation: expectedGeneration)
             }
         }
