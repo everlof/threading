@@ -105,6 +105,15 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertTrue(try database.load().state.projects.isEmpty)
     }
 
+    /// SQLite's *extended* result codes are defined as expressions over the primary ones —
+    /// `#define SQLITE_IOERR_WRITE (SQLITE_IOERR | (3<<8))` — and Swift's clang importer brings in
+    /// plain integer macros only. `SQLITE_FULL` is `13` and arrives; `SQLITE_IOERR_WRITE` does not
+    /// exist in Swift at all, so naming it fails to compile rather than reading wrong. Spelled out
+    /// here, once, with the header's own arithmetic.
+    private enum SQLiteExtended {
+        static let ioErrorWrite = SQLITE_IOERR | (3 << 8)
+    }
+
     func testSQLiteFullKeepsItsTypedRecoverySignal() {
         let full = SQLiteDatabase.Failure.step(.init(
             code: SQLITE_FULL,
@@ -113,7 +122,7 @@ final class ProjectDatabaseTests: XCTestCase {
         ))
         let other = SQLiteDatabase.Failure.step(.init(
             code: SQLITE_IOERR,
-            extendedCode: SQLITE_IOERR_WRITE,
+            extendedCode: SQLiteExtended.ioErrorWrite,
             message: "I/O error"
         ))
 
