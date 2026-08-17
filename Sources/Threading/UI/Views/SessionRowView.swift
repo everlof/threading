@@ -1172,7 +1172,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         }
 
         nativeIcon = iconView.image
-        nativeIconTint = iconView.contentTintColor
         nativeIconAlpha = iconView.alphaValue
     }
 
@@ -1367,9 +1366,16 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // fill is named: the unemphasized one is the accent held far back over the sidebar's
         // surface, where the chrome's ink is still the ink that reads.
         let ground: InkSource? = backgroundStyle == .emphasized ? .selection : nil
-        iconView.contentTintColor = backgroundStyle == .emphasized
+        let iconTint = backgroundStyle == .emphasized
             ? Design.Ink.selection.label
             : (isDormant ? Design.Text.tertiary : Design.Text.secondary)
+        iconView.contentTintColor = iconTint
+        // `applyCustomizationProperties` restores the native icon before applying an optional
+        // replacement. Keep that snapshot on the row's current ground: caching it only in
+        // `applyAgentIcon` captured the ordinary sidebar tint, so the next activity refresh of a
+        // selected Codex row restored white over an orange selection after this method had
+        // correctly chosen black.
+        nativeIconTint = iconTint
         pinnedIndicator?.contentTintColor = backgroundStyle == .emphasized
             ? Design.Ink.selection.label
             : Design.Surface.accent
