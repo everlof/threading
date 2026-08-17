@@ -1,9 +1,13 @@
 # Usage-aware work: budgets, and the next best account
 
-**Status: draft.** Nothing here is implemented. Re-check it against the code before starting,
-and move the decisions that survive into `docs/architecture/` — most likely
-[`accounts.md`](../architecture/accounts.md), [`limit-recovery.md`](../architecture/limit-recovery.md)
-and [`control-plane.md`](../architecture/control-plane.md) — rather than leaving them here.
+**Status: draft, except the delegated half of C.** A manager grant already carries an optional
+`SpendCeiling`, admitted by `ControlSpendCeiling` when a manager spawns, resumes or sends
+(2026-08-17, [`control-plane.md`](../architecture/control-plane.md)); that covers delegated work
+only, and A, B and the ordinary session's own ceiling remain unbuilt. Re-check the rest against
+the code before starting, and move the decisions that survive into `docs/architecture/` — most
+likely [`accounts.md`](../architecture/accounts.md),
+[`limit-recovery.md`](../architecture/limit-recovery.md) and
+[`control-plane.md`](../architecture/control-plane.md) — rather than leaving them here.
 
 ## The problem
 
@@ -214,6 +218,12 @@ Enforcement goes where new work is admitted — spawning subagents, starting tur
 voice. Pushed reading (A) is what lets the agent stop *gracefully* before the ceiling refuses it
 *abruptly*; they are complements, not alternatives.
 
+**The delegated half shipped on 2026-08-17** with the manager role: a grant may carry an optional
+`SpendCeiling`, and `ControlSpendCeiling` admits the manager's spawn, resume and send against it,
+refusing when the reading is unknown. What remains is the ceiling a user places on a session's
+*own* work — the same bound reaching the paths a manager does not sit in front of — and A, so a
+session can see the line before it meets it.
+
 ---
 
 ## What exists, and what is new
@@ -223,14 +233,15 @@ voice. Pushed reading (A) is what lets the agent stop *gracefully* before the ce
 | Per-account usage windows, `fraction`, `resetsAt`, `criticalFraction` | exists |
 | Cost/limit history to price work | exists (usage dashboard ledger) |
 | Move a conversation between accounts | exists (`SessionMigration`, `moveSession(_:to:)`) — user-triggered |
-| Limit detection and the recovery-policy chooser | in flight, another session |
+| Limit detection and the recovery-policy chooser | exists (`LimitEscapeRanking`, the park policy) |
+| The user's own line the ceiling is measured against | exists (`CustomLimitEvaluator`, shipped 2026-08-15) |
 | Per-account preferences keyed by `AccountID` | exists (`AccountPreferencesStore`) |
 | **`overflowRank` + its Settings surface** | new, small |
 | **The ranker** | new — policy over data that already exists |
 | **Window-type-aware trigger + failover policy case** | new |
 | **Reset keep-alive poke (B5)** | new — joins the existing poke run and the reset clock |
 | **Pushed usage reading** | new — a channel, not a tool |
-| **Budget ceilings** | new — slice two's authority axis |
+| **Budget ceilings** | the delegated half exists (`SpendCeiling` on a manager grant); a session's own ceiling is new |
 
 ## Risks and boundaries
 

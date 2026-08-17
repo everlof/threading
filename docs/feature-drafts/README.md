@@ -31,43 +31,34 @@ reshuffling it is a line move.
 
 ### Now — in active design
 
-- [Limit management](limit-management.md) — user-authored limits ahead of the provider's:
-  recreate a window the provider removed, pace-share caps that keep slack on a shared login,
-  threshold alerts, and holds on Threading-initiated spend at the user's own line. **The
-  threshold alerts shipped 2026-08-14** — the rule record, the pure evaluator, window-instance
-  identity, the fired-state ledger and the Accounts page's Limits section, with the durable
-  decisions moved to [`accounts.md`](../architecture/accounts.md). It stays first here because
-  everything above it now rides machinery that exists: showing the line on the bars and the
-  charts is the next slice, and it is surfaces reading `CustomLimitEvaluation.severity` rather
-  than new policy.
 - [Usage-aware accounts](usage-aware-accounts.md) — tell an agent what its budget is, let the user
   rank which logins may be spent automatically, move work to the next best one before a
-  weekly window strands it, and keep a drained fleet's anchored windows cycling at reset. The
-  pushed reading (A) is the cheap first slice; the reset keep-alive's Claude half (B5) can ship
-  ahead of the rest.
+  weekly window strands it, and keep a drained fleet's anchored windows cycling at reset. It is
+  first because the drafts either side of it finished: the user's own line exists
+  ([limit management](limit-management.md)), and a manager grant can now carry a `SpendCeiling`
+  that refuses delegated spend at it — so a session can be stopped at a ceiling it still cannot
+  see. **The pushed reading (A) is the cheap first slice** and the missing half of that: it is
+  what lets an agent stop gracefully before a ceiling refuses it abruptly, and it rides channels
+  that already reach every session — `MCPToolCatalog.instructions(for:)` for the opening state,
+  and the settle edge `AccountUsageService` already observes for updates. Its account order (B1)
+  is the consent the automatic move depends on and must ship before it; the reset keep-alive's
+  Claude half (B5) can ship ahead of the rest.
 
 ### Next — researched and ready, waiting for a slot
 
 - [Observed work for terminal sessions](observed-work-for-terminal-sessions.md) — feed the Activity
   tab from the transcript, export and git checkpoint a session already leaves behind, so a chat
-  Threading does not render itself stops reporting zeros over a full repository atlas. **The Claude
-  and Codex half shipped 2026-08-14**; it stays first here because what remains is what the shipped
-  half made visible — a runtime with no transcript adapter still reports zeros, and needs the
-  honest empty state and the git-observed floor before the panel can be trusted at a glance. The
-  OpenCode and Grok feed waits on measuring their exports.
+  Threading does not render itself stops reporting zeros over a full repository atlas. **The
+  transcript feed shipped 2026-08-14; the git-observed floor, the exact/observed provenance split
+  and the honest empty state shipped 2026-08-17**, with the durable decisions in
+  [`mcp-and-display.md`](../architecture/mcp-and-display.md). Only the OpenCode/Grok export feed
+  remains, and it is blocked on a measurement rather than on work: neither CLI is installed here.
+  It moves down this list because the floor already gives those two runtimes a reading.
 - [Conversation forks and quick asides](conversation-forks-and-quick-asides.md) — separate the
   current durable Claude fork from a true temporary side question, add persistent forks for
   Codex, Grok and OpenCode, and add native read-only asides for Codex and Grok first. High-frequency
   session workflow with direct upstream operations; Claude native aside remains a measured later
   slice rather than blocking the ready paths.
-- [Orchestrator role and grants](orchestrator-role-and-grants.md) — a session whose job is to run
-  the others: an explicit authority axis (`ControlOperation` × `ControlGrant`) on the shipped
-  control plane, a manager *role* conferred only by the user, targeted archive/rename, resume,
-  spawn over the same launch plan the composer uses (managed worktrees included), read-only
-  accounts and usage, `best`-account choice through the limit-escape ranker (so the user's own
-  limits hold), guarded account moves, and a durable supervision record with pushed child
-  notices. Regular sessions keep exactly today's self-scoped tools and never see the manager's.
-  Slices two and four of `control-plane.md`, designed 2026-08-16.
 - [Browser Focus](browser-focus.md) — let the live browser fill the main window while retaining a
   compact, live conversation dock. Implementation-ready and self-contained.
 - [CCS launch profiles and GLM](ccs-launch-profiles-and-glm.md) — adopt CCS-managed launch
@@ -104,6 +95,17 @@ reshuffling it is a line move.
 
 ### Shipped — pointers remain
 
+- [Orchestrator role and grants](orchestrator-role-and-grants.md) — **shipped** 2026-08-17;
+  explicit grants, the project Manager role, bounded supervision operations and durable fleet
+  state are recorded in [`control-plane.md`](../architecture/control-plane.md), with account,
+  session and persistence boundaries in their respective architecture records.
+- [Limit management](limit-management.md) — **shipped** 2026-08-15; user-authored limits ahead of
+  the provider's. The alerts, the line drawn where the reading is, the four hold seams, both new
+  metrics and the tier-4 park live in
+  [`accounts.md`](../architecture/accounts.md#your-own-limits-ahead-of-the-providers), and the
+  draft remains beside it as the delivery plan and decision record. Its step 6, grants
+  integration, belongs to [usage-aware accounts](usage-aware-accounts.md) §C and shipped with the
+  manager grant's `SpendCeiling` on 2026-08-17.
 - [Cross-platform Usage dashboard](cross-platform-usage-dashboard.md) — **shipped** 2026-08-11;
   the file deliberately remains as the delivery plan and decision record beside
   [`usage-dashboard.md`](../architecture/usage-dashboard.md).
