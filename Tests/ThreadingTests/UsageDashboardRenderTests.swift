@@ -204,10 +204,8 @@ final class UsageDashboardRenderTests: XCTestCase {
 
     /// The same page in the pane squeezed to its floor.
     ///
-    /// Every render here was taken at 932 points for a page that has never been that wide: it is
-    /// laid out at `Design.Size.dashboardWidth` and floors at
-    /// `Design.UsageDashboard.minimumContentWidth`, so the one width nobody was looking at was
-    /// the only width anyone had a picture of. The floor is where the columns have to give
+    /// A squeezed window can still take the shared Settings canvas to
+    /// `Design.UsageDashboard.minimumContentWidth`. The floor is where the columns have to give
     /// something up, and this says which.
     func testRendersTheDashboardSqueezedToItsNarrowestPane() throws {
         let directory = renderDirectory
@@ -282,12 +280,12 @@ final class UsageDashboardRenderTests: XCTestCase {
             .appendingPathComponent("ThreadingUsageRenders", isDirectory: true)
     }
 
-    /// The page at a width it actually has. `Design.Size.dashboardWidth` is what the settings
-    /// pane gives it (`SettingsPageWidth.dashboard`); the floor is what a squeezed window leaves.
+    /// The dashboard at the content width every Settings page actually has; the floor is what a
+    /// squeezed window leaves.
     private func laidOut(
         _ dashboard: UsageDashboardView,
         appearance: NSAppearance,
-        width: CGFloat = Design.Size.dashboardWidth
+        width: CGFloat = Design.Size.settingsContentWidth
     ) -> NSView {
         let dashboardWidth = width
         dashboard.translatesAutoresizingMaskIntoConstraints = false

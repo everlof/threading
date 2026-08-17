@@ -61,6 +61,36 @@ final class SettingsRowLayoutTests: XCTestCase {
 
     // MARK: - Tests
 
+    /// Settings is one navigable surface, so changing destinations must replace content without
+    /// changing the canvas around it. Usage used to opt into a second width in the catalogue;
+    /// exercising the real container keeps that per-page seam from returning.
+    func testGeneralAndUsageUseTheSameSettingsCanvas() throws {
+        let container = TerminalContainerViewController()
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 1_400, height: 900))
+        container.view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(container.view)
+        NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: 1_400),
+            host.heightAnchor.constraint(equalToConstant: 900),
+            container.view.topAnchor.constraint(equalTo: host.topAnchor),
+            container.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            container.view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            container.view.bottomAnchor.constraint(equalTo: host.bottomAnchor)
+        ])
+
+        container.showSettingsPage(id: SettingsPages.generalID)
+        host.layoutSubtreeIfNeeded()
+        let generalWidth = try XCTUnwrap(container.children.last?.view.frame.width)
+
+        container.showSettingsPage(id: SettingsPages.usageID)
+        host.layoutSubtreeIfNeeded()
+        let usageWidth = try XCTUnwrap(container.children.last?.view.frame.width)
+
+        XCTAssertEqual(generalWidth, SettingsUIDefaults.pageWidth, accuracy: 0.5)
+        XCTAssertEqual(usageWidth, SettingsUIDefaults.pageWidth, accuracy: 0.5)
+        XCTAssertEqual(generalWidth, usageWidth, accuracy: 0.5)
+    }
+
     /// The regression this was written for: a wrapping label has no intrinsic width, so against
     /// anything willing to grow it collapses to its narrowest wrap and stays there. Measured on
     /// the Themes page, the App theme description wrapped to the same six lines at 420pt and at

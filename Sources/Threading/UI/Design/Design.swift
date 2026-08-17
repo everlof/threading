@@ -272,20 +272,19 @@ enum Design {
         /// Widest a column of content grows before it becomes hard to scan.
         static let readableWidth: CGFloat = 620
 
-        /// The measure a page whose content is a *picture* keeps, instead of `readableWidth`.
+        /// The content measure every Settings page keeps.
         ///
-        /// A form is read down one column, so 620 is exactly right for it. A dashboard is read
-        /// *across*: a total beside its own time series, and a table of named columns under
-        /// them. Laid out at the readable measure the Usage page carved its hero out of the
-        /// same 620 and left the 90-day chart 288 points — three points a day — so every
-        /// defect on it (a chart nobody could read a spike out of, tiles truncating their
-        /// detail, an axis printing `US$100,0…`) came from one number.
+        /// Usage exposed that the old readable-width shell was too narrow for a real settings
+        /// destination: its total, time series and named table columns were competing inside
+        /// the same 620 points. Giving only that page a wider shell fixed the dashboard but made
+        /// Settings change width during navigation. The shell now takes the widest legitimate
+        /// settings composition once; form controls keep their own compact measures inside it.
         ///
-        /// Derived rather than picked: the **plot rectangle** keeps the readable measure, its
-        /// axis gutters are added beside it rather than taken out of it, and the hero's column
-        /// is added again beyond that with a pane's worth of air between. Widening the page is
-        /// therefore the same decision as "the chart is content", stated once.
-        static let dashboardWidth: CGFloat = UsageDashboard.consumptionSummaryWidth
+        /// Derived rather than picked: the Usage plot rectangle keeps `readableWidth`, its axis
+        /// gutters sit beside it, and the summary column sits beyond those with a pane's air
+        /// between. The richest page therefore states the common canvas without inventing a
+        /// second arbitrary width.
+        static let settingsContentWidth: CGFloat = UsageDashboard.consumptionSummaryWidth
             + Spacing.pane
             + Chart.axisLeading + readableWidth + Chart.axisTrailing
 

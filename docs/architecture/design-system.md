@@ -2759,3 +2759,22 @@ always there — the pattern to reach for wherever a section break follows a som
 member. The collapsed seam is pinned by an assertion on converted frames in
 `ScheduledSessionPlaceholderRenderTests`, in the fixture whose warning is nil, because that is
 the case that collapsed.
+
+## 2026-08-17 — Settings is one canvas, not a width per destination
+
+Usage needed more horizontal room than the old 620-point form measure: its summary and chart sit
+beside each other, and its breakdown is a named table. Making that page alone wider fixed the
+content and introduced a navigation defect — the centred Settings canvas changed its visible
+edges whenever the reader entered or left Usage.
+
+`SettingsUIDefaults.pageWidth` is now the single shell contract for every built-in, AI-search and
+extension-provided Settings destination. The per-page `SettingsPageWidth` choice was removed from
+the catalogue rather than merely defaulted differently, so another destination cannot drift by
+opting into its own canvas. `Design.Size.settingsContentWidth` keeps the Usage-derived arithmetic
+that justified the wide measure; form controls retain their compact fixed or intrinsic widths
+inside it. A squeezed pane still narrows the page through the shell's existing edge constraints.
+
+`SettingsRowLayoutTests.testGeneralAndUsageUseTheSameSettingsCanvas` drives the real container and
+switches between the former two width classes, pinning both to the one shared value. The Settings
+render catalogue then reviews the wide regular state and the existing constrained state across
+the affected pages.

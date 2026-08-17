@@ -49,21 +49,23 @@ therefore bounded local model changes rather than a main-actor fold over report 
 records. The same semantic values are the input intended for the owner-only remote bridge; neither
 platform renderer receives raw transcript cells or the raw journal.
 
-## The page is a picture, not a form
+## The page established the shared Settings canvas
 
-Every other settings page is a column of rows and keeps `Design.Size.readableWidth`. This one is a
-total beside its own time series over a table of named columns, and it was laid out at the same
-620 points as a preferences form — which is where nearly every visual defect on it came from at
-once. The chart got whatever the hero left of a measure sized for prose (288 points for 90 days,
-three points a day), five bordered tiles each truncated their own explanation inside a fifth of
-it, and the value axis printed `US$100,0…`.
+Usage is a total beside its own time series over a table of named columns. It was originally laid
+out inside the 620 points used as a prose measure, which is where nearly every visual defect on it
+came from at once: the chart got whatever the hero left (288 points for 90 days, three points a
+day), five bordered tiles each truncated their own explanation inside a fifth of it, and the value
+axis printed `US$100,0…`.
 
-`SettingsPageWidth` (`SettingsComponents.swift`) is the per-page opt-in, and the Usage page is the
-only `.dashboard` in the catalogue. `Design.Size.dashboardWidth` is **derived rather than picked**:
-the plot rectangle keeps the readable measure, its axis gutters are added beside it, and the hero's
-fixed column is added again with a pane's air between — so "the chart is content" is stated once,
-in arithmetic. `Design.UsageDashboard.minimumContentWidth` is still the floor a squeezed pane
-leaves, and both widths are rendered.
+Making only Usage wider fixed those defects but made the Settings canvas jump horizontally when a
+reader changed destinations. `SettingsUIDefaults.pageWidth` is now the one shell width for every
+built-in and extension-provided Settings page. Its content measure,
+`Design.Size.settingsContentWidth`, is **derived rather than picked**: the Usage plot rectangle
+keeps the readable measure, its axis gutters are added beside it, and the hero's fixed column is
+added again with a pane's air between. The richest legitimate page therefore states the common
+canvas once, while form controls retain their compact intrinsic or fixed widths inside it.
+`Design.UsageDashboard.minimumContentWidth` remains the floor a squeezed pane leaves, and both
+widths are rendered.
 
 Three presentation rules follow from that, and each replaced something that had been quietly
 lying:

@@ -88,10 +88,6 @@ enum SettingsPages {
         /// page. Empty on pages whose rows are dynamic or table-backed — those still match at
         /// page level through `searchTerms`, they just cannot promise a row to scroll to.
         let entries: [SettingsEntry]
-        /// How much of the pane this page asks for. Presentation, like the title: the pane
-        /// applies it, the page itself is built the same way either measure. Defaulted, so a
-        /// page states it only when it is not a form — see `SettingsPageWidth`.
-        let width: SettingsPageWidth
         let make: () -> NSViewController
 
         @MainActor
@@ -103,7 +99,6 @@ enum SettingsPages {
             group: String,
             searchTerms: [String],
             entries: [SettingsEntry]? = nil,
-            width: SettingsPageWidth = .readable,
             make: @escaping () -> NSViewController
         ) {
             self.id = id
@@ -113,7 +108,6 @@ enum SettingsPages {
             self.group = group
             self.searchTerms = searchTerms
             self.entries = entries ?? SettingsPages.entries(for: id)
-            self.width = width
             self.make = make
         }
 
@@ -297,9 +291,7 @@ enum SettingsPages {
             title: usageTitle,
             symbol: "chart.bar",
             group: agentsGroup,
-            searchTerms: terms("tokens", "cost", "spend", "account", "checkout", "model", "day"),
-            // The only page here that is a picture rather than a form.
-            width: .dashboard
+            searchTerms: terms("tokens", "cost", "spend", "account", "checkout", "model", "day")
         ) { UsagePreferencesViewController() },
         Page(
             id: usageWindowsID,

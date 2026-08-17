@@ -176,6 +176,27 @@
       }
     },
     {
+      "id": "settings-shared-canvas",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Shared Settings canvas",
+      "description": "The real main window before and after switching Settings destinations, proving the page canvas stays fixed while the selected sidebar row and page content change.",
+      "states": ["General selected", "Keyboard selected"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light"],
+        "sizes": ["1560×900-point main-window content"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SettingsCanvasRenderTests.swift",
+        "test": "ThreadingTests/SettingsCanvasRenderTests/testRendersTheSharedSettingsCanvasInTheMainWindow"
+      },
+      "capture": {
+        "glob": "settings-canvas-*.png"
+      }
+    },
+    {
       "id": "conversation-timeline",
       "kind": "surface",
       "status": "implemented",
@@ -275,7 +296,7 @@
       "matrix": {
         "themes": ["System", "Cyberpunk", "Neo Brutalism", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],
-        "sizes": ["620-point settings page"]
+        "sizes": ["Shared settings width"]
       },
       "source": {
         "path": "Tests/ThreadingTests/SettingsDisclosureRenderTests.swift",
@@ -296,7 +317,7 @@
       "matrix": {
         "themes": ["System"],
         "appearances": ["Light", "Dark"],
-        "sizes": ["620×920-point settings page"]
+        "sizes": ["Shared settings width × 920 points"]
       },
       "source": {
         "path": "Tests/ThreadingTests/ThemedControlTests.swift",
@@ -317,7 +338,7 @@
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark"],
-        "sizes": ["620-point settings page"]
+        "sizes": ["Shared settings width"]
       },
       "source": {
         "path": "Tests/ThreadingTests/GitHubSettingsRenderTests.swift",
@@ -575,7 +596,7 @@
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["System light/dark", "Authored fixed-theme appearances"],
-        "sizes": ["620×920-point settings page"]
+        "sizes": ["Shared settings width × 920 points"]
       },
       "source": {
         "path": "Tests/ThreadingTests/ExtensionsSettingsRenderTests.swift",
@@ -641,7 +662,7 @@
       "matrix": {
         "themes": ["System", "Cyberpunk", "Neo Brutalism", "Classic Player"],
         "appearances": ["Theme representative appearance"],
-        "sizes": ["932-point dashboard"]
+        "sizes": ["Shared settings content width"]
       },
       "source": {
         "path": "Tests/ThreadingTests/UsageDashboardRenderTests.swift",

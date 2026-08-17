@@ -14,10 +14,8 @@ import XCTest
 final class ThemeSettingsRenderTests: XCTestCase {
 
     private enum Render {
-        /// The width the pane actually gives a settings page — `SettingsUIDefaults.pageWidth`,
-        /// the cap `showSettingsPage` centres it at (the readable measure plus the halo
-        /// gutters) — and a squeezed pane, since the eight-column ANSI grid is the widest
-        /// fixed thing on the page and is what breaks first.
+        /// The shared width the pane gives every settings page, plus a squeezed pane since the
+        /// eight-column ANSI grid is the widest fixed thing here and is what breaks first.
         static let widths: [CGFloat] = [420, SettingsUIDefaults.pageWidth]
         static let height: CGFloat = 1000
 

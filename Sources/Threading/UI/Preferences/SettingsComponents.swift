@@ -854,41 +854,10 @@ enum SettingsUIDefaults {
     static let controlWidth: CGFloat = 220
     static let wideSegmentedControlWidth: CGFloat = 380
 
-    /// The width a settings page asks its pane for: the readable measure the cards keep,
-    /// plus the halo gutter `SettingsUI.page` holds clear on either side. Stated here so the
-    /// pane that caps the page and the render tests that draw it read one number.
-    static var pageWidth: CGFloat { width(for: .readable) }
-
-    /// The same arithmetic for whichever measure a page asked for.
-    static func width(for measure: SettingsPageWidth) -> CGFloat {
-        measure.contentWidth + Design.Size.glowGutter * 2
-    }
-}
-
-// MARK: - Page Width
-
-/// How much horizontal room one settings page asks its pane for.
-///
-/// Every page is a form and keeps the readable measure — except the one whose content is a
-/// *picture*. The Usage dashboard is a total beside its own time series over a table of named
-/// columns, and read at 620 points it had no room to be any of those things: the chart got what
-/// the hero left of a column sized for prose. This is a per-page opt-in rather than a wider
-/// `readableWidth`, because widening every page would make every *form* harder to read, which
-/// is the measure's whole point.
-///
-/// The pane still applies its own floor and margins, so a squeezed window narrows a wide page
-/// exactly as it already narrowed a readable one.
-enum SettingsPageWidth {
-    /// A column of rows, read downwards. The default, and what every page but one uses.
-    case readable
-    /// A dashboard, read across. See `Design.Size.dashboardWidth`.
-    case dashboard
-
-    /// The measure the page's own content keeps, before the halo gutters are added.
-    var contentWidth: CGFloat {
-        switch self {
-        case .readable: return Design.Size.readableWidth
-        case .dashboard: return Design.Size.dashboardWidth
-        }
+    /// The one width every settings destination asks its pane for: the shared content canvas
+    /// plus the halo gutter `SettingsUI.page` keeps clear on either side. Stated here so the
+    /// pane, every page fixture and extension-provided settings agree without a per-page choice.
+    static var pageWidth: CGFloat {
+        Design.Size.settingsContentWidth + Design.Size.glowGutter * 2
     }
 }

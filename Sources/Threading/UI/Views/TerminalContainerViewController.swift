@@ -659,8 +659,9 @@ final class TerminalContainerViewController: NSViewController {
     /// Shows a settings page centred in the pane, replacing whatever session or composer was on
     /// screen. The section list lives in the sidebar; this only draws the chosen page.
     ///
-    /// The page is pinned straight to the pane — centred, capped at a readable width, floored by
-    /// margins — rather than through an intermediate container, which did not size its child.
+    /// The page is pinned straight to the pane — centred, capped at the shared Settings width,
+    /// and floored by margins — rather than through an intermediate container, which did not
+    /// size its child.
     func showSettingsPage(id: String, revealing anchorTitle: String? = nil) {
         guard let definition = SettingsPages.page(id: id) else { return }
 
@@ -673,7 +674,7 @@ final class TerminalContainerViewController: NSViewController {
             return made
         }()
 
-        install(settings: page, repaint: cached != nil, width: definition.width)
+        install(settings: page, repaint: cached != nil)
 
         // After the pane's own layout pass, so the row the reveal scrolls to has a frame. A
         // page that cannot answer for the anchor — table-backed, or rebuilt by an extension —
@@ -712,13 +713,12 @@ final class TerminalContainerViewController: NSViewController {
         install(settings: controller, repaint: true)
     }
 
-    /// Puts a settings-shaped child in the pane: centred, capped at a readable width, floored by
-    /// margins — pinned straight to the pane rather than through an intermediate container,
-    /// which did not size its child.
+    /// Puts a settings-shaped child in the pane: centred, capped at the shared Settings width,
+    /// floored by margins — pinned straight to the pane rather than through an intermediate
+    /// container, which did not size its child.
     private func install(
         settings page: NSViewController,
-        repaint: Bool,
-        width: SettingsPageWidth = .readable
+        repaint: Bool
     ) {
         consumeComposerHandoff(for: nil)
         currentComposerProjectID = nil
@@ -748,11 +748,10 @@ final class TerminalContainerViewController: NSViewController {
         // fonts that one walk can simply take again.
         if repaint { AppThemeRefresh.repaint(content) }
 
-        // The cap is the measure this page asked for plus the glow gutters the page pads itself
-        // with, so the cards inside keep that measure. A form asks for the readable one; the
-        // Usage dashboard asks for a wider one, because its content is a picture rather than a
-        // column of rows (`SettingsPageWidth`).
-        let pageWidth = SettingsUIDefaults.width(for: width)
+        // One cap for every destination keeps the Settings canvas still while its contents
+        // change. It includes the glow gutters the page pads itself with, so cards and the Usage
+        // dashboard share the same visible edges.
+        let pageWidth = SettingsUIDefaults.pageWidth
         let preferred = content.widthAnchor.constraint(equalToConstant: pageWidth)
         preferred.priority = .defaultHigh
 
