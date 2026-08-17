@@ -82,23 +82,14 @@ private struct StartupProfileMeasurement: Sendable {
     }
 }
 
-/// The app's command plane is one responder hop outside AppKit's ordinary Edit menu.
-///
-/// Cut, Copy and Paste are actions implemented by the text responder itself. Undo is different:
-/// the operation lives on that responder's undo manager. Re-sending `undo` into the responder
-/// chain therefore found no action even though the focused editor's manager had work waiting —
-/// which is why calling the manager directly in a component test passed while the real ⌘Z did
-/// nothing. Resolve the focused responder first and invoke the manager it owns.
+/// AppKit's Edit actions live on `NSWindow`'s Objective-C responder surface and are not imported
+/// as Swift methods. They take a sender (`undo:` / `redo:`); `UndoManager.undo` and `.redo` are
+/// different, zero-argument selectors, so sending either of those through the responder chain
+/// finds no target even while the focused editor's manager has work waiting.
 @MainActor
-enum FirstResponderUndo {
-    @discardableResult
-    static func perform(in window: NSWindow?) -> Bool {
-        guard let manager = window?.firstResponder?.undoManager, manager.canUndo else {
-            return false
-        }
-        manager.undo()
-        return true
-    }
+enum AppKitEditActions {
+    static let undo = NSSelectorFromString("undo:")
+    static let redo = NSSelectorFromString("redo:")
 }
 
 @MainActor
@@ -1746,8 +1737,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func makeEditMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: MenuIdentifiers.editMenu)
 
-        menu.addItem(commandItem("system.undo", action: #selector(performHostMenuCommand(_:))))
-        menu.addItem(withTitle: L10n.string("Redo"), action: #selector(UndoManager.redo), keyEquivalent: "Z")
+        menu.addItem(commandItem("system.undo", action: AppKitEditActions.undo))
+        menu.addItem(withTitle: L10n.string("Redo"), action: AppKitEditActions.redo, keyEquivalent: "Z")
         menu.addItem(.separator())
         menu.addItem(commandItem("system.cut", action: #selector(performHostMenuCommand(_:))))
         menu.addItem(commandItem("system.copy", action: #selector(performHostMenuCommand(_:))))
@@ -2316,12 +2307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case "system.hide": NSApp.hide(nil)
         case "system.quit": NSApp.terminate(nil)
         case "system.undo":
-            let window = NSApp.keyWindow ?? mainWindowController?.window
-            if !FirstResponderUndo.perform(in: window) {
-                // Preserve the platform route for an unusual responder whose undo target is
-                // supplied dynamically rather than through `NSResponder.undoManager`.
-                NSApp.sendAction(#selector(UndoManager.undo), to: nil, from: nil)
-            }
+            NSApp.sendAction(AppKitEditActions.undo, to: nil, from: nil)
         case "system.cut": NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil)
         case "system.copy": NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
         case "system.paste": NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
