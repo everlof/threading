@@ -1127,6 +1127,7 @@ extension ProjectSidebarViewController {
     ) -> ThemedMenuEntry {
         .item(ThemedMenuItem(
             title: title,
+            help: policy.explanation,
             isSelected: resolved == policy,
             onChoose: { [weak self] in self?.chooseLimitRecovery(policy) }
         ))

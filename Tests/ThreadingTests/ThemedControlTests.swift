@@ -656,7 +656,10 @@ final class ThemedControlTests: HostedStoreTestCase {
         let token = try XCTUnwrap(ThemedMenuPresenter.present(
             ThemedMenuPresentation(
                 entries: [
-                    .item(ThemedMenuItem(title: "Enabled")),
+                    .item(ThemedMenuItem(
+                        title: "Enabled",
+                        help: "Runs the enabled action."
+                    )),
                     .item(ThemedMenuItem(title: "Disabled", isEnabled: false))
                 ],
                 minimumWidth: source.bounds.width
@@ -674,6 +677,8 @@ final class ThemedControlTests: HostedStoreTestCase {
         let rows = descendants(in: menu).filter { $0.accessibilityRole() == .menuItem }
 
         XCTAssertEqual(rows.compactMap { $0.accessibilityTitle() }, ["Enabled", "Disabled"])
+        XCTAssertEqual(rows.map(\.toolTip), ["Runs the enabled action.", nil])
+        XCTAssertEqual(rows.map { $0.accessibilityHelp() }, ["Runs the enabled action.", nil])
         XCTAssertEqual(rows.map { $0.isAccessibilityEnabled() }, [true, false])
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: window), [])
     }

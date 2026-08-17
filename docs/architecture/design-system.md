@@ -612,6 +612,14 @@ of numbers. Its *space* belongs to the menu's column plan so the cursor steps ov
 row; its *ink* is the row's, or a runtime with no login draws a rule standing alone in an empty
 row.
 
+**A menu row may explain more than its title without becoming two lines tall.**
+`ThemedMenuItem.help` is supplementary consequence text: the shared row presents it as the Help
+Tag after pointer dwell and as accessibility help, while the visible title remains the menu item's
+accessible name. It is distinct from `subtitle`, which is standing content and participates in
+the height and column plan. The limit-recovery outcomes are the first use: “Continue on the Best
+Login” names an outcome, while its help explains the stop, move and queued continuation. The row
+owns the Help Tag so a feature never installs competing hover tracking over menu chrome.
+
 **Three things a row does not decide for itself: its height, its first line, and the gap inside
 it.** All three shipped wrong in the account rows and all three are one mistake — treating a row
 as if it were the only one on screen.

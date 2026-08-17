@@ -88,6 +88,13 @@ struct ThemedMenuItem {
     }
 
     let title: String
+    /// Explanatory hover and assistive help that adds meaning beyond the visible title.
+    ///
+    /// This stays separate from `subtitle`: a subtitle is part of the menu's standing layout,
+    /// while help is supplementary and appears only when somebody lingers or asks assistive
+    /// technology for more detail. The row owns both presentations so callers never install a
+    /// second tracking area over menu chrome.
+    var help: String?
     var subtitle: String?
     /// The action's command-key equivalent, without its modifier glyph. The row owns that
     /// glyph because the same semantic shortcut is a cloverleaf in Platinum and an Amiga-key
@@ -141,6 +148,7 @@ struct ThemedMenuItem {
 
     init(
         title: String,
+        help: String? = nil,
         subtitle: String? = nil,
         keyEquivalent: String? = nil,
         image: NSImage? = nil,
@@ -151,6 +159,7 @@ struct ThemedMenuItem {
     ) {
         self.init(
             title: title,
+            help: help,
             subtitle: subtitle,
             keyEquivalent: keyEquivalent,
             image: image,
@@ -164,6 +173,7 @@ struct ThemedMenuItem {
 
     init(
         title: String,
+        help: String? = nil,
         subtitle: String? = nil,
         keyEquivalent: String? = nil,
         image: NSImage? = nil,
@@ -175,6 +185,7 @@ struct ThemedMenuItem {
     ) {
         self.init(
             title: title,
+            help: help,
             subtitle: subtitle,
             keyEquivalent: keyEquivalent,
             image: image,
@@ -188,6 +199,7 @@ struct ThemedMenuItem {
 
     init(
         title: String,
+        help: String? = nil,
         subtitle: String? = nil,
         keyEquivalent: String? = nil,
         image: NSImage? = nil,
@@ -199,6 +211,7 @@ struct ThemedMenuItem {
     ) {
         self.init(
             title: title,
+            help: help,
             subtitle: subtitle,
             keyEquivalent: keyEquivalent,
             image: image,
@@ -212,6 +225,7 @@ struct ThemedMenuItem {
 
     private init(
         title: String,
+        help: String?,
         subtitle: String?,
         keyEquivalent: String?,
         image: NSImage?,
@@ -222,6 +236,7 @@ struct ThemedMenuItem {
         destination: Destination
     ) {
         self.title = title
+        self.help = help
         self.subtitle = subtitle
         self.keyEquivalent = keyEquivalent
         self.image = image
@@ -3352,19 +3367,24 @@ private final class ThemedMenuRowView: ThemedControl {
 
     /// What the row says when the pointer rests on it.
     ///
-    /// The whole reading, not the subtitle alone: once the numbers are columns and a drawn bar, a
-    /// tooltip carrying only the leftover line would name less than the row shows. On the
-    /// accessory it becomes the accessory's own name instead — a glyph that appeared under the
-    /// pointer has no other way to say what it does, and while the pointer is on it the row's
+    /// Explicit help wins because it explains the consequence the visible title cannot. Without
+    /// it, the whole reading wins over the subtitle alone: once the numbers are columns and a
+    /// drawn bar, a tooltip carrying only the leftover line would name less than the row shows.
+    /// On the accessory it becomes the accessory's own name instead — a glyph that appeared under
+    /// the pointer has no other way to say what it does, and while the pointer is on it the row's
     /// reading is not the question being asked.
     private func updateToolTip() {
         if isAccessoryHovered, let accessory = item.accessory {
             toolTip = accessory.title
             return
         }
-        toolTip = item.metrics.isEmpty && item.trailingDetail == nil
-            ? item.subtitle
-            : item.spokenSummary
+        if let help = item.help, !help.isEmpty {
+            toolTip = help
+        } else {
+            toolTip = item.metrics.isEmpty && item.trailingDetail == nil
+                ? item.subtitle
+                : item.spokenSummary
+        }
     }
 
     // MARK: - Submenu
@@ -3661,6 +3681,10 @@ private final class ThemedMenuRowView: ThemedControl {
     /// nothing at all to VoiceOver if only its title is announced — and "identifiable without
     /// colour alone" is not met by a bar whose severity is a hue.
     override func accessibilityTitle() -> String? { item.spokenSummary }
+    override func accessibilityHelp() -> String? {
+        guard let help = item.help, !help.isEmpty else { return nil }
+        return help
+    }
     override func accessibilityValue() -> Any? { selected }
     override func isAccessibilityEnabled() -> Bool { item.isEnabled }
     override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
