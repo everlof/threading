@@ -348,7 +348,7 @@ final class ACPStreamSession:
     }
 
     private func mcpServers() -> [[String: Any]] {
-        guard !MCPToolCatalog.enabledToolNames.isEmpty,
+        guard !MCPToolCatalog.toolNames(for: sessionID).isEmpty,
               let url = MCPSessionRegistry.endpointURL(for: sessionID) else { return [] }
         return [[
             "type": "http",

@@ -1,12 +1,11 @@
 # Observed work for terminal sessions
 
-> Status: **partially shipped** (2026-08-14). Feed A — the resumable transcript scan, its persisted
-> resume point, and the three triggers — is implemented for Claude and Codex, and its durable
-> decisions live in [`mcp-and-display.md`](../architecture/mcp-and-display.md). What remains is
-> drafted below and unbuilt: the honest empty state for a session with no source, the git-observed
-> neutral floor, and the OpenCode/Grok export feed, which is still gated on measuring those
-> exports. The rest of this file is kept as written so the reasoning behind the shipped half, and
-> the shape of the unshipped half, stay together.
+> Status: **shipped except feed B** (feed A 2026-08-14; the floor, the provenance split and the
+> honest empty state 2026-08-17). The durable decisions for all three live in
+> [`mcp-and-display.md`](../architecture/mcp-and-display.md). What remains is **feed B**, the
+> OpenCode/Grok export, and it is gated on a measurement nobody has been able to take: see
+> *Rollout* for what was attempted on 2026-08-17 and what would settle it. The rest of this file
+> is kept as written so the reasoning and the delivery stay together.
 
 ## Summary
 
@@ -102,6 +101,10 @@ session here is native and already records live.
 
 ### D. Neutral floor — git turn checkpoints, every runtime
 
+> **Shipped 2026-08-17**, including for rendered conversations: their claims are usable, so the
+> subtraction against them is exact, and a shell edit is as invisible to a native chat's tool
+> stream as to a terminal one's transcript.
+
 `GitTurnBaselineStore.noteActivity` is driven by the terminal container's own activity edges
 (`MainWindowController.swift:3969`) and carries an explicit fallback for *a terminal whose
 lifecycle hooks are unavailable* (`GitTurnBaselineStore.swift:163`). Every terminal session of
@@ -137,7 +140,8 @@ never merged into the read/edit counts as if a tool had reported it.
    files a tool named exactly (`AgentWorkTrace.swift:17`). This is not a regression to fix here;
    feed D is where those files appear, marked as what they are.
 4. **Honest empty state.** Today an unavailable source is indistinguishable from a session that did
-   nothing. The card needs a third state beside loading and populated.
+   nothing. The card needs a third state beside loading and populated. *(Shipped: four, counting
+   the git-observed reading that draws its atlas but withholds the counts it cannot take.)*
 5. **Execution Audit is a separate slice.** It shares the cause and would share the feed, but it
    carries redaction and hash-linked storage rules of its own; read
    [`execution-audit.md`](../architecture/execution-audit.md) before extending it.
@@ -166,12 +170,28 @@ never merged into the read/edit counts as if a tool had reported it.
    panel on for 179 of 183 sessions here.
 2. ~~`turnFinished` top-up, so a live terminal session updates as it works.~~ **Shipped**, plus the
    inferred activity edge, which covers a session whose runtime or user has no lifecycle hooks.
-3. The unavailable state and the provenance legend. **Next**, and the one piece of the shipped half
-   that is still dishonest: a Grok or OpenCode terminal session reports zeros over a full atlas
-   exactly as before, because nothing feeds it yet.
-4. Feed D, the git-observed floor, for every runtime.
+3. ~~The unavailable state and the provenance legend.~~ **Shipped 2026-08-17** as `AgentWorkSource`:
+   four cases, resolved from three in-memory facts, deciding both whether the card draws and which
+   counts it may show. A source that cannot see a read withholds the count rather than printing
+   zero; a session with no source draws one sentence and nothing else.
+4. ~~Feed D, the git-observed floor, for every runtime.~~ **Shipped 2026-08-17.**
+   `GitReviewReader.checkpointChangedPaths` is name-only by design, the trace counts observed
+   changes apart from reads and edits, and the floor skips any path the turn's claims or this
+   session's own exact edits inside the turn window already account for.
 5. Measure the OpenCode and Grok exports; add feed B if the tool inputs are there, and record the
-   negative in [`docs/decisions/`](../decisions/README.md) if they are not.
+   negative in [`docs/decisions/`](../decisions/README.md) if they are not. **Attempted
+   2026-08-17 and blocked, not answered**: neither `opencode` nor `grok` is installed on this
+   machine any more (only `~/.local/share/opencode` and `~/.grok` remain), and the leftover
+   OpenCode store holds no conversations at all — its `part` table is empty — so nothing local can
+   stand in for the export. The measurement needs an installed CLI with one real session:
+   `opencode export <id>` and `grok export <id> <path>`, then ask whether `messages[].parts`
+   carries tool invocations *with their inputs*, since a tool name with no `file_path` yields no
+   file signal and would leave feed B worth less than the floor already delivers.
+
+**Feed D changed what feed B is worth.** Before the floor, OpenCode and Grok reported nothing at
+all, so any export data was a large win. Now they report changed files per turn, and feed B buys
+exactly two things over that: reads, which no tree pair can see, and per-call attribution for the
+files a tool did name. That is still worth having and it is no longer urgent.
 
 ## What shipping feed A changed about this draft
 

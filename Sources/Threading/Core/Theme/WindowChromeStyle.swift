@@ -87,6 +87,11 @@ struct WindowChromeStyle: Codable, Equatable {
         /// the wire means true, preserving the first takeover implementation exactly.
         var showsAppIcon: Bool
 
+        /// Where the window's own commands — the sidebar toggle and the history pair — sit
+        /// while this theme owns the frame. Absent on the wire means `ownRow`, which is the
+        /// structure every takeover shipped with.
+        var commands: CommandPlacement
+
         /// Optional raster-like treatments over the active and inactive fills. A texture is
         /// data interpreted by the shared band, never a theme-specific drawing branch.
         var activeTexture: Texture?
@@ -126,6 +131,7 @@ struct WindowChromeStyle: Codable, Equatable {
             buttonGlyphStyle: ButtonGlyphStyle = .plain,
             buttonPlacement: ButtonPlacement = .trailing,
             showsAppIcon: Bool = true,
+            commands: CommandPlacement = .ownRow,
             activeTexture: Texture? = nil,
             inactiveTexture: Texture? = nil,
             shape: Shape = .fullWidth,
@@ -144,6 +150,7 @@ struct WindowChromeStyle: Codable, Equatable {
             self.buttonGlyphStyle = buttonGlyphStyle
             self.buttonPlacement = buttonPlacement
             self.showsAppIcon = showsAppIcon
+            self.commands = commands
             self.activeTexture = activeTexture
             self.inactiveTexture = inactiveTexture
             self.shape = shape
@@ -210,6 +217,23 @@ struct WindowChromeStyle: Codable, Equatable {
         enum Shape: String, Codable, CaseIterable {
             case fullWidth = "full_width"
             case leadingTab = "leading_tab"
+        }
+
+        /// Where the window's own commands live — the application-layout half of the caption
+        /// row, kept apart from `buttonPlacement`, which orders the frame's own operations.
+        ///
+        /// The desktop systems this vocabulary reconstructs all keep the two apart: the caption
+        /// is window identity and window furniture, and anything the *application* does sits on
+        /// a row below it. That is also a physical constraint — a period caption is 14 to 26
+        /// points tall and cannot seat a modern toolbar control at all — so it stays the
+        /// default. A theme drawing its own frame rather than reproducing one may state
+        /// `inTitleBar` instead and get a single row, provided its band is tall enough to hold
+        /// a toolbar control (`WindowChromeStyleLimits.commandsInTitleBarMinimumHeight`).
+        enum CommandPlacement: String, Codable, CaseIterable {
+            /// A button-face row directly below the caption — `WindowCommandBandView`.
+            case ownRow = "own_row"
+            /// Beside the title, in the caption row itself, ahead of the window's operations.
+            case inTitleBar = "in_title_bar"
         }
 
         enum ButtonRole: String, Codable, CaseIterable {
@@ -332,7 +356,7 @@ extension WindowChromeStyle.TitleBar: Codable {
     private enum CodingKeys: String, CodingKey {
         case activeGradient, inactiveGradient, ink, inactiveInk
         case titleAlignment, titleFontStyle, titleFontSize, height
-        case buttonGlyphStyle, buttonPlacement, showsAppIcon
+        case buttonGlyphStyle, buttonPlacement, showsAppIcon, commands
         case activeTexture, inactiveTexture, shape, tabWidth, visibleButtons, classicSkin
     }
 
@@ -364,6 +388,10 @@ extension WindowChromeStyle.TitleBar: Codable {
             forKey: .buttonPlacement
         ) ?? .trailing
         showsAppIcon = try container.decodeIfPresent(Bool.self, forKey: .showsAppIcon) ?? true
+        commands = try container.decodeIfPresent(
+            CommandPlacement.self,
+            forKey: .commands
+        ) ?? .ownRow
         activeTexture = try container.decodeIfPresent(Texture.self, forKey: .activeTexture)
         inactiveTexture = try container.decodeIfPresent(Texture.self, forKey: .inactiveTexture)
         shape = try container.decodeIfPresent(Shape.self, forKey: .shape) ?? .fullWidth
@@ -388,6 +416,7 @@ extension WindowChromeStyle.TitleBar: Codable {
         try container.encode(buttonGlyphStyle, forKey: .buttonGlyphStyle)
         try container.encode(buttonPlacement, forKey: .buttonPlacement)
         try container.encode(showsAppIcon, forKey: .showsAppIcon)
+        try container.encode(commands, forKey: .commands)
         try container.encodeIfPresent(activeTexture, forKey: .activeTexture)
         try container.encodeIfPresent(inactiveTexture, forKey: .inactiveTexture)
         try container.encode(shape, forKey: .shape)
@@ -465,6 +494,16 @@ enum WindowChromeStyleLimits {
     /// What a band measures when the theme does not say — the native pane-tab height's
     /// neighbourhood, so the window's top does not jump between modes more than it must.
     static let defaultBandHeight: Double = 28
+
+    /// The shortest band that may state `commands: in_title_bar`.
+    ///
+    /// A toolbar control is 28 points and says so with a *required* constraint, so a shorter
+    /// band does not compress it — it breaks constraints and draws the row's controls outside
+    /// their own band. This floor is that height plus two points of air either side, which is
+    /// also why the two rows were separate to begin with: no reconstructed caption in this
+    /// vocabulary is this tall. `WindowChromeComponentTests` holds it against
+    /// `Design.Size.toolbarButtonHeight` so the two cannot drift apart.
+    static let commandsInTitleBarMinimumHeight: Double = 32
     /// Points. Smaller loses the period bitmap/screen-font shapes; larger no longer fits the
     /// minimum 18pt caption band with its hardware.
     static let titleFontSizeRange: ClosedRange<Double> = 8...18

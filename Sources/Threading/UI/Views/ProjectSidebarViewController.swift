@@ -67,6 +67,12 @@ final class ProjectSidebarViewController: NSViewController {
         scroll.hasVerticalScroller = true
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.automaticallyAdjustsContentInsets = false
+        // Inside the well, not as a layout gap above it: outside the scroll view the pane's
+        // ground shows, and it is the same colour as the header's — a sliver of it below the
+        // header's rule read as the band bleeding through its own border.
+        scroll.contentBreathing = NSEdgeInsets(
+            top: SidebarDefaults.contentTopInset, left: 0, bottom: 0, right: 0
+        )
         return scroll
     }()
     private var scrollViewBottomConstraint: NSLayoutConstraint?
@@ -446,10 +452,10 @@ private extension ProjectSidebarViewController {
         let bottomConstraint = scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor)
         scrollViewBottomConstraint = bottomConstraint
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(
-                equalTo: header.bottomAnchor,
-                constant: SidebarDefaults.contentTopInset
-            ),
+            // Flush to the header's rule: the first row's breathing is the scroll view's own
+            // `contentBreathing`, inside the navigator well, so the well's fill meets the rule
+            // with no strip of pane ground between them.
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             bottomConstraint
@@ -3316,28 +3322,42 @@ extension ProjectSidebarViewController {
         ))
     }
 
-    /// Arms every chat in this checkout that has not answered for itself. The session item's
-    /// twin — same words, same checkmark-reads-the-resolved-answer rule, same nil-means-follow
-    /// writer one scope out.
+    /// What every chat in this checkout does when refused, unless it answered for itself. The
+    /// session item's twin — same words, same checkmark-reads-the-resolved-answer rule, same
+    /// nil-means-follow writer one scope out.
+    ///
+    /// **It names no login, and cannot.** A login belongs to exactly one runtime while a checkout
+    /// hosts chats of several, so "continue as Daniel Block" is only a well-formed answer one scope
+    /// in, on a chat that runs Claude. What a checkout can say is the runtime-neutral version —
+    /// continue on whichever of *that chat's* logins has room — which is why this list is
+    /// `LimitRecoveryPolicy.runtimeNeutralChoices` rather than the session menu's.
     private func projectLimitRecoveryEntry(for projectID: ProjectID, row: Int) -> ThemedMenuEntry {
-        let resolved = LimitRecoveryResolution.answer(forProjectID: projectID, in: projectStore)
+        let resolved = LimitRecoveryResolution
+            .answer(forProjectID: projectID, in: projectStore)
+            .policy
+
+        let submenu: [ThemedMenuEntry] = LimitRecoveryPolicy.runtimeNeutralChoices.map { policy in
+            .item(ThemedMenuItem(
+                title: SessionActionMenuDefaults.limitRecoveryChoiceTitle(policy),
+                isSelected: resolved == policy,
+                onChoose: pinnedAction(row) { $0.chooseProjectLimitRecovery(policy) }
+            ))
+        }
+
         return .item(ThemedMenuItem(
-            title: SessionActionMenuDefaults.limitRecoveryTitle,
+            title: SessionActionMenuDefaults.limitRecoveryMenuTitle,
             image: ThemedMenuIcon.symbol(SessionActionMenuDefaults.limitRecoverySymbol),
-            isSelected: resolved.policy == .waitForReset,
-            onChoose: pinnedAction(row) { $0.toggleProjectLimitRecoveryClicked() }
+            submenu: submenu
         ))
     }
 
-    @objc private func toggleProjectLimitRecoveryClicked() {
+    private func chooseProjectLimitRecovery(_ policy: LimitRecoveryPolicy) {
         guard let projectID = contextProjectID() else { return }
 
-        let resolved = LimitRecoveryResolution.answer(forProjectID: projectID, in: projectStore)
-        let wanted: LimitRecoveryPolicy = resolved.policy == .waitForReset ? .flagOnly : .waitForReset
         let inherited = LimitRecoveryResolution.inherited(beyondProjectID: projectID)
 
         guard projectStore.setLimitRecoveryPolicy(
-            wanted == inherited ? nil : wanted,
+            policy == inherited ? nil : policy,
             forProjectID: projectID
         ).succeeded else {
             reload()
@@ -3551,6 +3571,11 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
         cancelScheduledMessage id: ScheduledMessageID
+    )
+    /// A scheduled row's Edit: open the waiting record in its project's composer.
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        editScheduledMessage id: ScheduledMessageID
     )
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSession sessionID: SessionID)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectTerminal terminalID: TerminalID)

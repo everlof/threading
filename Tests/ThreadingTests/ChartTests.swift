@@ -350,6 +350,78 @@ final class ChartTests: XCTestCase {
         )
     }
 
+    // MARK: - How much room a chart takes
+
+    /// A ranking's vertical axis is its *categories*, and a category axis says nothing more for
+    /// being taller. Reported from the running app: eight rows in a full-height panel drew eight
+    /// 130-point bands that were almost entirely gap.
+    func testARankingTakesTheRoomItsRowsNeedRatherThanTheWholePane() throws {
+        let spec = ranking(rows: 12)
+        let (host, card) = try pane(spec, width: 560, height: 1_000)
+
+        XCTAssertEqual(
+            card.frame.height,
+            ChartCardView.preferredHeight(for: spec),
+            accuracy: 1
+        )
+        // And the room it did not take is left as ground under it, rather than being distributed
+        // into the bands: the card sits at the top of a pane it no longer fills.
+        XCTAssertGreaterThan(host.frame.height - card.frame.height, 400)
+    }
+
+    /// The transcript's ceiling belongs to the transcript. A row nobody can scroll past is a
+    /// reason to cap a chart *inline*; a panel opened to read a forty-row ranking is the one place
+    /// it should be forty rows tall.
+    func testALongRankingUsesTheWholePaneRatherThanTheTranscriptsCeiling() throws {
+        let spec = ranking(rows: 30)
+        let (_, card) = try pane(spec, width: 560, height: 1_400)
+
+        XCTAssertGreaterThan(card.frame.height, Design.Chart.maximumCardHeight)
+        XCTAssertEqual(
+            card.frame.height,
+            try XCTUnwrap(ChartCardView.boundedHeight(for: spec)),
+            accuracy: 1
+        )
+        // Inline, the same chart is still capped — the two answers are different on purpose.
+        XCTAssertLessThan(
+            ChartCardView.preferredHeight(for: spec),
+            card.frame.height
+        )
+    }
+
+    /// The same rule the other way round: a column chart's vertical axis is the **value**, which
+    /// is data — a taller plot resolves it better, so that one still takes the pane.
+    func testAColumnChartStillUsesTheHeightItIsGiven() throws {
+        let (_, card) = try pane(comparison(), width: 560, height: 1_000)
+
+        XCTAssertGreaterThan(card.frame.height, 800)
+    }
+
+    /// A bound is a preference, not a floor: a pane shorter than the chart's own height still
+    /// gets a chart that fits inside it. (`testAChartImposesNoRequiredHeightOnThePaneThatHoldsIt`
+    /// is the other half of this — the window has to stay resizable.)
+    func testAPaneShorterThanTheRankingCompressesItRatherThanOverflowing() throws {
+        let (host, card) = try pane(ranking(rows: 12), width: 560, height: 220)
+
+        XCTAssertLessThanOrEqual(card.frame.height, host.frame.height)
+        XCTAssertGreaterThan(card.frame.height, 100)
+    }
+
+    /// A bar's thickness carries no reading — only its length does — so it must not grow with the
+    /// container. Below the cap the group keeps its share of the band; above it the band keeps
+    /// the slack as gap.
+    func testABarStopsThickeningOnceTheBandIsBiggerThanItNeeds() {
+        let narrow = Design.Chart.barGroupExtent(band: 40, members: 1)
+        let wide = Design.Chart.barGroupExtent(band: 900, members: 1)
+        let pair = Design.Chart.barGroupExtent(band: 900, members: 2)
+
+        XCTAssertEqual(narrow, 40 * Design.Chart.barBandFraction, accuracy: 0.001)
+        XCTAssertEqual(wide, Design.Chart.maximumBarThickness, accuracy: 0.001)
+        // A grouped chart's bars stay adjacent to each other: the cap is per bar, so the group
+        // it belongs to may be that much wider rather than being squeezed into one bar's room.
+        XCTAssertEqual(pair, Design.Chart.maximumBarThickness * 2, accuracy: 0.001)
+    }
+
     // MARK: - In the panel
 
     /// Switching off a chart tab has to leave the pane holding one thing.
@@ -424,6 +496,56 @@ final class ChartTests: XCTestCase {
         for subview in view.subviews { found.append(contentsOf: chartCards(in: subview)) }
         return found
     }
+
+    /// A ranking of `rows` named places, the shape an agent produces from a disk or timing report.
+    private func ranking(rows: Int) -> ChartSpec {
+        ChartSpec(
+            title: "What is consuming the volume",
+            summary: nil,
+            kind: .ranking,
+            categories: (0..<rows).map { "~/Library/Application Support/place-\($0)" },
+            series: [ChartSpec.Series(
+                name: "Size",
+                values: (0..<rows).map { Double(rows - $0) },
+                details: nil,
+                emphasis: nil
+            )],
+            stacked: false,
+            valueFormat: .number,
+            unit: "GB",
+            maximumValue: nil
+        )
+    }
+
+    /// A chart tab's content at the size a pane gives it.
+    ///
+    /// The host states its size with anchors and the controller's view fills it, which is exactly
+    /// what `DisplayPaneController` does — and, unlike a bare frame, is a claim the layout engine
+    /// actually has to satisfy.
+    private func pane(
+        _ spec: ChartSpec,
+        width: CGFloat,
+        height: CGFloat
+    ) throws -> (NSView, ChartCardView) {
+        let controller = ChartPaneViewController(spec: spec, subtitle: "1 series")
+        panes.append(controller)
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(controller.view)
+        NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: width),
+            host.heightAnchor.constraint(equalToConstant: height),
+            controller.view.topAnchor.constraint(equalTo: host.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            controller.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+        host.layoutSubtreeIfNeeded()
+        return (host, try XCTUnwrap(chartCards(in: host).first))
+    }
+
+    /// The controllers the pane fixtures built, kept alive for the length of the test case.
+    private var panes: [ChartPaneViewController] = []
 
     private func requiredHeightConstraints(in view: NSView) -> [String] {
         var found: [String] = []

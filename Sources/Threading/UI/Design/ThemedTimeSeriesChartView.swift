@@ -691,6 +691,9 @@ class ThemedTimeSeriesChartView: ThemedControl {
     private(set) var renderedMarkerCount = 0
     var displayedGeometryForTesting: [ThemedChartRenderedSeries] { displayedGeometry }
     var resolvedYRangeForTesting: ClosedRange<Double> { resolvedYRange }
+    /// The marks' own rectangle, so a test can point at a band rather than restate the gutter
+    /// widths this view derives from the model's orientation.
+    var plotRectForTesting: NSRect { plotRect }
 
     private var transitionFrom: [ThemedChartRenderedSeries] = []
     private var targetGeometry: [ThemedChartRenderedSeries] = []
@@ -1220,7 +1223,8 @@ class ThemedTimeSeriesChartView: ThemedControl {
         guard band > 0 else { return }
 
         let grouped = composition == .independent ? barSeriesIndices : []
-        let slot = grouped.count > 1 ? band * Design.Chart.barBandFraction / CGFloat(grouped.count) : band * Design.Chart.barBandFraction
+        let members = max(1, grouped.count)
+        let slot = Design.Chart.barGroupExtent(band: band, members: members) / CGFloat(members)
         let position = grouped.firstIndex(of: index) ?? 0
         let offset = grouped.count > 1
             ? (CGFloat(position) - CGFloat(grouped.count - 1) / 2) * slot
@@ -1885,9 +1889,8 @@ class ThemedTimeSeriesChartView: ThemedControl {
         series: ThemedChartSeries,
         near location: NSPoint
     ) {
-        let lines = [series.title, value.label ?? valueString(value.value), value.detail]
-            .compactMap { $0 }
-        let text = lines.joined(separator: "\n")
+        let text = inspectionLines(for: value, series: series).joined(separator: "\n")
+        guard !text.isEmpty else { return }
         let attributes: [NSAttributedString.Key: Any] = [
             .font: Design.Typography.detail(),
             .foregroundColor: Design.Text.label
@@ -2022,9 +2025,52 @@ class ThemedTimeSeriesChartView: ThemedControl {
         }
     }
 
+    /// Where a hover is answered: the plot, plus the gutter its **category names** are drawn in.
+    ///
+    /// A category name is a word in a fixed-width slot, so a long one ends in an ellipsis — and the
+    /// pointer that goes to read it lands on the one part of the chart that answered nothing.
+    /// Inspection already carries the whole name, so the fix is where the chart listens rather than
+    /// what it says: a name and the band it labels are the same target. The time axis keeps the
+    /// plot alone — its leading gutter holds *values*, not names, and a hover there would be
+    /// answered by whichever point happens to sit at the left edge.
+    private var hoverRect: NSRect {
+        let plot = plotRect
+        guard model.xAxis.categories != nil, plot.width > 0, plot.height > 0 else { return plot }
+        if model.orientation == .horizontal {
+            return NSRect(
+                x: bounds.minX,
+                y: plot.minY,
+                width: plot.maxX - bounds.minX,
+                height: plot.height
+            )
+        }
+        return NSRect(
+            x: plot.minX,
+            y: bounds.minY,
+            width: plot.width,
+            height: plot.maxY - bounds.minY
+        )
+    }
+
+    /// Hover, without a window or a synthesized event: a test drives the same entry point the
+    /// tracking area does, and reads the answer back through `inspectionForTesting`.
+    func hoverForTesting(at location: NSPoint) {
+        selectNearest(to: location)
+    }
+
+    /// What the tooltip and VoiceOver currently state, or nothing when no point is selected.
+    var inspectionForTesting: [String] {
+        guard let selected,
+              model.series.indices.contains(selected.series),
+              model.series[selected.series].points.indices.contains(selected.point)
+        else { return [] }
+        let series = model.series[selected.series]
+        return inspectionLines(for: series.points[selected.point], series: series)
+    }
+
     private func selectNearest(to location: NSPoint) {
         let plot = plotRect
-        guard plot.contains(location), !model.series.isEmpty else {
+        guard hoverRect.contains(location), !model.series.isEmpty else {
             selected = nil
             needsDisplay = true
             return
@@ -2081,10 +2127,26 @@ class ThemedTimeSeriesChartView: ThemedControl {
 
     private func accessibilityDescription(for series: Int, point: Int) -> String {
         let group = model.series[series]
-        let value = group.points[point]
-        return [group.title, value.label ?? valueString(value.value), value.detail]
-            .compactMap { $0 }
-            .joined(separator: ", ")
+        return inspectionLines(for: group.points[point], series: group).joined(separator: ", ")
+    }
+
+    /// What hover, keyboard inspection and VoiceOver all say about one point — one list, so the
+    /// picture and the spoken sentence cannot disagree about what is under the pointer.
+    ///
+    /// A time series' `label` is its *reading* (`42%`, `US$1.20`), and stating the value again
+    /// beside it would say the same thing twice. A categorical point's label is its **name**, so
+    /// the reading has to be stated separately: on a compressed ranking the bar is too thin to
+    /// print its own number and the name on the axis is an ellipsized stub, which leaves this the
+    /// only place either can be read. Empty strings are dropped rather than joined — a series with
+    /// no title is normal (one series needs no key) and used to open the tooltip with a blank line.
+    private func inspectionLines(
+        for value: ThemedChartPoint,
+        series: ThemedChartSeries
+    ) -> [String] {
+        let lines = model.xAxis.categories == nil
+            ? [series.title, value.label ?? valueString(value.value), value.detail]
+            : [series.title, value.label, valueString(value.value), value.detail]
+        return lines.compactMap { $0 }.filter { !$0.isEmpty }
     }
 
     private func startDriver() {

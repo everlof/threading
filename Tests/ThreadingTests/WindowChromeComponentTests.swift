@@ -138,7 +138,10 @@ final class WindowChromeComponentTests: HostedStoreTestCase {
     }
 
     private func fixtureChrome(
-        glyphs: WindowChromeStyle.TitleBar.ButtonGlyphStyle = .squares
+        glyphs: WindowChromeStyle.TitleBar.ButtonGlyphStyle = .squares,
+        height: Double? = nil,
+        showsAppIcon: Bool = true,
+        commands: WindowChromeStyle.TitleBar.CommandPlacement = .ownRow
     ) -> WindowChromeStyle {
         WindowChromeStyle(
             titleBar: .init(
@@ -147,10 +150,29 @@ final class WindowChromeComponentTests: HostedStoreTestCase {
                     .init(color: NSColor(hex: "#1084D0")!, position: 1)
                 ], angleDegrees: 90),
                 ink: .white,
-                buttonGlyphStyle: glyphs
+                height: height,
+                buttonGlyphStyle: glyphs,
+                showsAppIcon: showsAppIcon,
+                commands: commands
             ),
             frame: .init(width: 4)
         )
+    }
+
+    /// The window's own commands, as `MainWindowController` builds them for a takeover.
+    private func fixtureWindowCommands() -> [ThemedIconButton] {
+        [
+            ThemedIconButton(
+                symbolName: "sidebar.leading",
+                accessibility: "Show or hide sidebar",
+                inkSource: .chrome
+            ),
+            ThemedIconButton(
+                symbolName: "chevron.left",
+                accessibility: "Go back",
+                inkSource: .chrome
+            )
+        ]
     }
 
     /// Records the operations instead of running them. A real `zoom()` on a frameless,
@@ -1153,6 +1175,184 @@ final class WindowChromeComponentTests: HostedStoreTestCase {
             accuracy: 0.5,
             "siblings keep the band's item spacing"
         )
+    }
+
+    /// A caption carrying the window's commands is a pane band too, and states the same column
+    /// the command band would have: the first control's ink twelve points in, siblings at the
+    /// band's item spacing. Anything else and the toggle sits off the column the sidebar's
+    /// brand row and the content header both start on — the drift the command band was already
+    /// caught in once, one row higher.
+    func testAMergedCaptionSeatsTheWindowCommandsOnThePaneColumn() {
+        let band = WindowTitleBandView()
+        band.fixtureStyle = WindowChromeAppearance.resolved(
+            from: fixtureChrome(
+                glyphs: .plain,
+                height: 36,
+                showsAppIcon: false,
+                commands: .inTitleBar
+            )
+        )
+        let commands = fixtureWindowCommands()
+        band.setLeadingControls(commands)
+        NSLayoutConstraint.activate([
+            band.widthAnchor.constraint(equalToConstant: 420),
+            band.heightAnchor.constraint(equalToConstant: 36)
+        ])
+        band.layoutSubtreeIfNeeded()
+
+        // In the band's own space: these sit inside its stacks, so their `frame` is measured
+        // against a parent the column knows nothing about.
+        let seated = commands.map { band.convert($0.bounds, from: $0) }
+        XCTAssertEqual(
+            seated[0].minX + commands[0].opticalHorizontalInset,
+            PaneHeaderView.contentInset,
+            accuracy: 0.5,
+            "the merged caption starts its ink on the column every band below starts at"
+        )
+        XCTAssertEqual(
+            seated[1].minX - seated[0].maxX,
+            PaneHeaderView.itemSpacing,
+            accuracy: 0.5,
+            "siblings keep the bands' item spacing"
+        )
+        for rect in seated {
+            XCTAssertTrue(
+                band.bounds.contains(rect),
+                "a command drawn outside the band it was seated in is the required-height "
+                    + "conflict this placement is bounded to avoid"
+            )
+        }
+        // The band paints its own gradient under them, so they are told whose ground they are
+        // on rather than measuring their ink against the chrome surface that is no longer there.
+        XCTAssertEqual(commands.map(\.hostGround), [.titleBand, .titleBand])
+
+        // The column belongs to the row, not to the commands: a theme that keeps its identity
+        // icon puts *that* on it, and the commands follow the icon.
+        band.fixtureStyle = WindowChromeAppearance.resolved(
+            from: fixtureChrome(glyphs: .plain, height: 36, commands: .inTitleBar)
+        )
+        band.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(
+            band.convert(commands[0].bounds, from: commands[0]).minX,
+            PaneHeaderView.contentInset,
+            "the identity icon leads the row when the theme shows one"
+        )
+    }
+
+    /// The floor on a merged caption is a real control's height, not a number that looked
+    /// about right: 28 points of toolbar control plus two of air either side. If the control
+    /// grows, this fails rather than the row silently breaking constraints.
+    func testTheMergedCaptionFloorHoldsARealToolbarControl() {
+        XCTAssertGreaterThanOrEqual(
+            CGFloat(WindowChromeStyleLimits.commandsInTitleBarMinimumHeight),
+            Design.Size.toolbarButtonHeight + 4,
+            "the floor is the toolbar control it has to seat, with air"
+        )
+        XCTAssertTrue(
+            WindowChromeStyleLimits.bandHeightRange.contains(
+                WindowChromeStyleLimits.commandsInTitleBarMinimumHeight
+            ),
+            "a floor outside the authorable range is a placement no document could ever state"
+        )
+    }
+
+    /// Every stock theme that asks for a merged caption can actually seat one. This is the
+    /// gate that answers the question for the rest of the family: a reconstruction whose
+    /// caption is 14 to 26 points cannot state this placement, and the build says so here
+    /// rather than in a broken row.
+    func testEveryStockTakeoverBandCanSeatTheCommandsItAsksFor() {
+        for theme in AppThemeLibrary.stock {
+            for variant in theme.availableVariants {
+                guard let chrome = theme.variant(variant)?.chrome,
+                      chrome.titleBar.commands == .inTitleBar else { continue }
+                let height = chrome.titleBar.height
+                    ?? WindowChromeStyleLimits.defaultBandHeight
+                XCTAssertGreaterThanOrEqual(
+                    height,
+                    WindowChromeStyleLimits.commandsInTitleBarMinimumHeight,
+                    "\(theme.id.rawValue) seats the window's commands in a band too short "
+                        + "to hold one"
+                )
+            }
+        }
+    }
+
+    /// A merged caption has no second row at all: the command band collapses the way it does in
+    /// native dress rather than standing empty, and the workspace starts under the caption.
+    func testTheHostCollapsesTheCommandBandWhenTheCaptionCarriesTheCommands() throws {
+        let workspace = NSViewController()
+        workspace.view = NSView()
+        let host = WindowChromeHostViewController(workspace: workspace)
+        host.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+
+        try applyFixtureTakeover(fixtureChrome(glyphs: .plain, height: 36, commands: .inTitleBar))
+        host.setTakeoverActive(true)
+        let commands = fixtureWindowCommands()
+        host.setWindowCommands(commands)
+        host.view.layoutSubtreeIfNeeded()
+
+        let bandFrame = host.view.convert(host.bandView.bounds, from: host.bandView)
+        XCTAssertEqual(bandFrame.height, 36)
+        XCTAssertTrue(host.commandBandView.isHidden)
+        XCTAssertEqual(
+            host.view.convert(host.commandBandView.bounds, from: host.commandBandView).height,
+            0,
+            "an empty second row is the vertical space this placement exists to give back"
+        )
+        var workspaceFrame = host.view.convert(workspace.view.bounds, from: workspace.view)
+        XCTAssertEqual(workspaceFrame.maxY, bandFrame.minY)
+        XCTAssertTrue(
+            commands.allSatisfy { $0.isDescendant(of: host.bandView) },
+            "the caption holds the commands it collapsed the other row for"
+        )
+
+        // A live switch to a two-row chrome moves them back. Before the theme decided this,
+        // the controls were re-homed only by a dress flip, so a theme change from one takeover
+        // to another left them in whichever band the flip had found.
+        try applyFixtureTakeover(fixtureChrome(glyphs: .plain))
+        host.view.layoutSubtreeIfNeeded()
+
+        XCTAssertFalse(host.commandBandView.isHidden)
+        XCTAssertTrue(
+            commands.allSatisfy { $0.isDescendant(of: host.commandBandView) },
+            "the commands follow the theme that says where they live"
+        )
+        XCTAssertEqual(
+            commands.map(\.hostGround),
+            [nil, nil],
+            "and stop claiming a ground they are no longer over"
+        )
+        workspaceFrame = host.view.convert(workspace.view.bounds, from: workspace.view)
+        XCTAssertEqual(
+            workspaceFrame.maxY,
+            host.view.convert(
+                host.commandBandView.bounds,
+                from: host.commandBandView
+            ).minY
+        )
+    }
+
+    /// Applies a chrome document as the live theme, the way the host reads it.
+    private func applyFixtureTakeover(_ chrome: WindowChromeStyle) throws {
+        let variant = AppThemeStyles.cyberpunk.availableVariants[0]
+        let theme = try AppThemeEditing.assemble(
+            id: AppThemeID("custom-window-chrome-command-placement"),
+            name: "Command Placement Fixture",
+            mode: variant == .dark ? .dark : .light,
+            summary: nil,
+            variants: [
+                variant: AppThemeEditing.makeVariant(
+                    named: "Command Placement Fixture",
+                    from: AppThemeStyles.cyberpunk,
+                    kind: variant,
+                    chrome: .set(chrome)
+                )
+            ]
+        )
+        AppThemePalette.set(theme)
+        // The palette holds the theme; the event is what tells the window's chrome to re-read
+        // it, and `AppThemeLibrary.apply` posts exactly this beside the same assignment.
+        NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id))
     }
 
     // MARK: - Renders

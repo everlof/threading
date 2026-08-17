@@ -657,6 +657,22 @@ enum AppThemeEditing {
             }
         }
 
+        // A band that seats the window's commands has to be tall enough to hold one. A toolbar
+        // control states its height as required, so a shorter band does not squeeze it — it
+        // breaks constraints and draws the row outside itself, which is a thing the document
+        // can say and therefore a thing the document is answered for.
+        if titleBar.commands == .inTitleBar {
+            let height = titleBar.height ?? WindowChromeStyleLimits.defaultBandHeight
+            guard height >= WindowChromeStyleLimits.commandsInTitleBarMinimumHeight else {
+                throw AppThemeEditingError.invalid(
+                    "chrome.title_bar.commands \"in_title_bar\" needs a band of at least "
+                        + "\(Int(WindowChromeStyleLimits.commandsInTitleBarMinimumHeight)) "
+                        + "points to seat the window's own commands; this one is "
+                        + "\(Int(height))."
+                )
+            }
+        }
+
         if let fontSize = titleBar.titleFontSize {
             guard WindowChromeStyleLimits.titleFontSizeRange.contains(fontSize) else {
                 throw AppThemeEditingError.invalid(

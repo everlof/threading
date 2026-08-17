@@ -442,7 +442,7 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         )
 
         let onDisk = Set([live, stranger].compactMap(\.workspacePath))
-        let groups = StoragePreferencesViewController.scratchGroups(
+        let groups = ReclaimableFindings.scratchGroups(
             [orphan, stranger, live],
             among: [project],
             workspaceExists: { onDisk.contains($0) }
@@ -1050,7 +1050,7 @@ final class SettingsDisclosureRenderTests: XCTestCase {
             )
         ]
 
-        return StoragePreferencesViewController.scratchGroups(
+        return ReclaimableFindings.scratchGroups(
             artifacts,
             among: [project],
             workspaceExists: { $0 == workspace || $0 == stranger }

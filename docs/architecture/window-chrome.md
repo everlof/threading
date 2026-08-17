@@ -602,7 +602,7 @@ per launch, beside the app's name in a `MorphingTitleLabel`, or whatever the cur
 `SidebarStyle.Brand` states instead (see [`themes.md`](themes.md)) — and the list's two
 controls at its trailing edge: the `+` that adds a project (its two-way menu on the press,
 the platform's menu gesture) and the arrangement control. The column is shut from the
-toolbar's toggle or ⌃⌘S rather than from a close of its own; the panel at the other edge of
+toolbar's toggle or ⌘S rather than from a close of its own; the panel at the other edge of
 the window carries one, and why the two differ is in
 [`mcp-and-display.md`](mcp-and-display.md). The band long held *no* app-name
 label on the argument that it should carry only controls that act on the list; the brand
@@ -1045,6 +1045,50 @@ the native toolbar previously supplied and avoiding a toolbar button's required 
 conflicting with the caption row's compact height. The controller's weak references re-point so
 `updateToolbarControlStates()` never learns which dress is worn. `PaneBandMargin.paneEdge`'s
 corner-adapted clearance is left alone in v1: harmless over-inset under square corners.
+
+**Two rows is the default, not the only answer** — `chrome.title_bar.commands`. Every
+reconstruction here keeps them apart because the systems did: a caption is window identity and
+window furniture, and what the application does sits below it. It is also arithmetic. A toolbar
+control is 28pt and says so with a *required* constraint, and the reconstructed captions in this
+vocabulary measure 14 (Classic Player), 17 (Platinum), 18 (Windows 98, Workbench), 19 (BeOS),
+22 (Cheetah, Tiger), 23 (OPENSTEP) and 26 (TUI) points. None of them can hold one; a shorter
+band does not compress that control, it breaks constraints and draws the row outside itself. So
+`own_row` is the default and the only value a period theme can honestly state.
+
+A theme that reproduces nothing is free of both halves of that, and **Threading** states
+`in_title_bar`: the sidebar toggle and the history pair move into the caption ahead of the
+title, the command band collapses to zero the way it does in native dress, and the window's top
+loses the 41pt second row for 4pt of extra caption (32 → 36, which is what seats a 28pt control
+with equal air). Its title turns `center` in the same breath, because the leading column is now
+the toggle and the sidebar's brand row directly beneath already carries the name at that column.
+`WindowChromeStyleLimits.commandsInTitleBarMinimumHeight` (32) is the authoring gate, held
+against `Design.Size.toolbarButtonHeight` by test so the two cannot drift, and validated on the
+document so an agent's theme is refused rather than rendered broken. IRIX is the only other
+takeover whose band could physically hold the row — and it may not, because its 32 points are a
+pixel-exact palette assembly with fixed end caps and a clipped caption window, not free space.
+
+Three things follow from the placement rather than being restated by it. The merged caption is a
+*pane band* as well as a caption, so its first control's ink starts on `PaneHeaderView`'s own
+column and its siblings take that component's item spacing — the toggle aligns with the brand
+row beneath it, which is the whole reason the column is read from there rather than repeated.
+The band paints its gradient under controls built for the chrome's roles, so it names that
+ground through `hostGround = .titleBand` rather than letting them measure ink against a surface
+that is no longer beneath them. And the routing lives in `WindowChromeHostViewController`, which
+owns both bands and re-runs it on every theme event: for as long as `installTakeoverControls`
+was the only thing that moved them, a live switch from a merged chrome to a two-row one left the
+commands in whichever band the *dress flip* had found. The two optional groups ahead of the
+commands (leading window buttons, identity icon) are collapsed when empty in this mode only —
+an empty `NSStackView` still takes the spacing around it, and that phantom is absorbed into
+every family's measured `leadingEdgeInset`, so removing it globally would move eleven tuned
+captions to fix one column.
+
+One consequence is deliberate and worth stating, because it looks like an oversight: an in-window
+overlay's wash still stops at `bandHost.bottomAnchor`, so under a merged caption the sidebar
+toggle and history pair stay lit and clickable while a covering surface is open. That is not the
+band leaking through the modal — it is the same reachability native dress has always had, where
+those three controls live in AppKit's toolbar *above* the content view the scrim covers. Extending
+the wash over them instead would dim and swallow the close, minimize and zoom sitting in the same
+row, which is the one thing the scrim is not allowed to do.
 
 **Scope.** Main window only. The Component Gallery, Onboarding and detached browser windows keep
 native chrome under every theme — the last for the same reason as the first two, and because a

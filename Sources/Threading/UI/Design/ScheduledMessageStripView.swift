@@ -29,6 +29,23 @@ final class ScheduledMessageStripView: NSView, ThemedComponent {
         let timing: String
         /// Set when the send needs a decision rather than a wait.
         let problem: String?
+        /// Set while a composer holds this row open for editing, so the strip can say where
+        /// the words went instead of offering to open them a second time.
+        let isEditing: Bool
+
+        init(
+            id: ScheduledMessageID,
+            summary: String,
+            timing: String,
+            problem: String?,
+            isEditing: Bool = false
+        ) {
+            self.id = id
+            self.summary = summary
+            self.timing = timing
+            self.problem = problem
+            self.isEditing = isEditing
+        }
 
         var needsAttention: Bool { problem != nil }
     }
@@ -162,7 +179,9 @@ final class ScheduledMessageRowView: ThemedControl {
     private func setup() {
         translatesAutoresizingMaskIntoConstraints = false
 
-        timingLabel.stringValue = row.problem ?? row.timing
+        timingLabel.stringValue = row.isEditing
+            ? L10n.string("Editing")
+            : row.problem ?? row.timing
         timingLabel.applyFont(.caption, in: .chrome)
         timingLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         timingLabel.setContentHuggingPriority(.required, for: .horizontal)
@@ -254,8 +273,11 @@ final class ScheduledMessageRowView: ThemedControl {
 
     private func applyTheme() {
         // A row needing a decision takes the status role rather than a colour of its own, so a
-        // theme that redefines "something is wrong" redefines this too.
-        timingLabel.textColor = row.needsAttention ? Design.Status.warning : Design.Text.tertiary
+        // theme that redefines "something is wrong" redefines this too. A row open for editing
+        // takes the accent — it is the one the composer below is currently about.
+        timingLabel.textColor = row.isEditing
+            ? Design.Surface.accent
+            : row.needsAttention ? Design.Status.warning : Design.Text.tertiary
         summaryLabel.textColor = Design.Text.label
     }
 
@@ -277,7 +299,11 @@ final class ScheduledMessageRowView: ThemedControl {
     override func accessibilityRole() -> NSAccessibility.Role? { .button }
 
     override func accessibilityLabel() -> String? {
-        L10n.format("%@ — %@", row.problem ?? row.timing, row.summary)
+        L10n.format(
+            "%@ — %@",
+            row.isEditing ? L10n.string("Editing") : row.problem ?? row.timing,
+            row.summary
+        )
     }
 
     /// The row's primary action is the one its click performs. A themed control that states a

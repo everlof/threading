@@ -160,6 +160,40 @@ final class RowConductSummaryTests: XCTestCase {
     func testTheStatementsNameBehaviourRatherThanSettings() {
         XCTAssertEqual(RowConductStrings.limitRecovery(.waitForReset), "Continues at reset")
         XCTAssertEqual(RowConductStrings.limitRecovery(.flagOnly), "Stops at its limit")
+        XCTAssertEqual(
+            RowConductStrings.limitRecovery(.resumeOnBestAccount),
+            "Moves to a login with room"
+        )
         XCTAssertEqual(RowConductStrings.mute(true), "Notifications muted")
+    }
+
+    /// A pinned login is named by its handle, and that is a scaling decision: the person's name
+    /// needs `AgentAccountDiscovery`, which is a cache in front of a home-directory scan, and this
+    /// string is built once per visible row on the configure path.
+    func testAPinnedLoginIsNamedFromTheStoredIdentifierAlone() {
+        XCTAssertEqual(
+            RowConductStrings.limitRecovery(.resumeVia(
+                AccountID(provider: .claude, handle: AccountHandle(storedName: "work"))
+            )),
+            "Moves to work"
+        )
+    }
+
+    /// The mark exists for a row that will behave differently, and a chat that moves logins by
+    /// itself is the loudest example there is — it acts precisely when nobody is watching.
+    func testAChatThatMovesLoginsByItselfIsMarked() throws {
+        let summary = try XCTUnwrap(
+            RowConductSummary.session(
+                muted: nil,
+                inheritedMuted: false,
+                limitRecovery: .resumeOnBestAccount,
+                inheritedLimitRecovery: .flagOnly
+            )
+        )
+
+        XCTAssertEqual(
+            summary.statements,
+            [RowConductStrings.limitRecovery(.resumeOnBestAccount)]
+        )
     }
 }

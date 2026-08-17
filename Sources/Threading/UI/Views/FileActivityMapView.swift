@@ -19,6 +19,19 @@ enum FileActivityInk {
 
     static let readDimming: CGFloat = 0.7
 
+    /// A change a turn's git checkpoint showed with no tool naming it.
+    ///
+    /// Deliberately colourless. The accent is this app's word for "an agent did exactly this",
+    /// and a repository delta has not earned it: all it knows is that the file differs between
+    /// two trees. Drawn from the label tiers instead, brighter than either resting shade, so the
+    /// file still reads as touched without reading as an edit.
+    static var observed: NSColor {
+        let secondary = Design.Text.secondary
+        return secondary.withAlphaComponent(secondary.alphaComponent * observedDimming)
+    }
+
+    static let observedDimming: CGFloat = 0.8
+
     /// The fraction of a detail cell the read strip occupies.
     static let readStripFraction: CGFloat = 0.32
 
@@ -236,6 +249,7 @@ final class FileActivityMapView: NSView {
         // legend marks cannot drift from what the atlas actually draws.
         let accent = FileActivityInk.edit
         let read = FileActivityInk.read
+        let observed = FileActivityInk.observed
         let restingEven = FileActivityInk.restingEven
         let restingOdd = FileActivityInk.restingOdd
         let layout = WorkProjectionLayout(
@@ -255,6 +269,16 @@ final class FileActivityMapView: NSView {
 
             let readHeat = FileActivityMap.heat(since: bin.lastRead, now: now)
             let editHeat = FileActivityMap.heat(since: bin.lastEdit, now: now)
+
+            // Under the exact marks, never over them: a file a tool named *and* the turn's tree
+            // pair changed is an attributed edit, and the accent is the truer statement about it.
+            let observedHeat = FileActivityMap.heat(since: bin.lastObserved, now: now)
+            if observedHeat > 0 {
+                observed
+                    .withAlphaComponent(observed.alphaComponent * glowAlpha(observedHeat))
+                    .setFill()
+                rect.fill()
+            }
             if editHeat > 0 {
                 accent.withAlphaComponent(accent.alphaComponent * glowAlpha(editHeat)).setFill()
                 rect.fill()
@@ -389,7 +413,7 @@ final class FileActivityMapView: NSView {
     private func hasActiveGlow(now: Date) -> Bool {
         if let workPresentation {
             return workPresentation.bins.contains { bin in
-                [bin.lastRead, bin.lastEdit].contains { touch in
+                [bin.lastRead, bin.lastEdit, bin.lastObserved].contains { touch in
                     guard let touch else { return false }
                     return now.timeIntervalSince(touch) < FileActivityMap.Metrics.glowDuration
                 }

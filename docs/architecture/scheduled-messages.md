@@ -130,13 +130,25 @@ paths go into the prompt. Naming our own would hand the agent a path that stops 
 moment `complete` deletes the record. Repeatable on purpose, since a delivery that finds its
 target busy is retried and `SessionAttachmentStore` matches a second mention by source path.
 
-**Editing — and Send now for a scheduled reply — detaches rather than borrows.** `detach` *moves*
-the files to the temporary directory and hands those paths to the composer, because what comes
-back has to be exactly what a freshly pasted image is: the composer will hold the path, send it,
-and take custody again if the message is scheduled a second time. Lending our own file would leave
-the composer pointing into a directory the very next `remove` deletes. Start now for a scheduled
-session is different: it runs the same reserved conversation, so its normal fire-time handover
-keeps custody intact.
+**Editing a scheduled reply — and Send now for one — detaches rather than borrows.** `detach`
+*moves* the files to the temporary directory and hands those paths to the composer, because what
+comes back has to be exactly what a freshly pasted image is: the composer will hold the path,
+send it, and take custody again if the message is scheduled a second time. Lending our own file
+would leave the composer pointing into a directory the very next `remove` deletes. Start now for
+a scheduled session is different: it runs the same reserved conversation, so its normal
+fire-time handover keeps custody intact.
+
+**Editing a scheduled *start* borrows, and the loan is copies.** The draft surface's edit leaves
+the record in the store — see the editing contract under
+[A scheduled start is a real waiting conversation](#a-scheduled-start-is-a-real-waiting-conversation)
+— so `detach` is exactly wrong there: the record may still fire mid-edit and must keep bytes to
+fire with. `ScheduledAttachmentStore.copies(of:)` hands the composer temporary *copies*, which
+have precisely a pasted screenshot's durability, and the commit takes custody of whatever the
+box then holds under a fresh **staging** id (an ordinary `take`, so every ceiling and refusal
+applies), rewrites the record in one verified commit, and only then `adopt`s the staged
+directory over the record's own. A refusal at any step leaves the schedule's current pictures
+untouched, and a staging directory stranded by a crash is an unnamed id `retainOnly` sweeps at
+the next launch.
 
 **The conversation surface was losing them silently.** Only the draft view ever refused an
 attached image; chat read the text and the context, left the pictures in the box, and then cleared
@@ -253,14 +265,47 @@ plan's stable id and frozen launch configuration. That gives the intent a durabl
 sidebar before any process exists. Selecting its row does not launch it: the conversation pane
 shows a bounded scheduled-state surface with the brief, configuration, and the exact automatic
 cause — a wall-clock time, the named usage reset and its expected time, or the named conversation
-whose current turn must finish. It also offers **Start now** and **Cancel schedule**. The sidebar
-row says **Scheduled**, suppresses archive, and exposes those same two lifecycle actions.
+whose current turn must finish. It also offers **Start now**, **Edit** and **Cancel schedule**.
+The sidebar row says **Scheduled**, suppresses archive, and exposes those same lifecycle actions.
+
+The surface states one ladder rather than six styles: the trigger sentence is the headline —
+the one fact this surface exists to state — under a caption naming the surface, with the brief
+in body ink and the frozen decisions in detail. The session's name is deliberately *not*
+restated: the pane header already carries it, and the title is the brief's first words, so the
+first version said the same sentence twice. The brief **wraps**; it does not truncate line by
+line. `byTruncatingTail` on a wrapping field truncates each *paragraph* at the field's width, so
+a two-bullet brief drew as two clipped `…` lines with the pane's whole width standing empty
+around them — word wrapping with `truncatesLastVisibleLine` fills the column and marks only
+where the line bound actually cuts. (The strip's rows stay one deliberate line each, with the
+full text on the tooltip: a queue is scanned, not read.)
 
 The schedule remains the authority. Removing it also removes the empty reservation; starting it
 claims the schedule and launches that same session id, so the row does not disappear and return as
 a different conversation. A managed workspace is still provisioned at launch rather than at
 reservation: waiting should not consume a worktree, and launch-time validation is what prevents a
 deleted branch or folder from silently changing the target.
+
+**Editing borrows the composer; it never spends the record.** The first Edit gesture — a click
+on a strip row — detached the pictures, removed the record and its reserved conversation, and
+poured the text into the box: tapping a row silently *unscheduled* it, and tapping a second row
+destroyed both while the box could only hold one. `beginEditingScheduledStart` is the
+replacement contract, reached from the strip row, the scheduled surface's Edit, and the sidebar
+row's menu (which navigate to the project's composer first). The record stays in the store,
+still armed and still the authority — a trigger reaching its moment mid-edit fires the message
+as written — while the box holds loans: the words, copies of the pictures, the frozen plan in
+the chips. `DraftStore` writes pause during the loan so the project's own half-typed draft
+survives underneath, and it is restored — attachments included, from an in-memory stash with
+exactly the composer's own durability — when the edit ends. Save (the primary's `⌘↩`, retitled)
+rewrites the record in place, keeping its trigger; choosing a moment from the schedule menu
+commits with the new trigger instead; Cancel, in the import offer's slot, ends the loan with the
+record untouched. Opening a second row saves the first, navigating to another project commits
+(or, for a commit the record cannot take, cancels), and a record that leaves the store mid-edit
+— fired, or cancelled elsewhere — ends the edit with the box keeping the only copy of its words
+as the draft. An edit that changed only words or moment keeps the reserved conversation, whose
+creation title follows the brief through `applyReservedPromptTitle` (refusing to touch a user's
+or an agent's name); a changed *configuration* is honestly a different conversation, so it is
+re-reserved under a fresh session id and the old row leaves — with the record rewritten in
+between, so `forget(sessionID:)` never sees a record naming the row being removed.
 
 ## Presets, including the one Slack would never have
 

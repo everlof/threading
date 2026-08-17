@@ -153,12 +153,23 @@ enum RowConductStrings {
         L10n.format("Held at your limit · %@", line)
     }
 
+    /// A pinned login is named by its **handle**, not by the person behind it, and that is a
+    /// scaling decision rather than a wording one: `AccountName.display(for:)` needs an
+    /// `AgentAccount`, which means `AgentAccountDiscovery` — a seven-second cache in front of a home
+    /// directory scan — and this runs once per visible row on the configure path. The handle is
+    /// already inside the stored identifier, costs nothing, and is the name the user gave the
+    /// login's own directory. The surfaces that *do* hold an account list (the chat menu, the
+    /// strip) name the person.
     static func limitRecovery(_ policy: LimitRecoveryPolicy) -> String {
         switch policy {
         case .waitForReset:
             return L10n.string("Continues at reset")
         case .flagOnly:
             return L10n.string("Stops at its limit")
+        case .resumeOnBestAccount:
+            return L10n.string("Moves to a login with room")
+        case .resumeVia(let accountID):
+            return L10n.format("Moves to %@", accountID.handle.name)
         }
     }
 

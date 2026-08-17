@@ -510,6 +510,9 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
     /// changing results list is never twice in the same place.
     private var trailingControlsBuilt = false
 
+    /// Holds the trailing run on the query's own optical centre; see `textInkCenterOffset`.
+    private var trailingControlsCentering: NSLayoutConstraint?
+
     private lazy var trailingControls: NSStackView = {
         trailingControlsBuilt = true
         let stack = NSStackView(views: [clearButton])
@@ -518,8 +521,13 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
         stack.spacing = Design.Spacing.tight
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
+        let centering = stack.centerYAnchor.constraint(
+            equalTo: centerYAnchor,
+            constant: textInkCenterOffset
+        )
+        trailingControlsCentering = centering
         NSLayoutConstraint.activate([
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            centering,
             stack.trailingAnchor.constraint(
                 equalTo: trailingAnchor,
                 constant: -Layout.actionEdgeGap
@@ -527,6 +535,23 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
         ])
         return stack
     }()
+
+    /// Where the query's visible letters actually centre, as an offset from the field's own
+    /// vertical middle.
+    ///
+    /// The cell centres a rect of the font's *bounding* height, which reaches further below the
+    /// baseline than any letter of a search term does — so the ink the reader sees sits above
+    /// the field's geometric middle, by more the further a themed face's metrics stray from the
+    /// system's. A mark centred on `midY` therefore drew visibly below the words beside it,
+    /// which is the settings search field's "the magnifier is misaligned". The offset is the
+    /// same arithmetic the cell's rect uses, carried on to the baseline and up half a cap.
+    private var textInkCenterOffset: CGFloat {
+        let font = font ?? Design.Typography.body()
+        let height = ceil(font.boundingRectForFont.height)
+        // In this flipped control, the text rect's top is midY - height/2, the baseline sits an
+        // ascender below it, and the ink's centre half a cap height back up.
+        return font.ascender - font.capHeight / 2 - height / 2
+    }
 
     /// The way a query leaves without being deleted a character at a time. At the far edge —
     /// every search field's own convention — and only while there is something to clear.
@@ -641,10 +666,13 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
 
     /// Both insets are cut from a mark's size, and a mark's optical size follows the chrome's
     /// type scale — so a theme switch that redrew the query at 0.80× left it starting behind
-    /// the room the previous theme's magnifier had asked for. See `SymbolMetric`.
+    /// the room the previous theme's magnifier had asked for. See `SymbolMetric`. The trailing
+    /// run re-centres for the same reason: the ink offset is the font's, and the font moved.
     func rederiveThemedContent() {
         applyGlyphInset()
         refreshTrailingControls()
+        trailingControlsCentering?.constant = textInkCenterOffset
+        needsDisplay = true
     }
 
     @available(*, unavailable)
@@ -660,9 +688,12 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
             accessibilityDescription: nil
         )?.withSymbolConfiguration(Design.Symbol.configuration(Layout.glyphSize)) else { return }
 
+        // On the query's optical centre, not the field's: the two differ by however far the
+        // font's bounding box outreaches its letters, and a mark on `midY` sat visibly below
+        // the words it introduces. See `textInkCenterOffset`.
         let rect = NSRect(
             x: Layout.glyphLeading,
-            y: bounds.midY - Layout.glyphSize / 2,
+            y: bounds.midY + textInkCenterOffset - Layout.glyphSize / 2,
             width: Layout.glyphSize,
             height: Layout.glyphSize
         )

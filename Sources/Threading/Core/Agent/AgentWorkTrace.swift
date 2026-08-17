@@ -100,7 +100,26 @@ struct AgentFileWork: Codable, Equatable, Sendable {
     var lastRead: Date?
     var lastEdit: Date?
 
-    var isTouched: Bool { readCount > 0 || editCount > 0 }
+    /// Times a turn's git checkpoint pair showed this file changed with no tool naming it.
+    ///
+    /// Deliberately not folded into `editCount`: an exact signal is a tool that said which file
+    /// it wrote, and this is a repository delta that says only *that* the file differs. The two
+    /// are counted, drawn and spoken separately, so the panel can show a shell edit without
+    /// claiming a tool reported it.
+    ///
+    /// Optional and additive on purpose, exactly as `AgentSessionWorkTrace.transcriptOffset` is:
+    /// a cache file written before the floor existed decodes with it absent, which is precisely
+    /// "nothing observed", so no format version has to move.
+    var observedCount: Int?
+    var lastObserved: Date?
+
+    var observedChanges: Int { observedCount ?? 0 }
+
+    /// Whether a tool named this file. The counts a runtime cannot report are held back on this,
+    /// so a git-observed reading never presents an absent read count as a zero one.
+    var hasExactSignal: Bool { readCount > 0 || editCount > 0 }
+
+    var isTouched: Bool { hasExactSignal || observedChanges > 0 }
 
     mutating func record(_ kind: AgentFileActivityKind, at date: Date) {
         switch kind {
@@ -113,11 +132,28 @@ struct AgentFileWork: Codable, Equatable, Sendable {
         }
     }
 
+    mutating func recordObservedChange(at date: Date) {
+        observedCount = observedChanges + 1
+        lastObserved = max(lastObserved ?? date, date)
+    }
+
+    /// Whether an exact edit inside this window already accounts for a turn's observed delta.
+    /// The tree pair is complete but unattributed; a tool call is attributed but incomplete, so
+    /// crossing them is only sound in this one direction.
+    func wasEdited(between start: Date, and end: Date) -> Bool {
+        guard let lastEdit else { return false }
+        return lastEdit >= start && lastEdit <= end
+    }
+
     mutating func merge(_ other: AgentFileWork) {
         readCount += other.readCount
         editCount += other.editCount
+        if other.observedChanges > 0 {
+            observedCount = observedChanges + other.observedChanges
+        }
         if let date = other.lastRead { lastRead = max(lastRead ?? date, date) }
         if let date = other.lastEdit { lastEdit = max(lastEdit ?? date, date) }
+        if let date = other.lastObserved { lastObserved = max(lastObserved ?? date, date) }
     }
 }
 
@@ -165,8 +201,21 @@ struct AgentSessionWorkTrace: Codable, Equatable, Sendable {
     /// exactly "never hydrated", so no format version has to move.
     var transcriptOffset: UInt64?
 
+    /// The last turn checkpoint whose changed paths were folded in, by its per-session ordinal.
+    ///
+    /// The floor's resume point, and the same shape of fact as `transcriptOffset`: a checkpoint
+    /// diff is a pair of immutable trees, so re-reading one would count every path in it again.
+    /// Optional and additive, so an older cache file decodes as "never folded in".
+    var observedCheckpointOrdinal: Int?
+
     var touchedFileCount: Int { files.count }
     var totalActionCount: Int { categoryCounts.values.reduce(0, +) }
+
+    /// Files whose only evidence is a repository delta. The card legends these separately, so it
+    /// needs to know when it has any at all.
+    var observedOnlyFileCount: Int {
+        files.values.filter { !$0.hasExactSignal && $0.observedChanges > 0 }.count
+    }
 
     @discardableResult
     mutating func recordFile(
@@ -177,6 +226,20 @@ struct AgentSessionWorkTrace: Codable, Equatable, Sendable {
     ) -> String? {
         guard let path = AgentWorkPath.relative(suppliedPath, root: root) else { return nil }
         files[path, default: AgentFileWork()].record(kind, at: date)
+        lastActivity = max(lastActivity ?? date, date)
+        return path
+    }
+
+    /// Records a file a turn changed without a tool naming it. Returns the relative path it
+    /// landed on, or nil when the path is outside the root the atlas is drawn against.
+    @discardableResult
+    mutating func recordObservedChange(
+        path suppliedPath: String,
+        root: String?,
+        at date: Date
+    ) -> String? {
+        guard let path = AgentWorkPath.relative(suppliedPath, root: root) else { return nil }
+        files[path, default: AgentFileWork()].recordObservedChange(at: date)
         lastActivity = max(lastActivity ?? date, date)
         return path
     }
@@ -319,6 +382,8 @@ struct AgentProjectWorkAggregate: Equatable, Sendable {
 
             file.work.readCount = max(0, file.work.readCount - removedWork.readCount)
             file.work.editCount = max(0, file.work.editCount - removedWork.editCount)
+            let observed = max(0, file.work.observedChanges - removedWork.observedChanges)
+            file.work.observedCount = observed == 0 ? nil : observed
             if file.work.lastRead == removedWork.lastRead {
                 file.work.lastRead = file.contributors.compactMap {
                     remainingTraces[$0]?.files[path]?.lastRead
@@ -327,6 +392,11 @@ struct AgentProjectWorkAggregate: Equatable, Sendable {
             if file.work.lastEdit == removedWork.lastEdit {
                 file.work.lastEdit = file.contributors.compactMap {
                     remainingTraces[$0]?.files[path]?.lastEdit
+                }.max()
+            }
+            if file.work.lastObserved == removedWork.lastObserved {
+                file.work.lastObserved = file.contributors.compactMap {
+                    remainingTraces[$0]?.files[path]?.lastObserved
                 }.max()
             }
             files[path] = file
@@ -357,6 +427,12 @@ struct AgentProjectWorkAggregate: Equatable, Sendable {
         at date: Date
     ) {
         files[path, default: AgentProjectFileWork()].work.record(kind, at: date)
+        files[path, default: AgentProjectFileWork()].contributors.insert(sessionID)
+        contributingSessionIDs.insert(sessionID)
+    }
+
+    mutating func recordObservedChange(path: String, sessionID: SessionID, at date: Date) {
+        files[path, default: AgentProjectFileWork()].work.recordObservedChange(at: date)
         files[path, default: AgentProjectFileWork()].contributors.insert(sessionID)
         contributingSessionIDs.insert(sessionID)
     }
@@ -530,16 +606,22 @@ struct AgentWorkProjectionBin: Equatable, Sendable {
     var touchedFileCount = 0
     var readCount = 0
     var editCount = 0
+    /// Changes a turn's tree pair showed, which no tool claimed. Drawn without the accent the
+    /// exact marks own, so the picture cannot say a tool reported them either.
+    var observedCount = 0
     var lastRead: Date?
     var lastEdit: Date?
+    var lastObserved: Date?
     var contributorCount = 0
 
     mutating func record(_ work: AgentFileWork, contributors: Int) {
         if work.isTouched { touchedFileCount += 1 }
         readCount += work.readCount
         editCount += work.editCount
+        observedCount += work.observedChanges
         if let date = work.lastRead { lastRead = max(lastRead ?? date, date) }
         if let date = work.lastEdit { lastEdit = max(lastEdit ?? date, date) }
+        if let date = work.lastObserved { lastObserved = max(lastObserved ?? date, date) }
         contributorCount = max(contributorCount, contributors)
     }
 
@@ -553,6 +635,12 @@ struct AgentWorkProjectionBin: Equatable, Sendable {
             editCount += 1
             lastEdit = max(lastEdit ?? date, date)
         }
+    }
+
+    mutating func recordObservedChange(at date: Date, isFirstTouch: Bool) {
+        if isFirstTouch { touchedFileCount += 1 }
+        observedCount += 1
+        lastObserved = max(lastObserved ?? date, date)
     }
 }
 
@@ -582,6 +670,11 @@ struct AgentWorkPresentation: Equatable, Sendable {
     var recentContributors: [AgentWorkContributor]
 
     var totalActionCount: Int { categoryCounts.values.reduce(0, +) }
+
+    /// Changes seen in a turn's repository delta and claimed by no tool. Read off the bins for
+    /// the same reason the read and edit totals are: the bins are the bounded thing, and they
+    /// stay correct under the incremental updates a live event applies to them.
+    var observedChangeCount: Int { bins.reduce(0) { $0 + $1.observedCount } }
 
     static func session(
         _ trace: AgentSessionWorkTrace,

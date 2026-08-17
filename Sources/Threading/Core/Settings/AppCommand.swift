@@ -210,10 +210,13 @@ enum AppCommands {
                    defaultShortcut: KeyboardShortcut(key: "o", modifiers: .command), isEditable: true,
                    scope: .project),
 
+        // Bare ⌘S: the sidebar toggle is the most-pressed window command here, and this app
+        // has no documents, so the platform's Save never claimed the chord. ⌃⌘S remains free
+        // for anyone who preferred the window-structure layer to rebind.
         AppCommand(id: ID.toggleSidebar, group: .view, title: "Toggle Sidebar",
-                   defaultShortcut: KeyboardShortcut(key: "s", modifiers: [.command, .control]), isEditable: true),
+                   defaultShortcut: KeyboardShortcut(key: "s", modifiers: .command), isEditable: true),
         // Xcode's Go Back chords, for Xcode's gesture: retrace the window's page selection.
-        // The ⌃⌘ layer is already this app's window-structure layer (⌃⌘S, ⌃⌘B, ⌃⌘F) — and the
+        // The ⌃⌘ layer is already this app's window-structure layer (⌃⌘B, ⌃⌘F) — and the
         // bare ⌃-arrow belongs to Spaces, while ⌃←/→ *in the terminal* stays xterm word motion.
         AppCommand(id: ID.navigateBack, group: .view, title: "Go Back",
                    defaultShortcut: KeyboardShortcut(key: "\u{F702}", modifiers: [.command, .control]), isEditable: true),
@@ -318,7 +321,7 @@ enum AppCommands {
         // view of anything, it works with no window on screen, and it is the one quiet switch
         // macOS cannot supply — a Focus silences the notification sounds that ride a posted
         // `UNNotificationSound`, but not the bell, which this app plays itself through
-        // `NSSound`. ⇧⌘S is free: ⌃⌘S is Toggle Sidebar, and this app has no documents for the
+        // `NSSound`. ⇧⌘S is free: ⌘S is Toggle Sidebar, and this app has no documents for the
         // platform's Save As to have claimed the chord.
         AppCommand(id: ID.silenceSounds, group: .system, title: "Silence Sounds",
                    detail: "Holds every sound Threading makes — notification alerts and the "

@@ -24,6 +24,18 @@ code. Buying it is what funds this project.
 
 The project is Xcode-only — one `Threading.xcodeproj`, no root SwiftPM manifest.
 
+For the complete cloud-free development environment, run:
+
+```bash
+./dev
+```
+
+That starts the loopback control plane, builds and opens an isolated Debug Mac app, then builds,
+installs and opens the iOS app in an available iPhone Simulator. It installs the control-plane
+Node dependencies when needed. Use `./dev --no-ios` for Mac-only work or `./dev --backend-only`
+for the service alone; `./dev --help` lists the remaining options. Ctrl-C stops the backend but
+leaves the apps open so an active local agent session is never terminated implicitly.
+
 ```bash
 # The Mac app
 xcodebuild -project Threading.xcodeproj -scheme Threading -configuration Debug build

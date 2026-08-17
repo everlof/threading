@@ -11,7 +11,7 @@ import AppKit
 /// Its dropdown is app-owned too: `ThemedMenuPresenter` draws the rows, selection, scrolling,
 /// and elevation from the same theme roles as the closed control. Callers provide semantic
 /// `ThemedMenuItem` values, so system menu chrome never leaks through this API.
-final class ThemedPopUp: ThemedControl {
+final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
 
     // MARK: - Geometry
 
@@ -243,7 +243,6 @@ final class ThemedPopUp: ThemedControl {
             return false
         }) else { return false }
 
-        isPresentingMenu = true
         menuSession = ThemedMenuPresenter.present(
             ThemedMenuPresentation(entries: presentedEntries, minimumWidth: bounds.width),
             from: self,
@@ -253,14 +252,16 @@ final class ThemedPopUp: ThemedControl {
             },
             onDismiss: { [weak self] in
                 self?.menuSession = nil
-                self?.isPresentingMenu = false
             }
         )
         if menuSession == nil {
-            isPresentingMenu = false
             return false
         }
         return true
+    }
+
+    func themedMenuPresentationDidChange(isPresented: Bool) {
+        isPresentingMenu = isPresented
     }
 
     /// The single point at which a choice becomes the selection. Reachable from a test, which

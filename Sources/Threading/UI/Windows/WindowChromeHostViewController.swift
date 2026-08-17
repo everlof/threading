@@ -30,6 +30,12 @@ final class WindowChromeHostViewController: NSViewController {
     private var installedCommandBandView: WindowCommandBandView?
     private var pendingTitle = ""
 
+    /// The window's own commands, held here rather than only where they were built: which band
+    /// they belong to is a theme's answer, and it can change under them while they are on
+    /// screen.
+    private var windowCommands: [NSView] = []
+    private var windowCommandsAreInTitleBar = false
+
     /// A native window carries only two zero-height structural slots. App-icon lookup, title-band
     /// fonts and takeover controls do not exist until a theme actually exposes them.
     private(set) var takeoverChromeIsMaterialized = false
@@ -229,6 +235,37 @@ final class WindowChromeHostViewController: NSViewController {
         installedBandView?.setTitle(title)
     }
 
+    /// The window's own commands — the sidebar toggle and the history pair — for whichever band
+    /// the active theme seats them in. Passing an empty array in native dress hands them back:
+    /// the toolbar has rebuilt its own copies by then.
+    ///
+    /// The routing lives here rather than at the call site because the destination is a theme's
+    /// answer and this controller already re-measures on every theme event. A live switch from
+    /// a merged caption to a two-row chrome therefore moves the controls with it, instead of
+    /// leaving them in the band the dress flip happened to find.
+    func setWindowCommands(_ views: [NSView]) {
+        windowCommands = views
+        routeWindowCommands(force: true)
+    }
+
+    private func routeWindowCommands(force: Bool = false) {
+        let inTitleBar = isTakeoverActive
+            && WindowChromeAppearance.resolve()?.commands == .inTitleBar
+        guard force || inTitleBar != windowCommandsAreInTitleBar else { return }
+        windowCommandsAreInTitleBar = inTitleBar
+        guard takeoverChromeIsMaterialized || !windowCommands.isEmpty else { return }
+
+        // Both bands are told, in this order, so the controls are only ever in one of them:
+        // handing them to their new host after the old one has let go.
+        if inTitleBar {
+            installedCommandBandView?.setLeadingControls([])
+            bandView.setLeadingControls(windowCommands)
+        } else {
+            installedBandView?.setLeadingControls([])
+            commandBandView.setLeadingControls(windowCommands)
+        }
+    }
+
     private func applyMeasures() {
         let resolved = isTakeoverActive ? WindowChromeAppearance.resolve() : nil
         if resolved != nil {
@@ -255,12 +292,19 @@ final class WindowChromeHostViewController: NSViewController {
         contentWell.layer?.cornerRadius = wellRadius
         contentWell.layer?.masksToBounds = wellRadius > 0
 
+        // A theme that seats the window's commands in its caption has no second row at all:
+        // the command band collapses the way it does in native dress rather than standing
+        // empty, which is the whole point of stating it.
+        let commandsInTitleBar = resolved?.commands == .inTitleBar
+        let showsCommandBand = resolved != nil && !commandsInTitleBar
+
         bandHeight?.constant = resolved?.bandHeight ?? 0
-        commandBandHeight?.constant = resolved == nil ? 0 : WindowCommandBandView.bandHeight
+        commandBandHeight?.constant = showsCommandBand ? WindowCommandBandView.bandHeight : 0
         bandHost.isHidden = resolved == nil
-        commandBandHost.isHidden = resolved == nil
+        commandBandHost.isHidden = !showsCommandBand
         installedBandView?.isHidden = resolved == nil
-        installedCommandBandView?.isHidden = resolved == nil
+        installedCommandBandView?.isHidden = !showsCommandBand
+        routeWindowCommands()
         view.needsDisplay = true
     }
 }

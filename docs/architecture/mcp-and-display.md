@@ -247,7 +247,7 @@ incrementally from file events, not computed by walking its subtree. Row queries
 current viewport, cache at most 256 paths, and run through `AgentWorkTraceStore`'s utility worker.
 Closed directories are neither enumerated nor represented by views merely because the pane opened.
 
-**Observed work has two feeds, and the second one is why the panel is not empty for most chats.**
+**Observed work has three feeds and one honest absence.**
 A rendered conversation records each tool call as it streams, from `ConversationViewController`.
 A session Threading does not render has no such stream — its calls reach us as PTY bytes — so for
 a long time Activity drew the whole repository and reported zeros beside it: measured on this
@@ -285,10 +285,47 @@ project has touched), per turn, for a reading that changed one directory.
 
 This is capability-shaped, not runtime-shaped: `.transcriptReplay` is the fact that a normalizable
 local conversation exists, so Claude and Codex are covered today and a sixth runtime is covered the
-day it earns the capability. What a transcript cannot say stays unsaid — a shell edit no tool
-named lights no file, exactly as for a rendered conversation. The remaining runtimes, the git-
-observed floor for them, and the empty state that should replace "0 of N files" for a session with
-no source are in
+day it earns the capability.
+
+**Under both sits the neutral floor: what the checkout saw.** A transcript cannot name a file a
+shell command wrote, and for Grok and OpenCode there is no transcript at all — but every session
+in a git checkout already leaves a before and an end tree behind per turn, because
+`GitTurnBaselineStore` captures one for the Git Review pane. `AgentWorkHydration` folds those pairs
+in through `GitReviewReader.checkpointChangedPaths`, which is deliberately `--name-only`: a path is
+the whole of what a tree pair may claim. Four rules keep it from overstating itself.
+
+- **It is counted apart.** `AgentFileWork.observedCount` is never folded into `editCount`, draws
+  colourless rather than in the accent (`FileActivityInk.observed`), is spoken as "observed
+  changes", and reads `C n` on a tree row. An edit count is a tool naming the file it wrote; a
+  changed count is the repository noticing a difference, and the card has to say which one a mark
+  is.
+- **It never says what an exact signal already said.** A path in the turn's own
+  `claimedEditPaths` is skipped, and so is one this session exactly edited inside the turn's window
+  — which is how a transcript-fed terminal chat avoids recording its own edits a second time as
+  anonymous deltas. The window comparison is the direction that is sound: a claimed path is
+  certainly this chat's, while an unclaimed one is merely unproven.
+- **It resumes, like feed A.** `observedCheckpointOrdinal` persists beside the work it counted;
+  checkpoints are folded ascending, at most `checkpointsPerPass` at a time, and the pass re-arms
+  itself while any remain. An identical tree pair costs no process at all, which is most turns. An
+  unreadable checkpoint still moves the resume point: its refs are gone, no later pass can read it
+  either, and retrying would spend a process per turn forever.
+- **It is one serial `.utility` queue.** Backfilling a session with fifty retained checkpoints
+  must not fan out into fifty concurrent `git diff`s, or wait in front of a diff somebody is
+  looking at.
+
+**"Nobody was watching" and "this chat did nothing" are no longer the same picture.**
+`AgentWorkSource` resolves one session to `.live`, `.transcript`, `.gitObserved` or
+`.unavailable(reason)` from three facts that are all in-memory lookups, because the card asks on
+every refresh. It decides two things: whether the card draws at all, and which counts it is
+entitled to show. A source that cannot see a read withholds the read count rather than printing
+zero, hides the action row and the ribbon it can only leave empty, and legends its marks as
+changed files. A session with no source at all draws no atlas, no counts and no ribbon — only the
+sentence saying which of the two absences it is, since "this runtime keeps no transcript Threading
+can read" and "no transcript for this session yet" have different futures. Project scope resolves
+to `.live` and never reaches that state: one unwatchable session says nothing about the rest.
+
+The one feed still unbuilt is B, OpenCode's and Grok's supported `export`, and it is gated on a
+measurement rather than on work; see
 [`observed-work-for-terminal-sessions.md`](../feature-drafts/observed-work-for-terminal-sessions.md).
 
 **The panel's one header row ends in two controls: `+`, and the panel's own toggle.** The toggle
@@ -406,6 +443,25 @@ against its own background, so a role change that dims the axis again fails rath
 looking wrong. This is shared with the Usage dashboard, deliberately: its axis had the same
 problem.
 
+**A category name is a word in a fixed slot, so pointing at the slot has to answer.** A ranking's
+leading gutter is 108 points; an agent's categories are paths, test names and file names, so most
+real charts draw `/tmp/claude-5…` and `~/Library/Appli…` down the edge. The reader's move is to
+point at the stub — which used to land outside `plotRect` and select nothing, because hover was
+answered only over the marks. The **name and the band it labels are one target**: `hoverRect` is
+the plot plus the gutter the category names are drawn in (the leading gutter for a ranking, the
+bottom band for a vertical categorical chart), so a name too long to print is read by pointing at
+it. This is deliberately not extended to a time axis, whose leading gutter holds *values* — a
+hover there would be answered by whichever point happens to sit against the left edge.
+
+What it answers with is one list, `inspectionLines(for:series:)`, shared by the tooltip and the
+accessibility value so the picture and the spoken sentence cannot disagree. The line the list
+gained is the **reading**: a time series' `label` already *is* its reading (`42%`, `US$1.20`) and
+stating the value beside it would say the same thing twice, but a categorical point's label is its
+name, and a compressed ranking prints no number next to a bar thinner than
+`Design.Chart.barValueLabelThickness`. Without it, hovering a thin bar named the category and no
+quantity at all. Empty strings are dropped too — one series needs no key, so `series.title` is
+routinely `""`, and joining it opened every single-series tooltip with a blank line.
+
 Three more rules here were arrived at by rendering the fixtures and looking at them, and every
 assertion passed while each was wrong. A chart whose view is left on its autoresizing mask keeps
 the zero frame it was built with and draws a perfect title over an empty rectangle. A bar's own
@@ -431,6 +487,29 @@ becomes the window's own minimum size, so a chart in the side pane stopped the w
 shorter until its tab was closed. The card's minimum is `.defaultHigh` and the chart's vertical
 compression resistance is low, so a short pane compresses the plot instead of pinning the window
 open. `ChartTests` asserts there is no required height constraint anywhere in the card.
+
+**Stretch a value axis; never stretch a category axis.** The pane used to pin the card top *and*
+bottom, so every chart was as tall as the panel: a ranking of eight places in a full-height pane
+drew eight 130-point bands that were almost entirely gap, and the same bars at any other pane
+height were a different picture of the same numbers. Which axis carries the categories decides
+who may take the room. A ranking runs its categories **down the page**, so
+`ChartCardView.boundedHeight(for:)` gives it a row per category and the pane keeps the rest as
+ground under the chart; a column, line or area chart puts the *value* on the vertical axis, which
+is data a taller plot resolves better, and still fills the pane. The bound is `.defaultHigh` and
+the card's foot is `lessThanOrEqualTo` the pane's, so a pane shorter than the chart compresses it
+exactly as before — the rule above is not weakened by this one.
+
+The transcript's ceiling (`maximumCardHeight`) deliberately does **not** apply to the pane. It
+exists so one chart cannot become a row nobody can scroll past; the panel is where a reader went
+*to see the ranking*, and forty rows there should be forty rows tall. So `preferredHeight` (the
+virtualized row's answer) and `boundedHeight` (the pane's) agree up to the ceiling and diverge
+above it, which is the one place the panel and the transcript are allowed to differ.
+
+The width axis has the same failure mode and its own bound: `Design.Chart.barGroupExtent` caps a
+bar group at `maximumBarThickness` per bar, so a two-category comparison across a wide pane draws
+bars rather than a pair of 300-point slabs. A bar's thickness carries no reading — only its length
+does — so past the cap the band keeps the slack as gap, and grouped bars stay adjacent because the
+cap is per bar rather than per group.
 
 The same `ChartCardView` serves both surfaces, so the panel and the transcript cannot disagree
 about what a chart looks like. In a natively rendered conversation the chart is drawn **inline, on

@@ -145,14 +145,26 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         needsLayout = true
     }
 
-    /// An optional title-bar leading slot retained for authored previews and future identity
-    /// furniture. Its guests keep their own semantic size; forcing toolbar controls down to the
-    /// caption-button height created two conflicting required constraints.
+    /// The band's leading application slot: the window's own commands when the theme states
+    /// `commands: in_title_bar`, and nothing at all otherwise.
+    ///
+    /// Its guests keep their own semantic size — forcing toolbar controls down to the caption
+    /// buttons' height created two conflicting required constraints, which is why a band
+    /// shorter than `WindowChromeStyleLimits.commandsInTitleBarMinimumHeight` may not ask for
+    /// them. What the band does own is the ground underneath: these controls were built for the
+    /// chrome's roles and are now over the band's gradient, so they are told whose ground they
+    /// are on (`hostGround`) rather than left measuring their ink against a surface that is no
+    /// longer there.
     func setLeadingControls(_ views: [NSView]) {
+        for case let control as BackdropThemedControl in leadingStack.arrangedSubviews {
+            control.hostGround = nil
+        }
         leadingStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for view in views {
+            (view as? BackdropThemedControl)?.hostGround = .titleBand
             leadingStack.addArrangedSubview(view)
         }
+        apply()
     }
 
     // MARK: - Setup
@@ -283,7 +295,6 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         buttonStack.spacing = anatomy.clusterSpacing
         leadingButtonsCenterYConstraint?.constant = anatomy.clusterVerticalOffset
         trailingButtonsCenterYConstraint?.constant = anatomy.clusterVerticalOffset
-        leadingClusterEdgeConstraint?.constant = anatomy.leadingEdgeInset
         trailingClusterEdgeConstraint?.constant = -anatomy.trailingEdgeInset
         titleCenterYConstraint?.constant = anatomy.titleVerticalOffset
         centeredTitleConstraint?.constant = anatomy.titleHorizontalOffset
@@ -334,6 +345,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
             visible: resolved?.visibleButtons
                 ?? WindowChromeStyle.TitleBar.ButtonRole.standardOperations
         )
+        applyLeadingColumn(anatomy, commands: resolved?.commands ?? .ownRow)
         // `NSStackView.spacing` cannot state the Win98 caption's two operation groups. Reset
         // the per-view override on every application so a live theme switch never carries
         // that Windows break into another family.
@@ -467,6 +479,52 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         buttonStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         leading.forEach(leadingButtonStack.addArrangedSubview)
         trailing.forEach(buttonStack.addArrangedSubview)
+    }
+
+    /// Where the band's leading run starts, and how its members are spaced.
+    ///
+    /// A caption band inset its leading cluster by the family's own measured edge, which is
+    /// what every reconstruction here was tuned against. A band carrying the window's commands
+    /// is additionally a *pane band* — it is the top row of an application whose next row down
+    /// is the sidebar's brand and the content pane's header — so its first control's ink starts
+    /// on the column those bands start on, and its siblings take their item spacing. Both are
+    /// `PaneHeaderView`'s statement of the same two rules, read from there rather than restated,
+    /// which is the drift `WindowCommandBandView` was already caught in once.
+    ///
+    /// The two optional groups ahead of the commands collapse in that mode. An empty
+    /// `NSStackView` is still an arranged subview and still takes the spacing around it, and
+    /// that phantom is baked into every family's measured `leadingEdgeInset` — so it is left
+    /// alone where a reconstruction depends on it and removed where an exact column is the
+    /// point.
+    private func applyLeadingColumn(
+        _ anatomy: WindowChromeCaptionAnatomy,
+        commands: WindowChromeStyle.TitleBar.CommandPlacement
+    ) {
+        guard commands == .inTitleBar else {
+            leadingButtonStack.isHidden = false
+            leadingStack.isHidden = false
+            leadingStack.spacing = Design.Spacing.tight
+            leadingClusterEdgeConstraint?.constant = anatomy.leadingEdgeInset
+            return
+        }
+
+        leadingButtonStack.isHidden = leadingButtonStack.arrangedSubviews.isEmpty
+        leadingStack.isHidden = leadingStack.arrangedSubviews.isEmpty
+        leadingStack.spacing = PaneHeaderView.itemSpacing
+        leadingClusterEdgeConstraint?.constant =
+            PaneHeaderView.contentInset - opticalInset(of: firstLeadingInk)
+    }
+
+    /// The view whose ink the leading column is measured from: the first window operation when
+    /// the theme leads with one, then the identity icon, then the commands.
+    private var firstLeadingInk: NSView? {
+        if let button = leadingButtonStack.arrangedSubviews.first { return button }
+        if !appIcon.isHidden { return appIcon }
+        return leadingStack.arrangedSubviews.first
+    }
+
+    private func opticalInset(of view: NSView?) -> CGFloat {
+        (view as? OpticalInsetProviding)?.opticalHorizontalInset ?? 0
     }
 
     private func applyShape(_ resolved: WindowChromeAppearance.Resolved?) {

@@ -71,6 +71,37 @@ enum Design {
         }
     }
 
+    // MARK: - Placeholder Rhythm
+
+    /// The vertical rhythm of an empty-state surface — a hero glyph over an announcement, then
+    /// the content sections under it.
+    ///
+    /// Stated once because every placeholder had picked its own numbers: the plain empty pane
+    /// ran a 6pt base with an off-scale 16 after its icon, and the scheduled surface ran a 4pt
+    /// base — which read as exactly what it was, two surfaces re-deciding one rhythm, both too
+    /// tight at the seams. Each member restates a `Spacing` step; a placeholder takes these by
+    /// role instead of choosing numbers.
+    ///
+    /// **A section break never hangs on a hideable member.** `NSStackView` detaches a hidden
+    /// arranged view, and the custom spacing recorded *after* it leaves with it — the scheduled
+    /// surface's 20pt seam before its brief was recorded after the sometimes-hidden warning
+    /// line, so the ordinary no-warning case collapsed to the 4pt base and the caption read as
+    /// a stray word glued to the headline. Group the hideable line into a cluster stack and
+    /// record the seam after the *cluster*, which is always there.
+    enum Placeholder {
+        /// Hero glyph → the surface's name. A badge hangs below a symbol's box, so the caption
+        /// needs `inset`, not a control gap.
+        static let afterIcon = Spacing.inset
+        /// Lines within one announcement cluster — the name, the headline, a warning under it.
+        static let line = Spacing.small
+        /// A caption above the content it names.
+        static let caption = Spacing.tight
+        /// The announcement → the next section, and any other major seam of the surface.
+        static let section = Spacing.pane
+        /// Groups within a section, and the step before an action row.
+        static let group = Spacing.large
+    }
+
     // MARK: - Radius
 
     @MainActor
@@ -924,6 +955,13 @@ enum Design {
         /// the bands are separate categories rather than one continuous run.
         static let barBandFraction: CGFloat = 0.72
         static let barGap: CGFloat = 2
+        /// Past this a bar has stopped being a length and become a panel. A bar's thickness
+        /// carries no reading — only its length does — so it must not grow with the container:
+        /// a two-category comparison across a wide pane drew a pair of 300-point slabs, and the
+        /// same chart in a narrow one drew bars. Sized generously, since a chart of three
+        /// categories with hairline bars reads as a sparse lollipop plot rather than a
+        /// comparison.
+        static let maximumBarThickness: CGFloat = 56
         /// Enough tint that a bar reads as a measured quantity rather than as an outline. Below
         /// roughly a quarter it washes out on a light ground, where the fill is competing with
         /// white rather than sitting on black.
@@ -935,6 +973,17 @@ enum Design {
         /// A bar thinner than this has no room for its own number, and printing one anyway
         /// overlaps the bar beside it.
         static let barValueLabelThickness: CGFloat = 26
+        /// How much of one category band `members` bars drawn side by side may occupy.
+        ///
+        /// The band is the room a category *owns*; the group is only obliged to be legible in it.
+        /// Below the cap the group keeps its share of the band and the rest is the gap between
+        /// categories; above it the group stays put and the band keeps the slack, which is what
+        /// stops a chart of two categories in a full-height pane drawing two slabs.
+        static func barGroupExtent(band: CGFloat, members: Int) -> CGFloat {
+            let count = CGFloat(max(1, members))
+            return min(band * barBandFraction, maximumBarThickness * count)
+        }
+
         /// Axis labels are thinned in whole steps below these widths, so a resize drops whole
         /// categories rather than shuffling which names happen to fit.
         static let minimumCategoryLabelWidth: CGFloat = 48

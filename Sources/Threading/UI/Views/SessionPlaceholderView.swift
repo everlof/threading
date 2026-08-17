@@ -32,14 +32,23 @@ final class SessionPlaceholderView: NSView {
     // MARK: - Setup
 
     private func setupViews() {
-        let stack = NSStackView(views: [iconView, titleLabel, detailLabel, actionButton])
+        // Title and detail as one announcement cluster, so the seam before the button is
+        // recorded after a member that is always there — hung on the hideable detail label it
+        // left with it, and a detail-less placeholder collapsed the gap to the base spacing.
+        // The rhythm is `Design.Placeholder`'s, stated once for every empty-state surface.
+        let announcement = NSStackView(views: [titleLabel, detailLabel])
+        announcement.orientation = .vertical
+        announcement.alignment = .centerX
+        announcement.spacing = Design.Placeholder.line
+
+        let stack = NSStackView(views: [iconView, announcement, actionButton])
         stack.orientation = .vertical
         stack.alignment = .centerX
-        stack.spacing = PlaceholderDefaults.stackSpacing
+        stack.spacing = Design.Placeholder.line
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        stack.setCustomSpacing(PlaceholderDefaults.iconSpacing, after: iconView)
-        stack.setCustomSpacing(PlaceholderDefaults.buttonSpacing, after: detailLabel)
+        stack.setCustomSpacing(Design.Placeholder.afterIcon, after: iconView)
+        stack.setCustomSpacing(Design.Placeholder.section, after: announcement)
 
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.contentTintColor = Design.Text.tertiary
@@ -100,9 +109,6 @@ final class SessionPlaceholderView: NSView {
 // MARK: - Placeholder Defaults
 
 enum PlaceholderDefaults {
-    static let stackSpacing: CGFloat = 6
-    static let iconSpacing: CGFloat = 16
-    static let buttonSpacing: CGFloat = 20
     static let iconSize: CGFloat = 44
     static let titleFontSize: CGFloat = 15
     static let detailFontSize: CGFloat = 12

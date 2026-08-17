@@ -51,6 +51,7 @@ enum WindowChromeAppearance {
         let glyphStyle: WindowChromeStyle.TitleBar.ButtonGlyphStyle
         let buttonPlacement: WindowChromeStyle.TitleBar.ButtonPlacement
         let showsAppIcon: Bool
+        let commands: WindowChromeStyle.TitleBar.CommandPlacement
         let activeTexture: Texture?
         let inactiveTexture: Texture?
         let shape: WindowChromeStyle.TitleBar.Shape
@@ -112,6 +113,7 @@ enum WindowChromeAppearance {
             glyphStyle: titleBar.buttonGlyphStyle,
             buttonPlacement: titleBar.buttonPlacement,
             showsAppIcon: titleBar.showsAppIcon,
+            commands: titleBar.commands,
             activeTexture: texture(from: titleBar.activeTexture, fallbackInk: ink),
             inactiveTexture: texture(
                 from: titleBar.inactiveTexture,

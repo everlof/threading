@@ -135,6 +135,74 @@ final class LimitRecoveryResolutionTests: XCTestCase {
     func testThePersistedNamesAreStable() {
         XCTAssertEqual(LimitRecoveryPolicy.flagOnly.rawValue, "flagOnly")
         XCTAssertEqual(LimitRecoveryPolicy.waitForReset.rawValue, "waitForReset")
+        XCTAssertEqual(LimitRecoveryPolicy.resumeOnBestAccount.rawValue, "resumeOnBestAccount")
+    }
+
+    /// A pinned login rides inside the same string, so the record that held `"waitForReset"` can
+    /// hold this too — no second column, and a build that predates the case reads it as "never
+    /// chose" like any other unrecognised name.
+    ///
+    /// The account identifier carries its own colon, which is why the split is bounded: parsing it
+    /// as two parts would name the provider and lose the login.
+    func testAPinnedLoginRoundTripsThroughOneStoredName() throws {
+        let accountID = AccountID(provider: .claude, handle: AccountHandle(storedName: "work"))
+        let pinned = LimitRecoveryPolicy.resumeVia(accountID)
+
+        XCTAssertEqual(pinned.rawValue, "resumeVia:claude:work")
+        XCTAssertEqual(LimitRecoveryPolicy(rawValue: pinned.rawValue), pinned)
+        XCTAssertEqual(pinned.pinnedAccountID, accountID)
+
+        // Through a record, since the enum's synthesised coding would have produced a nested
+        // object keyed by case name and quietly changed the shape of every stored answer.
+        var session = AgentSession(kind: .claude, title: "Pinned")
+        session.limitRecoveryPolicy = pinned
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: try JSONEncoder().encode(session)
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(json["limitRecoveryPolicy"] as? String, "resumeVia:claude:work")
+
+        let decoded = try JSONDecoder().decode(
+            AgentSession.self,
+            from: try JSONSerialization.data(withJSONObject: json)
+        )
+        XCTAssertEqual(decoded.limitRecoveryPolicy, pinned)
+    }
+
+    /// A pinned login is the one answer a scope with no runtime cannot give: Settings and a
+    /// checkout each speak for chats of several runtimes, and a login belongs to exactly one.
+    func testTheScopesWithNoRuntimeOfferEveryAnswerButAPinnedLogin() {
+        XCTAssertEqual(
+            LimitRecoveryPolicy.runtimeNeutralChoices,
+            [.flagOnly, .waitForReset, .resumeOnBestAccount]
+        )
+        XCTAssertFalse(
+            LimitRecoveryPolicy.runtimeNeutralChoices.contains { $0.pinnedAccountID != nil }
+        )
+    }
+
+    /// The two that spend a second login's window are the two the budget sits under, and the
+    /// property is what says so — every reader asks it rather than listing the cases again.
+    func testOnlyTheAnswersThatMoveTheConversationSaySo() {
+        XCTAssertFalse(LimitRecoveryPolicy.flagOnly.movesToAnotherAccount)
+        XCTAssertFalse(LimitRecoveryPolicy.waitForReset.movesToAnotherAccount)
+        XCTAssertTrue(LimitRecoveryPolicy.resumeOnBestAccount.movesToAnotherAccount)
+        XCTAssertTrue(
+            LimitRecoveryPolicy.resumeVia(
+                AccountID(provider: .claude, handle: AccountHandle(storedName: "work"))
+            ).movesToAnotherAccount
+        )
+    }
+
+    /// A name that is nearly right is refused rather than half-read: a pin with no login behind it
+    /// would resolve to an answer naming nothing, which is worse than falling through to the scope
+    /// above.
+    func testAMalformedPinnedLoginIsRefused() {
+        XCTAssertNil(LimitRecoveryPolicy(rawValue: "resumeVia:"))
+        XCTAssertNil(LimitRecoveryPolicy(rawValue: "resumeVia:notAProvider:work"))
+        XCTAssertNil(LimitRecoveryPolicy(rawValue: "resumeVia"))
+        XCTAssertNil(LimitRecoveryPolicy(rawValue: "somethingALaterBuildInvented"))
     }
 
     /// An answer this build does not recognise reads as "never chose" rather than costing the

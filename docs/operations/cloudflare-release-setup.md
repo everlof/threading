@@ -84,9 +84,9 @@ secrets, custom domain, cron triggers and the Queue consumer are deployed throug
 
 ## Cloud-free development
 
-- [ ] Run `npm run dev` with network access disabled and verify `/ready`, local auth, D1 migrations,
-  R2 report storage/pickup and WebRTC host-only ICE all work at `127.0.0.1:8787`.
-- [ ] Launch the Debug Mac app with `THREADING_CONTROL_PLANE_URL=http://127.0.0.1:8787` and
-  `THREADING_CONTROL_PLANE_LOCAL_AUTH=1`; verify it auto-enrolls and the iOS Simulator pairs.
+- [ ] Run repository-root `./dev` and verify `/ready`, local auth, D1 migrations, R2 report
+  storage/pickup and WebRTC host-only ICE all work at `127.0.0.1:8787`.
+- [ ] Verify the isolated Debug Mac app auto-enrolls, its private-report outbox uses the loopback
+  intake, and the automatically launched iOS Simulator app pairs from the copied owner link.
 - [ ] Confirm local mode never calls Apple identity, TURN, APNs or the triage webhook. Use staging,
   not a LAN HTTP exception, for a physical iPhone.

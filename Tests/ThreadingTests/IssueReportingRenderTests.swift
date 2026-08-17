@@ -80,6 +80,45 @@ final class IssueReportingRenderTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: pendingURL.path))
     }
 
+    func testMacOutboxUsesTheDebugReportIntakeOverride() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mac-local-report-outbox-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if FileManager.default.fileExists(atPath: directory.path) {
+                try? FileManager.default.removeItem(at: directory)
+            }
+        }
+        let submission = makeSubmission()
+        let capture = IssueReportRequestCapture()
+        let outbox = MacIssueReportOutbox(
+            directory: directory,
+            environment: [
+                "THREADING_REPORT_INTAKE_URL": "http://127.0.0.1:8787/v1/reports",
+            ],
+            transport: { request in
+                await capture.record(request)
+                return (
+                    try JSONEncoder().encode(PublicIssueReportReceiptDTO(
+                        reportID: submission.id,
+                        reference: "RPT-LOCAL",
+                        wasAlreadyReceived: false
+                    )),
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 201,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!
+                )
+            }
+        )
+
+        _ = try await outbox.enqueueAndDeliver(submission)
+
+        let request = await capture.request
+        XCTAssertEqual(request?.url?.absoluteString, "http://127.0.0.1:8787/v1/reports")
+    }
+
     func testMacOutboxRetainsAnOfflineReportAndFlushesTheSameUUIDLater() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("mac-report-retry-\(UUID().uuidString)", isDirectory: true)

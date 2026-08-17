@@ -58,6 +58,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
+    private var isPresentingMenu = false
+    private var presentsHoverControls: Bool { isHovered || isPresentingMenu }
 
     /// Source for the hover popover, refreshed on every configure.
     ///
@@ -752,7 +754,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// correction does not animate: the row it would animate is no longer under the pointer.
     private func hoverDidEnd(animated: Bool) {
         isHovered = false
-        setActionVisible(false, animated: animated)
+        setActionVisible(presentsHoverControls, animated: animated)
         popoverScheduler.pointerExited()
     }
 
@@ -893,7 +895,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             statusSlot.animator().alphaValue = statusAlpha
         }, completionHandler: { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, !visible, !self.isHovered else { return }
+                guard let self, !visible, !self.presentsHoverControls else { return }
                 self.setTrailingSlotExpanded(false)
             }
         })
@@ -1000,7 +1002,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
         // Rows are reconfigured while the pointer sits on them (activity changes as an
         // agent works), so the hover state is reasserted rather than reset.
-        setActionVisible(isHovered, animated: false)
+        setActionVisible(presentsHoverControls, animated: false)
 
         // The hover popover carries the full title and account, so a tooltip would only
         // duplicate it more slowly.
@@ -1380,6 +1382,16 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         statusIndicator?.hostGround = ground
         actionButton.hostGround = ground
         archiveButton.hostGround = ground
+    }
+}
+
+// MARK: - Menu Presentation
+
+extension SessionRowView: ThemedMenuPresentationObserving {
+    func themedMenuPresentationDidChange(isPresented: Bool) {
+        guard isPresentingMenu != isPresented else { return }
+        isPresentingMenu = isPresented
+        setActionVisible(presentsHoverControls, animated: !isPresented)
     }
 }
 

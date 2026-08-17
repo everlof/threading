@@ -102,6 +102,8 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
+    private var isPresentingMenu = false
+    private var presentsHoverControls: Bool { isHovered || isPresentingMenu }
 
     /// Whether this row's role offers hover controls; repository headings keep a quiet edge.
     private var showsHoverButton = false
@@ -337,7 +339,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         updateTrailingSlotVisibility()
 
         if showsHoverButton {
-            setHoverButtonVisible(isHovered, animated: false)
+            setHoverButtonVisible(presentsHoverControls, animated: false)
         } else {
             hoverControls.alphaValue = 0
             countLabel?.alphaValue = 1
@@ -691,7 +693,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// correction does not animate: the row it would animate is no longer under the pointer.
     private func hoverDidEnd(animated: Bool) {
         isHovered = false
-        setHoverButtonVisible(false, animated: animated)
+        setHoverButtonVisible(presentsHoverControls, animated: animated)
         popoverScheduler.pointerExited()
     }
 
@@ -914,6 +916,16 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         conductIndicator?.contentTintColor = Design.Text.secondary
         iconView.contentTintColor = Design.Text.secondary
         nativeIconTint = iconView.contentTintColor
+    }
+}
+
+// MARK: - Menu Presentation
+
+extension ProjectRowView: ThemedMenuPresentationObserving {
+    func themedMenuPresentationDidChange(isPresented: Bool) {
+        guard isPresentingMenu != isPresented else { return }
+        isPresentingMenu = isPresented
+        setHoverButtonVisible(presentsHoverControls, animated: !isPresented)
     }
 }
 

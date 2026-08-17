@@ -210,7 +210,7 @@ enum ClassicChoiceDrawing {
 /// rather than the edge of a plate that is not drawn.
 ///
 /// See `Design` for the vocabulary this belongs to.
-final class ChipView: ThemedControl, OpticalInsetProviding {
+final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentationObserving {
 
     enum HeightStyle {
         /// A compact chooser among other compact controls.
@@ -676,8 +676,8 @@ final class ChipView: ThemedControl, OpticalInsetProviding {
         }
 
         if let menuPresentationOverride {
-            isPresentingMenu = true
-            defer { isPresentingMenu = false }
+            themedMenuPresentationDidChange(isPresented: true)
+            defer { themedMenuPresentationDidChange(isPresented: false) }
             if let selected = menuPresentationOverride(presentation) {
                 choose(selected)
             }
@@ -686,7 +686,6 @@ final class ChipView: ThemedControl, OpticalInsetProviding {
                 guard case .item(let item) = entry else { return false }
                 return item.isSelected
             }
-            isPresentingMenu = true
             menuSession = ThemedMenuPresenter.present(
                 presentation,
                 from: self,
@@ -694,15 +693,17 @@ final class ChipView: ThemedControl, OpticalInsetProviding {
                 onChoose: { [weak self] _, item in self?.choose(item) },
                 onDismiss: { [weak self] in
                     self?.menuSession = nil
-                    self?.isPresentingMenu = false
                 }
             )
             if menuSession == nil {
-                isPresentingMenu = false
                 return false
             }
         }
         return true
+    }
+
+    func themedMenuPresentationDidChange(isPresented: Bool) {
+        isPresentingMenu = isPresented
     }
 
     private func choose(_ item: ThemedMenuItem) {

@@ -4,9 +4,10 @@ import Foundation
 
 /// Which of a session's other logins its conversation could carry on under, ranked.
 ///
-/// The interactive half of `limit-recovery.md`'s `resumeOnBestAccount`: the policy that migrates
-/// automatically stays unbuilt, but the *choice* it would have made is exactly what a one-tap
-/// offer needs, so the arithmetic is written once, here, and pressed by hand.
+/// The one arithmetic behind `limit-recovery.md`'s two account escapes: the standing policy
+/// `resumeOnBestAccount` and the one-tap offer are the same choice, differing only in whether
+/// anybody pressed for it, so the rule that decides where a conversation goes is written once,
+/// here, and read by both.
 ///
 /// **Pure, and taking values rather than looking anything up** — `preferred(among:)`'s reason in
 /// [`accounts.md`](accounts.md): a rule that decides where somebody's conversation goes has to be
@@ -401,6 +402,21 @@ struct LimitEscapeRequested: AppEvent {
     let sessionID: SessionID
 }
 
+/// A policy asked for the migration nobody pressed for.
+///
+/// A third event rather than `LimitEscapeRequested` with a flag, because it carries the one thing
+/// a press does not: **which login**. `resumeVia(_:)` names a login the user pinned, which is not
+/// necessarily the one the strip's own offer would name, and a policy that quietly moved the
+/// conversation somewhere else would be the escalation this subsystem refuses.
+///
+/// `LimitRecoveryCoordinator` has already forced the readings and ranked them by the time this is
+/// posted; what the observer adds is the move itself.
+struct LimitAccountResumeRequested: AppEvent {
+    static let name = Notification.Name("ThreadingLimitAccountResumeRequested")
+    let sessionID: SessionID
+    let accountID: AccountID
+}
+
 /// The user pressed the other offer: stay put and continue when the window resets.
 ///
 /// A second event rather than a flag on the first, because they end in different places — the
@@ -551,6 +567,36 @@ final class LimitEscapeSuggestionStore {
         guard fresh != standing else { return }
         entries[suggestion.sessionID] = fresh
         announce(suggestion.sessionID)
+    }
+
+    /// Points the standing offer at the login a **policy** chose, before it starts moving there.
+    ///
+    /// `resumeVia(_:)` names a login the user pinned, which is not necessarily the one the ranking
+    /// would have offered — and the busy state is drawn from this record, so without this the strip
+    /// would say "Continuing as Daniel Block…" over a conversation being moved to somebody else.
+    /// That is the same misstatement `busy` is named rather than counted to avoid.
+    ///
+    /// The deciding window is dropped rather than carried over: it described the *other* login's
+    /// worst window, and a journal entry naming the wrong one is worse than naming none.
+    func retarget(
+        to accountID: AccountID,
+        name: String,
+        reading: String?,
+        for sessionID: SessionID
+    ) {
+        guard let standing = entries[sessionID], standing.accountID != accountID else { return }
+
+        var fresh = LimitEscapeSuggestion(
+            sessionID: sessionID,
+            accountID: accountID,
+            accountName: name,
+            reading: reading,
+            resetHint: standing.resetHint,
+            model: standing.model
+        )
+        fresh.isDismissed = standing.isDismissed
+        entries[sessionID] = fresh
+        announce(sessionID)
     }
 
     /// Waves this refusal's offer away until a new one is computed.

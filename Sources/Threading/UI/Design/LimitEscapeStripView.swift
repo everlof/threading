@@ -5,10 +5,10 @@ import AppKit
 /// The offer over a session whose provider refused its turn for a spent usage limit: what
 /// happened, one login to carry on under, and the way to be rid of the offer.
 ///
-/// **One tap, and the button names its whole action.** `limit-recovery.md` refuses to migrate a
-/// conversation automatically because that types into somebody's session and spends their quota
-/// with nobody watching; here the press *is* the watching, so there is no second dialog to
-/// confirm what the button already says on its face. The automatic policy stays unbuilt.
+/// **One tap, and the button names its whole action.** `limit-recovery.md` makes the migrating
+/// policies something a user arms in advance, because they type into somebody's session and spend
+/// their quota with nobody watching; here the press *is* the watching, so there is no second
+/// dialog to confirm what the button already says on its face — and no opt-in in front of it.
 ///
 /// **Not a `PaneNoticeView`.** That band is a condition the *pane* found — it spans the pane, it
 /// pushes the header apart from the content, and one of them at a time is chrome. This is a

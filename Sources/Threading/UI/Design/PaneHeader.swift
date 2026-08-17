@@ -24,12 +24,16 @@ final class PaneHeaderView: NSView {
         Design.Size.tabHeight + Design.Spacing.small * 2 + Design.Radius.border
     }
 
-    private enum Layout {
-        /// Ink-to-edge distance, measured from the corner-adapted content region.
-        static let contentInset: CGFloat = Design.Spacing.inset
-        /// Between sibling controls on the same side.
-        static let itemSpacing: CGFloat = Design.Spacing.small
-    }
+    /// Ink-to-edge distance, measured from the corner-adapted content region.
+    ///
+    /// Stated here rather than at each band for the reason the height is: every band that
+    /// re-derived it got it subtly wrong. A band this component does not itself lay out — the
+    /// window's caption row, when a theme seats the window's commands in it — reads these two
+    /// rather than repeating the numbers.
+    static let contentInset: CGFloat = Design.Spacing.inset
+
+    /// Between sibling controls on the same side.
+    static let itemSpacing: CGFloat = Design.Spacing.small
 
     // MARK: - Properties
 
@@ -150,26 +154,26 @@ final class PaneHeaderView: NSView {
         if let first = leading.first {
             first.leadingAnchor.constraint(
                 equalTo: contentGuide.leadingAnchor,
-                constant: Layout.contentInset - opticalInset(of: first)
+                constant: Self.contentInset - opticalInset(of: first)
             ).isActive = true
         }
         for (previous, next) in zip(leading, leading.dropFirst()) {
             next.leadingAnchor.constraint(
                 equalTo: previous.trailingAnchor,
-                constant: Layout.itemSpacing
+                constant: Self.itemSpacing
             ).isActive = true
         }
 
         if let last = trailing.last {
             last.trailingAnchor.constraint(
                 equalTo: contentGuide.trailingAnchor,
-                constant: -(Layout.contentInset - opticalInset(of: last))
+                constant: -(Self.contentInset - opticalInset(of: last))
             ).isActive = true
         }
         for (previous, next) in zip(trailing, trailing.dropFirst()) {
             next.leadingAnchor.constraint(
                 equalTo: previous.trailingAnchor,
-                constant: Layout.itemSpacing
+                constant: Self.itemSpacing
             ).isActive = true
         }
 
@@ -180,7 +184,7 @@ final class PaneHeaderView: NSView {
         if let lastLeading = leading.last, let firstTrailing = trailing.first {
             lastLeading.trailingAnchor.constraint(
                 lessThanOrEqualTo: firstTrailing.leadingAnchor,
-                constant: -Layout.itemSpacing
+                constant: -Self.itemSpacing
             ).isActive = true
         }
     }

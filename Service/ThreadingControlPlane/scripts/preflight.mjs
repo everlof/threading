@@ -75,12 +75,14 @@ if (countMatches(
   failures.push("shipping bundle identifiers differ from the reviewed Apple audiences");
 }
 const serviceURLPattern = /<key>ThreadingControlPlaneURL<\/key>\s*<string>https:\/\/remote\.threading\.codes<\/string>/u;
-if (!serviceURLPattern.test(macInfoPlist)
-  || countMatches(
-    xcodeProject,
-    /^\s*INFOPLIST_KEY_ThreadingControlPlaneURL = "https:\/\/remote\.threading\.codes";\s*$/gmu,
-  ) !== 2) {
-  failures.push("shipping macOS and iOS targets must use the production control-plane URL");
+if (!serviceURLPattern.test(macInfoPlist)) {
+  failures.push("shipping macOS target must use the production control-plane URL");
+}
+if (countMatches(
+  xcodeProject,
+  /^\s*INFOPLIST_KEY_ThreadingControlPlaneURL\s*=/gmu,
+) !== 0) {
+  failures.push("iOS must obtain its control-plane URL from each validated pairing link");
 }
 const appleSignInEntitlement = /<key>com\.apple\.developer\.applesignin<\/key>\s*<array>\s*<string>Default<\/string>\s*<\/array>/u;
 if (/<key>com\.apple\.developer\./u.test(debugEntitlements)) {

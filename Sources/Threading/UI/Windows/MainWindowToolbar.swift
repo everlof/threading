@@ -69,7 +69,7 @@ extension MainWindowController: NSToolbarDelegate {
                 symbolName: "sidebar.leading",
                 accessibility: L10n.string("Show or hide sidebar")
             )
-            button.toolTip = L10n.string("Show or Hide the Sidebar (⌃⌘S)")
+            button.toolTip = L10n.string("Show or Hide the Sidebar (⌘S)")
             button.onPress = { [weak self] in self?.toggleSidebar() }
             sidebarToolbarButton = button
             return makeOverlayItem(identifier: itemIdentifier, view: button)

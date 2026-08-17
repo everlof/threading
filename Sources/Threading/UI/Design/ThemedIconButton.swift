@@ -13,7 +13,8 @@ import AppKit
 ///
 /// It draws from an `InkSource` rather than the chrome roles, which is what lets the same button
 /// serve the toolbar — floating over the terminal's own palette — and a tab inside the chrome.
-final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
+final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
+    ThemedMenuPresentationObserving {
 
     /// When the symbol backing the control becomes an `NSImage`.
     ///
@@ -178,9 +179,9 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// is how a raised half survives the pointer leaving it.
     var surfaceStateDidChange: (() -> Void)?
 
-    /// Whether a host drawing for this button should raise its half — the pointer is on it, or
-    /// holding it down.
-    var isRaised: Bool { isHovered || isPressed }
+    /// Whether a host drawing for this button should raise its half — the pointer is on it, the
+    /// press is held, or the menu opened by that press is still being browsed.
+    var isRaised: Bool { isHovered || isPressed || isPresentingMenu }
 
     /// Set when the press opens a menu rather than performing an action.
     ///
@@ -199,6 +200,17 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// release are forwarded to the open menu — so the button reads as held for exactly as
     /// long as its menu is, the way a menu-bar title does.
     var presentsMenu = false
+
+    /// The menu presenter owns this state for every route — pointer, keyboard, accessibility and
+    /// secondary click — so a button cannot forget to keep its source treatment while its menu is
+    /// being browsed.
+    private(set) var isPresentingMenu = false {
+        didSet {
+            guard isPresentingMenu != oldValue else { return }
+            needsDisplay = true
+            surfaceStateDidChange?()
+        }
+    }
 
     /// The menu a *secondary* click asks for, on a button whose press already does something.
     ///
@@ -443,7 +455,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
 
         let active = isSelected || isEmphasized
         let fill: NSColor
-        if isPressed {
+        if isPressed || isPresentingMenu {
             fill = ink.surfaceHover
         } else if active {
             fill = isHovered ? ink.surfaceHover : ink.surface
@@ -465,7 +477,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
             fill: fill,
             border: border,
             radius: Design.Radius.control(fitting: bounds.size),
-            bevel: (isPressed || isSelected) ? .sunken : .automatic
+            bevel: (isPressed || isPresentingMenu || isSelected) ? .sunken : .automatic
         )
 
         drawKeyboardFocus(around: shape, color: ink.label)
@@ -478,7 +490,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     /// paths — this button's own surface, and a host's — end here.
     private func applyGlyphTint() {
         iconView.tint = isEnabled
-            ? (isSelected || isHovered ? ink.label : ink.secondary)
+            ? (isSelected || isHovered || isPresentingMenu ? ink.label : ink.secondary)
             : ink.quaternary
     }
 
@@ -486,6 +498,10 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding {
     override func hoverDidChange() {
         super.hoverDidChange()
         surfaceStateDidChange?()
+    }
+
+    func themedMenuPresentationDidChange(isPresented: Bool) {
+        isPresentingMenu = isPresented
     }
 
     /// **A press does not take the keyboard focus.** Tab still reaches this button — that is what

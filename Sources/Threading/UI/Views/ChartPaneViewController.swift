@@ -47,13 +47,35 @@ final class ChartPaneViewController: NSViewController {
             card.topAnchor.constraint(equalTo: container.topAnchor, constant: Layout.inset)
         ]
 
-        if subtitle.isEmpty {
-            constraints.append(
-                card.bottomAnchor.constraint(
+        // A chart takes the room its own shape asks for, not the room the panel happens to have.
+        // See `ChartCardView.boundedHeight(for:)`: a ranking's vertical axis is its categories,
+        // so a taller pane is empty ground under the chart rather than taller rows. The bound is
+        // a preference and the floor of the pane is a limit — a required height inside pane
+        // content becomes the window's own minimum size, which is a bug this pane already had
+        // once.
+        let bounded = ChartCardView.boundedHeight(for: spec)
+        if let bounded {
+            let height = card.heightAnchor.constraint(equalToConstant: bounded)
+            height.priority = .defaultHigh
+            constraints.append(height)
+        }
+
+        /// The card's foot: level with the pane's when the chart fills it, above it when the
+        /// chart's own height is smaller than the room.
+        func footConstraint(of view: NSView) -> NSLayoutConstraint {
+            bounded == nil
+                ? view.bottomAnchor.constraint(
                     equalTo: container.bottomAnchor,
                     constant: -Layout.inset
                 )
-            )
+                : view.bottomAnchor.constraint(
+                    lessThanOrEqualTo: container.bottomAnchor,
+                    constant: -Layout.inset
+                )
+        }
+
+        if subtitle.isEmpty {
+            constraints.append(footConstraint(of: card))
         } else {
             let caption = NSTextField.label(
                 attributed: NSAttributedString(
@@ -72,10 +94,7 @@ final class ChartPaneViewController: NSViewController {
                 ),
                 caption.leadingAnchor.constraint(equalTo: card.leadingAnchor),
                 caption.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor),
-                caption.bottomAnchor.constraint(
-                    equalTo: container.bottomAnchor,
-                    constant: -Layout.inset
-                )
+                footConstraint(of: caption)
             ])
         }
 

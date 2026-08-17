@@ -38,7 +38,7 @@ See [Display Panel](#display-panel).
 
 There is no title bar — the window controls sit over the top of the sidebar. That is also as
 narrow as the sidebar goes: drag its divider and it stops where those controls end, and pushing
-on past that stop closes the sidebar altogether. **⌃⌘S** brings it back, as does the sidebar
+on past that stop closes the sidebar altogether. **⌘S** brings it back, as does the sidebar
 button beside the traffic lights.
 
 Widening has no fixed limit — the sidebar takes whatever the terminal beside it can spare — and
@@ -202,7 +202,7 @@ The band at the top of the sidebar carries the app's brand at its left — the T
 which stitches itself in when the app launches (skipped under Reduce Motion), beside the
 app's name — and three quiet controls at its right: the arrangement control described below,
 **+** to add a project, and **×** in the corner, which hides the sidebar — the same collapse
-as **⌃⌘S** and the toolbar's sidebar button, either of which brings it back. Both the brand
+as **⌘S** and the toolbar's sidebar button, either of which brings it back. Both the brand
 and **Settings**, at the sidebar's bottom-left, sit on the same left margin as the rows
 between them, icon and word.
 
@@ -1315,8 +1315,10 @@ histories aren't interchangeable — and isn't offered here.
 
 One thing to keep in mind: moving to another account to keep working past a limit is fine when
 the accounts are genuinely separate (your personal and your work login, say). Rotating through
-accounts purely to dodge usage limits is the pattern Anthropic's terms discourage — Threading
-leaves the choice, and the timing, to you rather than doing it automatically.
+accounts purely to dodge usage limits is the pattern Anthropic's terms discourage — so Threading
+never moves a conversation on its own unless you have asked it to, in advance and in writing, per
+chat or per checkout (see [Limit recovery](#limit-recovery)); and even then it stops after a few
+moves in an hour rather than working its way around your logins.
 
 ### Sending something later
 
@@ -1342,8 +1344,18 @@ sits beside **Start session**. Both open the same offers:
   sheet names your time zone.
 
 What is waiting appears in a strip above the box — in a chat, above the queue of messages waiting
-for the current turn to finish. Click a row to open it back up in the composer, ✕ to unschedule
-it. Scheduling clears the composer, exactly as sending does.
+for the current turn to finish. ✕ unschedules a row. Scheduling clears the composer, exactly as
+sending does.
+
+Click a waiting **session start** to edit it in place. The schedule stays exactly as it was —
+the row keeps its time, and would still fire on it — while the brief, the pictures and the
+session's configuration open in the composer for rewriting. The Start button becomes **Save
+changes** (same **⌘↩**), a **Cancel** appears beside the box for backing out, and picking a
+moment from the clock while editing moves the schedule to that moment as it saves. A half-typed
+draft the box was holding comes back when the edit ends, and opening a second waiting row saves
+the first. The same edit opens from the scheduled conversation's own pane (**Edit**, beside
+Start now) and from its sidebar row's menu. In a chat, clicking a waiting reply still moves it
+back into the box for rewriting, as before.
 
 **Threading has to be running.** It is an app on your Mac, not a server. If a scheduled moment
 passes while Threading is closed, nothing is sent: the message is marked as missed and waits for
@@ -1403,17 +1415,41 @@ can be removed there like any other scheduled send. Upgrading your plan is never
 any setting. Every step is written to the diagnostics journal (**Help ▸ Reveal Diagnostics
 Log**), so if a recovery ever stands down you can read exactly what it saw and why.
 
-You can turn it on for **one chat**, for **a whole checkout**, or for everything:
+**Continue on another login** is the other way to keep going, and it does not wait: Threading
+stops the agent, moves the conversation to one of your other logins for that agent, and queues the
+**continue** there. Two forms, and the difference is who chooses the login:
+
+- **Continue on the Best Login** ranks your other logins the same way the strip below does — by
+  how far each is behind its own burn — and takes the one with the most room.
+- **Continue as _(a named login)_** always uses that one. If it turns out to be spent too,
+  Threading stops and says so rather than quietly picking a third; the strip then offers whichever
+  login now ranks best, for you to press.
+
+Either way the target's usage is re-read from the provider first, and a login without room is
+refused rather than used. A conversation that has already moved between logins several times in
+the last hour stops moving by itself — a backstop against a fault turning this into login-hopping
+— and the session is flagged with the strip's offer instead. Upgrading your plan is never chosen,
+under any setting.
+
+Moving stops the agent, so a session whose pane you were not looking at ends up dormant with its
+**continue** waiting in the strip; it goes as soon as you open the session. Threading will not
+type into a terminal it cannot see, which is the same rule every scheduled send follows.
+
+You can set any of this for **one chat**, for **a whole checkout**, or for everything:
 
 | Where | Sets it for |
 |---|---|
-| A session's **Session Options** ▸ **Continue at Reset** — right-click the row, or use its `⋯`, or the pane header's Context button | that conversation |
-| A project row's **Continue at Reset** — right-click the row, or use its `⋯` | every chat in that checkout that has not answered for itself |
+| A session's **Session Options** ▸ **When the Limit Is Reached** — right-click the row, or use its `⋯`, or the pane header's Context button | that conversation |
+| A project row's **When the Limit Is Reached** — right-click the row, or use its `⋯` | every chat in that checkout that has not answered for itself |
 | **Settings ▸ Usage Windows ▸ Limit recovery** | everything that has not answered for itself |
+
+A chat's menu lists your logins by name, because a chat runs exactly one agent. A checkout and
+Settings speak for chats of several agents at once, so they offer **Continue on the Best Login**
+instead — the version that means "whichever of *that* chat's logins has room".
 
 The narrower setting wins, and a chat you have not touched keeps *following* its project and
 Settings — so arming a checkout later still reaches it. A chat inside an armed checkout can still
-opt out, and the checkbox always shows what will actually happen rather than only what that one
+opt out, and the tick always shows what will actually happen rather than only what that one
 record says.
 
 A row that has been set differently from the ones around it carries a small **slider mark** after
@@ -1459,9 +1495,11 @@ qualifies, that is a fresh offer for you to press.
 
 ✕ puts the offer away for this refusal. It comes back if the session is refused again.
 
-This needs no setting and does not run on its own. It is the one-press version of a recovery
-Threading will not do unattended: automatic account switching would spend a second login's quota
-with nobody watching, and your press is what makes the difference.
+This needs no setting, and it is the answer for a session that has *already* stopped: the strip is
+in front of you, and the button names the login, its usage and what pressing does. Arming
+**Continue on another login** above is the same move decided in advance — it runs with nobody
+watching, which is why it is something you switch on rather than something you discover, and why
+it has a backstop the press does not need. A press cannot become a loop; a fault can.
 
 Both surfaces offer it: a session running in Threading's own chat view shows the strip above its
 composer, and one running in the agent's terminal shows it under the terminal, where you would
@@ -2332,8 +2370,17 @@ axes, legend and VoiceOver summary. That is why an agent's chart matches the Usa
 instead of looking like whatever the model last saw on the web, and why reopening one in a
 different theme redraws it correctly rather than restoring old colours. Comparisons and
 breakdowns come as bars, rankings as horizontal bars with the names down the side, and
-progressions as a line. Hover any bar for its exact value; the **⋯** menu's **Copy Chart Data**
-hands you the numbers as a table you can paste into a spreadsheet.
+progressions as a line. Hover any bar for its exact value — or, when a ranking's names are longer
+than the space beside it (paths, test names), **hover the truncated name itself** and the chart
+states the whole entry and its value. The **⋯** menu's **Copy Chart Data** hands you the numbers
+as a table you can paste into a spreadsheet.
+
+**A chart takes the room its own shape needs.** A ranking is a row per entry, so in a tall panel
+it sits at the top with ground below it rather than stretching eight entries into eight bands of
+mostly gap — and a long ranking is shown at full length in the panel even though the same chart is
+capped inline, where an over-tall row would be something to scroll past. Charts that put the value
+on the vertical axis — columns, lines, areas — still use the whole panel, because there the extra
+height is more resolution rather than more gap.
 
 In a natively rendered conversation the chart also appears **inline, where the agent produced
 it**, and stays visible when the rest of that turn's work folds away — the picture is part of the
@@ -2466,9 +2513,20 @@ large checkout does not have to be built merely to open the pane.
 Chats running in the terminal are counted too, not only the ones Threading draws itself. Their work
 is read from the transcript the agent keeps, so it appears when the tab is opened — including for a
 chat that last ran days ago — and catches up as each turn ends. Only Claude and Codex keep a
-transcript Threading can read; a Grok or OpenCode session in the terminal still shows nothing.
-Either way, only work a tool named exactly is shown: files changed by a shell command are not
-attributed to it, which is what keeps the counts honest rather than guessed.
+transcript Threading can read.
+
+Under that, in every chat and for every agent, sits what the checkout itself saw. Threading already
+records a before and an end snapshot around each turn, so the files a turn changed are known even
+when no tool named them: a shell command's edit, a formatter, a generated file. Those appear as
+**changed** beside the read and edit counts, drawn in plain grey rather than in the accent the
+exact marks own, and they are never added to the edit total. The distinction is the point: an edit
+count is a tool saying which file it wrote, and a changed count is the repository noticing a
+difference. A file the turn's own tools already named stays an edit and is not counted twice.
+
+A chat nothing can be read from says so. A Grok or OpenCode session that has not yet taken a turn
+in a git checkout shows one sentence explaining why, instead of drawing the whole repository with
+zeros beside it: nothing observed and nothing observable look completely different now, which they
+did not before.
 
 Five kinds of content:
 
@@ -3439,6 +3497,13 @@ Dock, and enter full screen as usual. Switching back to System restores the nati
 as you left it. Custom themes can opt into every one of these frame and scrollbar vocabularies
 through the theme tools.
 
+**Threading's own theme draws its frame too, in one row rather than two.** The sidebar toggle
+and the back/forward pair sit in the title bar itself, on the same column the sidebar's name
+row below them starts at, with the window title centred and the window buttons at the far end.
+Those systems above keep their commands on a second row under the caption, because that is
+where each of them put application controls — and because a period title bar is too short to
+hold a toolbar-sized button at all. A custom theme can ask for either arrangement.
+
 **Classic Player supports classic Winamp `.wsz` skins for the window band.** In
 **Settings ▸ Themes ▸ App ▸ Classic skins**, choose **Import…**, or drop one or more `.wsz`
 files anywhere on the Themes page. Each becomes a custom theme and is selected immediately.
@@ -4020,6 +4085,19 @@ exactly what it proposes and why, and nothing happens until you approve. An agen
 propose paths that already appear in the listing, so it cannot use this to delete anything else,
 and it is told to propose rather than reach for `rm` itself.
 
+The sheet is named for the chat that asked, and the directories are grouped under the same
+headings this page uses — a checkout, or a tier of temporary caches — with the path segments they
+share folded into one line and a size beside each. A long proposal scrolls inside the sheet
+rather than hiding anything.
+
+**You are asked once, however many chats propose it.** The disk is one disk, so when it fills
+every session hits the same error in the same minute and reads the same listing. A chat proposing
+directories that are already on screen in another chat's sheet is answered by your decision there
+rather than opening a second one. Approve, and later proposals naming the same directories are
+told they are already gone and how much that freed. Decline, and they are told you said no and
+asked not to raise it again for the rest of the session — nothing is remembered past quitting,
+and a directory that has since been rebuilt is a fresh question you will be asked about again.
+
 **What is never offered.** Only directories that git ignores *and* that a known tool can rebuild
 — `target` beside a `Cargo.toml`, `node_modules` beside a `package.json`, and so on. Ignored
 files that are not build output are never touched, which matters more than it sounds: your
@@ -4182,7 +4260,7 @@ screen says so and leads with the offers further down the list instead.
 ### View
 | Action | Shortcut |
 |--------|----------|
-| Toggle Sidebar | Cmd+Ctrl+S |
+| Toggle Sidebar | Cmd+S |
 | Go Back / Go Forward (selection history) | Cmd+Ctrl+Left / Cmd+Ctrl+Right |
 | Previous Turn / Next Turn (in a conversation) | Cmd+Ctrl+Up / Cmd+Ctrl+Down |
 | Previous Step / Next Step (tool calls in a turn) | Cmd+Opt+Up / Cmd+Opt+Down |

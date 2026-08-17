@@ -356,6 +356,107 @@ final class SidebarRowRenderTests: XCTestCase {
 
     // MARK: - Trailing Edge
 
+    /// The row is the menu's visible source, not merely the few points under the pointer. Once a
+    /// trailing control opens a menu, moving into that menu must not crossfade the source away.
+    /// All three sidebar row kinds inherit the same presenter lifecycle rather than each menu
+    /// callback remembering to pin and unpin its own hover state.
+    func testAnOpenMenuCarriesEverySidebarRowsHoverActions() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: Fixture.width, height: 120))
+
+        let project = ProjectRowView(customizationLookup: { _ in .empty })
+        project.frame = NSRect(x: 0, y: 84, width: Fixture.width, height: Fixture.height)
+        project.configure(
+            with: Project(
+                name: "Threading",
+                folderURL: URL(fileURLWithPath: "/tmp/Threading")
+            )
+        )
+
+        let session = SessionRowView(customizationLookup: { _ in .empty })
+        session.frame = NSRect(x: 0, y: 48, width: Fixture.width, height: Fixture.height)
+        session.configure(
+            with: AgentSession(kind: .claude, title: "Keep the source visible"),
+            activity: .idle
+        )
+
+        let terminal = ProjectTerminalRowView()
+        terminal.frame = NSRect(x: 0, y: 12, width: Fixture.width, height: Fixture.height)
+        terminal.configure(
+            with: ProjectTerminal(currentDirectory: "/tmp/Threading", title: "zsh"),
+            running: true,
+            projectRoot: nil
+        )
+
+        for row in [project, session, terminal] {
+            root.addSubview(row)
+        }
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        root.layoutSubtreeIfNeeded()
+        defer { window.close() }
+
+        let projectActions = try XCTUnwrap(
+            project.descendant(identified: "sidebar.project.actions")
+        )
+        let sessionActions = try XCTUnwrap(
+            session.descendant(identified: "sidebar.session.hover-controls")
+        )
+        let terminalAction = try XCTUnwrap(
+            terminal.descendant(identified: "sidebar.terminal.actions")
+                as? ThemedIconButton
+        )
+        let fixtures: [(name: String, row: NSView, source: ThemedIconButton, actions: NSView)] = [
+            (
+                "project",
+                project,
+                try XCTUnwrap(projectActions.subviews.compactMap { $0 as? ThemedIconButton }.first),
+                projectActions
+            ),
+            (
+                "session",
+                session,
+                try XCTUnwrap(sessionActions.subviews.compactMap { $0 as? ThemedIconButton }.first),
+                sessionActions
+            ),
+            ("terminal", terminal, terminalAction, terminalAction)
+        ]
+
+        for fixture in fixtures {
+            let token = try XCTUnwrap(ThemedMenuPresenter.present(
+                ThemedMenuPresentation(
+                    entries: [.item(ThemedMenuItem(title: "Action"))],
+                    minimumWidth: 120
+                ),
+                from: fixture.source,
+                selectedEntryIndex: nil,
+                onChoose: { _, _ in },
+                onDismiss: {}
+            ))
+
+            // This is the crossing in the report: the pointer has left the row for the overlay.
+            fixture.row.mouseExited(with: try XCTUnwrap(Self.exitEvent()))
+
+            XCTAssertTrue(
+                fixture.source.isPresentingMenu,
+                "the \(fixture.name) source forgot the menu it opened"
+            )
+            XCTAssertEqual(
+                fixture.actions.alphaValue,
+                1,
+                "the \(fixture.name) row disappeared while its menu was open"
+            )
+
+            ThemedMenuPresenter.dismiss(token)
+            XCTAssertFalse(fixture.source.isPresentingMenu)
+        }
+    }
+
     /// Every trailing mark lands on one optical line, whatever kind of thing it is.
     ///
     /// A count is text, whose frame is its ink. A hover control is a click target with a glyph
@@ -830,6 +931,20 @@ final class SidebarRowRenderTests: XCTestCase {
     private static func enterEvent() -> NSEvent? {
         NSEvent.enterExitEvent(
             with: .mouseEntered,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            trackingNumber: 0,
+            userData: nil
+        )
+    }
+
+    private static func exitEvent() -> NSEvent? {
+        NSEvent.enterExitEvent(
+            with: .mouseExited,
             location: .zero,
             modifierFlags: [],
             timestamp: 0,

@@ -19,6 +19,10 @@ day; exact retries do not consume another slot.
 
 ## Local verification
 
+From the repository root, `./dev` is the normal one-command path: it starts this service, builds
+and opens the locally configured Mac app, and launches the iOS Simulator app. Use the service-only
+commands below when working on the Worker in isolation.
+
 ```sh
 npm ci
 npm run check
@@ -31,8 +35,10 @@ npm run dev
 persistent local D1, and binds local R2 and Durable Objects at `127.0.0.1:8787`. It contacts no
 Apple or Cloudflare service. Launch a Debug Mac app with
 `THREADING_CONTROL_PLANE_URL=http://127.0.0.1:8787` and
-`THREADING_CONTROL_PLANE_LOCAL_AUTH=1`; it signs into the loopback profile without an Apple sheet.
-The iOS Simulator can pair through that Mac. A physical phone requires an HTTPS staging service.
+`THREADING_CONTROL_PLANE_LOCAL_AUTH=1`; `THREADING_REPORT_INTAKE_URL` can also point its private
+report outbox at the local `/v1/reports` route in Debug builds. It signs into the loopback profile
+without an Apple sheet. The iOS Simulator can pair through that Mac. A physical phone requires an
+HTTPS staging service.
 
 The checked-in `wrangler.jsonc` is a non-deployable production template. Terraform/OpenTofu in
 [`infra/`](infra/) creates D1, private R2 plus expiry, report Queues/event notification, the zone

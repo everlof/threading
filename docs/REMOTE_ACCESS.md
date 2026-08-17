@@ -442,6 +442,12 @@ The Mac remains authoritative for session contents, permission evidence and actu
 decisions. No hosted store may become a public transcript store or an alternate way around a
 revoked membership.
 
+The Mac also selects the hosted-service origin. It includes that origin in the one-time owner
+pairing link, and iOS validates and stores it with that paired Mac. There is intentionally no
+app-wide iOS control-plane URL: different paired Macs may use the operated service, a local
+development Worker, or a self-hosted service. The report-intake URL is configured separately
+because an iOS user must be able to send a diagnostic report before pairing a Mac.
+
 This also gives a clean product boundary for an open-source app: direct/local and self-hosted
 remote access remains available, while an official paid iOS/hosted service can sell reliable
 rendezvous, account-backed invitations, push delivery and cross-network presence. Payment buys

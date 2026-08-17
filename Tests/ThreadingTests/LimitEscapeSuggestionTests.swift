@@ -234,6 +234,50 @@ final class LimitEscapeSuggestionTests: XCTestCase {
 
     // MARK: - The Store
 
+    /// A policy that pins a login moves the conversation there, not to the one the ranking put on
+    /// the strip — so the record is pointed at the login being moved to before the busy line is
+    /// drawn from it. Otherwise the strip reports a login change that is not happening, which is
+    /// the whole reason `busy` names its action instead of counting a Boolean.
+    func testAPolicysOwnLoginBecomesTheOneTheStripNames() throws {
+        let store = LimitEscapeSuggestionStore(center: NotificationCenter())
+        let sessionID = SessionID()
+        store.record(Fixture.suggestion(for: sessionID))
+
+        let pinned = Fixture.account("pinned")
+        store.retarget(to: pinned, name: "Vera Lund", reading: "5h 3%", for: sessionID)
+
+        let offer = try XCTUnwrap(store.offer(for: sessionID))
+        XCTAssertEqual(offer.accountID, pinned)
+        XCTAssertEqual(offer.accountName, "Vera Lund")
+        XCTAssertEqual(offer.reading, "5h 3%")
+        XCTAssertEqual(
+            offer.resetHint,
+            "9:40pm (Europe/Rome)",
+            "the refusal itself is unchanged — only the login being moved to is"
+        )
+        XCTAssertNil(
+            offer.decidingWindowName,
+            "the window that placed the *other* login was carried over"
+        )
+    }
+
+    /// A dismissal survives it: this is still the same refusal, and pointing it at another login
+    /// is not the user being asked again.
+    func testRetargetingKeepsADismissalAndIgnoresTheLoginItAlreadyNames() {
+        let store = LimitEscapeSuggestionStore(center: NotificationCenter())
+        let sessionID = SessionID()
+        store.record(Fixture.suggestion(for: sessionID))
+        store.dismiss(sessionID)
+
+        store.retarget(to: Fixture.account("pinned"), name: "Vera Lund", reading: nil, for: sessionID)
+        XCTAssertNil(store.offer(for: sessionID))
+
+        // Naming the login already on the record changes nothing, so an escape that agrees with
+        // the standing offer does not file a fresh one over it.
+        store.retarget(to: Fixture.account("pinned"), name: "Someone Else", reading: nil, for: sessionID)
+        XCTAssertEqual(store.suggestion(for: sessionID)?.accountName, "Vera Lund")
+    }
+
     func testAnOfferIsDrawnUntilItIsDismissed() {
         let store = LimitEscapeSuggestionStore(center: NotificationCenter())
         let sessionID = SessionID()

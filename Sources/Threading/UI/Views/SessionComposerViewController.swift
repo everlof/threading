@@ -119,7 +119,9 @@ final class SessionComposerViewController: NSViewController {
         importButton.translatesAutoresizingMaskIntoConstraints = false
         startButton.translatesAutoresizingMaskIntoConstraints = false
         scheduleButton.translatesAutoresizingMaskIntoConstraints = false
+        cancelEditButton.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(importButton)
+        row.addSubview(cancelEditButton)
         row.addSubview(scheduleButton)
         row.addSubview(startButton)
 
@@ -167,6 +169,17 @@ final class SessionComposerViewController: NSViewController {
                 constant: -Design.Spacing.small
             ),
 
+            // The import button's own geometry, restated for the control that takes its slot
+            // while an edit holds the box. The two are never visible together, so sharing the
+            // leading edge costs nothing and keeps the row's silhouette identical in both modes.
+            cancelEditButton.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            cancelEditButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            cancelEditButton.heightAnchor.constraint(equalTo: startButton.heightAnchor),
+            cancelEditButton.trailingAnchor.constraint(
+                lessThanOrEqualTo: scheduleButton.leadingAnchor,
+                constant: -Design.Spacing.medium
+            ),
+
             startButton.trailingAnchor.constraint(equalTo: row.trailingAnchor),
             startButton.topAnchor.constraint(equalTo: row.topAnchor),
             startButton.bottomAnchor.constraint(equalTo: row.bottomAnchor)
@@ -210,6 +223,38 @@ final class SessionComposerViewController: NSViewController {
 
     /// What is already waiting to start in this project.
     lazy var scheduledStrip = ScheduledMessageStripView()
+
+    /// The scheduled start currently opened for editing, while the composer is in that mode.
+    ///
+    /// Editing borrows the box; it does not spend the record. The schedule stays in the store,
+    /// still armed and still the authority, until `commitScheduledStartEdit` rewrites it in
+    /// place — which is what lets two rows be opened one after the other without either being
+    /// destroyed, the failure the old detach-and-remove gesture shipped as "tapping two removed
+    /// them both but the box only kept one".
+    var editingScheduledStartID: ScheduledMessageID?
+
+    /// What the box held before an edit borrowed it, put back when the edit ends.
+    ///
+    /// Only the attachments genuinely need this memory: the text is already in `DraftStore`,
+    /// whose writes pause while an edit holds the box, but pasted images are temporary files no
+    /// store drafts. Kept in memory because that is exactly the durability a plain unsaved
+    /// composer has today.
+    var scheduledEditDraftStash: (text: String, attachmentPaths: [String])?
+
+    /// The way out of an edit that keeps the schedule as it was. In the import button's slot,
+    /// because the two are never on offer at once and both read as "the other thing this
+    /// screen can do".
+    lazy var cancelEditButton: ThemedButton = {
+        let button = ThemedButton(
+            title: L10n.string("Cancel"),
+            target: self,
+            action: #selector(cancelEditTapped)
+        )
+        button.isHidden = true
+        button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        button.setAccessibilityIdentifier("composer.session-start.cancel-edit")
+        return button
+    }()
 
     /// Conversations found on disk for the current project, once discovery has finished.
     ///
@@ -603,6 +648,13 @@ final class SessionComposerViewController: NSViewController {
         // otherwise the end of it.
         promptView.onChange = { [weak self] text in
             guard let self, let projectID = self.projectID else { return }
+            // While an edit borrows the box, the text in it belongs to the scheduled record,
+            // not to the project's draft — writing it through would overwrite the half-typed
+            // brief the edit will hand back when it ends.
+            guard self.editingScheduledStartID == nil else {
+                self.refreshScheduleChip()
+                return
+            }
             DraftStore.shared.setDraft(text, for: projectID)
             // The chip's own menu is rebuilt on open, but whether it is *usable* changes with
             // every keystroke — an empty brief has nothing to schedule.
@@ -639,7 +691,9 @@ final class SessionComposerViewController: NSViewController {
     /// offers, or one row that cannot be chosen carrying the sentence. The tooltip still answers
     /// a pointer that pauses on it, for the reading that costs no press at all.
     func refreshScheduleChip() {
-        scheduleButton.toolTip = scheduleRefusalReason() ?? L10n.string("Start this session later")
+        scheduleButton.toolTip = editingScheduledStartID != nil
+            ? L10n.string("Change when it starts")
+            : scheduleRefusalReason() ?? L10n.string("Start this session later")
     }
 
     /// Keeps the outside primary action on the prompt's own submission answer.
@@ -803,6 +857,13 @@ final class SessionComposerViewController: NSViewController {
             refreshDerivedState()
             return
         }
+        // Leaving for another project ends an edit in progress. Committing rather than
+        // discarding, because the words typed into the borrowed box are the user's work; a
+        // commit the record cannot take (an emptied brief, a blocked store) falls back to
+        // cancelling, which leaves the schedule exactly as it was.
+        if editingScheduledStartID != nil, !commitScheduledStartEdit(reporting: false) {
+            cancelScheduledStartEdit()
+        }
         hasBeenShown = true
 
         // Words typed before a project was chosen are the user's work: they follow the
@@ -944,10 +1005,35 @@ final class SessionComposerViewController: NSViewController {
     }
 
     /// The offer appears once discovery has found something to offer. Only the button hides —
-    /// the row it is on carries the send, so it stands whatever discovery answers.
+    /// the row it is on carries the send, so it stands whatever discovery answers. While an
+    /// edit holds the box its slot belongs to Cancel, the way out of the edit.
     private func refreshImportOffer() {
-        importButton.isHidden = importable.isEmpty
+        importButton.isHidden = importable.isEmpty || editingScheduledStartID != nil
         importButton.title = ComposerDefaults.importTitle(count: importable.count)
+    }
+
+    /// Restates the action row for whether an edit is holding the box.
+    ///
+    /// The primary keeps its place and its `⌘↩`; what changes is what pressing it means, and
+    /// the title says so. Import yields its slot to Cancel because both are "the other thing
+    /// this screen can do" and only one of them ever applies.
+    func applyScheduledEditPresentation() {
+        let isEditing = editingScheduledStartID != nil
+        startButton.title = isEditing
+            ? L10n.string("Save changes")
+            : (selectedRole == .manager
+                ? L10n.string("Start manager")
+                : L10n.string("Start session"))
+        cancelEditButton.isHidden = !isEditing
+        scheduleButton.toolTip = isEditing
+            ? L10n.string("Change when it starts")
+            : scheduleRefusalReason() ?? L10n.string("Start this session later")
+        refreshImportOffer()
+        refreshScheduledStrip()
+    }
+
+    @objc private func cancelEditTapped() {
+        cancelScheduledStartEdit()
     }
 
     // MARK: - Chip State
@@ -1783,9 +1869,11 @@ final class SessionComposerViewController: NSViewController {
             : (selectedRole == .manager
                 ? L10n.string("Write the brief: what to run, on which accounts, when to stop")
                 : ComposerDefaults.promptPlaceholder)
-        startButton.title = selectedRole == .manager
-            ? L10n.string("Start manager")
-            : L10n.string("Start session")
+        if editingScheduledStartID == nil {
+            startButton.title = selectedRole == .manager
+                ? L10n.string("Start manager")
+                : L10n.string("Start session")
+        }
     }
 
     private func speedItems() -> [ThemedMenuEntry] {
@@ -1799,6 +1887,12 @@ final class SessionComposerViewController: NSViewController {
     // MARK: - Actions
 
     private func start(with prompt: String) {
+        // While an edit holds the box, the primary action is the edit's save — starting a
+        // fresh session with a borrowed brief would launch what the user was still rewriting.
+        guard editingScheduledStartID == nil else {
+            commitScheduledStartEdit()
+            return
+        }
         guard let projectID else { return }
 
         // Read before the start, because starting is what empties the strip. The paths are

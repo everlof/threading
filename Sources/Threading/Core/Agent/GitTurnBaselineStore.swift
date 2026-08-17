@@ -611,6 +611,15 @@ final class GitTurnBaselineStore {
             .sorted { $0.ordinal < $1.ordinal }
     }
 
+    /// Whether this session has any turn checkpoint at all.
+    ///
+    /// Separate from `checkpoints(forSessionID:)` because the Activity card asks it on every
+    /// refresh — once per tool call during a live turn — and that one sorts a copy of every
+    /// retained record to answer a question this settles on the first match.
+    func hasCheckpoints(forSessionID sessionID: SessionID) -> Bool {
+        archive.checkpoints.contains { $0.sessionID == sessionID && $0.status != .notAdmitted }
+    }
+
     func checkpoint(id: GitTurnCheckpointID) -> GitTurnCheckpoint? {
         archive.checkpoints.first { $0.id == id }
     }

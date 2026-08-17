@@ -102,6 +102,12 @@ extension SessionComposerViewController {
     // MARK: - Scheduling
 
     func scheduleStart(at date: Date, anchor: ScheduledMessage.Anchor) {
+        // While an edit holds the box, choosing a moment re-aims the record being edited
+        // rather than scheduling a second one beside it.
+        guard editingScheduledStartID == nil else {
+            commitScheduledStartEdit(.at(date, anchor), reporting: true)
+            return
+        }
         guard let projectID else { return }
         let brief = promptView.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !brief.isEmpty else { return }
@@ -124,6 +130,10 @@ extension SessionComposerViewController {
     }
 
     func scheduleStart(whenSessionFinishes watchedSessionID: SessionID) {
+        guard editingScheduledStartID == nil else {
+            commitScheduledStartEdit(.whenSessionFinishes(watchedSessionID), reporting: true)
+            return
+        }
         guard let projectID else { return }
         let brief = promptView.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !brief.isEmpty else { return }
@@ -252,6 +262,15 @@ extension SessionComposerViewController {
     /// caught. A view that has nothing to say leaves the room.
     func refreshScheduledStrip() {
         guard isViewLoaded else { return }
+
+        // The record an edit is holding can leave underneath it — its trigger fired, or it was
+        // cancelled from the sidebar or the reserved conversation's own surface. The box then
+        // holds the only copy of its words, so the edit ends by keeping them as the draft.
+        if let editingID = editingScheduledStartID, ScheduledMessageStore.shared[editingID] == nil {
+            endScheduledStartEdit(keepingBoxContents: true)
+            return
+        }
+
         let now = Date()
         let rows = projectID.map { projectID in
             ScheduledMessageStore.shared.sessionStarts(in: projectID).map { message in
@@ -263,7 +282,8 @@ extension SessionComposerViewController {
                         from: now,
                         watchedSessionTitle: watchedSessionTitle(for: message)
                     ),
-                    problem: ScheduledTiming.problem(for: message.state)
+                    problem: ScheduledTiming.problem(for: message.state),
+                    isEditing: message.id == editingScheduledStartID
                 )
             }
         } ?? []
@@ -301,22 +321,13 @@ extension SessionComposerViewController {
             self?.refreshScheduledStrip()
         }
 
-        // Editing puts the brief and its configuration back where they came from, so a change of
-        // mind costs a click rather than retyping the paragraph.
+        // Editing borrows the box; it never spends the record. The first version detached the
+        // pictures, removed the record and reserved session, and poured the text into the box —
+        // so tapping a row silently unscheduled it, and tapping a second row destroyed both
+        // while the box kept only one. The record now stays in the store, still armed, until
+        // Save rewrites it in place.
         scheduledStrip.onEdit = { [weak self] id in
-            guard let self,
-                  let message = ScheduledMessageStore.shared[id],
-                  case .newSession(let plan) = message.target else { return }
-
-            // Detached before the removal, and in that order: `remove` deletes the pictures, so
-            // taking them back has to happen while the record still owns them.
-            let images = ScheduledMessageStore.shared.attachments.detach(message)
-            self.discardScheduledStart(message)
-            self.promptView.stringValue = message.text
-            self.promptView.attachFiles(at: images)
-            self.adopt(plan)
-            self.view.window?.makeFirstResponder(self.promptView)
-            self.refreshScheduledStrip()
+            self?.beginEditingScheduledStart(id)
         }
 
         scheduledStrip.onSendNow = { [weak self] id in
@@ -332,5 +343,232 @@ extension SessionComposerViewController {
         guard case .newSession(let plan) = message.target,
               let sessionID = plan.reservedSessionID else { return }
         _ = ProjectStore.shared.removeSession(id: sessionID)
+    }
+
+    // MARK: - Editing A Scheduled Start
+
+    /// Opens a waiting record in the composer without spending it.
+    ///
+    /// The record stays in the store, still armed and still the authority — a trigger reaching
+    /// its moment mid-edit fires the message as it was written, which is what "the schedule
+    /// remains the authority" has meant since reservation. What the composer receives are
+    /// loans: the words into the box, *copies* of the pictures (`ScheduledAttachmentStore
+    /// .copies(of:)`), and the frozen plan into the chips. Save rewrites the record in place;
+    /// Cancel hands the box back untouched.
+    ///
+    /// Opening a second row while one is already open saves the first — the words typed into
+    /// the borrowed box are the user's work, and this is what makes tapping around the strip
+    /// lossless where the old detach gesture destroyed a record per tap.
+    func beginEditingScheduledStart(_ id: ScheduledMessageID) {
+        guard let message = ScheduledMessageStore.shared[id],
+              case .newSession(let plan) = message.target else { return }
+        if editingScheduledStartID == id {
+            view.window?.makeFirstResponder(promptView)
+            return
+        }
+        if editingScheduledStartID != nil {
+            guard commitScheduledStartEdit() else { return }
+        }
+
+        // What the box held before the loan, put back when the edit ends. The text is already
+        // durable in `DraftStore` (whose writes pause during the edit); the attachment paths
+        // have exactly the composer's own in-memory durability.
+        if editingScheduledStartID == nil {
+            scheduledEditDraftStash = (
+                text: promptView.stringValue,
+                attachmentPaths: promptView.attachmentPaths
+            )
+        }
+
+        promptView.clearAttachments()
+        promptView.stringValue = message.text
+        promptView.attachFiles(at: ScheduledMessageStore.shared.attachments.copies(of: message))
+        adopt(plan)
+        editingScheduledStartID = id
+        applyScheduledEditPresentation()
+        view.window?.makeFirstResponder(promptView)
+    }
+
+    /// The moment an edited record keeps or takes on the way back into the store.
+    enum EditedMoment {
+        /// Save: the content changed, the trigger did not.
+        case unchanged
+        case at(Date, ScheduledMessage.Anchor)
+        case whenSessionFinishes(SessionID)
+    }
+
+    /// Rewrites the record being edited from what the composer holds now.
+    ///
+    /// In-place and atomic where it matters: custody of the pictures is staged under a fresh id
+    /// first (`take`, so every ceiling and refusal applies), the record is rewritten in one
+    /// verified store commit, and only then are the staged bytes adopted and the old ones
+    /// released — a refusal at any step leaves the schedule exactly as it was, edit still open.
+    ///
+    /// The reservation survives an edit that changed only the words or the moment; its sidebar
+    /// row keeps its identity and takes the new title. A changed *configuration* is honestly a
+    /// different conversation, so it is re-reserved under a fresh session id and the old empty
+    /// row leaves — with the record rewritten in between, so `forget(sessionID:)` never sees a
+    /// record naming the row being removed.
+    @discardableResult
+    func commitScheduledStartEdit(
+        _ moment: EditedMoment = .unchanged,
+        reporting: Bool = true
+    ) -> Bool {
+        guard let editingID = editingScheduledStartID else { return false }
+        guard let original = ScheduledMessageStore.shared[editingID],
+              case .newSession(let originalPlan) = original.target else {
+            // The record left while the box held it — fired, or removed elsewhere. The box now
+            // holds the only copy of its words, so the edit ends by keeping them.
+            endScheduledStartEdit(keepingBoxContents: true)
+            return false
+        }
+        guard let projectID else { return false }
+
+        if let reason = scheduleRefusalReason() {
+            if reporting { reportScheduleFailure(reason) }
+            return false
+        }
+        let brief = promptView.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let stagingID = ScheduledMessageID()
+        guard let attachments = ScheduledMessageStore.shared.attachments.take(
+            promptView.attachmentPaths,
+            for: stagingID
+        ) else {
+            if reporting {
+                reportScheduleFailure(L10n.string(
+                    "The attached images could not be kept, so this was not scheduled."
+                ))
+            }
+            return false
+        }
+
+        let keptPlan = frozenPlan(
+            in: projectID,
+            reserving: originalPlan.reservedSessionID ?? SessionID()
+        )
+        let configurationChanged = keptPlan != originalPlan
+        let plan = configurationChanged ? frozenPlan(in: projectID, reserving: SessionID()) : originalPlan
+
+        var updated: ScheduledMessage
+        switch moment {
+        case .unchanged:
+            updated = original
+            updated.text = brief
+            updated.attachments = attachments
+            updated.target = .newSession(plan)
+        case .at(let date, let anchor):
+            updated = ScheduledMessage(
+                id: original.id,
+                createdAt: original.createdAt,
+                dueAt: date,
+                target: .newSession(plan),
+                text: brief,
+                attachments: attachments,
+                anchor: anchor
+            )
+        case .whenSessionFinishes(let watched):
+            updated = ScheduledMessage(
+                id: original.id,
+                createdAt: original.createdAt,
+                whenSessionFinishes: watched,
+                target: .newSession(plan),
+                text: brief,
+                attachments: attachments
+            )
+        }
+
+        if configurationChanged {
+            // Reserved directly rather than through the delegate's reservation, whose contract
+            // is the *first* schedule: it selects the reserved row, and a commit must not
+            // navigate away from the composer mid-edit. The sidebar reloads itself from
+            // `ProjectsDidChange`.
+            guard ScheduledSessionReservation.reserve(updated, in: .shared) != nil else {
+                ScheduledMessageStore.shared.attachments.release(stagingID)
+                if reporting {
+                    reportScheduleFailure(L10n.string("Its session could not be created."))
+                }
+                return false
+            }
+        }
+
+        guard ScheduledMessageStore.shared.replace(editingID, with: updated) else {
+            ScheduledMessageStore.shared.attachments.release(stagingID)
+            if configurationChanged, let newSessionID = plan.reservedSessionID {
+                // The record still names the old reservation, so removing this one is safe.
+                _ = ProjectStore.shared.removeSession(id: newSessionID)
+            }
+            if reporting {
+                reportScheduleFailure(ScheduledRefusalText.sentence(for: .writesBlocked))
+            }
+            return false
+        }
+        ScheduledMessageStore.shared.attachments.adopt(stagingID, as: editingID)
+
+        if configurationChanged {
+            if let oldSessionID = originalPlan.reservedSessionID {
+                // After the replace on purpose: the record now names the new reservation, so
+                // `forget(sessionID:)` passes it by.
+                _ = ProjectStore.shared.removeSession(id: oldSessionID)
+            }
+        } else if let sessionID = plan.reservedSessionID {
+            // The kept row follows the rewritten brief; a name the user or an agent gave the
+            // row keeps its authority (`applyReservedPromptTitle` refuses to touch either).
+            ProjectStore.shared.applyReservedPromptTitle(brief, forSessionID: sessionID)
+        }
+
+        if case .whenSessionFinishes(let watched) = moment {
+            // The watched turn may have ended while the picker was open; re-read the settled
+            // snapshot exactly once, as the first schedule does.
+            ScheduledMessageScheduler.shared.evaluateCompletion(
+                of: watched,
+                acceptsSettledSnapshot: true
+            )
+        }
+
+        EventLog.shared.record(.composer, "Scheduled start edited", [
+            "message": editingID.uuidString,
+            "project": projectID.uuidString,
+            "configurationChanged": configurationChanged ? "yes" : "no",
+            "prompt": brief
+        ])
+        endScheduledStartEdit(keepingBoxContents: false)
+        return true
+    }
+
+    /// Ends the edit with the record exactly as it was.
+    func cancelScheduledStartEdit() {
+        guard editingScheduledStartID != nil else { return }
+        endScheduledStartEdit(keepingBoxContents: false)
+    }
+
+    /// Hands the box back and leaves the mode.
+    ///
+    /// `keepingBoxContents` is for the one exit where the box holds the only copy of the words —
+    /// the record left the store mid-edit — and then what it holds becomes the project's draft.
+    /// Every other exit restores what the box held before the edit borrowed it.
+    private func endScheduledStartEdit(keepingBoxContents: Bool) {
+        let stash = scheduledEditDraftStash
+        scheduledEditDraftStash = nil
+        editingScheduledStartID = nil
+
+        if keepingBoxContents {
+            if let projectID {
+                DraftStore.shared.setDraft(promptView.stringValue, for: projectID)
+            }
+        } else {
+            promptView.clearAttachments()
+            promptView.stringValue = stash?.text ?? ""
+            let survivingPaths = (stash?.attachmentPaths ?? [])
+                .filter { FileManager.default.fileExists(atPath: $0) }
+            if !survivingPaths.isEmpty {
+                promptView.attachFiles(at: survivingPaths)
+            }
+            if let projectID {
+                DraftStore.shared.setDraft(promptView.stringValue, for: projectID)
+            }
+        }
+
+        applyScheduledEditPresentation()
     }
 }

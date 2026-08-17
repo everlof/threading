@@ -82,6 +82,17 @@ final class AgentWorkTraceStore {
             operation: String,
             date: Date
         )
+        case observed(
+            sessionID: SessionID,
+            sessionTitle: String,
+            agentLabel: String,
+            checkpointOrdinal: Int,
+            paths: [String],
+            claimedPaths: Set<String>?,
+            turnStart: Date,
+            turnEnd: Date,
+            rootPath: String
+        )
         case seed(sessionID: SessionID, trace: AgentSessionWorkTrace)
         case hydrate(
             sessionID: SessionID,
@@ -280,6 +291,61 @@ final class AgentWorkTraceStore {
             transcript: url,
             rootPath: rootPath
         ), projectID: projectID)
+    }
+
+    /// Folds the files one completed turn changed into the session's trace, as observed changes.
+    ///
+    /// The neutral floor: `paths` came from the turn's own tree pair, so the set is complete and
+    /// unattributed, which is the opposite shape of everything else this store records. Two rules
+    /// keep it from overstating itself, and both live in the worker beside the trace: a path the
+    /// turn's edit tools *claimed* is already exact and is left alone, and so is one this session
+    /// exactly edited inside the turn's own window, which is how a transcript-fed session avoids
+    /// counting its own edits a second time as anonymous deltas.
+    ///
+    /// `checkpointOrdinal` is the resume point. Checkpoints are folded in ascending order and a
+    /// tree pair is immutable, so re-reading one would count every path in it again.
+    func record(
+        observedChanges paths: [String],
+        checkpointOrdinal: Int,
+        turnStart: Date,
+        turnEnd: Date,
+        claimedPaths: Set<String>?,
+        projectID: ProjectID,
+        session: AgentSession,
+        rootPath: String
+    ) {
+        guard !removedProjects.contains(projectID), !removedSessions.contains(session.id) else {
+            return
+        }
+        enqueue(.observed(
+            sessionID: session.id,
+            sessionTitle: session.displayTitle,
+            agentLabel: session.kind.displayName,
+            checkpointOrdinal: checkpointOrdinal,
+            paths: paths,
+            claimedPaths: claimedPaths,
+            turnStart: turnStart,
+            turnEnd: turnEnd,
+            rootPath: rootPath
+        ), projectID: projectID)
+    }
+
+    /// How far the git-observed floor has been folded in for this session, by checkpoint ordinal.
+    /// Nil means no checkpoint has been read yet. Answered from the worker's own copy, so the
+    /// caller never reasons about a resume point the queue is halfway through moving.
+    func observedCheckpointOrdinal(
+        sessionID: SessionID,
+        projectID: ProjectID,
+        completion: @escaping @MainActor @Sendable (Int?) -> Void
+    ) {
+        guard !removedProjects.contains(projectID), !removedSessions.contains(sessionID) else {
+            completion(nil)
+            return
+        }
+        prepareProject(projectID)
+        worker.observedCheckpointOrdinal(
+            sessionID: sessionID, projectID: projectID, completion: completion
+        )
     }
 
     /// Seeds a conversation that predates the cache from its bounded transcript replay. It is
@@ -616,6 +682,16 @@ struct AgentDirectoryWork: Sendable {
         if isFirstTouch { touchedFileCount += 1 }
         contributors.insert(contributor)
     }
+
+    mutating func recordObservedChange(
+        at date: Date,
+        isFirstTouch: Bool,
+        contributor: SessionID
+    ) {
+        work.recordObservedChange(at: date)
+        if isFirstTouch { touchedFileCount += 1 }
+        contributors.insert(contributor)
+    }
 }
 
 /// A serial owner for filesystem and total-content work. Keeping it outside the main-actor store
@@ -684,6 +760,18 @@ private final class AgentWorkWorker: @unchecked Sendable {
         queue.async { [self] in
             let revision = memory(for: projectID).revision
             Task { @MainActor in completion(revision) }
+        }
+    }
+
+    func observedCheckpointOrdinal(
+        sessionID: SessionID,
+        projectID: ProjectID,
+        completion: @escaping @MainActor @Sendable (Int?) -> Void
+    ) {
+        queue.async { [self] in
+            let ordinal = memory(for: projectID)
+                .file.sessions[sessionID]?.observedCheckpointOrdinal
+            Task { @MainActor in completion(ordinal) }
         }
     }
 
@@ -1011,6 +1099,64 @@ private final class AgentWorkWorker: @unchecked Sendable {
             // One rebuild for the whole pass rather than a change per call: a turn's calls land
             // together, and the bounded projection is cheaper once than N incremental patches of
             // the same presentation.
+            return recorded ? .rebuilt(sessionID: sessionID) : nil
+
+        case .observed(
+            let sessionID, let title, let agent, let ordinal, let paths,
+            let claimedPaths, let turnStart, let turnEnd, let rootPath
+        ):
+            var trace = memory.file.sessions[sessionID] ?? AgentSessionWorkTrace()
+
+            // Ascending and once only. A checkpoint's trees are immutable, so a second pass over
+            // the same turn would add every path in it again — the floor's equivalent of
+            // re-counting a transcript from the top.
+            if let consumed = trace.observedCheckpointOrdinal, ordinal <= consumed { return nil }
+            trace.sessionTitle = title
+            trace.agentLabel = agent
+            trace.observedCheckpointOrdinal = ordinal
+            memory.file.sessions[sessionID] = trace
+            // Bumped even when the turn changed nothing, so the resume point is saved: losing it
+            // means re-reading, and re-counting, every checkpoint before it after a relaunch.
+            memory.revision += 1
+
+            var recorded = false
+            for suppliedPath in paths {
+                guard let path = AgentWorkPath.relative(suppliedPath, root: rootPath) else {
+                    continue
+                }
+                // A path this turn's edit tools named is already exact; saying it again as an
+                // anonymous delta would double a file the panel can attribute properly.
+                if claimedPaths?.contains(path) == true { continue }
+                let existing = memory.file.sessions[sessionID]?.files[path]
+                if existing?.wasEdited(between: turnStart, and: turnEnd) == true { continue }
+
+                var session = memory.file.sessions[sessionID] ?? AgentSessionWorkTrace()
+                let firstSession = session.files[path]?.isTouched != true
+                session.files[path, default: AgentFileWork()].recordObservedChange(at: turnEnd)
+                session.lastActivity = max(session.lastActivity ?? turnEnd, turnEnd)
+                memory.file.sessions[sessionID] = session
+
+                let firstProject = memory.aggregate.files[path]?.work.isTouched != true
+                memory.aggregate.recordObservedChange(
+                    path: path, sessionID: sessionID, at: turnEnd
+                )
+                for directory in AgentWorkPath.directoryAncestors(of: path) {
+                    memory.sessionDirectories[sessionID, default: [:]][
+                        directory, default: AgentDirectoryWork()
+                    ]
+                        .recordObservedChange(
+                            at: turnEnd, isFirstTouch: firstSession, contributor: sessionID
+                        )
+                    memory.projectDirectories[directory, default: AgentDirectoryWork()]
+                        .recordObservedChange(
+                            at: turnEnd, isFirstTouch: firstProject, contributor: sessionID
+                        )
+                }
+                recorded = true
+            }
+
+            // One projection rebuild for the whole turn rather than one per path: a turn's
+            // changed files land together, and the bounded projection is cheaper once.
             return recorded ? .rebuilt(sessionID: sessionID) : nil
 
         case .seed(let sessionID, let seed):

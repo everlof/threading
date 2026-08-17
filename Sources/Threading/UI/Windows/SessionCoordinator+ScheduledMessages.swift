@@ -38,6 +38,19 @@ extension SessionCoordinator {
         performScheduledSend(id)
     }
 
+    /// Opens a waiting scheduled start in its project's composer, from the reserved
+    /// conversation's own surface or its sidebar row.
+    ///
+    /// The composer owns the editing contract (`beginEditingScheduledStart`): the record stays
+    /// in the store, still armed, while the box holds a loan of its words, pictures and plan.
+    func editScheduledMessage(_ id: ScheduledMessageID) {
+        guard let message = ScheduledMessageStore.shared[id],
+              case .newSession(let plan) = message.target else { return }
+        sidebar.select(projectID: plan.projectID)
+        container.showComposer(projectID: plan.projectID)
+        container.composerViewController.beginEditingScheduledStart(id)
+    }
+
     /// Cancels a scheduled start and removes the empty conversation reserved to represent it.
     func cancelScheduledMessage(_ id: ScheduledMessageID) {
         guard let message = ScheduledMessageStore.shared[id],

@@ -733,7 +733,7 @@ enum AgentLauncher {
         // group switched off there is nothing to register — and an empty `enabled_tools` list is
         // ambiguous to Codex (it can read as "all"), so the server is skipped outright rather than
         // handed an empty allowlist.
-        let enabledTools = MCPToolCatalog.enabledToolNames
+        let enabledTools = MCPToolCatalog.toolNames(for: session.id)
         guard !enabledTools.isEmpty else { return }
 
         switch session.kind {
@@ -968,6 +968,22 @@ enum AgentLauncher {
             // No prompt on resume: the conversation already has its opening.
             command.append(flag: "--resume", value: existingID.rawValue)
             return (command, .resumable(existingID))
+        }
+
+        // A session that has run before and still has no transcript is worth one line, because
+        // the fallthrough below is about to relaunch with `--session-id` naming an identifier
+        // Claude may already hold — which it refuses, exiting 1 within a second. That is what a
+        // Resume button doing nothing looks like from outside, and the wrong-slug bug that
+        // caused it was invisible for exactly as long as this path stayed silent.
+        if session.hasLaunched, let existingID = session.resumeState.transcriptID {
+            ThreadingLogger.agent.warning(
+                """
+                Session \(session.id.uuidString, privacy: .public) has run before but no \
+                transcript for \(existingID.rawValue, privacy: .public) was found under \
+                \(ClaudeTranscript.projectSlug(for: project), privacy: .public); \
+                launching fresh
+                """
+            )
         }
 
         let mintedID = session.resumeState.transcriptID

@@ -141,6 +141,65 @@ final class GitTurnCheckpointTests: XCTestCase {
         XCTAssertEqual(try read("ignored"), "never checkpoint this\n")
     }
 
+    /// The neutral floor's whole input: every path the turn changed, including the ones no tool
+    /// could have named. A rename is two of them, because both names are files the turn touched.
+    func testCheckpointChangedPathsNamesEveryFileTheTurnTouchedIncludingUnnamedOnes() throws {
+        try write("moved\n", to: "renamed-from.txt")
+        try git("add", "renamed-from.txt")
+        try git("commit", "--quiet", "--message", "fixture")
+
+        let session = SessionID()
+        let store = makeStore()
+        _ = try prepare(store, session: session)
+
+        // A shell edit, a new file and a rename: none of these name themselves to any tool.
+        try write("shell wrote this\n", to: "tracked.txt")
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("nested"), withIntermediateDirectories: true
+        )
+        try write("generated\n", to: "nested/built.txt")
+        try git("mv", "renamed-from.txt", "renamed-to.txt")
+
+        let completed = try finish(store, session: session)
+        XCTAssertEqual(
+            try changedPaths(completed, in: root).sorted(),
+            ["nested/built.txt", "renamed-from.txt", "renamed-to.txt", "tracked.txt"]
+        )
+    }
+
+    /// The common turn: a question answered, nothing written. It must cost no process and say
+    /// nothing, or every quiet turn would light the panel.
+    func testACheckpointThatChangedNothingNamesNothing() throws {
+        let session = SessionID()
+        let store = makeStore()
+        _ = try prepare(store, session: session)
+        let completed = try finish(store, session: session)
+
+        XCTAssertEqual(completed.beforeTreeHash, completed.afterTreeHash)
+        XCTAssertEqual(try changedPaths(completed, in: root), [])
+    }
+
+    /// Paths come back relative to the directory they were asked from, and changes outside it are
+    /// not mentioned. The observed floor writes into a trace whose paths are relative to the
+    /// session's execution folder, which is not always the repository root.
+    func testChangedPathsAreRelativeToTheDirectoryTheyWereAskedFrom() throws {
+        let nested = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try write("base\n", to: "workspace/inside.txt")
+        try git("add", "workspace/inside.txt")
+        try git("commit", "--quiet", "--message", "nested fixture")
+
+        let session = SessionID()
+        let store = makeStore()
+        _ = try prepare(store, session: session)
+        try write("changed inside\n", to: "workspace/inside.txt")
+        try write("changed outside\n", to: "tracked.txt")
+        let completed = try finish(store, session: session)
+
+        XCTAssertEqual(try changedPaths(completed, in: root).sorted(), ["tracked.txt", "workspace/inside.txt"])
+        XCTAssertEqual(try changedPaths(completed, in: nested), ["inside.txt"])
+    }
+
     func testUserEditsBetweenTurnsBelongToNeitherAdjacentAgentTurn() throws {
         let session = SessionID()
         let store = makeStore()
@@ -943,6 +1002,19 @@ final class GitTurnCheckpointTests: XCTestCase {
         }
         wait(for: [captured], timeout: 20)
         return try XCTUnwrap(checkpoint)
+    }
+
+    private func changedPaths(
+        _ checkpoint: GitTurnCheckpoint,
+        in checkout: URL
+    ) throws -> [String] {
+        let result: Result<[String], GitFailure> = try perform { completion in
+            GitReviewReader.checkpointChangedPaths(checkpoint, in: checkout, completion: completion)
+        }
+        switch result {
+        case .success(let paths): return paths
+        case .failure(let failure): throw failure
+        }
     }
 
     private func rawDiff(_ checkpoint: GitTurnCheckpoint, in checkout: URL) throws -> String {

@@ -799,18 +799,26 @@ final class FileTreeRowView: NSView {
 
         let reads = item.work.readCount
         let edits = item.work.editCount
-        let compact = item.isDirectory
+        let observed = item.work.observedChanges
+        var compact = item.isDirectory
             ? L10n.format("%d files · R %d · E %d", item.touchedFileCount, reads, edits)
             : L10n.format("R %d · E %d", reads, edits)
-        activityLabel.stringValue = compact
-        activityLabel.textColor = edits > 0 ? Design.Text.secondary : Design.Text.tertiary
-        activityLabel.isHidden = false
-
-        let spoken = item.isDirectory
+        var spoken = item.isDirectory
             ? L10n.format(
                 "%d files, %d reads, %d edits", item.touchedFileCount, reads, edits
             )
             : L10n.format("%d reads, %d edits", reads, edits)
+
+        // Appended rather than folded into the edit total: a turn's tree pair shows that a file
+        // changed, which is a different fact from a tool saying it wrote one, and the row is the
+        // one place a person reads the two numbers side by side.
+        if observed > 0 {
+            compact += L10n.format(" · C %d", observed)
+            spoken += ", " + L10n.format("%d observed changes", observed)
+        }
+        activityLabel.stringValue = compact
+        activityLabel.textColor = edits > 0 ? Design.Text.secondary : Design.Text.tertiary
+        activityLabel.isHidden = false
         activityLabel.setAccessibilityLabel(spoken)
         setAccessibilityLabel(node.name + ", " + spoken)
     }

@@ -442,7 +442,356 @@ final class AgentWorkHydrationTests: XCTestCase {
         XCTAssertEqual(throttle.admit(other, now: start.addingTimeInterval(5)), .now)
     }
 
+    // MARK: - The git-observed floor
+
+    /// The floor's whole point: a file a turn changed that no tool ever named. It is counted, but
+    /// never as a read or an edit — the tree pair knows the file differs and nothing more.
+    @MainActor
+    func testAnObservedChangeIsCountedApartFromReadsAndEdits() async throws {
+        let session = AgentSession(kind: .grok, title: "Terminal work")
+        let projectID = ProjectID()
+        let store = AgentWorkTraceStore(directory: directory)
+        let target = AgentWorkTarget.session(
+            projectID: projectID, sessionID: session.id, rootPath: repositoryRoot, detailed: false
+        )
+
+        _ = store.presentation(for: target)
+        store.record(
+            observedChanges: ["CLAUDE.md", "USER_GUIDE.md"],
+            checkpointOrdinal: 1,
+            turnStart: turnStart,
+            turnEnd: turnEnd,
+            claimedPaths: nil,
+            projectID: projectID,
+            session: session,
+            rootPath: repositoryRoot
+        )
+
+        let presentation = try await eventually {
+            let presentation = store.presentation(for: target)
+            return presentation?.observedChangeCount == 2 ? presentation : nil
+        }
+        XCTAssertEqual(presentation.touchedFileCount, 2)
+        XCTAssertEqual(presentation.bins.reduce(0) { $0 + $1.editCount }, 0, "a delta is not an edit")
+        XCTAssertEqual(presentation.bins.reduce(0) { $0 + $1.readCount }, 0, "a delta is not a read")
+        XCTAssertEqual(presentation.totalActionCount, 0, "a delta is not a tool call")
+    }
+
+    /// A checkpoint's trees are immutable, so a second pass over the same turn would add every
+    /// path in it again — the floor's version of re-counting a transcript from the top.
+    @MainActor
+    func testTheSameCheckpointIsNeverFoldedInTwice() async throws {
+        let session = AgentSession(kind: .grok, title: "Terminal work")
+        let projectID = ProjectID()
+        let store = AgentWorkTraceStore(directory: directory)
+        let target = AgentWorkTarget.session(
+            projectID: projectID, sessionID: session.id, rootPath: repositoryRoot, detailed: false
+        )
+        _ = store.presentation(for: target)
+
+        for _ in 0..<3 {
+            store.record(
+                observedChanges: ["CLAUDE.md"],
+                checkpointOrdinal: 1,
+                turnStart: turnStart,
+                turnEnd: turnEnd,
+                claimedPaths: nil,
+                projectID: projectID,
+                session: session,
+                rootPath: repositoryRoot
+            )
+        }
+        let first = try await eventually {
+            let presentation = store.presentation(for: target)
+            return presentation?.observedChangeCount == 1 ? presentation : nil
+        }
+        XCTAssertEqual(first.touchedFileCount, 1)
+
+        // The next turn still lands: the guard is "this ordinal or older", not "any ordinal".
+        store.record(
+            observedChanges: ["CLAUDE.md"],
+            checkpointOrdinal: 2,
+            turnStart: turnStart,
+            turnEnd: turnEnd,
+            claimedPaths: nil,
+            projectID: projectID,
+            session: session,
+            rootPath: repositoryRoot
+        )
+        let second = try await eventually {
+            let presentation = store.presentation(for: target)
+            return presentation?.observedChangeCount == 2 ? presentation : nil
+        }
+        XCTAssertEqual(second.touchedFileCount, 1, "the same file changed twice is one file")
+    }
+
+    /// A path the turn's own edit tools named is already exactly attributed. Recording it again
+    /// as an anonymous delta would double a file the panel can describe properly.
+    @MainActor
+    func testAPathTheTurnClaimedIsLeftToItsExactSignal() async throws {
+        let session = AgentSession(kind: .claude, title: "Terminal work")
+        let projectID = ProjectID()
+        let store = AgentWorkTraceStore(directory: directory)
+        let target = AgentWorkTarget.session(
+            projectID: projectID, sessionID: session.id, rootPath: repositoryRoot, detailed: false
+        )
+        _ = store.presentation(for: target)
+
+        store.record(
+            observedChanges: ["CLAUDE.md", "USER_GUIDE.md"],
+            checkpointOrdinal: 1,
+            turnStart: turnStart,
+            turnEnd: turnEnd,
+            claimedPaths: ["CLAUDE.md"],
+            projectID: projectID,
+            session: session,
+            rootPath: repositoryRoot
+        )
+
+        let presentation = try await eventually {
+            let presentation = store.presentation(for: target)
+            return presentation?.observedChangeCount == 1 ? presentation : nil
+        }
+        XCTAssertEqual(presentation.touchedFileCount, 1, "the claimed path was recorded twice")
+    }
+
+    /// The same rule for a session whose claims were never tracked: a transcript-fed terminal
+    /// chat records its edits exactly, and the delta for that same turn must not say them again.
+    /// The window is what tells this turn's exact edit from one in a different turn.
+    @MainActor
+    func testAnExactEditInsideTheTurnsWindowIsNotSaidTwice() async throws {
+        let session = AgentSession(kind: .claude, title: "Terminal work")
+        let projectID = ProjectID()
+        let store = AgentWorkTraceStore(directory: directory)
+        let target = AgentWorkTarget.session(
+            projectID: projectID, sessionID: session.id, rootPath: repositoryRoot, detailed: false
+        )
+        _ = store.presentation(for: target)
+
+        // One edit inside this turn, one before it began.
+        store.record(
+            streamEvent: edit(of: repositoryRoot + "/CLAUDE.md"),
+            projectID: projectID,
+            session: session,
+            rootPath: repositoryRoot,
+            at: turnStart.addingTimeInterval(1)
+        )
+        store.record(
+            streamEvent: edit(of: repositoryRoot + "/USER_GUIDE.md", callID: "older"),
+            projectID: projectID,
+            session: session,
+            rootPath: repositoryRoot,
+            at: turnStart.addingTimeInterval(-600)
+        )
+        _ = try await eventually {
+            let presentation = store.presentation(for: target)
+            return presentation?.bins.reduce(0) { $0 + $1.editCount } == 2 ? presentation : nil
+        }
+
+        store.record(
+            observedChanges: ["CLAUDE.md", "USER_GUIDE.md"],
+            checkpointOrdinal: 1,
+            turnStart: turnStart,
+            turnEnd: turnEnd,
+            claimedPaths: nil,
+            projectID: projectID,
+            session: session,
+            rootPath: repositoryRoot
+        )
+
+        let presentation = try await eventually {
+            let presentation = store.presentation(for: target)
+            return presentation?.observedChangeCount == 1 ? presentation : nil
+        }
+        XCTAssertEqual(
+            presentation.bins.reduce(0) { $0 + $1.editCount }, 2,
+            "the exact edits are untouched by the floor"
+        )
+        XCTAssertEqual(presentation.touchedFileCount, 2)
+    }
+
+    /// The resume point is persisted for the same reason the transcript's offset is: a relaunch
+    /// that re-reads every retained checkpoint would count every path in all of them again.
+    @MainActor
+    func testTheObservedResumePointSurvivesAFreshStore() async throws {
+        let session = AgentSession(kind: .grok, title: "Terminal work")
+        let projectID = ProjectID()
+        let target = AgentWorkTarget.session(
+            projectID: projectID, sessionID: session.id, rootPath: repositoryRoot, detailed: false
+        )
+
+        let first = AgentWorkTraceStore(directory: directory)
+        _ = first.presentation(for: target)
+        first.record(
+            observedChanges: ["CLAUDE.md"],
+            checkpointOrdinal: 4,
+            turnStart: turnStart,
+            turnEnd: turnEnd,
+            claimedPaths: nil,
+            projectID: projectID,
+            session: session,
+            rootPath: repositoryRoot
+        )
+        _ = try await eventually {
+            let presentation = first.presentation(for: target)
+            return presentation?.observedChangeCount == 1 ? presentation : nil
+        }
+
+        // Persistence is trailing-coalesced, so let the quiet edge pass before reopening.
+        try await Task.sleep(for: .seconds(1.3))
+        let second = AgentWorkTraceStore(directory: directory)
+        _ = second.presentation(for: target)
+        let resumed: Int? = await withCheckedContinuation { continuation in
+            second.observedCheckpointOrdinal(sessionID: session.id, projectID: projectID) {
+                continuation.resume(returning: $0)
+            }
+        }
+        XCTAssertEqual(resumed, 4)
+
+        second.record(
+            observedChanges: ["CLAUDE.md"],
+            checkpointOrdinal: 4,
+            turnStart: turnStart,
+            turnEnd: turnEnd,
+            claimedPaths: nil,
+            projectID: projectID,
+            session: session,
+            rootPath: repositoryRoot
+        )
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(
+            second.presentation(for: target)?.observedChangeCount, 1,
+            "the checkpoint was folded in twice across a relaunch"
+        )
+    }
+
+    /// A refactoring turn is the floor's stress case: one checkpoint whose tree pair differs on
+    /// thousands of paths, folded in while the tab is open. Every path is applied through the same
+    /// incremental path a live event takes, and the main actor's share is one enqueue.
+    @MainActor
+    func testALargeTurnFoldsInOffMainAndCostsTheCallerOneEnqueue() async throws {
+        let session = AgentSession(kind: .grok, title: "Refactor everything")
+        let projectID = ProjectID()
+        let store = AgentWorkTraceStore(directory: directory)
+        let target = AgentWorkTarget.session(
+            projectID: projectID, sessionID: session.id, rootPath: repositoryRoot, detailed: false
+        )
+        let paths = (0..<4_000).map { "Sources/Area\($0 / 200)/file-\($0).swift" }
+        _ = store.presentation(for: target)
+
+        let start = DispatchTime.now().uptimeNanoseconds
+        store.record(
+            observedChanges: paths,
+            checkpointOrdinal: 1,
+            turnStart: turnStart,
+            turnEnd: turnEnd,
+            claimedPaths: nil,
+            projectID: projectID,
+            session: session,
+            rootPath: repositoryRoot
+        )
+        let mainActorMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+        XCTAssertLessThan(mainActorMilliseconds, 20, "the fold is running on the main actor")
+
+        let folded = try await eventually(timeout: .seconds(30)) {
+            let presentation = store.presentation(for: target)
+            return presentation?.observedChangeCount == paths.count ? presentation : nil
+        }
+        XCTAssertEqual(folded.touchedFileCount, paths.count)
+
+        // And the pass that follows it: every later trigger finds this checkpoint consumed and
+        // stops at an integer comparison on the store's own queue.
+        let repeatStart = DispatchTime.now().uptimeNanoseconds
+        for _ in 0..<20 {
+            store.record(
+                observedChanges: paths,
+                checkpointOrdinal: 1,
+                turnStart: turnStart,
+                turnEnd: turnEnd,
+                claimedPaths: nil,
+                projectID: projectID,
+                session: session,
+                rootPath: repositoryRoot
+            )
+        }
+        let repeatMilliseconds =
+            Double(DispatchTime.now().uptimeNanoseconds - repeatStart) / 1_000_000
+        XCTAssertLessThan(repeatMilliseconds, 20)
+
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(
+            store.presentation(for: target)?.observedChangeCount,
+            paths.count,
+            "a repeated pass counted the same checkpoint again"
+        )
+        print(
+            "floor: \(paths.count) paths; enqueue \(mainActorMilliseconds)ms, "
+            + "20 further passes \(repeatMilliseconds)ms on main"
+        )
+    }
+
+    /// Claims are stored relative to the checkout; the trace and the changed paths are relative
+    /// to the session's execution folder. A project added as a subdirectory of a repository makes
+    /// those different, and an unshifted comparison would match nothing at all — recording every
+    /// file the turn's own tools named a second time, as an anonymous delta.
+    @MainActor
+    func testClaimedPathsAreMovedOntoTheAxisTheTraceUses() {
+        let checkpoint = checkpoint(
+            checkout: "/repo",
+            claims: ["app/Sources/A.swift", "docs/README.md"]
+        )
+
+        XCTAssertEqual(
+            AgentWorkHydration.claims(of: checkpoint, relativeTo: "/repo/app"),
+            ["Sources/A.swift"],
+            "a claim outside the execution folder describes no mark this card can draw"
+        )
+        // The ordinary case: the execution folder is the checkout, so nothing shifts.
+        XCTAssertEqual(
+            AgentWorkHydration.claims(of: checkpoint, relativeTo: "/repo"),
+            ["app/Sources/A.swift", "docs/README.md"]
+        )
+    }
+
     // MARK: - Fixtures
+
+    private func checkpoint(checkout: String, claims: [String]) -> GitTurnCheckpoint {
+        GitTurnCheckpoint(
+            id: GitTurnCheckpointID(),
+            projectID: nil,
+            sessionID: SessionID(),
+            ordinal: 1,
+            userTurnID: "turn",
+            assistantTurnID: "turn",
+            providerTurnID: nil,
+            logicalProjectPath: checkout,
+            executionCheckoutPath: checkout,
+            repositoryIdentity: "identity",
+            worktreeIdentity: "identity",
+            beforeRef: nil,
+            afterRef: nil,
+            beforeTreeHash: nil,
+            afterTreeHash: nil,
+            status: .complete,
+            requestedAt: turnStart,
+            beforeCapturedAt: turnStart,
+            finalRequestedAt: turnEnd,
+            completedAt: turnEnd,
+            failureDescription: nil,
+            overlappingSessionIDs: nil,
+            claimedEditPaths: claims,
+            claimedEditsOverflowed: false
+        )
+    }
+
+    private var turnStart: Date { Date(timeIntervalSinceReferenceDate: 800_000_000) }
+    private var turnEnd: Date { turnStart.addingTimeInterval(120) }
+
+    private func edit(of path: String, callID: String = "call-1") -> StreamEvent {
+        .assistantMessage(blocks: [
+            .toolUse(id: callID, tool: .edit, input: ["file_path": .string(path)])
+        ])
+    }
 
     private var repositoryRoot: String {
         URL(fileURLWithPath: #filePath)

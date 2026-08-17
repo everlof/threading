@@ -135,6 +135,22 @@ enum GitReviewCommands {
             + ["--"] + literalPathspecs(paths)
     }
 
+    /// Just the paths two trees differ on, relative to the directory the command runs in.
+    ///
+    /// `--relative` rather than the repository-root paths Git prints by default: the observed-work
+    /// floor writes into a trace whose paths are relative to the session's execution folder, and
+    /// that folder is not always the repository root. It also drops changes outside that folder,
+    /// which is the same answer the atlas gives for them.
+    ///
+    /// `--no-renames` because a rename is two changed paths here, not one moved file: both the
+    /// name that stopped existing and the name that started are files the turn touched.
+    static func diffNames(from oldTree: String, to newTree: String) -> [String] {
+        [
+            "diff", "--name-only", "--relative", "--no-renames", "-z",
+            "--no-color", "--no-ext-diff", "--no-textconv", oldTree, newTree
+        ]
+    }
+
     static func diffIndex(
         from oldTree: String,
         to newTree: String,

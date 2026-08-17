@@ -2464,6 +2464,23 @@ the project aggregate. A live file event updates only that file's ancestors; ope
 the pane asks the worker for exact totals for visible rows, caches at most 256 paths, and never
 walks a closed directory or all expanded rows.
 
+**The git-observed floor is bounded the same way, at the checkpoint rather than at the call.** A
+turn's changed paths arrive as one enqueue carrying a path list, and each path is then applied
+through exactly the incremental primitive a live event uses: one session entry, one project entry,
+its ancestor directories, and one bounded projection rebuild for the whole turn. Reading the paths
+is one `git diff --name-only` per checkpoint on a serial `.utility` queue, at most
+`AgentWorkHydration.Defaults.checkpointsPerPass` (8) per pass; a turn whose before and end trees
+are identical costs no process at all, which is most turns. `observedCheckpointOrdinal` persists
+the resume point, so a repeated trigger stops at an integer comparison on the worker queue.
+`AgentWorkHydrationTests.testALargeTurnFoldsInOffMainAndCostsTheCallerOneEnqueue` is the opt-in
+shape: 4,000 changed paths in one checkpoint, asserting the caller's share stays under 20 ms and
+that twenty further triggers cost the same nothing a resumed transcript pass does.
+
+**The Activity card resolves its source on every refresh**, which is once per tool call during a
+live turn, so `AgentWorkSource.resolve(sessionID:)` is three in-memory lookups and no allocation:
+`GitTurnBaselineStore.hasCheckpoints(forSessionID:)` exists precisely so that question does not
+sort a copy of every retained checkpoint to answer what the first match settles.
+
 `scripts/profile_threading.sh agent-work-stress` runs the opt-in production-model benchmark. Keep
 the `THREADING_PERF agent-work` line with release evidence; specifically watch atlas construction,
 64,000 sparse mutations, aggregate and directory-index construction, detailed project projection,

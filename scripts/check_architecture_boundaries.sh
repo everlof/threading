@@ -22,12 +22,18 @@ if ! python3 "${script_directory}/check_module_boundaries.py" "${repository_dire
   failed=1
 fi
 
-if ! python3 -m unittest "${script_directory}/tests/test_module_boundaries.py"; then
+# Run as scripts, not through `-m unittest`. This phase's interpreter is Xcode's own
+# (`Developer/usr/bin/python3`, 3.9.6), which is prepended to PATH ahead of any Homebrew
+# install, and `-m unittest` there rejects an *absolute* file path — "No module named
+# '/Users/…/test_module_boundaries'". So every `xcodebuild` failed the boundary phase while
+# running the same two files by hand passed. Both tests already end in `unittest.main()` and
+# resolve the repository from `__file__`, so this needs no cwd and no interpreter version.
+if ! python3 "${script_directory}/tests/test_module_boundaries.py"; then
   echo "architecture-boundary: module boundary checker regression tests failed" >&2
   failed=1
 fi
 
-if ! python3 -m unittest "${script_directory}/tests/test_dependency_boundaries.py"; then
+if ! python3 "${script_directory}/tests/test_dependency_boundaries.py"; then
   echo "architecture-boundary: dependency boundary checker regression tests failed" >&2
   failed=1
 fi

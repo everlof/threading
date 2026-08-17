@@ -763,8 +763,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             installTakeoverControls()
         } else {
             // The toolbar reinstall has already re-created its buttons and re-pointed the
-            // weak references at them; the command band only has to let go of its copies.
-            chromeHostViewController.commandBandView.setLeadingControls([])
+            // weak references at them; the chrome only has to let go of its copies.
+            chromeHostViewController.setWindowCommands([])
         }
 
         updateHeaderInset()
@@ -775,17 +775,20 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
     }
 
-    /// The toolbar residents, rebuilt for the command band with ordinary chrome ink. Fresh
+    /// The toolbar residents, rebuilt for the app-drawn chrome with ordinary chrome ink. Fresh
     /// instances rather than the toolbar's: an `NSToolbarItem`'s view belongs to the item,
     /// and the weak references exist precisely so `updateToolbarControlStates` reaches
     /// whichever copies are live.
+    ///
+    /// Which band holds them is not decided here — a theme states that, and can restate it
+    /// live — so they are handed to the chrome host, which owns both bands.
     private func installTakeoverControls() {
         let sidebar = ThemedIconButton(
             symbolName: "sidebar.leading",
             accessibility: L10n.string("Show or hide sidebar"),
             inkSource: .chrome
         )
-        sidebar.toolTip = L10n.string("Show or Hide the Sidebar (⌃⌘S)")
+        sidebar.toolTip = L10n.string("Show or Hide the Sidebar (⌘S)")
         sidebar.onPress = { [weak self] in self?.toggleSidebar() }
         sidebarToolbarButton = sidebar
 
@@ -809,7 +812,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         forward.isEnabled = false
         navForwardToolbarButton = forward
 
-        chromeHostViewController.commandBandView.setLeadingControls([sidebar, back, forward])
+        chromeHostViewController.setWindowCommands([sidebar, back, forward])
         updateToolbarControlStates()
     }
 
@@ -3715,6 +3718,13 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         sessionCoordinator.cancelScheduledMessage(id)
     }
 
+    func projectSidebar(
+        _ sidebar: ProjectSidebarViewController,
+        editScheduledMessage id: ScheduledMessageID
+    ) {
+        sessionCoordinator.editScheduledMessage(id)
+    }
+
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSession sessionID: SessionID) {
         // Taken rather than read: an opening prompt belongs to the launch that follows it,
         // not to every later selection of the same session.
@@ -4063,6 +4073,13 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         cancelScheduledMessage id: ScheduledMessageID
     ) {
         sessionCoordinator.cancelScheduledMessage(id)
+    }
+
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        editScheduledMessage id: ScheduledMessageID
+    ) {
+        sessionCoordinator.editScheduledMessage(id)
     }
 
     func terminalContainer(

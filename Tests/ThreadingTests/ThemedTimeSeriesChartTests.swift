@@ -212,6 +212,104 @@ final class ThemedTimeSeriesChartTests: XCTestCase {
         XCTAssertEqual(interval, 50_000)
     }
 
+    /// A ranking's names are drawn in a fixed-width gutter, so a long one is an ellipsized stub.
+    /// Pointing at the stub is how a reader asks what it says, and the gutter is part of the band
+    /// it labels rather than dead chrome beside it.
+    func testPointingAtATruncatedCategoryNameStatesTheWholeEntry() {
+        let chart = ThemedTimeSeriesChartView(frame: NSRect(x: 0, y: 0, width: 560, height: 300))
+        chart.setModel(rankingModel(), animated: false)
+        let plot = chart.plotRectForTesting
+
+        chart.hoverForTesting(at: NSPoint(x: Design.Spacing.inset, y: bandCentre(1, in: plot)))
+
+        XCTAssertTrue(chart.inspectionForTesting.contains(Self.categories[1]))
+        XCTAssertTrue(chart.inspectionForTesting.contains("49 GB"))
+        XCTAssertTrue(
+            (chart.accessibilityValue() as? String)?.contains(Self.categories[1]) == true
+        )
+    }
+
+    /// The band and its name are one target: pointing at the bar answers with the same lines the
+    /// name does, so a reader who found the entry either way reads the same thing.
+    func testPointingAtTheBarAndAtItsNameAnswerAlike() {
+        let chart = ThemedTimeSeriesChartView(frame: NSRect(x: 0, y: 0, width: 560, height: 300))
+        chart.setModel(rankingModel(), animated: false)
+        let plot = chart.plotRectForTesting
+        let row = bandCentre(0, in: plot)
+
+        chart.hoverForTesting(at: NSPoint(x: plot.midX, y: row))
+        let overTheBar = chart.inspectionForTesting
+        chart.hoverForTesting(at: NSPoint(x: Design.Spacing.inset, y: row))
+
+        XCTAssertEqual(chart.inspectionForTesting, overTheBar)
+        XCTAssertEqual(overTheBar, [Self.categories[0], "91 GB"])
+    }
+
+    /// A categorical point's label is its *name*, so the reading has to be stated as well — a
+    /// compressed ranking prints no number beside a thin bar, and a time series must not repeat
+    /// its own reading, which is what its label already is.
+    func testInspectionStatesANameAndItsReadingButNeverTheReadingTwice() {
+        let ranking = ThemedTimeSeriesChartView(frame: NSRect(x: 0, y: 0, width: 560, height: 300))
+        ranking.setModel(rankingModel(), animated: false)
+        let plot = ranking.plotRectForTesting
+        ranking.hoverForTesting(at: NSPoint(x: plot.midX, y: bandCentre(2, in: plot)))
+
+        let series = ThemedTimeSeriesChartView(frame: NSRect(x: 0, y: 0, width: 560, height: 300))
+        series.setModel(model(points: points(count: 8, slope: 0.5)), animated: false)
+        series.hoverForTesting(at: NSPoint(
+            x: series.plotRectForTesting.midX,
+            y: series.plotRectForTesting.midY
+        ))
+
+        XCTAssertEqual(ranking.inspectionForTesting, [Self.categories[2], "41 GB"])
+        XCTAssertEqual(series.inspectionForTesting.filter { $0.hasSuffix("tokens") }.count, 1)
+        XCTAssertFalse(series.inspectionForTesting.contains { $0.isEmpty })
+    }
+
+    /// A time chart's leading gutter holds values rather than names, so there is nothing there to
+    /// point at — and answering a hover would name whichever point sits against the left edge.
+    func testAValueAxisGutterIsNotAHoverTarget() {
+        let chart = ThemedTimeSeriesChartView(frame: NSRect(x: 0, y: 0, width: 560, height: 300))
+        chart.setModel(model(points: points(count: 12, slope: 0.5)), animated: false)
+        let plot = chart.plotRectForTesting
+
+        chart.hoverForTesting(at: NSPoint(x: plot.midX, y: plot.midY))
+        XCTAssertFalse(chart.inspectionForTesting.isEmpty)
+        chart.hoverForTesting(at: NSPoint(x: Design.Spacing.inset, y: plot.midY))
+
+        XCTAssertEqual(chart.inspectionForTesting, [])
+    }
+
+    /// Where category *index* is centred when the value axis runs across the page.
+    private func bandCentre(_ index: Int, in plot: NSRect) -> CGFloat {
+        let band = plot.height / CGFloat(Self.categories.count)
+        return plot.maxY - (CGFloat(index) + 0.5) * band
+    }
+
+    private static let categories = [
+        "/tmp/claude-501/-Users-david-repo-AnotherTerminal",
+        "Xcode DerivedData and module caches",
+        "~/Library/Application Support"
+    ]
+
+    private func rankingModel() -> ThemedChartModel {
+        ThemedChartModel.categorical(
+            title: "What is consuming the volume",
+            accessibilitySummary: "Storage by location",
+            categories: Self.categories,
+            series: [ThemedChartSeries(
+                id: "size",
+                // No title: one series needs no key, and the tooltip must not open on a blank line.
+                title: "",
+                values: [91, 49, 41],
+                categories: Self.categories,
+                style: .primary
+            )],
+            orientation: .horizontal,
+            valueFormat: .unit("GB")
+        )
+    }
+
     private func points(count: Int, slope: Double) -> [ThemedChartPoint] {
         (0..<count).map { index in
             ThemedChartPoint(

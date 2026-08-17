@@ -655,6 +655,30 @@ rollout file it writes under `~/.codex/sessions/`. OpenCode also assigns its own
 its supported `opencode session list --format json` command and selects the newest record for
 the launching checkout. This intentionally avoids its private storage schema.
 
+**An identifier is not a conversation, so the resume branch asks the filesystem — and the
+encoding it asks with is load-bearing.** Claude's id is minted before anything is written, so
+`AgentLauncher` emits `--resume` only when `ClaudeTranscript.exists` finds the file and otherwise
+falls through to a fresh `--session-id` launch. That fallthrough is only safe while the lookup is
+right: relaunching with an id Claude has already used makes it exit 1 in under a second, and what
+the user sees is a Resume button that does nothing, seven times in ninety seconds.
+
+`ClaudeTranscript.projectSlug` is that lookup, and it had replaced `/` and nothing else. Claude
+replaces **every character outside `[a-zA-Z0-9]`**, per UTF-16 code unit — measured, not inferred:
+a folder named `slug probe_v1.2 åäö-🎉` is filed under `slug-probe-v1-2-------`, the astral scalar
+contributing two dashes because it is two code units. Replacing separators alone is right for
+`/Users/me/repo/thing` and wrong for everything else, and the wrongness is silent, because a
+missing directory is indistinguishable from a session that never recorded anything. Every managed
+workspace was in that state — they live under `Application Support`, and the space is not a
+separator — along with any project folder carrying a dot, and `SessionImporter`, which had spelled
+the same encoding a second time and so found nothing to import from those folders either. The
+encoding now lives in `ClaudeTranscript` alone and `ClaudeTranscriptPathTests` holds the measured
+cases.
+
+The *directory* was never the bug: `AgentLauncher.plan` and `ProjectStore.executionProject` both
+hand the transcript seam a `Project` copy whose `folderPath` is `session.workingDirectory(in:)`,
+so a managed workspace is already addressed by the worktree it ran in rather than by the
+repository it will merge back into. See [`managed-workspaces.md`](managed-workspaces.md).
+
 **Claude, Codex, Grok and Cursor take the opening prompt as an operand, not a word.** The first two reject one that
 begins with `-` before the session exists: Claude answers
 `error: unknown option '- Make sure all tests are green'` and exits 1, Codex answers

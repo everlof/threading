@@ -1041,6 +1041,74 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertNil(AppThemeLibrary.all.first { $0.name == name })
     }
 
+    /// A theme can say the window's own commands share its caption, and is answered when the
+    /// band it states could not hold one. The floor is not decoration: a toolbar control's
+    /// height is required, so a 20-point caption asking for one draws it outside the band.
+    func testAgentCanSeatTheWindowCommandsInACaptionTallEnoughToHoldThem() throws {
+        let name = "Merged Caption Theme \(UUID().uuidString)"
+        let kind = AppThemeStyles.cyberpunk.availableVariants[0]
+
+        func create(height: Double) -> CreateAppThemeArguments {
+            CreateAppThemeArguments(
+                name: name,
+                baseID: AppThemeStyles.cyberpunk.id.rawValue,
+                appearance: nil,
+                mode: nil,
+                summary: nil,
+                variants: [kind.rawValue: AppThemeVariantArguments(
+                    chrome: AppThemeChromeArguments(
+                        titleBar: AppThemeChromeTitleBarArguments(
+                            activeGradient: AppThemeGradientArguments(
+                                angleDegrees: 90,
+                                stops: [
+                                    AppThemeGradientStopArguments(color: "#000080", position: 0),
+                                    AppThemeGradientStopArguments(color: "#1084D0", position: 1)
+                                ]
+                            ),
+                            ink: "#FFFFFF",
+                            height: height,
+                            commands: "in_title_bar"
+                        ),
+                        frame: nil,
+                        removeFrame: nil,
+                        remove: nil
+                    )
+                )],
+                roles: nil,
+                material: nil,
+                terminalColors: nil,
+                apply: false
+            )
+        }
+
+        let refused = coordinator().createAppTheme(create(height: 20))
+        XCTAssertTrue(refused.isError, "a caption too short for a toolbar control was accepted")
+        XCTAssertTrue(refused.text.contains("commands"), refused.text)
+
+        let created = coordinator().createAppTheme(create(height: 36))
+        XCTAssertFalse(created.isError, created.text)
+        let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer {
+            if let latest = AppThemeLibrary.theme(withID: theme.id) {
+                _ = AppThemeLibrary.delete(latest)
+            }
+        }
+        XCTAssertEqual(theme.variant(kind)?.chrome?.titleBar.commands, .inTitleBar)
+
+        let get = coordinator().getAppTheme(
+            AppThemeReferenceArguments(themeID: theme.id.rawValue)
+        )
+        XCTAssertFalse(get.isError, get.text)
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(get.text.utf8)) as? [String: Any]
+        )
+        let variants = try XCTUnwrap(document["variants"] as? [String: Any])
+        let variantDocument = try XCTUnwrap(variants[kind.rawValue] as? [String: Any])
+        let chromeDocument = try XCTUnwrap(variantDocument["chrome"] as? [String: Any])
+        let titleBar = try XCTUnwrap(chromeDocument["title_bar"] as? [String: Any])
+        XCTAssertEqual(titleBar["commands"] as? String, "in_title_bar")
+    }
+
     func testTheVariantSchemaDescribesTheChromeBlock() throws {
         let schema = try schema(for: MCPTools.createAppTheme)
         let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
@@ -1057,6 +1125,12 @@ final class ThemeToolTests: XCTestCase {
         for field in ["title_bar", "frame", "remove_frame", "remove"] {
             XCTAssertNotNil(chromeProperties[field], "chrome schema lost \(field)")
         }
+        let titleBar = try XCTUnwrap(chromeProperties["title_bar"] as? [String: Any])
+        let titleBarProperties = try XCTUnwrap(titleBar["properties"] as? [String: Any])
+        XCTAssertNotNil(
+            titleBarProperties["commands"],
+            "title-bar schema lost where the window's own commands sit"
+        )
         let frame = try XCTUnwrap(chromeProperties["frame"] as? [String: Any])
         let frameProperties = try XCTUnwrap(frame["properties"] as? [String: Any])
         XCTAssertNotNil(

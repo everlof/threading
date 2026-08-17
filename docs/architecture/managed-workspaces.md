@@ -161,6 +161,25 @@ required `lessThanOrEqualTo` inequality rather than by lowering the label's comp
 the inequality still lets the card grow to its ceiling first, whereas a weakened label let the card
 settle at its 320-point minimum and truncated a sentence that would have fitted.
 
+## A workspace path is not an ordinary checkout path
+
+The worktree lives under `Application Support`, which has a space in it, and that made every
+managed session unresumable for as long as `ClaudeTranscript.projectSlug` replaced only `/`.
+Claude files a conversation under its launch directory encoded with **every** non-alphanumeric
+character replaced, so the app looked for `…-Application Support-…`, found no directory, read that
+as "no conversation was recorded", and relaunched with `--session-id` naming an id Claude had
+already used — which exits 1 immediately. On screen: a Resume button that does nothing, with the
+session's own "target branch moved" refusal sitting in the corner card as a plausible but
+unrelated explanation.
+
+The lesson generalises past this one encoding. A managed workspace is the app's only routine
+producer of paths that are not `~/repo/<name>`, so it is where a seam that assumed the ordinary
+shape gets found — and it gets found silently, because a path built from a wrong assumption is a
+path that simply does not exist, and an absent file is what "nothing here yet" looks like. A new
+seam that derives a filename, directory or identifier from the execution path belongs in a test
+with a spaced path in it. The encoding and its measured cases are in
+[`sessions.md`](sessions.md#launch-and-resume).
+
 ## Finish handshake
 
 Provisioning is offered only when the chosen surface can receive Threading's session-scoped MCP

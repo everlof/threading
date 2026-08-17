@@ -507,7 +507,7 @@ final class SessionRowActionsTests: XCTestCase {
                 L10n.string("Mute Notifications"),
                 // Beside Mute rather than beside Theme: both are conduct — what this chat does
                 // when nobody is watching — while Theme and Sound are presentation.
-                SessionActionMenuDefaults.limitRecoveryTitle,
+                SessionActionMenuDefaults.limitRecoveryMenuTitle,
                 SessionActionMenuDefaults.attachmentsTitle
             ]
         )
@@ -1118,6 +1118,104 @@ final class SessionRowActionsTests: XCTestCase {
             activity: .idle
         )
         XCTAssertNil(inheriting.soundLine, "a chat that inherits grew a line for it")
+    }
+
+    // MARK: - What A Chat Does At Its Limit
+
+    /// The fold that replaced the checkbox, and the reason it had to: there are four outcomes now,
+    /// and the two that move the conversation to another login are alternatives to waiting rather
+    /// than a second switch beside it.
+    ///
+    /// The per-login rows are counted against `SessionMigration.destinations` rather than against a
+    /// fixture, because this machine's signed-in logins are whatever they are — and that is the
+    /// same list the policy itself resolves against, so the count is the assertion that they agree.
+    func testTheLimitFoldOffersEveryStandingAnswerAChatCanGive() throws {
+        try withAppLimitRecovery(.flagOnly) {
+            let sidebar = ProjectSidebarViewController()
+            let session = AgentSession(kind: .claude, title: "Terminal")
+            let choices = try limitRecoveryChoices(for: session, in: sidebar)
+            let titles = choices.compactMap { $0.item?.title }
+
+            XCTAssertEqual(
+                Array(titles.prefix(3)),
+                [
+                    SessionActionMenuDefaults.limitRecoveryFlagTitle,
+                    SessionActionMenuDefaults.limitRecoveryTitle,
+                    SessionActionMenuDefaults.limitRecoveryBestLoginTitle
+                ],
+                "the fold no longer opens with the three answers every account-routed chat can give"
+            )
+            XCTAssertEqual(
+                titles.count - 3,
+                SessionMigration.destinations(for: session).count,
+                "the pinned-login rows and the policy's own destinations disagree"
+            )
+            for item in choices.compactMap(\.item) {
+                XCTAssertNotNil(item.onChoose, "\(item.title) answers nothing")
+            }
+
+            // The fold names the *condition* and its rows name the outcomes. A fold carrying one
+            // of its own rows' names would read as that row being switched on, which is the
+            // mistake `LimitEscapeStripStrings.waitForReset` records on the strip beside it.
+            XCTAssertFalse(
+                titles.contains(SessionActionMenuDefaults.limitRecoveryMenuTitle),
+                "the fold is named after one of the answers inside it"
+            )
+        }
+    }
+
+    /// The check reads the **resolved** answer, not the chat's own field. A chat that inherits
+    /// "move to a login with room" from Settings is going to do exactly that, and a fold showing
+    /// nothing selected would be stating the opposite of what happens.
+    func testTheLimitFoldChecksTheAnswerTheChatWouldActuallyFollow() throws {
+        try withAppLimitRecovery(.resumeOnBestAccount) {
+            let sidebar = ProjectSidebarViewController()
+            let choices = try limitRecoveryChoices(
+                for: AgentSession(kind: .claude, title: "Inheriting"),
+                in: sidebar
+            )
+            let selected = choices.compactMap(\.item).filter(\.isSelected).map(\.title)
+
+            XCTAssertEqual(
+                selected,
+                [SessionActionMenuDefaults.limitRecoveryBestLoginTitle],
+                "the inherited answer is not the one the fold marks"
+            )
+        }
+    }
+
+    /// A runtime that routes no logins is offered neither account answer — not a row that would
+    /// stand down every time it fired.
+    func testAChatWithNoLoginsToRouteIsOfferedNoAccountAnswers() throws {
+        try withAppLimitRecovery(.flagOnly) {
+            let sidebar = ProjectSidebarViewController()
+            let session = AgentSession(kind: .cursor, title: "No logins")
+            try XCTSkipIf(
+                session.kind.supportsAccounts,
+                "this case needs a runtime that routes no accounts"
+            )
+
+            XCTAssertEqual(
+                try limitRecoveryChoices(for: session, in: sidebar).compactMap { $0.item?.title },
+                [
+                    SessionActionMenuDefaults.limitRecoveryFlagTitle,
+                    SessionActionMenuDefaults.limitRecoveryTitle
+                ]
+            )
+        }
+    }
+
+    private func limitRecoveryChoices(
+        for session: AgentSession,
+        in sidebar: ProjectSidebarViewController
+    ) throws -> [ThemedMenuEntry] {
+        try XCTUnwrap(
+            try sessionOptions(in: sidebar.sessionActionEntries(for: session))
+                .compactMap(\.item)
+                .first { $0.title == SessionActionMenuDefaults.limitRecoveryMenuTitle }?
+                .submenu,
+            "the Session Options fold has no limit-recovery submenu"
+        )
     }
 
     /// Seeds the app-scope limit-recovery answer without announcing a settings change.

@@ -652,12 +652,52 @@ enum SessionActionMenuDefaults {
     /// menu and its tests must agree on where those items went.
     static var sessionOptionsTitle: String { L10n.string("Session Options") }
 
+    /// The fold holding what a chat does when its provider refuses it. A **condition**, because
+    /// the items under it are its alternative outcomes and a fold named after one of them would
+    /// read as that one being switched on.
+    static var limitRecoveryMenuTitle: String { L10n.string("When the Limit Is Reached") }
+
     /// **Not** the strip button's words, though it is the same behaviour. This is a standing
     /// option — what this chat will do the next time it is refused — and it is phrased as the
     /// outcome. The strip's control is an act performed on a refusal already in front of the
     /// user, and is phrased as an instruction; see `LimitEscapeStripStrings.waitForReset` for
     /// what sharing one name did to that row.
     static var limitRecoveryTitle: String { L10n.string("Continue at Reset") }
+
+    /// The quiet answer, named by what it does for the reader rather than by the flag it sets:
+    /// "Flag Only" describes the implementation, and the row above and below it describe outcomes.
+    static var limitRecoveryFlagTitle: String { L10n.string("Stop and Wait for Me") }
+
+    /// The ranked move. "Best" is `LimitEscapeRanking`'s word and the strip's, so one idea keeps
+    /// one name across the two surfaces that offer it.
+    static var limitRecoveryBestLoginTitle: String { L10n.string("Continue on the Best Login") }
+
+    /// One named login. Deliberately the same phrasing as the strip's button, because it is the
+    /// same act — the difference is only that this one is decided in advance.
+    static func limitRecoveryLoginTitle(_ accountName: String) -> String {
+        L10n.format("Continue as %@", accountName)
+    }
+
+    /// The outcome each standing answer is offered under.
+    ///
+    /// Separate from `LimitRecoveryPolicy.title`, which is the sentence beside a Settings popup
+    /// ("Answer the chooser and continue at reset"); a menu row is read in a column of sibling
+    /// rows and wants the outcome in three words. A pinned login falls back to its stored handle
+    /// here — the surfaces that hold an account list pass the display name through
+    /// `limitRecoveryLoginTitle` instead, and they are the only ones that can ask.
+    static func limitRecoveryChoiceTitle(_ policy: LimitRecoveryPolicy) -> String {
+        switch policy {
+        case .flagOnly:
+            return limitRecoveryFlagTitle
+        case .waitForReset:
+            return limitRecoveryTitle
+        case .resumeOnBestAccount:
+            return limitRecoveryBestLoginTitle
+        case .resumeVia(let accountID):
+            return limitRecoveryLoginTitle(accountID.handle.name)
+        }
+    }
+
     static let limitRecoverySymbol = "clock.arrow.circlepath"
 }
 
@@ -694,6 +734,13 @@ extension ProjectSidebarViewController {
                     self.delegate?.projectSidebar(
                         self,
                         startScheduledMessageNow: scheduled.id
+                    )
+                },
+                action(L10n.string("Edit"), symbol: "pencil") { [weak self] in
+                    guard let self else { return }
+                    self.delegate?.projectSidebar(
+                        self,
+                        editScheduledMessage: scheduled.id
                     )
                 },
                 action(L10n.string("Cancel schedule"), symbol: "xmark.circle") { [weak self] in
@@ -1003,34 +1050,91 @@ extension ProjectSidebarViewController {
         ) { [weak self] in self?.toggleMutedClicked() }
     }
 
-    /// Arms this conversation to pick itself up when its account's usage window resets.
+    /// What this conversation does the next time its provider refuses it over a usage limit.
     ///
-    /// A checkbox rather than a three-way list, even though there are three states to express —
-    /// on, off, and following whoever is above. The third is not a thing the user picks; it is
-    /// what is *stored* when their answer already matches what they would have inherited, which
-    /// is the mute item's rule (`toggleLimitRecoveryClicked`) and keeps a chat following its
-    /// project and Settings. Two states on screen, three in the record.
+    /// **A list rather than the checkbox this used to be.** Two outcomes fit on a checkbox and
+    /// four do not: stopping, waiting for the reset, and the two that move the conversation to
+    /// another login are alternatives to each other, and a checkbox forced to express them would
+    /// have to hide two of them. The third *scope* state is unaffected and still never appears —
+    /// "following whoever is above" is not something the user picks, it is what gets **stored**
+    /// when their answer already matches what they would have inherited (`chooseLimitRecovery`),
+    /// which is the mute item's rule and what keeps a chat following its project and Settings.
     ///
     /// The check reads the **resolved** answer, so a chat inside an armed checkout shows armed —
-    /// an unchecked box on a session that will in fact continue by itself would be stating the
+    /// an unmarked row on a session that will in fact continue by itself would be stating the
     /// opposite of what happens.
+    ///
+    /// **The two account answers are gated on two different questions, deliberately.** Whether the
+    /// ranked move is offered at all is a *capability* — `kind.supportsAccounts`, so a runtime that
+    /// routes no logins never shows it — while the per-login rows come from this session's own
+    /// destinations, which is a count that changes as the user signs in and out. Gating the ranked
+    /// answer on the count instead would hide it from the single-login user for whom it is the
+    /// obvious thing to arm before adding a second login, and would leave a chat that *inherited*
+    /// it from Settings looking as though it had no answer at all.
+    ///
+    /// A pinned login that has since gone is the one answer this list cannot show, and then nothing
+    /// is checked. That is the truth: the stored answer names a login the session can no longer
+    /// reach, which is exactly the case the policy itself stands down over and says so.
+    ///
+    /// Bounded by the user's logins — the same small set the Move to Account submenu already lists.
     private func limitRecoveryEntry(for session: AgentSession) -> ThemedMenuEntry {
-        let resolved = LimitRecoveryResolution.answer(forSessionID: session.id, in: projectStore)
+        let resolved = LimitRecoveryResolution
+            .answer(forSessionID: session.id, in: projectStore)
+            .policy
+
+        let stayPutChoices: [LimitRecoveryPolicy] = [.flagOnly, .waitForReset]
+        var submenu: [ThemedMenuEntry] = stayPutChoices.map { policy in
+            limitRecoveryItem(
+                policy,
+                title: SessionActionMenuDefaults.limitRecoveryChoiceTitle(policy),
+                resolved: resolved
+            )
+        }
+
+        if session.kind.supportsAccounts {
+            submenu.append(limitRecoveryItem(
+                .resumeOnBestAccount,
+                title: SessionActionMenuDefaults.limitRecoveryBestLoginTitle,
+                resolved: resolved
+            ))
+
+            let destinations = SessionMigration.destinations(for: session)
+            if !destinations.isEmpty {
+                submenu.append(.separator)
+                for account in destinations {
+                    submenu.append(limitRecoveryItem(
+                        .resumeVia(account.id),
+                        title: SessionActionMenuDefaults.limitRecoveryLoginTitle(
+                            AccountName.display(for: account)
+                        ),
+                        resolved: resolved
+                    ))
+                }
+            }
+        }
+
         return .item(ThemedMenuItem(
-            title: SessionActionMenuDefaults.limitRecoveryTitle,
+            title: SessionActionMenuDefaults.limitRecoveryMenuTitle,
             image: ThemedMenuIcon.symbol(SessionActionMenuDefaults.limitRecoverySymbol),
-            isSelected: resolved.policy == .waitForReset,
-            onChoose: { [weak self] in self?.toggleLimitRecoveryClicked() }
+            submenu: submenu
         ))
     }
 
-    @objc private func toggleLimitRecoveryClicked() {
+    private func limitRecoveryItem(
+        _ policy: LimitRecoveryPolicy,
+        title: String,
+        resolved: LimitRecoveryPolicy
+    ) -> ThemedMenuEntry {
+        .item(ThemedMenuItem(
+            title: title,
+            isSelected: resolved == policy,
+            onChoose: { [weak self] in self?.chooseLimitRecovery(policy) }
+        ))
+    }
+
+    private func chooseLimitRecovery(_ policy: LimitRecoveryPolicy) {
         guard let sessionID = actionSessionID else { return }
 
-        let wanted: LimitRecoveryPolicy =
-            LimitRecoveryResolution.policy(forSessionID: sessionID, in: projectStore) == .waitForReset
-                ? .flagOnly
-                : .waitForReset
         let inherited = LimitRecoveryResolution.inherited(beyondSessionID: sessionID, in: projectStore)
 
         // Nil where the answer already matches what would have been inherited, so a chat keeps
@@ -1038,7 +1142,7 @@ extension ProjectSidebarViewController {
         // explicit value is written only where it actually differs — which is the whole reason
         // the field is optional rather than a plain flag.
         guard projectStore.setLimitRecoveryPolicy(
-            wanted == inherited ? nil : wanted,
+            policy == inherited ? nil : policy,
             forSessionID: sessionID
         ).succeeded else {
             reload()

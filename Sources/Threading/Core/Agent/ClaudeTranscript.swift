@@ -52,11 +52,47 @@ enum ClaudeTranscript {
         return FileManager.default.fileExists(atPath: url.path)
     }
 
-    /// Claude's directory name for a project: its absolute path with separators replaced.
+    /// Claude's directory name for the folder a session runs in.
+    ///
+    /// `Project.folderPath` because callers hand this type an *execution* project — the copy
+    /// `AgentLauncher.plan` and `ProjectStore.executionProject` make, whose folder is the
+    /// session's own checkout. A managed workspace's transcripts are filed under the worktree
+    /// it ran in, not under the repository it will merge back into.
     static func projectSlug(for project: Project) -> String {
-        project.folderPath.replacingOccurrences(
-            of: "/",
-            with: AgentDefaults.projectSlugSeparator
-        )
+        projectSlug(forPath: project.folderPath)
     }
+
+    /// A path encoded the way Claude names the directory it files that path's transcripts under.
+    ///
+    /// Every character outside `[a-zA-Z0-9]` becomes a dash — not only the separators. Replacing
+    /// `/` alone is right for the usual `/Users/me/repo/thing` and silently wrong for anything
+    /// else, and the wrongness is invisible: a missing directory reads as "no conversation
+    /// recorded", so `AgentLauncher` dropped to its fresh-launch branch and relaunched with
+    /// `--session-id` naming an id Claude had already used. Claude exits 1 on that, in under a
+    /// second, which on screen is a Resume button that does nothing. Every managed workspace hit
+    /// this — they live under `Application Support` — as did any project folder with a dot in it.
+    ///
+    /// Per UTF-16 code unit rather than per character, which is what makes an astral scalar two
+    /// dashes rather than one. Measured against the CLI: a folder named `slug probe_v1.2 åäö-🎉`
+    /// is filed under `slug-probe-v1-2-------`.
+    static func projectSlug(forPath path: String) -> String {
+        var slug = ""
+        slug.reserveCapacity(path.utf16.count)
+
+        for unit in path.utf16 {
+            if preservedSlugCodeUnits.contains(unit), let scalar = Unicode.Scalar(unit) {
+                slug.unicodeScalars.append(scalar)
+            } else {
+                slug.append(AgentDefaults.projectSlugSeparator)
+            }
+        }
+
+        return slug
+    }
+
+    /// Spelled out rather than compared against numeric bounds: the set is the rule, and an
+    /// ASCII range written as `0x61...0x7A` is a place for a mistake to hide.
+    private static let preservedSlugCodeUnits: Set<UInt16> = Set(
+        AgentDefaults.projectSlugPreservedCharacters.utf16
+    )
 }

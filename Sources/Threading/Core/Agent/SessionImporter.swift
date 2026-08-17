@@ -147,15 +147,17 @@ enum SessionImporter {
     /// slug maps straight to it. Each transcript also records its own `cwd`, which is checked
     /// against the project's worktree — the directory name is a lossy encoding (two different
     /// paths can slug alike), so the recorded path is the authority on membership.
+    ///
+    /// The encoding comes from `ClaudeTranscript` rather than being spelled again here. This
+    /// site had its own copy, and the copy was the incomplete one: a project folder with a dot
+    /// or a space in its name scanned a directory that does not exist and reported no
+    /// conversations to import, which is indistinguishable from having none.
     private static func claudeSessions(
         inFolder folder: String,
         worktree: String?,
         accounts: [AgentAccount]
     ) -> ScanBatch {
-        let slug = folder.replacingOccurrences(
-            of: "/",
-            with: AgentDefaults.projectSlugSeparator
-        )
+        let slug = ClaudeTranscript.projectSlug(forPath: folder)
 
         let fileManager = FileManager.default
         var found: [ImportableSession] = []

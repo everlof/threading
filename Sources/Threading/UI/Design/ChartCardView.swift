@@ -152,17 +152,40 @@ final class ChartCardView: NSView, ThemedComponent {
     /// to answer *before* the view exists.
     static func preferredHeight(for spec: ChartSpec) -> CGFloat {
         // A ranking grows with its rows — a chart of twenty tests in the height of a chart of
-        // three is a smear — but only up to a bound: past it the bands compress and the axis
-        // thins its labels, which is a chart that is hard to read rather than a row that is
-        // impossible to scroll past.
+        // three is a smear — but in a *transcript* only up to a bound: past it the bands compress
+        // and the axis thins its labels, which is a chart that is hard to read rather than a row
+        // that is impossible to scroll past.
+        chrome + min(rowsHeight(for: spec), Design.Chart.maximumCardHeight)
+    }
+
+    /// The height a **pane** should hold this chart at, or `nil` when it may use whatever room it
+    /// is given.
+    ///
+    /// A ranking runs its *categories* down the page, and a category axis has nothing more to say
+    /// for being taller: filling a full-height panel turned eight rows into eight 130-point bands
+    /// that were mostly gap. Every other kind puts the *value* on the vertical axis — that is data,
+    /// and a taller plot resolves it better, so those still take the pane.
+    ///
+    /// The transcript's ceiling is deliberately not applied here. It exists so one chart cannot
+    /// become a row nobody can scroll past; a panel the reader opened *to see the ranking* is the
+    /// one place a forty-row chart should be forty rows tall, and the pane's own height is still
+    /// the limit — this is a preference, and the card's foot may not pass the pane's.
+    static func boundedHeight(for spec: ChartSpec) -> CGFloat? {
+        spec.kind == .ranking ? chrome + rowsHeight(for: spec) : nil
+    }
+
+    /// The plot's own claim on height: a row per category for a ranking, and the shared floor
+    /// under every chart — below it there is no room for an axis, a legend and a mark at once.
+    private static func rowsHeight(for spec: ChartSpec) -> CGFloat {
         let bars = spec.kind == .ranking
             ? CGFloat(spec.categories.count) * Design.Chart.rankingRowHeight
             : 0
-        let plot = min(
-            max(Design.Chart.preferredHeight, bars),
-            Design.Chart.maximumCardHeight
-        )
-        return plot + Design.Typography.heading().boundingRectForFont.height + Layout.titleSpacing
+        return max(Design.Chart.preferredHeight, bars)
+    }
+
+    /// What the card spends on its title before any of it reaches the chart.
+    private static var chrome: CGFloat {
+        Design.Typography.heading().boundingRectForFont.height + Layout.titleSpacing
     }
 
     init(spec: ChartSpec) {
@@ -176,6 +199,7 @@ final class ChartCardView: NSView, ThemedComponent {
         setAccessibilityLabel(spec.title)
         setAccessibilityIdentifier("chart-card")
 
+        applyTitle()
         addSubview(titleLabel)
         NSLayoutConstraint.activate([
             titleLabel.topAnchor.constraint(equalTo: topAnchor),
@@ -199,7 +223,7 @@ final class ChartCardView: NSView, ThemedComponent {
     func setSpec(_ newSpec: ChartSpec, animated: Bool = true) {
         let rebuilds = newSpec.isStacked != spec.isStacked
         spec = newSpec
-        titleLabel.attributedStringValue = Self.titleText(newSpec)
+        applyTitle()
         setAccessibilityLabel(newSpec.title)
 
         if rebuilds {
@@ -245,7 +269,18 @@ final class ChartCardView: NSView, ThemedComponent {
     }
 
     func applyTheme() {
+        applyTitle()
+    }
+
+    /// The title, and the whole title on the pointer.
+    ///
+    /// A chart's title is a sentence — the question the picture answers — while the panel it lands
+    /// in is only as wide as the user's split makes it, and the label is single-line. The tooltip
+    /// is where the tail of it survives, the same way the axis gutter's names survive on the
+    /// chart's own hover.
+    private func applyTitle() {
         titleLabel.attributedStringValue = Self.titleText(spec)
+        titleLabel.toolTip = spec.title
     }
 
     private static func makeChart(for spec: ChartSpec) -> ThemedTimeSeriesChartView {

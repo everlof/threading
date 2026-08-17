@@ -131,13 +131,15 @@ final class UsageWindowPreferencesViewController: NSViewController {
     /// nothing but mark the session, so the automatic half is chosen here or not at all. See
     /// `docs/architecture/limit-recovery.md`.
     private func limitRecoverySection() -> NSView {
+        // The runtime-neutral answers only. Settings speaks for every chat in the app and a login
+        // belongs to exactly one runtime, so "continue as Daniel Block" is a sentence only a chat
+        // can say — it is offered in the chat's own menu. See `LimitRecoveryPolicy.resumeVia`.
+        let choices = LimitRecoveryPolicy.runtimeNeutralChoices
         let popUp = SettingsUI.popUp(target: self, action: #selector(limitRecoveryChanged))
-        for policy in LimitRecoveryPolicy.allCases {
+        for policy in choices {
             popUp.addItem(ThemedMenuItem(title: policy.title, representedValue: policy.rawValue))
         }
-        popUp.selectItem(
-            at: LimitRecoveryPolicy.allCases.firstIndex(of: LimitRecoveryPolicy.current) ?? 0
-        )
+        popUp.selectItem(at: choices.firstIndex(of: LimitRecoveryPolicy.current) ?? 0)
 
         return SettingsUI.section(
             UsageWindowStrings.limitRecoveryCaption,

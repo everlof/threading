@@ -326,6 +326,13 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
                              "the native clearance returns with the native frame")
     }
 
+    private func themedIconButtons(in root: NSView) -> [ThemedIconButton] {
+        root.subviews.flatMap { view -> [ThemedIconButton] in
+            if let button = view as? ThemedIconButton { return [button] }
+            return themedIconButtons(in: view)
+        }
+    }
+
     /// The product theme owns the complete frame, not only the colors inside AppKit's frame.
     /// This is the shipped path used by ordinary product captures.
     func testTheStockThreadingThemeTakesTheWindowOverAndHandsItBack() throws {
@@ -348,7 +355,19 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
         XCTAssertTrue(host.isTakeoverActive)
         XCTAssertTrue(host.takeoverChromeIsMaterialized)
         XCTAssertGreaterThan(host.bandView.bounds.height, 0)
-        XCTAssertGreaterThan(host.commandBandView.bounds.height, 0)
+        // One chrome row, not two: this theme seats the window's own commands in its caption,
+        // so the band below them collapses exactly as it does in native dress.
+        XCTAssertEqual(
+            AppThemeStyles.threading.variant(.dark)?.chrome?.titleBar.commands,
+            .inTitleBar
+        )
+        XCTAssertEqual(host.commandBandView.bounds.height, 0)
+        XCTAssertTrue(
+            themedIconButtons(in: host.bandView).contains {
+                $0.accessibilityTitle() == L10n.string("Show or hide sidebar")
+            },
+            "the caption carries the commands it collapsed the other row for"
+        )
 
         AppThemePalette.set(.system)
         coordinator.applyCurrentTheme()
@@ -445,6 +464,25 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
         content.cacheDisplay(in: content.bounds, to: rep)
         let scale = CGFloat(rep.pixelsWide) / content.bounds.width
 
+        // This theme seats the window's own commands in its caption, so the first thing inside
+        // the corner is the sidebar toggle rather than the band's ground — and the toggle's
+        // active plate is outlined in the same border role the seat is drawn in, which no
+        // nearest-ink classification can tell apart. Its pixels are therefore excluded from the
+        // "inside is content" claim only. The curve itself is scanned with the control in
+        // place, which is the claim that matters: a control near the corner may not cover the
+        // seat, and this is what says so.
+        let host = try XCTUnwrap(window.contentViewController as? WindowChromeHostViewController)
+        let commandBoxes = themedIconButtons(in: host.bandView).map { button -> CGRect in
+            let rect = content.convert(button.bounds, from: button)
+            return CGRect(
+                x: rect.minX * scale,
+                y: (content.bounds.height - rect.maxY) * scale,
+                width: rect.width * scale,
+                height: rect.height * scale
+            ).insetBy(dx: -scale, dy: -scale)
+        }
+        XCTAssertFalse(commandBoxes.isEmpty, "the caption lost the commands it seats")
+
         // The three inks a corner pixel can be nearest to, resolved as the frame drew them. The
         // band is pictured inactive (an unshown window is never key), but both gradients' top
         // stops are candidates so the claim does not rest on which one a fixture happens to draw.
@@ -496,6 +534,8 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
                 } else if distance > radius * scale + 0.7 * scale {
                     beyond.append(kind)
                 } else if distance < seatRadius - 0.5 * scale - 0.7 * scale {
+                    let centre = CGPoint(x: CGFloat(x) + 0.5, y: CGFloat(y) + 0.5)
+                    guard !commandBoxes.contains(where: { $0.contains(centre) }) else { continue }
                     within.append(kind)
                 }
             }

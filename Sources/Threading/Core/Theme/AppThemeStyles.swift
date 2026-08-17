@@ -214,13 +214,22 @@ enum AppThemeStyles {
                     ], angleDegrees: 180),
                     ink: hex("#F7EFE6"),
                     inactiveInk: hex("#8693A0"),
-                    titleAlignment: .leading,
+                    // Centred, because the commands below share this row now: the leading
+                    // column is the sidebar toggle and the history pair, and the sidebar's
+                    // own brand row directly beneath already says Threading at that column.
+                    titleAlignment: .center,
                     titleFontStyle: .upright,
                     titleFontSize: 12,
-                    height: 32,
+                    // Four points taller than the caption alone needed, which is what seats a
+                    // 28-point toolbar control with the same air above and below it.
+                    height: 36,
                     buttonGlyphStyle: .plain,
                     buttonPlacement: .trailing,
                     showsAppIcon: false,
+                    // Threading's own frame reproduces no system, so it is free of the reason
+                    // every other takeover here keeps two rows: one row, and the ~41 points the
+                    // command band took go back to the conversation.
+                    commands: .inTitleBar,
                     activeTexture: .init(kind: .rule, color: hex("#FF9A3D")),
                     inactiveTexture: .init(kind: .rule, color: hex("#2B4B65"))
                 ),

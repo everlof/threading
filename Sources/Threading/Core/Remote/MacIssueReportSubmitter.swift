@@ -236,12 +236,20 @@ actor MacIssueReportOutbox {
             .appendingPathComponent("IssueReports", isDirectory: true)
             .appendingPathComponent("Outbox", isDirectory: true),
         endpoint: URL? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
         transport: Transport? = nil
     ) {
         self.directory = directory
+        #if DEBUG
+        let developmentEndpoint = environment["THREADING_REPORT_INTAKE_URL"]
+            .flatMap { $0.isEmpty ? nil : URL(string: $0) }
+        #else
+        let developmentEndpoint: URL? = nil
+        #endif
         self.endpoint = endpoint
+            ?? developmentEndpoint
             ?? (Bundle.main.object(forInfoDictionaryKey: "ThreadingReportIntakeURL") as? String)
-                .flatMap(URL.init(string:))
+                .flatMap { $0.isEmpty ? nil : URL(string: $0) }
             ?? URL(string: "https://remote.threading.codes/v1/reports")!
         self.transport = transport ?? { request in
             let (data, response) = try await URLSession.shared.data(for: request)

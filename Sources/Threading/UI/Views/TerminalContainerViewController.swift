@@ -1543,7 +1543,6 @@ final class TerminalContainerViewController: NSViewController {
         gitStatusOverlay.updateModel(nil)
 
         scheduledView.configure(.init(
-            title: session.displayTitle,
             trigger: ScheduledTiming.automaticStartCauseSentence(
                 for: message,
                 watchedSessionTitle: watchedSessionTitle(for: message)
@@ -1555,6 +1554,10 @@ final class TerminalContainerViewController: NSViewController {
         scheduledView.onStartNow = { [weak self] in
             guard let self else { return }
             self.delegate?.terminalContainer(self, startScheduledMessageNow: message.id)
+        }
+        scheduledView.onEdit = { [weak self] in
+            guard let self else { return }
+            self.delegate?.terminalContainer(self, editScheduledMessage: message.id)
         }
         scheduledView.onCancel = { [weak self] in
             guard let self else { return }
@@ -2467,6 +2470,11 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
     func terminalContainer(
         _ container: TerminalContainerViewController,
         cancelScheduledMessage id: ScheduledMessageID
+    )
+    /// The scheduled surface's Edit: open the waiting record in its project's composer.
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        editScheduledMessage id: ScheduledMessageID
     )
     func terminalContainer(
         _ container: TerminalContainerViewController,

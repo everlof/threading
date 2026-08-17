@@ -136,6 +136,55 @@ final class ScheduledAttachmentStore {
 
     // MARK: - Giving It Back
 
+    /// Hands a composer *copies* of a send's pictures, leaving custody exactly where it is —
+    /// the editing loan.
+    ///
+    /// `detach` moves, because its callers remove the record next. An edit is different: the
+    /// record stays in the store and may still fire while its content is being worked on, so it
+    /// keeps the bytes it may fire with, and the composer gets what a freshly pasted image is —
+    /// a temporary file of its own, held, sent or re-scheduled without this store's directories
+    /// ever being named outside it.
+    func copies(of message: ScheduledMessage) -> [String] {
+        let sources = urls(for: message)
+        var paths: [String] = []
+        for source in sources {
+            let destination = fileManager.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+                .appendingPathComponent(source.lastPathComponent)
+            do {
+                try fileManager.createDirectory(
+                    at: destination.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try fileManager.copyItem(at: source, to: destination)
+                paths.append(destination.path)
+            } catch {
+                ThreadingLogger.session.error(
+                    "Failed to lend a scheduled image copy: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
+        }
+        return paths
+    }
+
+    /// Moves a staged edit's pictures over a message's own.
+    ///
+    /// The editing commit takes custody of the composer's images under a *fresh* staging id
+    /// first — an ordinary `take`, so every ceiling and refusal applies — and only once the
+    /// rewritten record has committed do the staged bytes become the message's. A commit that
+    /// fails therefore leaves the record's current pictures untouched, and a staging directory
+    /// stranded by a crash is an unnamed id `retainOnly` sweeps at the next launch.
+    func adopt(_ stagingID: ScheduledMessageID, as id: ScheduledMessageID) {
+        let staged = directory(for: stagingID)
+        let destination = directory(for: id)
+        try? fileManager.removeItem(at: destination)
+        if fileManager.fileExists(atPath: staged.path) {
+            try? fileManager.moveItem(at: staged, to: destination)
+        }
+        inFlight.remove(stagingID)
+        inFlight.insert(id)
+    }
+
     /// Hands the pictures back to a composer that is taking this send apart again — Edit, and
     /// Send now.
     ///

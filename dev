@@ -1,0 +1,272 @@
+#!/usr/bin/env bash
+#
+# One-command local Threading environment.
+#
+# The default starts the loopback control plane, builds and opens an isolated Debug Mac app,
+# then builds, installs and opens ThreadingMobile in an available iPhone Simulator. Cloudflare,
+# Apple identity, APNs and TURN are deliberately not contacted.
+
+set -euo pipefail
+
+repository_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+service_directory="${repository_directory}/Service/ThreadingControlPlane"
+derived_data_directory="${THREADING_DEV_DERIVED_DATA:-${repository_directory}/.build/dev/DerivedData}"
+mac_home_directory="${THREADING_DEV_HOME:-${repository_directory}/.build/dev/home}"
+control_plane_url="http://127.0.0.1:8787"
+report_intake_url="${control_plane_url}/v1/reports"
+requested_simulator="${THREADING_DEV_SIMULATOR:-}"
+
+launch_mac=1
+launch_ios=1
+backend_pid=""
+backend_process_group=""
+
+usage() {
+  cat <<'EOF'
+Usage: ./dev [options]
+
+Start the complete cloud-free Threading development environment.
+
+Options:
+  --backend-only       Start only the loopback control plane
+  --no-mac             Do not build or open the macOS app
+  --no-ios             Do not build or open the iOS Simulator app
+  --simulator UDID     Use this available iPhone Simulator
+  -h, --help           Show this help
+
+Environment overrides:
+  THREADING_DEV_DERIVED_DATA       Xcode DerivedData directory
+  THREADING_DEV_HOME               Isolated macOS app data directory
+  THREADING_DEV_SIMULATOR          Preferred iPhone Simulator UDID
+
+Ctrl-C stops the local control plane. The opened apps are left running so stopping the backend
+cannot terminate an active local agent session.
+EOF
+}
+
+fail() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+while (($#)); do
+  case "$1" in
+    --backend-only)
+      launch_mac=0
+      launch_ios=0
+      shift
+      ;;
+    --no-mac)
+      launch_mac=0
+      shift
+      ;;
+    --no-ios)
+      launch_ios=0
+      shift
+      ;;
+    --simulator)
+      (($# >= 2)) || fail "--simulator requires a UDID"
+      requested_simulator="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'error: unknown option: %s\n\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || fail "required command is unavailable: $1"
+}
+
+backend_is_running() {
+  [[ -n "${backend_pid}" && -n "${backend_process_group}" ]] || return 1
+  local current_group
+  current_group="$(ps -o pgid= -p "${backend_pid}" 2>/dev/null | tr -d ' ')"
+  [[ "${current_group}" == "${backend_process_group}" ]]
+}
+
+backend_group_is_running() {
+  [[ -n "${backend_process_group}" ]] || return 1
+  kill -0 -- "-${backend_process_group}" 2>/dev/null
+}
+
+cleanup() {
+  local exit_status=$?
+  trap - EXIT HUP INT TERM
+
+  if backend_group_is_running; then
+    printf '\nStopping the local control plane…\n'
+    kill -TERM -- "-${backend_process_group}" 2>/dev/null || true
+    for _ in {1..30}; do
+      backend_group_is_running || break
+      sleep 0.1
+    done
+    if backend_group_is_running; then
+      printf 'The control plane did not stop after three seconds; ending its process group.\n' >&2
+      kill -KILL -- "-${backend_process_group}" 2>/dev/null || true
+    fi
+  fi
+  if [[ -n "${backend_pid}" ]]; then
+    wait "${backend_pid}" 2>/dev/null || true
+  fi
+  exit "${exit_status}"
+}
+
+require_command node
+require_command npm
+require_command curl
+
+node_major="$(node --version)"
+node_major="${node_major#v}"
+node_major="${node_major%%.*}"
+[[ "${node_major}" =~ ^[0-9]+$ ]] || fail "could not determine the installed Node.js version"
+((node_major >= 22)) || fail "Node.js 22 or newer is required (found $(node --version))"
+
+if ((launch_mac || launch_ios)); then
+  require_command xcodebuild
+  require_command xcrun
+  require_command open
+fi
+
+mkdir -p "${derived_data_directory}" "${mac_home_directory}"
+
+installed_lock="${service_directory}/node_modules/.package-lock.json"
+if [[ ! -x "${service_directory}/node_modules/.bin/wrangler" \
+    || ! -f "${installed_lock}" \
+    || "${service_directory}/package-lock.json" -nt "${installed_lock}" \
+    || "${service_directory}/package.json" -nt "${installed_lock}" ]]; then
+  printf 'Installing control-plane dependencies…\n'
+  (cd "${service_directory}" && npm ci)
+fi
+
+printf 'Starting the local control plane at %s…\n' "${control_plane_url}"
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Monitor mode gives the background service its own process group. Cleanup can then stop npm,
+# Node, Wrangler and Miniflare together instead of orphaning a grandchild on Ctrl-C.
+set -m
+(
+  cd "${service_directory}"
+  exec node scripts/local-dev.mjs
+) </dev/null &
+backend_pid=$!
+backend_process_group="$(ps -o pgid= -p "${backend_pid}" | tr -d ' ')"
+set +m
+[[ -n "${backend_process_group}" ]] || fail "could not identify the control-plane process group"
+
+ready=0
+for _ in {1..120}; do
+  if curl --fail --silent "${control_plane_url}/ready" >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  backend_is_running || fail "the local control plane stopped before it became ready"
+  sleep 0.25
+done
+((ready == 1)) || fail "the local control plane did not become ready within 30 seconds"
+printf 'Local control plane is ready.\n'
+
+if ((launch_mac)); then
+  printf 'Building the macOS app…\n'
+  xcodebuild \
+    -project "${repository_directory}/Threading.xcodeproj" \
+    -scheme Threading \
+    -configuration Debug \
+    -destination 'platform=macOS' \
+    -derivedDataPath "${derived_data_directory}" \
+    -quiet \
+    build
+
+  mac_app="${derived_data_directory}/Build/Products/Debug/Threading.app"
+  [[ -d "${mac_app}" ]] || fail "the built macOS app is missing: ${mac_app}"
+
+  printf 'Opening the macOS app with isolated local state…\n'
+  open -n \
+    --env "CFFIXED_USER_HOME=${mac_home_directory}" \
+    --env "THREADING_CONTROL_PLANE_URL=${control_plane_url}" \
+    --env THREADING_CONTROL_PLANE_LOCAL_AUTH=1 \
+    --env "THREADING_REPORT_INTAKE_URL=${report_intake_url}" \
+    "${mac_app}"
+fi
+
+resolve_simulator() {
+  local devices line udid
+  devices="$(xcrun simctl list devices available)"
+
+  if [[ -n "${requested_simulator}" ]]; then
+    line="$(printf '%s\n' "${devices}" | grep -F "(${requested_simulator})" | head -1 || true)"
+    [[ "${line}" == *iPhone* ]] || fail \
+      "the requested simulator is not an available iPhone: ${requested_simulator}"
+    printf '%s\n' "${requested_simulator}"
+    return
+  fi
+
+  line="$(printf '%s\n' "${devices}" | awk '/iPhone/ && /\(Booted\)/ { print; exit }')"
+  if [[ -z "${line}" ]]; then
+    line="$(printf '%s\n' "${devices}" | awk '/iPhone/ { print; exit }')"
+  fi
+  [[ -n "${line}" ]] || fail "no available iPhone Simulator was found; use --no-ios to skip it"
+
+  udid="$(printf '%s\n' "${line}" | sed -E 's/.*\(([0-9A-Fa-f-]{36})\).*/\1/')"
+  [[ "${udid}" =~ ^[0-9A-Fa-f-]{36}$ ]] || fail "could not read the iPhone Simulator UDID"
+  printf '%s\n' "${udid}"
+}
+
+if ((launch_ios)); then
+  simulator_udid="$(resolve_simulator)"
+  simulator_state="$(
+    xcrun simctl list devices available \
+      | grep -F "(${simulator_udid})" \
+      | head -1
+  )"
+  if [[ "${simulator_state}" != *'(Booted)'* ]]; then
+    printf 'Booting iPhone Simulator %s…\n' "${simulator_udid}"
+    xcrun simctl boot "${simulator_udid}"
+  fi
+  open -a Simulator
+  xcrun simctl bootstatus "${simulator_udid}" -b >/dev/null
+
+  printf 'Building the iOS app…\n'
+  xcodebuild \
+    -project "${repository_directory}/Threading.xcodeproj" \
+    -scheme ThreadingMobile \
+    -configuration Debug \
+    -destination "platform=iOS Simulator,id=${simulator_udid}" \
+    -derivedDataPath "${derived_data_directory}" \
+    "THREADING_REPORT_INTAKE_URL=${report_intake_url}" \
+    -quiet \
+    build
+
+  ios_app="${derived_data_directory}/Build/Products/Debug-iphonesimulator/ThreadingMobile.app"
+  [[ -d "${ios_app}" ]] || fail "the built iOS app is missing: ${ios_app}"
+
+  printf 'Installing and opening the iOS app…\n'
+  xcrun simctl install "${simulator_udid}" "${ios_app}"
+  xcrun simctl launch --terminate-running-process \
+    "${simulator_udid}" codes.threading.mobile >/dev/null
+fi
+
+printf '\nThreading local development is running.\n'
+printf '  control plane: %s\n' "${control_plane_url}"
+if ((launch_mac && launch_ios)); then
+  printf '  pairing: Mac Settings → Remote Access → Copy Pairing Link, then paste it on iOS\n'
+fi
+printf '  stop backend: Ctrl-C (the apps remain open)\n\n'
+
+set +e
+wait "${backend_pid}"
+backend_status=$?
+set -e
+backend_pid=""
+backend_process_group=""
+exit "${backend_status}"

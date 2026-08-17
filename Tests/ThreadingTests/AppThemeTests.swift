@@ -2364,7 +2364,11 @@ final class AppThemeTests: HostedStoreTestCase {
             sidebar.navigatorWell?.bevel,
             SidebarStyle.NavigatorWell.Bevel.none
         )
-        XCTAssertEqual(chrome.titleBar.height, 32)
+        // One chrome row: the window's own commands share the caption, which is why the band
+        // is four points taller than a caption alone needs — a toolbar control is 28.
+        XCTAssertEqual(chrome.titleBar.commands, .inTitleBar)
+        XCTAssertEqual(chrome.titleBar.height, 36)
+        XCTAssertEqual(chrome.titleBar.titleAlignment, .center)
         XCTAssertFalse(chrome.titleBar.showsAppIcon)
         XCTAssertEqual(chrome.titleBar.activeTexture?.kind, .rule)
         XCTAssertEqual(chrome.frame?.cornerRadius, 12)

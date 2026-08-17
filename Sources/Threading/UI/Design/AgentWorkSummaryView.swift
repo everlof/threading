@@ -19,6 +19,7 @@ final class AgentWorkSummaryView: NSView, ThemedComponent {
     private let filesToken = WorkCountToken()
     private let editsToken = WorkCountToken(mark: .edit)
     private let readsToken = WorkCountToken(mark: .read)
+    private let observedToken = WorkCountToken(mark: .observed)
     private let actionsToken = WorkCountToken()
     private let shellToken = WorkCountToken(mark: .action(.shell))
     private let webToken = WorkCountToken(mark: .action(.network))
@@ -29,6 +30,7 @@ final class AgentWorkSummaryView: NSView, ThemedComponent {
 
     private var target: AgentWorkTarget?
     private var injectedPresentation: AgentWorkPresentation?
+    private var injectedSource: AgentWorkSource?
 
     init(target: AgentWorkTarget? = nil) {
         self.target = target
@@ -47,13 +49,18 @@ final class AgentWorkSummaryView: NSView, ThemedComponent {
     func bind(to target: AgentWorkTarget?) {
         self.target = target
         injectedPresentation = nil
+        injectedSource = nil
         refresh()
     }
 
     /// Render harness injection; production views bind to the store instead.
-    func setPresentation(_ presentation: AgentWorkPresentation?) {
+    func setPresentation(
+        _ presentation: AgentWorkPresentation?,
+        source: AgentWorkSource = .live
+    ) {
         target = nil
         injectedPresentation = presentation
+        injectedSource = source
         refresh()
     }
 
@@ -75,7 +82,7 @@ final class AgentWorkSummaryView: NSView, ThemedComponent {
         }
         legendLabel.textColor = Design.Text.tertiary
 
-        statsRow.setTokens([filesToken, editsToken, readsToken])
+        statsRow.setTokens([filesToken, editsToken, readsToken, observedToken])
         actionsRow.setTokens([actionsToken, shellToken, webToken, subagentToken, otherToken])
 
         atlas.translatesAutoresizingMaskIntoConstraints = false
@@ -133,7 +140,29 @@ final class AgentWorkSummaryView: NSView, ThemedComponent {
         }
     }
 
+    /// What this session's reading can come from, which decides both whether the card draws at
+    /// all and which counts it is entitled to show. Project scope aggregates many sessions with
+    /// different answers, so it asks nothing and shows everything it has.
+    private var source: AgentWorkSource {
+        if let sessionID = target?.sessionID { return .resolve(sessionID: sessionID) }
+        return injectedSource ?? .live
+    }
+
     private func refresh() {
+        // Nothing feeds this session. Drawing the repository silhouette with zeros beside it
+        // said "this chat did nothing" in the same picture that says "nobody was watching"; the
+        // sentence is the only honest thing the card has, so it is the only thing it shows.
+        // Project scope resolves to `.live` and therefore never lands here: it aggregates many
+        // sessions, and one of them being unwatchable says nothing about the rest.
+        //
+        // Resolved before the atlas is bound, so a card that will draw no atlas does not ask the
+        // store to enumerate a checkout to build one.
+        let source = self.source
+        guard source.hasAnySource else {
+            showUnavailable(source)
+            return
+        }
+
         let presentation: AgentWorkPresentation?
         if let target {
             presentation = AgentWorkTraceStore.shared.presentation(for: target)
@@ -149,6 +178,8 @@ final class AgentWorkSummaryView: NSView, ThemedComponent {
             statusLabel.isHidden = false
             statsRow.isHidden = true
             actionsRow.isHidden = true
+            atlas.isHidden = false
+            ribbon.isHidden = false
             contributorLabel.stringValue = ""
             contributorLabel.isHidden = true
             legendLabel.stringValue = ""
@@ -160,7 +191,12 @@ final class AgentWorkSummaryView: NSView, ThemedComponent {
 
         statusLabel.isHidden = true
         statsRow.isHidden = false
-        actionsRow.isHidden = false
+        atlas.isHidden = false
+        // Actions are tool calls. A git-observed reading has none by construction, so the row
+        // and the chronology under the atlas would be permanent zeros and an empty strip rather
+        // than a quiet stretch of a real one.
+        actionsRow.isHidden = !source.reportsExactCalls
+        ribbon.isHidden = !source.reportsExactCalls
 
         let projectScope = presentation.scope.isProjectScope
         titleLabel.stringValue = projectScope
@@ -169,6 +205,7 @@ final class AgentWorkSummaryView: NSView, ThemedComponent {
 
         let reads = presentation.bins.reduce(0) { $0 + $1.readCount }
         let edits = presentation.bins.reduce(0) { $0 + $1.editCount }
+        let observed = presentation.observedChangeCount
         let repositoryFiles = max(presentation.repositoryFileCount, presentation.touchedFileCount)
         filesToken.set(
             value: presentation.touchedFileCount,
@@ -176,6 +213,13 @@ final class AgentWorkSummaryView: NSView, ThemedComponent {
         )
         editsToken.set(value: edits, unit: L10n.string("edits"))
         readsToken.set(value: reads, unit: L10n.string("reads"))
+        observedToken.set(value: observed, unit: L10n.string("changed"))
+
+        // A count this source cannot produce is withheld, not shown as zero: "0 reads" is a
+        // measurement, and a runtime whose reads nobody can see has not taken one.
+        editsToken.isHidden = !source.reportsExactCalls
+        readsToken.isHidden = !source.reportsExactCalls
+        observedToken.isHidden = observed == 0
 
         let shell = presentation.categoryCounts[.shell, default: 0]
         let web = presentation.categoryCounts[.network, default: 0]
@@ -209,33 +253,89 @@ final class AgentWorkSummaryView: NSView, ThemedComponent {
             contributorLabel.stringValue = names.isEmpty
                 ? L10n.string("No agent work observed yet")
                 : L10n.format("Recent agents: %@", names.joined(separator: " · "))
-            // No colour word: the cap draws in the label ink, which is dark on a light ground.
-            legendLabel.isHidden = false
-            legendLabel.stringValue = L10n.string(
-                "A capped mark means more than one agent touched it."
-            )
         } else {
             contributorLabel.stringValue = ""
             contributorLabel.isHidden = true
-            legendLabel.stringValue = ""
-            legendLabel.isHidden = true
         }
 
-        setAccessibilityValue(
-            L10n.format(
+        var legend: [String] = []
+        if projectScope {
+            // No colour word: the cap draws in the label ink, which is dark on a light ground.
+            legend.append(L10n.string("A capped mark means more than one agent touched it."))
+        }
+        // The provenance line, and the whole reason the observed marks are colourless: what the
+        // repository saw change is a weaker fact than what a tool said it wrote, and the card
+        // has to say which one a mark is.
+        if !source.reportsExactCalls {
+            legend.append(L10n.string("Changed files only. This runtime reports no reads or edits."))
+        } else if observed > 0 {
+            legend.append(
+                L10n.string("Plain marks are files a turn changed with no tool naming them.")
+            )
+        }
+        legendLabel.stringValue = legend.joined(separator: " ")
+        legendLabel.isHidden = legend.isEmpty
+
+        var spoken = source.reportsExactCalls
+            ? L10n.format(
                 "%d of %d files · %d reads · %d edits",
                 presentation.touchedFileCount,
                 repositoryFiles,
                 reads,
                 edits
-            ) + ". " + L10n.format(
+            )
+            : L10n.format(
+                "%d of %d files",
+                presentation.touchedFileCount,
+                repositoryFiles
+            )
+        if observed > 0 {
+            spoken += " · " + L10n.format("%d observed changes", observed)
+        }
+        if source.reportsExactCalls {
+            spoken += ". " + L10n.format(
                 "%d actions · %d shell · %d web · %d subagent",
                 presentation.totalActionCount,
                 shell,
                 web,
                 subagents
             )
-        )
+        }
+        setAccessibilityValue(spoken)
+    }
+
+    /// The card for a session nothing feeds: one sentence, and none of the encodings it has no
+    /// data for. A reading that cannot be taken is not a reading of zero.
+    private func showUnavailable(_ source: AgentWorkSource) {
+        titleLabel.stringValue = L10n.string("Observed work")
+        statusLabel.stringValue = Self.unavailableSentence(source)
+        statusLabel.isHidden = false
+        statsRow.isHidden = true
+        actionsRow.isHidden = true
+        contributorLabel.stringValue = ""
+        contributorLabel.isHidden = true
+        legendLabel.stringValue = ""
+        legendLabel.isHidden = true
+        atlas.isHidden = true
+        ribbon.isHidden = true
+        ribbon.setActions([])
+        setAccessibilityValue(statusLabel.stringValue)
+    }
+
+    private static func unavailableSentence(_ source: AgentWorkSource) -> String {
+        guard case .unavailable(let reason) = source else {
+            return L10n.string("Nothing observed for this session yet.")
+        }
+        switch reason {
+        case .runtimeKeepsNoReadableTranscript:
+            // Not "no work": the work happened. Threading has no way to see it, and says which
+            // way would start working.
+            return L10n.string(
+                "This runtime keeps no transcript Threading can read. Files a turn changes appear here once it has run in a git checkout."
+            )
+        case .transcriptNotWrittenYet:
+            return L10n.string("No transcript for this session yet.")
+        }
     }
 }
 
@@ -410,6 +510,7 @@ private final class WorkMarkView: NSView, ThemedComponent {
     enum Encoding {
         case edit
         case read
+        case observed
         case action(ExecutionAuditRecord.Category?)
     }
 
@@ -445,6 +546,11 @@ private final class WorkMarkView: NSView, ThemedComponent {
                 width: bounds.width,
                 height: max(1, floor(bounds.height * FileActivityInk.readStripFraction))
             ).fill()
+        case .observed:
+            // The same whole-cell fill an edit draws, in the colourless ink: the shape says "this
+            // file was touched" and the absence of accent says nobody claimed it.
+            FileActivityInk.observed.setFill()
+            bounds.fill()
         case .action(let category):
             WorkActionInk.ink(for: category).setFill()
             NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5)).fill()

@@ -193,8 +193,12 @@ enum AgentDefaults {
     static let claudeSubagentsSubdirectory = "subagents"
     static let transcriptExtension = "jsonl"
 
-    /// Claude names a project's directory after its absolute path with separators replaced.
+    /// Claude names a project's directory after its absolute path, keeping only the characters
+    /// below and writing this separator in place of every other one. `ClaudeTranscript` owns the
+    /// encoding; these are the two values it is written from.
     static let projectSlugSeparator = "-"
+    static let projectSlugPreservedCharacters =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 }
 
 // MARK: - Agent Environment

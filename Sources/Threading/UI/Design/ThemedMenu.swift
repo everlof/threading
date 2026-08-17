@@ -351,6 +351,19 @@ enum ThemedMenuAnchor {
     case pointer(NSPoint)
 }
 
+/// A view whose presentation changes while a menu opened from it or one of its descendants is
+/// on screen.
+///
+/// The menu is part of the source's interaction, even though its full-window overlay sits
+/// elsewhere in the view tree. Publishing that fact from the presenter keeps the source control
+/// held and lets a container carry hover-only actions while the pointer travels into the menu.
+/// The session remembers the observer chain it opened with, so dismissal reaches the same views
+/// even when a list has since detached or rearranged them.
+@MainActor
+protocol ThemedMenuPresentationObserving: NSView {
+    func themedMenuPresentationDidChange(isPresented: Bool)
+}
+
 /// Presents a completely app-owned dropdown above the window's content.
 ///
 /// An overlay rather than `NSMenu`, `NSPopover`, or a borderless panel is deliberate:
@@ -678,6 +691,16 @@ enum ThemedMenuLayout {
 @MainActor
 private final class ThemedMenuSession: NSObject {
 
+    /// Weak because a transient menu must not keep a recycled source row alive. The session's
+    /// source is weak for the same reason; this is the rest of the source-to-root chain.
+    private final class WeakPresentationObserver {
+        weak var view: NSView?
+
+        init(_ view: NSView) {
+            self.view = view
+        }
+    }
+
     /// The sessions currently up — how `ThemedMenuPresenter.isMenuOpen(in:)` answers for a
     /// window, and the session's **owner** while its menu is on screen. Strong on purpose:
     /// nothing else is obliged to retain a session — the overlay's callbacks hold it weakly,
@@ -693,6 +716,7 @@ private final class ThemedMenuSession: NSObject {
 
     private weak var source: NSView?
     fileprivate weak var window: NSWindow?
+    private let presentationObservers: [WeakPresentationObserver]
     private let overlay: ThemedMenuOverlayView
     private let onChoose: (Int, ThemedMenuItem) -> Void
     private let onDismiss: () -> Void
@@ -717,6 +741,7 @@ private final class ThemedMenuSession: NSObject {
     ) {
         self.source = source
         self.window = window
+        presentationObservers = Self.presentationObservers(from: source)
         self.onChoose = onChoose
         self.onDismiss = onDismiss
 
@@ -759,6 +784,7 @@ private final class ThemedMenuSession: NSObject {
         super.init()
 
         Self.open.add(self)
+        notifyPresentationObservers(isPresented: true)
         overlay.menuSource = source
         overlay.onDismiss = { [weak self] in self?.closeFromUser() }
         overlay.onChoose = { [weak self] index, item in self?.choose(index: index, item: item) }
@@ -806,6 +832,27 @@ private final class ThemedMenuSession: NSObject {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+    }
+
+    /// The source plus each presentation-aware container around it, captured before the overlay
+    /// changes hit testing or a list gets a chance to recycle the row.
+    private static func presentationObservers(from source: NSView) -> [WeakPresentationObserver] {
+        var observers: [WeakPresentationObserver] = []
+        var candidate: NSView? = source
+        while let view = candidate {
+            if view is any ThemedMenuPresentationObserving {
+                observers.append(WeakPresentationObserver(view))
+            }
+            candidate = view.superview
+        }
+        return observers
+    }
+
+    private func notifyPresentationObservers(isPresented: Bool) {
+        for observer in presentationObservers {
+            (observer.view as? any ThemedMenuPresentationObserving)?
+                .themedMenuPresentationDidChange(isPresented: isPresented)
+        }
     }
 
     /// A dropdown is modal keyboard UI for as long as it is open. AppKit can apply a window's
@@ -1016,6 +1063,7 @@ private final class ThemedMenuSession: NSObject {
             if let window, window.firstResponder === overlay, let source {
                 window.makeFirstResponder(source)
             }
+            notifyPresentationObservers(isPresented: false)
             overlay.tearDown(exit: exit)
             // After the teardown and ahead of the exit animation: the pixels that outlive this
             // call take no clicks — `tearDown` has already stopped the overlay answering hit

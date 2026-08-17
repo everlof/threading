@@ -59,6 +59,21 @@ enum AgentWorkSummaryGalleryStory {
             )
         }
 
+        // A session with no per-call source at all: only the files each turn's git checkpoint
+        // pair showed changed. Its marks are colourless on purpose, and the card withholds the
+        // counts it cannot take rather than printing them as zero.
+        // No session title: this card is drawn at session scope, where the title is the card's
+        // own heading rather than the trace's.
+        var observedOnly = AgentSessionWorkTrace()
+        observedOnly.agentLabel = "Grok"
+        for index in stride(from: 300, through: 1_500, by: 37) {
+            observedOnly.recordObservedChange(
+                path: files[index],
+                root: nil,
+                at: now.addingTimeInterval(-TimeInterval(index % 80))
+            )
+        }
+
         let traces = [firstID: first, secondID: second]
         let presentation = AgentWorkPresentation.project(
             AgentProjectWorkAggregate(traces: traces),
@@ -67,10 +82,36 @@ enum AgentWorkSummaryGalleryStory {
             atlas: atlas,
             detailed: true
         )
-        let summary = AgentWorkSummaryView()
-        summary.setClock { now }
-        summary.setPresentation(presentation)
+
+        let stack = NSStackView(views: [
+            card(presentation, source: .live, clock: now),
+            card(
+                AgentWorkPresentation.session(
+                    observedOnly, sessionID: SessionID(), atlas: atlas, detailed: true
+                ),
+                source: .gitObserved,
+                clock: now
+            ),
+            // The third state, and the one that used to be a lie: nothing feeds this session, so
+            // the card says that instead of drawing the repository with zeros beside it.
+            card(nil, source: .unavailable(.runtimeKeepsNoReadableTranscript), clock: now)
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.large
         // One realistic review width keeps evidence independent of host text fitting.
+        stack.widthAnchor.constraint(equalToConstant: 520).isActive = true
+        return stack
+    }
+
+    private static func card(
+        _ presentation: AgentWorkPresentation?,
+        source: AgentWorkSource,
+        clock: Date
+    ) -> AgentWorkSummaryView {
+        let summary = AgentWorkSummaryView()
+        summary.setClock { clock }
+        summary.setPresentation(presentation, source: source)
         summary.widthAnchor.constraint(equalToConstant: 520).isActive = true
         return summary
     }

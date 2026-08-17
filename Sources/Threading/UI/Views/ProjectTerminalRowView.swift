@@ -20,6 +20,9 @@ final class ProjectTerminalRowView: NSTableCellView {
     private var trackingArea: NSTrackingArea?
     private var terminalID: TerminalID?
     private var isRunning = false
+    private var isHovered = false
+    private var isPresentingMenu = false
+    private var presentsHoverAction: Bool { isHovered || isPresentingMenu }
 
     var onAction: ((TerminalID, NSView) -> Void)?
 
@@ -148,25 +151,29 @@ final class ProjectTerminalRowView: NSTableCellView {
         )
         addTrackingArea(area)
         trackingArea = area
-        if hoverIsStale(actionButton.alphaValue > 0) {
-            setActionVisible(false, animated: false)
+        if hoverIsStale(isHovered) {
+            isHovered = false
+            setActionVisible(presentsHoverAction, animated: false)
         }
     }
 
     override func mouseEntered(with event: NSEvent) {
         // Not through the receipt floating over the list — see `NSView.isPointerCovered(at:)`.
         guard !isPointerCovered(at: event.locationInWindow) else { return }
-        setActionVisible(true, animated: true)
+        isHovered = true
+        setActionVisible(presentsHoverAction, animated: true)
     }
 
     override func mouseExited(with event: NSEvent) {
-        setActionVisible(false, animated: true)
+        isHovered = false
+        setActionVisible(presentsHoverAction, animated: true)
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
         terminalID = nil
-        setActionVisible(false, animated: false)
+        isHovered = false
+        setActionVisible(presentsHoverAction, animated: false)
     }
 
     private func setActionVisible(_ visible: Bool, animated: Bool) {
@@ -192,6 +199,16 @@ final class ProjectTerminalRowView: NSTableCellView {
         // on rather than handed a colour — see `BackdropThemedControl.hostGround`, and the
         // session row beside this one, which states the same thing.
         actionButton.hostGround = backgroundStyle == .emphasized ? .selection : nil
+    }
+}
+
+// MARK: - Menu Presentation
+
+extension ProjectTerminalRowView: ThemedMenuPresentationObserving {
+    func themedMenuPresentationDidChange(isPresented: Bool) {
+        guard isPresentingMenu != isPresented else { return }
+        isPresentingMenu = isPresented
+        setActionVisible(presentsHoverAction, animated: !isPresented)
     }
 }
 

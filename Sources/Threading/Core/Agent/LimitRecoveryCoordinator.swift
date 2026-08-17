@@ -34,6 +34,11 @@ final class LimitRecoveryCoordinator {
     /// this and the rendered-conversation surface feed.
     private var parked: [SessionID: UsageLimitStop] = [:]
 
+    /// How much login-hopping each session has done unattended. The floor under the two policies
+    /// that move a conversation, and the guard the interactive escape deliberately does without —
+    /// see `LimitRecoveryBudget`.
+    private var budget = LimitRecoveryBudget()
+
     // MARK: - Initialization
 
     private init() {}
@@ -131,6 +136,18 @@ final class LimitRecoveryCoordinator {
                 "scope": String(describing: answer.scope)
             ])
             armWaitForReset(sessionID, terminal: terminal, trigger: .policy)
+
+        case .resumeOnBestAccount, .resumeVia:
+            EventLog.shared.record(.limitRecovery, "Account recovery armed by policy", [
+                "session": sessionID.uuidString,
+                "scope": String(describing: answer.scope),
+                "policy": answer.policy.rawValue
+            ])
+            armAccountResume(
+                sessionID,
+                terminal: terminal,
+                policy: answer.policy
+            )
         }
     }
 
@@ -182,6 +199,14 @@ final class LimitRecoveryCoordinator {
     private enum RecoveryTrigger {
         case policy
         case press
+
+        /// A policy that moves the conversation to another login. Unattended like `policy`, and
+        /// yet it reports its failures the way a press does: `armAccountResume` publishes the
+        /// standing refusal *before* it tries anything, so the offer is already on screen and
+        /// recomputing it would clear the dismissal and wipe the sentence being written. Named
+        /// separately all the same, because "nobody pressed this" is what the journal needs to
+        /// say when somebody asks weeks later why their conversation moved.
+        case policyAccountResume
     }
 
     /// The plan is computed before anything is typed, the chooser is answered before anything
@@ -351,6 +376,248 @@ final class LimitRecoveryCoordinator {
         }
     }
 
+    // MARK: - Private Methods — Moving To Another Login
+
+    /// Carries out `resumeOnBestAccount` or `resumeVia(_:)`: choose a login with room, then hand
+    /// the move to the one routine that performs it.
+    ///
+    /// **The chooser is never answered here, and that is not an oversight.** The refused turn is
+    /// already over when the CLI draws it (`limit-recovery.md`'s second measured fact), and this
+    /// policy stops the process anyway — `SessionMigration.move` tears the PTY down before it
+    /// copies the transcript, so typing into that screen first would be keystrokes into a terminal
+    /// about to be discarded.
+    ///
+    /// **The offer is published before anything is attempted**, rather than only where a recovery
+    /// fails. Two things follow: a failure has a strip to write its reason on, and the session is
+    /// left exactly where `flagOnly` would leave it — flagged, with the interactive escape standing
+    /// over it, so the answer to "the policy could not do it" is a button the user can press.
+    private func armAccountResume(
+        _ sessionID: SessionID,
+        terminal: any AgentTerminalLimitRecoverySurface,
+        policy: LimitRecoveryPolicy
+    ) {
+        offerEscape(for: sessionID)
+
+        guard budget.admitMigration(for: sessionID) else {
+            standDown(
+                sessionID,
+                terminal: terminal,
+                trigger: .policyAccountResume,
+                because: "the unattended migration budget for this session is spent",
+                sentence: LimitRecoveryStrings.budgetSpentProblem
+            )
+            return
+        }
+
+        // Parked as *recovering* for the seconds the readings take to land, not as flagged: the
+        // triangle explains a session nothing is doing anything about, and a row that flashed it
+        // while a migration was being decided would be answering its own question wrong. A stand
+        // down below lowers it, which is the state the triangle is for.
+        terminal.noteLimitParked(recoveryArmed: true)
+
+        resolveResumeTarget(for: sessionID, policy: policy) { [weak self] result in
+            guard let self else { return }
+
+            switch result {
+            case .success(let account):
+                EventLog.shared.record(.limitRecovery, "Automatic migration chosen, requesting the move", [
+                    "session": sessionID.uuidString,
+                    "account": account.id.description,
+                    "policy": policy.rawValue
+                ])
+                // Announced rather than called, for `LimitEscapeRequested`'s reason: migrating a
+                // conversation and putting its pane back is `SessionCoordinator`'s work, and Core
+                // holds no controller to ask. The same routine the press runs answers it.
+                NotificationCenter.default.post(LimitAccountResumeRequested(
+                    sessionID: sessionID,
+                    accountID: account.id
+                ))
+                self.parked.removeValue(forKey: sessionID)
+                self.recovering.remove(sessionID)
+
+            case .failure(let refusal):
+                self.standDown(
+                    sessionID,
+                    terminal: terminal,
+                    trigger: .policyAccountResume,
+                    because: refusal.reason,
+                    sentence: refusal.sentence
+                )
+            }
+        }
+    }
+
+    /// Why a policy could not name a login to carry on under.
+    ///
+    /// Two words for each: the journal's, which names the defect for whoever reads it weeks later,
+    /// and the strip's, which names the situation for whoever finds the session. The same split
+    /// `LimitRecoveryStrings` already keeps, for the same reason — "no candidate survived
+    /// eligibility" is a diagnosis, not an explanation.
+    private enum ResumeTargetRefusal: Error {
+        case sessionGone
+        case noOtherLogin
+        case pinnedLoginGone(AccountID)
+        case pinnedLoginHasNoRoom(name: String, reading: String?)
+
+        /// Nothing qualified. The hold is carried when one of the user's *own* limits is what
+        /// refused a candidate, because a login fenced off by its owner must never be reported as
+        /// spent — that reads as the provider's doing and points the user at the wrong thing. It
+        /// is the reason `LimitEscapeRanking.exclusions` exists.
+        case noLoginWithRoom(heldByOwnLimit: CustomLimitHold?)
+
+        var reason: String {
+            switch self {
+            case .sessionGone:
+                return "the session was gone by the time the readings landed"
+            case .noOtherLogin:
+                return "the runtime routes no other login to move to"
+            case .pinnedLoginGone(let accountID):
+                return "the pinned login \(accountID.rawValue) is not among this session's destinations"
+            case .pinnedLoginHasNoRoom(_, let reading):
+                return "the pinned login has no room on a fresh reading: \(reading ?? "no windows")"
+            case .noLoginWithRoom(let hold) where hold != nil:
+                return "no login has a fresh reading with room, and one is held by the user's own limit"
+            case .noLoginWithRoom:
+                return "no login has a fresh reading with room"
+            }
+        }
+
+        var sentence: String {
+            switch self {
+            case .sessionGone, .noOtherLogin:
+                return LimitRecoveryStrings.noOtherLoginProblem
+            case .pinnedLoginGone:
+                return LimitRecoveryStrings.pinnedLoginGoneProblem
+            case .pinnedLoginHasNoRoom(let name, _):
+                // The wording the pressed escape already uses when its target turns out to be
+                // spent. One sentence for one fact, whoever discovered it.
+                return L10n.format("%@ is close to its own limit now.", name)
+            case .noLoginWithRoom(let hold):
+                // The user's own line gets its own words, in full: "excluded by your limit" is a
+                // different fact from "spent", and the one thing that must not happen is a fence
+                // the user drew being reported as the provider refusing.
+                return hold.map(CustomLimitReceipt.holdReason) ?? LimitRecoveryStrings.noLoginWithRoomProblem
+            }
+        }
+    }
+
+    /// Picks the login this policy names, on readings fetched *now*.
+    ///
+    /// **Forced, and bounded by the number of logins.** `warmCandidateReadings` asks politely at
+    /// detection and may not have landed, and a cached figure deciding where somebody's
+    /// conversation goes is the one thing `limit-recovery.md` names as a guard on this feature.
+    /// Every pacing rule in `AccountUsageService` still applies, receipt included, so a refusal
+    /// cannot become a way to spend a usage endpoint's rate limit faster.
+    ///
+    /// Choosing is all this does. The press path re-checks the chosen login against the reading
+    /// it has by then, which is the guard staying where it already lives rather than being
+    /// written twice.
+    private func resolveResumeTarget(
+        for sessionID: SessionID,
+        policy: LimitRecoveryPolicy,
+        completion: @escaping @MainActor (Result<AgentAccount, ResumeTargetRefusal>) -> Void
+    ) {
+        guard let session = ProjectStore.shared.session(withID: sessionID) else {
+            return completion(.failure(.sessionGone))
+        }
+
+        let model = LimitEscapeSuggestion.effectiveModel(for: session)
+        // Capability-gated already, which is why nothing here names a provider: a runtime that
+        // routes no accounts offers no destinations and the policy simply cannot apply.
+        let destinations = SessionMigration.destinations(for: session)
+        guard !destinations.isEmpty else { return completion(.failure(.noOtherLogin)) }
+
+        let candidates: [AgentAccount]
+        if let pinned = policy.pinnedAccountID {
+            guard let match = destinations.first(where: { $0.id == pinned }) else {
+                return completion(.failure(.pinnedLoginGone(pinned)))
+            }
+            candidates = [match]
+        } else {
+            candidates = destinations
+        }
+
+        var remaining = candidates.count
+        for account in candidates {
+            AccountUsageService.shared.refresh(account, force: true) {
+                remaining -= 1
+                guard remaining == 0 else { return }
+
+                let values = candidates.map {
+                    LimitEscapeRanking.Candidate(
+                        accountID: $0.id,
+                        usage: AccountUsageService.shared.usage(for: $0),
+                        limits: CustomLimitSettings.shared.rules(for: $0.id)
+                    )
+                }
+
+                // A login the user fenced off is refused by the ranking like any other, and named
+                // here so the refusal can say *whose* line stopped it.
+                let heldByOwnLimit = LimitEscapeRanking.exclusions(values).first?.hold
+
+                if policy.pinnedAccountID != nil {
+                    guard let candidate = values.first, let account = candidates.first else {
+                        return completion(.failure(.noLoginWithRoom(heldByOwnLimit: heldByOwnLimit)))
+                    }
+                    // Degraded, and deliberately **not** escalated to whichever login now ranks
+                    // best: a pinned answer names one login, and choosing a different one on the
+                    // user's behalf is the escalation `limit-recovery.md` refuses. The strip
+                    // offers the ranked login instead, for a press.
+                    guard LimitEscapeRanking.hasHeadroom(candidate, metering: model) else {
+                        // A pin the user's own limit is holding says so in that limit's words,
+                        // rather than reporting their own fence back to them as a spent account.
+                        guard heldByOwnLimit == nil else {
+                            return completion(.failure(.noLoginWithRoom(
+                                heldByOwnLimit: heldByOwnLimit
+                            )))
+                        }
+                        return completion(.failure(.pinnedLoginHasNoRoom(
+                            name: AccountName.display(for: account),
+                            reading: candidate.usage?.compactSummary(metering: model)
+                        )))
+                    }
+                    return completion(.success(account))
+                }
+
+                guard let best = LimitEscapeRanking.best(among: values, metering: model),
+                      let account = candidates.first(where: { $0.id == best.accountID })
+                else {
+                    return completion(.failure(.noLoginWithRoom(heldByOwnLimit: heldByOwnLimit)))
+                }
+
+                completion(.success(account))
+            }
+        }
+    }
+
+    // MARK: - Public Methods — The Move Reporting Back
+
+    /// The migration a policy asked for did not go through.
+    ///
+    /// Called by the routine that performs it, because the park is Core's fact and the move is
+    /// not: a session left `recovering` after a failed migration reads as an idle process sitting
+    /// at its prompt, when what it actually is is a session still refused with nothing coming to
+    /// fix it. The strip's sentence is written by the caller, which is the surface that knows
+    /// which of the three ways it failed.
+    ///
+    /// The **allocated** surface rather than the running one: `SessionMigration.move` discards the
+    /// process before it copies anything, so by the time a move fails there may be no PTY left —
+    /// the same reason that lookup exists for a transcript-derived park.
+    func noteAutomaticResumeFailed(for sessionID: SessionID, reason: String) {
+        AgentRuntime.shared.limitRecoverySurface(for: sessionID)?
+            .noteLimitParked(recoveryArmed: false)
+        EventLog.shared.record(.limitRecovery, "Automatic migration failed, session flagged", [
+            "session": sessionID.uuidString,
+            "reason": reason
+        ])
+        ThreadingLogger.agent.error(
+            """
+            Automatic limit migration failed for \(sessionID.uuidString, privacy: .public): \
+            \(reason, privacy: .private(mask: .hash))
+            """
+        )
+    }
+
     // MARK: - Private Methods — The Chooser
 
     private enum ChooserResult {
@@ -468,7 +735,7 @@ final class LimitRecoveryCoordinator {
             // `recoveryArmed: false` lands, and both make the same offer.
             offerEscape(for: sessionID)
 
-        case .press:
+        case .press, .policyAccountResume:
             // Never `offerEscape` here: recomputing the suggestion would file a *new* refusal
             // over the standing one, which clears the dismissal and wipes the very sentence
             // being written. The offer is already on screen; it is told why instead.
@@ -485,8 +752,9 @@ final class LimitRecoveryCoordinator {
     /// else: an armed recovery already has a plan and does not need a second one offered over it.
     ///
     /// The offer needs no settings opt-in, which is the whole difference between it and the
-    /// unbuilt `resumeVia` policy: `limit-recovery.md` refuses automatic recovery because it
-    /// "types into the user's session with nobody watching", and here the press is the watching.
+    /// `resumeVia` policy that performs the same move: `limit-recovery.md` makes automatic recovery
+    /// something the user arms because it "types into the user's session with nobody watching",
+    /// and here the press is the watching.
     private func offerEscape(for sessionID: SessionID) {
         guard let stop = parked[sessionID] else { return }
         LimitEscapeSuggestionStore.shared.refusalStands(stop, for: sessionID)
@@ -519,6 +787,12 @@ enum LimitRecoveryDefaults {
     /// typed submissions keep between text and Return, for the same paste-heuristic reason.
     static let keystrokeDelay: TimeInterval = 0.35
 
+    /// How many times an unattended policy may move one conversation between logins, and over
+    /// how long. A backstop rather than a quota — see `LimitRecoveryBudget` for why it is a
+    /// rolling window and not a lifetime count.
+    static let automaticMigrationAllowance = 3
+    static let automaticMigrationWindow: TimeInterval = 3600
+
     /// How much screen a journal entry keeps when the chooser could not be read.
     static let screenSampleRows = 14
     static let screenSampleLimit = 600
@@ -544,5 +818,29 @@ enum LimitRecoveryStrings {
     /// the screen is in the journal, and a sentence quoting a half-drawn TUI helps nobody.
     static var unreadableScreenProblem: String {
         L10n.string("The session is not showing the limit prompt.")
+    }
+
+    /// The unattended migrations ran out. Phrased as what happened rather than as a limit the user
+    /// has never heard of: the number is a backstop against a defect, not a setting, and the
+    /// answer in front of them is the button beside the sentence.
+    static var budgetSpentProblem: String {
+        L10n.string("This conversation has already moved between logins several times just now.")
+    }
+
+    /// The chat names a login that is no longer one of its destinations — signed out, disabled, or
+    /// the chat has since moved to it.
+    static var pinnedLoginGoneProblem: String {
+        L10n.string("The login this chat was set to continue on is not available.")
+    }
+
+    /// Nothing was eligible. Says "right now" because it is a reading, not a verdict: a login whose
+    /// window turns over becomes an offer the moment its next reading lands.
+    static var noLoginWithRoomProblem: String {
+        L10n.string("No other login has room right now.")
+    }
+
+    /// There is no second login at all — one account, or a runtime that routes none.
+    static var noOtherLoginProblem: String {
+        L10n.string("There is no other login to move this conversation to.")
     }
 }

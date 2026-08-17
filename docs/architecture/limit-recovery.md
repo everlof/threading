@@ -156,22 +156,61 @@ discovered.
   plus a row that says why.
 - **`waitForReset`** — answer the chooser with stop-and-wait, park, and schedule the
   continuation for the binding window's reset (below).
-- **`resumeVia(account)` / `resumeOnBestAccount`** — *designed, not yet built as a policy.* Its
-  ranking and its guards **are** built and ship as the interactive escape below, which is this
-  policy with the user's press where the setting would have been. Migrate the
-  conversation (`SessionMigration` — the transcript is client-side state, verified in
-  [`accounts.md`](accounts.md)) and continue immediately under a login with headroom. "Best" is
-  the enabled same-provider login whose metering windows all have headroom, ranked by **pace
-  deficit** — `elapsedFraction − usedFraction`, the account furthest behind its linear burn,
-  taking each account's worst window. Three guards are part of the design: the target's reading
-  is force-refreshed before migrating (a stale cache must not move a conversation onto a spent
-  login — while still honouring the 429 pacing in `AccountUsageService`); a policy whose
-  precondition fails degrades to `none` behaviour and says why, never silently escalating to a
-  different escape; and a per-session recovery budget is enforced below the rules, so a defect
-  above cannot turn this into an account-hopping loop.
+- **`resumeVia(account)` / `resumeOnBestAccount`** — migrate the conversation (`SessionMigration` —
+  the transcript is client-side state, verified in [`accounts.md`](accounts.md)) and continue
+  immediately under a login with headroom. "Best" is the enabled same-provider login whose metering
+  windows all have headroom, ranked by **pace deficit** — `elapsedFraction − usedFraction`, the
+  account furthest behind its linear burn, taking each account's worst window. The ranking is
+  `LimitEscapeRanking`, written for the interactive escape below and not duplicated here: the
+  arithmetic that decides where a conversation goes is the same arithmetic whoever asked for it.
+  `armAccountResume` is what the policy adds, and its three guards are the ones this design always
+  stated:
+  - the **target's reading is force-refreshed** before anything moves, and eligibility is decided on
+    that — a stale cache must not move a conversation onto a login that is also spent, while the 429
+    pacing in `AccountUsageService` is still honoured, so an unattended recovery cannot become a way
+    to hammer a usage endpoint. The choice is made on fresh readings in Core; the press path's own
+    re-check on the chosen login then runs unchanged, which is the guard staying in one place
+    rather than being written twice;
+  - a **failed precondition degrades to `flagOnly` and says why**, never silently escalating to a
+    different escape. A pinned login that is spent is reported as *that* login being spent; the
+    strip then offers whichever login now ranks best, for a press. `resolveResumeTarget` refuses
+    five shapes by name, and each carries two sentences — the journal's diagnosis and the strip's
+    explanation;
+  - a **per-session budget** (`LimitRecoveryBudget`) sits below the rules, so a defect above cannot
+    turn this into a login-hopping loop. It is a rolling window rather than a lifetime count,
+    because a defect loops in seconds while a legitimate long-running chat may exhaust several
+    logins over a week, and it is spent at the *attempt*: the failing shape is the more likely
+    defect.
+
+  Two smaller decisions the shipped version records. **No modal on an unattended failure** —
+  `moveSessionWithoutConfirmation` grew `alertingOnFailure` because a sheet nobody dismisses stops
+  the whole app until somebody comes back; the failure goes to the journal and to the strip
+  instead. And **the park says `recovering` while the readings land**, not `flagged`: the triangle
+  explains a session nothing is being done about, and a row that flashed it mid-migration would be
+  answering its own question wrong. `standDown` lowers it, which is the state the triangle is for.
+
+  **Rendered conversations are deliberately out of scope**, exactly as they are for `waitForReset`:
+  nothing recovers a native conversation automatically (see "One store, both surfaces"), so all
+  three acting policies belong to the terminal detection path and that surface stays the `flagOnly`
+  case with a strip. Extending policy-driven recovery there is one change for all of them, not a
+  capability the newest two should quietly acquire on their own.
 
 Never, under any policy or parse result: the chooser's "Upgrade your plan" option. No automated
 path may spend money.
+
+### Where the move lands, and why it is not typed into
+
+`SessionMigration.move` discards the process before it copies the transcript, so an automatic
+migration always ends with the agent stopped. What happens next is inherited from
+[`scheduled-messages.md`](scheduled-messages.md) rather than decided here, and the inheritance is
+the point: the continuation is an ordinary `ScheduledMessage`, so a session whose pane was showing
+is relaunched by `reopenIfShowing` and typed into between turns, while a background session's send
+reports `.noLiveSurface` and waits **visibly** — Threading does not wake a terminal to type into it,
+because a resumed TUI comes up on its own restore question and answering that unattended is the one
+outcome worth refusing over. The unattended policy therefore buys the *move* — the conversation is
+on a login with room, and its "continue" is filed — and the last step waits for the session to be
+opened. That is a smaller promise than "it carries on while you sleep", and it is the one the rules
+above can actually keep.
 
 ### It is chosen at three scopes, and the narrow one is the point
 
@@ -187,13 +226,27 @@ is the broad statement, so it stays off and the feature goes unused. "This long-
 carries on at reset, my other five do not" is the narrow one, and narrow is the safer default
 shape for a permission, not the more dangerous one.
 
-**A checkbox, with three states in the record.** The item in the session menu's Options fold, and
-its twin on the project row, show two states; the third is not something the user picks. The
-writers store **nil where the wanted value already matches what would have been inherited** —
-`toggleLimitRecoveryClicked`, and the mute item's rule before it — so a chat keeps *following* its
-project and Settings, and a later change there still reaches it. The check reads the **resolved**
-answer rather than the record's own field, because an unchecked box on a chat that will in fact
-continue by itself states the opposite of what happens.
+**A list of outcomes, with the scope state still only in the record.** It was a checkbox while
+there were two answers, and four do not fit on one: stopping, waiting for the reset, and the two
+that move the conversation are alternatives to each other, so the item in the session menu's
+Options fold and its twin on the project row are now a fold — **When the Limit Is Reached**, named
+after the condition, because a fold carrying one of its own rows' names reads as that row being
+switched on. Nothing else about the rule changed. The writers still store **nil where the wanted
+value already matches what would have been inherited** — `chooseLimitRecovery`, and the mute item's
+rule before it — so a chat keeps *following* its project and Settings, and a later change there
+still reaches it. The check still reads the **resolved** answer rather than the record's own field,
+because an unmarked list on a chat that will in fact continue by itself states the opposite of what
+happens.
+
+**Only a chat's own menu names a login.** `resumeVia` carries an `AccountID`, and a login belongs
+to exactly one runtime while a checkout hosts chats of several and Settings speaks for all of them
+— so those two scopes offer `LimitRecoveryPolicy.runtimeNeutralChoices`, whose third entry means
+"whichever of *that chat's* logins has room" and is well defined everywhere. Within the chat's fold
+the two gates are also different questions, deliberately: the ranked answer is gated on the
+*capability* (`kind.supportsAccounts`), so a chat with a single login can still arm it, while the
+per-login rows come from `SessionMigration.destinations` and appear as logins do. A pinned login
+that has since gone is the one answer the list cannot show, and then nothing is checked — which is
+the truth, and the same state the policy stands down over.
 
 **The rows say so.** `RowConductSummary` marks a sidebar row that carries a non-inherited
 *conduct* setting — this policy and `notificationsMuted` — and `SessionInfoPopover` names which.
@@ -207,23 +260,33 @@ to differ while behaving identically is worse than no mark. It is materialized o
 
 ## The interactive escape
 
-`resumeOnBestAccount`'s ranking is built and shipped; the *policy* is not. What ships is the same
-choice offered as a strip over the refused session's composer, pressed by hand:
+The same choice, offered as a strip over the refused session's composer and pressed by hand:
 
 > ⚠ Limit reached · resets 9:40pm (Europe/Rome)  ·  **Continue as Daniel Block · 5h 12% · 7d 40%**  ·  ✕
 
 **It needs no settings opt-in, and that is not an oversight.** The reason the automatic policies
 are opted into is stated above: they type into the user's session and spend their quota *with
-nobody watching*. A press is the watching. Everything the automatic version would need permission
+nobody watching*. A press is the watching. Everything the automatic version needs permission
 for — stopping the agent, moving the conversation, spending a second login's window — is named on
 the button's own face before it is pressed, so a confirmation sheet behind it would only ask the
 user to agree with what they just read. `SessionCoordinator.moveSessionWithoutConfirmation` exists
-for exactly that one caller; `moveSession` keeps `.moveRunningSessionToAccount`, because the
-sidebar's **Move to Account** submenu names a login and says nothing about stopping an agent.
+for that caller and for the policy's, and it alerts only for the first (`alertingOnFailure`);
+`moveSession` keeps `.moveRunningSessionToAccount`, because the sidebar's **Move to Account**
+submenu names a login and says nothing about stopping an agent.
 
-The **per-session recovery budget** in the automatic design is not needed here and is deliberately
-absent. It exists so a defect above the rules cannot become an account-hopping loop; a loop needs
-somebody pressing a button once per hop, which is a user changing their mind rather than a bug.
+The **per-session recovery budget** is not needed here and is deliberately absent. It exists so a
+defect above the rules cannot become an account-hopping loop; a loop needs somebody pressing a
+button once per hop, which is a user changing their mind rather than a bug.
+
+**The press and the policy run one routine**, which is `armWaitForReset`'s rule in the other
+direction: `performLimitEscape` takes a `LimitEscapeTrigger` and an optional login, so the four
+steps below are the same steps either way. The trigger changes exactly two things — the modal, and
+who is told when it fails (`LimitRecoveryCoordinator.noteAutomaticResumeFailed`, because the park
+is Core's fact and the move is not) — plus one thing a named login forces: `retarget` points the
+standing record at the login the policy chose before the busy line is drawn from it, since
+`resumeVia`'s login need not be the one the ranking offered and a strip reading "Continuing as
+Daniel Block…" over a conversation going somewhere else is the misstatement `busy` is named rather
+than counted to avoid.
 
 ### The ranking is pure, and it is the automatic policy's
 
@@ -279,7 +342,7 @@ Sharing one name looked right — one behaviour, one name — and read wrong: "C
 an outcome, which is what an option in a menu should be, and on a strip opening with "Limit
 reached" it turned into a mode the reader was being asked to switch on, over a session where
 switching it on could no longer change anything. The strip instructs (**Wait for Reset**), the
-context-menu checkbox states (**Continue at Reset**), and
+context-menu option states (**Continue at Reset**), and
 `LimitEscapeStripTests.testTheButtonInstructsWhileTheStandingOptionStates` keeps a later tidy-up
 from merging them back.
 

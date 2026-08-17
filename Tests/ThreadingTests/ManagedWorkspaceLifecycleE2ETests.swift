@@ -197,6 +197,10 @@ final class ManagedWorkspaceLifecycleE2ETests: HostedStoreTestCase {
         XCTAssertNotNil(completed.finalCommit)
         XCTAssertTrue(store.session(withID: session.id)?.isArchived == true)
         XCTAssertFalse(AgentRuntime.shared.hasTerminal(sessionID: session.id))
+        XCTAssertNil(
+            container.currentSessionID,
+            "the archived session remained open after its receipt appeared"
+        )
         XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.worktreeRoot))
         XCTAssertEqual(
             try String(contentsOf: fixture.project.appendingPathComponent("agent-change.txt")),

@@ -582,6 +582,16 @@ extension AgentToolCoordinator {
             if let showsAppIcon = titleBar.showsAppIcon {
                 style.titleBar.showsAppIcon = showsAppIcon
             }
+            if let rawCommands = cleaned(titleBar.commands) {
+                guard let parsed = WindowChromeStyle.TitleBar.CommandPlacement(
+                    rawValue: rawCommands
+                ) else {
+                    throw AppThemeEditingError.invalid(
+                        "chrome.title_bar.commands must be \"own_row\" or \"in_title_bar\"."
+                    )
+                }
+                style.titleBar.commands = parsed
+            }
             if let rawShape = cleaned(titleBar.shape) {
                 guard let parsed = WindowChromeStyle.TitleBar.Shape(rawValue: rawShape) else {
                     throw AppThemeEditingError.invalid(
@@ -1646,6 +1656,7 @@ extension AgentToolCoordinator {
             "button_glyph_style": chrome.titleBar.buttonGlyphStyle.rawValue,
             "button_placement": chrome.titleBar.buttonPlacement.rawValue,
             "shows_app_icon": chrome.titleBar.showsAppIcon,
+            "commands": chrome.titleBar.commands.rawValue,
             "shape": chrome.titleBar.shape.rawValue,
             "visible_buttons": chrome.titleBar.visibleButtons.map(\.rawValue)
         ]

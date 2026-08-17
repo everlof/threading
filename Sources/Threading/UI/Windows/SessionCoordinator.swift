@@ -65,6 +65,13 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             self?.performLimitEscape(for: event.sessionID)
         }
 
+        // The same move with nobody pressing for it: `LimitRecoveryPolicy.resumeOnBestAccount` and
+        // `resumeVia(_:)` have already chosen the login on forced readings, and what is left is
+        // the migration itself — the press's own routine, which is why this lands here too.
+        appEvents.observe(LimitAccountResumeRequested.self) { [weak self] event in
+            self?.performAutomaticLimitEscape(for: event.sessionID, to: event.accountID)
+        }
+
         // The strip's other answer goes straight to the recovery coordinator instead: waiting
         // for the reset moves no conversation and reopens no pane, and it is the same routine
         // the automatic policy runs. Observed here only because this is where the pane's
@@ -368,6 +375,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             guard let self else { return }
             switch result {
             case .success:
+                if wasShowing {
+                    container.show(sessionID: nil)
+                }
                 sidebar.presentToast(receipt(session, wasRunning) { [weak self] in
                     self?.restore(sessionID, reselecting: wasShowing)
                 })
@@ -628,13 +638,18 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// The confirmation exists because a menu item reading "Daniel Block" says nothing about
     /// stopping the agent; the usage-limit escape's button says *Continue as Daniel Block* on
     /// its face and is pressed by somebody looking at a session that has already stopped, so a
-    /// second dialog would only ask them to agree with what they just pressed. Everything else
-    /// is identical, the failure alert included — a move that could not be saved is news
-    /// whoever asked for it.
+    /// second dialog would only ask them to agree with what they just pressed.
+    ///
+    /// `alertingOnFailure` is the one thing an unattended caller changes. A move that could not be
+    /// saved is news to whoever asked for it — but a `LimitRecoveryPolicy` asked hours ago and is
+    /// not in the room, and a modal alert with nobody to dismiss it stops the application until
+    /// somebody comes back. That caller reports the failure through its own surfaces instead; see
+    /// `SessionCoordinator+LimitEscape`.
     @discardableResult
     func moveSessionWithoutConfirmation(
         _ sessionID: SessionID,
-        to account: AgentAccount
+        to account: AgentAccount,
+        alertingOnFailure: Bool = true
     ) -> Bool {
         switch SessionMigration.move(sessionID: sessionID, to: account) {
         case .success:
@@ -644,6 +659,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             return true
         case .failure(let error):
             container.reopenIfShowing(sessionID: sessionID)
+            guard alertingOnFailure else { return false }
             let alert = ThemedAlert()
             alert.messageText = L10n.string("Couldn't move the conversation")
             alert.informativeText = error.message

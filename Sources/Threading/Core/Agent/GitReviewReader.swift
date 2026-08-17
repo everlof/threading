@@ -82,6 +82,15 @@ enum GitReviewReader {
         qos: .utility
     )
 
+    /// The observed-work floor is bookkeeping behind a panel, never a keystroke: serial, so a
+    /// session whose checkpoints are being folded in for the first time reads one turn at a time
+    /// rather than fanning out into a process per turn, and `.utility` so none of it competes
+    /// with a diff somebody is waiting to look at.
+    private static let observedWorkQueue = DispatchQueue(
+        label: "codes.threading.git-observed-work",
+        qos: .utility
+    )
+
     /// Ref transactions are serialized within one repository, while unrelated repositories can
     /// still capture concurrently. Git already locks its ref backend; this narrower app-level
     /// ordering additionally keeps retention deletion from racing a final publication we own.
@@ -222,6 +231,33 @@ enum GitReviewReader {
                     in: root
                 )
             ))
+        }
+    }
+
+    /// The paths one completed turn checkpoint changed, relative to `root`, and nothing else.
+    ///
+    /// The neutral floor under Observed work. A tool call is exactly attributed and incomplete —
+    /// an edit made through a shell command names no file — while a checkpoint's tree pair is
+    /// complete and unattributed. This reads the second, so it is deliberately name-only: no
+    /// hunks, no content, no rename pairing, because a path is the whole of what it may claim.
+    ///
+    /// An identical tree pair answers with an empty list without spawning anything, which is what
+    /// most turns are.
+    static func checkpointChangedPaths(
+        _ checkpoint: GitTurnCheckpoint,
+        in root: URL,
+        completion: @escaping @MainActor @Sendable (Result<[String], Failure>) -> Void
+    ) {
+        perform("git.read.checkpoint-changed-paths", on: observedWorkQueue, completion) {
+            let trees = try checkpointTrees(checkpoint, in: root)
+            guard trees.before != trees.after else { return [] }
+            let output = try run(
+                GitReviewCommands.diffNames(from: trees.before, to: trees.after),
+                in: root
+            )
+            return String(decoding: output, as: UTF8.self)
+                .split(separator: "\0", omittingEmptySubsequences: true)
+                .map(String.init)
         }
     }
 

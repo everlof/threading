@@ -1128,6 +1128,39 @@ final class ProjectStore {
         return .applied
     }
 
+    /// Follows a scheduled brief that was edited before its reserved session ever launched: the
+    /// row's creation title tracks the brief exactly while nothing stronger has named it.
+    ///
+    /// The creation title rather than `customTitle`, deliberately — a rename here is automatic,
+    /// and recording it as the user's own choice would let it outrank the agent titles that
+    /// arrive once the session finally runs. A user's rename (`customTitle`) or an agent's name
+    /// (`agentTitle`) therefore keeps its authority, and this refuses to touch either.
+    @discardableResult
+    func applyReservedPromptTitle(
+        _ prompt: String,
+        forSessionID sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        let session = projects[location.projectIndex].sessions[location.sessionIndex]
+        guard session.customTitle == nil,
+              session.agentTitle == nil,
+              let title = SessionNaming.promptTitle(from: prompt),
+              title != session.title
+        else { return .unchanged }
+
+        projects[location.projectIndex].sessions[location.sessionIndex].title = title
+        let sidebarImpact: ProjectsDidChange.SidebarImpact =
+            AppSettings.sidebarSessionOrder == .name
+                ? .sessionOrder(sessionID)
+                : .sessionRow(sessionID)
+        guard save() else {
+            notifyChanged(sidebarImpact: sidebarImpact)
+            return .persistenceRefused
+        }
+        notifyChanged(sidebarImpact: sidebarImpact)
+        return .applied
+    }
+
     /// Records the agent's own name for a conversation: a transient transport report, canonical
     /// provider metadata, or `set_session_name`, which passes `.chosen`.
     ///

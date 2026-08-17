@@ -19,6 +19,10 @@ credential, or device/account name into this vocabulary.
 | Notifications | authorization, registration, provider, received/suppressed/presented/opened state tokens | notification title/body, push token, session title |
 | Optional environment | counts, enums, versions, permission states, memory/storage buckets | project/session/account names, stable identifiers, paths |
 
+The repository-root `./dev` launcher directs both Debug apps at the loopback report intake. The
+macOS `THREADING_REPORT_INTAKE_URL` override is compiled only into Debug builds; a production app
+cannot redirect reviewed customer reports through its process environment.
+
 The Worker independently carries the same event/field allowlists. Adding a native event without
 adding and testing the corresponding intake event is incomplete because the server will reject
 the report. A platform log with no safe representation is not automatically a blind spot: it is

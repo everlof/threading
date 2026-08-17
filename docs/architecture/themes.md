@@ -990,8 +990,9 @@ vocabulary rather than components: the theme states data, one interpreter draws 
 native frame — titled mask, traffic lights, rounded corners, toolbar — and wears an app-drawn
 title band, window buttons and border. The mechanics live in
 [`window-chrome.md`](window-chrome.md); the block itself carries the band's active and
-inactive gradients, its ink, alignment, height (18–44), the button glyph style, and a frame
-width (1–6). Gates: the active band's ink holds the label's
+inactive gradients, its ink, alignment, height (18–44), the button glyph style, whether the
+window's own commands take a row of their own or share the caption (`commands`, default
+`own_row`), and a frame width (1–6). Gates: the active band's ink holds the label's
 3:1 against every stop — the band carries the window's own close button — while the inactive
 band gets the softer 2:1 "tellable" floor, because inactive title text signals inactivity by
 carrying less ink (the authentic 1998 inactive pair sits at 2.6:1). An adaptive theme states
@@ -1336,9 +1337,12 @@ The theme uses the normal Threading layout and control vocabulary. Selected rows
 fill rather than diluted orange, leaving orange for actions, focus, the app mark, and the active
 window seam. The sidebar has a restrained navy depth shift and a flat navigator well. On macOS it
 takes over the window frame through `WindowChromeStyle`: a quiet two-stop navy title band, warm
-plain caption glyphs, a one-point orange active seam, the shared command band, and a one-point
+plain caption glyphs, a one-point orange active seam, and a one-point
 navy outer frame with a twelve-point corner. The title band does not repeat the application icon.
-It does not move application controls. The chrome is
+It is the only theme here that states `commands: in_title_bar` — the sidebar toggle and history
+pair sit in the caption on the pane column, the title centres between them and the window
+buttons, and the window has one chrome row instead of two. It moves no *other* application
+control there. The chrome is
 authored rather than copied from a historical system, so
 `docs/references/chrome/threading/reference.json` records every component as not applicable and
 the shared chrome sweeps plus whole-window render hold the implementation.

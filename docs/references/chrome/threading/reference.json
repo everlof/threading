@@ -21,7 +21,7 @@
     },
     "toolbar": {
       "status": "not_applicable",
-      "note": "Authored chrome. Application commands use the shared WindowCommandBandView directly below the title band."
+      "note": "Authored chrome. Application commands share the title band itself (chrome.title_bar.commands = in_title_bar), so the window has one chrome row rather than a caption above a command band."
     },
     "buttons": {
       "status": "not_applicable",

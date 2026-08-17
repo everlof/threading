@@ -251,7 +251,120 @@ final class FileActivityMapRenderTests: XCTestCase {
         XCTAssertEqual(written, 8)
     }
 
+    /// The two readings that are not exact, drawn and then asserted.
+    ///
+    /// Both were bugs of the same shape before they were states: the card drew a full repository
+    /// silhouette with `0 of N files · 0 edits · 0 reads` for a session no feed was watching, and
+    /// there was no way to draw a file a shell command changed at all. The pictures are where a
+    /// colourless mark is judged against an accent one; the assertions below are what the
+    /// pictures found.
+    func testRendersAndAssertsTheReadingsThatAreNotExact() throws {
+        let files = (0..<6_000).map { "Sources/Area\($0 / 200)/file-\($0).swift" }
+        let atlas = RepositoryFileAtlas(files: files)
+        let sessionID = SessionID()
+
+        var observedOnly = AgentSessionWorkTrace()
+        observedOnly.sessionTitle = "Terminal work"
+        observedOnly.agentLabel = "Grok"
+        for index in stride(from: 300, through: 1_500, by: 37) {
+            observedOnly.recordObservedChange(path: files[index], root: nil, at: seconds(index % 90))
+        }
+
+        var mixed = AgentSessionWorkTrace()
+        mixed.sessionTitle = "Terminal work"
+        mixed.agentLabel = "Claude Code"
+        for index in stride(from: 2_400, through: 3_600, by: 29) {
+            _ = mixed.recordFile(.read, path: files[index], root: nil, at: seconds(index % 70))
+            if index.isMultiple(of: 4) {
+                _ = mixed.recordFile(.edit, path: files[index], root: nil, at: seconds(index % 30))
+            }
+        }
+        // The shell edits the transcript could never name, beside the calls it could.
+        for index in stride(from: 4_000, through: 4_600, by: 43) {
+            mixed.recordObservedChange(path: files[index], root: nil, at: seconds(index % 50))
+        }
+
+        let observedPresentation = AgentWorkPresentation.session(
+            observedOnly, sessionID: sessionID, atlas: atlas, detailed: true
+        )
+        let mixedPresentation = AgentWorkPresentation.session(
+            mixed, sessionID: sessionID, atlas: atlas, detailed: true
+        )
+
+        var written = 0
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            written += try writeSummary(
+                story: "11-observed-floor-\(name)",
+                presentation: observedPresentation,
+                source: .gitObserved,
+                appearanceName: appearance
+            )
+            written += try writeSummary(
+                story: "12-exact-plus-observed-\(name)",
+                presentation: mixedPresentation,
+                source: .transcript,
+                appearanceName: appearance
+            )
+            written += try writeSummary(
+                story: "13-no-source-\(name)",
+                presentation: nil,
+                source: .unavailable(.runtimeKeepsNoReadableTranscript),
+                appearanceName: appearance
+            )
+        }
+        XCTAssertEqual(written, 6)
+
+        // A card with no source draws none of the encodings it has no data for. The silhouette
+        // is the part that lied: it is a picture of the repository, not of this chat.
+        let unavailable = summary(presentation: nil, source: .unavailable(.transcriptNotWrittenYet))
+        XCTAssertTrue(try XCTUnwrap(view(in: unavailable, identifier: "agent-work.detail-atlas")).isHidden)
+        XCTAssertTrue(try XCTUnwrap(view(in: unavailable, identifier: "agent-work.activity-ribbon")).isHidden)
+        XCTAssertEqual(unavailable.accessibilityValue() as? String, L10n.string("No transcript for this session yet."))
+
+        let runtimeless = summary(
+            presentation: nil, source: .unavailable(.runtimeKeepsNoReadableTranscript)
+        )
+        XCTAssertTrue(
+            (runtimeless.accessibilityValue() as? String)?
+                .contains("keeps no transcript Threading can read") == true,
+            "the card must say why it is empty, not merely that it is"
+        )
+
+        // A count the source cannot produce is withheld rather than spoken as zero.
+        let floor = summary(presentation: observedPresentation, source: .gitObserved)
+        let spokenFloor = try XCTUnwrap(floor.accessibilityValue() as? String)
+        XCTAssertFalse(spokenFloor.contains("reads"), "a tree pair cannot see a read: \(spokenFloor)")
+        XCTAssertFalse(spokenFloor.contains("edits"))
+        XCTAssertTrue(spokenFloor.contains("observed changes"))
+        XCTAssertFalse(try XCTUnwrap(view(in: floor, identifier: "agent-work.detail-atlas")).isHidden)
+
+        // With an exact source the observed marks are an addition, not a replacement.
+        let both = summary(presentation: mixedPresentation, source: .transcript)
+        let spokenBoth = try XCTUnwrap(both.accessibilityValue() as? String)
+        XCTAssertTrue(spokenBoth.contains("reads"))
+        XCTAssertTrue(spokenBoth.contains("edits"))
+        XCTAssertTrue(spokenBoth.contains("observed changes"))
+    }
+
     // MARK: - Harness
+
+    private func summary(
+        presentation: AgentWorkPresentation?,
+        source: AgentWorkSource
+    ) -> AgentWorkSummaryView {
+        let view = AgentWorkSummaryView()
+        view.setClock { self.now }
+        view.setPresentation(presentation, source: source)
+        return view
+    }
+
+    private func view(in root: NSView, identifier: String) -> NSView? {
+        if root.accessibilityIdentifier() == identifier { return root }
+        for subview in root.subviews {
+            if let match = view(in: subview, identifier: identifier) { return match }
+        }
+        return nil
+    }
 
     private func seconds(_ age: Int) -> Date {
         now.addingTimeInterval(-TimeInterval(age))
@@ -324,7 +437,8 @@ final class FileActivityMapRenderTests: XCTestCase {
 
     private func writeSummary(
         story: String,
-        presentation: AgentWorkPresentation,
+        presentation: AgentWorkPresentation?,
+        source: AgentWorkSource = .live,
         appearanceName: NSAppearance.Name
     ) throws -> Int {
         let directory = Render.directory
@@ -339,7 +453,7 @@ final class FileActivityMapRenderTests: XCTestCase {
 
             let summary = AgentWorkSummaryView()
             summary.setClock { self.now }
-            summary.setPresentation(presentation)
+            summary.setPresentation(presentation, source: source)
             host.addSubview(summary)
             NSLayoutConstraint.activate([
                 summary.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: Design.Spacing.inset),
