@@ -3344,7 +3344,10 @@ accepted changes appear in the open editor as they happen.
 
 Configure terminal palettes in **Settings > Themes**:
 - 16 ANSI colors (8 normal + 8 bright)
-- Foreground, background, cursor, and selection colors
+- Text, Bold Text, background, cursor, and selection colors
+- **Bold Text** is what a heading drawn in bold with the terminal's own text color uses, the
+  same setting Terminal.app calls Bold Text. Bold text that picks an ANSI color keeps that
+  color's bright variant instead, so a bold red stays red
 - Import themes from Terminal.app (.terminal files)
 - Export themes as JSON
 - Duplicate and customize built-in themes (built-in themes are read-only)

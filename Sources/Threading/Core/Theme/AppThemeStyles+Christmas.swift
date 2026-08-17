@@ -62,6 +62,10 @@ extension AppThemeStyles {
             id: "app-christmas-terminal-light",
             name: "Christmas",
             foreground: "#0F2419",
+            // Holly red pulled to the depth of a wreath berry. The theme’s accent itself is
+            // the palette’s `red`, so a heading in it would be the colour a program prints an
+            // error in; this is the same red, a shade darker than any slot.
+            boldForeground: "#7A0A12",
             background: "#F2F7F3",
             cursor: "#0F2419",
             selection: "#D8E7DB",
@@ -112,6 +116,9 @@ extension AppThemeStyles {
             id: "app-christmas-terminal-dark",
             name: "Christmas",
             foreground: "#EAF4EC",
+            // Candlelight rather than the candle: the pale end of the theme’s gold, since the
+            // gold itself is this palette’s `brightYellow`.
+            boldForeground: "#FFEFC2",
             background: "#082019",
             cursor: "#EAF4EC",
             selection: "#14432F",

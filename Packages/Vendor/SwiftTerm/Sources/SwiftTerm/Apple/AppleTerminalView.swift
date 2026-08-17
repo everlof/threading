@@ -183,7 +183,14 @@ extension TerminalView {
         switch color {
         case .defaultColor:
             if isFg {
-                return nativeForegroundColor
+                // **Threading's seam.** A palette may state a separate colour for bold text
+                // drawn with the *default* foreground — Terminal.app's "Bold Text" — because a
+                // heading written as SGR 1 in the default colour is otherwise only a weight,
+                // and on a palette whose foreground is already its brightest tone that is no
+                // difference at all. Nil means "the same as the foreground", which is what
+                // this returned before the property existed. Text that names an ANSI colour
+                // never arrives here: it keeps the bold-to-bright shift below.
+                return (isBold ? nativeBoldForegroundColor : nil) ?? nativeForegroundColor
             } else {
                 return nativeBackgroundColor
             }
@@ -237,6 +244,23 @@ extension TerminalView {
             trueColors [color] = newColor
             return newColor
         }
+    }
+
+    /// **Ours.** The colour this attribute's text is actually drawn in, resolved through the
+    /// same cached path the renderer uses — inverse, bold-as-bright, the bold foreground and
+    /// SGR 2 faintness included.
+    ///
+    /// It exists so the embedder can assert on the rendered answer without reaching into
+    /// internals: `getAttributes` is what draws, so anything else would be a second
+    /// implementation of the rule under test.
+    func resolvedForeground (for attribute: Attribute) -> TTColor
+    {
+        guard let attributes = getAttributes (attribute, withUrl: false),
+              let colour = attributes [.foregroundColor] as? TTColor
+        else {
+            return nativeForegroundColor
+        }
+        return colour
     }
 
     // Clears the cached state for colors and triggers a full display

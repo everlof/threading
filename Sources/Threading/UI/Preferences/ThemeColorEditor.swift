@@ -152,7 +152,13 @@ enum ThemeEditorLayout {
     static let rowLabelWidth: CGFloat = 52
     static let hexFontSize: CGFloat = 10
     /// Wide enough for "Background", so every main colour keeps the same pitch — and no wider,
-    /// since four of these are what decides how narrow the palette card can go before the ANSI
+    /// since five of these are what decides how narrow the palette card can go before the ANSI
     /// grid does.
-    static let mainColumnWidth: CGFloat = 84
+    ///
+    /// It was 84 while there were four. "Bold Text" made a fifth, and five at that pitch came to
+    /// 468 points inside a pane that can be 420, which this card overflows rather than wraps:
+    /// `ThemeSettingsRenderTests.testPaletteFitsTheNarrowSettingsPane` is what said so. 72 is
+    /// the widest pitch that keeps five inside the narrow pane, and "Background" sets its floor
+    /// at roughly 68.
+    static let mainColumnWidth: CGFloat = 72
 }

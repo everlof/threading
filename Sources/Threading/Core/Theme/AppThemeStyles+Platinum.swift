@@ -45,9 +45,10 @@ extension AppThemeStyles {
             terminalPalette: TerminalTheme(
                 id: TerminalThemeID("app-platinum-9-terminal"),
                 name: "Mac OS 9 Platinum",
-                foreground: hex("#111111"),
+                foreground: hex("#333333"),
+                boldForeground: hex("#111111"),  // The heading keeps the ramp’s black
                 background: hex("#FFFFFF"),
-                cursor: hex("#111111"),
+                cursor: hex("#333333"),
                 selection: hex("#B7C5E8"),
                 black: hex("#111111"),
                 red: hex("#A01818"),
@@ -165,9 +166,10 @@ extension AppThemeStyles {
             terminalPalette: TerminalTheme(
                 id: TerminalThemeID("app-aqua-cheetah-terminal"),
                 name: "Mac OS X Aqua",
-                foreground: hex("#111111"),
+                foreground: hex("#333333"),
+                boldForeground: hex("#111111"),  // The heading keeps the ramp’s black
                 background: hex("#FFFFFF"),
-                cursor: hex("#111111"),
+                cursor: hex("#333333"),
                 selection: hex("#B8D8F4"),
                 black: hex("#111111"),
                 red: hex("#B73732"),

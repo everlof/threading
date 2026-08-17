@@ -56,6 +56,46 @@ final class ThemeSettingsRenderTests: XCTestCase {
         XCTAssertGreaterThan(preview.frame.height, 100, "the preview collapsed")
     }
 
+    /// The sample stages every role the editor can change, and bold text is the one that was
+    /// missing: before this run the card drew nothing at all in `boldForeground`, so the well
+    /// beside it moved a colour the preview never showed. It is drawn where a terminal draws
+    /// it — the typed command — in the bold face, because the role is a weight and a colour.
+    @MainActor
+    func testPreviewDrawsTheTypedCommandInThePalettesBoldText() {
+        XCTAssertNotEqual(
+            TerminalTheme.pro.boldForeground.hexString,
+            TerminalTheme.pro.foreground.hexString,
+            "the fixture palette has to state a bold colour of its own to prove anything"
+        )
+
+        let preview = ThemePreviewView()
+        preview.show(.pro)
+
+        let sample = preview.renderedSample
+        var boldRuns = 0
+        sample.enumerateAttributes(
+            in: NSRange(location: 0, length: sample.length)
+        ) { attributes, range, _ in
+            guard (sample.string as NSString).substring(with: range).contains("git status")
+            else { return }
+            boldRuns += 1
+
+            XCTAssertEqual(
+                (attributes[.foregroundColor] as? NSColor)?.hexString,
+                TerminalTheme.pro.boldForeground.hexString
+            )
+            guard let face = attributes[.font] as? NSFont else {
+                return XCTFail("the run carries no font")
+            }
+            XCTAssertTrue(
+                NSFontManager.shared.traits(of: face).contains(.boldFontMask),
+                "the bold text role is drawn in the regular face"
+            )
+        }
+
+        XCTAssertEqual(boldRuns, 1, "the sample draws no run in the palette's bold text")
+    }
+
     @MainActor
     func testPageBuildsWithoutCollapsing() {
         let controller = ThemePreferencesViewController()

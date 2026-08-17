@@ -41,6 +41,7 @@ extension AppThemeStyles {
                 id: TerminalThemeID("app-classic-player-terminal"),
                 name: "Classic Player",
                 foreground: hex("#54F269"),
+                boldForeground: hex("#F1F1E5"),  // The LCD’s highlight white
                 background: hex("#070909"),
                 cursor: hex("#54F269"),
                 selection: hex("#234329"),

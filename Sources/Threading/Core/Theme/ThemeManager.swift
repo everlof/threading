@@ -239,6 +239,9 @@ final class ThemeManager {
         // Extract colors
         let foreground = try extractColor(from: plist, key: "TextColor") ?? .white
         let background = try extractColor(from: plist, key: "BackgroundColor") ?? .black
+        // Terminal.app's own key for the role. A profile that does not state one drew bold
+        // text in its text colour, so that is what an import without the key means here.
+        let boldForeground = try extractColor(from: plist, key: "TextBoldColor") ?? foreground
         let cursor = try extractColor(from: plist, key: "CursorColor") ?? foreground
         let selection = try extractColor(from: plist, key: "SelectionColor") ?? NSColor(white: 0.3, alpha: 1.0)
 
@@ -248,6 +251,7 @@ final class ThemeManager {
         let theme = TerminalTheme(
             name: finalName,
             foreground: foreground,
+            boldForeground: boldForeground,
             background: background,
             cursor: cursor,
             selection: selection,

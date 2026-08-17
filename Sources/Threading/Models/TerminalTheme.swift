@@ -91,6 +91,13 @@ struct TerminalTheme: Codable, Equatable {
     var id: TerminalThemeID
     var name: String
     var foreground: NSColor
+    /// Terminal.app's "Bold Text": what SGR 1 drawn with the *default* foreground uses.
+    ///
+    /// A palette states it because weight alone cannot carry a heading. Claude Code writes body
+    /// copy in the default foreground and headings as bold in the same colour, so on a palette
+    /// whose foreground is already its brightest tone the two rendered identically. Bold with an
+    /// *explicit* ANSI colour keeps its bright shift and never comes here.
+    var boldForeground: NSColor
     var background: NSColor
     var cursor: NSColor
     var selection: NSColor
@@ -118,7 +125,7 @@ struct TerminalTheme: Codable, Equatable {
     // MARK: - Codable
 
     enum CodingKeys: String, CodingKey {
-        case id, name, foreground, background, cursor, selection
+        case id, name, foreground, boldForeground, background, cursor, selection
         case black, red, green, yellow, blue, magenta, cyan, white
         case brightBlack, brightRed, brightGreen, brightYellow
         case brightBlue, brightMagenta, brightCyan, brightWhite
@@ -131,6 +138,13 @@ struct TerminalTheme: Codable, Equatable {
         id = try container.decodeIfPresent(TerminalThemeID.self, forKey: .id)
             ?? TerminalThemeID.migratedFromName(name)
         foreground = try Self.decodeColor(from: container, forKey: .foreground)
+        // A palette written before the role existed keeps drawing exactly as it did: bold text
+        // takes the foreground, which is what SwiftTerm did for it anyway. Only an absent key
+        // means that; a present-but-unparseable value goes through the same role fallback as
+        // every other colour.
+        boldForeground = container.contains(.boldForeground)
+            ? try Self.decodeColor(from: container, forKey: .boldForeground)
+            : foreground
         background = try Self.decodeColor(from: container, forKey: .background)
         cursor = try Self.decodeColor(from: container, forKey: .cursor)
         selection = try Self.decodeColor(from: container, forKey: .selection)
@@ -160,6 +174,7 @@ struct TerminalTheme: Codable, Equatable {
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
         try Self.encodeColor(foreground, to: &container, forKey: .foreground)
+        try Self.encodeColor(boldForeground, to: &container, forKey: .boldForeground)
         try Self.encodeColor(background, to: &container, forKey: .background)
         try Self.encodeColor(cursor, to: &container, forKey: .cursor)
         try Self.encodeColor(selection, to: &container, forKey: .selection)
@@ -225,6 +240,10 @@ struct TerminalTheme: Codable, Equatable {
         id: TerminalThemeID = .makeCustom(),
         name: String,
         foreground: NSColor,
+        /// Defaulted so a caller that has no opinion keeps the old behaviour — bold text drawn
+        /// in the foreground. Every palette this app ships states one; the sweep in
+        /// `TerminalBoldTextSweepTests` is what holds them to it.
+        boldForeground: NSColor? = nil,
         background: NSColor,
         cursor: NSColor,
         selection: NSColor,
@@ -248,6 +267,7 @@ struct TerminalTheme: Codable, Equatable {
         self.id = id
         self.name = name
         self.foreground = foreground
+        self.boldForeground = boldForeground ?? foreground
         self.background = background
         self.cursor = cursor
         self.selection = selection
@@ -277,9 +297,13 @@ extension TerminalTheme {
     static let basic = TerminalTheme(
         id: .basic,
         name: "Basic",
-        foreground: .white,
+        // Body text is the ramp's own `white` (index 7) so the heading can have pure white.
+        // Terminal.app's Pro has the same idea, #F2F2F2 text and #FFFFFF bold; Pro's step is
+        // smaller, at ΔE 4.5 against this pair's 19.8.
+        foreground: NSColor(hex: "#C7C7C7")!,
+        boldForeground: .white,
         background: .black,
-        cursor: .white,
+        cursor: NSColor(hex: "#C7C7C7")!,  // The body's ink, as every paired palette's is
         selection: NSColor(white: 0.3, alpha: 1.0),
         black: .black,
         red: NSColor(hex: "#C91B00")!,
@@ -304,6 +328,7 @@ extension TerminalTheme {
         id: .pro,
         name: "Pro",
         foreground: NSColor(hex: "#5ADB57")!,  // Green text like Terminal Pro_DUP
+        boldForeground: NSColor(hex: "#FFFFFF")!,  // Pro_DUP's own Bold Text
         background: NSColor(hex: "#20222B")!,  // Dark blue-gray background
         cursor: NSColor(hex: "#4D4D4D")!,
         selection: NSColor(hex: "#414141")!,
@@ -329,6 +354,9 @@ extension TerminalTheme {
         id: .homebrew,
         name: "Homebrew",
         foreground: NSColor(hex: "#00FF00")!,
+        // Phosphor bloom: the same green pushed to the top of the tube rather than a neutral,
+        // which would read as a second terminal pasted into this one.
+        boldForeground: NSColor(hex: "#CCFFCC")!,
         background: .black,
         cursor: NSColor(hex: "#00FF00")!,
         selection: NSColor(hex: "#004400")!,
@@ -354,6 +382,7 @@ extension TerminalTheme {
         id: .ocean,
         name: "Ocean",
         foreground: NSColor(hex: "#C0C5CE")!,
+        boldForeground: NSColor(hex: "#EFF1F5")!,  // The ramp's own lightest tone
         background: NSColor(hex: "#2B303B")!,
         cursor: NSColor(hex: "#C0C5CE")!,
         selection: NSColor(hex: "#4F5B66")!,
@@ -396,7 +425,10 @@ extension TerminalTheme {
     static let systemLight = TerminalTheme(
         id: TerminalThemeID("system-light"),
         name: "System",
-        foreground: .black,
+        // A step back from the ramp's `black`, which the heading keeps. The step sits above the
+        // palette's own `brightBlack`, so text dimmed to index 8 stays tellable from body copy.
+        foreground: NSColor(hex: "#333333")!,
+        boldForeground: .black,
         background: .white,
         cursor: NSColor(white: 0.35, alpha: 1.0),
         selection: NSColor(hex: "#B3D7FF")!,
@@ -435,9 +467,10 @@ extension TerminalTheme {
     static let systemDark = TerminalTheme(
         id: TerminalThemeID("system-dark"),
         name: "System",
-        foreground: NSColor(hex: "#E8E8E8")!,
+        foreground: NSColor(hex: "#C7C7C7")!,  // The ramp's own `white`, as in Basic
+        boldForeground: NSColor(hex: "#FFFFFF")!,
         background: NSColor(hex: "#1E1E1E")!,
-        cursor: NSColor(hex: "#E8E8E8")!,
+        cursor: NSColor(hex: "#C7C7C7")!,
         selection: NSColor(white: 0.32, alpha: 1.0),
         black: .black,
         red: NSColor(hex: "#C91B00")!,

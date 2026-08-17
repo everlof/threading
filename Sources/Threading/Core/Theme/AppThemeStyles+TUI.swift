@@ -69,6 +69,7 @@ extension AppThemeStyles {
                 id: TerminalThemeID("app-tui-terminal"),
                 name: "TUI",
                 foreground: hex("#C8D2DE"),
+                boldForeground: hex("#FFFFFF"),  // The highlight white a text UI reverses to
                 background: hex("#101419"),
                 // The palette's own ink, not the accent. A block cursor is the largest solid
                 // shape on the screen and a saturated one shouts over queued input — the rule

@@ -51,6 +51,10 @@ extension AppThemeStyles {
                 id: TerminalThemeID("app-amiga-workbench-31-terminal"),
                 name: "Amiga Workbench 3.1",
                 foreground: hex("#000000"),
+                // The Intuition title blue at ink depth. Workbench’s four colours leave no
+                // other choice: white cannot be read on the gray, black is the body, and the
+                // theme’s own #31577F is this palette’s `blue`.
+                boldForeground: hex("#102A50"),
                 background: hex("#AAAAAA"),
                 cursor: hex("#000000"),
                 selection: hex("#6688BB"),

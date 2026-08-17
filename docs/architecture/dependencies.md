@@ -153,6 +153,17 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     embedder changes the palette under it. The report prompts the program to *re-ask* `OSC 11`,
     which is how a theme switched under a running agent finally reaches it — see
     [`themes.md`](themes.md) for the whole three-leg contract.
+  - **A separate colour for bold default-foreground text is ours.**
+    `TerminalView.nativeBoldForegroundColor` is what `mapColor` returns for `.defaultColor` when
+    the run is a foreground and carries SGR 1; nil, its default, keeps upstream's behaviour of
+    drawing it in `nativeForegroundColor` with a bold face only. Nothing else moves: bold text
+    that names an ANSI colour keeps the 0-7 to 8-15 bright shift, and the inverted and truecolor
+    paths are untouched. Setting it clears the attribute caches, which key on the style flags and
+    so hold one resolved answer per bold state. This exists because an agent writes its headings
+    as bold in the terminal's *default* colour, and a palette whose foreground is already its
+    brightest tone then had no way to tell a heading from a paragraph; see
+    [`themes.md`](themes.md). `resolvedForegroundColor(for:)` is ours too, a read-only seam that
+    answers with the colour the renderer's own cached path produced.
   - **Final text-colour observation is ours.** `TerminalView.onLowContrastText` inspects the
     colours after inverse, bold-as-bright, faint alpha, palette lookup and background harmony
     have all resolved, while SwiftTerm is already grouping a visible row for drawing. It never

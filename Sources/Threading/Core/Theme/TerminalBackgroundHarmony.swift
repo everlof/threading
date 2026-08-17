@@ -115,8 +115,12 @@ enum TerminalBackgroundHarmony {
     /// then render differently from the indexed form of the same colour. The palette is in tune
     /// with the theme by definition; there is nothing to harmonise.
     static func statedColours(of theme: TerminalTheme) -> Set<UInt32> {
+        // Every colour, including the bold foreground: a palette that states one has it on
+        // screen as often as its body text, and a program echoing it back as truecolor must
+        // land on the same pixel as the palette's own.
         let palette = [
-            theme.foreground, theme.background, theme.cursor, theme.selection,
+            theme.foreground, theme.boldForeground, theme.background,
+            theme.cursor, theme.selection,
             theme.black, theme.red, theme.green, theme.yellow,
             theme.blue, theme.magenta, theme.cyan, theme.white,
             theme.brightBlack, theme.brightRed, theme.brightGreen, theme.brightYellow,
@@ -140,6 +144,10 @@ enum TerminalBackgroundHarmony {
     /// Both the normal and bright halves, because a theme routinely states its most saturated
     /// version of a hue only in the bright row, and that is the one an incoming vivid colour
     /// should be measured against.
+    ///
+    /// Not the text roles, `boldForeground` included: this is the set of hues a background is
+    /// pulled *towards*, and an ink is chosen to stand apart from the ground rather than to
+    /// name a hue the ground should take.
     static func anchorHues(of theme: TerminalTheme) -> [CGFloat] {
         let palette = [
             theme.red, theme.green, theme.yellow, theme.blue,

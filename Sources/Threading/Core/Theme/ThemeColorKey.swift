@@ -2,21 +2,24 @@ import AppKit
 
 /// One colour in a theme, named once for everything that has to talk about it.
 ///
-/// The settings editor kept a `[String: NSColorWell]` and a twenty-case `switch` to put a
+/// The settings editor kept a `[String: NSColorWell]` and a per-colour `switch` to put a
 /// changed colour back; the MCP tools need the same mapping from a name a model wrote to the
 /// property it sets. Both are a key path, so this is that key path with its two names attached
 /// — `displayName` for a label, `wireName` for the tool schema, where snake case is what a
 /// model reaches for unprompted.
 enum ThemeColorKey: String, CaseIterable {
-    case foreground, background, cursor, selection
+    case foreground, boldForeground, background, cursor, selection
     case black, red, green, yellow, blue, magenta, cyan, white
     case brightBlack, brightRed, brightGreen, brightYellow
     case brightBlue, brightMagenta, brightCyan, brightWhite
 
     // MARK: - Groups
 
-    /// The four that are not ANSI indices: what text, ground, caret and selection are drawn in.
-    static let main: [ThemeColorKey] = [.foreground, .background, .cursor, .selection]
+    /// The five that are not ANSI indices: what text, bold text, ground, caret and selection
+    /// are drawn in.
+    static let main: [ThemeColorKey] = [
+        .foreground, .boldForeground, .background, .cursor, .selection
+    ]
 
     /// ANSI 0–7, in index order — the order every terminal palette is written in.
     static let normal: [ThemeColorKey] = [
@@ -34,6 +37,7 @@ enum ThemeColorKey: String, CaseIterable {
     var keyPath: WritableKeyPath<TerminalTheme, NSColor> {
         switch self {
         case .foreground: return \.foreground
+        case .boldForeground: return \.boldForeground
         case .background: return \.background
         case .cursor: return \.cursor
         case .selection: return \.selection
@@ -60,6 +64,7 @@ enum ThemeColorKey: String, CaseIterable {
     var displayName: String {
         switch self {
         case .foreground: return L10n.string("Text")
+        case .boldForeground: return L10n.string("Bold Text")
         case .background: return L10n.string("Background")
         case .cursor: return L10n.string("Cursor")
         case .selection: return L10n.string("Selection")
@@ -83,7 +88,12 @@ enum ThemeColorKey: String, CaseIterable {
     }
 
     /// Snake case, which is what a model writes without being asked: `bright_magenta`.
+    ///
+    /// Only the `bright` prefix is decomposed automatically; anything else that is two words in
+    /// Swift states its wire spelling here, because a raw value's camel case is not snake case
+    /// and `named(_:)` has to round-trip.
     var wireName: String {
+        if self == .boldForeground { return "bold_foreground" }
         guard let bright = brightBase else { return rawValue }
         return "bright_\(bright)"
     }
@@ -95,6 +105,42 @@ enum ThemeColorKey: String, CaseIterable {
 
     static func named(_ wireName: String) -> ThemeColorKey? {
         allCases.first { $0.wireName == wireName.lowercased() }
+    }
+
+    // MARK: - Reading a Stated Palette
+
+    /// Whether a `{name: hex}` map an agent wrote names this colour, however it spelled the key.
+    fileprivate func isStated(in values: [String: String]) -> Bool {
+        values.keys.contains { ThemeColorKey.named($0) == self }
+    }
+
+    /// This colour out of a `{name: hex}` map, if it is named there and parses.
+    fileprivate func statedColour(in values: [String: String]) -> NSColor? {
+        guard let hex = values.first(where: { ThemeColorKey.named($0.key) == self })?.value else {
+            return nil
+        }
+        return NSColor(hex: hex)
+    }
+}
+
+// MARK: - Merging an Agent's Palette
+
+extension TerminalTheme {
+
+    /// This palette with its bold text following a stated text colour.
+    ///
+    /// The tools merge what an agent stated onto a base palette, so a caller that moves the
+    /// text colour and says nothing about bold would otherwise keep the *base's* heading ink,
+    /// chosen for a palette this one has just stopped being. A caller that states neither keeps
+    /// both, which is what makes a theme derived from a stock one inherit the stock pairing.
+    func adoptingBoldForeground(from values: [String: String]) -> TerminalTheme {
+        guard let foreground = ThemeColorKey.foreground.statedColour(in: values),
+              !ThemeColorKey.boldForeground.isStated(in: values)
+        else { return self }
+
+        var copy = self
+        copy.boldForeground = foreground
+        return copy
     }
 }
 

@@ -60,9 +60,10 @@ extension AppThemeStyles {
         terminalPalette: terminal(
             id: "app-pure-black-terminal",
             name: "Pure Black",
-            foreground: "#F2F2F2",
+            foreground: "#B3B3B3",
+            boldForeground: "#FFFFFF",  // The one colour this theme allows itself
             background: "#000000",
-            cursor: "#F2F2F2",
+            cursor: "#B3B3B3",
             selection: "#333333",
             ansi: [
                 "#1A1A1A", "#E5484D", "#4CC38A", "#E5B454",
@@ -121,6 +122,7 @@ extension AppThemeStyles {
             id: "app-cappuccino-terminal-light",
             name: "Cappuccino",
             foreground: "#3B2E25",
+            boldForeground: "#120D09",  // Espresso, the darkest roast in the cup
             background: "#F3EBE2",
             cursor: "#3B2E25",
             selection: "#E6D7C4",
@@ -159,9 +161,10 @@ extension AppThemeStyles {
         terminalPalette: terminal(
             id: "app-cappuccino-terminal-dark",
             name: "Cappuccino",
-            foreground: "#EFE3D5",
+            foreground: "#CFC0B0",
+            boldForeground: "#FFF7EC",  // Steamed milk; the body steps to the ramp’s white
             background: "#171210",
-            cursor: "#EFE3D5",
+            cursor: "#CFC0B0",
             selection: "#3D2F24",
             ansi: [
                 "#251D18", "#E06E5A", "#7FB069", "#E0B458",
@@ -229,6 +232,7 @@ extension AppThemeStyles {
             id: "app-solarized-terminal-light",
             name: "Solarized",
             foreground: "#657B83",
+            boldForeground: "#073642",  // base02
             background: "#FDF6E3",
             cursor: "#657B83",
             selection: "#EEE8D5",
@@ -266,6 +270,7 @@ extension AppThemeStyles {
             id: "app-solarized-terminal-dark",
             name: "Solarized",
             foreground: "#839496",
+            boldForeground: "#EEE8D5",  // base2
             background: "#002B36",
             cursor: "#839496",
             selection: "#073642",
@@ -322,6 +327,10 @@ extension AppThemeStyles {
             id: "app-nord-terminal",
             name: "Nord",
             foreground: "#D8DEE9",
+            // nord12, the one Aurora tone the published ANSI mapping leaves unspent. Every
+            // Nord colour bright enough to clear AA on nord0 is already a slot or a Snow
+            // Storm tone the body cannot be told from; see the sweep’s stated exception.
+            boldForeground: "#D08770",
             background: "#2E3440",
             cursor: "#D8DEE9",
             selection: "#434C5E",
@@ -373,6 +382,9 @@ extension AppThemeStyles {
             id: "app-dracula-terminal",
             name: "Dracula",
             foreground: "#F8F8F2",
+            // Dracula publishes Orange and maps it to no ANSI slot, which is exactly what a
+            // heading needs: the scheme’s own colour, and not one a program can print.
+            boldForeground: "#FFB86C",
             background: "#282A36",
             cursor: "#F8F8F2",
             selection: "#44475A",

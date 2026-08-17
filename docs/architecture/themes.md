@@ -56,7 +56,7 @@ with the thing it applies to instead of outliving it and re-theming whatever reu
 identifier. A standalone terminal inherits from the project at its **current cwd**, so moving
 under another already-added project updates the palette with the sidebar placement.
 
-`ThemeColorKey` names the palette's twenty colours once, as key paths with a `displayName` and
+`ThemeColorKey` names the palette's twenty-one colours once, as key paths with a `displayName` and
 a snake-case `wireName`. The settings editor previously kept a `[String: NSColorWell]` and a
 twenty-case `switch` to put a changed colour back, and the MCP schema needs the same mapping —
 generating the tool's schema from the enum is what stops a colour being added to the model and
@@ -1520,3 +1520,178 @@ Two things a head breaks that had to be fixed with it, both in `ThemedPopUp`:
 Section titles are localized where they are stated (`L10n.string`), and `AppThemeSection.title`
 is therefore presentation-ready rather than a key — a section may be named after an extension,
 and an extension called "Custom" must not come out of a string table as something else.
+
+
+## 2026-08-17 — a palette states its bold text
+
+A palette now names a **twenty-first** colour, `boldForeground`, and it answers one question:
+what does SGR 1 draw in when the text carries no colour of its own? Terminal.app has asked that
+question since it shipped, under the name "Bold Text", and every profile it bundles answers it:
+Pro sets text `#F2F2F2` against bold `#FFFFFF`, Homebrew `#28FE14` against `#00FF00`, Grass
+`#FFF0A5` against an amber `#FFB03B`, Novel `#3B2322` against a red-brown `#802A19`, Red Sands
+`#D7C9A7` against `#DFBD22`, Silver Aerogel `#000000` against `#FFFFFF`. Basic, Man Page and the
+Solid Colors set answer "the same as the text", which is a decision too.
+
+**Weight alone could not carry it.** Claude Code writes body copy in the terminal's default
+foreground and writes its headings as bold in that same default foreground, so the only thing
+separating a heading from a paragraph was the bold face. Our SwiftTerm fork resolved that pair
+through one branch of `mapColor`: `.defaultColor` with `isFg` returned `nativeForegroundColor`,
+and only ANSI 0 through 7 shifted to 8 through 15 when bold. On the stock Threading palette the
+foreground was `#F7EFE6`, which is also its `brightWhite` and already the brightest tone it
+states, so a heading and a paragraph came off the screen as the same pixels. Sampled from a
+screenshot, both were `#F7EFE6`.
+
+The fix is one property in three places, and each of them is deliberately narrow:
+
+- **`TerminalTheme.boldForeground`** sits next to `foreground`, is non-optional in memory, and
+  is `decodeIfPresent` on the wire. **An absent key means the foreground**, so every palette
+  already on disk keeps drawing exactly as it did: bold text takes the text colour, which is
+  what SwiftTerm did for it anyway. A key that is present but unparseable takes the same
+  role-shaped fallback as every other colour, `TerminalTheme.basic`'s value for that role,
+  because a palette that names the role and gets it wrong has said something and we should not
+  silently read it as silence. It is always encoded.
+- **`TerminalView.nativeBoldForegroundColor`** in the fork, optional, where nil means "the same
+  as the foreground". `mapColor` consults it in exactly one case: default foreground, `isFg`,
+  `isBold`. `.defaultInvertedColor`, the ANSI paths and truecolor are untouched, so **bold text
+  that names a colour keeps its bright shift**. That rule is Terminal.app's too, and it is the
+  right one: a program that wrote `SGR 1;31` asked for an emphatic *red*, and answering with the
+  palette's heading ink would throw away what it said. Setting the property clears the attribute
+  caches, which key on the style flags and therefore hold a resolved answer per bold state, and
+  queues a redraw.
+- **`TerminalSession.applyProfile`** sets it beside `nativeForegroundColor`, and
+  `RemoteThemeBridge` puts it on the wire as an optional `bold_foreground` so a phone built
+  before the role decodes a host that has it.
+
+**Every stock palette states one, and three gates hold them to it.**
+`TerminalBoldTextSweepTests` walks the four built-ins, the System pair and all thirty-one
+app-theme palettes:
+
+- **Distinctness.** CIE76 ΔE between the bold colour and the foreground is at least 15. That is
+  the number below which the two read as the same ink: `#F7EFE6` against `#FFFFFF` is 7.5 and
+  fails, `#D9D1C8` against `#FFFFFF` is 16.7 and passes.
+- **Legibility.** The bold colour clears `ThemeContrast.minimumRatio` against the palette's own
+  ground, and clears 4.5:1 wherever the body already does. Bold is never allowed to be the
+  reason a palette stops being readable.
+- **Ownership.** The bold colour is at least ΔE 15 from each of the palette's own `red`,
+  `green`, `yellow`, `blue`, `magenta` and `cyan`, in both weights. The four neutral slots are
+  exempt, because bold equal to `brightWhite` is the oldest pairing a terminal has and nothing
+  prints "white" to mean something.
+
+**The third gate came out of the first authoring round**, which put eight headings exactly on
+one of their palette's own coloured slots and two more within ΔE 15 of one: Christmas took its
+`red` by day and its `brightYellow` by night, Dracula its `yellow`, Cyberpunk its `green`,
+Vaporwave its `cyan`, Nord its `cyan`, Editorial its `brightYellow`, Bauhaus its `red`, Amiga
+came 12.6 from its `blue` and Botanical 13.2 from its `green`. Every one of those cleared the
+other two gates, and every one was wrong the same way: a heading in the palette's red is an
+error, in its yellow a warning, in its cyan or green any tool's coloured output, so a reader
+cannot tell what the agent emphasised from what a program coloured. The contact sheet said it
+without an assertion, with "Bold heading", "red" and "bold red" coming out of Bauhaus as one
+colour. Terminal.app's hue-shifted profiles never do this: Grass's amber `#FFB03B` is not its
+yellow, and Novel's `#802A19` is not its red.
+
+The gates are deliberately silent about whether bold out-contrasts body, because the precedent
+they are modelled on is not: Terminal.app's Grass draws body at 4.9:1 and bold at 3.1:1, and
+Novel does the same shape. A heading can be louder by hue instead of by luminance, and eleven
+palettes here take that route.
+
+**Choosing the colour is the authoring rule**, in preference order: a neutral extreme, white or
+black, when it clears ΔE 15 from the body; a colour from the theme's own family that no ANSI
+slot has spent, the chrome accent included; a tint or shade of a family colour, kept clear of
+the nearest slot; and only then a step of the body, which a published scheme never takes.
+Neutral dark palettes land on pure white and neutral light palettes on their deepest ink. A
+palette with a hue identity takes that hue at a tone no slot holds: Art Deco its brass,
+Cyberpunk a hazard yellow beside its neon green, Christmas a holly red deeper than its own `red`
+by day and candlelight rather than the candle by night, Vaporwave the violet between its magenta
+and its blue, Bauhaus the blue primary rather than the red one, Editorial the cognac its chrome
+already uses, Botanical the clay its own summary names beside the green, Amiga the Intuition
+title blue at ink depth.
+
+**The published schemes take a colour their own set states.** Solarized light and dark take
+base02 and base2, which are that scheme's ANSI `black` and `white` and therefore exempt from the
+third gate. Dracula takes Orange `#FFB86C`, the one published Dracula colour its ANSI mapping
+does not spend. Nord takes nord12, the one Aurora tone its published mapping leaves unspent, and
+it is the sweep's single stated exception: nord12 is 4.4:1 on nord0, above the floor every
+palette's text is held to and under the 4.5:1 the second gate would otherwise ask of a palette
+whose body clears AA. There is no alternative inside the scheme, because every Nord colour
+bright enough for AA is either an ANSI slot or a Snow Storm tone the body cannot be told from,
+and pure white is ΔE 13.2 from nord4, which is the original defect wearing a different number.
+The exception is keyed by palette id, carries that reason as its text, and
+`testEveryStatedExceptionIsStillNeeded` deletes it the moment it stops being load-bearing.
+
+**Fifteen palettes moved their body one step to make room**, and the move is always in the same
+direction: the heading keeps the extreme, the body steps back. On a dark palette the body takes
+the ramp's own `white` (index 7), which is what Threading, Basic, System dark, Pure Black, BeOS,
+IRIX and Cappuccino dark now do, and the relationship that leaves is Terminal.app's Pro exactly.
+On a light palette whose foreground already *was* the ramp's black there is nothing below it, so
+the body steps to `#333333`, which in every one of those palettes sits strictly between the
+stated `black` and the stated `brightBlack`. That last point is the constraint, not a
+preference: had the body landed on `brightBlack`, text a program dims to index 8 would have
+become indistinguishable from body copy, which is the bug this whole change exists to fix,
+pointed at a different pair. No palette's headings got quieter, and no body dropped below 7:1
+where it was above it.
+
+**The caret moved with the body**, in fourteen of the fifteen palettes that moved one.
+`testEveryPairedTerminalCursorIsThePalettesOwnInk` holds every paired palette's cursor to its
+own text colour, and it is the rule that keeps a block caret from drawing a theme's loudest hue
+over queued input. Body text is what the caret sits on, so it follows the body rather than the
+heading. Basic and System dark are not in that sweep and moved anyway, so that neither is left
+carrying a caret colour its palette no longer states. System light is the fifteenth: its caret
+was already a grey of its own rather than its text colour, and it stays that.
+
+Two palettes are worth knowing about individually. **Amiga Workbench** has a mid-grey ground, so
+there is no room under black for a legible body step and no room over it for a heading: white is
+1.9:1 on the gray, black is already the body, and the theme's own `#31577F` is this palette's
+`blue`. Its heading takes the Intuition title blue at ink depth instead, `#102A50`, and it is
+the one palette whose bold is a step *lighter* than its body. **Homebrew** could not use
+Terminal.app's own answer, whose `#28FE14` and `#00FF00` are ΔE 6.6 apart; it takes a phosphor
+bloom at the top of the tube instead.
+
+**The role is editable, visible and gated everywhere a colour is.** `ThemeColorKey.main` carries
+it, so the settings editor shows a "Bold Text" well beside Text, Background, Cursor and
+Selection, and `ThemePreviewView` draws the sample's typed command in it, in the bold face of
+the sample's own font, which is what makes moving that well change something the reader can
+see. `create_theme` and the app-theme variant validator both measure it against the background
+exactly as they measure `foreground`, and name `bold_foreground` and the ratio when they refuse:
+a caller may state bold and nothing else, so a gate that only measured the body would pass an
+unreadable heading on a palette it never touched. Nothing that passed before changes, because an
+unstated bold is the foreground.
+
+| palette | body before | body | bold | ΔE(bold, body) | nearest coloured slot | bold/bg | body/bg |
+|---|---|---|---|---|---|---|---|
+| Basic | #FFFFFF | #C7C7C7 | #FFFFFF | 19.8 | bright cyan 43.1 | 21.0:1 | 12.4:1 |
+| Pro | (unchanged) | #5ADB57 | #FFFFFF | 83.7 | bright cyan 41.7 | 15.8:1 | 8.8:1 |
+| Homebrew | (unchanged) | #00FF00 | #CCFFCC | 88.5 | bright cyan 39.4 | 18.7:1 | 15.3:1 |
+| Ocean | (unchanged) | #C0C5CE | #EFF1F5 | 16.0 | bright cyan 26.0 | 11.7:1 | 7.6:1 |
+| System (light) | #000000 | #333333 | #000000 | 21.2 | cyan 83.1 | 21.0:1 | 12.6:1 |
+| System (dark) | #E8E8E8 | #C7C7C7 | #FFFFFF | 19.8 | bright cyan 43.1 | 16.7:1 | 9.9:1 |
+| amiga-workbench-31 | (unchanged) | #000000 | #102A50 | 31.8 | blue 19.7 | 6.2:1 | 9.0:1 |
+| beos-r5 | #F0F0F0 | #C8C8C8 | #FFFFFF | 19.4 | bright cyan 39.9 | 19.0:1 | 11.4:1 |
+| christmas-light | (unchanged) | #0F2419 | #7A0A12 | 62.8 | red 27.9 | 10.3:1 | 15.1:1 |
+| christmas-dark | (unchanged) | #EAF4EC | #FFEFC2 | 21.3 | bright yellow 32.6 | 14.9:1 | 15.2:1 |
+| classic-player | (unchanged) | #54F269 | #F1F1E5 | 81.9 | bright cyan 30.9 | 17.5:1 | 13.6:1 |
+| bauhaus | (unchanged) | #121212 | #0B2C7A | 54.3 | magenta 27.8 | 11.1:1 | 16.4:1 |
+| art-deco | (unchanged) | #F2F0E4 | #D4AF37 | 61.0 | yellow 16.2 | 9.4:1 | 17.3:1 |
+| neo-brutalism | #000000 | #333333 | #000000 | 21.2 | cyan 54.6 | 20.6:1 | 12.4:1 |
+| claymorphism | (unchanged) | #332F3A | #5B21B6 | 81.2 | magenta 18.7 | 8.2:1 | 11.9:1 |
+| vaporwave | (unchanged) | #E0E0E0 | #C77DFF | 78.5 | bright magenta 32.2 | 7.6:1 | 15.6:1 |
+| newsprint | #111111 | #333333 | #111111 | 16.2 | blue 38.1 | 17.9:1 | 12.0:1 |
+| botanical | (unchanged) | #2D3A31 | #6B4030 | 29.4 | red 26.6 | 8.2:1 | 11.2:1 |
+| editorial | (unchanged) | #F3E7D3 | #D47842 | 55.6 | yellow 18.0 | 6.2:1 | 16.1:1 |
+| industrial | (unchanged) | #2D3436 | #0B1113 | 16.5 | magenta 46.5 | 15.0:1 | 10.0:1 |
+| irix-indigo-magic | #E8E8E8 | #BDBDBD | #FFFFFF | 23.4 | bright cyan 37.3 | 19.0:1 | 10.1:1 |
+| openstep-42 | #101010 | #333333 | #101010 | 16.6 | cyan 39.2 | 19.0:1 | 12.6:1 |
+| pure-black | #F2F2F2 | #B3B3B3 | #FFFFFF | 27.1 | bright cyan 33.2 | 21.0:1 | 10.0:1 |
+| cappuccino-light | (unchanged) | #3B2E25 | #120D09 | 17.5 | magenta 48.1 | 16.4:1 | 11.1:1 |
+| cappuccino-dark | #EFE3D5 | #CFC0B0 | #FFF7EC | 19.5 | bright cyan 28.1 | 17.5:1 | 10.5:1 |
+| solarized-light | (unchanged) | #657B83 | #073642 | 30.5 | bright green 25.4 | 12.1:1 | 4.1:1 |
+| solarized-dark | (unchanged) | #839496 | #EEE8D5 | 34.8 | bright cyan 29.5 | 12.3:1 | 4.7:1 |
+| nord | (unchanged) | #D8DEE9 | #D08770 | 46.6 | bright red 20.5 | 4.4:1 | 9.2:1 |
+| dracula | (unchanged) | #F8F8F2 | #FFB86C | 52.2 | bright yellow 36.2 | 8.4:1 | 13.4:1 |
+| platinum-9 | #111111 | #333333 | #111111 | 16.2 | cyan 44.8 | 18.9:1 | 12.6:1 |
+| aqua-cheetah | #111111 | #333333 | #111111 | 16.2 | cyan 48.4 | 18.9:1 | 12.6:1 |
+| tui | (unchanged) | #C8D2DE | #FFFFFF | 17.7 | bright blue 34.9 | 18.5:1 | 12.1:1 |
+| aqua-tiger | #111111 | #333333 | #111111 | 16.2 | cyan 48.4 | 18.9:1 | 12.6:1 |
+| retro-98 | (unchanged) | #C0C0C0 | #FFFFFF | 22.3 | bright cyan 45.0 | 21.0:1 | 11.5:1 |
+| threading | #F7EFE6 | #D9D1C8 | #FFFFFF | 16.7 | bright cyan 26.4 | 19.9:1 | 13.2:1 |
+| cyberpunk | (unchanged) | #E0E0E0 | #FCEE0A | 91.5 | yellow 37.3 | 16.3:1 | 15.0:1 |
+| swiss-minimalist | #111111 | #333333 | #111111 | 16.2 | cyan 42.8 | 18.9:1 | 12.6:1 |

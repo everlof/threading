@@ -96,6 +96,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
               let background = UIColor(remoteHex: theme.background) else {
             let fallback = UIColor(red: 0.035, green: 0.039, blue: 0.047, alpha: 1)
             view.nativeForegroundColor = .white
+            view.nativeBoldForegroundColor = nil
             view.nativeBackgroundColor = fallback
             view.backgroundColor = fallback
             view.keyboardAppearance = .dark
@@ -120,6 +121,9 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         if ansi.count == 16 { view.installColors(ansi) }
 
         view.nativeForegroundColor = foreground
+        // Absent or unreadable means "the same as the foreground", which is how a host from
+        // before the role existed describes itself.
+        view.nativeBoldForegroundColor = theme.boldForeground.flatMap(UIColor.init(remoteHex:))
         view.nativeBackgroundColor = background
         view.backgroundColor = background
         if let selection = UIColor(remoteHex: theme.selection) {

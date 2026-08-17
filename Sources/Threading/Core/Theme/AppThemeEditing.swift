@@ -364,6 +364,24 @@ enum AppThemeEditing {
             )
         }
 
+        // Bold text is text, and it is stated independently of the body, so a variant can
+        // arrive with a readable body and an unreadable heading.
+        guard ThemeContrast.isLegible(
+            foreground: variant.terminalPalette.boldForeground,
+            background: variant.terminalPalette.background
+        ) else {
+            let ratio = ThemeContrast.ratio(
+                variant.terminalPalette.boldForeground,
+                variant.terminalPalette.background
+            )
+            throw AppThemeEditingError.invalid(
+                "The \(kind.rawValue) variant's paired terminal bold_foreground "
+                    + "\(variant.terminalPalette.boldForeground.hexString) is only "
+                    + "\(formatted(ratio)):1 against its background; "
+                    + "at least \(Int(ThemeContrast.minimumRatio)):1 is required."
+            )
+        }
+
         let material = variant.material
         guard (0...40).contains(material.panelRadius) else {
             throw AppThemeEditingError.invalid("panel_radius must be between 0 and 40.")

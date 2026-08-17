@@ -28529,7 +28529,8 @@
     "ThemedMultilineTitleLabel": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ThemedMultilineTitleLabel"}}}},
     "Use compact title": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Använd kompakt rubrik"}}}},
     "Pairing code unavailable": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Parkopplingskod inte tillgänglig"}}}},
-    "The connection is ready, but Threading could not build a pairing code for it. Retrying starts the connection again.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Anslutningen är redo, men Threading kunde inte skapa någon parkopplingskod för den. Ett nytt försök startar anslutningen igen."}}}}
+    "The connection is ready, but Threading could not build a pairing code for it. Retrying starts the connection again.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Anslutningen är redo, men Threading kunde inte skapa någon parkopplingskod för den. Ett nytt försök startar anslutningen igen."}}}},
+    "Bold Text": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Fet text"}}}}
   },
   "version": "1.0"
 }

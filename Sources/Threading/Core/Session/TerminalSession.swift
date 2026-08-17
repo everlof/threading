@@ -216,6 +216,9 @@ final class TerminalSession: NSObject {
 
         // Apply theme colors
         terminalView.nativeForegroundColor = profile.theme.foreground
+        // What a heading written as SGR 1 in the default colour is drawn in. Set beside the
+        // foreground rather than derived from it: the palette states it.
+        terminalView.nativeBoldForegroundColor = profile.theme.boldForeground
         terminalView.nativeBackgroundColor = profile.theme.background
 
         // Installed after the palette, because the transform is built from it. Re-installed on

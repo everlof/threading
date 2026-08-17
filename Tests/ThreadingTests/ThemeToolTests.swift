@@ -2321,6 +2321,172 @@ final class ThemeToolTests: XCTestCase {
         XCTAssertNil(createProperties["base"])
     }
 
+    // MARK: - Bold Text
+
+    /// Bold text is text, and it is stated on its own, so it needs its own gate. Without this a
+    /// caller could name only `bold_foreground` and never be measured: the body it did not
+    /// touch would pass the check standing next to it, and every heading the agent then wrote
+    /// would be invisible.
+    func testCreateThemeRefusesABoldTextThatCannotBeReadOnItsGround() {
+        let result = coordinator().createTheme(
+            CreateThemeArguments(
+                name: "Illegible Heading \(UUID().uuidString)",
+                baseID: TerminalThemeID.ocean.rawValue,
+                base: nil,
+                colors: ["bold_foreground": "#30353F"],
+                apply: "none"
+            ),
+            for: SessionID()
+        )
+
+        XCTAssertTrue(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("bold_foreground"), result.text)
+        XCTAssertTrue(result.text.contains("1.1:1"), result.text)
+    }
+
+    /// The gate cannot move what already passed. Bold defaults to the foreground, so a palette
+    /// that says nothing about it is exactly as legible as its body text.
+    func testCreateThemeStillAcceptsAPaletteThatStatesNoBoldText() throws {
+        let name = "Silent Heading \(UUID().uuidString)"
+        let result = coordinator().createTheme(
+            CreateThemeArguments(
+                name: name,
+                baseID: TerminalThemeID.ocean.rawValue,
+                base: nil,
+                colors: ["cursor": "#FFCC00"],
+                apply: "none"
+            ),
+            for: SessionID()
+        )
+
+        XCTAssertFalse(result.isError, result.text)
+        let created = try XCTUnwrap(ThemeManager.shared.theme(named: name))
+        defer { _ = ThemeManager.shared.deleteTheme(created) }
+        XCTAssertEqual(created.cursor.hexString, "#FFCC00")
+    }
+
+    /// The merge rule, through the tool that needs it. A caller that moves the text colour and
+    /// says nothing about bold gets a heading in its own new ink, not the base's — which was
+    /// chosen for a palette this one has just stopped being.
+    func testCreateThemeGivesAStatedTextColourToABoldTextThatWasNotStated() throws {
+        let name = "Adopted Heading \(UUID().uuidString)"
+        let result = coordinator().createTheme(
+            CreateThemeArguments(
+                name: name,
+                baseID: TerminalThemeID.ocean.rawValue,
+                base: nil,
+                colors: ["foreground": "#8899AA"],
+                apply: "none"
+            ),
+            for: SessionID()
+        )
+
+        XCTAssertFalse(result.isError, result.text)
+        let created = try XCTUnwrap(ThemeManager.shared.theme(named: name))
+        defer { _ = ThemeManager.shared.deleteTheme(created) }
+
+        XCTAssertEqual(created.foreground.hexString, "#8899AA")
+        XCTAssertEqual(created.boldForeground.hexString, "#8899AA")
+    }
+
+    /// Both stated is both kept: adopting is a fallback, never an override.
+    func testCreateThemeKeepsBothColoursWhenBothAreStated() throws {
+        let name = "Stated Heading \(UUID().uuidString)"
+        let result = coordinator().createTheme(
+            CreateThemeArguments(
+                name: name,
+                baseID: TerminalThemeID.ocean.rawValue,
+                base: nil,
+                colors: ["foreground": "#8899AA", "bold_foreground": "#FFCC00"],
+                apply: "none"
+            ),
+            for: SessionID()
+        )
+
+        XCTAssertFalse(result.isError, result.text)
+        let created = try XCTUnwrap(ThemeManager.shared.theme(named: name))
+        defer { _ = ThemeManager.shared.deleteTheme(created) }
+
+        XCTAssertEqual(created.foreground.hexString, "#8899AA")
+        XCTAssertEqual(created.boldForeground.hexString, "#FFCC00")
+    }
+
+    /// Neither stated is the base's own pairing, unchanged — which is what makes a theme
+    /// derived from a stock one inherit the stock heading rather than flatten it.
+    func testCreateThemeInheritsTheBasesPairWhenNeitherIsStated() throws {
+        let name = "Inherited Heading \(UUID().uuidString)"
+        let result = coordinator().createTheme(
+            CreateThemeArguments(
+                name: name,
+                baseID: TerminalThemeID.ocean.rawValue,
+                base: nil,
+                colors: ["cursor": "#FFCC00"],
+                apply: "none"
+            ),
+            for: SessionID()
+        )
+
+        XCTAssertFalse(result.isError, result.text)
+        let created = try XCTUnwrap(ThemeManager.shared.theme(named: name))
+        defer { _ = ThemeManager.shared.deleteTheme(created) }
+
+        XCTAssertEqual(created.foreground.hexString, TerminalTheme.ocean.foreground.hexString)
+        XCTAssertEqual(
+            created.boldForeground.hexString,
+            TerminalTheme.ocean.boldForeground.hexString
+        )
+        XCTAssertNotEqual(created.boldForeground.hexString, created.foreground.hexString)
+    }
+
+    /// The same merge, on the other tool that performs it: an app theme's paired terminal
+    /// palette is built by the same rule, so it is held to the same behaviour.
+    func testAppThemePaletteGivesAStatedTextColourToABoldTextThatWasNotStated() throws {
+        let name = "Adopted App Heading \(UUID().uuidString)"
+        let result = coordinator().createAppTheme(
+            CreateAppThemeArguments(
+                name: name,
+                baseID: AppThemeStyles.cyberpunk.id.rawValue,
+                appearance: nil,
+                mode: "dark",
+                summary: nil,
+                variants: nil,
+                roles: nil,
+                material: nil,
+                terminalColors: ["foreground": "#8899AA"],
+                apply: false
+            )
+        )
+
+        XCTAssertFalse(result.isError, result.text)
+        let created = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer { _ = AppThemeLibrary.delete(created) }
+
+        let palette = try XCTUnwrap(created.variant(.dark)).terminalPalette
+        XCTAssertEqual(palette.foreground.hexString, "#8899AA")
+        XCTAssertEqual(palette.boldForeground.hexString, "#8899AA")
+    }
+
+    /// And the same gate: a variant can arrive with a readable body and an unreadable heading.
+    func testCreateAppThemeRefusesABoldTextThatCannotBeReadOnItsGround() {
+        let result = coordinator().createAppTheme(
+            CreateAppThemeArguments(
+                name: "Illegible App Heading \(UUID().uuidString)",
+                baseID: AppThemeStyles.cyberpunk.id.rawValue,
+                appearance: nil,
+                mode: "dark",
+                summary: nil,
+                variants: nil,
+                roles: nil,
+                material: nil,
+                terminalColors: ["bold_foreground": "#0B0B10"],
+                apply: false
+            )
+        )
+
+        XCTAssertTrue(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("bold_foreground"), result.text)
+    }
+
     /// Every scope the tool documents has to be one `ThemeScope` accepts, or the tool describes
     /// a value it then rejects.
     func testDocumentedScopesAreRealScopes() {

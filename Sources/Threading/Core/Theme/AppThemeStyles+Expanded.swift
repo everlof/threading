@@ -40,6 +40,9 @@ extension AppThemeStyles {
             id: "app-bauhaus-terminal",
             name: "Bauhaus",
             foreground: "#121212",
+            // The other primary, at ink weight. Red is where the eye goes in this style, but
+            // red is also the palette’s own slot; blue is the primary it has left to spend.
+            boldForeground: "#0B2C7A",
             background: "#F0F0F0",
             cursor: "#121212",
             selection: "#E7C9B5",
@@ -109,6 +112,7 @@ extension AppThemeStyles {
             id: "app-art-deco-terminal",
             name: "Art Deco",
             foreground: "#F2F0E4",
+            boldForeground: "#D4AF37",  // The theme’s brass, as on its rules and border
             background: "#0A0A0F",
             cursor: "#F2F0E4",
             selection: "#2F2916",
@@ -174,9 +178,10 @@ extension AppThemeStyles {
         terminalPalette: terminal(
             id: "app-neo-brutalism-terminal",
             name: "Neo Brutalism",
-            foreground: "#000000",
+            foreground: "#333333",
+            boldForeground: "#000000",  // Body steps back; the heading keeps the raw black
             background: "#FFFDF5",
-            cursor: "#000000",
+            cursor: "#333333",
             selection: "#C8D6FF",
             ansi: [
                 "#000000", "#D92D20", "#087F5B", "#A85D00",
@@ -260,6 +265,7 @@ extension AppThemeStyles {
             id: "app-claymorphism-terminal",
             name: "Claymorphism",
             foreground: "#332F3A",
+            boldForeground: "#5B21B6",  // A deeper pull of the theme’s violet accent
             background: "#F5F3FF",
             cursor: "#332F3A",
             selection: "#DDD6FE",
@@ -358,6 +364,9 @@ extension AppThemeStyles {
             id: "app-vaporwave-terminal",
             name: "Vaporwave",
             foreground: "#E0E0E0",
+            // The violet between the palette’s magenta and its blue — the one neon in this
+            // vocabulary no ANSI slot has already spent.
+            boldForeground: "#C77DFF",
             background: "#090014",
             cursor: "#E0E0E0",
             selection: "#1A103C",
@@ -426,9 +435,10 @@ extension AppThemeStyles {
         terminalPalette: terminal(
             id: "app-newsprint-terminal",
             name: "Newsprint",
-            foreground: "#111111",
+            foreground: "#333333",
+            boldForeground: "#111111",  // Body steps to press grey; headlines keep full ink
             background: "#F9F9F7",
-            cursor: "#111111",
+            cursor: "#333333",
             selection: "#E2D7D3",
             ansi: [
                 "#111111", "#CC0000", "#386641", "#8A5A16",
@@ -487,6 +497,9 @@ extension AppThemeStyles {
             id: "app-botanical-terminal",
             name: "Botanical",
             foreground: "#2D3A31",
+            // Clay, the theme’s second colour, at bark depth. A deeper leaf reads as the
+            // palette’s own `green`, and a heading is not a program’s success line.
+            boldForeground: "#6B4030",
             background: "#F9F8F4",
             cursor: "#2D3A31",
             selection: "#DDD9D1",
@@ -554,6 +567,9 @@ extension AppThemeStyles {
             id: "app-editorial-terminal",
             name: "Editorial",
             foreground: "#F3E7D3",
+            // Cognac — the theme’s own chrome accent, and the one warm tone here that is not
+            // also an ANSI slot.
+            boldForeground: "#D47842",
             background: "#090B0B",
             cursor: "#F3E7D3",
             selection: "#284B4C",
@@ -610,6 +626,7 @@ extension AppThemeStyles {
             id: "app-industrial-terminal",
             name: "Industrial",
             foreground: "#2D3436",
+            boldForeground: "#0B1113",  // Iron, a step below the body’s steel
             background: "#E0E5EC",
             cursor: "#2D3436",
             selection: "#F4B6BC",
@@ -673,6 +690,9 @@ extension AppThemeStyles {
         id: String,
         name: String,
         foreground: String,
+        // Terminal.app's "Bold Text". Stated by every palette here rather than defaulted, so a
+        // new theme cannot quietly ship headings that are only a weight.
+        boldForeground: String,
         background: String,
         cursor: String,
         selection: String,
@@ -684,6 +704,7 @@ extension AppThemeStyles {
             id: TerminalThemeID(id),
             name: name,
             foreground: hex(foreground),
+            boldForeground: hex(boldForeground),
             background: hex(background),
             cursor: hex(cursor),
             selection: hex(selection),

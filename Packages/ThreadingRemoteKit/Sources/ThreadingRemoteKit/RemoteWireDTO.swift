@@ -109,6 +109,10 @@ public struct RemoteTerminalThemeDTO: Codable, Equatable, Sendable {
     public let id: String
     public let name: String
     public let foreground: String
+    /// Terminal.app's "Bold Text": what SGR 1 in the default foreground draws in. Optional so a
+    /// client built before the role existed still decodes a host that sends it, and so a host
+    /// that does not send one still decodes here — nil means "the same as `foreground`".
+    public let boldForeground: String?
     public let background: String
     public let cursor: String
     public let selection: String
@@ -119,6 +123,7 @@ public struct RemoteTerminalThemeDTO: Codable, Equatable, Sendable {
         id: String,
         name: String,
         foreground: String,
+        boldForeground: String? = nil,
         background: String,
         cursor: String,
         selection: String,
@@ -127,6 +132,7 @@ public struct RemoteTerminalThemeDTO: Codable, Equatable, Sendable {
         self.id = id
         self.name = name
         self.foreground = foreground
+        self.boldForeground = boldForeground
         self.background = background
         self.cursor = cursor
         self.selection = selection

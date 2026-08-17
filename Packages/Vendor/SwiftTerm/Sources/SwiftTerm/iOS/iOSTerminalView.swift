@@ -824,6 +824,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     var _nativeFg, _nativeBg: TTColor!
     var settingFg = false, settingBg = false
+    var _nativeBoldFg: UIColor?
     /**
      * This will set the native foreground color to the specified native color (UIColor or NSColor)
      * and will have this reflected into the underlying's terminal `foregroundColor` and
@@ -855,6 +856,32 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             colorsChanged()
             settingBg = false
         }
+    }
+
+    /// **Ours.** The colour bold text drawn with the *default* foreground is rendered in —
+    /// Terminal.app's "Bold Text" — or nil to draw it in `nativeForegroundColor`, which is what
+    /// SwiftTerm did before this existed.
+    ///
+    /// Bold text that names an ANSI colour is unaffected: it keeps the 0–7 to 8–15 bright shift.
+    public var nativeBoldForegroundColor: UIColor? {
+        get { _nativeBoldFg }
+        set {
+            guard _nativeBoldFg != newValue else { return }
+            _nativeBoldFg = newValue
+            // The attribute caches resolved the bold styles through the old answer.
+            attributes = [:]
+            urlAttributes = [:]
+            terminal.updateFullScreen ()
+            queuePendingDisplay ()
+        }
+    }
+
+    /// **Ours.** The colour this attribute's text is drawn in, after inverse, the bold
+    /// foreground, bold-as-bright and SGR 2 faintness have all resolved. A seam for the
+    /// embedder's tests; the renderer itself uses the same call.
+    public func resolvedForegroundColor (for attribute: Attribute) -> UIColor
+    {
+        resolvedForeground (for: attribute)
     }
 
     /// Controls the color for the caret

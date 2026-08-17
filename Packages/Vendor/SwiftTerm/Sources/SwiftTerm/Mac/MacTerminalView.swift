@@ -353,6 +353,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     
     var _nativeFg, _nativeBg: TTColor!
     var settingFg = false, settingBg = false
+    var _nativeBoldFg: NSColor?
     /**
      * This will set the native foreground color to the specified native color (UIColor or NSColor)
      * and will have this reflected into the underlying's terminal `foregroundColor` and
@@ -368,6 +369,29 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             settingFg = false
             evaluatedTextContrast.removeAll(keepingCapacity: true)
             reportedTextContrast.removeAll(keepingCapacity: true)
+        }
+    }
+
+    /// **Ours.** The colour bold text drawn with the *default* foreground is rendered in —
+    /// Terminal.app's "Bold Text" — or nil to draw it in `nativeForegroundColor`, which is what
+    /// SwiftTerm did before this existed.
+    ///
+    /// Bold text that names an ANSI colour is unaffected: it keeps the 0–7 to 8–15 bright shift.
+    /// This is not pushed into the terminal engine, because no escape sequence describes it; it
+    /// is a property of the palette the host installed.
+    public var nativeBoldForegroundColor: NSColor? {
+        get { _nativeBoldFg }
+        set {
+            guard _nativeBoldFg != newValue else { return }
+            _nativeBoldFg = newValue
+            // Attributes are cached per `Attribute`, and the bold styles among them resolved
+            // through the old answer — so the cache is stale in exactly the cells this moves.
+            attributes = [:]
+            urlAttributes = [:]
+            evaluatedTextContrast = []
+            reportedTextContrast = []
+            terminal.updateFullScreen ()
+            queuePendingDisplay ()
         }
     }
 
@@ -491,6 +515,14 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         updateScroller()
     }
     
+    /// **Ours.** The colour this attribute's text is drawn in, after inverse, the bold
+    /// foreground, bold-as-bright and SGR 2 faintness have all resolved. A seam for the
+    /// embedder's tests; the renderer itself uses the same call.
+    public func resolvedForegroundColor (for attribute: Attribute) -> NSColor
+    {
+        resolvedForeground (for: attribute)
+    }
+
     /// This method sents the `nativeForegroundColor` and `nativeBackgroundColor`
     /// to match macOS default colors for text and its background.
     public func configureNativeColors ()

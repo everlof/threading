@@ -1534,7 +1534,7 @@ extension AgentToolCoordinator {
         _ values: [String: String]?,
         base: TerminalTheme
     ) throws -> TerminalTheme {
-        var palette = base
+        var palette = base.adoptingBoldForeground(from: values ?? [:])
         for (name, hex) in values ?? [:] {
             guard let key = ThemeColorKey.named(name) else {
                 throw AppThemeEditingError.invalid(

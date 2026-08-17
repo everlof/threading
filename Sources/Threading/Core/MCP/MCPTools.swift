@@ -2228,7 +2228,7 @@ enum MCPPropertyType: Encodable, Sendable {
   /// A nested object, whose members are described by the schema's own `properties`.
   ///
   /// Worth the extra case rather than flattening a structure into a delimited string: a
-  /// palette is twenty named colours, and "sixteen hex values, comma separated, in ANSI
+  /// palette is twenty-one named colours, and "sixteen hex values, comma separated, in ANSI
   /// order" is a format a model gets subtly wrong while a named object is one it cannot.
   case object
 
@@ -6767,7 +6767,7 @@ enum MCPTools {
     MCPBuiltInToolRegistry.descriptor(for: tool)?.definition
   }
 
-  /// The twenty named colours of a palette, described once for `create_theme`.
+  /// The twenty-one named colours of a palette, described once for `create_theme`.
   ///
   /// Generated from `ThemeColorKey` rather than written out, so a colour cannot be added to
   /// the model and left out of the schema an agent reads.
@@ -6778,6 +6778,11 @@ enum MCPTools {
       let role: String
       switch key {
       case .foreground: role = "Default text colour."
+      case .boldForeground:
+        role = """
+          Bold text: what SGR 1 text drawn with the default foreground uses. \
+          Terminal.app's Bold Text.
+          """
       case .background: role = "The terminal's ground."
       case .cursor: role = "The caret."
       case .selection: role = "The fill behind selected text."

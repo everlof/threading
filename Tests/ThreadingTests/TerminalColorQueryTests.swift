@@ -687,6 +687,43 @@ final class TerminalColorQueryTests: XCTestCase {
         XCTAssertEqual(sent.text, "")
     }
 
+    // MARK: - What the Session Installs
+
+    /// The palette's bold text has to reach the renderer, and a screenshot would not say when
+    /// it does not: the view falls back to the foreground whenever this is nil, which is
+    /// exactly how every palette drew before the role existed. So the wire is asserted rather
+    /// than looked at.
+    func testApplyingAProfileInstallsThePalettesBoldText() {
+        let (session, _) = makeSession(theme: .ocean)
+
+        XCTAssertEqual(
+            session.terminalView.nativeBoldForegroundColor?.hexString,
+            TerminalTheme.ocean.boldForeground.hexString
+        )
+        XCTAssertNotEqual(
+            session.terminalView.nativeBoldForegroundColor?.hexString,
+            TerminalTheme.ocean.foreground.hexString,
+            "the fixture palette has to state a bold colour of its own to prove anything"
+        )
+    }
+
+    /// And it follows a theme change, including onto a palette that draws its headings in the
+    /// body's own ink — the state the property must be *put back into*, not merely left in.
+    func testSwitchingToAPaletteWhoseBoldIsItsBodyMovesTheViewToThatColour() {
+        let (session, _) = makeSession(theme: .ocean)
+
+        var flat = TerminalTheme.basic
+        flat.boldForeground = flat.foreground
+        var profile = TerminalProfile.default
+        profile.theme = flat
+        session.updateProfile(profile)
+
+        XCTAssertEqual(
+            session.terminalView.nativeBoldForegroundColor?.hexString,
+            flat.foreground.hexString
+        )
+    }
+
     // MARK: - The Program That Only Re-Reads on Focus
 
     /// Codex does not implement `DECSET 2031`, so the announcement above reaches it not at all.

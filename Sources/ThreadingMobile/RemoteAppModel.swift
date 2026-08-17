@@ -1453,6 +1453,7 @@ final class RemoteAppModel: ObservableObject {
         id: "app-cyberpunk-terminal",
         name: "Cyberpunk",
         foreground: "#E6FFF4",
+        boldForeground: "#FCEE0A",
         background: "#07070B",
         cursor: "#00FF88",
         selection: "#103D2C",
@@ -1467,9 +1468,10 @@ final class RemoteAppModel: ObservableObject {
     static let demoThreadingTerminalTheme = RemoteTerminalThemeDTO(
         id: "app-threading-terminal",
         name: "Threading",
-        foreground: "#F7EFE6",
+        foreground: "#D9D1C8",
+        boldForeground: "#FFFFFF",
         background: "#040A12",
-        cursor: "#FF9A3D",
+        cursor: "#D9D1C8",
         selection: "#173A50",
         ansi: [
             "#071626", "#E06E65", "#74C49A", "#E6A35D",

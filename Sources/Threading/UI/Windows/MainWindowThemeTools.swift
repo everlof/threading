@@ -171,7 +171,7 @@ extension AgentToolCoordinator {
             base = ThemeAssignments.theme(for: sessionID)
         }
 
-        var theme = base.duplicated(named: name)
+        var theme = base.duplicated(named: name).adoptingBoldForeground(from: colors)
 
         for (rawKey, value) in colors {
             guard let key = ThemeColorKey.named(rawKey) else {
@@ -199,6 +199,25 @@ extension AgentToolCoordinator {
                     + " contrast ratio of \(ratio):1, below the \(Int(ThemeContrast.minimumRatio)):1"
                     + " this app requires — the terminal would be unreadable, and it is where the"
                     + " user would have to type to undo it. Move them further apart."
+            )
+        }
+
+        // Bold text is text. It is checked separately rather than folded into the line above
+        // because a caller that states only `bold_foreground` never touches `foreground`, and
+        // would otherwise get an unreadable heading past a gate that passed on the body.
+        guard ThemeContrast.isLegible(
+            foreground: theme.boldForeground,
+            background: theme.background
+        ) else {
+            let ratio = String(
+                format: "%.1f",
+                ThemeContrast.ratio(theme.boldForeground, theme.background)
+            )
+            return .failure(
+                "bold_foreground at \(theme.boldForeground.hexString) on"
+                    + " \(theme.background.hexString) has a contrast ratio of \(ratio):1, below"
+                    + " the \(Int(ThemeContrast.minimumRatio)):1 this app requires — headings"
+                    + " would be unreadable. Move them further apart."
             )
         }
 

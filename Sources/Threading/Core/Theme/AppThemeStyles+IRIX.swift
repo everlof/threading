@@ -47,9 +47,10 @@ extension AppThemeStyles {
             terminalPalette: TerminalTheme(
                 id: TerminalThemeID("app-irix-indigo-magic-terminal"),
                 name: "IRIX Indigo Magic",
-                foreground: hex("#E8E8E8"),
+                foreground: hex("#BDBDBD"),
+                boldForeground: hex("#FFFFFF"),  // Body steps to the ramp’s own white
                 background: hex("#101010"),
-                cursor: hex("#E8E8E8"),
+                cursor: hex("#BDBDBD"),
                 selection: hex("#4E6078"),
                 black: hex("#101010"),
                 red: hex("#B84A4A"),

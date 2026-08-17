@@ -99,6 +99,7 @@ enum RemoteThemeBridge {
             id: theme.id.rawValue,
             name: theme.name,
             foreground: theme.foreground.hexString,
+            boldForeground: theme.boldForeground.hexString,
             background: theme.background.hexString,
             cursor: theme.cursor.hexString,
             selection: theme.selection.hexString,

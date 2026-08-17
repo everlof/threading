@@ -46,9 +46,10 @@ extension AppThemeStyles {
             terminalPalette: TerminalTheme(
                 id: TerminalThemeID("app-aqua-tiger-terminal"),
                 name: "Mac OS X 10.4 Tiger",
-                foreground: hex("#111111"),
+                foreground: hex("#333333"),
+                boldForeground: hex("#111111"),  // The heading keeps the ramp’s black
                 background: hex("#FFFFFF"),
-                cursor: hex("#111111"),
+                cursor: hex("#333333"),
                 selection: hex("#B7D8F2"),
                 black: hex("#111111"),
                 red: hex("#B73732"),

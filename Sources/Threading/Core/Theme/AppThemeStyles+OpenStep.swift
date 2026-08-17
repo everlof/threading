@@ -49,9 +49,10 @@ extension AppThemeStyles {
             terminalPalette: TerminalTheme(
                 id: TerminalThemeID("app-openstep-42-terminal"),
                 name: "OPENSTEP 4.2",
-                foreground: hex("#101010"),
+                foreground: hex("#333333"),
+                boldForeground: hex("#101010"),  // The heading keeps the ramp’s black
                 background: hex("#FFFFFF"),
-                cursor: hex("#101010"),
+                cursor: hex("#333333"),
                 selection: hex("#B7B7D0"),
                 black: hex("#101010"),
                 red: hex("#8E2727"),

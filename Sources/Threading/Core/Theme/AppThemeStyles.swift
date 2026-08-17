@@ -164,11 +164,12 @@ enum AppThemeStyles {
             terminalPalette: TerminalTheme(
                 id: TerminalThemeID("app-threading-terminal"),
                 name: "Threading",
-                foreground: hex("#F7EFE6"),
+                foreground: hex("#D9D1C8"),
+                boldForeground: hex("#FFFFFF"),  // Body steps to the ramp’s own white
                 background: hex("#040A12"),
                 // The palette's own ink, not its orange. A block cursor sits *on* a character,
                 // so the accent drew an alarm block over the first letter of queued input.
-                cursor: hex("#F7EFE6"),
+                cursor: hex("#D9D1C8"),
                 selection: hex("#173A50"),
                 black: hex("#071626"),
                 red: hex("#E06E65"),
@@ -271,6 +272,9 @@ enum AppThemeStyles {
             id: TerminalThemeID("app-cyberpunk-terminal"),
             name: "Cyberpunk",
             foreground: hex("#E0E0E0"),
+            // Hazard yellow. The accent green is this palette’s `green`, and so is every
+            // other neon here except this one.
+            boldForeground: hex("#FCEE0A"),
             background: hex("#0A0A0F"),
             cursor: hex("#E0E0E0"),
             selection: hex("#103D2C"),
@@ -382,9 +386,10 @@ enum AppThemeStyles {
         terminalPalette: TerminalTheme(
             id: TerminalThemeID("app-swiss-minimalist-terminal"),
             name: "Swiss Minimalist",
-            foreground: hex("#111111"),
+            foreground: hex("#333333"),
+            boldForeground: hex("#111111"),  // The heading keeps the ramp’s black
             background: hex("#FFFFFF"),
-            cursor: hex("#111111"),
+            cursor: hex("#333333"),
             selection: hex("#FAD5D1"),
             black: hex("#111111"),
             red: hex("#FF3000"),

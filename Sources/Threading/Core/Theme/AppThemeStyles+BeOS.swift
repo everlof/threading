@@ -47,9 +47,10 @@ extension AppThemeStyles {
             terminalPalette: TerminalTheme(
                 id: TerminalThemeID("app-beos-r5-terminal"),
                 name: "BeOS R5",
-                foreground: hex("#F0F0F0"),
+                foreground: hex("#C8C8C8"),
+                boldForeground: hex("#FFFFFF"),  // Body steps to the ramp’s own white
                 background: hex("#101010"),
-                cursor: hex("#F0F0F0"),
+                cursor: hex("#C8C8C8"),
                 selection: hex("#5E531F"),
                 black: hex("#101010"),
                 red: hex("#C83B32"),

@@ -58,6 +58,7 @@ extension AppThemeStyles {
                 id: TerminalThemeID("app-retro-98-terminal"),
                 name: "Windows 98",
                 foreground: hex("#C0C0C0"),
+                boldForeground: hex("#FFFFFF"),  // The console’s intensity bit
                 background: hex("#000000"),
                 cursor: hex("#C0C0C0"),
                 selection: hex("#000080"),

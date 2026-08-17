@@ -64,6 +64,15 @@ final class ThemePreviewView: NSView {
         label.attributedStringValue = sample(for: theme)
     }
 
+    /// What the card is currently drawing.
+    ///
+    /// A seam for the tests that review the sample's own colours: the roles it stages have no
+    /// reading outside a running terminal, so the alternative is a second copy of `sample` in
+    /// the test and an assertion that proves nothing about what was installed.
+    var renderedSample: NSAttributedString {
+        label.attributedStringValue
+    }
+
     override func updateLayer() {
         super.updateLayer()
         applyLayerBorder(Design.Surface.border)
@@ -73,15 +82,24 @@ final class ThemePreviewView: NSView {
 
     private func sample(for theme: TerminalTheme) -> NSAttributedString {
         let font = Design.Typography.previewCode()
+        // Bold text is a weight *and* a colour, and the sample has to show both: drawn in the
+        // regular face the role reads as an arbitrary tint on one word, and drawn in the body
+        // colour the editor's "Bold Text" well changes nothing anybody can see.
+        let boldFont = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = Layout.lineSpacing
 
         let output = NSMutableAttributedString()
 
-        func append(_ text: String, _ color: NSColor, background: NSColor? = nil) {
+        func append(
+            _ text: String,
+            _ color: NSColor,
+            background: NSColor? = nil,
+            face: NSFont? = nil
+        ) {
             var attributes: [NSAttributedString.Key: Any] = [
                 .foregroundColor: color,
-                .font: font,
+                .font: face ?? font,
                 .paragraphStyle: paragraph
             ]
             attributes[.backgroundColor] = background
@@ -94,7 +112,9 @@ final class ThemePreviewView: NSView {
         append(" ", theme.foreground)
         append("~/projects", theme.brightBlue)
         append(" % ", theme.brightBlack)
-        append("git status\n", theme.foreground)
+        // The command the user typed, which is what an agent's headings look like too: SGR 1
+        // over the default foreground, so it is drawn in the palette's bold text.
+        append("git status\n", theme.boldForeground, face: boldFont)
 
         append("On branch ", theme.foreground)
         // The selection is staged on a word the eye is already reading, so it shows how text
