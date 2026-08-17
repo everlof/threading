@@ -23,6 +23,21 @@ final class ThemedPopover {
     var contentViewController: NSViewController?
     var onClose: (() -> Void)?
 
+    /// The responder that holds the keyboard while the popover is open, or nil to leave the
+    /// keyboard where it was.
+    ///
+    /// Setting this is what makes the panel key, and only content that asks for it gets that:
+    /// most popovers here are pointer-driven — hover cards, pickers — and one that took key
+    /// status would pull the caret out of the composer somebody is typing into, and unemphasize
+    /// every list in the window behind it.
+    ///
+    /// Ordering the panel front is *not* enough on its own, which is the trap: on a panel that
+    /// is merely visible, `makeFirstResponder` returns true and even installs the field editor,
+    /// so a caret blinks in the popover's field while every keystroke goes on reaching the
+    /// window underneath. That is how ⌘J's file search came to open with a search field that
+    /// could not be typed into — and why nothing short of asserting `isKeyWindow` catches it.
+    var initialFirstResponder: NSResponder?
+
     private(set) var isShown = false
     var presentedWindow: NSWindow? { panel }
 
@@ -97,6 +112,11 @@ final class ThemedPopover {
                 context.duration = Design.Motion.standard
                 panel.animator().alphaValue = 1
             }
+        }
+
+        if let initialFirstResponder {
+            panel.makeKey()
+            panel.makeFirstResponder(initialFirstResponder)
         }
 
         preferredSizeObservation = controller.observe(\.preferredContentSize) { [weak self] _, _ in

@@ -961,6 +961,58 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertEqual(Set(navigator.visibleLeafPathsForTesting), Set(files.map(\.path)))
     }
 
+    /// The popover hands the navigator its files while it is still an unloaded controller, so a
+    /// pass that only ran for an already-loaded view left ⌘J opening on a column of collapsed
+    /// directories. The model may arrive first; loading is where the view owes it a pass.
+    func testChangedFileNavigatorShowsItsTreeWhenTheRosterArrivesBeforeTheViewLoads() {
+        let navigator = GitReviewPathNavigatorViewController(
+            rootURL: URL(fileURLWithPath: NSTemporaryDirectory())
+        )
+        let files = [
+            GitFileDiff(path: "Sources/UI/Review.swift", change: .modified, hunks: [], added: 4, removed: 2),
+            GitFileDiff(path: "Sources/Git/Reader.swift", change: .modified, hunks: [], added: 1, removed: 0),
+            GitFileDiff(path: "Tests/ReviewTests.swift", change: .added, hunks: [], added: 20, removed: 0),
+        ]
+
+        navigator.update(files: files)
+        _ = navigator.view
+
+        // Sources ▸ Git ▸ Reader.swift, Sources ▸ UI ▸ Review.swift, Tests ▸ ReviewTests.swift:
+        // four directories and three files, every one of them disclosed.
+        XCTAssertEqual(
+            navigator.outlineRowCountForTesting,
+            7,
+            "every changed file must be showing, not waiting behind a collapsed directory"
+        )
+    }
+
+    /// A jump raised by a chord has to be finishable without the pointer.
+    func testFilteredNavigatorTakesTheTopMatchOnReturn() throws {
+        let navigator = GitReviewPathNavigatorViewController(
+            rootURL: URL(fileURLWithPath: NSTemporaryDirectory())
+        )
+        let files = [
+            GitFileDiff(path: "Sources/UI/Review.swift", change: .modified, hunks: [], added: 4, removed: 2),
+            GitFileDiff(path: "Sources/Git/Reader.swift", change: .modified, hunks: [], added: 1, removed: 0),
+        ]
+        navigator.update(files: files)
+        var chosen: [String] = []
+        navigator.onChoosePath = { chosen.append($0) }
+
+        let field = try XCTUnwrap(navigator.searchResponder as? NSTextField)
+        let returnKey = #selector(NSResponder.insertNewline(_:))
+
+        XCTAssertFalse(
+            navigator.control(field, textView: NSTextView(), doCommandBy: returnKey),
+            "Return with nothing typed picks nothing, and stays the field's own key"
+        )
+        XCTAssertTrue(chosen.isEmpty)
+
+        navigator.setFilterForTesting("Reader")
+        XCTAssertTrue(navigator.control(field, textView: NSTextView(), doCommandBy: returnKey))
+        XCTAssertEqual(chosen, ["Sources/Git/Reader.swift"])
+    }
+
     func testNavigatorToggleResizesTheDiffAndJumpKeepsTheChosenFileVisible() {
         let files = Self.stressSmallExpandedFiles(count: 100, linesPerFile: 4)
         let controller = GitReviewViewController(

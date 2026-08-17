@@ -176,6 +176,21 @@ exact checkpoint instead of redirecting every old card to the newest one. Mobile
 working-copy comparisons and defaults to Uncommitted too; Commits remains the desktop history
 navigator rather than pretending to be another compact diff mode.
 
+**Reaching one file among the changed ones** is `GitReviewPathNavigatorViewController`, shared by
+the folder button's persistent rail and the ⌘J popover so there is one changed-path tree rather
+than two. It receives the diff's already-bounded roster as values and never walks the checkout.
+Selecting a row *is* choosing it — there is no second confirming click in either surface — so the
+filter field commits its top match on Return, and ⌘J is finishable without the pointer.
+
+Three things had to be true before that was so, and each failed silently. The popover **takes key
+status**: `ThemedPopover.initialFirstResponder` is set, because a panel that is merely ordered
+front still accepts `makeFirstResponder` and still installs a field editor, so the caret appeared
+in the filter while the keystrokes went to the window underneath. The tree **catches up on view
+load**: the popover hands the navigator its files while it is still an unloaded controller, and a
+filter pass that only ran for a loaded view left ⌘J opening on collapsed directories. And the
+expansion is **every level, not the first**, or the files the surface exists to reach sit behind a
+second disclosure.
+
 The data layer (`GitReviewReader`) shells out on a dedicated queue and completes on main —
 `GitWorktree`'s runner made async, following `ProjectIconResearch`'s shape. Every invocation
 passes `--no-optional-locks`, so a *read never takes `index.lock`* out from under the agent

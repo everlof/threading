@@ -3067,6 +3067,11 @@ open as the header's split control, landing at the first line the diff changes. 
 right-click menu keeps the full set: the **Open in ▸** app list, **Reveal in Finder**, and
 **Copy Path**. A file the comparison deletes offers neither, having no working copy to act on.
 
+**View ▸ Jump to Review File…** (Cmd+J) opens a filter over the files the comparison changed,
+with the keyboard already in it. Type any part of a path and press Return to go to the top match;
+Escape closes without moving. The folder button beside it keeps the same tree open as a rail
+alongside the diff, where clicking a file jumps to it.
+
 ### Pull and merge requests
 
 For a checkout whose `origin` is on GitHub.com or GitLab.com, Git Review also shows the current
@@ -4323,6 +4328,7 @@ screen says so and leads with the offers further down the list instead.
 | Browser | Cmd+Shift+B |
 | Activity (display panel tab) | Cmd+P |
 | Git Review | Cmd+Shift+R |
+| Jump to Review File… | Cmd+J |
 | Save as Baseline… (the visible browser page) | unbound by default — assign one in Settings ▸ Keyboard |
 | Session Info | Cmd+Shift+I |
 | Shell drawer | Ctrl+` |
