@@ -756,6 +756,10 @@ def render_artifact(artifact: Artifact, mode: str) -> str:
     current = html.escape(artifact.current_asset)
     baseline = html.escape(artifact.baseline_asset or "")
     diff = html.escape(artifact.diff_asset or "")
+    image_dimensions = ""
+    if artifact.dimensions:
+        width, height = artifact.dimensions
+        image_dimensions = f' width="{width}" height="{height}"'
     controls = ""
     baseline_image = ""
     if artifact.baseline_asset:
@@ -802,8 +806,10 @@ def render_artifact(artifact: Artifact, mode: str) -> str:
         f'data-search="{html.escape((artifact.title + " " + artifact.variant + " " + artifact.description).lower())}">'
         f'<div class="image-stage" data-current="{current}" {baseline_image}>'
         f'<button class="image-button" type="button" aria-label="Enlarge {html.escape(artifact.title)}">'
-        f'<img src="{current}" loading="lazy" alt="{html.escape(artifact.title + ": " + artifact.variant)}">'
+        f'<img src="{current}" loading="lazy"{image_dimensions} alt="{html.escape(artifact.title + ": " + artifact.variant)}">'
         '</button>'
+        '<p class="image-error" role="status" aria-live="polite" hidden>'
+        'Image unavailable. Keep this report beside its assets directory.</p>'
         f'{controls}</div><figcaption>'
         f'<div class="caption-line"><span class="variant">{html.escape(artifact.variant)}</span>'
         f'<span class="verdict {html.escape(artifact.comparison)}">{html.escape(artifact.comparison.title())}{result}</span></div>'
@@ -923,9 +929,10 @@ main {{ min-width:0; padding:34px clamp(20px,4vw,60px) 80px; }} .run-header,.evi
 .source {{ display:flex; flex-wrap:wrap; gap:6px 14px; color:var(--muted); font-size:12px; }} .source code {{ color:#b6c9e8; }}
 .artifact-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr)); align-items:start; gap:18px; margin-top:18px; }}
 figure {{ margin:0; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--panel); box-shadow:0 13px 35px #0004; }}
-.image-stage {{ position:relative; background:#080a0d; }} .image-button {{ display:block; width:100%; padding:0; border:0; background:transparent; cursor:zoom-in; }}
+.image-stage {{ position:relative; display:grid; min-height:120px; place-items:center; background:#080a0d; }} .image-button {{ display:block; grid-area:1/1; width:100%; padding:0; border:0; background:transparent; cursor:zoom-in; }}
 .image-stage.annotating {{ outline:2px solid var(--accent); outline-offset:-2px; }} .image-stage.annotating .image-button {{ cursor:crosshair; }}
 .image-button img {{ display:block; width:100%; height:auto; }} .compare-controls {{ display:flex; gap:3px; position:absolute; right:9px; bottom:9px; padding:3px; border-radius:8px; background:#090c11dd; backdrop-filter:blur(8px); }}
+.image-error {{ grid-area:1/1; z-index:1; max-width:34ch; margin:0; padding:22px; color:var(--danger); text-align:center; }} .image-stage.image-failed .image-button {{ visibility:hidden; }}
 .annotation-marker {{ position:absolute; width:24px; height:24px; translate:-50% -50%; border:2px solid white; border-radius:50%; background:#0878f9; color:white; font-size:11px; font-weight:800; line-height:20px; text-align:center; pointer-events:none; box-shadow:0 2px 8px #000b; }}
 .compare-controls button {{ padding:4px 7px; color:#dce3ec; border:0; border-radius:5px; background:transparent; cursor:pointer; font-size:11px; }} .compare-controls button.active {{ background:#ffffff25; color:white; }}
 figcaption {{ padding:14px 16px 16px; }} .caption-line {{ display:flex; justify-content:space-between; gap:12px; align-items:center; }} .variant {{ color:var(--accent); font-size:12px; font-weight:700; }}
@@ -954,6 +961,8 @@ verdict.value='{initial_verdict}';
 function applyFilters(){{const query=search.value.trim().toLowerCase();document.querySelectorAll('.evidence-section').forEach(section=>{{const kindOK=kind.value==='all'||section.dataset.kind===kind.value;let visible=0;section.querySelectorAll('figure').forEach(figure=>{{const statusOK=verdict.value==='all'||figure.dataset.status===verdict.value||(verdict.value==='actionable'&&figure.dataset.status!=='accepted');const queryOK=!query||(section.dataset.search+' '+figure.dataset.search).includes(query);figure.hidden=!(kindOK&&statusOK&&queryOK);if(!figure.hidden)visible++;}});const empty=section.querySelector('.empty');if(empty)empty.hidden=!(kindOK&&(!query||section.dataset.search.includes(query)));section.hidden=!kindOK||(section.querySelectorAll('figure').length>0?visible===0:empty?.hidden);}});}}
 [search,kind,verdict].forEach(control=>control.addEventListener('input',applyFilters));
 const lightbox=document.querySelector('#lightbox'), lightboxImage=lightbox.querySelector('img');
+function setImageAvailability(image,available){{const stage=image.closest('.image-stage'),message=stage.querySelector('.image-error');stage.classList.toggle('image-failed',!available);message.hidden=available;}}
+document.querySelectorAll('.image-button img').forEach(image=>{{image.addEventListener('load',()=>setImageAvailability(image,true));image.addEventListener('error',()=>setImageAvailability(image,false));if(image.complete)setImageAvailability(image,image.naturalWidth>0);}});
 document.querySelectorAll('.image-button').forEach(button=>button.addEventListener('click',event=>{{const stage=button.closest('.image-stage'), image=button.querySelector('img');if(stage.classList.contains('annotating')){{event.preventDefault();addAnnotation(event,button.closest('figure'));return;}}if(image.hidden)return;lightboxImage.src=image.src;lightboxImage.alt=image.alt;lightbox.showModal();}}));
 lightbox.querySelector('button').addEventListener('click',()=>lightbox.close());lightbox.addEventListener('click',event=>{{if(event.target===lightbox)lightbox.close();}});
 document.querySelectorAll('.compare-controls button').forEach(control=>control.addEventListener('click',()=>{{const stage=control.closest('.image-stage'),image=stage.querySelector('img');stage.querySelectorAll('.compare-controls button').forEach(button=>button.classList.toggle('active',button===control));image.src=control.dataset.mode==='baseline'?stage.dataset.baseline:control.dataset.mode==='diff'?stage.dataset.diff:stage.dataset.current;}}));

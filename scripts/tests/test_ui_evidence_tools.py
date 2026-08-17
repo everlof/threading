@@ -140,6 +140,22 @@ class UIEvidenceToolsTests(unittest.TestCase):
             (self.root / "changed/regression.html").read_text(),
         )
 
+    def test_report_reserves_image_space_and_explains_a_missing_asset(self) -> None:
+        pixels = [(5, 6, 7, 255), (8, 9, 10, 255)]
+        write_rgba_png(self.current / "shot.png", pixels, bit_depth=8, compression=1)
+        write_rgba_png(self.baseline / "shot.png", pixels, bit_depth=8, compression=9)
+
+        result = self.generate("missing-asset-fallback", "--require-accepted")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = (self.root / "missing-asset-fallback/review.html").read_text()
+        self.assertIn('width="2" height="1"', report)
+        self.assertIn(
+            "Image unavailable. Keep this report beside its assets directory.",
+            report,
+        )
+        self.assertIn("setImageAvailability(image,image.naturalWidth>0)", report)
+
     def test_approval_is_bound_to_the_current_asset_hash(self) -> None:
         write_rgba_png(
             self.current / "shot.png", [(5, 6, 7, 255)], bit_depth=8, compression=1,
