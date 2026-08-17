@@ -28635,6 +28635,8 @@
     "Architecture": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Arkitektur"}}}},
     "Version": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Version"}}}},
     "Agent session scratchpad": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Agentsessionens skrivyta"}}}},
+    "Allowed by manager.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tillåten av manager."}}}},
+    "Denied by manager.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Nekad av manager."}}}},
     "not rebuilt — the session has ended": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "byggs inte om — sessionen har avslutats"}}}},
     "Let agents see reclaimable build output, suggest more of it, and propose removing some.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Låt agenter se återvinningsbar byggdata, föreslå mer av den och föreslå att ta bort delar av den."}}}},
     "StorageProposalOutlineView": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "StorageProposalOutlineView"}}}},

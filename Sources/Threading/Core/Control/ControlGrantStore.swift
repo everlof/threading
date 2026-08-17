@@ -38,7 +38,22 @@ final class ControlGrantStore {
     func storedGrants(for actor: ControlActor) -> [ControlGrant] {
         guard case .agentSession(let sessionID) = actor else { return [] }
         if let cached = grantsBySession[sessionID] { return cached }
-        let loaded = dependencies.state.controlGrants(for: sessionID) ?? []
+        var loaded = dependencies.state.controlGrants(for: sessionID) ?? []
+
+        // Manager is a user-appointed role, but older rows persist the exact operation set the
+        // role had when they were written. Upgrade only the exact former full-role set. A partial
+        // or custom grant remains exact, and a failed write fails closed by keeping the old set.
+        for index in loaded.indices {
+            var upgraded = loaded[index]
+            guard upgraded.upgradeManagerRoleIfNeeded() else { continue }
+            guard dependencies.state.saveControlGrant(upgraded) else { continue }
+            loaded[index] = upgraded
+            EventLog.shared.record(.session, "Manager grant upgraded", [
+                "session": sessionID.uuidString,
+                "grant": upgraded.id.uuidString,
+                "capability": ControlOperation.respondToPermission.rawValue,
+            ])
+        }
         grantsBySession[sessionID] = loaded
         return loaded
     }

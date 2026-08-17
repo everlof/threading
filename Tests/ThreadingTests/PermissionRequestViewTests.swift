@@ -79,6 +79,21 @@ final class PermissionRequestViewTests: XCTestCase {
         XCTAssertEqual(decisions, ["allow"])
     }
 
+    func testManagerDecisionMustMatchTheCardIsOneShotAndCarriesManagerAttribution() {
+        var decisions: [PermissionDecision] = []
+        let card = PermissionRequestView(request: makeRequest()) { decisions.append($0) }
+        let id = card.remoteRequest.id
+
+        XCTAssertFalse(card.resolveManager(id: "stale-id", decision: .allow))
+        XCTAssertTrue(card.resolveManager(id: id, decision: .deny))
+        XCTAssertFalse(card.resolveManager(id: id, decision: .allow))
+        XCTAssertEqual(decisions.count, 1)
+        guard case .deny(let reason) = decisions[0] else {
+            return XCTFail("Expected a manager denial")
+        }
+        XCTAssertEqual(reason, "Declined by a user-appointed Threading manager.")
+    }
+
     func testOversizedRemoteDiffRequiresReviewOnTheMac() {
         let request = PermissionRequest(
             sessionID: SessionID(),
@@ -99,6 +114,7 @@ final class PermissionRequestViewTests: XCTestCase {
         XCTAssertEqual(remote.unavailableReason, RemoteConversationWirePolicy.localReviewReason)
         XCTAssertTrue(remote.diff.isEmpty)
         XCTAssertFalse(card.resolveRemote(id: remote.id, decision: "allow"))
+        XCTAssertFalse(card.resolveManager(id: remote.id, decision: .allow))
         XCTAssertEqual(decisionCount, 0)
     }
 

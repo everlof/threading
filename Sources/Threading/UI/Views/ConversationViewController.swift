@@ -2071,6 +2071,11 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         activePermissionCard?.resolveRemote(id: id, decision: decision) ?? false
     }
 
+    /// Manager decisions share the active-card identity gate but retain distinct audit wording.
+    func resolveManagerPermission(id: String, decision: ControlPermissionDecision) -> Bool {
+        activePermissionCard?.resolveManager(id: id, decision: decision) ?? false
+    }
+
     // MARK: - Context Attachments
 
     /// One staging door for messages, diffs, images, the attachments pane, and remote clients.

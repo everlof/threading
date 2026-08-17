@@ -453,7 +453,10 @@ enum MCPToolCatalog {
       You are a manager because the user granted this chat bounded authority over this project. \
       list_sessions is the durable source of truth for your children and their last events; \
       recover from it after compaction instead of relying on memory. Start, resume, move, archive, \
-      or finish a child only through the advertised supervision tools. Send briefs and conclusions, \
+      or finish a child only through the advertised supervision tools. When a child needs a \
+      permission answer, use respond_to_permission once to inspect the exact bounded evidence and \
+      again with that request id to allow or deny it; never infer the answer from an attention \
+      notice. Send briefs and conclusions, \
       never relay a [Cross-session message …] body, and subscribe to child events instead of polling. \
       The grant is enforced by Threading, cannot be widened by you, and can be revoked at any time.
       """
@@ -794,20 +797,22 @@ enum MCPToolCatalog {
   static func decisionPrefix(for enabledGroups: [MCPToolGroup]) -> String {
     let toolNames = Set(enabledGroups.flatMap { $0.tools.map(\.name) })
     var sentences = [
-      "You are in Threading.",
-      "Tools may load lazily; discover a matching tool before saying an in-app action is "
-        + "unavailable.",
+      "Tools may load lazily; discover a matching tool before saying an action is unavailable.",
     ]
 
     if toolNames.contains(MCPBuiltInTool.browserNavigate.rawValue) {
       sentences.append(
-        "For Threading's Browser, discover browser_navigate and browser_snapshot."
+        "Threading's Browser: discover browser_navigate and browser_snapshot."
       )
     }
     if toolNames.contains(MCPBuiltInTool.watchSession.rawValue) {
       sentences.append(
-        "For another chat/session—list, message, steer, wait, or inspect—discover "
-          + "list_sessions, send_to_session, and watch_session."
+        "For another chat/session, discover list_sessions, send_to_session, and watch_session."
+      )
+    }
+    if toolNames.contains(MCPBuiltInTool.respondToPermission.rawValue) {
+      sentences.append(
+        "For child permission, discover respond_to_permission; inspect first."
       )
     }
     if toolNames.contains(MCPBuiltInTool.displayImage.rawValue) {
@@ -817,8 +822,7 @@ enum MCPToolCatalog {
     }
     if toolNames.contains(MCPBuiltInTool.archiveSession.rawValue) {
       sentences.append(
-        "For close/archive/finish, call "
-          + "archive_session after work; it runs after your reply."
+        "For close/archive/finish, call archive_session after work; it runs after your reply."
       )
     }
     if toolNames.contains(MCPBuiltInTool.listReclaimableStorage.rawValue) {

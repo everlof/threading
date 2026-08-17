@@ -281,6 +281,29 @@ final class MCPSessionRegistryTests: XCTestCase {
 
 final class MCPWireTests: XCTestCase {
 
+  func testPermissionResponseCallCarriesTheExactOneShotDecision() throws {
+    let sessionID = UUID().uuidString.lowercased()
+    let requestID = UUID().uuidString.lowercased()
+    let data = Data(
+      #"{"name":"respond_to_permission","arguments":{"session_id":"\#(sessionID)","request_id":"\#(requestID)","decision":"allow"}}"#.utf8
+    )
+    let decoded = try JSONDecoder().decode(MCPToolCallParameters.self, from: data)
+    let arguments: RespondToPermissionArguments = try requireToolArguments(
+      decoded.call,
+      tool: .respondToPermission
+    )
+
+    XCTAssertEqual(arguments.sessionID, sessionID)
+    XCTAssertEqual(arguments.requestID, requestID)
+    XCTAssertEqual(arguments.decision, "allow")
+    XCTAssertTrue(MCPTools.supervisionTools.contains(decoded.call.name))
+    XCTAssertEqual(ControlOperation.respondToPermission.supervisionToolName, decoded.call.name)
+    let definition = try XCTUnwrap(MCPTools.definition(for: .respondToPermission))
+    XCTAssertEqual(definition.annotations?.readOnlyHint, false)
+    XCTAssertEqual(definition.annotations?.destructiveHint, true)
+    XCTAssertEqual(definition.annotations?.idempotentHint, false)
+  }
+
   func testNotifyUserCallIsTypedAndSessionScopedByTheServer() throws {
     let data = Data(
       #"{"name":"notify_user","arguments":{"title":"Ready","message":"The review is complete.","recipient":"Kalle’s iPhone","delivery":"ios","target_ref":"opaque-target"}}"#
