@@ -96,9 +96,9 @@
       "kind": "surface",
       "status": "implemented",
       "priority": "important",
-      "title": "Sidebar session rows",
-      "description": "Session rows at rest, working, hovered, selected, pinned, scheduled and under title truncation pressure. Each image is one named row state in light or dark appearance.",
-      "states": ["Idle", "Working", "Hovered", "Selected", "Pinned", "Scheduled", "Long title"],
+      "title": "Sidebar activity rows",
+      "description": "Session rows at rest, working, hovered, selected, pinned, scheduled and under title truncation pressure, plus a selected standalone terminal running a foreground command. Each image is one named row state in light or dark appearance.",
+      "states": ["Idle", "Working", "Hovered", "Selected", "Pinned", "Scheduled", "Long title", "Terminal command running"],
       "matrix": {
         "themes": ["System"],
         "appearances": ["Light", "Dark"],

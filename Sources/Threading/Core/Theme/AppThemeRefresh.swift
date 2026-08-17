@@ -27,6 +27,8 @@ private final class RecordedSurface {
     /// Recorded as participation rather than result, like the radius: whether an edge is
     /// actually drawn is the *next* theme's material to decide.
     let bevel: SurfaceBevel
+    let corners: SurfaceCorners
+    let clipsContent: Bool
 
     init(
         fill: NSColor,
@@ -36,7 +38,9 @@ private final class RecordedSurface {
         glow: Bool,
         controlGlow: Bool,
         pattern: SurfacePattern,
-        bevel: SurfaceBevel
+        bevel: SurfaceBevel,
+        corners: SurfaceCorners,
+        clipsContent: Bool
     ) {
         self.fill = fill
         self.border = border
@@ -46,6 +50,8 @@ private final class RecordedSurface {
         self.controlGlow = controlGlow
         self.pattern = pattern
         self.bevel = bevel
+        self.corners = corners
+        self.clipsContent = clipsContent
     }
 }
 
@@ -128,7 +134,9 @@ extension NSView {
             glow: recorded.glow,
             controlGlow: recorded.controlGlow,
             pattern: recorded.pattern,
-            bevel: recorded.bevel
+            bevel: recorded.bevel,
+            corners: recorded.corners,
+            clipsContent: recorded.clipsContent
         )
     }
 
@@ -203,7 +211,9 @@ extension NSView {
         glow: Bool,
         controlGlow: Bool = false,
         pattern: SurfacePattern = .none,
-        bevel: SurfaceBevel = .automatic
+        bevel: SurfaceBevel = .automatic,
+        corners: SurfaceCorners = .all,
+        clipsContent: Bool = false
     ) {
         recordedSurface = RecordedSurface(
             fill: fill,
@@ -213,7 +223,9 @@ extension NSView {
             glow: glow,
             controlGlow: controlGlow,
             pattern: pattern,
-            bevel: bevel
+            bevel: bevel,
+            corners: corners,
+            clipsContent: clipsContent
         )
     }
 

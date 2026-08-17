@@ -129,113 +129,162 @@ enum AppThemeStyles {
         glyphStyle: .classic
     )
 
-    /// Threading's own navy and orange frame. Marketing captures use this theme unless they
-    /// are demonstrating the theme picker itself.
+    /// Threading's own adaptive navy, warm paper, and orange dress. Marketing captures use this
+    /// theme unless they are demonstrating the theme picker itself.
     static let threading = AppTheme(
         id: AppThemeID("threading"),
         name: "Threading",
-        mode: .dark,
-        summary: "A navy frame, warm text, and Threading orange.",
-        variants: [.dark: AppTheme.Variant(
-            roles: [
-                .ground: hex("#040A12"),
-                .surface: hex("#071626"),
-                .panel: hex("#0A1C2F"),
-                .elevated: hex("#102A43"),
-                .border: hex("#2B4B65"),
-                .divider: hex("#183A52"),
-                .label: hex("#F7EFE6"),
-                .accent: hex("#FF9A3D"),
-                .accentMuted: hex("#FF9A3D").withAlphaComponent(0.13),
-                .controlResting: hex("#0E253A"),
-                .controlHover: hex("#173B55"),
-                // Selection is a deeper navy rather than diluted orange. Orange remains the
-                // action and focus ink, while selected rows stay crisp instead of turning
-                // muddy brown over the app's blue surfaces.
-                .selection: hex("#17405C"),
-                .statusPositive: hex("#74C49A"),
-                .statusWarning: hex("#E6A35D"),
-                .statusNegative: hex("#E06E65"),
-                .syntaxKeyword: hex("#FF9A3D"),
-                .syntaxType: hex("#7DC9D2"),
-                .syntaxString: hex("#B8C58A"),
-                .syntaxNumber: hex("#E6B98C")
-            ],
-            terminalPalette: TerminalTheme(
-                id: TerminalThemeID("app-threading-terminal"),
-                name: "Threading",
-                foreground: hex("#D9D1C8"),
-                boldForeground: hex("#FFFFFF"),  // Body steps to the ramp’s own white
-                background: hex("#040A12"),
-                // The palette's own ink, not its orange. A block cursor sits *on* a character,
-                // so the accent drew an alarm block over the first letter of queued input.
-                cursor: hex("#D9D1C8"),
-                selection: hex("#173A50"),
-                black: hex("#071626"),
-                red: hex("#E06E65"),
-                green: hex("#74C49A"),
-                yellow: hex("#E6A35D"),
-                blue: hex("#6EA8D8"),
-                magenta: hex("#C486B9"),
-                cyan: hex("#7DC9D2"),
-                white: hex("#D9D1C8"),
-                brightBlack: hex("#4F697E"),
-                brightRed: hex("#F08A81"),
-                brightGreen: hex("#91D6AD"),
-                brightYellow: hex("#F2BC78"),
-                brightBlue: hex("#8DBEE3"),
-                brightMagenta: hex("#D9A0CC"),
-                brightCyan: hex("#9CDAE0"),
-                brightWhite: hex("#F7EFE6")
-            ),
-            material: AppTheme.Material(
-                panelRadius: 10,
-                controlRadius: 7,
-                borderWidth: 1,
-                buttonStyle: AppTheme.Material.ButtonStyle(fontWeight: .semibold),
-                headingStyle: AppTheme.Material.HeadingStyle(fontWeight: .semibold)
-            ),
-            sidebar: SidebarStyle(
-                background: .init(gradient: .init(stops: [
-                    .init(color: hex("#0B2237"), position: 0),
-                    .init(color: hex("#071626"), position: 1)
-                ], angleDegrees: 180)),
-                navigatorWell: .init(fill: hex("#061321"), bevel: .none)
-            ),
-            chrome: WindowChromeStyle(
-                titleBar: .init(
-                    activeGradient: .init(stops: [
-                        .init(color: hex("#0D253B"), position: 0),
-                        .init(color: hex("#091B2E"), position: 1)
-                    ], angleDegrees: 180),
-                    inactiveGradient: .init(stops: [
-                        .init(color: hex("#081524"), position: 0),
-                        .init(color: hex("#06101C"), position: 1)
-                    ], angleDegrees: 180),
-                    ink: hex("#F7EFE6"),
-                    inactiveInk: hex("#8693A0"),
-                    // Centred, because the commands below share this row now: the leading
-                    // column is the sidebar toggle and the history pair, and the sidebar's
-                    // own brand row directly beneath already says Threading at that column.
-                    titleAlignment: .center,
-                    titleFontStyle: .upright,
-                    titleFontSize: 12,
-                    // Four points taller than the caption alone needed, which is what seats a
-                    // 28-point toolbar control with the same air above and below it.
-                    height: 36,
-                    buttonGlyphStyle: .plain,
-                    buttonPlacement: .trailing,
-                    showsAppIcon: false,
-                    // Threading's own frame reproduces no system, so it is free of the reason
-                    // every other takeover here keeps two rows: one row, and the ~41 points the
-                    // command band took go back to the conversation.
-                    commands: .inTitleBar,
-                    activeTexture: .init(kind: .rule, color: hex("#FF9A3D")),
-                    inactiveTexture: .init(kind: .rule, color: hex("#2B4B65"))
-                ),
-                frame: .init(width: 1, cornerRadius: 12)
+        mode: .system,
+        summary: "Navy and warm paper with Threading orange, following macOS light or dark.",
+        variants: [
+            .light: threadingLight,
+            .dark: threadingDark
+        ]
+    )
+
+    /// The house palette is authored in OKLCH. Unlike a historical or community palette there
+    /// are no source RGB values to reproduce, so perceptual lightness and chroma are the actual
+    /// design decisions and sRGB is only the display encoding they resolve into.
+    private static let threadingLight = AppTheme.Variant(
+        roles: [
+            .ground: oklch(0.975, 0.012, 75),
+            .surface: oklch(0.940, 0.020, 245),
+            .panel: oklch(0.990, 0.006, 75),
+            .elevated: oklch(1.000, 0.000, 0),
+            .border: oklch(0.680, 0.055, 245),
+            .divider: oklch(0.820, 0.035, 245),
+            .label: oklch(0.235, 0.045, 250),
+            // The dark variant's orange is intentionally lowered in lightness for paper: the
+            // same hue and chroma at its night value falls below the accent contrast floor.
+            .accent: oklch(0.640, 0.170, 55),
+            .accentMuted: oklch(0.640, 0.170, 55, alpha: 0.13),
+            .controlResting: oklch(0.910, 0.025, 245),
+            .controlHover: oklch(0.850, 0.045, 245),
+            .selection: oklch(0.820, 0.065, 242),
+            .statusPositive: oklch(0.500, 0.120, 155),
+            .statusWarning: oklch(0.520, 0.130, 70),
+            .statusNegative: oklch(0.540, 0.180, 25),
+            .syntaxKeyword: oklch(0.540, 0.160, 55),
+            .syntaxType: oklch(0.500, 0.100, 220),
+            .syntaxString: oklch(0.480, 0.110, 135),
+            .syntaxNumber: oklch(0.520, 0.130, 70)
+        ],
+        terminalPalette: TerminalTheme(
+            id: TerminalThemeID("app-threading-terminal-light"),
+            name: "Threading",
+            foreground: oklch(0.320, 0.025, 250),
+            boldForeground: oklch(0.200, 0.045, 250),
+            background: oklch(0.990, 0.006, 75),
+            cursor: oklch(0.320, 0.025, 250),
+            selection: oklch(0.860, 0.055, 242),
+            black: oklch(0.200, 0.045, 250),
+            red: oklch(0.500, 0.170, 25),
+            green: oklch(0.450, 0.120, 150),
+            yellow: oklch(0.480, 0.120, 75),
+            blue: oklch(0.470, 0.140, 250),
+            magenta: oklch(0.500, 0.140, 330),
+            cyan: oklch(0.450, 0.090, 205),
+            // A light terminal's white slots are readable greys, not ink that disappears into
+            // the page. The ramp remains ordered black → brightBlack → white → brightWhite.
+            white: oklch(0.560, 0.018, 250),
+            brightBlack: oklch(0.420, 0.022, 250),
+            brightRed: oklch(0.600, 0.150, 25),
+            brightGreen: oklch(0.560, 0.120, 150),
+            brightYellow: oklch(0.580, 0.130, 75),
+            brightBlue: oklch(0.580, 0.120, 250),
+            brightMagenta: oklch(0.600, 0.120, 330),
+            brightCyan: oklch(0.560, 0.100, 205),
+            brightWhite: oklch(0.700, 0.012, 250)
+        ),
+        material: AppTheme.Material(
+            panelRadius: 10,
+            controlRadius: 7,
+            borderWidth: 1,
+            buttonStyle: AppTheme.Material.ButtonStyle(fontWeight: .semibold),
+            headingStyle: AppTheme.Material.HeadingStyle(fontWeight: .semibold)
+        ),
+        sidebar: SidebarStyle(
+            background: .init(gradient: .init(stops: [
+                .init(color: oklch(0.930, 0.028, 245), position: 0),
+                .init(color: oklch(0.950, 0.018, 245), position: 1)
+            ], angleDegrees: 180)),
+            navigatorWell: .init(fill: oklch(0.965, 0.015, 245), bevel: .none)
+        )
+    )
+
+    /// The existing night palette, expressed in the perceptual coordinates it was measured to.
+    /// Its displayed colours remain within one Delta E of the previous values; the source now
+    /// records lightness, chroma, and hue instead of treating encoded display channels as the
+    /// design space.
+    private static let threadingDark = AppTheme.Variant(
+        roles: [
+            .ground: oklch(0.141761, 0.021319, 250.637),
+            .surface: oklch(0.196295, 0.038688, 251.311),
+            .panel: oklch(0.222204, 0.044380, 251.573),
+            .elevated: oklch(0.278481, 0.056376, 249.755),
+            .border: oklch(0.400138, 0.058162, 244.494),
+            .divider: oklch(0.335281, 0.057992, 242.068),
+            .label: oklch(0.955907, 0.014783, 70.887),
+            .accent: oklch(0.776078, 0.158539, 59.042),
+            .accentMuted: oklch(0.776078, 0.158539, 59.042, alpha: 0.13),
+            .controlResting: oklch(0.257564, 0.049251, 248.386),
+            .controlHover: oklch(0.339314, 0.061642, 242.957),
+            // Selection is a deeper navy rather than diluted orange. Orange remains the
+            // action and focus ink, while selected rows stay crisp instead of turning
+            // muddy brown over the app's blue surfaces.
+            .selection: oklch(0.356897, 0.066545, 241.952),
+            .statusPositive: oklch(0.757137, 0.100383, 159.803),
+            .statusWarning: oklch(0.766015, 0.117694, 65.666),
+            .statusNegative: oklch(0.670404, 0.143983, 26.240),
+            .syntaxKeyword: oklch(0.776078, 0.158539, 59.042),
+            .syntaxType: oklch(0.789724, 0.076308, 205.349),
+            .syntaxString: oklch(0.798882, 0.080142, 118.352),
+            .syntaxNumber: oklch(0.815228, 0.078915, 66.341)
+        ],
+        terminalPalette: TerminalTheme(
+            id: TerminalThemeID("app-threading-terminal"),
+            name: "Threading",
+            foreground: oklch(0.864591, 0.015155, 70.867),
+            boldForeground: oklch(1.000000, 0.000000, 0),
+            background: oklch(0.141761, 0.021319, 250.637),
+            // The palette's own ink, not its orange. A block cursor sits *on* a character,
+            // so the accent drew an alarm block over the first letter of queued input.
+            cursor: oklch(0.864591, 0.015155, 70.867),
+            selection: oklch(0.333692, 0.056003, 239.149),
+            black: oklch(0.196295, 0.038688, 251.311),
+            red: oklch(0.670404, 0.143983, 26.240),
+            green: oklch(0.757137, 0.100383, 159.803),
+            yellow: oklch(0.766015, 0.117694, 65.666),
+            blue: oklch(0.710473, 0.093066, 244.605),
+            magenta: oklch(0.698604, 0.101447, 333.093),
+            cyan: oklch(0.789724, 0.076308, 205.349),
+            white: oklch(0.864591, 0.015155, 70.867),
+            brightBlack: oklch(0.508400, 0.045501, 243.150),
+            brightRed: oklch(0.740552, 0.125849, 25.871),
+            brightGreen: oklch(0.818889, 0.090747, 157.593),
+            brightYellow: oklch(0.829515, 0.105663, 71.917),
+            brightBlue: oklch(0.780188, 0.074036, 241.458),
+            brightMagenta: oklch(0.773029, 0.088695, 334.769),
+            brightCyan: oklch(0.848492, 0.063324, 203.583),
+            brightWhite: oklch(0.955907, 0.014783, 70.887)
+        ),
+        material: AppTheme.Material(
+            panelRadius: 10,
+            controlRadius: 7,
+            borderWidth: 1,
+            buttonStyle: AppTheme.Material.ButtonStyle(fontWeight: .semibold),
+            headingStyle: AppTheme.Material.HeadingStyle(fontWeight: .semibold)
+        ),
+        sidebar: SidebarStyle(
+            background: .init(gradient: .init(stops: [
+                .init(color: oklch(0.245556, 0.049539, 248.688), position: 0),
+                .init(color: oklch(0.196295, 0.038688, 251.311), position: 1)
+            ], angleDegrees: 180)),
+            navigatorWell: .init(
+                fill: oklch(0.182872, 0.034692, 250.860),
+                bevel: .none
             )
-        )]
+        )
     )
 
     /// High-contrast terminal chrome on the live reference's near-black violet stack.
@@ -436,8 +485,25 @@ enum AppThemeStyles {
         )
     )
 
-    /// Force-unwrapped deliberately: these are literals in this file, so a bad one is a build
-    /// this test suite fails rather than a colour that silently renders white at runtime.
+    /// The default authoring path for palettes designed here. OKLCH keeps lightness and chroma
+    /// perceptual; `NSColor.oklch` reduces only chroma when a request falls outside sRGB.
+    static func oklch(
+        _ lightness: CGFloat,
+        _ chroma: CGFloat,
+        _ hueDegrees: CGFloat,
+        alpha: CGFloat = 1
+    ) -> NSColor {
+        NSColor.oklch(OKLCH(
+            lightness: lightness,
+            chroma: chroma,
+            hueDegrees: hueDegrees,
+            alpha: alpha
+        ))
+    }
+
+    /// Exact-source palettes remain hexadecimal: historical pixels and published community
+    /// schemes are display values to reproduce, not colours Threading is free to redesign.
+    /// Force-unwrapped deliberately so a malformed source value fails immediately.
     static func hex(_ value: String) -> NSColor {
         guard let color = NSColor(hex: value) else {
             preconditionFailure("Malformed stock theme colour: \(value)")

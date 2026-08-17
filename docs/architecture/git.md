@@ -522,7 +522,21 @@ that updates the current path but shows no heading. The sticky host passes its n
 through to the scroller, while descendants of `ThemedControl` retain hit testing so Copy Path,
 Finder and staging remain usable. The row keeps its ordinary translucent control wash; its host
 adds the opaque `elevated` surface required of content floating over scrolling source, so lines do
-not remain legible through the retained heading.
+not remain legible through the retained heading. The ordinary file row clips its diff washes to
+one rounded card silhouette; the retained host owns only the visual top corners and leaves its
+lower corners square, because that edge is a seam into the source rather than the end of a pill.
+This corner selection belongs to the design-system surface API and is recorded for theme refresh,
+not spelled as a feature-owned Core Animation mask.
+
+Each visible `Lines …` heading is a real compact `ThemedDisclosureRow`, so its familiar chevron
+actually hides and reveals that hunk. Collapse state is keyed by the changed-line endpoints rather
+than the surrounding context range, survives virtual-row recycling, and is cleared when the
+comparison identity changes. Toggling hides the already-materialized hunk body and invalidates
+only its file row; it never constructs another file or rebuilds the complete table. Find navigation
+reopens a collapsed destination before revealing it. The source-line identity, staging eligibility,
+collapse persistence, and exact virtual height remain deliberately host-owned correctness
+behaviour; themes may change their shared disclosure and surface presentation, but extensions do
+not replace this review-state machinery.
 
 A two-line path makes the file name and directory one visual identity. The trailing change counts,
 staging action and disclosure therefore centre on that identity's complete height in both ordinary

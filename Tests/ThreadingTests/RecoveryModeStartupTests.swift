@@ -147,6 +147,29 @@ final class RecoveryModeStartupTests: XCTestCase {
 
     // MARK: - The Theme
 
+    /// No recorded answer means the product dress, and reading that default does not turn it
+    /// into an explicit choice. A future default can therefore change without migrating a key
+    /// the user never set.
+    func testANormalLaunchWithoutAStoredChoiceUsesThreadingWithoutRecordingIt() {
+        let key = "appThemeID"
+        let original = PreferenceStore.shared.string(forKey: key)
+        defer {
+            if let original {
+                PreferenceStore.shared.set(original, forKey: key)
+            } else {
+                PreferenceStore.shared.removeObject(forKey: key)
+            }
+            AppThemeLibrary.restore()
+        }
+
+        PreferenceStore.shared.removeObject(forKey: key)
+        AppThemeLibrary.restore()
+
+        XCTAssertEqual(AppThemeLibrary.current.id, AppThemeStyles.threading.id)
+        XCTAssertEqual(AppThemeLibrary.defaultTheme.id, AppThemeStyles.threading.id)
+        XCTAssertNil(AppThemeLibrary.storedThemeID, "restoring the default wrote a user choice")
+    }
+
     /// Recovery wears System, and the user's standing choice is left exactly as it was.
     ///
     /// System rather than "the stored choice if it happens to be stock": a stock theme carrying a

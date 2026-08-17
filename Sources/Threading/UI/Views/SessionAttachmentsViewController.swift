@@ -790,11 +790,13 @@ final class SessionAttachmentsViewController: NSViewController {
 
     /// The action the footer's press would take right now.
     private func resolvedPrimaryAction() -> AttachmentAction {
-        AttachmentAction.resolvePreferred(
+        let selection = selectedAttachments
+        return AttachmentAction.resolvePreferred(
             storedID: PreferenceStore.shared.string(
                 forKey: SessionAttachmentsDefaults.lastActionKey
             ),
-            canChat: SessionContextHandoff.canReceiveContext(for: sessionID)
+            canChat: SessionContextHandoff.canReceiveContext(for: sessionID),
+            canOpenInBrowser: !selection.isEmpty && selection.allSatisfy { $0.kind == .html }
         )
     }
 
@@ -1573,8 +1575,9 @@ final class SessionAttachmentsViewController: NSViewController {
     }
 
     /// What the chevron offers. One file gets the row menu's whole vocabulary; a batch keeps
-    /// only the actions that mean something said of several files at once — no Open in, no
-    /// comparison, no comment, each of which is a decision about *one* thing.
+    /// only the actions that mean something said of several files at once — no editor submenu,
+    /// comparison, or comment, each of which is a decision about *one* thing. An all-HTML batch
+    /// keeps Open in Browser because every file in that selection has the same destination.
     func actionMenuEntries(for selection: [SessionAttachment]) -> [ThemedMenuEntry] {
         guard selection.count > 1 else {
             return selection.first.map(contextMenuEntries(for:)) ?? []
@@ -1590,6 +1593,12 @@ final class SessionAttachmentsViewController: NSViewController {
                 onChoose: { [weak self] in self?.take(.reveal, on: selection) }
             ))
         ]
+        if selection.allSatisfy({ $0.kind == .html }) {
+            entries.insert(.item(ThemedMenuItem(
+                title: L10n.string("Open in Browser"),
+                onChoose: { [weak self] in self?.take(.openInBrowser, on: selection) }
+            )), at: 1)
+        }
         if SessionContextHandoff.canReceiveContext(for: sessionID) {
             entries.append(.separator)
             entries.append(.item(ThemedMenuItem(
@@ -1632,6 +1641,9 @@ final class SessionAttachmentsViewController: NSViewController {
         switch action {
         case .open:
             for attachment in attachments { NSWorkspace.shared.open(attachment.url) }
+        case .openInBrowser:
+            guard attachments.allSatisfy({ $0.kind == .html }) else { return }
+            DefaultBrowserLauncher.open(attachments.map(\.url))
         case .reveal:
             NSWorkspace.shared.activateFileViewerSelecting(attachments.map(\.url))
         case .copyPath:
@@ -1758,6 +1770,12 @@ final class SessionAttachmentsViewController: NSViewController {
                 onChoose: { [weak self] in self?.take(.open, on: attachment) }
             ))
         ]
+        if attachment.kind == .html {
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Open in Browser"),
+                onChoose: { [weak self] in self?.take(.openInBrowser, on: attachment) }
+            )))
+        }
         if let openIn = OpenInMenu.submenuEntry(for: .file(attachment.url, line: nil)) {
             entries.append(openIn)
         }
@@ -2295,6 +2313,7 @@ enum SessionAttachmentThumbnails {
 /// stored id names may no longer be on offer, and the rule is assertable while the pane is not.
 enum AttachmentAction: String, CaseIterable {
     case open
+    case openInBrowser
     case reveal
     case copyPath
     case copyFile
@@ -2306,6 +2325,7 @@ enum AttachmentAction: String, CaseIterable {
     func buttonTitle(for selection: [SessionAttachment]) -> String {
         switch self {
         case .open: return L10n.string("Open")
+        case .openInBrowser: return L10n.string("Browser")
         case .reveal: return L10n.string("Finder")
         case .copyPath: return L10n.string("Copy Path")
         case .copyFile:
@@ -2318,13 +2338,19 @@ enum AttachmentAction: String, CaseIterable {
     }
 
     /// What a stored id means today. An unknown or absent id is `.open` — the one action every
-    /// file always takes — and a remembered Chat falls back there while nothing is listening,
-    /// without the memory being overwritten: the door reopening restores the remembered answer.
-    static func resolvePreferred(storedID: String?, canChat: Bool) -> AttachmentAction {
+    /// file always takes. Remembered actions that do not apply to the current selection fall back
+    /// there without overwriting the memory: the chat door reopening or HTML being selected again
+    /// restores the remembered answer.
+    static func resolvePreferred(
+        storedID: String?,
+        canChat: Bool,
+        canOpenInBrowser: Bool
+    ) -> AttachmentAction {
         guard let storedID, let stored = AttachmentAction(rawValue: storedID) else {
             return .open
         }
         if stored == .chat, !canChat { return .open }
+        if stored == .openInBrowser, !canOpenInBrowser { return .open }
         return stored
     }
 }

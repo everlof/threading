@@ -159,7 +159,12 @@ final class SidebarRowRenderTests: XCTestCase {
             title: "Audit the release checklist"
         )
 
-        XCTAssertEqual(written, 32, "Every story should render in both appearances")
+        // The reported terminal state: a silent foreground command owns the PTY while the
+        // selected row stays legible. This runs through the same cell and selected ground the
+        // shipping outline uses, rather than rendering the spinner by itself.
+        written += try writeBusyTerminal(story: "17-terminal-working-and-selected")
+
+        XCTAssertEqual(written, 34, "Every story should render in both appearances")
         print("Rendered sidebar-row storybook to \(Render.directory.path)")
     }
 
@@ -384,6 +389,7 @@ final class SidebarRowRenderTests: XCTestCase {
         terminal.configure(
             with: ProjectTerminal(currentDirectory: "/tmp/Threading", title: "zsh"),
             running: true,
+            busy: false,
             projectRoot: nil
         )
 
@@ -657,8 +663,75 @@ final class SidebarRowRenderTests: XCTestCase {
                     ordinary,
                     "\(theme.name): a selected row's spinner did not ink from its fill"
                 )
+
+                let terminal = ProjectTerminalRowView()
+                terminal.translatesAutoresizingMaskIntoConstraints = false
+                terminal.configure(
+                    with: ProjectTerminal(
+                        currentDirectory: "/tmp/Threading",
+                        title: "sleep"
+                    ),
+                    running: true,
+                    busy: true,
+                    projectRoot: "/tmp/Threading"
+                )
+
+                let terminalInk = try strongestRowInk(
+                    of: terminal,
+                    identified: "sidebar.terminal.status",
+                    over: fill
+                )
+                let selectedTerminal = distance(
+                    terminalInk,
+                    Design.Ink.selection.label.composited(over: fill)
+                )
+                let ordinaryTerminal = distance(
+                    terminalInk,
+                    Design.Surface.accent.composited(over: fill)
+                )
+
+                XCTAssertLessThanOrEqual(
+                    selectedTerminal,
+                    ordinaryTerminal,
+                    "\(theme.name): a selected terminal spinner did not ink from its fill"
+                )
             }
         }
+    }
+
+    /// A foreground command and the row's action share one trailing slot. The status must stay
+    /// visible at rest, yield under the pointer, return when the pointer leaves, and disappear
+    /// when the shell regains the foreground.
+    func testATerminalWorkingStatusTradesPlacesWithItsAction() throws {
+        let row = ProjectTerminalRowView()
+        row.frame = NSRect(x: 0, y: 0, width: Fixture.width, height: Fixture.height)
+        let terminal = ProjectTerminal(currentDirectory: "/tmp/Threading", title: "sleep")
+
+        row.configure(with: terminal, running: true, busy: true, projectRoot: "/tmp/Threading")
+        let spinner = try XCTUnwrap(
+            row.descendant(identified: "sidebar.terminal.status") as? ThemedSpinner
+        )
+        let action = try XCTUnwrap(
+            row.descendant(identified: "sidebar.terminal.actions") as? ThemedIconButton
+        )
+        XCTAssertTrue(spinner.isAnimating)
+        XCTAssertEqual(spinner.alphaValue, 1)
+        XCTAssertEqual(action.alphaValue, 0)
+
+        row.mouseEntered(with: try XCTUnwrap(Self.enterEvent()))
+        row.configure(with: terminal, running: true, busy: true, projectRoot: "/tmp/Threading")
+        XCTAssertEqual(spinner.alphaValue, 0)
+        XCTAssertEqual(action.alphaValue, 1)
+
+        row.mouseExited(with: try XCTUnwrap(Self.exitEvent()))
+        row.configure(with: terminal, running: true, busy: true, projectRoot: "/tmp/Threading")
+        XCTAssertEqual(spinner.alphaValue, 1)
+        XCTAssertEqual(action.alphaValue, 0)
+
+        row.configure(with: terminal, running: true, busy: false, projectRoot: "/tmp/Threading")
+        XCTAssertFalse(spinner.isAnimating)
+        XCTAssertTrue(spinner.isHidden)
+        XCTAssertEqual(action.alphaValue, 0)
     }
 
     /// One row kind a sidebar selection can land on, hovered so its trailing controls are what is
@@ -902,6 +975,7 @@ final class SidebarRowRenderTests: XCTestCase {
         row.configure(
             with: ProjectTerminal(currentDirectory: "/tmp/Threading", title: "zsh"),
             running: true,
+            busy: false,
             projectRoot: nil
         )
         if let entered = enterEvent() { row.mouseEntered(with: entered) }
@@ -1040,6 +1114,84 @@ final class SidebarRowRenderTests: XCTestCase {
                 AppThemeRefresh.repaint(host)
                 host.layoutSubtreeIfNeeded()
 
+                host.wantsLayer = true
+                host.layer?.backgroundColor = Design.Surface.background.cgColor
+
+                guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+                    return
+                }
+                host.cacheDisplay(in: host.bounds, to: rep)
+                data = rep.representation(using: .png, properties: [:])
+            }
+
+            if #available(macOS 11.0, *) {
+                appearance?.performAsCurrentDrawingAppearance(render)
+            } else {
+                render()
+            }
+
+            let image = try XCTUnwrap(data, "Failed to render \(story) in \(name)")
+            try image.write(
+                to: directory.appendingPathComponent("sidebar-row-\(story)-\(name).png")
+            )
+            written += 1
+        }
+        return written
+    }
+
+    private func writeBusyTerminal(story: String) throws -> Int {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        var written = 0
+        for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let appearance = NSAppearance(named: appearanceName)
+            var data: Data?
+
+            let render = {
+                let cell = ProjectTerminalRowView()
+                cell.translatesAutoresizingMaskIntoConstraints = false
+                let row = SidebarHoverRowView()
+                row.translatesAutoresizingMaskIntoConstraints = false
+                row.addSubview(cell)
+
+                let host = NSView(
+                    frame: NSRect(x: 0, y: 0, width: Fixture.width, height: Fixture.height)
+                )
+                host.appearance = appearance
+                host.addSubview(row)
+                NSLayoutConstraint.activate([
+                    row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                    row.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+                    row.topAnchor.constraint(equalTo: host.topAnchor),
+                    row.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+                    cell.leadingAnchor.constraint(
+                        equalTo: row.leadingAnchor,
+                        constant: Fixture.cellLeadingInset
+                    ),
+                    cell.trailingAnchor.constraint(
+                        equalTo: row.trailingAnchor,
+                        constant: -Fixture.cellTrailingInset
+                    ),
+                    cell.topAnchor.constraint(equalTo: row.topAnchor),
+                    cell.bottomAnchor.constraint(equalTo: row.bottomAnchor)
+                ])
+
+                cell.configure(
+                    with: ProjectTerminal(
+                        currentDirectory: "/tmp/Threading",
+                        title: "AnotherTerminal"
+                    ),
+                    running: true,
+                    busy: true,
+                    projectRoot: "/tmp/Threading"
+                )
+                row.isSelected = true
+                row.isEmphasized = true
+                cell.backgroundStyle = .emphasized
+
+                AppThemeRefresh.repaint(host)
+                host.layoutSubtreeIfNeeded()
                 host.wantsLayer = true
                 host.layer?.backgroundColor = Design.Surface.background.cgColor
 

@@ -47,6 +47,49 @@ struct Oklab: Equatable {
     }
 }
 
+/// A colour authored in **OKLCH**: perceptual lightness, chroma, and a hue angle in degrees.
+///
+/// Oklab remains the Cartesian form used by colour math. OKLCH is the authoring form: lightness
+/// and colourfulness can be adjusted independently, and degrees make palette relationships
+/// reviewable without translating a pair of abstract axes or a radian angle by hand.
+struct OKLCH: Equatable {
+
+    /// Perceptual lightness, 0 (black) to 1 (white).
+    var lightness: CGFloat
+
+    /// Distance from the neutral axis. Zero is grey; values around 0.2 are vivid in sRGB.
+    var chroma: CGFloat
+
+    /// Hue angle in degrees. Values outside 0..<360 are accepted and normalised when measured.
+    var hueDegrees: CGFloat
+
+    /// Opacity, kept separate from the perceptual coordinates.
+    var alpha: CGFloat
+
+    init(
+        lightness: CGFloat,
+        chroma: CGFloat,
+        hueDegrees: CGFloat,
+        alpha: CGFloat = 1
+    ) {
+        precondition((0...1).contains(lightness), "OKLCH lightness must be between 0 and 1")
+        precondition(chroma >= 0, "OKLCH chroma must not be negative")
+        precondition((0...1).contains(alpha), "OKLCH alpha must be between 0 and 1")
+        self.lightness = lightness
+        self.chroma = chroma
+        self.hueDegrees = hueDegrees
+        self.alpha = alpha
+    }
+
+    fileprivate var oklab: Oklab {
+        Oklab(
+            lightness: lightness,
+            chroma: chroma,
+            hue: hueDegrees * .pi / 180
+        )
+    }
+}
+
 // MARK: - Conversion
 
 extension NSColor {
@@ -75,6 +118,20 @@ extension NSColor {
             lightness: 0.2104542553 * long + 0.7936177850 * medium - 0.0040720468 * short,
             a: 1.9779984951 * long - 2.4285922050 * medium + 0.4505937099 * short,
             b: 0.0259040371 * long + 0.7827717662 * medium - 0.8086757660 * short
+        )
+    }
+
+    /// This colour measured in the OKLCH coordinates used for palette authoring.
+    var oklch: OKLCH {
+        let value = oklab
+        let degrees = value.hue * 180 / .pi
+        let remainder = degrees.truncatingRemainder(dividingBy: 360)
+        let normalisedHue = remainder < 0 ? remainder + 360 : remainder
+        return OKLCH(
+            lightness: value.lightness,
+            chroma: value.chroma,
+            hueDegrees: normalisedHue,
+            alpha: usingColorSpace(.sRGB)?.alphaComponent ?? 1
         )
     }
 
@@ -135,6 +192,14 @@ extension NSColor {
             blue: encoded(blue),
             alpha: 1
         )
+    }
+
+    /// The sRGB colour for an authored OKLCH value.
+    ///
+    /// The Oklab converter owns gamut mapping, so lightness and hue stay fixed while an
+    /// out-of-gamut request gives up only as much chroma as the display space requires.
+    static func oklch(_ value: OKLCH) -> NSColor {
+        oklab(value.oklab).withAlphaComponent(value.alpha)
     }
 }
 

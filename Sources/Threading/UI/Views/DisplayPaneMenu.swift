@@ -185,7 +185,7 @@ extension DisplayPaneController {
 
     do {
       try html.write(to: file, atomically: true, encoding: .utf8)
-      NSWorkspace.shared.open(file)
+      DefaultBrowserLauncher.open([file])
     } catch {
       ThreadingLogger.mcp.error(
         "Display HTML export failed session=\(sessionID.uuidString, privacy: .public) destination=\(file.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"

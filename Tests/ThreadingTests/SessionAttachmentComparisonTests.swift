@@ -892,6 +892,148 @@ final class SessionAttachmentComparisonTests: XCTestCase {
     }
 }
 
+@MainActor
+final class AttachmentMomentTests: XCTestCase {
+
+    /// A timestamp keeps the detail that still helps at its age: recent days retain their time,
+    /// then the weekday and finally the day fall away instead of every non-today row collapsing
+    /// straight to one date-only format.
+    func testResolutionFallsAwayAsAnAttachmentAges() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let locale = Locale(identifier: "en_US_POSIX")
+        let reference = try date(
+            year: 2026,
+            month: 8,
+            day: 17,
+            hour: 15,
+            minute: 45,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(
+            AttachmentMoment.description(
+                of: try date(
+                    year: 2026,
+                    month: 8,
+                    day: 17,
+                    hour: 9,
+                    minute: 5,
+                    calendar: calendar
+                ),
+                relativeTo: reference,
+                calendar: calendar,
+                locale: locale
+            ),
+            "9:05\u{202F}AM"
+        )
+        XCTAssertEqual(
+            AttachmentMoment.description(
+                of: try date(
+                    year: 2026,
+                    month: 8,
+                    day: 14,
+                    hour: 9,
+                    minute: 5,
+                    calendar: calendar
+                ),
+                relativeTo: reference,
+                calendar: calendar,
+                locale: locale
+            ),
+            "Fri 9:05\u{202F}AM"
+        )
+        XCTAssertEqual(
+            AttachmentMoment.description(
+                of: try date(
+                    year: 2026,
+                    month: 7,
+                    day: 18,
+                    hour: 9,
+                    minute: 5,
+                    calendar: calendar
+                ),
+                relativeTo: reference,
+                calendar: calendar,
+                locale: locale
+            ),
+            "Jul 18"
+        )
+        XCTAssertEqual(
+            AttachmentMoment.description(
+                of: try date(
+                    year: 2025,
+                    month: 2,
+                    day: 17,
+                    hour: 9,
+                    minute: 5,
+                    calendar: calendar
+                ),
+                relativeTo: reference,
+                calendar: calendar,
+                locale: locale
+            ),
+            "Feb 2025"
+        )
+    }
+
+    /// Calendar days, rather than elapsed 24-hour blocks, decide whether a row is "today".
+    /// A file from just before midnight is yesterday once the local date rolls over.
+    func testTheRecentTierUsesCalendarDayBoundaries() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Stockholm"))
+        let locale = Locale(identifier: "sv_SE")
+        let reference = try date(
+            year: 2026,
+            month: 3,
+            day: 29,
+            hour: 0,
+            minute: 5,
+            calendar: calendar
+        )
+        let yesterday = try date(
+            year: 2026,
+            month: 3,
+            day: 28,
+            hour: 23,
+            minute: 55,
+            calendar: calendar
+        )
+
+        let value = AttachmentMoment.description(
+            of: yesterday,
+            relativeTo: reference,
+            calendar: calendar,
+            locale: locale
+        )
+        XCTAssertTrue(value.contains("lör"), "the weekday was missing from yesterday: \(value)")
+        XCTAssertTrue(value.contains("23:55"), "yesterday lost its useful time: \(value)")
+    }
+
+    private func date(
+        year: Int,
+        month: Int,
+        day: Int,
+        hour: Int,
+        minute: Int,
+        calendar: Calendar
+    ) throws -> Date {
+        try XCTUnwrap(
+            calendar.date(
+                from: DateComponents(
+                    calendar: calendar,
+                    timeZone: calendar.timeZone,
+                    year: year,
+                    month: month,
+                    day: day,
+                    hour: hour,
+                    minute: minute
+                )
+            )
+        )
+    }
+}
+
 // MARK: - Dragging Info
 
 /// The little AppKit hands a drop destination, with nothing in it but the pasteboard.

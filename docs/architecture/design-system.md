@@ -281,6 +281,13 @@ the row's answer to every mark. On selection they share `Design.Ink.selection.la
 filled ring, hollow ring, and triangle silhouettes keep the statuses distinct without colour; off
 selection they keep their ordinary accent, warning, and negative roles.
 
+A standalone terminal has only one transient status — a foreground command owns its PTY — so its
+row uses `ThemedSpinner` directly rather than materializing the session indicator's attention and
+limit vocabulary. It occupies the terminal action's fixed trailing column, yields to that action
+under the pointer, and takes the same selection ground through `hostGround`. The terminal icon
+remains identity at the leading edge; replacing it with activity would make the row stop saying
+what kind of thing it is precisely while it works.
+
 **Status says whether an agent is working; Activity says where the work has landed.** Sidebar rows
 carry status only: the former 3pt repository strip and its expanded hover card were too compressed
 for the information and duplicated a surface with more room. The display panel's Activity tab now
@@ -650,6 +657,34 @@ change ink only, never font, so the plain string measures exactly what the style
 The same pass gave both text runs an honest overflow: a line wider than the panel's width cap
 ends in an ellipsis rather than a hard clip, because `7d resets in` with its number sliced off
 is a sentence claiming to be complete.
+
+**A menu row answers a press with one action, and a list of sounds needed a second.**
+`ThemedMenuAccessory` is a control a row carries at its trailing edge — the play button on a
+sound — and it exists because a name is not a sound. Auditioning one by *choosing* it means the
+only way to hear `Funk` is to accept it, so comparing three left the third written into the
+setting; that was the state the sound pickers shipped in, described in
+[the sounds section of the user guide](../../USER_GUIDE.md). Four rules make a second target
+inside a row safe, and each of them was arrived at from the thing that goes wrong without it:
+
+- **It never chooses.** The press is consumed in the row and `onChoose` never fires, so the menu
+  stays open and the setting stays put. A version that also chose would look completely correct
+  to anyone who clicked it once.
+- **Its column is reserved by the menu, drawn by the row.**
+  `ThemedMenuMetrics.hasAccessoryColumn` answers for the whole panel exactly as the image, preview
+  and chevron columns do, so a slot appearing under the pointer cannot shorten the title beneath
+  it. The accessory owns the outermost trailing column and a submenu chevron steps inward by its
+  slot.
+- **It is a hover-revealed control, so it steps in ink only** — `secondary` where the row is
+  merely current, `label` under the pointer, `label` dimmed while held, the same alpha step
+  `ThemedButton` gives a press. A plate behind the glyph was tried first and was invisible, since
+  the accessory only ever appears on a row already filled with `controlHover`; the render is what
+  said so, and `ThemedMenuAccessoryTests` now asserts a held press does not draw like a hovered
+  one.
+- **It stays an accessibility *action*, not an element.** A menu item is a leaf here, and a second
+  focusable thing inside one would hand every consumer that walks a menu a row wearing a button.
+  `accessibilityCustomActions` names it, and the right arrow reaches it from the keyboard on a row
+  that opens no submenu — Space and Return are unavailable by definition, since both choose, which
+  is the commitment being avoided.
 
 **A surface role is translucent on purpose, and that purpose ends where live content begins.**
 `surface` is the base tone at 14%, which is what makes a pill read as a lift off the backdrop
@@ -1325,6 +1360,30 @@ The vocabulary these encode, which new work should follow:
   not resize itself around every name — the title is the view that absorbs it (`.fill`
   distribution, lowest hugging), so the × keeps the trailing inset instead of the slack landing
   after it. `PageTitleView` carries the same pair of properties for the same reason.
+
+- **A paragraph cannot morph; lines can.** LabelMorph diffs one Core Text line, so a wrapped
+  block has no single line to be diffed against. `MorphingMultilineTitleLabel` keeps a value as
+  lines instead — one `MorphingTitleLabel` per line, split on newlines and never wrapped — which
+  is what lets the composer's hero morph between a chat's one-line greeting and a manager's
+  three-line brief (`ComposerDefaults.managerGreeting`) rather than hide one label and show
+  another. Three rules make that read as one motion. Every slot is the **font's** line height
+  rather than the height its characters happen to measure, so the block's size is a function of
+  its line count alone — which is what makes the count animatable at all. The count then
+  **travels**: every line either value uses stays in layout for the length of the morph, and the
+  block's own height runs from what the old count is worth to what the new one is, on the morph's
+  clock. Resolved up front instead, the block snaps to its new shape and the line it dropped is
+  gone before it can be seen going; resolved afterwards, everything jumps once the animation has
+  finished, which reads as a defect however good the animation was. The stack's bottom pin is
+  therefore `.defaultHigh` rather than required, so a block passing through a smaller height lets
+  its lines reach past its own bounds instead of squeezing them. And the block is held at the
+  wider of the two states while the lines swap, below `.required` so a narrower host still wins:
+  the lines share one width, and without the hold the second line's morph resized the first one
+  mid-flight, which makes a `MorphingLabel` re-lay its glyphs where they are going while the
+  animations are still carrying them there. Both holds are released on a `DispatchQueue` deadline
+  rather than in the animation's completion handler — that handler belongs to a Core Animation
+  transaction, and a window that is never flushed would leave the block pinned at the shape it
+  was passing through. Releasing moves nothing: a centred block gives its width back from both
+  sides at once, and the height it gives back is the height the travel has just arrived at.
 
 **One silhouette per strip.** `TabAppearance` states a tab's geometry and type scale in one
 place, because the app draws tabs in two views that cannot share a class: the pane's strip reads

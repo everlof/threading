@@ -97,7 +97,8 @@ The first version of this contract now lives in:
 
 `GitReviewRenderTests.testRendersThreadingConversationWithGitReviewPane` owns the
 named macOS theme-showcase captures. It renders the shipping conversation, Git
-Review pane, split view, and Threading chrome rather than a website mockup.
+Review pane, split view, and Threading surfaces inside the native macOS window rather than a
+website mockup.
 
 All images under `web/public/product/` are generated copies. Do not edit them by
 hand. After capturing new macOS journey evidence, macOS surface evidence, and

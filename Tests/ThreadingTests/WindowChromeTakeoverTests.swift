@@ -35,7 +35,11 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
 
     private static let themeID = AppThemeID("custom-window-chrome-takeover-tests")
 
-    private func makeTakeoverTheme() throws -> AppTheme {
+    private func makeTakeoverTheme(
+        frameWidth: CGFloat = 4,
+        frameCornerRadius: CGFloat = 0,
+        commands: WindowChromeStyle.TitleBar.CommandPlacement = .ownRow
+    ) throws -> AppTheme {
         let base = AppThemeStyles.cyberpunk
         let kind = base.availableVariants[0]
         let chrome = WindowChromeStyle(
@@ -45,9 +49,11 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
                     .init(color: NSColor(hex: "#1084D0")!, position: 1)
                 ], angleDegrees: 90),
                 ink: .white,
-                buttonGlyphStyle: .squares
+                height: commands == .inTitleBar ? 36 : nil,
+                buttonGlyphStyle: .squares,
+                commands: commands
             ),
-            frame: .init(width: 4)
+            frame: .init(width: frameWidth, cornerRadius: frameCornerRadius)
         )
         return try AppThemeEditing.assemble(
             id: Self.themeID,
@@ -160,14 +166,19 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
 
     /// The backing has one owner. `TerminalContainerViewController` records its colour through
     /// `WindowBackdrop` on every session swap, and for as long as it painted the window itself
-    /// that write landed on top of the coordinator's: launched under the Threading theme's
-    /// rounded frame, every swap made the four cleared corners opaque again — captured, each
+    /// that write landed on top of the coordinator's: launched under a rounded authored frame,
+    /// every swap made the four cleared corners opaque again — captured, each
     /// wore a square of the terminal palette's black past the frame's curve. Now a backdrop
     /// change reaches the window only through the coordinator, which knows the dress: painted
     /// under a native frame, ignored behind a shape, and the pane's *current* colour is what a
     /// flip back to native paints, not a snapshot from before the takeover.
     func testAPaneBackdropChangeNeverPaintsBehindAShapedFrame() throws {
-        AppThemePalette.set(AppThemeStyles.threading)
+        let shapedTheme = try makeTakeoverTheme(
+            frameWidth: 1,
+            frameCornerRadius: 12,
+            commands: .inTitleBar
+        )
+        AppThemePalette.set(shapedTheme)
         let controller = makeMainWindowController()
         self.controller = controller
         let window = try window(of: controller)
@@ -204,7 +215,7 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
         try assertBacking(of: window, resolvesTo: .blue,
                           "a session swap under a native frame repaints the window")
 
-        AppThemePalette.set(AppThemeStyles.threading)
+        AppThemePalette.set(shapedTheme)
         coordinator.applyCurrentTheme()
         XCTAssertFalse(window.isOpaque)
         XCTAssertEqual(window.backgroundColor.alphaComponent, 0, accuracy: 0.001)
@@ -333,47 +344,29 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
         }
     }
 
-    /// The product theme owns the complete frame, not only the colors inside AppKit's frame.
-    /// This is the shipped path used by ordinary product captures.
-    func testTheStockThreadingThemeTakesTheWindowOverAndHandsItBack() throws {
+    /// The product theme owns application surfaces but leaves the actual window to macOS.
+    func testTheStockThreadingThemeKeepsTheNativeMacOSWindow() throws {
         let controller = makeMainWindowController()
         self.controller = controller
         let window = try window(of: controller)
         let coordinator = try XCTUnwrap(controller.chromeCoordinator)
 
-        XCTAssertTrue(AppThemeStyles.threading.takesOverWindowChrome)
+        XCTAssertFalse(AppThemeStyles.threading.takesOverWindowChrome)
         AppThemePalette.set(AppThemeStyles.threading)
         coordinator.applyCurrentTheme()
 
-        XCTAssertEqual(window.styleMask, WindowChromeCoordinator.takeoverMask)
-        XCTAssertNil(window.toolbar)
+        XCTAssertEqual(window.styleMask, WindowChromeCoordinator.nativeMask)
+        XCTAssertNotNil(window.toolbar)
 
         let host = try XCTUnwrap(
             window.contentViewController as? WindowChromeHostViewController
         )
         host.view.layoutSubtreeIfNeeded()
-        XCTAssertTrue(host.isTakeoverActive)
-        XCTAssertTrue(host.takeoverChromeIsMaterialized)
-        XCTAssertGreaterThan(host.bandView.bounds.height, 0)
-        // One chrome row, not two: this theme seats the window's own commands in its caption,
-        // so the band below them collapses exactly as it does in native dress.
-        XCTAssertEqual(
-            AppThemeStyles.threading.variant(.dark)?.chrome?.titleBar.commands,
-            .inTitleBar
+        XCTAssertFalse(host.isTakeoverActive)
+        XCTAssertFalse(
+            host.takeoverChromeIsMaterialized,
+            "native dress eagerly constructed the app-drawn frame it does not use"
         )
-        XCTAssertEqual(host.commandBandView.bounds.height, 0)
-        XCTAssertTrue(
-            themedIconButtons(in: host.bandView).contains {
-                $0.accessibilityTitle() == L10n.string("Show or hide sidebar")
-            },
-            "the caption carries the commands it collapsed the other row for"
-        )
-
-        AppThemePalette.set(.system)
-        coordinator.applyCurrentTheme()
-
-        XCTAssertEqual(window.styleMask, WindowChromeCoordinator.nativeMask)
-        XCTAssertNotNil(window.toolbar)
     }
 
     /// The stock Windows 98 theme is the first real user of the mechanism; the fixture
@@ -441,14 +434,18 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
     /// The frame draws its one-point seat along a rounded outline and the host clips the content
     /// to the same radius — but the band and the workspace were inset from the four edges only,
     /// so their square corners reached into the curve and covered the seat there. Under the
-    /// Threading theme's twelve-point frame the border ran along the top and down the left edge,
+    /// former twelve-point product frame the border ran along the top and down the left edge,
     /// stopped where the arc began, and the band's own clipped corner filled in between: two
     /// straight lines that never met, which is what was reported as the window having no proper
     /// edge. The content is now held `frameWidth` inside the outline through the corner too, so
     /// every pixel centred on the seat's curve is seat ink, everything beyond it is transparent,
     /// and everything inside it is content — with nothing of the band on the curve.
     func testTheFrameSeatRunsThroughARoundedCorner() throws {
-        AppThemePalette.set(AppThemeStyles.threading)
+        AppThemePalette.set(try makeTakeoverTheme(
+            frameWidth: 1,
+            frameCornerRadius: 12,
+            commands: .inTitleBar
+        ))
         let controller = makeMainWindowController()
         self.controller = controller
         let window = try window(of: controller)
@@ -458,7 +455,7 @@ final class WindowChromeTakeoverTests: HostedStoreTestCase {
 
         let appearance = try XCTUnwrap(WindowChromeAppearance.resolve())
         let radius = appearance.frameSilhouetteCornerRadius
-        XCTAssertGreaterThan(radius, 0, "the Threading theme states a rounded frame")
+        XCTAssertGreaterThan(radius, 0, "the fixture theme states a rounded frame")
 
         let rep = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
         content.cacheDisplay(in: content.bounds, to: rep)

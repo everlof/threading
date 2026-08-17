@@ -209,6 +209,44 @@ final class SoundMenuTests: HostedStoreTestCase {
         XCTAssertTrue(checked.first?.title.hasPrefix("Inherit") == true)
     }
 
+    // MARK: - Auditioning
+
+    /// Every row that names a file can be heard without being chosen. The three answers that are
+    /// not a file cannot, because there is nothing to play: *Inherit* chooses nothing, *Off* is
+    /// silence, and macOS's notification tone lives outside the folders a name resolves in.
+    func testEverySoundRowCanBeAuditionedAndTheReservedAnswersCannot() throws {
+        let sidebar = ProjectSidebarViewController()
+        let rows = items(in: try soundSubmenu(of: sidebar.sessionSoundEntry(for: SessionID())))
+        let sounds = Set(SoundPickerMenu.groups().flatMap { $0 }.map(\.displayName))
+
+        let auditionable = rows.filter { sounds.contains($0.title) }
+        XCTAssertFalse(auditionable.isEmpty, "the menu listed no sounds at all")
+        for row in auditionable {
+            XCTAssertEqual(row.accessory?.title, "Play", "\(row.title) offers no audition")
+        }
+
+        for title in ["Off", "macOS Alert Sound", "Add a Sound…", "Customize…"] {
+            let row = try XCTUnwrap(rows.first { $0.title == title })
+            XCTAssertNil(row.accessory, "\(title) offered to play something that is not a file")
+        }
+        XCTAssertNil(rows.first?.accessory, "Inherit offered an audition of nothing")
+    }
+
+    /// The settings pickers carry the same audition as the submenu, because both take it from
+    /// `SoundPickerMenu`. One list behaving differently depending on which surface opened it is
+    /// the drift that file exists to prevent.
+    func testTheSettingsPickerCarriesTheSameAudition() {
+        let popUp = ThemedPopUp()
+        SoundPickerMenu.addSounds(to: popUp) { SoundChoice.named($0) }
+
+        let sounds = popUp.entries.compactMap(\.item)
+        XCTAssertFalse(sounds.isEmpty)
+        XCTAssertTrue(
+            sounds.allSatisfy { $0.accessory?.title == "Play" },
+            "a sound in the settings picker cannot be heard before it is chosen"
+        )
+    }
+
     // MARK: - The Writer
 
     /// A chat picking the sound its project already carries stores **nothing**, so a later

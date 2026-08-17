@@ -147,6 +147,15 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
         label.width(fitting: available)
     }
 
+    /// How wide this label *would* be holding `candidate`, in the font it is set in now.
+    ///
+    /// `intrinsicContentSize` answers for the title it holds. A host that has to settle its
+    /// geometry before starting a morph — `MorphingMultilineTitleLabel`, whose lines share one
+    /// width and must not resize under their own glyphs — asks about the title to come.
+    func naturalWidth(of candidate: String) -> CGFloat {
+        label.naturalWidth(of: candidate)
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         refreshTextColor()

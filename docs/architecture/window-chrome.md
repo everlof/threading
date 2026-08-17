@@ -922,8 +922,9 @@ sit in a content well inset by `frame.width`, and under a rounded frame the well
 *inner* curve — radius minus width, concentric with the outline. Without that, content inset only
 on its four sides reached square into every corner and covered the curved run of the seat, so the
 outline read as two straight lines that stopped short of each other with the band's own clipped
-edge (the root's mask) between them. That is what was reported, under the Threading theme's
-twelve-point frame, as the window not having a proper edge. `WindowChromeTakeoverTests` renders
+edge (the root's mask) between them. That was reported under the former Threading takeover's
+twelve-point frame as the window not having a proper edge. `WindowChromeTakeoverTests` now uses
+an equivalent authored fixture and renders
 the corner and sorts its pixels by where their centres fall against the seat's centreline: on it
 they must be seat ink, beyond it transparent, inside it content — a per-pixel-centre claim rather
 than a walk down the diagonal, because an unshown window renders at whichever scale the process
@@ -948,7 +949,7 @@ is opaque over the same backdrop, unseen beneath the frame the app draws edge to
 repaints on `WindowBackdropDidChange` (a session swap) and on `AppThemeDidChange`, and a flip
 back to native paints the pane's *current* colour rather than a snapshot from before the takeover.
 `TerminalContainerViewController.applyPaneBackground` only records the ground; for as long as it
-also wrote the window itself, every session swap under the Threading theme's rounded frame put
+also wrote the window itself, every session swap under the former Threading takeover's rounded frame put
 an opaque square of the terminal's black back behind the corners the coordinator had cleared —
 captured on a 1x display as a square outline round a rounded band, which is the other half of
 the "no proper edge" report. `testAPaneBackdropChangeNeverPaintsBehindAShapedFrame` holds it.

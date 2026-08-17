@@ -18,6 +18,34 @@ import AppKit
 /// and a toggle nested inside it would disappear from the accessibility tree entirely.
 final class ThemedDisclosureRow: ThemedControl {
 
+    enum Density {
+        /// A section decision in a settings-style inventory.
+        case standard
+        /// An inline structural heading, such as one hunk inside a source diff.
+        case compact
+
+        var minimumHeight: CGFloat {
+            switch self {
+            case .standard: 44
+            case .compact: 27
+            }
+        }
+
+        var edgeInset: CGFloat {
+            switch self {
+            case .standard: Design.Spacing.inset
+            case .compact: Design.Spacing.small
+            }
+        }
+
+        var verticalInset: CGFloat {
+            switch self {
+            case .standard: Design.Spacing.medium
+            case .compact: Design.Spacing.tight
+            }
+        }
+    }
+
     // MARK: - Properties
 
     /// Whether the detail below this header is currently shown. Setting it moves the chevron
@@ -34,6 +62,7 @@ final class ThemedDisclosureRow: ThemedControl {
     /// Called with the new state after a click, Space/Return, or an accessibility press.
     var onToggle: ((Bool) -> Void)?
 
+    private let density: Density
     private let chevron = GlyphView()
     private var isPressed = false {
         didSet { needsDisplay = true }
@@ -41,8 +70,13 @@ final class ThemedDisclosureRow: ThemedControl {
 
     // MARK: - Initialization
 
-    init(content: NSView, isExpanded: Bool = false) {
+    init(
+        content: NSView,
+        isExpanded: Bool = false,
+        density: Density = .standard
+    ) {
         self.isExpanded = isExpanded
+        self.density = density
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
@@ -52,9 +86,9 @@ final class ThemedDisclosureRow: ThemedControl {
         addSubview(content)
 
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(greaterThanOrEqualToConstant: Layout.minHeight),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: density.minimumHeight),
 
-            chevron.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
+            chevron.leadingAnchor.constraint(equalTo: leadingAnchor, constant: density.edgeInset),
             chevron.widthAnchor.constraint(equalToConstant: Layout.chevronSlot),
             chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
 
@@ -64,10 +98,10 @@ final class ThemedDisclosureRow: ThemedControl {
             ),
             content.trailingAnchor.constraint(
                 equalTo: trailingAnchor,
-                constant: -Design.Spacing.inset
+                constant: -density.edgeInset
             ),
-            content.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.medium),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.medium)
+            content.topAnchor.constraint(equalTo: topAnchor, constant: density.verticalInset),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -density.verticalInset)
         ])
 
         updateChevron()
@@ -153,9 +187,5 @@ final class ThemedDisclosureRow: ThemedControl {
         /// one line whichever way its chevron points.
         static let chevronSlot: CGFloat = 16
 
-        /// The settings row height — `SettingsUIDefaults.rowHeight` states the same number for
-        /// the rows this header folds, restated here so the design component does not read a
-        /// preferences-layer constant.
-        static let minHeight: CGFloat = 44
     }
 }

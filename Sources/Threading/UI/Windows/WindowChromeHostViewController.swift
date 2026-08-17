@@ -21,7 +21,7 @@ final class WindowChromeHostViewController: NSViewController {
     /// margin is `frameWidth` wide on the straight runs, and it has to stay that wide through
     /// the corner: content inset only on its four sides reaches square into a rounded corner and
     /// covers the curved run of the seat `WindowChromeFrameView` draws there. Measured under the
-    /// Threading theme's twelve-point frame, the border read as two straight lines that stopped
+    /// former Threading takeover's twelve-point frame, the border read as two straight lines that stopped
     /// short of each other, with the band's own rounded edge (the host's clip) between them.
     private let contentWell = NSView()
     private let bandHost = NSView()

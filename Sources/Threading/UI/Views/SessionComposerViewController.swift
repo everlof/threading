@@ -21,8 +21,7 @@ final class SessionComposerViewController: NSViewController {
     /// The hero: the mark above a greeting that knows what day it is. It fills the room the
     /// bottom-flush composer leaves, and hides when a short pane leaves none.
     private let heroMark = ThreadingMarkView()
-    private let greetingLabel = MorphingTitleLabel()
-    private let managerGreetingLabel = ThemedMultilineTitleLabel()
+    private let greetingLabel = MorphingMultilineTitleLabel()
     private let heroStack = NSStackView()
     private let heroRegion = NSLayoutGuide()
     private var hasPlayedHeroDrawIn = false
@@ -362,21 +361,12 @@ final class SessionComposerViewController: NSViewController {
         // greeting to one glyph and an ellipsis.
         greetingLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
-        managerGreetingLabel.applyFont(.heading)
-        managerGreetingLabel.alignment = .center
-        managerGreetingLabel.isHidden = true
-        managerGreetingLabel.setContentCompressionResistancePriority(
-            .defaultHigh,
-            for: .horizontal
-        )
-
         heroMark.setAccessibilityElement(false)
         heroStack.orientation = .vertical
         heroStack.alignment = .centerX
         heroStack.spacing = Design.Spacing.inset
         heroStack.addArrangedSubview(heroMark)
         heroStack.addArrangedSubview(greetingLabel)
-        heroStack.addArrangedSubview(managerGreetingLabel)
         heroStack.translatesAutoresizingMaskIntoConstraints = false
 
         // The quietest tier there is. With the primary gone from this screen, a bordered import
@@ -928,19 +918,16 @@ final class SessionComposerViewController: NSViewController {
 
     /// A fresh line each time the composer is pointed somewhere, morphing in place when a
     /// greeting is already up.
+    ///
+    /// The manager's brief is three lines against the chat greeting's one, and the block morphs
+    /// between them line by line: the greeting becomes the first line of the brief while the
+    /// other two morph in beneath it, and back out again on the way to a chat. Two labels swapped
+    /// by `isHidden` did the same job and cut between them, which is the one transition on this
+    /// screen the eye is already on.
     private func refreshGreeting() {
-        if selectedRole == .manager {
-            managerGreetingLabel.stringValue = L10n.string(
-                "Coordinate this project\nStart and guide chats\nStop when the brief is done"
-            )
-            greetingLabel.isHidden = true
-            managerGreetingLabel.isHidden = false
-            return
-        }
-
-        managerGreetingLabel.isHidden = true
-        greetingLabel.isHidden = false
-        let message = ComposerGreeting.message()
+        let message = selectedRole == .manager
+            ? ComposerDefaults.managerGreeting
+            : ComposerGreeting.message()
         guard message != greetingLabel.stringValue else { return }
         greetingLabel.setStringValue(message, animated: !greetingLabel.stringValue.isEmpty)
     }
@@ -2319,6 +2306,13 @@ enum ComposerDefaults {
     /// three surfaces share.
     static var promptPlaceholder: String {
         L10n.string("Describe a task or ask a question")
+    }
+
+    /// What a manager is for, in place of the greeting a chat gets. Three lines the hero morphs
+    /// through one at a time (`MorphingMultilineTitleLabel`), which is why they are one string
+    /// with newlines in it rather than three strings a caller assembles.
+    static var managerGreeting: String {
+        L10n.string("Coordinate this project\nStart and guide chats\nStop when the brief is done")
     }
 
     static let importSymbol = "tray.and.arrow.down"

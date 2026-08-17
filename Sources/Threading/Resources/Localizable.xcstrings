@@ -335,6 +335,16 @@
     "Script %lld has an invalid workingDirectory; use . or a checkout-relative path without .. components.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skript %lld har en ogiltig workingDirectory; använd . eller en checkout-relativ sökväg utan ..-komponenter."}}}},
     "Script %lld previewURL must be an absolute http or https URL without credentials.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skript %lld:s previewURL måste vara en absolut http- eller https-URL utan inloggningsuppgifter."}}}},
     "This script is no longer available in the active checkout.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skriptet är inte längre tillgängligt i den aktiva checkouten."}}}},
+    "A block of authored lines that morphs one line at a time. These are the composer's own two values: a greeting on one line against a manager's brief on three, so the block gains and loses lines as it goes." : {
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett block med korta rader som morfar en rad i taget. Det är startvyns egna två värden: en hälsning på en rad mot en managers brief på tre, så att blocket både får och tappar rader."
+          }
+        }
+      }
+    },
     "Git Review creates a draft %@ when you press Create." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13100,6 +13110,26 @@
         }
       }
     },
+    "MorphingMultilineTitleLabel" : {
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MorphingMultilineTitleLabel"
+          }
+        }
+      }
+    },
+    "MorphingMultilineTitleLabel previewed %@." : {
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MorphingMultilineTitleLabel förhandsgranskade %@."
+          }
+        }
+      }
+    },
     "MorphingTitleLabel": {
       "extractionState": "stale",
       "localizations": {
@@ -15261,6 +15291,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Förhandsgranska patch"
+          }
+        }
+      }
+    },
+    "Preview block" : {
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förhandsgranska block"
           }
         }
       }
@@ -25925,6 +25965,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Terminalåtgärder"
+          }
+        }
+      }
+    },
+    "Terminal command running": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminalkommando körs"
           }
         }
       }

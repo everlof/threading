@@ -1,6 +1,35 @@
 import AppKit
 import NativeDiffCore
 
+/// A hunk's source identity, independent of the surrounding context Git was asked to include.
+/// Context expansion changes `@@` ranges and can merge hunks; the changed endpoints are the
+/// durable part a disclosure can remember while the same hunk still exists.
+struct GitReviewHunkIdentity: Hashable {
+    let firstOldNumber: Int?
+    let firstNewNumber: Int?
+    let lastOldNumber: Int?
+    let lastNewNumber: Int?
+
+    init(_ hunk: GitHunk) {
+        var firstOldNumber: Int?
+        var firstNewNumber: Int?
+        var lastOldNumber: Int?
+        var lastNewNumber: Int?
+        for line in hunk.lines where line.kind != .context {
+            if firstOldNumber == nil, firstNewNumber == nil {
+                firstOldNumber = line.oldNumber
+                firstNewNumber = line.newNumber
+            }
+            lastOldNumber = line.oldNumber
+            lastNewNumber = line.newNumber
+        }
+        self.firstOldNumber = firstOldNumber
+        self.firstNewNumber = firstNewNumber
+        self.lastOldNumber = lastOldNumber
+        self.lastNewNumber = lastNewNumber
+    }
+}
+
 /// One changed file in the review pane: a collapsible section whose header names the file and
 /// its `+/−` weight, and whose body is the diff itself.
 ///
@@ -60,6 +89,10 @@ final class GitReviewFileRow: NSView {
     /// One hunk, by its index into `file.hunks`.
     var onStageHunk: ((Int) -> Void)?
 
+    /// A hunk disclosure changed after its body was hidden or shown. The controller retains the
+    /// state across row recycling and invalidates only this virtual row's cached height.
+    var onHunkExpansionGeometryChange: ((GitReviewHunkIdentity, Bool) -> Void)?
+
     /// Requests a larger, path-scoped git context read. One callback serves every omitted range;
     /// Git merges neighbouring hunks and remains the source of truth for line numbering.
     var onExpandContext: ((GitReviewSourceLineAnchor?) -> Void)?
@@ -75,7 +108,11 @@ final class GitReviewFileRow: NSView {
     private var contextDiffs: [GitReviewDiffTextView] = []
     private var splitContextDiffs: [GitReviewSplitDiffView] = []
     private var findHunkHeaders: [Int: NSView] = [:]
+    private var hunkBodyRows: [GitReviewHunkIdentity: NSView] = [:]
+    private var hunkDisclosures: [GitReviewHunkIdentity: ThemedDisclosureRow] = [:]
+    private var hunkIdentitiesByIndex: [Int: GitReviewHunkIdentity] = [:]
     private var contextExpansionAnchorByButton: [ObjectIdentifier: GitReviewSourceLineAnchor] = [:]
+    private var collapsedHunks: Set<GitReviewHunkIdentity>
 
     /// Fetches the file's bytes at the mode's two endpoints, for an image row's body. Wired by
     /// the pane, which knows the mode and the checkout; the row only knows it has a picture.
@@ -174,7 +211,8 @@ final class GitReviewFileRow: NSView {
         width: CGFloat,
         textSize: Design.CodeTextScale = .standard,
         contextLines: Int = GitReviewDefaults.contextLines,
-        contextExpansionIsExhausted: Bool = false
+        contextExpansionIsExhausted: Bool = false,
+        collapsedHunks: Set<GitReviewHunkIdentity> = []
     ) -> CGFloat {
         guard expanded, isExpandable(file) else { return 48 }
         guard !isImageComparison(file) else { return 96 }
@@ -192,6 +230,7 @@ final class GitReviewFileRow: NSView {
         var remaining = GitReviewDefaults.fileDisplayCap
         var visualLines = 0
         var shownHunks = 0
+        var shownHunkBodies = 0
         var skipped = 0
         for hunk in file.hunks {
             guard remaining > 0 else {
@@ -199,6 +238,18 @@ final class GitReviewFileRow: NSView {
                 continue
             }
             shownHunks += 1
+            // Nearly every estimate is for the default expanded state. Width changes run this
+            // loop over the complete file index, so do not derive a hunk identity (including an
+            // allocated changed-line filter) unless this particular file has a collapsed hunk.
+            // The uncommon branch remains proportional only to this file's bounded hunks.
+            let showsBody: Bool
+            if collapsedHunks.isEmpty {
+                showsBody = true
+            } else {
+                showsBody = !collapsedHunks.contains(GitReviewHunkIdentity(hunk))
+            }
+            guard showsBody else { continue }
+            shownHunkBodies += 1
             for line in hunk.lines.prefix(remaining) {
                 guard wraps else {
                     visualLines += 1
@@ -250,7 +301,7 @@ final class GitReviewFileRow: NSView {
 
         let hasHunkHeaders = file.hunks.count > 1 || file.change != .untracked
         let hunkHeaderHeight = hasHunkHeaders ? CGFloat(shownHunks) * 27 : 0
-        let bodyItemCount = shownHunks * (hasHunkHeaders ? 2 : 1)
+        let bodyItemCount = shownHunks * (hasHunkHeaders ? 1 : 0) + shownHunkBodies
             + contextControlCount
             + (skipped > 0 ? 1 : 0)
         let bodySpacing = CGFloat(max(bodyItemCount - 1, 0)) * Design.Spacing.tight
@@ -341,7 +392,8 @@ final class GitReviewFileRow: NSView {
         headerOnly: Bool = false,
         contextLines: Int = GitReviewDefaults.contextLines,
         contextExpansionIsPending: Bool = false,
-        contextExpansionIsExhausted: Bool = false
+        contextExpansionIsExhausted: Bool = false,
+        collapsedHunks: Set<GitReviewHunkIdentity> = []
     ) {
         self.file = file
         self.staging = staging
@@ -360,6 +412,7 @@ final class GitReviewFileRow: NSView {
         self.contextLines = contextLines
         self.contextExpansionIsPending = contextExpansionIsPending
         self.contextExpansionIsExhausted = contextExpansionIsExhausted
+        self.collapsedHunks = collapsedHunks
         super.init(frame: .zero)
         setupViews()
         if headerOnly {
@@ -426,7 +479,11 @@ final class GitReviewFileRow: NSView {
             return
         }
         translatesAutoresizingMaskIntoConstraints = false
-        applySurface(fill: Design.Surface.controlResting, radius: .control)
+        applySurface(
+            fill: Design.Surface.controlResting,
+            radius: headerOnly ? .fixed(0) : .control,
+            clipsContent: !headerOnly
+        )
 
         let glyphLabel = NSTextField(labelWithString: glyph)
         glyphLabel.applyFont(.code(weight: .medium))
@@ -586,7 +643,11 @@ final class GitReviewFileRow: NSView {
     /// full interactive header. It is replaced before the pointer can interact with the row.
     private func setupDeferredViews() {
         translatesAutoresizingMaskIntoConstraints = false
-        applySurface(fill: Design.Surface.controlResting, radius: .control)
+        applySurface(
+            fill: Design.Surface.controlResting,
+            radius: .control,
+            clipsContent: true
+        )
 
         let nameLabel = NSTextField(labelWithString: pathText)
         nameLabel.applyFont(.control)
@@ -964,6 +1025,9 @@ final class GitReviewFileRow: NSView {
         case .hunk(let hunkIndex):
             setExpanded(true)
             layoutSubtreeIfNeeded()
+            if let identity = hunkIdentitiesByIndex[hunkIndex] {
+                setHunk(identity, expanded: true)
+            }
             guard let header = findHunkHeaders[hunkIndex] else { return }
             _ = header.scrollToVisible(header.bounds)
             flashFindReveal(in: header)
@@ -971,6 +1035,9 @@ final class GitReviewFileRow: NSView {
         case .line(let hunkIndex, let lineIndex, let range):
             setExpanded(true)
             layoutSubtreeIfNeeded()
+            if let identity = hunkIdentitiesByIndex[hunkIndex] {
+                setHunk(identity, expanded: true)
+            }
             switch diffLayout {
             case .unified:
                 guard contextDiffs.indices.contains(hunkIndex) else { return }
@@ -1092,11 +1159,14 @@ final class GitReviewFileRow: NSView {
                 }
             }
 
+            let identity = GitReviewHunkIdentity(hunk)
+            hunkIdentitiesByIndex[index] = identity
             if file.hunks.count > 1 || file.change != .untracked {
-                let header = makeHunkHeader(hunk, index: index)
+                let header = makeHunkHeader(hunk, index: index, identity: identity)
                 findHunkHeaders[index] = header
                 addBodyRow(header)
             }
+            let bodyRow: NSView
             switch diffLayout {
             case .unified:
                 let diff = GitReviewDiffTextView(
@@ -1111,7 +1181,7 @@ final class GitReviewFileRow: NSView {
                 contextDiffs.append(diff)
                 wireContextDiff(diff)
                 diff.onPreferredHeightChange = { [weak self] in self?.onHeightChange?() }
-                addBodyRow(wraps ? diff : Self.horizontallyScrolling(diff))
+                bodyRow = wraps ? diff : Self.horizontallyScrolling(diff)
             case .split:
                 let diff = GitReviewSplitDiffView(
                     gitLines: hunk.lines,
@@ -1123,8 +1193,11 @@ final class GitReviewFileRow: NSView {
                 splitContextDiffs.append(diff)
                 wireContextDiff(diff)
                 diff.onPreferredHeightChange = { [weak self] in self?.onHeightChange?() }
-                addBodyRow(diff)
+                bodyRow = diff
             }
+            hunkBodyRows[identity] = bodyRow
+            bodyRow.isHidden = collapsedHunks.contains(identity)
+            addBodyRow(bodyRow)
             remaining -= hunk.lines.count
         }
 
@@ -1316,22 +1389,14 @@ final class GitReviewFileRow: NSView {
 
     /// The `@@` line, and — where a hunk is a thing the index can be given on its own — the
     /// one control that gives it.
-    private func makeHunkHeader(_ hunk: GitHunk, index: Int) -> NSView {
+    private func makeHunkHeader(
+        _ hunk: GitHunk,
+        index: Int,
+        identity: GitReviewHunkIdentity
+    ) -> NSView {
         let row = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
         row.applySurface(fill: Design.Surface.background, radius: .fixed(0))
-
-        let disclosure = NSImageView()
-        disclosure.image = NSImage(
-            systemSymbolName: "chevron.down",
-            accessibilityDescription: nil
-        )
-        disclosure.contentTintColor = Design.Text.tertiary
-        disclosure.symbolConfiguration = Design.Symbol.configuration(
-            Design.Symbol.chevron,
-            weight: .semibold
-        )
-        disclosure.translatesAutoresizingMaskIntoConstraints = false
 
         let label = NSTextField(labelWithString: DiffPresentation.rangeTitle(for: hunk))
         label.applyFont(.caption)
@@ -1374,35 +1439,52 @@ final class GitReviewFileRow: NSView {
             button = nil
         }
 
-        [disclosure, label, counts, button].compactMap { $0 }.forEach(row.addSubview)
-        let trailingView: NSView? = button.map { $0 as NSView }
-            ?? counts.map { $0 as NSView }
+        let content = NSView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        [label, counts].compactMap { $0 }.forEach(content.addSubview)
+        let disclosure = ThemedDisclosureRow(
+            content: content,
+            isExpanded: !collapsedHunks.contains(identity),
+            density: .compact
+        )
+        disclosure.setAccessibilityIdentifier("git-review.hunk.disclosure")
+        disclosure.setAccessibilityTitle(label.stringValue)
+        disclosure.toolTip = hunk.header
+        disclosure.onToggle = { [weak self] expanded in
+            self?.setHunk(identity, expanded: expanded)
+        }
+        hunkDisclosures[identity] = disclosure
+
+        row.addSubview(disclosure)
+        if let button { row.addSubview(button) }
 
         NSLayoutConstraint.activate([
-            disclosure.leadingAnchor.constraint(
-                equalTo: row.leadingAnchor,
-                constant: Design.Spacing.small
-            ),
-            disclosure.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            disclosure.widthAnchor.constraint(equalToConstant: 10),
+            disclosure.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            disclosure.topAnchor.constraint(equalTo: row.topAnchor),
+            disclosure.bottomAnchor.constraint(equalTo: row.bottomAnchor),
 
-            label.leadingAnchor.constraint(
-                equalTo: disclosure.trailingAnchor,
-                constant: Design.Spacing.small
-            ),
-            label.topAnchor.constraint(equalTo: row.topAnchor, constant: Design.Spacing.small),
-            label.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -Design.Spacing.small),
-
-            label.trailingAnchor.constraint(
-                lessThanOrEqualTo: row.trailingAnchor,
-                constant: -Design.Spacing.small
-            )
+            label.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            label.topAnchor.constraint(equalTo: content.topAnchor),
+            label.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor)
         ])
 
-        if let trailingView {
-            trailingView.trailingAnchor.constraint(
+        if let button {
+            NSLayoutConstraint.activate([
+                disclosure.trailingAnchor.constraint(
+                    equalTo: button.leadingAnchor,
+                    constant: -Design.Spacing.small
+                ),
+                button.trailingAnchor.constraint(
+                    equalTo: row.trailingAnchor,
+                    constant: -Design.Spacing.small
+                ),
+                button.centerYAnchor.constraint(equalTo: row.centerYAnchor)
+            ])
+        } else {
+            disclosure.trailingAnchor.constraint(
                 equalTo: row.trailingAnchor,
-                constant: -Design.Spacing.small
+                constant: 0
             ).isActive = true
         }
 
@@ -1412,20 +1494,27 @@ final class GitReviewFileRow: NSView {
                     greaterThanOrEqualTo: label.trailingAnchor,
                     constant: Design.Spacing.small
                 ),
+                counts.trailingAnchor.constraint(equalTo: content.trailingAnchor),
                 counts.centerYAnchor.constraint(equalTo: label.centerYAnchor)
             ])
         }
-
-        if let button {
-            NSLayoutConstraint.activate([
-                button.leadingAnchor.constraint(
-                    equalTo: counts?.trailingAnchor ?? label.trailingAnchor,
-                    constant: Design.Spacing.small
-                ),
-                button.centerYAnchor.constraint(equalTo: label.centerYAnchor),
-            ])
-        }
         return row
+    }
+
+    /// Hides one already-materialized TextKit hunk in place. The file row remains the table's
+    /// repeating unit; no other file is rebuilt and no offscreen body is constructed.
+    private func setHunk(_ identity: GitReviewHunkIdentity, expanded: Bool) {
+        guard let body = hunkBodyRows[identity], body.isHidden == expanded else { return }
+        if expanded {
+            collapsedHunks.remove(identity)
+        } else {
+            collapsedHunks.insert(identity)
+        }
+        body.isHidden = !expanded
+        hunkDisclosures[identity]?.isExpanded = expanded
+        layoutSubtreeIfNeeded()
+        onHunkExpansionGeometryChange?(identity, expanded)
+        onHeightChange?()
     }
 
     /// A borderless caption-weight control: this is a pane of content, and a bezelled button

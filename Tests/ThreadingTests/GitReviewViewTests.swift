@@ -589,6 +589,71 @@ final class GitReviewViewTests: XCTestCase {
         )
     }
 
+    func testHunkHeadingDisclosesOnlyItsOwnBodyAndSurvivesRowRecycling() throws {
+        let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+        let controller = GitReviewViewController(
+            sessionID: SessionID(),
+            folderPath: NSTemporaryDirectory(),
+            mode: .uncommitted
+        )
+        _ = controller.view
+        controller.view.frame = NSRect(x: 0, y: 0, width: 620, height: 700)
+        controller.show(.files([file]))
+        controller.view.layoutSubtreeIfNeeded()
+
+        func materializedRow() throws -> GitReviewFileRow {
+            let host = try XCTUnwrap(controller.fileTableView.view(
+                atColumn: 0,
+                row: 0,
+                makeIfNecessary: true
+            ))
+            return try XCTUnwrap(Self.firstDescendant(of: GitReviewFileRow.self, in: host))
+        }
+
+        let row = try materializedRow()
+        let body = try XCTUnwrap(row.subviews.compactMap { $0 as? NSStackView }.first)
+        let disclosures = Self.descendants(of: ThemedDisclosureRow.self, in: row)
+        XCTAssertEqual(disclosures.count, 2)
+        XCTAssertEqual(disclosures[0].accessibilityValue() as? Bool, true)
+        XCTAssertFalse(body.arrangedSubviews[1].isHidden)
+
+        XCTAssertTrue(disclosures[0].performPrimaryAction())
+        row.layoutSubtreeIfNeeded()
+        XCTAssertEqual(disclosures[0].accessibilityValue() as? Bool, false)
+        XCTAssertTrue(body.arrangedSubviews[1].isHidden)
+        XCTAssertFalse(body.arrangedSubviews[4].isHidden, "the second hunk stays open")
+        XCTAssertEqual(controller.collapsedHunksByPath[file.path]?.count, 1)
+
+        controller.fileTableView.reloadData()
+        controller.view.layoutSubtreeIfNeeded()
+        let recycled = try materializedRow()
+        let recycledBody = try XCTUnwrap(
+            recycled.subviews.compactMap { $0 as? NSStackView }.first
+        )
+        let recycledDisclosures = Self.descendants(of: ThemedDisclosureRow.self, in: recycled)
+        XCTAssertEqual(recycledDisclosures[0].accessibilityValue() as? Bool, false)
+        XCTAssertTrue(recycledBody.arrangedSubviews[1].isHidden)
+    }
+
+    func testReviewCardsClipDiffContentAndStickyHeadingHasASquareLowerSeam() throws {
+        let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
+        let row = GitReviewFileRow(file: file, expanded: true)
+        XCTAssertTrue(try XCTUnwrap(row.layer).masksToBounds)
+        XCTAssertEqual(row.layer?.maskedCorners.rawValue.nonzeroBitCount, 4)
+
+        let host = GitReviewStickyHeaderHost()
+        let heading = GitReviewFileRow(file: file, expanded: false, headerOnly: true)
+        host.install(heading)
+        let layer = try XCTUnwrap(host.layer)
+        XCTAssertTrue(layer.masksToBounds)
+        XCTAssertEqual(
+            layer.maskedCorners.rawValue.nonzeroBitCount,
+            2,
+            "only the retained heading's top turns"
+        )
+        XCTAssertEqual(try XCTUnwrap(heading.layer).cornerRadius, 0, accuracy: 0.01)
+    }
+
     func testTwoLineFileHeaderCentersStatsAndStageActionOnTheWholeIdentity() throws {
         let file = GitFileDiff(
             path: "Sources/Threading/Core/Agent/UsageHistoryStore.swift",

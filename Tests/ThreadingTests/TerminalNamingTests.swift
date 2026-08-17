@@ -201,4 +201,46 @@ final class TerminalNamingTests: XCTestCase {
     func testAClosedDescriptorHasNoForegroundGroup() {
         XCTAssertNil(ProcessUtility.foregroundProcessGroup(ofPTY: -1, shellPid: 0))
     }
+
+    /// A silent command produces no output edge to infer activity from. Its PTY ownership must
+    /// still turn the standalone terminal's working state on, then return it to the shell after
+    /// interruption.
+    @MainActor
+    func testASilentForegroundCommandOwnsTheTerminalUntilItStops() {
+        var profile = TerminalProfile.default
+        profile.shellPath = "/bin/sh"
+        profile.shellArguments = []
+
+        let session = TerminalSession(
+            profile: profile,
+            frame: NSRect(x: 0, y: 0, width: 400, height: 300)
+        )
+        session.startShell()
+        defer { session.terminate() }
+
+        XCTAssertFalse(session.hasForegroundProcess)
+        session.insertText("sleep 30\n")
+
+        XCTAssertTrue(waitUntilForegroundState(true, in: session))
+
+        session.sendRemoteInput([3]) // Control-C
+        XCTAssertTrue(waitUntilForegroundState(false, in: session))
+    }
+
+    @MainActor
+    private func waitUntilForegroundState(
+        _ expected: Bool,
+        in session: TerminalSession,
+        timeout: TimeInterval = 3
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            _ = session.refreshForegroundProcess()
+            if session.hasForegroundProcess == expected { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        } while Date() < deadline
+
+        _ = session.refreshForegroundProcess()
+        return session.hasForegroundProcess == expected
+    }
 }

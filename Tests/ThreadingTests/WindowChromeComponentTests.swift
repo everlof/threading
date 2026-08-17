@@ -1553,35 +1553,6 @@ final class WindowChromeComponentTests: HostedStoreTestCase {
         try pngAtOneX(of: classicBand).write(to: classicBandURL)
         print("Rendered the Classic Player title band to \(classicBandURL.path)")
 
-        // Threading's own frame is the app's design rather than a period reconstruction, so
-        // like TUI and Classic Player it owes the sweep a state catalogue and not a source
-        // crop. It is the theme marketing captures use, which is the reason it draws chrome
-        // at all — so a regression in its caption cluster is the most visible one here.
-        AppThemePalette.set(AppThemeStyles.threading)
-        let threadingChrome = try XCTUnwrap(takeoverChrome(of: AppThemeStyles.threading))
-        let threadingStyle = WindowChromeAppearance.resolved(from: threadingChrome)
-        let threadingPNG = try XCTUnwrap(captionGlyphStrip(style: threadingStyle))
-        let threadingURL = directory.appendingPathComponent(
-            "caption-glyphs-\(AppThemeStyles.threading.id.rawValue).png"
-        )
-        try threadingPNG.write(to: threadingURL)
-        print("Rendered the Threading caption state catalogue to \(threadingURL.path)")
-        written += 1
-
-        let threadingBand = WindowTitleBandView()
-        threadingBand.translatesAutoresizingMaskIntoConstraints = true
-        threadingBand.frame = NSRect(x: 0, y: 0, width: 420, height: threadingStyle.bandHeight)
-        threadingBand.fixtureStyle = threadingStyle
-        threadingBand.fixtureIsKey = true
-        threadingBand.setTitle("Threading")
-        threadingBand.layoutSubtreeIfNeeded()
-        threadingBand.needsDisplay = true
-        let threadingBandURL = directory.appendingPathComponent(
-            "title-band-\(AppThemeStyles.threading.id.rawValue).png"
-        )
-        try pngAtOneX(of: threadingBand).write(to: threadingBandURL)
-        print("Rendered the Threading title band to \(threadingBandURL.path)")
-
         XCTAssertEqual(written, AppThemeStyles.takeovers.count)
     }
 

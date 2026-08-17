@@ -753,6 +753,15 @@ not a file the app can reach to preview for the other. **Off** keeps the banner 
 ping — nothing visual is suppressed — which is what the separate "Play a sound" switch used to
 say; an install that had it switched off comes back as **Off** in this menu.
 
+**Hearing one without choosing it.** Every row that names a sound carries a small play button at
+its right edge, which appears on the row under the pointer. Clicking it plays that sound and
+changes nothing: the menu stays open and the setting keeps whatever it had, so you can walk down
+the list comparing without the last one you tried becoming the one you are left with. From the
+keyboard, the right arrow plays the highlighted row. The button appears on sounds only, since
+**Off**, **macOS Alert Sound** and **Inherit** are not files there is anything to play. It works
+while **Silence** holds, for the same reason picking a sound does: asking to hear something is
+asking to hear it.
+
 **Adding your own sound.** **Add a Sound…** at the bottom of the menu takes an AIFF, WAV or CAF
 file and copies it into your `~/Library/Sounds` folder, which is where macOS looks for
 notification sounds. Because that folder is shared with the system, an added sound also shows
@@ -802,8 +811,9 @@ already showing in Notification Center is withdrawn as you mute.
 **Theme** on all three sidebar rows — a session's `⋯` or right-click, a project row's, and a
 standalone terminal's — because both answer the same kind of question: how this scope looks, how
 it sounds. Pick **Off**, **macOS Alert Sound**, or any sound in the list, and that scope's
-notifications and terminal bell all use it. Picking one plays it, and **Add a Sound…** at the
-bottom takes a file of your own exactly as the Settings pickers do.
+notifications and terminal bell all use it. Picking one plays it, the play button at a row's right
+edge plays it without picking it, and **Add a Sound…** at the bottom takes a file of your own
+exactly as the Settings pickers do.
 
 The narrowest level wins, and it inherits by default:
 
@@ -2603,17 +2613,20 @@ it opens paused; press Play and it plays. If an extension is installed that draw
 Threading does not carry itself, its preview takes the place of the built-in one; remove the
 extension and the built-in preview comes back.
 
-Every row shows the picture itself and when it arrived — the time for today, the date before
-that — and is marked **Agent** or **You**; when a session has both, a small **All / Agent / You**
-filter appears beside the count. It stays hidden while everything came from one side. A picture the
-agent shows opens this tab and selects its row, and resets that filter if it would have hidden it:
-being asked to show something outranks a filter you left set.
+Every row shows the picture itself and when it arrived. Today's rows show the time; the rest of the
+last week show weekday and time; timestamps then simplify to day and month for a year, and month and
+year after that. Rows are also marked **Agent** or **You**; when a session has both, a small
+**All / Agent / You** filter appears beside the count. It stays hidden while everything came from
+one side. A picture the agent shows opens this tab and selects its row, and resets that filter if it
+would have hidden it: being asked to show something outranks a filter you left set.
 
 Open **Attachments** from the session `⋯` menu's **Session Options** or the panel's **+** menu.
 The tab is two panes: the list above, and the selected file's preview filling the space below —
 images and PDFs inline (click an image to enter the same collection-aware media inspector),
 archives and documents through the same Quick Look preview the space bar shows in Finder, and
 diagram files as their own source text, ready to read or drag into a chat.
+HTML files render inline too; use **Open in Browser** when the full browser window is the better
+place to read or interact with one.
 
 **Drag the line between them** to decide how the pane is split. Left alone it opens on the rows
 the session actually has, so a short session keeps a short list; once you move it, it stays where
@@ -2636,23 +2649,24 @@ or a force click) does the same thing to the row under the pointer.
 
 The footer names the selected file and, beside the name, offers one button plus a **⌄** menu —
 like Finder's toolbar. The button performs whatever you last chose from the menu (**Open**,
-**Finder**, **Copy Path**, **Copy Image**/**Copy File**, or **Add to Chat**), starting at
-**Open**; choosing from the menu both runs the action and retitles the button, and the choice
-is remembered across sessions and launches. Double-clicking a row always opens the file without
-changing the remembered action.
+**Open in Browser** for HTML, **Finder**, **Copy Path**, **Copy Image**/**Copy File**, or **Add to
+Chat**), starting at **Open**; choosing from the menu both runs the action and retitles the button,
+and the choice is remembered across sessions and launches. Double-clicking a row always opens the
+file without changing the remembered action.
 
 Several rows can be selected at once (⇧-click, ⌘-click): the footer counts the batch with its
-total size, the button and the **⌄** menu act on all of them — open all, reveal all, copy every
-path one per line, copy the files, add each to the chat — and dragging any selected row carries
-the whole batch, so a handful of screenshots can be dropped on a composer, a terminal, or
-Finder in one gesture. Right-clicking inside the selection keeps it and aims the menu at the
-row under the pointer.
+total size, the button and the **⌄** menu act on all of them — open all, open an all-HTML selection
+in the browser, reveal all, copy every path one per line, copy the files, add each to the chat — and
+dragging any selected row carries the whole batch, so a handful of screenshots can be dropped on a
+composer, a terminal, or Finder in one gesture. Right-clicking inside the selection keeps it and
+aims the menu at the row under the pointer.
 
-Right-click a row for the same actions aimed at the row you pointed at — **Open**, **Open in**
-your installed editors, **Reveal in Finder**, **Copy Image** (or **Copy File** for anything that
-is not a picture) and **Copy Path** — plus **Compare with**, which names every other picture the
-session holds and opens the two of them in a **Compare** tab. Right-clicking also selects the
-row, so the preview underneath is always showing the file the menu is about.
+Right-click a row for the same actions aimed at the row you pointed at — **Open**, **Open in
+Browser** for HTML, **Open in** your installed editors, **Reveal in Finder**, **Copy Image** (or
+**Copy File** for anything that is not a picture) and **Copy Path** — plus **Compare with**, which
+names every other picture the session holds and opens the two of them in a **Compare** tab.
+Right-clicking also selects the row, so the preview underneath is always showing the file the menu
+is about.
 
 **Comparing two pictures.** Drag one row onto another and drop it: the row under the pointer says
 **Drop to compare**, and releasing opens the pair in the Compare tab with the wipe, crossfade,
@@ -3389,6 +3403,11 @@ collect in a stable end cell rather than rearranging the existing file layout.
 
 ### Themes
 
+Fresh profiles start with **Threading**, the adaptive product theme: warm paper in macOS light
+mode, navy in dark mode, and the native macOS title bar in both. It follows the Mac's current
+appearance automatically. **System** remains the unstyled macOS-colour option in the picker, and
+an explicit choice you already made is never replaced by the new default.
+
 Open **View ▸ Current Theme**, or pick **Current Theme** from the `+` in the display panel beside
 a conversation, to inspect the app chrome that is active now. It opens in that panel and stays
 open as you move between conversations — it belongs to the app, not to one chat. The page shows
@@ -3497,12 +3516,11 @@ Dock, and enter full screen as usual. Switching back to System restores the nati
 as you left it. Custom themes can opt into every one of these frame and scrollbar vocabularies
 through the theme tools.
 
-**Threading's own theme draws its frame too, in one row rather than two.** The sidebar toggle
-and the back/forward pair sit in the title bar itself, on the same column the sidebar's name
-row below them starts at, with the window title centred and the window buttons at the far end.
-Those systems above keep their commands on a second row under the caption, because that is
-where each of them put application controls — and because a period title bar is too short to
-hold a toolbar-sized button at all. A custom theme can ask for either arrangement.
+**Threading's own theme keeps the native macOS window.** AppKit owns its title bar, traffic
+lights, dragging, resizing, full screen, and the user's configured title-bar double-click action;
+the adaptive Threading palette begins inside that frame. The historical themes above deliberately
+replace it to reproduce their source systems. A custom theme can still request either a native
+frame or one of those authored frame arrangements.
 
 **Classic Player supports classic Winamp `.wsz` skins for the window band.** In
 **Settings ▸ Themes ▸ App ▸ Classic skins**, choose **Import…**, or drop one or more `.wsz`
@@ -3531,7 +3549,7 @@ generated icon every built-in style does.
 
 An installed extension can offer app themes of its own. They appear in the picker under a
 heading carrying the extension's name — "Storm" filed under "Usage Rain" — while the extension
-is enabled, and leave with it; if the one you were using goes away, the app falls back to System
+is enabled, and leave with it; if the one you were using goes away, the app falls back to Threading
 and records that as the choice. An extension theme cannot be edited in place: duplicate it to make an editable copy,
 or update the extension that ships it.
 

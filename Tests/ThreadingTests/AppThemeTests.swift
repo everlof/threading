@@ -3,12 +3,11 @@ import XCTest
 @testable import Threading
 
 /// The app-chrome theme: its roles, its derivations, and the promise that matters most —
-/// that the **System theme changes nothing**.
+/// that the **System theme remains available unchanged**.
 ///
 /// That promise is the whole reason this refactor is safe to land before any style exists. The
-/// design system's "system colours only" rule is not abolished by theming; it becomes the
-/// default, and a user who never picks a style keeps light, dark and their own accent working
-/// exactly as they did.
+/// design system's "system colours only" rule is not abolished by theming. System remains the
+/// identity option while Threading supplies the fresh-profile product default.
 @MainActor
 final class AppThemeTests: HostedStoreTestCase {
 
@@ -2346,32 +2345,54 @@ final class AppThemeTests: HostedStoreTestCase {
         }
     }
 
-    /// Threading is the product dress, not a renamed generic dark palette. Its app, terminal,
-    /// sidebar, and window frame must remain one authored set as the theme system grows.
+    /// Threading is the product dress, not a renamed generic palette. Its light and dark app,
+    /// terminal, and sidebar variants remain one authored set while AppKit owns the window frame.
     func testThreadingThemeShipsOneCompleteProductDress() throws {
         let theme = AppThemeStyles.threading
-        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
-        let variant = try XCTUnwrap(theme.variant(for: appearance))
-        let sidebar = try XCTUnwrap(variant.sidebar)
-        let chrome = try XCTUnwrap(variant.chrome)
+        let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let darkAppearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
 
-        XCTAssertEqual(theme.mode, .dark)
-        XCTAssertEqual(theme.resolved(.accent, appearance: appearance).hexString, "#FF9A3D")
-        XCTAssertEqual(theme.resolved(.selection, appearance: appearance).hexString, "#17405C")
-        XCTAssertEqual(variant.terminalPalette.background.hexString, "#040A12")
-        XCTAssertNotNil(sidebar.background?.gradient)
+        XCTAssertEqual(theme.mode, .system)
+        XCTAssertEqual(Set(theme.availableVariants), Set(AppTheme.VariantKind.allCases))
+        XCTAssertFalse(theme.takesOverWindowChrome)
+
+        let light = try XCTUnwrap(theme.variant(for: lightAppearance))
+        let lightGround = theme.resolved(.ground, appearance: lightAppearance).oklch
+        XCTAssertEqual(lightGround.lightness, 0.975, accuracy: 0.001)
+        XCTAssertEqual(lightGround.hueDegrees, 75, accuracy: 0.1)
+        let lightAccent = theme.resolved(.accent, appearance: lightAppearance).oklch
+        XCTAssertEqual(lightAccent.lightness, 0.640, accuracy: 0.001)
+        XCTAssertEqual(lightAccent.hueDegrees, 55, accuracy: 0.2)
+        XCTAssertEqual(light.terminalPalette.background.hexString, "#FEFBF7")
+        XCTAssertNotNil(light.sidebar?.background?.gradient)
         XCTAssertEqual(
-            sidebar.navigatorWell?.bevel,
+            light.sidebar?.navigatorWell?.bevel,
             SidebarStyle.NavigatorWell.Bevel.none
         )
-        // One chrome row: the window's own commands share the caption, which is why the band
-        // is four points taller than a caption alone needs — a toolbar control is 28.
-        XCTAssertEqual(chrome.titleBar.commands, .inTitleBar)
-        XCTAssertEqual(chrome.titleBar.height, 36)
-        XCTAssertEqual(chrome.titleBar.titleAlignment, .center)
-        XCTAssertFalse(chrome.titleBar.showsAppIcon)
-        XCTAssertEqual(chrome.titleBar.activeTexture?.kind, .rule)
-        XCTAssertEqual(chrome.frame?.cornerRadius, 12)
+        XCTAssertNil(light.chrome, "the product theme must keep the native macOS window")
+
+        let dark = try XCTUnwrap(theme.variant(for: darkAppearance))
+        XCTAssertLessThan(
+            ThemeContrast.perceptualDistance(
+                theme.resolved(.accent, appearance: darkAppearance),
+                try XCTUnwrap(NSColor(hex: "#FF9A3D"))
+            ),
+            1
+        )
+        XCTAssertLessThan(
+            ThemeContrast.perceptualDistance(
+                theme.resolved(.selection, appearance: darkAppearance),
+                try XCTUnwrap(NSColor(hex: "#17405C"))
+            ),
+            1
+        )
+        XCTAssertEqual(dark.terminalPalette.background.hexString, "#040A12")
+        XCTAssertNotNil(dark.sidebar?.background?.gradient)
+        XCTAssertEqual(
+            dark.sidebar?.navigatorWell?.bevel,
+            SidebarStyle.NavigatorWell.Bevel.none
+        )
+        XCTAssertNil(dark.chrome, "the product theme must keep the native macOS window")
     }
 
     // MARK: - Legibility
@@ -2406,8 +2427,7 @@ final class AppThemeTests: HostedStoreTestCase {
         XCTAssertEqual(Set(ids).count, ids.count, "two stock themes share an id")
         XCTAssertTrue(ids.contains(AppThemeID.system.rawValue))
         // 29 = System + Threading + eleven design movements + five palette-first styles +
-        // Christmas + ten period and authored chrome themes. Threading now belongs to the
-        // takeover set too, without adding another catalogue entry.
+        // Christmas + ten period and authored chrome themes.
         XCTAssertEqual(ids.count, 29, "the curated stock catalogue unexpectedly changed size")
     }
 

@@ -29,6 +29,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Project hover card | `sidebar.project-hover-card@1` | hook, replacement | hover, popover, sizing, dismissal | Implemented |
 | Session row | `sidebar.session-row@1` | properties, slot, replacement | selection, DnD, activity, actions | Implemented |
 | Session identity | `sidebar.session-identity@1` | replacement | activity precedence and row shell | Implemented |
+| Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
 | Session hover card | `sidebar.session-hover-card@1` | hook, replacement | hover, popover, session lifecycle | Implemented |
 | Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival | Implemented |
 | Start composer accessories | `composer.session-start@1` | protected horizontal hook | text input, submission, keyboard, drafts | Implemented |
@@ -41,6 +42,13 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Display tab header | `display.tab-header@1` | display-only `after-title` slot | identity, active state, close/select, ordering, overflow | Implemented |
 | Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity presentation, refresh, the whole reveal gesture | Implemented |
 | Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, the inspector rail | Implemented |
+
+The standalone terminal row remains host-only because no published extension entity or data
+capability represents its live shell. Exposing replacement presentation without that authority
+would create a visual contract that cannot truthfully describe the process behind it. Threading
+therefore keeps its identity, selection, foreground-command spinner and lifecycle actions
+host-owned; a future public row starts by publishing the typed terminal context rather than by
+leaking the AppKit cell.
 
 ## Project hover-card precedent
 

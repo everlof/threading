@@ -1477,6 +1477,82 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         XCTAssertEqual(written, expected)
     }
 
+    /// The hero in both roles — the one thing on this screen that changes *shape* when a choice
+    /// is made. A chat's greeting is one line, a manager's brief is three, and the block behind
+    /// them morphs from one to the other rather than swapping two labels.
+    ///
+    /// Rendered because what this can get wrong is a picture: a hero holding two empty lines
+    /// open under a one-line greeting, three lines set so tight they read as a paragraph, or a
+    /// block that stopped being centred the moment it grew.
+    func testRendersTheHeroInBothRoles() throws {
+        AppThemePalette.set(.system)
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
+        defer { store.removeProject(id: project.id) }
+
+        for (suffix, appearanceName) in [
+            ("light", NSAppearance.Name.aqua),
+            ("dark", NSAppearance.Name.darkAqua)
+        ] {
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+            var heroHeights: [CGFloat] = []
+
+            for role in [SessionRole.chat, .manager] {
+                let composer = SessionComposerViewController()
+                let renderHost = host(composer, size: Render.tall)
+                renderHost.appearance = appearance
+                AppThemeRefresh.repaint(renderHost)
+                composer.show(projectID: project.id)
+                if role == .manager { composer.presetManagerRole() }
+                renderHost.layoutSubtreeIfNeeded()
+
+                let hero = try XCTUnwrap(
+                    descendants(of: composer.view)
+                        .compactMap { $0 as? MorphingMultilineTitleLabel }
+                        .first,
+                    "the composer's greeting is the block"
+                )
+                heroHeights.append(hero.frame.height)
+                XCTAssertEqual(
+                    composer.view.convert(hero.bounds, from: hero).midX,
+                    composer.view.bounds.midX,
+                    accuracy: 0.5,
+                    "the hero stopped being centred in the pane"
+                )
+
+                let rep = try XCTUnwrap(
+                    renderHost.bitmapImageRepForCachingDisplay(in: renderHost.bounds)
+                )
+                renderHost.wantsLayer = true
+                // Resolved *as* the appearance being rendered. The system theme answers this
+                // role with a dynamic system colour, and a `CGColor` taken from one of those
+                // reads whichever appearance the process happens to be in — which drew the
+                // light pass on the dark pass's ground, with the hero's own light-appearance
+                // ink nearly invisible on it.
+                appearance.performAsCurrentDrawingAppearance {
+                    renderHost.layer?.backgroundColor = AppTheme.system
+                        .resolved(.ground, appearance: appearance).cgColor
+                }
+                renderHost.cacheDisplay(in: renderHost.bounds, to: rep)
+                try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(
+                    to: directory.appendingPathComponent(
+                        "composer-hero-\(role.rawValue)-\(suffix).png"
+                    )
+                )
+            }
+
+            XCTAssertEqual(
+                heroHeights[1],
+                heroHeights[0] * 3,
+                accuracy: 1,
+                "a manager's brief is three of the greeting's own lines, no taller and no tighter"
+            )
+        }
+    }
+
     // MARK: - Fixtures
 
     private func fixtureFolder() -> URL {

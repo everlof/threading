@@ -174,8 +174,8 @@ is enabled, its themes appear in Settings ▸ Themes labelled by the extension's
 fonts are registered process-scoped, which makes them appear in the font pickers and resolvable
 by any theme document that names their family — including the extension's own, which is how a
 theme pack styles the whole app with its own face. Disabling the extension removes both; a
-theme that was active falls back to System, and a named-but-gone family degrades one resolution
-rung exactly like an uninstalled font. Font licensing is the package author's responsibility,
+theme that was active falls back to the stock Threading default, and a named-but-gone family
+degrades one resolution rung exactly like an uninstalled font. Font licensing is the package author's responsibility,
 and the install disclosure names every theme and font family before anything is copied.
 
 **Localization is package-owned presentation data.** A manifest's `localizations` entries pair

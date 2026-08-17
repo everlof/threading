@@ -17,6 +17,7 @@ final class ProjectTerminalViewController: NSViewController {
     weak var delegate: ProjectTerminalViewControllerDelegate?
 
     var isRunning: Bool { session.isRunning }
+    var isBusy: Bool { session.hasForegroundProcess }
     var paneBackgroundColor: NSColor { session.terminalView.nativeBackgroundColor }
 
     private let appEvents = AppEventObservations()

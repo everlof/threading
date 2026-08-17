@@ -392,6 +392,7 @@ final class GitReviewViewController: NSViewController {
     /// state, so a watched checkout re-reading itself does not undo what the reader chose.
     var expansionOverrides: [String: Bool] = [:]
     var bulkExpansionOverride: Bool?
+    var collapsedHunksByPath: [String: Set<GitReviewHunkIdentity>] = [:]
     var contextLinesByPath: [String: Int] = [:]
     var contextExpansionInFlightPaths: Set<String> = []
     var contextExpansionExhaustedPaths: Set<String> = []
@@ -1490,6 +1491,7 @@ final class GitReviewViewController: NSViewController {
     }
 
     private func resetContextExpansion() {
+        collapsedHunksByPath.removeAll(keepingCapacity: false)
         contextLinesByPath.removeAll(keepingCapacity: false)
         contextExpansionInFlightPaths.removeAll(keepingCapacity: false)
         contextExpansionExhaustedPaths.removeAll(keepingCapacity: false)
@@ -1521,7 +1523,12 @@ final class GitReviewStickyHeaderHost: NSView {
         // A retained heading floats above source text. The ordinary row's quiet translucent
         // control wash is correct inside its card but cannot occlude content scrolling beneath
         // an overlay, so the host supplies the design system's opaque floating-card surface.
-        applySurface(fill: Design.Surface.elevated, radius: .control)
+        applySurface(
+            fill: Design.Surface.elevated,
+            radius: .control,
+            corners: .top,
+            clipsContent: true
+        )
     }
 
     func install(_ header: GitReviewFileRow) {

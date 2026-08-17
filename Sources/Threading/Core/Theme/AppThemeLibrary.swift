@@ -11,7 +11,7 @@ import os
 /// from the compiler by `nonisolated(unsafe)`.
 enum AppThemePalette {
 
-    private static let storage = OSAllocatedUnfairLock(initialState: AppTheme.system)
+    private static let storage = OSAllocatedUnfairLock(initialState: AppThemeStyles.threading)
 
     static var current: AppTheme { storage.withLock { $0 } }
 
@@ -49,6 +49,11 @@ enum AppThemeLibrary {
     /// rather than to `UserDefaults.standard` — see that type for why the difference matters
     /// here of all places.
     private static var defaults: UserDefaults { PreferenceStore.shared }
+
+    /// The product dress used whenever no user-owned choice exists. Recovery remains the one
+    /// deliberate exception: it wears System in memory so authored theme machinery cannot take
+    /// part in recovering from a failed launch.
+    static var defaultTheme: AppTheme { AppThemeStyles.threading }
 
     // MARK: Catalogue
 
@@ -137,7 +142,8 @@ enum AppThemeLibrary {
 
     /// Called by the appearance registry when the contributed tier changes.
     ///
-    /// A vanished theme falls back exactly the way a deleted custom theme does — to System,
+    /// A vanished theme falls back exactly the way a deleted custom theme does — to the product
+    /// default,
     /// recorded as the new choice, so it does not snap back on a later re-enable. The one
     /// divergence `restore()` can leave — the stored choice unresolvable at launch because its
     /// extension had not started the session enabled — heals here: the moment the standing
@@ -147,9 +153,9 @@ enum AppThemeLibrary {
     static func contributedThemesDidChange() {
         if theme(withID: current.id) == nil {
             ThreadingLogger.theme.warning(
-                "Active contributed theme became unavailable theme=\(current.id.rawValue, privacy: .private(mask: .hash)); falling back to system"
+                "Active contributed theme became unavailable theme=\(current.id.rawValue, privacy: .private(mask: .hash)); falling back to default"
             )
-            apply(.system)
+            apply(defaultTheme)
         } else if let stored = defaults.string(forKey: Keys.currentThemeID),
                   stored != current.id.rawValue,
                   let standing = theme(withID: AppThemeID(stored)) {
@@ -334,7 +340,7 @@ enum AppThemeLibrary {
         // them, or Application Support accumulates folders no document can reach.
         ThemeAssetStore.removeAll(for: theme.id)
         if current.id == theme.id {
-            apply(.system)
+            apply(defaultTheme)
         }
         ThreadingLogger.theme.info(
             "App theme deleted theme=\(theme.id.rawValue, privacy: .private(mask: .hash))"
@@ -345,7 +351,7 @@ enum AppThemeLibrary {
 
     // MARK: Current
 
-    private(set) static var current: AppTheme = .system
+    private(set) static var current: AppTheme = AppThemeStyles.threading
 
     /// The user's standing choice, whatever is in force right now.
     ///
@@ -371,7 +377,7 @@ enum AppThemeLibrary {
         let restored: AppTheme
         switch mode {
         case .normal:
-            restored = storedThemeID.flatMap { theme(withID: $0) } ?? AppTheme.system
+            restored = storedThemeID.flatMap { theme(withID: $0) } ?? defaultTheme
         case .recovery:
             restored = .system
         }

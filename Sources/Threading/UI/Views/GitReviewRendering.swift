@@ -86,6 +86,7 @@ extension GitReviewViewController {
         renderedTurnID = selectedTurnID
         if !keepsPlace {
             bulkExpansionOverride = nil
+            collapsedHunksByPath.removeAll(keepingCapacity: false)
         }
 
         let pendingNotice = notice
@@ -1042,7 +1043,8 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
                 width: cardWidth,
                 textSize: reviewTextSize,
                 contextLines: contextLinesByPath[file.path] ?? GitReviewDefaults.contextLines,
-                contextExpansionIsExhausted: contextExpansionExhaustedPaths.contains(file.path)
+                contextExpansionIsExhausted: contextExpansionExhaustedPaths.contains(file.path),
+                collapsedHunks: collapsedHunksByPath[file.path] ?? []
             )
         }
         guard abs(measured.width - cardWidth) <= 0.5 else {
@@ -1065,7 +1067,8 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
                 width: cardWidth,
                 textSize: reviewTextSize,
                 contextLines: contextLinesByPath[file.path] ?? GitReviewDefaults.contextLines,
-                contextExpansionIsExhausted: contextExpansionExhaustedPaths.contains(file.path)
+                contextExpansionIsExhausted: contextExpansionExhaustedPaths.contains(file.path),
+                collapsedHunks: collapsedHunksByPath[file.path] ?? []
             )
         }
         return measured.height
@@ -1215,7 +1218,8 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             fileURL: renderedFileRoot?.appendingPathComponent(file.path),
             contextLines: contextLinesByPath[file.path] ?? GitReviewDefaults.contextLines,
             contextExpansionIsPending: contextExpansionInFlightPaths.contains(file.path),
-            contextExpansionIsExhausted: contextExpansionExhaustedPaths.contains(file.path)
+            contextExpansionIsExhausted: contextExpansionExhaustedPaths.contains(file.path),
+            collapsedHunks: collapsedHunksByPath[file.path] ?? []
         )
         row.onToggle = { [weak self] expanded in
             self?.expansionOverrides[file.path] = expanded
@@ -1233,6 +1237,22 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
         row.onHeightChange = { [weak self, weak row] in
             self?.recordFileHeight(file, row: row)
+        }
+        row.onHunkExpansionGeometryChange = { [weak self, weak row] identity, expanded in
+            guard let self, let row else { return }
+            var collapsed = self.collapsedHunksByPath[file.path] ?? []
+            if expanded {
+                collapsed.remove(identity)
+            } else {
+                collapsed.insert(identity)
+            }
+            self.collapsedHunksByPath[file.path] = collapsed.isEmpty ? nil : collapsed
+            self.measuredFileRowHeights[file.path] = nil
+            let tableRow = self.fileTableView.row(for: row)
+            guard tableRow >= 0, tableRow < self.fileTableView.numberOfRows else { return }
+            self.fileTableView.noteHeightOfRows(
+                withIndexesChanged: IndexSet(integer: tableRow)
+            )
         }
         row.onStageFile = { [weak self] in self?.stageFile(file) }
         row.onStageHunk = { [weak self] index in self?.stageHunk(at: index, of: file) }

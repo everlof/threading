@@ -51,16 +51,37 @@ enum SoundPickerMenu {
             popUp.addSeparator()
             for sound in group {
                 indexOfSound[sound.fileName] = popUp.numberOfItems
-                popUp.addItem(
-                    ThemedMenuItem(
-                        title: sound.displayName,
-                        representedValue: representedValue(sound.fileName)
-                    )
+                var item = ThemedMenuItem(
+                    title: sound.displayName,
+                    representedValue: representedValue(sound.fileName)
                 )
+                item.accessory = audition(sound)
+                popUp.addItem(item)
             }
         }
 
         return indexOfSound
+    }
+
+    /// The audition every sound row offers: the play button that appears at its trailing edge
+    /// under the pointer, and does not choose the row.
+    ///
+    /// Defined here rather than at the two call sites for the same reason the order is. A
+    /// settings pop-up whose rows can be heard beside a submenu whose rows cannot would be one
+    /// list behaving differently depending on which surface opened it.
+    ///
+    /// It plays through `NotificationSoundPreview` whatever the row will come to mean — a
+    /// notification alert, a terminal bell, one event's override. The question a press asks is
+    /// what this *file* sounds like, and that has one answer; the bell's own rate limit exists to
+    /// survive a program ringing in a loop, which a person clicking a button is not.
+    @MainActor
+    static func audition(_ sound: NotificationSound) -> ThemedMenuAccessory {
+        ThemedMenuAccessory(
+            symbolName: SoundPickerDefaults.auditionSymbolName,
+            title: L10n.string("Play")
+        ) {
+            NotificationSoundPreview.play(sound)
+        }
     }
 
     /// The same list as menu entries, for the surfaces that build a submenu rather than fill a
@@ -71,7 +92,13 @@ enum SoundPickerMenu {
     @MainActor
     static func soundEntries(item: (NotificationSound) -> ThemedMenuItem) -> [ThemedMenuEntry] {
         groups().flatMap { group in
-            [ThemedMenuEntry.separator] + group.map { .item(item($0)) }
+            [ThemedMenuEntry.separator] + group.map { sound in
+                // The caller owns what choosing the row means; the audition is the list's, and
+                // is attached here so it cannot be the one surface that forgot it.
+                var row = item(sound)
+                row.accessory = audition(sound)
+                return .item(row)
+            }
         }
     }
 
@@ -124,6 +151,11 @@ enum SoundPickerMenu {
 // MARK: - Sound Picker Defaults
 
 enum SoundPickerDefaults {
+    /// The mark on the audition button. Filled rather than outlined: at 13pt an outlined
+    /// triangle is three hairlines, and this one appears and disappears under the pointer, where
+    /// a shape has to be recognised in the moment it arrives.
+    static let auditionSymbolName = "play.fill"
+
     /// What the Add a Sound panel will open. The extensions `NotificationSoundLibrary` accepts,
     /// expressed as the types the panel filters on: CAF has no system-declared constant, so it
     /// is looked up by extension and simply absent if the platform stops declaring it.

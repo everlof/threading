@@ -1329,26 +1329,35 @@ instead of mixing alphabets or drawing a missing glyph.
 
 ## 2026-08-12: the product has its own stock theme
 
-**Threading** (`threading`) is the stock dark theme used for ordinary product captures. It uses
-navy ground and panel roles, warm text, and orange accents. Its terminal palette uses the same
-family of colors, so a provider TUI does not look like a separate skin placed inside the app.
+**Threading** (`threading`) is the adaptive stock product theme and the fresh-profile default. An
+absent `appThemeID` resolves to Threading without writing one: inheritance remains distinguishable
+from a choice the user made. A stored choice still wins, an unavailable or deleted choice falls
+back to Threading, and Recovery Mode remains the deliberate exception that wears System in memory
+without touching the stored answer.
 
-The theme uses the normal Threading layout and control vocabulary. Selected rows use a deep navy
-fill rather than diluted orange, leaving orange for actions, focus, the app mark, and the active
-window seam. The sidebar has a restrained navy depth shift and a flat navigator well. On macOS it
-takes over the window frame through `WindowChromeStyle`: a quiet two-stop navy title band, warm
-plain caption glyphs, a one-point orange active seam, and a one-point
-navy outer frame with a twelve-point corner. The title band does not repeat the application icon.
-It is the only theme here that states `commands: in_title_bar` — the sidebar toggle and history
-pair sit in the caption on the pane column, the title centres between them and the window
-buttons, and the window has one chrome row instead of two. It moves no *other* application
-control there. The chrome is
-authored rather than copied from a historical system, so
-`docs/references/chrome/threading/reference.json` records every component as not applicable and
-the shared chrome sweeps plus whole-window render hold the implementation.
+The dark variant uses navy ground and panel roles, warm text, and orange accents. The light
+variant is warm paper seated in pale navy surfaces, with the orange lowered in perceptual
+lightness so it keeps the same emphasis and clears the contrast floor on paper. Both terminal
+palettes use the same family of colours, so a provider TUI does not look like a separate skin
+placed inside the app. The adaptive theme leaves `NSApp.appearance` unpinned and follows macOS.
+
+The theme uses the normal Threading layout and control vocabulary. Selected rows use navy rather
+than diluted orange, leaving orange for actions, focus, and the app mark. The sidebar has a
+restrained depth shift and a flat navigator well in both appearances. Both variants deliberately
+omit `WindowChromeStyle`: Threading owns the app surfaces inside the window while AppKit owns the
+standard macOS titlebar, traffic lights, rounded frame, resizing, sheets, and full-screen
+integration. The old authored takeover ledger was removed with the takeover; the historical
+frame mechanism and its stock examples remain unchanged.
+
+Threading's authored colours are stated in **OKLCH** (`AppThemeStyles.oklch`), which makes
+perceptual lightness, chroma, and hue the reviewed decisions and gamut-maps by reducing chroma
+only. This is the default for colours designed in this repository. Hex remains correct at exact
+source boundaries — historical pixels, published community palettes, persisted theme documents,
+and agent/user input — where changing an encoded source value would be a fidelity bug rather than
+an improvement. Runtime derivation continues in Oklab, the Cartesian form of the same space.
 
 System and other stock themes remain available, but ordinary product evidence uses Threading.
-Other themes appear only when a page is explicitly comparing themes.
+The theme matrix renders both Threading appearances automatically because it is adaptive.
 
 ## 2026-08-14 — the palette-first family
 

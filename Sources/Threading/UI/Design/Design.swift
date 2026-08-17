@@ -2108,6 +2108,35 @@ enum SurfaceRadius {
     }
 }
 
+/// Which corners an applied surface actually turns.
+///
+/// Most cards turn all four. A retained section heading is different: it is the top of content
+/// that continues below it, so its lower edge is a seam rather than the end of a floating pill.
+/// Keeping that distinction in the surface API also keeps feature code from spelling Core
+/// Animation's coordinate-dependent corner masks itself.
+@MainActor
+enum SurfaceCorners {
+    case all
+    case top
+    case bottom
+    case none
+
+    fileprivate func layerMask(isGeometryFlipped: Bool) -> CACornerMask {
+        let visualTop: CACornerMask = isGeometryFlipped
+            ? [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+            : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        let visualBottom: CACornerMask = isGeometryFlipped
+            ? [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+            : [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        switch self {
+        case .all: return [visualTop, visualBottom]
+        case .top: return visualTop
+        case .bottom: return visualBottom
+        case .none: return []
+        }
+    }
+}
+
 /// How an applied or drawn surface participates in a bevel material (`Material.bevel`).
 ///
 /// Recorded like `SurfaceRadius` — as a role rather than a result — so the theme sweep
@@ -2496,11 +2525,17 @@ extension NSView {
         glow: Bool = false,
         controlGlow: Bool = false,
         pattern: SurfacePattern = .none,
-        bevel: SurfaceBevel = .automatic
+        bevel: SurfaceBevel = .automatic,
+        corners: SurfaceCorners = .all,
+        clipsContent: Bool = false
     ) {
         wantsLayer = true
         layer?.cornerCurve = .continuous
         layer?.cornerRadius = radius.current
+        if let layer {
+            layer.maskedCorners = corners.layerMask(isGeometryFlipped: layer.isGeometryFlipped)
+            layer.masksToBounds = clipsContent
+        }
 
         // A bevel replaces the flat border outright — two edge colours and a hairline would
         // be three lines around one surface. The hard construction is square; soft relief
@@ -2550,7 +2585,9 @@ extension NSView {
             glow: glow,
             controlGlow: controlGlow,
             pattern: pattern,
-            bevel: bevel
+            bevel: bevel,
+            corners: corners,
+            clipsContent: clipsContent
         )
     }
 

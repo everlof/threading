@@ -130,28 +130,60 @@ enum AttachmentComparisonDrop {
 /// How this pane says *when*, in one place because two surfaces say it: a row's caption and the
 /// menu that names the same file from somewhere else.
 ///
-/// Terse on purpose — a column of full timestamps is the same date said 32 times. Today's rows
-/// say the time, everything older says the day, which is the distinction the reader is actually
-/// making when they scan for the picture from this morning.
+/// Terse on purpose — a column of full timestamps is the same date said 32 times. Resolution
+/// falls away with age: today is a time, the rest of the recent week keeps its weekday and time,
+/// rows up to a year old keep the day, and older rows keep only month and year.
 @MainActor
 enum AttachmentMoment {
 
-    static func description(of date: Date) -> String {
-        Calendar.current.isDateInToday(date)
-            ? timeFormatter.string(from: date)
-            : dateFormatter.string(from: date)
+    static func description(
+        of date: Date,
+        relativeTo referenceDate: Date = Date(),
+        calendar: Calendar = .autoupdatingCurrent,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        let dayDistance = abs(
+            calendar.dateComponents(
+                [.day],
+                from: calendar.startOfDay(for: date),
+                to: calendar.startOfDay(for: referenceDate)
+            ).day ?? AttachmentMomentDefaults.distantDay
+        )
+
+        let format = Date.FormatStyle(
+            locale: locale,
+            calendar: calendar,
+            timeZone: calendar.timeZone
+        )
+
+        switch dayDistance {
+        case 0:
+            return date.formatted(format.hour().minute())
+        case 1..<AttachmentMomentDefaults.recentDayLimit:
+            return date.formatted(format.weekday(.abbreviated).hour().minute())
+        default:
+            if isWithinOneYear(date, of: referenceDate, calendar: calendar) {
+                return date.formatted(format.day().month(.abbreviated))
+            }
+            return date.formatted(format.month(.abbreviated).year())
+        }
     }
 
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter
-    }()
+    private static func isWithinOneYear(
+        _ date: Date,
+        of referenceDate: Date,
+        calendar: Calendar
+    ) -> Bool {
+        guard let yearBefore = calendar.date(byAdding: .year, value: -1, to: referenceDate),
+              let yearAfter = calendar.date(byAdding: .year, value: 1, to: referenceDate) else {
+            return true
+        }
+        return yearBefore...yearAfter ~= date
+    }
+}
 
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("dMMM")
-        return formatter
-    }()
+private enum AttachmentMomentDefaults {
+    /// Today plus the preceding six days: one glance still distinguishes morning from afternoon.
+    static let recentDayLimit = 7
+    static let distantDay = Int.max
 }

@@ -233,10 +233,9 @@ final class ThemePreferencesViewController: NSViewController {
     /// The app's own theme — the window, sidebar, panels and text — chosen for the whole app.
     ///
     /// App-wide rather than per-session, unlike the terminal palette below it: there is one
-    /// window, and a sidebar cannot be two colours at once. "System" is the default and is not
-    /// a compromise — it resolves every role to the system colour the app always used, so the
-    /// design system's light/dark and accent behaviour is intact for anyone who never picks a
-    /// style.
+    /// window, and a sidebar cannot be two colours at once. Threading is the fresh-profile
+    /// default; System remains the explicit unstyled option, resolving every role to the native
+    /// colour the app used before authored app themes existed.
     private func appThemeSection() -> NSView {
         let popUp = SettingsUI.popUp(target: self, action: #selector(appThemeChanged))
         appThemePopUp = popUp

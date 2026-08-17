@@ -359,6 +359,13 @@ fold down and the panel wider. See [`window-chrome.md`](window-chrome.md#the-cor
 wants to read their attachments rather than a fact about one conversation, and the scratch suite is
 what stops a hosted test's drag from moving the divider in the pane the developer is looking at.
 
+The chronology's timestamp loses resolution with age instead of dropping every non-today row
+straight to a date. Today shows the local time; the preceding six calendar days keep an abbreviated
+weekday and time; rows up to one year old keep day and month; older rows keep month and year. Calendar
+days are evaluated in the user's current time zone, so midnight — not an elapsed 24-hour interval —
+moves a row out of "today". The same localized value remains part of the row's one accessibility
+sentence.
+
 ### Two places that are easy to miss
 
 - `mediaInspectorSelection(forRow:)` needed a `.media` case. A row missing from the rail has **no

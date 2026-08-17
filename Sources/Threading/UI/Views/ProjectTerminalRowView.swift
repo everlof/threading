@@ -20,6 +20,9 @@ final class ProjectTerminalRowView: NSTableCellView {
     private var trackingArea: NSTrackingArea?
     private var terminalID: TerminalID?
     private var isRunning = false
+    private var isBusy = false
+    /// Materialized only after this recycled row first has foreground work to show.
+    private var statusSpinner: ThemedSpinner?
     private var isHovered = false
     private var isPresentingMenu = false
     private var presentsHoverAction: Bool { isHovered || isPresentingMenu }
@@ -41,10 +44,16 @@ final class ProjectTerminalRowView: NSTableCellView {
 
     /// `projectRoot` is the folder of the project this row sits under, which the name is stated
     /// relative to: at the project's own folder the row above already says the folder's name.
-    func configure(with terminal: ProjectTerminal, running: Bool, projectRoot: String?) {
+    func configure(
+        with terminal: ProjectTerminal,
+        running: Bool,
+        busy: Bool,
+        projectRoot: String?
+    ) {
         let sameTerminal = terminalID == terminal.id
         terminalID = terminal.id
         isRunning = running
+        isBusy = busy
         let title = ProjectTerminalTitle.displayTitle(for: terminal, projectRoot: projectRoot)
         titleLabel.setStringValue(
             title,
@@ -60,6 +69,10 @@ final class ProjectTerminalRowView: NSTableCellView {
                 overrides: terminal.soundOverrides
             )
         ].compactMap { $0 }.joined(separator: "\n")
+        updateBusyStatus()
+        // Foreground ownership is sampled while the pointer may already be over the row. Keep
+        // the action/status crossfade in that state instead of flashing the spinner through it.
+        setActionVisible(presentsHoverAction, animated: false)
         applyColors()
     }
 
@@ -172,20 +185,60 @@ final class ProjectTerminalRowView: NSTableCellView {
     override func prepareForReuse() {
         super.prepareForReuse()
         terminalID = nil
+        isBusy = false
+        statusSpinner?.isAnimating = false
         isHovered = false
         setActionVisible(presentsHoverAction, animated: false)
     }
 
+    /// A terminal shell lives for the lifetime of the row, so its running flag cannot say that a
+    /// command is in progress. The foreground process group can. Show the same themed progress
+    /// mark session rows use, without making an invisible spinner part of every terminal row.
+    private func updateBusyStatus() {
+        guard isBusy || statusSpinner != nil else { return }
+
+        let spinner: ThemedSpinner
+        if let statusSpinner {
+            spinner = statusSpinner
+        } else {
+            let materialized = ThemedSpinner()
+            materialized.translatesAutoresizingMaskIntoConstraints = false
+            materialized.setAccessibilityLabel(L10n.string("Terminal command running"))
+            materialized.setAccessibilityIdentifier("sidebar.terminal.status")
+            materialized.hostGround = backgroundStyle == .emphasized ? .selection : nil
+            // Keep the status behind the overlapping action. Alpha is presentation state, not
+            // hit-testing policy, so the hover button must remain the frontmost target.
+            addSubview(materialized, positioned: .below, relativeTo: actionButton)
+            NSLayoutConstraint.activate([
+                materialized.centerXAnchor.constraint(equalTo: actionButton.centerXAnchor),
+                materialized.centerYAnchor.constraint(equalTo: actionButton.centerYAnchor),
+                materialized.widthAnchor.constraint(
+                    equalToConstant: StatusIndicatorDefaults.spinnerSize
+                ),
+                materialized.heightAnchor.constraint(
+                    equalToConstant: StatusIndicatorDefaults.spinnerSize
+                )
+            ])
+            statusSpinner = materialized
+            spinner = materialized
+        }
+
+        spinner.isAnimating = isBusy
+    }
+
     private func setActionVisible(_ visible: Bool, animated: Bool) {
         if visible { actionButton.materializeGlyphIfNeeded() }
+        let statusAlpha: CGFloat = (isBusy && !visible) ? 1 : 0
 
         guard animated else {
             actionButton.alphaValue = visible ? 1 : 0
+            statusSpinner?.alphaValue = statusAlpha
             return
         }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Design.Motion.quick
             actionButton.animator().alphaValue = visible ? 1 : 0
+            statusSpinner?.animator().alphaValue = statusAlpha
         }
     }
 
@@ -194,6 +247,7 @@ final class ProjectTerminalRowView: NSTableCellView {
         iconView.contentTintColor = backgroundStyle == .emphasized
             ? Design.Text.selected
             : (isRunning ? Design.Text.label : Design.Text.secondary)
+        statusSpinner?.hostGround = backgroundStyle == .emphasized ? .selection : nil
 
         // The `⋯` is a drawn control rather than a tinted image, so it is told which ground it is
         // on rather than handed a colour — see `BackdropThemedControl.hostGround`, and the

@@ -534,15 +534,15 @@ final class ExtensionAppearanceTests: XCTestCase {
 
     /// The whole selection lifecycle in one arc: the stored choice cannot resolve at launch and
     /// falls back without being forgotten; the extension enabling makes it resolvable and it is
-    /// taken again; the extension disabling falls back to System *as the recorded choice*, so a
+    /// taken again; the extension disabling falls back to Threading *as the recorded choice*, so a
     /// later re-enable does not snap the theme back over whatever was chosen since.
     func testTheStoredChoiceHealsOnEnableAndFallsBackHonestlyOnDisable() {
         let theme = contributedTheme()
         PreferenceStore.shared.set(theme.id.rawValue, forKey: "appThemeID")
         AppThemeLibrary.restore()
         XCTAssertEqual(
-            AppThemeLibrary.current.id, AppThemeID("system"),
-            "an unresolvable stored choice falls back to System at launch"
+            AppThemeLibrary.current.id, AppThemeStyles.threading.id,
+            "an unresolvable stored choice falls back to the product default at launch"
         )
 
         ExtensionAppearanceRegistry.shared.replace(
@@ -554,9 +554,9 @@ final class ExtensionAppearanceTests: XCTestCase {
         )
 
         ExtensionAppearanceRegistry.shared.replace(contributions: [])
-        XCTAssertEqual(AppThemeLibrary.current.id, AppThemeID("system"))
+        XCTAssertEqual(AppThemeLibrary.current.id, AppThemeStyles.threading.id)
         XCTAssertEqual(
-            PreferenceStore.shared.string(forKey: "appThemeID"), "system",
+            PreferenceStore.shared.string(forKey: "appThemeID"), AppThemeStyles.threading.id.rawValue,
             "the fallback is recorded, so re-enabling does not snap the theme back"
         )
 
@@ -564,8 +564,8 @@ final class ExtensionAppearanceTests: XCTestCase {
             contributions: [contribution(themes: [theme])]
         )
         XCTAssertEqual(
-            AppThemeLibrary.current.id, AppThemeID("system"),
-            "System stays: it is the recorded choice now, not a fallback"
+            AppThemeLibrary.current.id, AppThemeStyles.threading.id,
+            "Threading stays: it is the recorded choice now, not a fallback"
         )
     }
 

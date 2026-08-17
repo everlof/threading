@@ -115,6 +115,11 @@ struct ThemedMenuItem {
     var titleDetail: String?
     var image: NSImage?
     var preview: ThemedMenuPreview?
+    /// A second action offered at the trailing edge under the pointer, which does not choose the
+    /// row. See `ThemedMenuAccessory`. Set after construction like the other trailing columns,
+    /// because it is a property of the *list* a row was put in — one caller builds the row and
+    /// the list's owner decides that its rows can be auditioned.
+    var accessory: ThemedMenuAccessory?
     var representedValue: Any?
     var isSelected: Bool
     var isEnabled: Bool
@@ -296,6 +301,48 @@ struct ThemedMenuPreview {
     var highlightChanged: ((Bool) -> Void)?
 }
 
+/// A second thing a row can do, offered at its trailing edge and never chosen by accident.
+///
+/// A row answers a press with one action — choosing it — and that is the right contract almost
+/// everywhere. It is the wrong one for a list whose entries are something to *experience* rather
+/// than read. A sound is the case: its name is not the sound, so the only way to find out what
+/// `Funk` is was to accept it, and comparing three of them left the third one written into the
+/// setting whether or not it was the one wanted.
+///
+/// Three properties make that safe, and all three are the point:
+///
+/// - **It never chooses.** The press is consumed here, so the menu stays open and the setting
+///   stays where it was. Comparing is the whole reason the affordance exists.
+/// - **It is quiet until the row is current.** Nothing is drawn until the pointer is on the row
+///   or the keyboard highlight is, which is the same rule the chrome keeps everywhere else: a
+///   column of glyphs down a menu of names would compete with the names.
+/// - **Its column is reserved on every row of the menu regardless.** Revealing a control that
+///   was not costing width would reflow the row under the pointer, and a title that shortens as
+///   you arrive is worse than a glyph that was always there.
+///
+/// One gesture deliberately ignores it: a press held on the control that opened the menu and
+/// released over a row chooses that row, accessory or not. A sweep is a choosing gesture from the
+/// moment it leaves the button — the platform's own menus track a held press exactly this way and
+/// offer nothing to press inside one — so the accessory answers a click on an open menu, which is
+/// how a picker is actually used. `ThemedMenuAccessoryTests` pins it so the day it changes is a
+/// decision.
+struct ThemedMenuAccessory {
+    /// The symbol drawn in the trailing slot, resolved through `ThemedMenuIcon` so it is the
+    /// size and weight every other mark in a menu is.
+    let symbolName: String
+    /// What pressing it does, in the imperative: "Play". VoiceOver offers it under this name and
+    /// the row says it as a tooltip while the pointer is on the glyph, which is the only
+    /// explanation a hover-revealed control gets to give.
+    let title: String
+    let action: () -> Void
+
+    init(symbolName: String, title: String, action: @escaping () -> Void) {
+        self.symbolName = symbolName
+        self.title = title
+        self.action = action
+    }
+}
+
 /// The mark a menu row leads with, resolved once at the menu's own size and weight.
 ///
 /// A row's `image` stays an `NSImage` because it is not always a symbol — an installed app's
@@ -311,6 +358,18 @@ enum ThemedMenuIcon {
             name,
             slot: ThemedMenuMetrics.imageSize,
             pointSize: Design.Symbol.control
+        )
+    }
+
+    /// The same, one column over and one size down: a trailing accessory's glyph. The point size
+    /// is derived from the slot rather than stated, so a smaller mark is *configured* smaller and
+    /// keeps the stroke weight its optical size chose instead of being a shrunk render of a
+    /// larger one.
+    static func accessorySymbol(_ name: String) -> NSImage? {
+        Design.Symbol.image(
+            name,
+            slot: ThemedMenuMetrics.accessorySize,
+            pointSize: Design.Symbol.pointSize(forSlot: ThemedMenuMetrics.accessorySize)
         )
     }
 }
@@ -1721,11 +1780,24 @@ private final class ThemedMenuOverlayView: ThemedControl {
 
     /// Right arrow: the highlighted parent row opens, with its first row lit — keyboard
     /// travel always says where it landed.
+    /// Right arrow: reach into the highlighted row.
+    ///
+    /// On a row that opens a submenu that means the submenu, which is what the key has always
+    /// done here and what the platform's own menus do. On a row that opens nothing and carries a
+    /// trailing accessory it means the accessory — the key was inert on such a row, and the
+    /// alternative was leaving a hover-revealed control with no key at all. It cannot be Space or
+    /// Return: both choose the row, which is precisely the commitment an accessory exists to
+    /// avoid.
     private func openSubmenuFromKeyboard() {
         let columnIndex = columns.count - 1
         guard columnIndex >= 0,
               let highlighted = columns[columnIndex].highlightedIndex
         else { return }
+        if let row = columns[columnIndex].surface.row(at: highlighted),
+           row.item.submenu == nil,
+           row.performAccessory() {
+            return
+        }
         openSubmenu(columnIndex: columnIndex, entryIndex: highlighted, highlightFirst: true)
     }
 
@@ -2049,6 +2121,39 @@ enum ThemedMenuMetrics {
     }
     static var submenuChevronSlot: CGFloat {
         submenuChevronSize + (usesClassicGrammar ? 4 : Design.Spacing.small)
+    }
+
+    /// The hover-revealed action's glyph, and the column it sits in — the outermost trailing one,
+    /// outside the submenu chevron, because it is the only thing on a row that is *pressed* and a
+    /// press wants the edge rather than a slot between two others.
+    ///
+    /// Smaller than a row's leading mark (`imageSize`): that column names what a row is and is
+    /// read down the menu as a column, while this one is a control on a single row and is drawn
+    /// only where the pointer already is.
+    static var accessorySize: CGFloat { usesClassicGrammar ? 11 : 13 }
+    static var accessorySlot: CGFloat {
+        accessorySize + (usesClassicGrammar ? 4 : Design.Spacing.small)
+    }
+    /// How far past its glyph the press still lands. A 13pt symbol is a 13pt target, which is
+    /// under half of what a pointer is aimed with; the padding is invisible and the difference
+    /// between a control and a dare. It never reaches past the glyph's own column, so the row
+    /// beside it keeps every pixel a press on the *row* can land on.
+    static var accessoryHitPadding: CGFloat { Design.Spacing.tight }
+    /// What a press takes off the accessory's ink — the same answer `ThemedButton` gives a press,
+    /// an alpha step rather than a second surface. A plate was drawn here first and was invisible:
+    /// the row under it is *already* filled with `controlHover`, because the accessory only ever
+    /// appears on the row the pointer or the highlight is on, so the press painted the hover fill
+    /// over itself. Ink is the only channel this glyph has left, and it is enough.
+    static let accessoryPressedDimming: CGFloat = 0.55
+
+    /// Reserved on the image column's terms — only when some row in this menu carries one — and
+    /// then on **every** row of it. A slot that appeared with the pointer would reflow the title
+    /// underneath it, so the width is spent whether or not the row draws anything in it.
+    static func hasAccessoryColumn(_ entries: [ThemedMenuEntry]) -> Bool {
+        entries.contains { entry in
+            guard case .item(let item) = entry else { return false }
+            return item.accessory != nil
+        }
     }
 
     static var titleFont: NSFont {
@@ -2470,6 +2575,7 @@ enum ThemedMenuMetrics {
         let imageColumn = hasImageColumn(entries) ? imageSlot : 0
         let previewColumn = hasPreviewColumn(entries) ? previewSlot : 0
         let chevronColumn = hasSubmenuColumn(entries) ? submenuChevronSlot : 0
+        let accessoryColumn = hasAccessoryColumn(entries) ? accessorySlot : 0
         let shortcutColumn = shortcutColumnWidth(entries)
         let marks = checkColumn(entries, selectedEntryIndex: selectedEntryIndex)
         let markColumn = markWidth(checkColumn: marks, hasImageColumn: imageColumn > 0)
@@ -2478,7 +2584,8 @@ enum ThemedMenuMetrics {
             ? max(markColumn, previewColumn)
             : ownCheckColumn + markColumn + previewColumn
         let content = outerInset * 2 + contentInset * 2
-            + leadingColumns + text + chevronColumn + metricReservation(entries)
+            + leadingColumns + text + chevronColumn + accessoryColumn
+            + metricReservation(entries)
             + (shortcutColumn > 0 ? shortcutGap + shortcutColumn : 0)
         return min(max(minimum, content), ThemedMenuLayout.maximumWidth)
     }
@@ -2567,6 +2674,7 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         let hasImageColumn = ThemedMenuMetrics.hasImageColumn(entries)
         let hasPreviewColumn = ThemedMenuMetrics.hasPreviewColumn(entries)
         let hasSubmenuColumn = ThemedMenuMetrics.hasSubmenuColumn(entries)
+        let hasAccessoryColumn = ThemedMenuMetrics.hasAccessoryColumn(entries)
         let shortcutColumnWidth = ThemedMenuMetrics.shortcutColumnWidth(entries)
         let metricColumns = ThemedMenuMetrics.metricColumns(entries)
         let metricColumnWidth = ThemedMenuMetrics.metricColumnWidth(entries)
@@ -2588,6 +2696,7 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
                     hasImageColumn: hasImageColumn,
                     hasPreviewColumn: hasPreviewColumn,
                     hasSubmenuColumn: hasSubmenuColumn,
+                    hasAccessoryColumn: hasAccessoryColumn,
                     shortcutColumnWidth: shortcutColumnWidth,
                     preferredHeight: entryHeights[index],
                     metricColumns: metricColumns,
@@ -2774,17 +2883,65 @@ enum ThemedMenuReferenceFixture {
         entries: [ThemedMenuEntry],
         size: NSSize,
         selectedEntryIndex: Int? = nil,
-        highlightedEntryIndex: Int? = nil
+        highlightedEntryIndex: Int? = nil,
+        onChoose: ((Int) -> Void)? = nil
     ) -> NSView {
         let surface = ThemedMenuSurfaceView(
             frame: NSRect(origin: .zero, size: size),
             entries: entries,
             selectedEntryIndex: selectedEntryIndex
         )
+        if let onChoose {
+            surface.onChoose = { index, _ in onChoose(index) }
+        }
         surface.highlight(highlightedEntryIndex, scrollIntoView: false)
         surface.layoutSubtreeIfNeeded()
         surface.needsDisplay = true
         return surface
+    }
+
+    /// Where an entry's trailing accessory answers a press, in the made surface's own
+    /// coordinates.
+    ///
+    /// Asked of the row rather than recomputed from `ThemedMenuMetrics` at the call site: a test
+    /// that derives the target itself is a second implementation of the layout it is checking,
+    /// and it passes when both copies are wrong in the same way.
+    /// `view` may be the surface itself or anything containing one — a presented menu wraps it in
+    /// an overlay and a panel chassis, and a test should not have to know that shape to aim at a
+    /// control. The rect comes back in `view`'s own coordinates either way.
+    static func accessoryHitRect(in view: NSView, entryIndex: Int) -> NSRect? {
+        guard let surface = surface(in: view),
+              let row = surface.row(at: entryIndex),
+              row.item.accessory != nil
+        else { return nil }
+        return row.convert(row.accessoryHitRect, to: view)
+    }
+
+    /// The two states only a pointer produces: the accessory lit under it, and held down.
+    ///
+    /// A render fixture builds a window nobody sees and moves no mouse, so without this the two
+    /// states that exist *because* of the pointer would be the two nobody ever looks at. It sets
+    /// what the tracking area and the press set and nothing else, so what it draws is what a
+    /// press draws — the routing that decides *whether* a press lands on the accessory is left to
+    /// the ordinary event path, where a behaviour test drives it.
+    static func setAccessoryPointerState(
+        in view: NSView,
+        entryIndex: Int,
+        hovering: Bool,
+        pressed: Bool
+    ) {
+        guard let row = surface(in: view)?.row(at: entryIndex) else { return }
+        row.setAccessoryPointerState(hovering: hovering, pressed: pressed)
+    }
+
+    /// The first menu panel in a subtree, so a caller can hand over whichever view it happens to
+    /// hold — the surface a fixture made, or the overlay a presenter added to a window.
+    private static func surface(in view: NSView) -> ThemedMenuSurfaceView? {
+        if let surface = view as? ThemedMenuSurfaceView { return surface }
+        for subview in view.subviews {
+            if let found = surface(in: subview) { return found }
+        }
+        return nil
     }
 
     /// A clipped source-sized view of a live submenu cascade. The production presenter owns
@@ -3093,6 +3250,10 @@ private final class ThemedMenuRowView: ThemedControl {
     private let hasImageColumn: Bool
     private let hasPreviewColumn: Bool
     private let hasSubmenuColumn: Bool
+    /// Again the *menu's* answer rather than this row's: a row with no accessory in a menu that
+    /// has them still starts its trailing columns after the slot, or the titles either side of it
+    /// would end at two different places.
+    private let hasAccessoryColumn: Bool
     private let shortcutColumnWidth: CGFloat
     /// The menu's shared column plan, so this row puts its `7d` where every other row puts its
     /// `7d` — including the rows that have no `7d` and leave the cell empty.
@@ -3106,6 +3267,24 @@ private final class ThemedMenuRowView: ThemedControl {
     /// The pointer is on a row that cannot be chosen. It answers with a wash far fainter
     /// than the hover fill — feedback that the hover was seen, not an invitation.
     private var isDisabledHover = false { didSet { needsDisplay = true } }
+
+    /// The pointer is on the accessory in particular, rather than merely on the row carrying it.
+    /// A revealed control that does not answer its own hover is a picture of a button.
+    private var isAccessoryHovered = false {
+        didSet {
+            guard isAccessoryHovered != oldValue else { return }
+            needsDisplay = true
+            updateToolTip()
+        }
+    }
+    /// A press that began on the accessory. Held separately from `pressed` because the two mean
+    /// opposite things on release: this one runs the accessory and leaves the menu standing,
+    /// while `pressed` chooses the row and closes it.
+    private var accessoryPressed = false { didSet { needsDisplay = true } }
+    /// A second area over the accessory's own rectangle. `ThemedControl` owns the row's, and the
+    /// row's cannot answer this question: the pointer moving from a title onto the glyph beside
+    /// it crosses nothing the row can see.
+    private var accessoryTrackingArea: NSTrackingArea?
 
     /// The open panel this row fathered, while it is open. It keeps the row drawing the
     /// menu-path highlight — the parent stays lit wherever the pointer is in its chain, as
@@ -3143,6 +3322,7 @@ private final class ThemedMenuRowView: ThemedControl {
         hasImageColumn: Bool,
         hasPreviewColumn: Bool,
         hasSubmenuColumn: Bool,
+        hasAccessoryColumn: Bool = false,
         shortcutColumnWidth: CGFloat,
         /// The menu's, not the row's: `ThemedMenuMetrics.heights(for:)` decides it from the run
         /// this row sits in, so neighbours stacked against each other keep one rhythm.
@@ -3158,6 +3338,7 @@ private final class ThemedMenuRowView: ThemedControl {
         self.hasImageColumn = hasImageColumn
         self.hasPreviewColumn = hasPreviewColumn
         self.hasSubmenuColumn = hasSubmenuColumn
+        self.hasAccessoryColumn = hasAccessoryColumn
         self.shortcutColumnWidth = shortcutColumnWidth
         self.metricColumns = metricColumns
         self.metricColumnWidth = metricColumnWidth
@@ -3165,12 +3346,25 @@ private final class ThemedMenuRowView: ThemedControl {
         self.preferredHeight = preferredHeight
         reservesSubtitleLine = preferredHeight >= ThemedMenuMetrics.subtitleRowHeight
         super.init(frame: .zero)
-        // The whole reading, not the subtitle alone: once the numbers are columns and a drawn
-        // bar, a tooltip carrying only the leftover line would name less than the row shows.
+        updateToolTip()
+        installPreview()
+    }
+
+    /// What the row says when the pointer rests on it.
+    ///
+    /// The whole reading, not the subtitle alone: once the numbers are columns and a drawn bar, a
+    /// tooltip carrying only the leftover line would name less than the row shows. On the
+    /// accessory it becomes the accessory's own name instead — a glyph that appeared under the
+    /// pointer has no other way to say what it does, and while the pointer is on it the row's
+    /// reading is not the question being asked.
+    private func updateToolTip() {
+        if isAccessoryHovered, let accessory = item.accessory {
+            toolTip = accessory.title
+            return
+        }
         toolTip = item.metrics.isEmpty && item.trailingDetail == nil
             ? item.subtitle
             : item.spokenSummary
-        installPreview()
     }
 
     // MARK: - Submenu
@@ -3271,6 +3465,13 @@ private final class ThemedMenuRowView: ThemedControl {
         if newWindow == nil, isKeyboardHighlighted {
             isKeyboardHighlighted = false
         }
+        if newWindow == nil {
+            // Detachment produces no pointer exit, and a retained row must not come back holding
+            // a lit accessory or a half-finished press. `ThemedControl` says the same about the
+            // row's own hover.
+            isAccessoryHovered = false
+            accessoryPressed = false
+        }
     }
 
     /// Reports to the preview, unless this row no longer speaks for it.
@@ -3303,17 +3504,40 @@ private final class ThemedMenuRowView: ThemedControl {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // Reported first and unconditionally, exactly as before: the held-press tracking this
+        // arms belongs to the menu, and a press that turns out to be an audition is still a
+        // press the menu has to know about.
         onPressBegan?(event)
         guard item.isEnabled else { return }
+        if hitsAccessory(event) {
+            accessoryPressed = true
+            return
+        }
         pressed = true
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard item.isEnabled else { return }
+        // A drag off the glyph disarms the audition rather than promoting it to a choice. A
+        // press that began on a control and ended somewhere else does nothing, which is what
+        // every button on the platform does and is the escape hatch from a mispress.
+        if accessoryPressed {
+            accessoryPressed = hitsAccessory(event)
+            return
+        }
         pressed = bounds.contains(convert(event.locationInWindow, from: nil))
     }
 
     override func mouseUp(with event: NSEvent) {
+        if accessoryPressed {
+            accessoryPressed = false
+            if hitsAccessory(event) {
+                performAccessory()
+            }
+            // Never falls through to the choice. The menu is still standing and the setting is
+            // still whatever it was, which is the entire contract of an audition.
+            return
+        }
         guard pressed else { return }
         pressed = false
         if bounds.contains(convert(event.locationInWindow, from: nil)) {
@@ -3325,6 +3549,110 @@ private final class ThemedMenuRowView: ThemedControl {
         guard item.isEnabled else { return false }
         onChoose?(entryIndex, item)
         return true
+    }
+
+    // MARK: - Accessory
+
+    /// The glyph's own rectangle, on the row's first line like everything else trailing.
+    private var accessoryRect: NSRect {
+        NSRect(
+            x: bounds.maxX - ThemedMenuMetrics.contentInset - ThemedMenuMetrics.accessorySize,
+            y: firstLineCenterY - ThemedMenuMetrics.accessorySize / 2,
+            width: ThemedMenuMetrics.accessorySize,
+            height: ThemedMenuMetrics.accessorySize
+        )
+    }
+
+    /// What a press has to land in, which is larger than what is drawn — and clamped to the row,
+    /// so padding a small glyph never quietly claims part of the row above or below it.
+    var accessoryHitRect: NSRect {
+        accessoryRect
+            .insetBy(
+                dx: -ThemedMenuMetrics.accessoryHitPadding,
+                dy: -ThemedMenuMetrics.accessoryHitPadding
+            )
+            .intersection(bounds)
+    }
+
+    private func hitsAccessory(_ event: NSEvent) -> Bool {
+        guard item.accessory != nil else { return false }
+        return accessoryHitRect.contains(convert(event.locationInWindow, from: nil))
+    }
+
+    /// The pointer's two states, for the fixture that has no pointer. See
+    /// `ThemedMenuReferenceFixture.setAccessoryPointerState`.
+    func setAccessoryPointerState(hovering: Bool, pressed: Bool) {
+        isAccessoryHovered = hovering
+        accessoryPressed = pressed
+    }
+
+    /// Runs the accessory. The one entry point, so the pointer, the right arrow and VoiceOver
+    /// cannot end up doing three slightly different things.
+    @discardableResult
+    func performAccessory() -> Bool {
+        guard item.isEnabled, let accessory = item.accessory else { return false }
+        accessory.action()
+        return true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+
+        if let accessoryTrackingArea {
+            removeTrackingArea(accessoryTrackingArea)
+            self.accessoryTrackingArea = nil
+        }
+        guard item.accessory != nil else {
+            isAccessoryHovered = false
+            return
+        }
+
+        // An explicit rectangle rather than `.inVisibleRect`, which would snap the area to the
+        // whole visible row and answer for the title as well as the glyph.
+        let area = NSTrackingArea(
+            rect: accessoryHitRect,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self
+        )
+        addTrackingArea(area)
+        accessoryTrackingArea = area
+
+        // Tracking is rebuilt exactly when this row's geometry changed — a scroll, a resize —
+        // which is the one moment a hover can have gone stale with the pointer never moving.
+        // `ThemedControl` does this for the row; the sub-rect is ours to answer for.
+        if isAccessoryHovered, !accessoryHitRect.contains(
+            convert(window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)
+        ) {
+            isAccessoryHovered = false
+        }
+    }
+
+    /// Both areas report here, and only one of them is the row's.
+    ///
+    /// Passing an accessory crossing to `super` would be the bug this split exists to avoid: the
+    /// pointer moving from the title onto the glyph beside it exits nothing, but the second area's
+    /// *entry* would set the row's hover a second time and its exit — fired while the pointer is
+    /// still well inside the row — would clear it, so a row would go dark as the pointer arrived
+    /// at the control it was reaching for.
+    override func mouseEntered(with event: NSEvent) {
+        if event.trackingArea === accessoryTrackingArea {
+            isAccessoryHovered = true
+            return
+        }
+        super.mouseEntered(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if event.trackingArea === accessoryTrackingArea {
+            isAccessoryHovered = false
+            accessoryPressed = false
+            return
+        }
+        // Leaving the row leaves everything on it. The sub-area fires its own exit for an
+        // ordinary crossing, but not when the row is removed from under a still pointer.
+        isAccessoryHovered = false
+        accessoryPressed = false
+        super.mouseExited(with: event)
     }
 
     override func isAccessibilityElement() -> Bool { true }
@@ -3349,6 +3677,23 @@ private final class ThemedMenuRowView: ThemedControl {
     /// submenu it has opened is its child, exactly as the platform models an item's menu.
     override func accessibilityChildren() -> [Any]? {
         openSubmenuSurface.map { [$0] } ?? []
+    }
+
+    /// The accessory, offered as an action on the row rather than as an element inside it.
+    ///
+    /// This is what keeps the rule above true. A second focusable thing in a menu item would put
+    /// an element between a menu and its items where the platform models none, and every consumer
+    /// that walks a menu expecting rows would find one row wearing a button. An action is the
+    /// platform's own answer for "this element can do a second thing", it is announced with the
+    /// row rather than found by hunting inside it, and it reaches exactly the same code the
+    /// pointer does.
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        guard item.isEnabled, let accessory = item.accessory else { return nil }
+        return [
+            NSAccessibilityCustomAction(name: accessory.title) { [weak self] in
+                self?.performAccessory() ?? false
+            }
+        ]
     }
 
     // MARK: - Drawing
@@ -3495,11 +3840,16 @@ private final class ThemedMenuRowView: ThemedControl {
             draw(image, in: imageRect, tint: glyph)
         }
 
+        // The accessory owns the outermost trailing column, so a chevron steps inward by its
+        // slot — measured off the menu's answer, not this row's, or a chevron would sit at two
+        // different x positions down one panel.
+        let accessoryColumn = hasAccessoryColumn ? ThemedMenuMetrics.accessorySlot : 0
+
         if item.submenu != nil {
             drawChevron(
                 in: NSRect(
                     x: bounds.maxX - ThemedMenuMetrics.submenuTrailingInset
-                        - ThemedMenuMetrics.submenuChevronSize,
+                        - ThemedMenuMetrics.submenuChevronSize - accessoryColumn,
                     y: lineY - ThemedMenuMetrics.submenuChevronSize / 2,
                     width: ThemedMenuMetrics.submenuChevronSize,
                     height: ThemedMenuMetrics.submenuChevronSize
@@ -3507,6 +3857,8 @@ private final class ThemedMenuRowView: ThemedControl {
                 color: label
             )
         }
+
+        drawAccessory(label: label, secondary: secondary)
 
         guard drawsTitle else { return }
 
@@ -3540,7 +3892,10 @@ private final class ThemedMenuRowView: ThemedControl {
         // down to the middle of its slot.
         let titleY = lineY - titleHeight / 2 + ThemedMenuMetrics.titleBaselineOffset
         let subtitleY = titleY - ThemedMenuMetrics.subtitleGap - subtitleHeight
-        let chevronColumn = hasSubmenuColumn ? ThemedMenuMetrics.submenuChevronSlot : 0
+        // Everything reserved at the trailing edge before the readings begin: the chevron column
+        // and the accessory column, each present only if some row in this menu carries one.
+        let trailingColumns = (hasSubmenuColumn ? ThemedMenuMetrics.submenuChevronSlot : 0)
+            + accessoryColumn
         let shortcutReservation = shortcutColumnWidth > 0
             ? ThemedMenuMetrics.shortcutGap + shortcutColumnWidth
             : 0
@@ -3548,7 +3903,7 @@ private final class ThemedMenuRowView: ThemedControl {
         // The columns are fixed and the name is elastic — the inversion of the line this
         // replaced, where the name set the numbers' positions and the countdown lost its digits.
         let metricReservation = drawMetricColumns(
-            trailingEdge: bounds.maxX - ThemedMenuMetrics.contentInset - chevronColumn
+            trailingEdge: bounds.maxX - ThemedMenuMetrics.contentInset - trailingColumns
                 - shortcutReservation,
             centeredOn: titleY + titleHeight / 2,
             selection: selection,
@@ -3557,7 +3912,7 @@ private final class ThemedMenuRowView: ThemedControl {
         )
         let textWidth = max(
             0,
-            bounds.maxX - ThemedMenuMetrics.contentInset - chevronColumn
+            bounds.maxX - ThemedMenuMetrics.contentInset - trailingColumns
                 - shortcutReservation - metricReservation - x
         )
         // Win98's GDI text, Platinum's QuickDraw menu face, and Workbench's Topaz menu strike
@@ -3623,7 +3978,7 @@ private final class ThemedMenuRowView: ThemedControl {
         }
 
         if let key = item.keyEquivalent, !key.isEmpty, shortcutColumnWidth > 0 {
-            let shortcutX = bounds.maxX - ThemedMenuMetrics.contentInset - chevronColumn
+            let shortcutX = bounds.maxX - ThemedMenuMetrics.contentInset - trailingColumns
                 - shortcutColumnWidth
             drawKeyEquivalent(
                 key,
@@ -3867,6 +4222,42 @@ private final class ThemedMenuRowView: ThemedControl {
                 .font: font, .foregroundColor: color, .paragraphStyle: style
             ]
         )
+    }
+
+    /// The trailing accessory, drawn only where the row is current — under the pointer, or under
+    /// the keyboard highlight so the right arrow is offering something visible.
+    ///
+    /// Three states, and the step between each is **ink only**: `secondary` where the row is
+    /// merely current, `label` with the pointer on the glyph, and `label` dimmed while it is held
+    /// down. That is the rule `ChipView` keeps, for the same reason — anything that changes a
+    /// control's size or weight under the pointer moves the row while it is being aimed at — and
+    /// the dim is the answer `ThemedButton` gives a press.
+    ///
+    /// A plate behind the glyph was drawn here first and was invisible: this only ever appears on
+    /// a row that is already filled with `controlHover`, so the press painted the hover fill over
+    /// itself. The render is what said so.
+    ///
+    /// Both inks arrive resolved, including the flattening a classic selection band does to
+    /// everything drawn over it, so this cannot state a colour the rest of the row disagrees with.
+    private func drawAccessory(label: NSColor, secondary: NSColor) {
+        guard item.isEnabled,
+              let accessory = item.accessory,
+              // The pointer being on the glyph is the pointer being on the row; the third term
+              // only matters to a fixture that sets one without the other.
+              isKeyboardHighlighted || isHovered || isAccessoryHovered,
+              let image = ThemedMenuIcon.accessorySymbol(accessory.symbolName)
+        else { return }
+
+        var tint = isAccessoryHovered || accessoryPressed ? label : secondary
+        if accessoryPressed {
+            // Resolve, then multiply: `withAlphaComponent` replaces an alpha outright, and every
+            // label tier below `label` is defined *as* one.
+            let resolved = tint.usingColorSpace(.sRGB) ?? tint
+            tint = resolved.withAlphaComponent(
+                resolved.alphaComponent * ThemedMenuMetrics.accessoryPressedDimming
+            )
+        }
+        draw(image, in: accessoryRect, tint: tint)
     }
 
     private func drawKeyEquivalent(

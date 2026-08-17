@@ -2910,6 +2910,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             cell.configure(
                 with: terminal,
                 running: ProjectTerminalRuntime.shared.isRunning(terminalID: terminal.id),
+                busy: ProjectTerminalRuntime.shared.isBusy(terminalID: terminal.id),
                 projectRoot: terminalNode.displayProjectFolderPath
             )
             cell.onAction = { [weak self] terminalID, anchor in

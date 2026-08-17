@@ -257,6 +257,15 @@ for every project and a row that asked again would pay it per row, per reload. A
 **computed, not stored**: a `cd` moves the name with no write, and a dormant record cannot show
 the name of a command that stopped running two launches ago.
 
+**That foreground group is also the standalone terminal's working boundary.** The shell itself
+stays alive at its prompt, so `TerminalSession.isRunning` cannot distinguish `sleep 10` from an
+idle terminal, and PTY-output inference cannot see a silent command at all. The cached group
+presence therefore drives the terminal row's themed spinner, independently of whether the
+kernel yielded a printable process name. The same existing poll posts the targeted row refresh;
+there is no second timer, process walk or output heuristic. Under the pointer the spinner yields
+to the terminal action in the same fixed trailing slot, and on an emphasized selection it takes
+the selection's ink rather than drawing accent on accent.
+
 The drawer is a **tab host** (`DrawerHostViewController`) on the same model as the display
 panel — `PaneTab` lists per session, a `ThemedTabStripView` along its top, a `+` for another
 tab. The shell is its *default first tab*, auto-created the first time the drawer opens for a
@@ -415,6 +424,14 @@ about the clock at all. The rule lives in one place with the date as a *paramete
 randomness injected, so tests pass a fixed date and a seeded generator; production reads the
 clock only at the call site. The hero hides below a height threshold
 (`viewDidLayout`) — half a greeting peeking from behind the prompt reads as a defect.
+
+Choosing **Manager** replaces that greeting with what a manager is for — three lines rather than
+one (`ComposerDefaults.managerGreeting`) — and the hero *morphs* between the two: it is one
+`MorphingMultilineTitleLabel`, so the greeting becomes the brief's first line while the other two
+morph in beneath it, and back out again on the way to a chat. It was two labels swapped by
+`isHidden`, which cut between them in the one place on this screen the eye is already resting.
+See [`design-system.md`](design-system.md) for why a block of lines is what morphs and a
+paragraph is not.
 
 **The prompt box carries the same control row the conversation replies with** — model, mode and
 catalog-backed effort on the leading side of its bottom row, the account's usage reading and the

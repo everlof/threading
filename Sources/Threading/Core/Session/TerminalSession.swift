@@ -66,6 +66,13 @@ final class TerminalSession: NSObject {
 
     private var foregroundGroup: pid_t?
 
+    /// Whether a command rather than the shell itself currently owns the terminal.
+    ///
+    /// Kept separately from `foregroundProcessName`: naming is best-effort, while the foreground
+    /// process-group reading itself is the exact fact the standalone terminal's activity mark
+    /// needs. A command whose argument area cannot be read is still a command in progress.
+    var hasForegroundProcess: Bool { foregroundGroup != nil }
+
     /// The primary side of the pty, which is what `tcgetpgrp` must be asked.
     private var ptyDescriptor: Int32 {
         terminalView.process?.childfd ?? -1
@@ -603,13 +610,14 @@ final class TerminalSession: NSObject {
     @discardableResult
     func refreshForegroundProcess() -> Bool {
         guard isRunning, shellPid > 0 else {
-            let changed = foregroundProcessName != nil || reportedTitle != nil
+            let changed = hasForegroundProcess || foregroundProcessName != nil || reportedTitle != nil
             clearForegroundState()
             return changed
         }
 
         var changed = false
         let group = ProcessUtility.foregroundProcessGroup(ofPTY: ptyDescriptor, shellPid: shellPid)
+        let hadForegroundProcess = hasForegroundProcess
 
         if group != foregroundGroup {
             foregroundGroup = group
@@ -621,6 +629,12 @@ final class TerminalSession: NSObject {
                 foregroundProcessName = name
                 changed = true
             }
+        }
+
+        // The sidebar's working mark follows ownership, not whether the kernel also yielded a
+        // printable process name. Preserve that edge even when `processName` returns nil.
+        if hadForegroundProcess != hasForegroundProcess {
+            changed = true
         }
 
         if let owner = reportedTitleOwner, owner != group {

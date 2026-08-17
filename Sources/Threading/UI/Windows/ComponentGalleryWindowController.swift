@@ -119,6 +119,7 @@ final class ComponentGalleryViewController: NSViewController {
         "MediaDocumentPlayerView",
         "MediaInspectorView",
         "MediaTransportView",
+        "MorphingMultilineTitleLabel",
         "MorphingTitleLabel",
         "NavigatorGridItemView",
         "PageTitleView",
@@ -243,6 +244,12 @@ final class ComponentGalleryViewController: NSViewController {
     private let submissionStatus = SubmissionStatusView()
     private let workingOrbs = OrbState.allCases.map { WorkingOrbView(state: $0) }
     private let morphingTitle = MorphingTitleLabel()
+
+    /// The block story's sample and which of the two values it is holding. Both values are the
+    /// composer's own, because the transition this component exists for is that screen's: a
+    /// greeting on one line against a manager's brief on three.
+    private let morphingBlock = MorphingMultilineTitleLabel()
+    private var morphingBlockShowsBrief = false
 
     /// The highlight story's field and the lines it marks, retained so typing re-marks them.
     /// A search's answer is the one thing here that cannot be shown at rest: the component's
@@ -1768,6 +1775,14 @@ final class ComponentGalleryViewController: NSViewController {
         morphingTitle.widthAnchor.constraint(equalToConstant: 260).isActive = true
         let morphButton = button("Preview rename", action: #selector(previewTitleMorph))
 
+        morphingBlock.applyFont(.emphasizedBody)
+        morphingBlock.setStringValue(ComposerGreeting.message(), animated: false)
+        // A floor rather than a width: the block is as wide as its widest line, and a story whose
+        // button slid left and right with the greeting it was previewing would be demonstrating
+        // the row rather than the component.
+        morphingBlock.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
+        let blockButton = button("Preview block", action: #selector(previewBlockMorph))
+
         progressBar.progress = progress
         progressBar.translatesAutoresizingMaskIntoConstraints = false
         progressBar.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
@@ -1830,6 +1845,13 @@ final class ComponentGalleryViewController: NSViewController {
                     "MorphingTitleLabel",
                     "The selected chat-name effect with fixed, app-owned timing.",
                     row([morphingTitle, morphButton])
+                ),
+                story(
+                    "MorphingMultilineTitleLabel",
+                    "A block of authored lines that morphs one line at a time. These are the "
+                        + "composer's own two values: a greeting on one line against a manager's "
+                        + "brief on three, so the block gains and loses lines as it goes.",
+                    row([morphingBlock, blockButton])
                 ),
                 story(
                     "ThemedProgressBar",
@@ -5030,6 +5052,22 @@ final class ComponentGalleryViewController: NSViewController {
         showReceipt(
             L10n.format(
                 "MorphingTitleLabel previewed %@.",
+                AppSettings.shared.chatNameMorphStyle.displayName
+            )
+        )
+    }
+
+    @objc private func previewBlockMorph() {
+        morphingBlockShowsBrief.toggle()
+        // A fresh greeting each time it comes back, which is what the composer does too — so the
+        // one-line end of the transition is a different line each pass rather than a rehearsal.
+        morphingBlock.setStringValue(
+            morphingBlockShowsBrief ? ComposerDefaults.managerGreeting : ComposerGreeting.message(),
+            animated: true
+        )
+        showReceipt(
+            L10n.format(
+                "MorphingMultilineTitleLabel previewed %@.",
                 AppSettings.shared.chatNameMorphStyle.displayName
             )
         )

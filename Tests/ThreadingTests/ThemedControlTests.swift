@@ -7221,6 +7221,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "MediaDocumentPlayerView",
                 "MediaInspectorView",
                 "MediaTransportView",
+                "MorphingMultilineTitleLabel",
                 "MorphingTitleLabel",
                 "NavigatorGridItemView",
                 "PageTitleView",

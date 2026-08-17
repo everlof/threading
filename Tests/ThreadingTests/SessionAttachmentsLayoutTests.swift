@@ -169,6 +169,16 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         return url
     }
 
+    private func writeHTML(named name: String = "report.html") throws -> URL {
+        let url = root.appendingPathComponent(name)
+        try "<!doctype html><title>Report</title><p>Done</p>".write(
+            to: url,
+            atomically: true,
+            encoding: .utf8
+        )
+        return url
+    }
+
     private func button(titled title: String, in view: NSView) throws -> NSView {
         try XCTUnwrap(
             descendants(of: view)
@@ -496,6 +506,31 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         _ = try button(titled: L10n.string("Finder"), in: try footerBand(in: pane.view))
     }
 
+    /// A browser choice belongs to HTML, not to whichever unrelated file is selected next. The
+    /// preference stays put while the footer falls back, so returning to HTML restores it.
+    func testAStoredBrowserActionRetitlesOnlyAnHTMLSelection() throws {
+        PreferenceStore.shared.set(
+            AttachmentAction.openInBrowser.rawValue,
+            forKey: SessionAttachmentsDefaults.lastActionKey
+        )
+        let htmlPane = try laidOutPane(
+            showing: try writeHTML(),
+            size: NSSize(width: 353, height: 600)
+        )
+        _ = try button(titled: L10n.string("Browser"), in: try footerBand(in: htmlPane.view))
+
+        let imagePane = try laidOutPane(
+            showing: try writePNG(named: "picture.png", size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: 600)
+        )
+        _ = try button(titled: L10n.string("Open"), in: try footerBand(in: imagePane.view))
+        XCTAssertEqual(
+            PreferenceStore.shared.string(forKey: SessionAttachmentsDefaults.lastActionKey),
+            AttachmentAction.openInBrowser.rawValue,
+            "falling back outside HTML erased the remembered browser choice"
+        )
+    }
+
     /// A remembered Chat falls back while nothing is listening — a button performing nothing is
     /// worse than a button saying something else — and the memory itself is not overwritten, so
     /// the door reopening restores the remembered answer.
@@ -581,7 +616,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
     }
 
     /// A batch's chevron menu keeps only the actions that mean something said of several files —
-    /// no Open in, no comparison, no comment — and offers the batch forms of the rest.
+    /// no editor submenu, comparison, or comment — and offers the batch forms of the rest.
     func testABatchMenuOffersTheBatchActionsOnly() throws {
         let pane = try laidOutPane(
             showing: try writePNGs(count: 2, size: NSSize(width: 40, height: 40)),
@@ -602,7 +637,54 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         )
     }
 
+    /// Opening in a browser means the whole selection can go there. A run of HTML files gets the
+    /// batch action; mixing in a picture removes it rather than silently acting on only part.
+    func testOnlyAnAllHTMLBatchOffersOpenInBrowser() throws {
+        let pane = try laidOutPane(
+            showing: [
+                try writeHTML(named: "first.html"),
+                try writeHTML(named: "second.htm"),
+                try writePNG(named: "picture.png", size: NSSize(width: 40, height: 40))
+            ],
+            size: NSSize(width: 353, height: 700)
+        )
+        let listed = SessionAttachmentStore.shared.attachments(for: pane.sessionID)
+        let html = listed.filter { $0.kind == .html }
+        XCTAssertEqual(html.count, 2, "the fixture did not record both HTML files")
+
+        let htmlTitles = items(in: pane.actionMenuEntries(for: html)).map(\.title)
+        XCTAssertTrue(htmlTitles.contains(L10n.string("Open in Browser")))
+
+        let mixedTitles = items(in: pane.actionMenuEntries(for: listed)).map(\.title)
+        XCTAssertFalse(
+            mixedTitles.contains(L10n.string("Open in Browser")),
+            "a mixed batch offered an action that could only handle part of it"
+        )
+    }
+
     // MARK: - Kinds
+
+    /// The browser action is a property of HTML, not a generic file action. `Open` remains beside
+    /// it because that follows the file association and may deliberately be an editor.
+    func testAnHTMLRowAloneOffersOpenInBrowser() throws {
+        let pane = try laidOutPane(
+            showing: [
+                try writeHTML(),
+                try writePNG(named: "picture.png", size: NSSize(width: 40, height: 40))
+            ],
+            size: NSSize(width: 353, height: 700)
+        )
+        let listed = SessionAttachmentStore.shared.attachments(for: pane.sessionID)
+        let html = try XCTUnwrap(listed.first { $0.kind == .html })
+        let image = try XCTUnwrap(listed.first { $0.kind == .image })
+
+        let htmlTitles = items(in: pane.contextMenuEntries(for: html)).map(\.title)
+        XCTAssertTrue(htmlTitles.contains(L10n.string("Open")))
+        XCTAssertTrue(htmlTitles.contains(L10n.string("Open in Browser")))
+
+        let imageTitles = items(in: pane.contextMenuEntries(for: image)).map(\.title)
+        XCTAssertFalse(imageTitles.contains(L10n.string("Open in Browser")))
+    }
 
     /// An archive and an office document land in the document preview — the same Quick Look
     /// surface the space bar shows in Finder — never in the image decoder.

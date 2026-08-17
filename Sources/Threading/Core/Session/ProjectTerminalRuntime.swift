@@ -23,6 +23,11 @@ final class ProjectTerminalRuntime {
         controllers[terminalID]?.isRunning ?? false
     }
 
+    /// A foreground command is running inside the terminal's long-lived shell.
+    func isBusy(terminalID: TerminalID) -> Bool {
+        controllers[terminalID]?.isBusy ?? false
+    }
+
     func discard(terminalID: TerminalID) {
         guard let controller = controllers.removeValue(forKey: terminalID) else { return }
         controller.terminate()

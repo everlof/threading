@@ -22,7 +22,7 @@ import AppKit
 /// so a terminal palette runs into the platform's rounded corners and under the transparent
 /// titlebar; under a shaped takeover it must be nothing at all, or AppKit fills the corners the
 /// frame cleared. Two writers to `backgroundColor` was the bug: the coordinator cleared it for
-/// the Threading theme's rounded frame and the pane painted it opaque again on the next session
+/// the former Threading takeover's rounded frame and the pane painted it opaque again on the next session
 /// swap, so a window that should have shown the desktop past its curve showed a square of the
 /// terminal's black instead. The pane now records its colour through `WindowBackdrop`, and the
 /// colour reaches the window only through `applyBackingSurface`.
