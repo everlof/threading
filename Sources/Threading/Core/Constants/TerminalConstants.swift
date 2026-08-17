@@ -400,10 +400,15 @@ enum SidebarDefaults {
     /// deliberately the one thing in the list that is not a checkout.
     static let scratchpadSymbol = "note.text"
 
-    /// The footer's silence gate. One glyph in both states rather than a speaker/speaker-slash
-    /// pair: a control whose mark changes reads as two different buttons in a band this small,
-    /// and the state is already worn by the button's own filled on-state.
-    static let silenceSymbol = "speaker.slash"
+    /// The footer's silence gate says the current answer in its mark as well as its surface.
+    /// The filled on-state keeps the toggle legible as a control; the speaker/slashed-speaker
+    /// pair makes the sound state itself legible without having to infer what the frame means.
+    static let soundsAudibleSymbol = "speaker.wave.2"
+    static let soundsSilencedSymbol = "speaker.slash"
+
+    static func silenceSymbol(isSilenced: Bool) -> String {
+        isSilenced ? soundsSilencedSymbol : soundsAudibleSymbol
+    }
 
     /// How hard the sidebar holds its width against a window resize.
     ///

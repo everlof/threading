@@ -97,11 +97,10 @@ final class PaneFooterRenderTests: XCTestCase {
 
     /// The band carrying the global silence gate, in both of its states.
     ///
-    /// The worn state is the part no assertion can review. "Quiet when inactive, filled and
-    /// tinted while silenced" is a claim about a *relationship* — how loudly the on-state reads
-    /// against the Settings button it shares a band with, under themes whose control surfaces
-    /// differ as much as Cyberpunk's and Swiss Minimalist's — and a control that stops every
-    /// sound the app makes and then hides is the mystery-noise problem inverted.
+    /// The worn state is the part no assertion can review. "Audible speaker when inactive;
+    /// slashed, filled and tinted while silenced" is a claim about a *relationship* — how
+    /// clearly the two states differ against the Settings button they share a band with, under
+    /// themes whose control surfaces differ as much as Cyberpunk's and Swiss Minimalist's.
     func testRendersTheSilenceGateInBothStates() throws {
         let directory = Render.directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -268,7 +267,7 @@ final class PaneFooterRenderTests: XCTestCase {
                 .compactMap { $0 }
             let trailing: [NSView] = silenced.map { isOn in
                 let gate = ThemedIconButton(
-                    symbolName: SidebarDefaults.silenceSymbol,
+                    symbolName: SidebarDefaults.silenceSymbol(isSilenced: isOn),
                     accessibility: SidebarStrings.silenceSounds,
                     target: .inline,
                     inkSource: .chrome

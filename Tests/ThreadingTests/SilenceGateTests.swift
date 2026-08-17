@@ -248,8 +248,8 @@ final class SilenceGateTests: XCTestCase {
 
 // MARK: - The Footer's Control
 
-/// The gate as the sidebar wears it: a speaker at the footer's trailing edge, quiet while the
-/// app can be heard and filled while it cannot.
+/// The gate as the sidebar wears it: an audible speaker at the footer's trailing edge, becoming
+/// slashed and filled while the app cannot be heard.
 ///
 /// Asserted inside the sidebar itself rather than against a loose button, because a control
 /// tested outside the container it ships in can pass while being unreachable — the footer band,
@@ -381,6 +381,21 @@ final class SilenceGateFooterTests: XCTestCase {
     }
 
     // MARK: - What It Says and Does
+
+    func testTheGateUsesSpeakerStatesInsteadOfMakingTheFrameCarryTheMeaning() {
+        XCTAssertEqual(
+            SidebarDefaults.silenceSymbol(isSilenced: false),
+            SidebarDefaults.soundsAudibleSymbol
+        )
+        XCTAssertEqual(
+            SidebarDefaults.silenceSymbol(isSilenced: true),
+            SidebarDefaults.soundsSilencedSymbol
+        )
+        XCTAssertNotEqual(
+            SidebarDefaults.soundsAudibleSymbol,
+            SidebarDefaults.soundsSilencedSymbol
+        )
+    }
 
     /// It follows the setting rather than its own presses, which is what keeps it agreeing with
     /// the Settings row, the menu item and a second window.

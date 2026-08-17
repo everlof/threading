@@ -610,12 +610,11 @@ the alert paths inherit it from one seam, the `@MainActor` conveniences over the
 (the chain itself stays gate-free). Banners still post, the sidebar still raises its hand.
 Auditions bypass it deliberately: a sound picked in a list is an explicit ask to hear it, and a
 picker that played nothing would read as broken. Three surfaces write the one Boolean — the
-speaker at the sidebar footer's trailing edge (worn while silenced: a control that stops nine
-kinds of sound and then hides is the mystery-noise problem inverted), the mirrored Settings row,
-and Threading ▸ Silence Sounds (⇧⌘S, `AppCommand.Group.system`, which Recovery Mode allows
-wholesale) — and all three follow `AppSettingsDidChange` rather than each other. macOS Focus
-cannot do this job: it silences notification sounds but not the bell, which the app plays
-itself through `NSSound`.
+speaker at the sidebar footer's trailing edge (audible speaker while open; slashed speaker plus
+the selected surface while silenced), the mirrored Settings row, and Threading ▸ Silence Sounds
+(⇧⌘S, `AppCommand.Group.system`, which Recovery Mode allows wholesale) — and all three follow
+`AppSettingsDidChange` rather than each other. macOS Focus cannot do this job: it silences
+notification sounds but not the bell, which the app plays itself through `NSSound`.
 
 The stored preference is `attentionAlertSound`, unseeded: an absent key is the macOS tone, which
 is a real answer rather than a missing one. `AttentionAlertCenter.chosenSound(for:sessionID:)` is

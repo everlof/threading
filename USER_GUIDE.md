@@ -217,8 +217,9 @@ hover, and on the About window.
 At the other end of the same band, a **speaker** is the app's silence switch: one click stops
 every sound Threading makes — notification alerts and the terminal bell alike — and a second
 click gives both back exactly what they were set to, since the switch changes no sound
-setting. While it holds, the button is filled rather than quiet, so a silent app always says
-so on screen. It is the same state as **Settings ▸ General ▸ Silence** and the **Threading ▸
+setting. The ordinary speaker becomes slashed while it holds, and the button is filled rather
+than quiet, so a silent app always says so on screen. It is the same state as **Settings ▸
+General ▸ Silence** and the **Threading ▸
 Silence Sounds** menu item (⇧⌘S); all three follow each other, and the choice survives a
 relaunch. See [Notifications](#notifications) for what it does and does not silence.
 
@@ -797,8 +798,8 @@ Nothing is suppressed while it holds. Banners still arrive, the sidebar still ma
 a bell still ends the turn it was reporting — they are simply quiet. That is what separates it
 from Mute below: **Mute** answers "don't tell me", the silence switch answers "tell me quietly".
 Choosing a sound in either picker still plays it while the switch holds, because picking a sound
-is asking to hear it. The button is filled while the app is silent, and the state survives a
-relaunch.
+is asking to hear it. The speaker becomes slashed and the button fills while the app is silent;
+the state survives a relaunch.
 
 **Silencing one chat or one project.** **Session Options ▸ Mute Notifications** in a session's `⋯` menu quiets
 that conversation; the same item on a project row quiets the whole checkout, including sessions
