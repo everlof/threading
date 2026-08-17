@@ -106,8 +106,8 @@ final class SessionInfoRenderTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    /// Both origins, nested depths, a stopped process, a reachable port and an unreachable one —
-    /// every visual voice the panel has, in one picture.
+    /// Both origins, nested depths, a paragraph-long agent command, a stopped process, a
+    /// reachable port and an unreachable one — every visual voice the panel has, in one picture.
     private static var runningFixture: SessionInfoSnapshot {
         SessionInfoSnapshot(
             processGroups: [
@@ -119,7 +119,12 @@ final class SessionInfoRenderTests: XCTestCase {
                         cpuPercent: 12,
                         depth: 0,
                         executablePath: "/Users/me/.local/share/claude/versions/2.1.218",
-                        arguments: ["claude", "--continue"]
+                        arguments: [
+                            "claude",
+                            "--settings",
+                            "/Users/me/Library/Application Support/Claude/settings.json",
+                            "We can still have terminals too, so keep the full launch context available."
+                        ]
                     ),
                     SessionProcess(
                         pid: 50301,

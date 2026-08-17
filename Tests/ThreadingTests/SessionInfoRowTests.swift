@@ -174,6 +174,38 @@ final class SessionInfoRowTests: XCTestCase {
         )
     }
 
+    /// A real agent command can carry an opening prompt or configuration paths long enough to
+    /// wrap many times. The row is deliberately one line tall, so both descriptions must remain
+    /// one-line fields and truncate horizontally instead of painting through adjacent rows.
+    func testLongCommandLineStaysInsideItsFixedHeightRow() {
+        let longCommand = SessionInfoRowView.CommandLine(
+            redactedDisplay: String(repeating: "--settings /Users/me/Library/Application Support/Threading ", count: 8),
+            fullDisplay: String(repeating: "--settings /Users/me/Library/Application Support/Threading ", count: 8),
+            redactedLine: "claude",
+            fullLine: "claude",
+            redactedCount: 0
+        )
+        let row = makeProcessRow(commandLine: longCommand)
+        let host = NSView()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(row)
+        NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: 320),
+            host.heightAnchor.constraint(equalToConstant: SessionInfoLayout.rowHeight),
+            row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            row.topAnchor.constraint(equalTo: host.topAnchor)
+        ])
+
+        host.layoutSubtreeIfNeeded()
+
+        for label in row.subviews.compactMap({ $0 as? NSTextField }) {
+            XCTAssertTrue(label.usesSingleLineMode)
+            XCTAssertGreaterThanOrEqual(label.frame.minY, row.bounds.minY)
+            XCTAssertLessThanOrEqual(label.frame.maxY, row.bounds.maxY)
+        }
+    }
+
     // MARK: - Accessibility
 
     /// The port row is a link VoiceOver can press; the process row is a quiet group. Both speak

@@ -1424,8 +1424,10 @@ gives up whole segments, never characters — and the row speaks as one accessib
 pressable link where the row opens a port, a quiet group otherwise. Command lines render
 through `CommandLineRedactor` (secrets behind credential-shaped flags become `<redacted>`,
 shared vocabulary with the execution audit); the raw line is one right-click away, per row,
-forgotten on rebuild. The hover plate belongs only to the port rows, whose whole surface is a
-click; a stoppable process row hovers by revealing its `✕` in the value's place — a
+forgotten on rebuild. Both text fields explicitly use AppKit's single-line mode: a truncating
+line-break mode alone still lets a paragraph-long launch command wrap outside the fixed-height
+row and paint through its siblings. The hover plate belongs only to the port rows, whose whole
+surface is a click; a stoppable process row hovers by revealing its `✕` in the value's place — a
 `ThemedIconButton` that asks (`ConfirmationPrompt.stopSessionProcess`, `.irreversible`) and
 signals exactly one pid through `SessionProcessTerminator`'s identity-checked SIGTERM.
 

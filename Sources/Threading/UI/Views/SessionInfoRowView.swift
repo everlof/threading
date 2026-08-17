@@ -86,10 +86,15 @@ final class SessionInfoRowView: NSView {
         primaryLabel.textColor = Design.Text.label
         primaryLabel.stringValue = primary
         primaryLabel.lineBreakMode = .byTruncatingTail
+        primaryLabel.usesSingleLineMode = true
 
         secondaryLabel.applyFont(.compactCode)
         secondaryLabel.textColor = Design.Text.tertiary
         secondaryLabel.lineBreakMode = .byTruncatingTail
+        // `lineBreakMode` chooses how a line ends; it does not make an AppKit label one line.
+        // Agent launch arguments can be paragraph-long, and a wrapping field centred inside the
+        // fixed-height row paints through the rows and section headings on both sides of it.
+        secondaryLabel.usesSingleLineMode = true
 
         valueLabel.segments = valueSegments
         valueLabel.alignment = .right
