@@ -121,6 +121,9 @@ final class RemoteListenerSet: @unchecked Sendable {
     private var pathMonitor: NWPathMonitor?
     private var pendingRebuild = false
     private var startCompletion: (@Sendable (RemoteListenerStartOutcome) -> Void)?
+    /// Which start a deadline belongs to. Without it, a stop-and-start inside the deadline
+    /// window lets the old start's timer fail the new one.
+    private var startGeneration = 0
     private var isRunning = false
 
     // MARK: - Initialization
@@ -153,9 +156,10 @@ final class RemoteListenerSet: @unchecked Sendable {
                 return
             }
             self.isRunning = true
+            self.startGeneration += 1
             self.configuration = configuration
             self.startCompletion = completion
-            self.armStartDeadline()
+            self.armStartDeadline(generation: self.startGeneration)
             self.bindLoopback(candidates: configuration.portCandidates, index: 0)
         }
     }
@@ -234,8 +238,7 @@ final class RemoteListenerSet: @unchecked Sendable {
             ThreadingLogger.remote.error(
                 "Remote access listener found no free port in its range"
             )
-            publish()
-            finishStart(.failed(.portRangeInUse))
+            failStart(.portRangeInUse)
             return
         }
 
@@ -251,7 +254,7 @@ final class RemoteListenerSet: @unchecked Sendable {
         parameters.allowLocalEndpointReuse = true
 
         guard let listener = try? NWListener(using: parameters) else {
-            finishStart(.failed(.loopbackUnavailable))
+            failStart(.loopbackUnavailable)
             return
         }
 
@@ -274,7 +277,7 @@ final class RemoteListenerSet: @unchecked Sendable {
                 ThreadingLogger.remote.info(
                     "Remote access server listening on port \(port, privacy: .public)"
                 )
-                self.bindRoutableDoors()
+                self.rebuildRoutableDoors()
                 self.readFirewallHint()
                 self.publish()
                 self.finishStart(.listening(port: port))
@@ -287,9 +290,7 @@ final class RemoteListenerSet: @unchecked Sendable {
                     ThreadingLogger.remote.error(
                         "Remote access listener failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
                     )
-                    self.cancel(entry)
-                    self.publish()
-                    self.finishStart(.failed(.loopbackUnavailable))
+                    self.failStart(.loopbackUnavailable)
                 }
             default:
                 break
@@ -313,10 +314,6 @@ final class RemoteListenerSet: @unchecked Sendable {
     }
 
     // MARK: - Routable doors
-
-    private func bindRoutableDoors() {
-        rebuildRoutableDoors()
-    }
 
     /// Applies the current door selection and interface list to the listener set.
     ///
@@ -488,13 +485,28 @@ final class RemoteListenerSet: @unchecked Sendable {
 
     /// A listener that never answers is a state, not a wait. Without this the coordinator would
     /// sit in Starting forever, which is the failure shape the relay already taught us to name.
-    private func armStartDeadline() {
+    private func armStartDeadline(generation: Int) {
         queue.asyncAfter(deadline: .now() + RemoteAccessDefaults.listenerStartTimeout) {
             [weak self] in
-            guard let self, self.startCompletion != nil else { return }
+            guard let self,
+                  self.startGeneration == generation,
+                  self.startCompletion != nil else { return }
             ThreadingLogger.remote.error("Remote access listener did not become ready in time")
-            self.finishStart(.failed(.loopbackUnavailable))
+            self.failStart(.loopbackUnavailable)
         }
+    }
+
+    /// Ends a start that cannot produce a listener: nothing stays bound, and the set is idle
+    /// again so the user's retry is a real retry rather than a replay of this answer.
+    private func failStart(_ failure: RemoteListenerFailure) {
+        for entry in listeners.values.flatMap({ $0.values }) { cancel(entry) }
+        listeners.removeAll()
+        resolvedPort = nil
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        isRunning = false
+        publish()
+        finishStart(.failed(failure))
     }
 
     private func finishStart(_ outcome: RemoteListenerStartOutcome) {
