@@ -172,8 +172,9 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Developer ID signing, notarization, `scripts/release.sh`, and the Sparkle automatic-update plan | [`releasing.md`](docs/architecture/releasing.md) |
 | Reclaimable build output, the two deletion gates, bundled project composition and Git activity | [`storage-and-stats.md`](docs/architecture/storage-and-stats.md) |
 | Persistence/wire failure semantics, dependency direction, strict concurrency, bounded work, CI and release gates | [`reliability-and-type-safety.md`](docs/architecture/reliability-and-type-safety.md) |
-| Product-scope classification, application layers, upward dependencies and architecture health metrics | [`application-structure.md`](docs/architecture/application-structure.md) |
+| Product-scope classification, application layers, upward dependencies, authoritative registries/projections and architecture health metrics | [`application-structure.md`](docs/architecture/application-structure.md) |
 | Application-level XCUITest journeys, recorded provider traffic and deterministic fixture agents | [`ui-scenario-testing.md`](docs/architecture/ui-scenario-testing.md) |
+| Any new or materially changed user-facing surface, popover, sidebar/composer/conversation component, or public extension seam | [`CUSTOMIZATION_SURFACE_AUDIT.md`](docs/extensions/CUSTOMIZATION_SURFACE_AUDIT.md) |
 | Any UI at all: the component vocabulary, themed controls, tabs, the composer, motion previews | [`design-system.md`](docs/architecture/design-system.md) |
 | The three forked packages and the seams that are ours | [`dependencies.md`](docs/architecture/dependencies.md) |
 
@@ -537,6 +538,14 @@ The short active architecture-health ledger. It contains only current structural
 to the measurement command and closing rules. Completed reviews live under `docs/archive/reviews`;
 their findings are evidence, not current instructions. Load-bearing rules such as persistence
 quarantine, actor isolation, and typed IDs live in the owning `docs/architecture` file.
+
+### Agent-guidance feedback
+
+Run `scripts/audit_agent_feedback.py` when deciding whether past Claude/Codex behavior justifies
+new guidance. It writes a private, ignored report under `.build/agent-feedback/`. Promote only
+repeated, future-actionable behavior: cross-cutting rules belong here, subsystem rules belong in
+their owning architecture document, and enforceable rules should become code, tests or gates.
+Never commit transcript excerpts or add historical change narration to agent guidance.
 
 ### USER_GUIDE.md
 

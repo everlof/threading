@@ -11,7 +11,7 @@ subsystem table. The reasoning behind each subsystem — what was measured, what
 and which rules are load-bearing — lives in [`docs/architecture/`](docs/architecture/). Read the
 file for the area you are about to change; those notes are not recoverable from the code.
 
-Five rules that are cheapest to learn before you start:
+Seven rules that are cheapest to learn before you start:
 
 - **Fix the root cause each time, no band-aids.**
 
@@ -31,3 +31,11 @@ Five rules that are cheapest to learn before you start:
   `project.pbxproj`.
 - **Before creating or changing an extension**, read `docs/extensions/AGENT_AUTHORING.md`
   completely rather than inferring the API from application internals.
+- **Before adding or materially changing a durable user-facing surface**, apply the
+  [customization-surface gate](docs/extensions/CUSTOMIZATION_SURFACE_AUDIT.md#gate-for-every-new-surface).
+  Decide whether the surface is a public extension component or deliberately host-only, and state
+  which behavior Threading keeps host-owned when presentation is customizable.
+- **Before reporting a change complete**, re-read the request item by item, verify the shipping
+  path at the relevant test level, and state anything that remains unverified. Appearance and
+  layout work requires inspected rendered evidence from the real product shell; compilation and
+  structural assertions alone are not visual verification.

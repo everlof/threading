@@ -13,6 +13,13 @@ reusable mechanism is semantic component composition:
 The component ID remains specific to a durable product concept. The composition engine is
 general; a selector such as `NSView > NSStackView:nth-child(2)` is not.
 
+Here **host** means the Threading application rather than an installed extension. **Host-owned**
+behavior remains Threading's responsibility even when an extension adds to or replaces the
+surface's presentation: for example, a session-row extension may replace visible content while
+Threading still owns selection, drag and drop, activity state and row actions. A **host-only**
+surface exposes no extension customization seam at all, usually because replacement would weaken
+a security boundary, misrepresent an explicit user-owned choice or break an essential interaction.
+
 ## Adoption order
 
 | Surface | Proposed contract | First authority | Host must retain | Status |
