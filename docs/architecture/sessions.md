@@ -425,6 +425,14 @@ randomness injected, so tests pass a fixed date and a seeded generator; producti
 clock only at the call site. The hero hides below a height threshold
 (`viewDidLayout`) — half a greeting peeking from behind the prompt reads as a defect.
 
+**The line is minted on arrival and then held** (`chatGreeting`). It is a *welcome*: it belongs
+to the composer being pointed at a project, not to any decision made on it afterwards. Asked for
+each time the hero is restated it followed `refreshChips` instead — every chip's selection ends
+there, and `refreshChips` restates the role, which owns the hero — so choosing a model, an effort
+or a permission mode morphed the sentence over the box into a different one, which reads as the
+app answering a choice it has nothing to say about. Returning to a project the composer already
+holds keeps its line for the same reason it keeps the chips and the half-written prompt.
+
 Choosing **Manager** replaces that greeting with what a manager is for — three lines rather than
 one (`ComposerDefaults.managerGreeting`) — and the hero *morphs* between the two: it is one
 `MorphingMultilineTitleLabel`, so the greeting becomes the brief's first line while the other two
@@ -1547,6 +1555,17 @@ built separately from being asked so tests can hold their wording to what the ac
 
 `SessionImporter` discovers conversations started outside Threading by reading the transcripts
 the CLIs already keep, so a session can be adopted into a project and resumed by id.
+
+**The offer follows the discovery, and fades in.** The composer's import button is a picture of
+`importable`, so nothing can change what was found without the row saying so. A scan takes a
+couple of seconds, which means the button arrives under a pane the eye has already stopped
+moving over — switched on at full strength it reads as a blink beside the send, so the arrival
+is a `Design.Motion.standard` fade. Withdrawal is not: every route that takes the offer away —
+another project, a scheduled edit borrowing the slot — has already replaced what the rest of the
+row says, and fading a stale count out over it would be the offer lingering after it stopped
+being true. That also leaves the button's resting opacity at full, which is what the only
+animation here ends at, so an arrival interrupted by anything at all still settles where it
+belongs and there is no generation to track.
 
 Reading these files has two traps, both of which cost real coverage before they were fixed:
 
