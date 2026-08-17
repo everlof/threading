@@ -36,4 +36,10 @@ for agent_file in "$repo_root/AGENTS.md" "$repo_root/CLAUDE.md"; do
 done
 
 "$script_dir/chrome_reference.py" validate
+python3 "$script_dir/check_mobile_theme_boundaries.py" "$repo_root"
+if ! mobile_theme_lint_tests="$(python3 "$script_dir/tests/test_mobile_theme_boundaries.py" 2>&1)"; then
+    printf '%s\n' "$mobile_theme_lint_tests" >&2
+    echo "theme-boundary: mobile theme boundary checker regression tests failed" >&2
+    exit 1
+fi
 "$script_dir/check_localization_boundaries.sh"

@@ -134,9 +134,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             view.caretColor = cursor
         }
 
-        var white: CGFloat = 0
-        let isDark = background.getWhite(&white, alpha: nil) ? white < 0.5 : true
-        view.keyboardAppearance = isDark ? .dark : .light
+        view.keyboardAppearance = MobileKeyboardAppearance.over(background)
         view.setNeedsDisplay()
     }
 

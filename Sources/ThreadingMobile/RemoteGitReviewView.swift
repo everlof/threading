@@ -160,8 +160,7 @@ struct RemoteGitReviewView: View {
             NavigationStack {
                 RemoteRepositoryFileView(file: file)
             }
-            .environment(\.remoteTheme, theme)
-            .preferredColorScheme(theme.colorScheme)
+            .mobileTheme(theme)
         }
     }
 

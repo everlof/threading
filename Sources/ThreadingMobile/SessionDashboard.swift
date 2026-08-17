@@ -254,21 +254,21 @@ struct SessionDashboard: View {
         .sheet(isPresented: $showsNewSession) {
             NewRemoteSessionView(initialProjectName: newSessionProjectName)
                 .environmentObject(model)
-                .environment(\.remoteTheme, theme)
+                .mobileTheme(theme)
         }
         .sheet(isPresented: $showsMacPicker) {
             DashboardMacPickerView()
                 .environmentObject(model)
-                .environment(\.remoteTheme, theme)
+                .mobileTheme(theme)
         }
         .sheet(item: $sharedLink) { link in
             SharedSessionLinkView(link: link)
-                .environment(\.remoteTheme, theme)
+                .mobileTheme(theme)
         }
         .sheet(isPresented: $showsUsage) {
             if let link = model.activeHost?.link {
                 RemoteUsageDashboardView(link: link, isDemo: model.isDemo)
-                    .environment(\.remoteTheme, theme)
+                    .mobileTheme(theme)
             }
         }
     }
@@ -808,11 +808,10 @@ private struct DashboardMacPickerView: View {
                     .frame(minHeight: MobileDesign.Size.minimumTapTarget)
                 }
                 .buttonStyle(.plain)
-                .listRowBackground(theme.surface)
+                .themedSettingsRow(theme)
             }
             .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(theme.ground)
+            .themedSettingsPage(theme)
             .navigationTitle("Choose Mac")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(theme.surface, for: .navigationBar)

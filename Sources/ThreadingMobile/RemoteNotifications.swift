@@ -1359,20 +1359,22 @@ struct NotificationSettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
+                ThemedSettingsSection {
                     statusRow
                 }
 
-                Section("Notify me about") {
+                ThemedSettingsSection {
                     Toggle("Chats shared with me", isOn: $notifications.sharedChatsEnabled)
                     Toggle("Permission requests", isOn: $notifications.permissionsEnabled)
                     Toggle("Agent needs my response", isOn: $notifications.agentQuestionsEnabled)
                     Toggle("Requests for my input", isOn: $notifications.attentionRequestsEnabled)
                     Toggle("Agent updates I request", isOn: $notifications.agentUpdatesEnabled)
+                } header: {
+                    Text("Notify me about")
                 }
                 .disabled(notifications.authorizationStatus == .denied)
 
-                Section {
+                ThemedSettingsSection {
                     Toggle("Play notification sounds", isOn: $notifications.notificationSoundsEnabled)
                     if notifications.notificationSoundsEnabled {
                         Toggle("Permission requests", isOn: $notifications.permissionSoundsEnabled)
@@ -1393,7 +1395,7 @@ struct NotificationSettingsView: View {
                 }
                 .disabled(notifications.authorizationStatus == .denied)
 
-                Section {
+                ThemedSettingsSection {
                     Toggle(
                         "People in open sessions",
                         isOn: $notifications.peoplePresenceEnabled
@@ -1418,7 +1420,7 @@ struct NotificationSettingsView: View {
                 }
 
                 if notifications.hasLiveOnlyConnections {
-                    Section {
+                    ThemedSettingsSection {
                         Label(
                             "This Mac can currently deliver while the live connection is open, "
                                 + "but APNs provider delivery is not configured.",
@@ -1431,7 +1433,7 @@ struct NotificationSettingsView: View {
 
                 #if DEBUG
                 if let deviceToken = notifications.deviceToken {
-                    Section {
+                    ThemedSettingsSection {
                         Button {
                             UIPasteboard.general.string = deviceToken
                         } label: {
@@ -1454,14 +1456,13 @@ struct NotificationSettingsView: View {
                 }
                 #endif
 
-                Section {
+                ThemedSettingsSection {
                     Text("Permission notifications open the exact chat for review. They never put Allow or Deny on the lock screen.")
                         .font(.footnote)
                         .foregroundStyle(theme.secondaryLabel)
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(theme.ground)
+            .themedSettingsPage(theme)
             .navigationTitle("Notifications")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

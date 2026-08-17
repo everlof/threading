@@ -127,8 +127,7 @@ struct SessionDetailView: View {
                 // each notification its own navigation identity so that tap replaces the old
                 // stack with the newly requested attachment or live surface.
                 .id(initialWorkspaceEventID ?? "manual-workspace")
-                .environment(\.remoteTheme, theme)
-                .preferredColorScheme(theme.colorScheme)
+                .mobileTheme(theme)
                 .presentationDetents([.fraction(0.72), .large])
                 .presentationDragIndicator(.visible)
             }
@@ -662,15 +661,15 @@ struct TerminalRemoteView: View {
                 RemoteNavigationTitle(connection: connection)
             }
         }
-        .environment(\.remoteTheme, theme)
-        .preferredColorScheme(theme.colorScheme)
+        .mobileTheme(theme)
         .sheet(isPresented: $showsAttentionRequest) {
             AttentionRequestSheet(connection: connection)
+                .mobileTheme(theme)
         }
         .sheet(isPresented: $showsKeyboardEditor) {
             TerminalKeyboardEditorView(agentKind: connection.session.agentKind)
                 .environmentObject(keyboards)
-                .environment(\.remoteTheme, theme)
+                .mobileTheme(theme)
         }
     }
 
@@ -1001,9 +1000,7 @@ private struct LegacyConversationRemoteView: View {
                     )
                 }
             }
-            .environment(\.remoteTheme, theme)
-            .preferredColorScheme(theme.colorScheme)
-            .foregroundStyle(theme.label)
+            .mobileTheme(theme)
             .background(theme.ground)
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .onReceive(
@@ -1026,6 +1023,7 @@ private struct LegacyConversationRemoteView: View {
             .onAppear(perform: restoreDraft)
             .sheet(isPresented: $showsAttentionRequest) {
                 AttentionRequestSheet(connection: connection)
+                    .mobileTheme(theme)
             }
     }
 
@@ -1591,7 +1589,7 @@ struct AttentionRequestSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
+                ThemedSettingsSection {
                     ForEach(connection.attentionRecipients) { participant in
                         Button {
                             selectedRecipientID = participant.id
@@ -1619,7 +1617,7 @@ struct AttentionRequestSheet: View {
                     Text("Person")
                 }
 
-                Section {
+                ThemedSettingsSection {
                     TextField("Optional note…", text: $note, axis: .vertical)
                         .focused($noteIsFocused)
                         .mobileUIEvidenceKeyboardFocus($noteIsFocused)
@@ -1638,7 +1636,7 @@ struct AttentionRequestSheet: View {
                 }
 
                 if connection.isAttentionRequestPending, requestID != nil {
-                    Section {
+                    ThemedSettingsSection {
                         HStack(spacing: MobileDesign.Spacing.small) {
                             ProgressView().controlSize(.small)
                             Text("Sending attention request…")
@@ -1646,14 +1644,13 @@ struct AttentionRequestSheet: View {
                         .foregroundStyle(theme.secondaryLabel)
                     }
                 } else if let notice {
-                    Section {
+                    ThemedSettingsSection {
                         Label(notice, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(theme.warning)
                     }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(theme.ground)
+            .themedSettingsPage(theme)
             .navigationTitle("Ask for input")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -201,9 +201,17 @@ directory exclusion; fix the call site or add the smallest justified exception t
 It runs from the **Enforce Repository Boundaries** build phase, together with
 `scripts/check_architecture_boundaries.sh` (structural invariants the type checker cannot
 express across files, including the provider-capability rule) and, through the theme script's
-own last line, `scripts/check_localization_boundaries.sh`. All three therefore fail an ordinary
+own chained lines, `scripts/check_mobile_theme_boundaries.py` and
+`scripts/check_localization_boundaries.sh`. All therefore fail an ordinary
 `xcodebuild`, which is the point: the push gate runs tests only, and this repository has no
-remote for it to gate. `scripts/ci.sh` runs the same three for CI and release preflight.
+remote for it to gate. `scripts/ci.sh` runs the same set for CI and release preflight.
+
+The iPhone app has its own half of the boundary, because SwiftUI fails differently: a `List`
+supplies its own row plate and a sheet is a hosting scene that inherits neither the palette nor
+the presentation values read from it. Row chrome has one owner
+(`Sources/ThreadingMobile/MobileSettingsChrome.swift`) and the theme crosses a presentation
+boundary one way (`mobileTheme(_:)`). See
+[`docs/IOS_THEMED_DIALOGS.md`](docs/IOS_THEMED_DIALOGS.md).
 
 `Design.swift` holds every measurement, weight and surface colour. Reach for a token rather
 than a number — a literal in a view is how the language erodes. The scale is deliberately

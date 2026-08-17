@@ -926,8 +926,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 
     private func presentAttentionRequest() {
         let root = AttentionRequestSheet(connection: connection)
-            .environment(\.remoteTheme, theme)
-            .preferredColorScheme(theme.colorScheme)
+            .mobileTheme(theme)
         let controller = UIHostingController(rootView: root)
         controller.modalPresentationStyle = .pageSheet
         present(controller, animated: true)

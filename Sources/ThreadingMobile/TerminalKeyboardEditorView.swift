@@ -37,7 +37,7 @@ struct TerminalKeyboardAgentList: View {
 
     var body: some View {
         List {
-            Section {
+            ThemedSettingsSection {
                 ForEach(agentKinds, id: \.self) { kind in
                     NavigationLink {
                         TerminalKeyboardEditorContent(agentKind: kind)
@@ -59,8 +59,7 @@ struct TerminalKeyboardAgentList: View {
                 ))
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(theme.ground)
+        .themedSettingsPage(theme)
         .navigationTitle(MobileL10n.string("Terminal Keys"))
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -78,7 +77,7 @@ struct TerminalKeyboardEditorContent: View {
 
     var body: some View {
         List {
-                Section {
+                ThemedSettingsSection {
                     ForEach(keys) { key in
                         NavigationLink {
                             TerminalKeyEditForm(key: key) { updated in
@@ -105,7 +104,7 @@ struct TerminalKeyboardEditorContent: View {
                     ))
                 }
 
-                Section {
+                ThemedSettingsSection {
                     NavigationLink {
                         TerminalKeyCatalogView(existing: keys) { added in
                             append(added)
@@ -129,7 +128,7 @@ struct TerminalKeyboardEditorContent: View {
                 }
 
                 if keyboards.hasCustomLayout(forAgentKind: agentKind) {
-                    Section {
+                    ThemedSettingsSection {
                         Button(role: .destructive) {
                             confirmsReset = true
                         } label: {
@@ -139,15 +138,14 @@ struct TerminalKeyboardEditorContent: View {
                 }
 
                 if let recoveryMessage = keyboards.recoveryMessage {
-                    Section {
+                    ThemedSettingsSection {
                         Label(recoveryMessage, systemImage: "exclamationmark.triangle")
                             .font(.footnote)
                             .foregroundStyle(theme.warning)
                     }
                 }
         }
-        .scrollContentBackground(.hidden)
-        .background(theme.ground)
+        .themedSettingsPage(theme)
         .navigationTitle(MobileL10n.string("Terminal Keys"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -259,6 +257,37 @@ func terminalNamedKeyDisplayName(_ key: RemoteTerminalNamedKey) -> String {
     }
 }
 
+#if DEBUG
+/// Deterministic hosts for the editor's own destinations.
+///
+/// Add Key, Add Snippet and Edit Key are reachable only by navigating inside the editor, so the
+/// evidence catalogue could not see them and they were the three screens that kept UIKit's grey
+/// row plate longest. Each one is a fixed form with no host payload, so a host is all the
+/// catalogue needs.
+struct TerminalKeyboardEditorDemo: View {
+    enum Screen: String {
+        case catalog
+        case snippet
+        case edit
+    }
+
+    let screen: Screen
+
+    var body: some View {
+        switch screen {
+        case .catalog:
+            TerminalKeyCatalogView(existing: []) { _ in }
+        case .snippet:
+            TerminalSnippetForm { _ in }
+        case .edit:
+            TerminalKeyEditForm(
+                key: RemoteTerminalKeyDefinition(action: .named(.tab, []))
+            ) { _ in }
+        }
+    }
+}
+#endif
+
 /// The catalogue: pick modifiers, then tap a key to add it as one chord. The two latching
 /// modifiers are offered once each — a second ⌃ on the bar would fight the first.
 private struct TerminalKeyCatalogView: View {
@@ -272,7 +301,7 @@ private struct TerminalKeyCatalogView: View {
 
     var body: some View {
         List {
-            Section {
+            ThemedSettingsSection {
                 Toggle(MobileL10n.string("Control"), isOn: $includesControl)
                 Toggle(MobileL10n.string("Option"), isOn: $includesAlt)
                 Toggle(MobileL10n.string("Shift"), isOn: $includesShift)
@@ -284,7 +313,7 @@ private struct TerminalKeyCatalogView: View {
                 ))
             }
 
-            Section(MobileL10n.string("Keys")) {
+            ThemedSettingsSection {
                 ForEach(RemoteTerminalNamedKey.allCases, id: \.rawValue) { key in
                     Button {
                         onAdd(RemoteTerminalKeyDefinition(action: .named(key, modifiers)))
@@ -296,9 +325,11 @@ private struct TerminalKeyCatalogView: View {
                     }
                     .buttonStyle(.plain)
                 }
+            } header: {
+                Text(MobileL10n.string("Keys"))
             }
 
-            Section {
+            ThemedSettingsSection {
                 ForEach(RemoteTerminalLatchingModifier.allCases, id: \.rawValue) { modifier in
                     Button {
                         onAdd(RemoteTerminalKeyDefinition(action: .latch(modifier)))
@@ -319,8 +350,7 @@ private struct TerminalKeyCatalogView: View {
                 ))
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(theme.ground)
+        .themedSettingsPage(theme)
         .navigationTitle(MobileL10n.string("Add Key"))
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -345,10 +375,12 @@ private struct TerminalSnippetForm: View {
 
     var body: some View {
         List {
-            Section(MobileL10n.string("Label")) {
+            ThemedSettingsSection {
                 TextField(MobileL10n.string("Optional — the text leads otherwise"), text: $label)
+            } header: {
+                Text(MobileL10n.string("Label"))
             }
-            Section {
+            ThemedSettingsSection {
                 TextField(MobileL10n.string("Text to type"), text: $text, axis: .vertical)
                     .lineLimit(1...6)
                     .textInputAutocapitalization(.never)
@@ -363,8 +395,7 @@ private struct TerminalSnippetForm: View {
                 ))
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(theme.ground)
+        .themedSettingsPage(theme)
         .navigationTitle(MobileL10n.string("Add Snippet"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -420,15 +451,17 @@ private struct TerminalKeyEditForm: View {
 
     var body: some View {
         List {
-            Section(MobileL10n.string("Label")) {
+            ThemedSettingsSection {
                 TextField(
                     MobileL10n.string("Optional — the key names itself otherwise"),
                     text: $label
                 )
+            } header: {
+                Text(MobileL10n.string("Label"))
             }
 
             if case .snippet = key.action {
-                Section(MobileL10n.string("Snippet")) {
+                ThemedSettingsSection {
                     TextField(
                         MobileL10n.string("Text to type"),
                         text: $snippetText,
@@ -439,11 +472,13 @@ private struct TerminalKeyEditForm: View {
                     .autocorrectionDisabled()
                     .font(.system(.subheadline, design: .monospaced))
                     Toggle(MobileL10n.string("Submit with Return"), isOn: $snippetSubmits)
+                } header: {
+                    Text(MobileL10n.string("Snippet"))
                 }
             }
 
             if case .named(let namedKey, _) = key.action {
-                Section {
+                ThemedSettingsSection {
                     Toggle(MobileL10n.string("Control"), isOn: $includesControl)
                     Toggle(MobileL10n.string("Option"), isOn: $includesAlt)
                     Toggle(MobileL10n.string("Shift"), isOn: $includesShift)
@@ -454,14 +489,13 @@ private struct TerminalKeyEditForm: View {
                 }
             }
 
-            Section {
+            ThemedSettingsSection {
                 TerminalKeyRow(key: edited)
             } header: {
                 Text(MobileL10n.string("Preview"))
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(theme.ground)
+        .themedSettingsPage(theme)
         .navigationTitle(MobileL10n.string("Edit Key"))
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear {

@@ -209,20 +209,10 @@ struct RemoteThemePalette: Equatable {
     var uiTertiaryLabel: UIColor { uiColor("tertiary_label", fallback: "#747983") }
     var uiAccent: UIColor { uiColor("accent", fallback: "#FFFFFF") }
     var uiAccentForeground: UIColor {
-        var red: CGFloat = 0
-        var green: CGFloat = 0
-        var blue: CGFloat = 0
-        var alpha: CGFloat = 0
-        guard uiAccent.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+        guard let luminance = uiAccent.remoteRelativeLuminance else {
             return colorScheme == .light ? .black : .white
         }
-        func linear(_ component: CGFloat) -> CGFloat {
-            component <= 0.04045
-                ? component / 12.92
-                : pow((component + 0.055) / 1.055, 2.4)
-        }
-        let luminance = 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
-        return luminance > 0.179 ? .black : .white
+        return luminance > MobileKeyboardAppearance.lightThreshold ? .black : .white
     }
     var uiAccentMuted: UIColor { uiColor("accent_muted", fallback: "#FFFFFF24") }
     var uiPositive: UIColor { uiColor("status_positive", fallback: "#55B978") }

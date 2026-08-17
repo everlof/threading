@@ -319,7 +319,7 @@ struct RemoteDiagnosticsView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Connection") {
+                ThemedSettingsSection {
                     diagnosticRow(
                         "Mac",
                         value: model.activeHost?.name ?? MobileL10n.string("None")
@@ -333,9 +333,11 @@ struct RemoteDiagnosticsView: View {
                             Int64(RemoteProtocol.minimumSupported)
                         )
                     )
+                } header: {
+                    Text("Connection")
                 }
 
-                Section("Notifications") {
+                ThemedSettingsSection {
                     diagnosticRow("Permission", value: authorizationStatus)
                     diagnosticRow(
                         "APNs device token",
@@ -344,10 +346,12 @@ struct RemoteDiagnosticsView: View {
                         )
                     )
                     diagnosticRow("Delivery", value: deliveryStatus)
+                } header: {
+                    Text("Notifications")
                 }
 
                 if let host = model.activeHost, host.isOwnerDevice {
-                    Section {
+                    ThemedSettingsSection {
                         if diagnosticSharing.isSharing(with: host.link),
                            let until = diagnosticSharing.sharingUntil {
                             diagnosticRow(
@@ -411,7 +415,7 @@ struct RemoteDiagnosticsView: View {
                     }
                 }
 
-                Section {
+                ThemedSettingsSection {
                     Button {
                         isRunningChecks = true
                         Task {
@@ -467,8 +471,7 @@ struct RemoteDiagnosticsView: View {
                     )
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(theme.ground)
+            .themedSettingsPage(theme)
             .navigationTitle("Diagnostics")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -482,6 +485,7 @@ struct RemoteDiagnosticsView: View {
         }
         .sheet(item: $issueReportRequest) { request in
             MobileIssueReportView(request: request)
+                .mobileTheme(theme)
         }
         .themedAlert(
             "Couldn’t export diagnostics",

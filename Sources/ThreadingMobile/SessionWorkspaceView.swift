@@ -100,11 +100,10 @@ struct SessionWorkspaceView: View {
                         hasUnseenActivity: item == .browser && activity.hasUnseenBrowser
                     )
                 }
-                .listRowBackground(theme.surface)
+                .themedSettingsRow(theme)
             }
             .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(theme.ground)
+            .themedSettingsPage(theme)
             .navigationTitle("Workspace")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: SessionWorkspaceRoute.self) { route in

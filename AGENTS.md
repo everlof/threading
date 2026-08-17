@@ -19,7 +19,9 @@ Seven rules that are cheapest to learn before you start:
   [`docs/architecture/design-system.md`](docs/architecture/design-system.md).** Feature code
   never constructs or subclasses an AppKit control or chrome-drawing surface; new UI is built
   from `Sources/Threading/UI/Design/`. `scripts/check_theme_boundaries.sh` fails the build
-  otherwise.
+  otherwise. iPhone UI has its own half of the same boundary — row chrome has one owner and the
+  theme crosses a sheet one way — in
+  [`docs/IOS_THEMED_DIALOGS.md`](docs/IOS_THEMED_DIALOGS.md).
 - **Performance is a product requirement, not a cleanup pass.** Follow the measured workflow in
   [`CLAUDE.md`](CLAUDE.md#performance-is-a-product-requirement). Before implementing a surface or
   callback whose size or frequency comes from files, transcripts, extensions, accounts, sessions,

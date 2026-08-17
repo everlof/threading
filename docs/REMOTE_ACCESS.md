@@ -267,7 +267,9 @@ library, while session and project overrides still carry their full foreground, 
 cursor, selection and ANSI colours to the remote terminal. The iPhone keeps native system
 typography rather than trying to transfer a Mac-only font. Application-owned iOS alerts and
 confirmations use the same palette and live updates; their shared component and mandatory
-extension policy are documented in [iOS themed dialogs](IOS_THEMED_DIALOGS.md).
+extension policy are documented in the [iOS theme boundary](IOS_THEMED_DIALOGS.md), together
+with the themed settings chrome, the sheet-crossing rule and what a theme may say about the
+system keyboard.
 
 Pairing and sharing are deliberately different actions:
 

@@ -49,6 +49,7 @@
 		A61300010000000000000001 /* SessionDashboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61300010000000000000002 /* SessionDashboardTests.swift */; };
 		A61400010000000000000001 /* MobileCollaborationPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */; };
 		A61500010000000000000001 /* MobileSessionChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61500010000000000000002 /* MobileSessionChromeTests.swift */; };
+		A61600010000000000000001 /* MobileThemeChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600010000000000000002 /* MobileThemeChromeTests.swift */; };
 		B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
 		B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
 /* End PBXBuildFile section */
@@ -145,6 +146,7 @@
 		A61300010000000000000002 /* SessionDashboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionDashboardTests.swift; sourceTree = "<group>"; };
 		A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileCollaborationPresentationTests.swift; sourceTree = "<group>"; };
 		A61500010000000000000002 /* MobileSessionChromeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionChromeTests.swift; sourceTree = "<group>"; };
+		A61600010000000000000002 /* MobileThemeChromeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileThemeChromeTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A6563DF6216A83E7016B0C5B /* ThreadingExtensionHelperNetwork */ = {isa = PBXFileReference; includeInIndex = 0; path = ThreadingExtensionHelperNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
 		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -170,6 +172,8 @@
 				ThreadingMobile/HostedRemoteConnectionManager.swift,
 				ThreadingMobile/MobileAgentIdentity.swift,
 				ThreadingMobile/MobileIssueReporting.swift,
+				ThreadingMobile/MobileSettingsChrome.swift,
+				ThreadingMobile/MobileThemeEnvironment.swift,
 				ThreadingMobile/MobileSettingsView.swift,
 				ThreadingMobile/MobileWorkspaceActivity.swift,
 				ThreadingMobile/MobileSessionContinuityStore.swift,
@@ -432,6 +436,7 @@
 				A61300010000000000000002 /* SessionDashboardTests.swift */,
 				A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */,
 				A61500010000000000000002 /* MobileSessionChromeTests.swift */,
+				A61600010000000000000002 /* MobileThemeChromeTests.swift */,
 			);
 			name = "Mobile Tests";
 			path = Tests/ThreadingMobileTests;
@@ -954,6 +959,7 @@
 				A61300010000000000000001 /* SessionDashboardTests.swift in Sources */,
 				A61400010000000000000001 /* MobileCollaborationPresentationTests.swift in Sources */,
 				A61500010000000000000001 /* MobileSessionChromeTests.swift in Sources */,
+				A61600010000000000000001 /* MobileThemeChromeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

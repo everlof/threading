@@ -96,13 +96,13 @@ struct MobileSettingsView: View {
             NotificationSettingsView()
                 .environmentObject(notifications)
                 .environmentObject(model)
-                .environment(\.remoteTheme, theme)
+                .mobileTheme(theme)
         }
         .sheet(isPresented: $showsDiagnostics) {
             RemoteDiagnosticsView()
                 .environmentObject(notifications)
                 .environmentObject(model)
-                .environment(\.remoteTheme, theme)
+                .mobileTheme(theme)
         }
         .presentationDetents([.large])
     }
@@ -297,17 +297,28 @@ struct MacAppearanceSettingsView: View {
     var body: some View {
         List {
             if let choices = model.me?.themeCatalog?.appThemes {
-                ForEach(choices, id: \.id) { option in
-                    Button {
-                        choose(option.id)
-                    } label: {
-                        HStack(spacing: MobileDesign.Spacing.medium) {
-                            Circle()
-                                .fill(Color(uiColor: UIColor(remoteHex:
-                                    option.colors["accent"] ?? "#FFFFFF") ?? .white))
-                                .frame(width: 18, height: 18)
-                                .overlay {
-                                    Circle().stroke(theme.border, lineWidth: theme.borderWidth)
+                ThemedSettingsSection {
+                    ForEach(choices, id: \.id) { option in
+                        Button {
+                            choose(option.id)
+                        } label: {
+                            HStack(spacing: MobileDesign.Spacing.medium) {
+                                Circle()
+                                    .fill(Color(uiColor: UIColor(remoteHex:
+                                        option.colors["accent"] ?? "#FFFFFF") ?? .white))
+                                    .frame(width: 18, height: 18)
+                                    .overlay {
+                                        Circle()
+                                            .stroke(theme.border, lineWidth: theme.borderWidth)
+                                    }
+                                Text(option.name)
+                                    .foregroundStyle(theme.label)
+                                Spacer()
+                                if pendingThemeID == option.id {
+                                    ProgressView().controlSize(.small)
+                                } else if model.me?.theme?.id == option.id {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(theme.accent)
                                 }
                             }
                         }
@@ -318,15 +329,14 @@ struct MacAppearanceSettingsView: View {
             }
 
             if let errorMessage {
-                Section {
+                ThemedSettingsSection {
                     Label(errorMessage, systemImage: "exclamationmark.triangle")
                         .font(.footnote)
                         .foregroundStyle(theme.negative)
                 }
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(theme.ground)
+        .themedSettingsPage(theme)
         .navigationTitle("Mac appearance")
         .navigationBarTitleDisplayMode(.inline)
     }

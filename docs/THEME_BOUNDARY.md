@@ -227,3 +227,17 @@ wrappers created underneath the content root.
 `AppThemeRefresh` observes macOS accessibility display-option changes alongside app-theme
 changes. It reapplies recorded layer surfaces and redraws the window tree, so Increase Contrast
 and Reduce Motion changes take effect live rather than only after reopening a window.
+
+## The phone's half
+
+`ThreadingMobile` is SwiftUI, so it fails differently: nothing is constructed wrongly, a
+framework simply keeps painting the parts a view did not claim. A `List` hands out its own row
+plate and hairlines, and a sheet is a separate hosting scene that inherits neither the palette
+nor the presentation values read from it. Both are the "code nobody wrote" case above, on a
+platform where the audit and pixel-sweep layers do not exist.
+
+`scripts/check_mobile_theme_boundaries.py` therefore holds the mechanical half — one owner for
+row chrome, one way to hand the theme across a presentation boundary — and runs from
+`check_theme_boundaries.sh` beside the AppKit checker. The rules, the surfaces they were written
+against, and what a theme may say about the system keyboard are in
+[`IOS_THEMED_DIALOGS.md`](IOS_THEMED_DIALOGS.md).

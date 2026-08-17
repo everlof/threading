@@ -66,10 +66,10 @@ struct RemoteAttachmentsView: View {
                     } label: {
                         RemoteAttachmentRow(attachment: attachment)
                     }
-                    .listRowBackground(theme.surface)
+                    .themedSettingsRow(theme)
                 }
                 .listStyle(.plain)
-                .scrollContentBackground(.hidden)
+                .themedSettingsPage(theme)
                 .refreshable { await load() }
             }
         }

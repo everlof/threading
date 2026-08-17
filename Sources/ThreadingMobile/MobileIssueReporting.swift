@@ -60,7 +60,7 @@ struct MobileIssueReportView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
+                ThemedSettingsSection {
                     TextEditor(text: $reporterNote)
                         .focused($reporterNoteIsFocused)
                         .mobileUIEvidenceKeyboardFocus($reporterNoteIsFocused)
@@ -88,7 +88,7 @@ struct MobileIssueReportView: View {
                     Text("Your description is sent exactly as written.")
                 }
 
-                Section {
+                ThemedSettingsSection {
                     Label {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Connection diagnostics")
@@ -142,8 +142,7 @@ struct MobileIssueReportView: View {
                 }
 
             }
-            .scrollContentBackground(.hidden)
-            .background(theme.ground)
+            .themedSettingsPage(theme)
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 8) {
                     Button {

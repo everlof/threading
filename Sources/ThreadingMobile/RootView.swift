@@ -73,6 +73,21 @@ struct RootView: View {
                         .navigationTitle("Claude Code")
                 }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "terminal-key-catalog" {
+                NavigationStack {
+                    TerminalKeyboardEditorDemo(screen: .catalog)
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "terminal-key-snippet" {
+                NavigationStack {
+                    TerminalKeyboardEditorDemo(screen: .snippet)
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "terminal-key-edit" {
+                NavigationStack {
+                    TerminalKeyboardEditorDemo(screen: .edit)
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "mac-appearance-settings" {
                 NavigationStack {
                     MacAppearanceSettingsView()
@@ -162,11 +177,7 @@ struct RootView: View {
             standardRoot
 #endif
         }
-        .environment(\.remoteTheme, theme)
-        .preferredColorScheme(theme.colorScheme)
-        .tint(theme.accent)
-        .toggleStyle(MobileThemedToggleStyle(theme: theme))
-        .foregroundStyle(theme.label)
+        .mobileTheme(theme)
         .background(theme.ground.ignoresSafeArea())
         .background {
             ShakeGestureDetector {
@@ -207,6 +218,7 @@ struct RootView: View {
         )
         .sheet(item: $issueReportRequest) { request in
             MobileIssueReportView(request: request)
+                .mobileTheme(theme)
         }
 #if DEBUG
         .task {
@@ -444,9 +456,11 @@ struct RootView: View {
         .sheet(isPresented: $model.isPairing) {
             PairingView()
                 .environmentObject(model)
+                .mobileTheme(theme)
         }
         .sheet(isPresented: $showsSettings) {
             MobileSettingsView()
+                .mobileTheme(theme)
         }
     }
 }
