@@ -30,6 +30,23 @@ final class SidebarSplitViewController: NSSplitViewController {
     /// the split view has committed its final frames.
     var paneTransitionDidComplete: ((NSSplitViewItem, Bool) -> Void)?
 
+    /// Whether an otherwise-animated split-pane transition should actually move geometry.
+    ///
+    /// The main window supplies one answer for both edge panes. A live terminal makes every
+    /// intermediate width an expensive backing-tree layout and potential terminal-grid resize,
+    /// so both the sidebar and display panel commit their final geometry immediately there.
+    /// Native conversation/content surfaces keep the standard pane motion. Keeping this policy
+    /// at the shared collapse route prevents the two window edges from drifting again depending
+    /// on which caller happened to request the change.
+    var allowsAnimatedPaneTransitions: () -> Bool = { true }
+
+#if DEBUG
+    /// The animation answer after the caller request and shared pane policy were combined.
+    /// Tests use this to prove both edge panes go through the same decision even in an unshown
+    /// fixture, where `PaneTransition` correctly suppresses presentation motion of its own.
+    private(set) var lastCollapseUsedAnimatedGeometry = false
+#endif
+
     // MARK: - Initialization
 
     /// The split view is replaced before any item is added, which is the only window in which
@@ -176,9 +193,13 @@ final class SidebarSplitViewController: NSSplitViewController {
         geometryChanges: (() -> Void)? = nil,
         completion: (@MainActor @Sendable () -> Void)? = nil
     ) {
+        let animatesGeometry = animated && allowsAnimatedPaneTransitions()
+#if DEBUG
+        lastCollapseUsedAnimatedGeometry = animatesGeometry
+#endif
         PaneTransition.run(
             in: splitView,
-            animated: animated,
+            animated: animatesGeometry,
             changes: {
 #if DEBUG
                 let itemStarted = DispatchTime.now().uptimeNanoseconds

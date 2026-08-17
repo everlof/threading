@@ -369,15 +369,14 @@ layout pass, and it avoids a reveal to the chrome floor followed by a second tra
 remembered width. `isRestoringDisplayPaneWidth` is held for exactly that one transition instead
 of a guessed two turns.
 
-**The terminal's pixel frame moves; its character grid does not chase the animation.** A split
-animation beside a full-screen Codex or Claude TUI used to turn each intermediate width into an
-emulator reflow, PTY resize, SIGWINCH and process repaint. For a visible animated pane,
-`MainWindowController` brackets the motion with
-`EmojiFixedTerminalView.beginDeferringFrameGridChanges()` / `endDeferringFrameGridChanges()`.
-The terminal remembers only the final natural grid and applies it once after the split settles.
-The hold nests when the user reverses the pane before the first motion completes, and a remote
-grid remains authoritative if phone control begins in the middle. Immediate, off-screen and
-session-switch routes still resize once without a hold.
+**Both edge panes make one motion decision.** A split animation beside a full-screen Codex or
+Claude TUI turns intermediate pixel widths into expensive backing-tree layout before the first
+frame, even if character-grid updates are withheld. `SidebarSplitViewController.setCollapsed`
+therefore resolves one window-supplied policy for both the sidebar and display panel: a
+terminal-backed workspace commits the final geometry immediately, while native conversation and
+content surfaces keep the standard motion. Explicitly immediate session-switch and off-screen
+routes stay immediate. Keeping that answer at the shared collapse boundary prevents the two
+window edges from drifting into an animated sidebar beside an instant display panel.
 
 ### How a sidebar row arrives, leaves and moves
 

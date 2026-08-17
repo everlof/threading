@@ -1700,11 +1700,13 @@ frequency.
 
 The remembered divider position is installed in the same geometry transaction as the uncollapse,
 so there is no second restoration motion. More importantly, terminal-backed sessions take the
-immediate split route even when the caller requests animation. That commits the one useful final
-width without blocking the main thread on a backing-tree animation or manufacturing intermediate
-terminal grids. Native conversation surfaces retain the standard motion. This is a presentation
-policy at the pane boundary, not a SwiftTerm resize suppression: terminal frame, emulator, PTY,
-accessibility, search and scroller state still follow the one final geometry normally.
+immediate split route even when the caller requests animation. The policy is resolved once in the
+shared split-collapse boundary for both edge panes, so the sidebar and display panel cannot
+disagree. That commits the one useful final width without blocking the main thread on a
+backing-tree animation or manufacturing intermediate terminal grids. Native conversation surfaces
+retain the standard motion. This is a presentation policy at the pane boundary, not a SwiftTerm
+resize suppression: terminal frame, emulator, PTY, accessibility, search and scroller state still
+follow the one final geometry normally.
 
 The empty display pane had a second independent cold cost: `viewDidLoad` eagerly installed a
 `WKWebView`, launching WebKit services for image, chart, native-controller, and empty panes.
