@@ -138,6 +138,13 @@ watcher's narrow window cannot reflow the controller's TUI. A Tailscale/relay ro
 not change the person's control identity; reconnecting receives the Mac's authoritative current
 mode before input is accepted.
 
+Entering a terminal-backed session commits the navigation destination without a width animation.
+A navigation push that reveals the destination through intermediate widths is not cosmetic for a
+terminal: every width becomes a SwiftTerm grid, a viewport message, a PTY resize/SIGWINCH and a
+full-screen agent repaint. The immediate route installs the one useful final grid. Native
+conversation sessions retain the standard navigation transition because their virtual rows do not
+control a remote process viewport.
+
 **The chat says who can see it.** For a long time the app could report that a session was
 shared and nothing else — not who accepted a link, not whether anyone was on it, not how many
 links were still lying around unused. That was a privacy gap and a debugging one: two clients

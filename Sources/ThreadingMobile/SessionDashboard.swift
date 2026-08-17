@@ -880,12 +880,25 @@ private struct ProjectSessionGroup: View {
     }
 }
 
+enum MobileSessionNavigationTransition: Equatable {
+    case standard
+    case immediate
+
+    /// A terminal transition cannot manufacture intermediate widths. Every width becomes a
+    /// SwiftTerm grid, a remote viewport lease, a PTY resize and a full-screen agent repaint.
+    /// Native conversations own width-independent rows and keep the platform transition.
+    static func forSurface(_ surface: String) -> Self {
+        surface == "terminal" ? .immediate : .standard
+    }
+}
+
 private struct SessionListItem: View {
     let session: RemoteSessionSummaryDTO
     let isArchived: Bool
     let showsActions: Bool
     let pendingActionSessionID: String?
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
+    @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
 
     @ViewBuilder
@@ -904,10 +917,25 @@ private struct SessionListItem: View {
         if isArchived {
             SessionRow(session: session, showsChevron: false)
         } else {
-            NavigationLink(value: session.id) {
+            Button(action: openSession) {
                 SessionRow(session: session, showsChevron: false)
             }
             .buttonStyle(.plain)
+            .accessibilityAddTraits(.isLink)
+            .accessibilityRemoveTraits(.isButton)
+        }
+    }
+
+    private func openSession() {
+        switch MobileSessionNavigationTransition.forSurface(session.surface) {
+        case .standard:
+            model.navigationPath.append(session.id)
+        case .immediate:
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                model.navigationPath.append(session.id)
+            }
         }
     }
 
