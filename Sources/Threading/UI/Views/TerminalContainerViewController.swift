@@ -2127,14 +2127,10 @@ private extension TerminalContainerViewController {
     /// writing anything down. `AgentModels.defaultFastMode` can now name the value a Claude
     /// session *launches* with — the composer chips say so, and that is honest there because
     /// nothing has started yet — but this card reports a session already running, where the
-    /// launch value is exactly the stale reading `ObservedPermissionMode` exists to refuse.
+    /// launch value would be stale as soon as the live flag moves.
     /// Effort for a Claude terminal session is the account's configured value — what the CLI will
     /// inherit, which is the best answer available and goes stale the moment the user types
     /// `/effort`.
-    ///
-    /// **The permission mode is the one fact taken only from observation.** The launch record is
-    /// not consulted at all — `ObservedPermissionMode` says why — so a runtime that records
-    /// nothing, and a session that has not started, show no posture rather than a stale one.
     func refreshGitStatusOverlayModel() {
         guard let sessionID = currentSessionID,
               let session = ProjectStore.shared.session(withID: sessionID),
@@ -2178,7 +2174,6 @@ private extension TerminalContainerViewController {
 
         let reading = GitStatusOverlayView.ModelReading(
             name: model.map { ModelName.display(for: $0) },
-            mode: ObservedPermissionMode.known(for: session, in: project)?.displayName,
             effort: effort.map {
                 AgentReasoningLevel(effort: $0, description: "").displayName
             },
@@ -2195,16 +2190,6 @@ private extension TerminalContainerViewController {
                 guard let self, self.currentSessionID == sessionID else { return }
                 self.refreshGitStatusOverlayModel()
             }
-        }
-
-        // The posture has no configured source to fall back to, so unlike the model this asks
-        // every time rather than only when nothing else could answer — the transcript is the
-        // only thing that knows. The same three properties keep that affordable: the read is off
-        // the main thread, capped, gated on the file having grown, and silent unless the answer
-        // moved. A runtime that records no posture returns before any of that happens.
-        ObservedPermissionMode.revalidate(for: session, in: project) { [weak self] _ in
-            guard let self, self.currentSessionID == sessionID else { return }
-            self.refreshGitStatusOverlayModel()
         }
 
         gitStatusOverlay.updateModel(reading)

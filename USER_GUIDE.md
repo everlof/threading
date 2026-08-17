@@ -3155,14 +3155,6 @@ moves the line the next time the card refreshes. The card says what it knows whe
 own Claude status line already prints the same thing, so a line that names the model shows it
 twice — once there, once on the card.
 
-**The same line names the permission mode a Claude session is actually in** — Auto, Plan, Accept
-Edits, Manual, Don't Ask or Bypass Permissions — between the model and the effort. It is read from
-what the session recorded, not from what it was started with, so pressing Shift+Tab inside Claude
-moves the line the next time the card refreshes. Chats where the posture cannot be observed show
-none: Codex, Grok and OpenCode record nothing to read, and a chat that has not been started yet
-has nothing to have observed. The mode shown here is a *reading*; the place to change it is still
-the chat's **⋯** menu ▸ Permission Mode, which takes effect the next time the chat starts.
-
 **A bolt at the end of that line means the chat is running in Fast mode.** Standard speed shows
 nothing — it is what a chat runs at unless you asked otherwise, so it costs no ink. VoiceOver reads
 the state as the word "Fast" in the bolt's place. Only runtimes whose speed Threading sets can show

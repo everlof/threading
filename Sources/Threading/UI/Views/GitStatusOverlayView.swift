@@ -197,13 +197,6 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// a field leaves it out, and the row shrinks to the facts that are left.
     struct ModelReading: Equatable {
         var name: String?
-        /// The permission posture, already display-named — "Accept Edits", not "acceptEdits".
-        ///
-        /// Set only from a mode the session was *observed* in, never from the launch record: a
-        /// terminal's own Shift+Tab moves the posture without telling this app, so the record
-        /// answers what the next launch will ask for rather than what is true now. See
-        /// `ObservedPermissionMode`.
-        var mode: String?
         /// Already display-named — "Extra High", not "xhigh".
         var effort: String?
         /// Drawn as the bolt the row ends on, and only while it is true. False is not a fact the
@@ -211,7 +204,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         /// otherwise, so it earns no ink — see `speedMark`.
         var isFast = false
 
-        var isEmpty: Bool { name == nil && mode == nil && effort == nil && !isFast }
+        var isEmpty: Bool { name == nil && effort == nil && !isFast }
     }
 
     /// What the card says about the isolated worktree a session was given, when it was given one.
@@ -1170,8 +1163,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         let model = Self.modelText(for: modelReading, ink: surfaceInk)
         let workspace = Self.workspaceText(for: workspaceReading, ink: surfaceInk)
         // The bolt is a row of its own right, not decoration on the words: a session whose only
-        // agent fact is its speed still gets the agent line, the same way one with only a posture
-        // does.
+        // agent fact is its speed still gets the agent line.
         let isFast = modelReading?.isFast ?? false
 
         hasGitReceipt = head != nil || counters != nil
@@ -1524,14 +1516,9 @@ final class GitStatusOverlayView: BackdropOverlay {
     ///
     /// Nil when there are no words at all, which includes a reading whose only fact is its speed:
     /// the row is then the mark and the bolt, and `rebuild()` keeps it open on `isFast` rather
-    /// than on this. Each part is independently optional — a session may know its posture and not
-    /// its model, or the reverse.
-    ///
-    /// **Mode leads effort**, and the bolt follows both, so the row reads model → posture → how it
-    /// thinks → how fast: the order the composer's own chips are in (`modelChip`, `modeChip`,
-    /// `effortChip`, `speedChip`). Speed used to sit between posture and effort here, which
-    /// nothing on screen agreed with; no runtime could reach the case, so the disagreement lived
-    /// only in the fixtures until the bolt made it visible.
+    /// than on this. Each part is independently optional — a session may know its effort and not
+    /// its model, or the reverse. The bolt follows both, so the row reads model → how it thinks →
+    /// how fast.
     private static func modelText(
         for reading: ModelReading?,
         ink: Design.Ink
@@ -1547,13 +1534,9 @@ final class GitStatusOverlayView: BackdropOverlay {
             ]))
         }
 
-        var details: [String] = []
-        if let mode = reading.mode { details.append(mode) }
-        if let effort = reading.effort { details.append(effort) }
-        if !details.isEmpty {
-            let joined = details.joined(separator: " · ")
+        if let effort = reading.effort {
             text.append(NSAttributedString(
-                string: text.length == 0 ? joined : " · \(joined)",
+                string: text.length == 0 ? effort : " · \(effort)",
                 attributes: [.font: font, .foregroundColor: ink.tertiary]
             ))
         }
@@ -1722,7 +1705,6 @@ final class GitStatusOverlayView: BackdropOverlay {
         guard let reading, !reading.isEmpty else { return nil }
         var parts: [String] = []
         if let name = reading.name { parts.append(name) }
-        if let mode = reading.mode { parts.append(mode) }
         if let effort = reading.effort { parts.append(effort) }
         if reading.isFast { parts.append(L10n.string("Fast")) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
