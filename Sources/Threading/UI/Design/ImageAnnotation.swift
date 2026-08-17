@@ -1,28 +1,5 @@
 import AppKit
 
-// MARK: - Image Annotation
-
-/// One numbered mark a person put on a picture, and the sentence it stands for.
-///
-/// **The point is normalized into the image's own space** (0…1, origin top-left), never a view
-/// coordinate. A mark is made on a preview scaled to fit a column, read again in the fullscreen
-/// inspector at 400% with a pan offset, drawn into a flattened copy at the file's real pixel
-/// size, and quoted as a coordinate in prose. Those are four different rectangles for the same
-/// mark; storing any one of them makes the other three a conversion nobody remembers to do, and
-/// a resized sheet would move the pins off the thing they were pointing at.
-struct ImageAnnotation: Identifiable, Equatable, Sendable {
-    let id: UUID
-    /// 0…1 in the image's own space, origin top-left.
-    var point: CGPoint
-    var note: String
-
-    init(id: UUID = UUID(), point: CGPoint, note: String = "") {
-        self.id = id
-        self.point = point
-        self.note = note
-    }
-}
-
 /// The pin's geometry, which is **`BrowserAnnotationOverlay`'s geometry**.
 ///
 /// That surface already drops numbered accent pins on live content, and a second numbered mark

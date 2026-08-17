@@ -24,6 +24,13 @@ import Foundation
 protocol SessionContextReceiving: AnyObject {
     func stageContextAttachment(_ attachment: ConversationContextAttachment)
     func sendContextAttachment(_ attachment: ConversationContextAttachment)
+    @discardableResult
+    func removeContextAttachment(id: UUID) -> Bool
+}
+
+extension SessionContextReceiving {
+    @discardableResult
+    func removeContextAttachment(id: UUID) -> Bool { false }
 }
 
 /// The smallest live-session projection the handoff policy needs. Keeping lookup behind this
@@ -136,6 +143,16 @@ enum SessionContextHandoff {
             for: sessionID,
             querying: liveDestinations
         )
+    }
+
+    /// Removes a staged receipt from a native composer. A terminal paste has already crossed
+    /// the transport boundary and is intentionally not presented as removable.
+    @discardableResult
+    static func remove(_ attachmentID: UUID, for sessionID: SessionID) -> Bool {
+        guard case .conversation(let conversation) = destination(for: sessionID) else {
+            return false
+        }
+        return conversation.removeContextAttachment(id: attachmentID)
     }
 
     static func send(

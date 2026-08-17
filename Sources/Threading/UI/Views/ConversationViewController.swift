@@ -337,6 +337,17 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         prompt.onRequestContextComment = { [weak self] attachment in
             self?.requestComment(on: attachment)
         }
+        prompt.isContextAttachmentOpenable = { [weak self] attachment in
+            guard let self else { return false }
+            return SessionContinuityStore.shared.imageAnnotationDocument(
+                forContextAttachmentID: attachment.id,
+                in: self.sessionID
+            ) != nil
+        }
+        prompt.onOpenContextAttachment = { [weak self, weak prompt] attachment in
+            guard let self, let prompt else { return }
+            self.openImageAnnotations(for: attachment, from: prompt)
+        }
         prompt.onRequestImageComment = { [weak self] path in
             guard let self else { return }
             self.requestComment(on: self.attachmentContext(path: path))
@@ -2111,6 +2122,23 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         _ = submit(promptView.stringValue, context: promptView.contextAttachments)
     }
 
+    @discardableResult
+    func removeContextAttachment(id: UUID) -> Bool {
+        guard RemoteSessionMirrorRegistry.shared.ownerCanWrite(to: sessionID) else {
+            refreshInputControl()
+            return false
+        }
+        let removed = promptView.removeContextAttachment(id: id)
+        if removed {
+            SessionContinuityStore.shared.setConversationDraft(
+                promptView.stringValue,
+                context: promptView.contextAttachments,
+                for: sessionID
+            )
+        }
+        return removed
+    }
+
     func requestComment(
         on attachment: ConversationContextAttachment,
         preview: CodeContextPreview? = nil
@@ -2179,6 +2207,42 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         messageView.onCommentContext = { [weak self] attachment in
             self?.requestComment(on: attachment)
         }
+        messageView.isContextOpenable = { [weak self] attachment in
+            guard let self else { return false }
+            return SessionContinuityStore.shared.imageAnnotationDocument(
+                forContextAttachmentID: attachment.id,
+                in: self.sessionID
+            ) != nil
+        }
+        messageView.onOpenContext = { [weak self, weak messageView] attachment in
+            guard let self, let messageView else { return }
+            self.openImageAnnotations(for: attachment, from: messageView)
+        }
+    }
+
+    private func openImageAnnotations(
+        for attachment: ConversationContextAttachment,
+        from source: NSView
+    ) {
+        guard let document = SessionContinuityStore.shared.imageAnnotationDocument(
+            forContextAttachmentID: attachment.id,
+            in: sessionID
+        ) else { return }
+        let stored = document.sourceAttachmentID.flatMap {
+            SessionAttachmentStore.shared.attachment(for: sessionID, id: $0)
+        }
+        let url = stored?.url ?? URL(fileURLWithPath: document.sourcePath)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        _ = MediaInspectorPresenter.present(
+            MediaInspectorItem(
+                url: url,
+                title: document.title,
+                content: .image,
+                annotationAssetID: stored?.id
+            ),
+            from: source,
+            annotationHost: ChatImageAnnotationHost(sessionID: sessionID)
+        )
     }
 
     private func projectRelativePath(for path: String) -> String {

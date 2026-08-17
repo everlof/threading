@@ -41,7 +41,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Display-pane header | `display.pane-header@1` | protected command/status hook | tab ownership, close/select/order, overflow, persistence, `+` menu | Implemented |
 | Display tab header | `display.tab-header@1` | display-only `after-title` slot | identity, active state, close/select, ordering, overflow | Implemented |
 | Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity presentation, refresh, the whole reveal gesture | Implemented |
-| Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, the inspector rail | Implemented |
+| Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, editable annotation receipt/revisions and the inspector rail | Implemented |
 
 The standalone terminal row remains host-only because no published extension entity or data
 capability represents its live shell. Exposing replacement presentation without that authority
@@ -49,6 +49,12 @@ would create a visual contract that cannot truthfully describe the process behin
 therefore keeps its identity, selection, foreground-command spinner and lifecycle actions
 host-owned; a future public row starts by publishing the typed terminal context rather than by
 leaking the AppKit cell.
+
+Image annotation persistence and publication remain deliberately host-owned inside the existing
+attachment-preview contract. A replacement preview may draw the file body, but it cannot replace
+the editable annotation document, claim that a revision was added to chat, or alter the stable
+receipt that links a composer/transcript back to that document. Those are user-authored state and
+transport truth, not preview presentation.
 
 ## Project hover-card precedent
 

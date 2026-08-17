@@ -43,6 +43,12 @@ final class ImageAnnotationRailView: NSView, ThemedComponent, NSTextFieldDelegat
         setupViews()
     }
 
+    override var isFlipped: Bool { true }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: max(1, stack.fittingSize.height))
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
@@ -61,6 +67,12 @@ final class ImageAnnotationRailView: NSView, ThemedComponent, NSTextFieldDelegat
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.small
+        stack.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.inset,
+            left: Design.Spacing.inset,
+            bottom: Design.Spacing.inset,
+            right: Design.Spacing.inset
+        )
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(stack)
@@ -72,7 +84,10 @@ final class ImageAnnotationRailView: NSView, ThemedComponent, NSTextFieldDelegat
         ])
 
         stack.addArrangedSubview(emptyHint)
-        emptyHint.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        emptyHint.widthAnchor.constraint(
+            equalTo: stack.widthAnchor,
+            constant: -Design.Spacing.inset * 2
+        ).isActive = true
     }
 
     // MARK: - Theme
@@ -126,7 +141,14 @@ final class ImageAnnotationRailView: NSView, ThemedComponent, NSTextFieldDelegat
         emptyHint.isHidden = !rows.isEmpty
         for row in rows {
             stack.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            row.widthAnchor.constraint(
+                equalTo: stack.widthAnchor,
+                constant: -Design.Spacing.inset * 2
+            ).isActive = true
+        }
+        invalidateIntrinsicContentSize()
+        if translatesAutoresizingMaskIntoConstraints {
+            frame.size.height = max(1, intrinsicContentSize.height)
         }
     }
 
@@ -160,7 +182,7 @@ private extension ImageAnnotationRailView {
     final class Row: NSView {
 
         let id: ImageAnnotation.ID
-        let field = ThemedTextField()
+        let field = ThemedTextField(surfacePresentation: .onInteraction)
         var onRemove: ((ImageAnnotation.ID) -> Void)?
 
         var isSelected: Bool = false {
@@ -171,12 +193,18 @@ private extension ImageAnnotationRailView {
         }
 
         private let badge: BadgeView
+        private let surface = ThemedSurfaceView()
 
         init(id: ImageAnnotation.ID, index: Int, note: String) {
             self.id = id
             badge = BadgeView(index: index)
             super.init(frame: .zero)
             translatesAutoresizingMaskIntoConstraints = false
+            surface.applySurface(
+                fill: Design.Surface.controlResting,
+                radius: .control,
+                border: Design.Surface.border
+            )
 
             field.stringValue = note
             field.placeholderString = ImageAnnotationStrings.notePlaceholder(index: index)
@@ -200,13 +228,18 @@ private extension ImageAnnotationRailView {
             row.alignment = .centerY
             row.spacing = Design.Spacing.small
             row.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(surface)
             addSubview(row)
 
             NSLayoutConstraint.activate([
-                row.topAnchor.constraint(equalTo: topAnchor),
-                row.bottomAnchor.constraint(equalTo: bottomAnchor),
-                row.leadingAnchor.constraint(equalTo: leadingAnchor),
-                row.trailingAnchor.constraint(equalTo: trailingAnchor)
+                surface.topAnchor.constraint(equalTo: topAnchor),
+                surface.bottomAnchor.constraint(equalTo: bottomAnchor),
+                surface.leadingAnchor.constraint(equalTo: leadingAnchor),
+                surface.trailingAnchor.constraint(equalTo: trailingAnchor),
+                row.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.small),
+                row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.small),
+                row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.small),
+                row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.small)
             ])
         }
 
@@ -280,6 +313,8 @@ enum ImageAnnotationIdentifiers {
     static func note(index: Int) -> String { "annotation.note.\(index)" }
     static let rail = "annotation.rail"
     static let image = "annotation.image"
+    static let share = "annotation.share"
+    static let removeFromChat = "annotation.remove-from-chat"
 }
 
 // MARK: - Inspector Strings

@@ -523,6 +523,27 @@
       }
     },
     {
+      "id": "image-annotations",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Durable image annotations",
+      "description": "The real media inspector with several saved notes visible on its first frame, explicit revision-aware chat actions, and the polished annotation sidecar.",
+      "states": ["Several saved annotations", "Changed draft revision", "Explicit Update chat action", "Attachment preview receipt after inspector close"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["Light", "Dark", "Theme-authored"],
+        "sizes": ["960×640-point inspector"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/MediaInspectorTests.swift",
+        "test": "ThreadingTests/MediaInspectorTests/testRendersDurableAnnotationInspector"
+      },
+      "capture": {
+        "glob": "image-annotations-*.png"
+      }
+    },
+    {
       "id": "image-comparison",
       "kind": "surface",
       "status": "implemented",

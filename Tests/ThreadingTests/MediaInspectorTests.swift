@@ -735,14 +735,16 @@ final class MediaInspectorTests: XCTestCase {
 
     // MARK: - Annotating
 
-    /// The host is asked for the marks, told of every change, and told once on the way out.
-    /// A fake stands in for both real hosts: the report sheet, which keeps up as it goes, and
-    /// the chat host, which waits for the close.
+    /// The host is asked for the marks and told of every change. Closing is deliberately not a
+    /// publication gesture; chat publication has its own explicit callback.
     @MainActor
     private final class FakeAnnotationHost: MediaInspectorAnnotationHost {
         var marks: [ImageAnnotation] = []
         private(set) var changeCount = 0
         private(set) var closedWith: [ImageAnnotation]?
+        var presentsChatActions = false
+        var canShare = true
+        var state: ImageAnnotationSharingState = .local
 
         func annotations(for item: MediaInspectorItem) -> [ImageAnnotation] { marks }
 
@@ -762,6 +764,10 @@ final class MediaInspectorTests: XCTestCase {
         ) {
             closedWith = annotations
         }
+
+        func sharingState(for item: MediaInspectorItem) -> ImageAnnotationSharingState { state }
+        func showsChatActions(for item: MediaInspectorItem) -> Bool { presentsChatActions }
+        func canShareAnnotations(for item: MediaInspectorItem) -> Bool { canShare }
     }
 
     @MainActor
@@ -790,10 +796,9 @@ final class MediaInspectorTests: XCTestCase {
         XCTAssertTrue(host.marks.isEmpty)
     }
 
-    /// A click marks the picture, the host hears about it at once, and closing the overlay is
-    /// the one notice the chat host is waiting for.
+    /// A click marks the picture and reaches durable ownership at once. Closing is not sending.
     @MainActor
-    func testAMarkReachesTheHostAndTheCloseNoticeCarriesTheWholeList() throws {
+    func testAMarkReachesTheHostAndClosingDoesNotPublishIt() throws {
         let fixture = try imageFiles(count: 1)
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
 
@@ -822,7 +827,82 @@ final class MediaInspectorTests: XCTestCase {
         XCTAssertEqual(canvas.annotations.count, 1, "the pin was not drawn on the canvas")
 
         inspector.prepareForRemoval()
-        XCTAssertEqual(host.closedWith?.count, 1, "the close notice carried nothing")
+        XCTAssertNil(host.closedWith, "closing the inspector published user-authored marks")
+    }
+
+    func testRendersDurableAnnotationInspector() throws {
+        let fixture = try imageFiles(count: 1)
+        defer {
+            AppThemePalette.set(.system)
+            try? FileManager.default.removeItem(at: fixture.directory)
+        }
+        let directory = renderDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let themes: [(String, AppTheme, NSAppearance.Name)] = [
+            ("system-light", .system, .aqua),
+            ("system-dark", .system, .darkAqua),
+            ("cyberpunk", AppThemeStyles.cyberpunk, .darkAqua),
+            ("swiss", AppThemeStyles.swissMinimalist, .aqua)
+        ]
+
+        for (name, theme, appearance) in themes {
+            let host = FakeAnnotationHost()
+            host.marks = [
+                ImageAnnotation(point: CGPoint(x: 0.24, y: 0.28), note: "Align this title with the toolbar"),
+                ImageAnnotation(point: CGPoint(x: 0.72, y: 0.36), note: "This action needs a clearer label"),
+                ImageAnnotation(point: CGPoint(x: 0.54, y: 0.72), note: "Reduce the empty space below")
+            ]
+            host.presentsChatActions = true
+            host.state = .changedInChat
+            AppThemePalette.set(theme)
+            let inspector = MediaInspectorView(
+                items: fixture.items,
+                selectedIndex: 0,
+                annotationHost: host
+            )
+            inspector.frame = NSRect(x: 0, y: 0, width: 960, height: 640)
+            inspector.appearance = NSAppearance(named: appearance)
+            AppThemeRefresh.repaint(inspector)
+            let data = try XCTUnwrap(render(inspector))
+            try data.write(to: directory.appendingPathComponent(
+                "image-annotations-\(name).png"
+            ))
+        }
+        AppThemePalette.set(.system)
+        for (name, appearance) in [
+            ("light", NSAppearance.Name.aqua),
+            ("dark", NSAppearance.Name.darkAqua)
+        ] {
+            let surface = ThemedSurfaceView()
+            surface.frame = NSRect(x: 0, y: 0, width: 480, height: 400)
+            surface.translatesAutoresizingMaskIntoConstraints = true
+            surface.appearance = NSAppearance(named: appearance)
+            surface.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+            let preview = ThemedImagePreview()
+            preview.image = fixture.items[0].image
+            let receipt = ImageAnnotationReceiptView()
+            receipt.configure(count: 3, state: .changedInChat, canShare: true)
+            let stack = NSStackView(views: [preview, receipt])
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = Design.Spacing.small
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            surface.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.topAnchor.constraint(equalTo: surface.topAnchor, constant: Design.Spacing.inset),
+                stack.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: Design.Spacing.inset),
+                stack.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -Design.Spacing.inset),
+                stack.bottomAnchor.constraint(equalTo: surface.bottomAnchor, constant: -Design.Spacing.inset),
+                preview.widthAnchor.constraint(equalTo: stack.widthAnchor),
+                receipt.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            ])
+            AppThemeRefresh.repaint(surface)
+            let data = try XCTUnwrap(render(surface))
+            try data.write(to: directory.appendingPathComponent(
+                "image-annotations-attachment-receipt-\(name).png"
+            ))
+        }
+        print("Rendered durable image annotations to \(directory.path)")
     }
 
     /// A drag pans; only a click marks. A zoomed picture is exactly when somebody wants to pan

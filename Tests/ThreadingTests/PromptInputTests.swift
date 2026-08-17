@@ -1922,9 +1922,23 @@ final class PromptInputTests: XCTestCase {
         prompt.addContextAttachment(comment)
 
         XCTAssertEqual(prompt.contextAttachments, [comment], "the same receipt must stage once")
+        let updated = ConversationContextAttachment(
+            id: comment.id,
+            kind: .comment,
+            source: .attachment,
+            title: "layout.png · revision 2",
+            comment: "The toolbar and title are both too close.",
+            locator: "attachments/layout-r2.png"
+        )
+        prompt.addContextAttachment(updated)
+        XCTAssertEqual(
+            prompt.contextAttachments,
+            [updated],
+            "a new annotation revision should update its linked receipt in place"
+        )
         XCTAssertTrue(try inlineSubmitButton(in: prompt).isEnabled)
         prompt.submit()
-        XCTAssertEqual(submittedContexts, [[comment]])
+        XCTAssertEqual(submittedContexts, [[updated]])
 
         prompt.clear()
         XCTAssertTrue(prompt.contextAttachments.isEmpty)

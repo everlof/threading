@@ -2,50 +2,32 @@ import AppKit
 
 // MARK: - Chat Image Annotation Host
 
-/// Where marks go when nobody else asked for them: into the chat.
+/// Makes ordinary inspector annotations durable and publishes them to chat only on request.
 ///
-/// The report sheet takes its own marks because it has a rail to put them in and a report to
-/// write them into. Every *other* image in the app — an attachment, a chart the agent drew, a
-/// browser baseline, a screenshot dropped in a moment ago — has no such owner, and the only
-/// useful thing to do with "this bit, here, is wrong" is to tell the agent working on it.
-///
-/// **Handed over on close, not on every pin.** Marking is a sentence being composed: the third
-/// pin often renames the first, and a handoff per click would put three versions of the same
-/// picture in the composer. `MediaInspectorView` calls `inspectorDidClose` once, and only when
-/// something was actually marked.
-///
-/// What arrives is what the user chose it to be: the picture **with the pins drawn into it**, so
-/// the agent sees the marks where they were made, and the numbered notes **carrying each mark's
-/// point in the image's own pixels**, so a reader measuring the file lands on the same spot. One
-/// file rather than two — the original is still on disk and named in the same message.
+/// The editable document belongs to the session continuity store, not the inspector window.
+/// Closing, reopening, or moving through a collection therefore changes no state. Sharing mints
+/// an immutable flattened attachment revision and upserts one linked composer receipt.
 @MainActor
 final class ChatImageAnnotationHost: MediaInspectorAnnotationHost {
 
-    /// Which session the marks are for, asked at the moment they are handed over rather than
-    /// captured when the inspector opened: the user may have changed rows while looking at a
-    /// picture, and the chat they are looking at now is the one they mean.
-    private let sessionID: () -> SessionID?
+    let sessionID: SessionID
+    private let continuity: SessionContinuityStore
+    private let attachments: SessionAttachmentStore
 
-    /// The marks for the picture currently open, keyed by file so arrowing along a collection
-    /// and back does not lose them. Bounded by the inspector's own lifetime — the whole map goes
-    /// when this host does, which is when the overlay closes.
-    private var annotationsByURL: [URL: [ImageAnnotation]] = [:]
-
-    init(sessionID: @escaping () -> SessionID?) {
+    init(
+        sessionID: SessionID,
+        continuity: SessionContinuityStore = .shared,
+        attachments: SessionAttachmentStore = .shared
+    ) {
         self.sessionID = sessionID
+        self.continuity = continuity
+        self.attachments = attachments
     }
 
-    /// Whether there is a chat to hand anything to. The inspector offers no annotation button
-    /// when this answers false, because a mode whose result goes nowhere is worse than no mode.
-    var canHandOff: Bool {
-        guard let id = sessionID() else { return false }
-        return SessionContextHandoff.canReceiveContext(for: id)
-    }
-
-    // MARK: - MediaInspectorAnnotationHost
+    var canHandOff: Bool { SessionContextHandoff.canReceiveContext(for: sessionID) }
 
     func annotations(for item: MediaInspectorItem) -> [ImageAnnotation] {
-        annotationsByURL[item.url.standardizedFileURL] ?? []
+        document(for: item)?.annotations ?? []
     }
 
     func inspector(
@@ -53,49 +35,86 @@ final class ChatImageAnnotationHost: MediaInspectorAnnotationHost {
         for item: MediaInspectorItem,
         image: NSImage?
     ) {
-        annotationsByURL[item.url.standardizedFileURL] = annotations
+        let existing = document(for: item)
+        // Entering and leaving an untouched annotation mode must not promote arbitrary image
+        // bytes into the session attachment store.
+        guard existing != nil || !annotations.isEmpty else { return }
+
+        let stableAttachment = stableAttachment(for: item, existing: existing)
+        var keys = [ImageAnnotationAssetKey.file(item.url)]
+        if let id = item.annotationAssetID ?? stableAttachment?.id ?? existing?.sourceAttachmentID {
+            keys.append(ImageAnnotationAssetKey.attachment(id))
+        }
+        let sourceURL = stableAttachment?.url
+            ?? existing?.sourceAttachmentID.flatMap {
+                attachments.attachment(for: sessionID, id: $0)?.url
+            }
+            ?? item.url
+        _ = continuity.setImageAnnotations(
+            annotations,
+            assetKeys: keys,
+            sourceAttachmentID: item.annotationAssetID
+                ?? stableAttachment?.id
+                ?? existing?.sourceAttachmentID,
+            sourcePath: sourceURL.path,
+            title: item.title,
+            in: sessionID
+        )
     }
 
-    func inspectorDidClose(
-        with annotations: [ImageAnnotation],
-        for item: MediaInspectorItem,
-        image: NSImage?
-    ) {
-        guard !annotations.isEmpty,
-              let sessionID = sessionID(),
-              SessionContextHandoff.canReceiveContext(for: sessionID),
-              let image,
-              let annotatedURL = ImageAnnotationFlattening.writeFlattenedPNG(
-                  image,
-                  annotations: annotations,
-                  basedOn: item.url
-              ) else { return }
+    func sharingState(for item: MediaInspectorItem) -> ImageAnnotationSharingState {
+        guard let document = document(for: item) else { return .local }
+        let staged = continuity.isImageAnnotationStaged(document, in: sessionID)
+        if staged {
+            return document.sharedRevision == document.revision ? .currentInChat : .changedInChat
+        }
+        guard let sharedRevision = document.sharedRevision else { return .local }
+        return sharedRevision == document.revision ? .shared : .changedSinceShared
+    }
 
-        let notes = ImageAnnotationSummary.lines(annotations, imageSize: image.size)
+    func showsChatActions(for item: MediaInspectorItem) -> Bool { true }
 
-        // The same shape the Attachments pane's **Add attachment to chat** uses, deliberately:
-        // one provider-neutral reference, staged through the seam that answers for a native
-        // conversation *and* a terminal. A second, image-only route would work on one surface
-        // and silently do nothing on the other, which is the gap `SessionContextHandoff` exists
-        // to have closed.
-        SessionContextHandoff.stage(
-            ConversationContextAttachment(
-                kind: .comment,
-                source: .attachment,
-                title: annotatedURL.lastPathComponent,
-                excerpt: annotatedURL.path,
-                comment: notes.joined(separator: "\n"),
-                locator: annotatedURL.path
-            ),
-            fileURL: annotatedURL,
-            for: sessionID
+    func canShareAnnotations(for item: MediaInspectorItem) -> Bool { canHandOff }
+
+    func inspectorDidRequestShare(for item: MediaInspectorItem, image: NSImage?) {
+        guard let document = document(for: item) else { return }
+        _ = ImageAnnotationChatHandoff.stage(document, image: image, for: sessionID)
+    }
+
+    func inspectorDidRequestRemoveFromChat(for item: MediaInspectorItem) {
+        guard let document = document(for: item) else { return }
+        _ = ImageAnnotationChatHandoff.removeFromChat(document, for: sessionID)
+    }
+
+    private func document(for item: MediaInspectorItem) -> ImageAnnotationDocument? {
+        if let id = item.annotationAssetID,
+           let document = continuity.imageAnnotationDocument(
+               forAssetKey: ImageAnnotationAssetKey.attachment(id),
+               in: sessionID
+           ) {
+            return document
+        }
+        return continuity.imageAnnotationDocument(
+            forAssetKey: ImageAnnotationAssetKey.file(item.url),
+            in: sessionID
         )
+    }
 
-        EventLog.shared.record(.session, "Annotated an image into the chat", [
-            "session": sessionID.uuidString,
-            "marks": String(annotations.count)
-        ])
-
-        annotationsByURL.removeValue(forKey: item.url.standardizedFileURL)
+    /// An image not already in the session's attachment collection is captured exactly once on
+    /// its first mark. That makes reopening independent of a temporary source URL and exposes
+    /// the editable work from the Attachments pane as soon as it exists.
+    private func stableAttachment(
+        for item: MediaInspectorItem,
+        existing: ImageAnnotationDocument?
+    ) -> SessionAttachment? {
+        if let id = item.annotationAssetID ?? existing?.sourceAttachmentID {
+            return attachments.attachment(for: sessionID, id: id)
+        }
+        return attachments.recordSnapshot(
+            of: item.url,
+            sessionID: sessionID,
+            origin: .user,
+            preferredName: item.title
+        )
     }
 }

@@ -156,17 +156,22 @@ struct MediaInspectorItem {
     let title: String
     let image: NSImage?
     let content: MediaInspectorItemContent
+    /// Stable session-attachment identity when the item came from that store. Annotation hosts
+    /// use it instead of treating a mutable path as identity; other callers fall back to the URL.
+    let annotationAssetID: String?
 
     init(
         url: URL,
         title: String? = nil,
         image: NSImage? = nil,
-        content: MediaInspectorItemContent = .automatic
+        content: MediaInspectorItemContent = .automatic,
+        annotationAssetID: String? = nil
     ) {
         self.url = url
         self.title = title ?? url.lastPathComponent
         self.image = image
         self.content = content
+        self.annotationAssetID = annotationAssetID
     }
 
     var isAvailable: Bool {
@@ -204,9 +209,10 @@ enum MediaInspectorZoomMode: Equatable {
 /// gesture over the same picture, so the difference belongs in who is asked, not in a mode flag
 /// inside the inspector.
 ///
-/// A host is asked for the current marks each time an item is shown, told of every edit, and
-/// told once when the inspector closes. The report sheet needs only the middle one — it has been
-/// keeping up all along — so the close notice has a default that does nothing.
+/// A host is asked for the current marks each time an item is shown and told of every edit.
+/// Publication is a separate explicit request: dismissing a view is never interpreted as
+/// sending user-authored content. The legacy close notice remains a default no-op for hosts that
+/// need teardown bookkeeping, not as a handoff path.
 @MainActor
 protocol MediaInspectorAnnotationHost: AnyObject {
     func annotations(for item: MediaInspectorItem) -> [ImageAnnotation]
@@ -220,6 +226,11 @@ protocol MediaInspectorAnnotationHost: AnyObject {
         for item: MediaInspectorItem,
         image: NSImage?
     )
+    func sharingState(for item: MediaInspectorItem) -> ImageAnnotationSharingState
+    func showsChatActions(for item: MediaInspectorItem) -> Bool
+    func canShareAnnotations(for item: MediaInspectorItem) -> Bool
+    func inspectorDidRequestShare(for item: MediaInspectorItem, image: NSImage?)
+    func inspectorDidRequestRemoveFromChat(for item: MediaInspectorItem)
 }
 
 extension MediaInspectorAnnotationHost {
@@ -228,6 +239,20 @@ extension MediaInspectorAnnotationHost {
         for item: MediaInspectorItem,
         image: NSImage?
     ) {}
+
+    func sharingState(for item: MediaInspectorItem) -> ImageAnnotationSharingState { .local }
+    func showsChatActions(for item: MediaInspectorItem) -> Bool { false }
+    func canShareAnnotations(for item: MediaInspectorItem) -> Bool { false }
+    func inspectorDidRequestShare(for item: MediaInspectorItem, image: NSImage?) {}
+    func inspectorDidRequestRemoveFromChat(for item: MediaInspectorItem) {}
+}
+
+enum ImageAnnotationSharingState: Equatable {
+    case local
+    case currentInChat
+    case changedInChat
+    case shared
+    case changedSinceShared
 }
 
 // MARK: - Presentation
@@ -428,15 +453,14 @@ final class MediaInspectorView: NSView, ThemedComponent {
     // MARK: - Annotation
 
     private weak var annotationHost: MediaInspectorAnnotationHost?
-    private let annotationRail = ImageAnnotationRailView()
-    private let annotationScrollView = ThemedScrollView()
+    private let annotationPane = ImageAnnotationPaneView()
     /// **Vertical, and stating so is load-bearing.** A `SeparatorView` reports its thickness on
     /// the axis it is drawn along and `noIntrinsicMetric` on the other. Left at the default
     /// horizontal, this rule had no width of its own while sitting between the canvas's trailing
     /// edge and the notes column — so Auto Layout was free to satisfy the chain by giving the
     /// rule the room and the canvas none. The inspector then drew a blank picture, in every
     /// inspection in the app, with no broken constraint to say why.
-    private let annotationSeparator = SeparatorView(.vertical)
+    private let annotationSeparator = SeparatorView(.vertical, role: .paneBoundary)
     private var annotationWidthConstraint: NSLayoutConstraint?
     private var annotations: [ImageAnnotation] = []
 
@@ -594,7 +618,7 @@ final class MediaInspectorView: NSView, ThemedComponent {
         for view in [canvas, documentView, headerSeparator, railSeparator, railScrollView,
                      titleLabel, detailLabel, zoomLabel, zoomModeControl, previousButton,
                      nextButton, annotateButton, actionsButton, closeButton,
-                     annotationScrollView, annotationSeparator] {
+                     annotationPane, annotationSeparator] {
             addSubview(view)
         }
 
@@ -666,11 +690,11 @@ final class MediaInspectorView: NSView, ThemedComponent {
             annotationSeparator.topAnchor.constraint(equalTo: canvas.topAnchor),
             annotationSeparator.bottomAnchor.constraint(equalTo: canvas.bottomAnchor),
             annotationSeparator.trailingAnchor.constraint(
-                equalTo: annotationScrollView.leadingAnchor
+                equalTo: annotationPane.leadingAnchor
             ),
-            annotationScrollView.topAnchor.constraint(equalTo: canvas.topAnchor),
-            annotationScrollView.bottomAnchor.constraint(equalTo: canvas.bottomAnchor),
-            annotationScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            annotationPane.topAnchor.constraint(equalTo: canvas.topAnchor),
+            annotationPane.bottomAnchor.constraint(equalTo: canvas.bottomAnchor),
+            annotationPane.trailingAnchor.constraint(equalTo: trailingAnchor),
             documentView.topAnchor.constraint(equalTo: canvas.topAnchor),
             documentView.leadingAnchor.constraint(equalTo: canvas.leadingAnchor),
             documentView.trailingAnchor.constraint(equalTo: canvas.trailingAnchor),
@@ -700,35 +724,42 @@ final class MediaInspectorView: NSView, ThemedComponent {
             self.setAnnotating(!self.isAnnotating)
         }
 
-        annotationScrollView.hasVerticalScroller = true
-        annotationScrollView.hasHorizontalScroller = false
-        annotationScrollView.translatesAutoresizingMaskIntoConstraints = false
-        annotationScrollView.documentView = annotationRail
-        annotationScrollView.setAccessibilityIdentifier(ImageAnnotationIdentifiers.rail)
-        annotationRail.setAccessibilityLabel(ImageAnnotationStrings.caption)
-
-        let width = annotationScrollView.widthAnchor.constraint(equalToConstant: 0)
+        annotationPane.setCollapsed(true)
+        let width = annotationPane.widthAnchor.constraint(equalToConstant: 0)
         width.isActive = true
         annotationWidthConstraint = width
-        annotationScrollView.isHidden = true
+        annotationPane.isHidden = true
         annotationSeparator.isHidden = true
 
         canvas.onAddAnnotation = { [weak self] point in self?.addAnnotation(at: point) }
         canvas.onSelectAnnotation = { [weak self] id in
             guard let self else { return }
-            self.annotationRail.selectedAnnotationID = id
-            if let id { self.annotationRail.focusNote(for: id) }
+            self.annotationPane.selectedAnnotationID = id
+            if let id { self.annotationPane.focusNote(for: id) }
         }
 
-        annotationRail.onNoteChange = { [weak self] id, note in
+        annotationPane.onNoteChange = { [weak self] id, note in
             self?.updateAnnotation(id: id) { $0.note = note }
         }
-        annotationRail.onRemove = { [weak self] id in
+        annotationPane.onRemove = { [weak self] id in
             guard let self else { return }
             self.applyAnnotations(self.annotations.filter { $0.id != id })
         }
-        annotationRail.onFocus = { [weak self] id in
+        annotationPane.onFocus = { [weak self] id in
             self?.canvas.selectedAnnotationID = id
+        }
+        annotationPane.onShare = { [weak self] in
+            guard let self else { return }
+            self.annotationHost?.inspectorDidRequestShare(
+                for: self.selectedItem,
+                image: self.canvas.image
+            )
+            self.refreshAnnotationPane()
+        }
+        annotationPane.onRemoveFromChat = { [weak self] in
+            guard let self else { return }
+            self.annotationHost?.inspectorDidRequestRemoveFromChat(for: self.selectedItem)
+            self.refreshAnnotationPane()
         }
     }
 
@@ -740,11 +771,16 @@ final class MediaInspectorView: NSView, ThemedComponent {
         isAnnotating = annotating
         canvas.isAnnotating = annotating
         annotateButton.isSelected = annotating
-        annotationScrollView.isHidden = !annotating
+        if annotating {
+            annotationWidthConstraint?.constant = Design.Size.mediaInspectorAnnotationColumnWidth
+            annotationPane.setCollapsed(false)
+            annotationPane.isHidden = false
+        } else {
+            annotationPane.setCollapsed(true)
+            annotationPane.isHidden = true
+            annotationWidthConstraint?.constant = 0
+        }
         annotationSeparator.isHidden = !annotating
-        annotationWidthConstraint?.constant = annotating
-            ? Design.Size.mediaInspectorAnnotationColumnWidth
-            : 0
         if annotating { reloadAnnotationsFromHost() }
         needsLayout = true
     }
@@ -752,7 +788,7 @@ final class MediaInspectorView: NSView, ThemedComponent {
     private func reloadAnnotationsFromHost() {
         annotations = annotationHost?.annotations(for: selectedItem) ?? []
         canvas.annotations = annotations
-        annotationRail.setAnnotations(annotations)
+        refreshAnnotationPane()
     }
 
     private func addAnnotation(at point: CGPoint) {
@@ -760,8 +796,8 @@ final class MediaInspectorView: NSView, ThemedComponent {
         let annotation = ImageAnnotation(point: point)
         applyAnnotations(annotations + [annotation])
         canvas.selectedAnnotationID = annotation.id
-        annotationRail.selectedAnnotationID = annotation.id
-        annotationRail.focusNote(for: annotation.id)
+        annotationPane.selectedAnnotationID = annotation.id
+        annotationPane.focusNote(for: annotation.id)
     }
 
     private func updateAnnotation(
@@ -777,11 +813,21 @@ final class MediaInspectorView: NSView, ThemedComponent {
     private func applyAnnotations(_ updated: [ImageAnnotation]) {
         annotations = updated
         canvas.annotations = updated
-        annotationRail.setAnnotations(updated)
         annotationHost?.inspector(
             didChange: updated,
             for: selectedItem,
             image: canvas.image
+        )
+        refreshAnnotationPane()
+    }
+
+    private func refreshAnnotationPane() {
+        guard let annotationHost else { return }
+        annotationPane.setAnnotations(
+            annotations,
+            sharingState: annotationHost.sharingState(for: selectedItem),
+            showsChatActions: annotationHost.showsChatActions(for: selectedItem),
+            canShare: annotationHost.canShareAnnotations(for: selectedItem)
         )
     }
 
@@ -850,16 +896,6 @@ final class MediaInspectorView: NSView, ThemedComponent {
     }
 
     func prepareForRemoval() {
-        // Told once, on the way out, and only when there is something to tell. This is the
-        // moment the chat host has been waiting for — the report sheet has been kept up to date
-        // all along and its default implementation ignores it.
-        if !annotations.isEmpty {
-            annotationHost?.inspectorDidClose(
-                with: annotations,
-                for: selectedItem,
-                image: canvas.image
-            )
-        }
         ThemedMenuPresenter.dismiss(menuSession)
         menuSession = nil
         documentView.close()
@@ -937,6 +973,8 @@ final class MediaInspectorView: NSView, ThemedComponent {
         annotateButton.isEnabled = !canvas.isHidden
         if canvas.isHidden, isAnnotating {
             setAnnotating(false)
+        } else if annotationHost?.annotations(for: item).isEmpty == false, !isAnnotating {
+            setAnnotating(true)
         } else if isAnnotating {
             reloadAnnotationsFromHost()
         }

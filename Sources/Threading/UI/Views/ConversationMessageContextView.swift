@@ -37,6 +37,12 @@ final class ConversationMessageContextView: NSView {
     var onCommentContext: ((ConversationContextAttachment) -> Void)? {
         didSet { contextRail.onComment = onCommentContext }
     }
+    var isContextOpenable: ((ConversationContextAttachment) -> Bool)? {
+        didSet { contextRail.isOpenable = isContextOpenable }
+    }
+    var onOpenContext: ((ConversationContextAttachment) -> Void)? {
+        didSet { contextRail.onOpen = onOpenContext }
+    }
 
     init(
         content: NSView,

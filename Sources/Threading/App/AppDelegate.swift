@@ -668,10 +668,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard let controller = window?.windowController as? MainWindowController else {
                 return nil
             }
-            let host = ChatImageAnnotationHost(sessionID: { [weak controller] in
-                controller?.currentSessionID
-            })
-            return host.canHandOff ? host : nil
+            guard let sessionID = controller.currentSessionID else { return nil }
+            return ChatImageAnnotationHost(sessionID: sessionID)
         }
 
         // The disk survey runs itself from here on, at background priority and on its own

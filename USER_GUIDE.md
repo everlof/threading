@@ -2444,12 +2444,15 @@ as the last-resort system viewer. The panel's own **⋯** advertises the same ro
 image to drop a numbered mark, and a field for it appears in a column beside the picture. Click a
 mark to put the caret in its field; put the caret in a field and its mark lights up, so "which one
 is this?" is answered by looking rather than counting. Marks survive zoom and pan because they
-belong to the picture rather than to the view. Remove one with the **✕** beside its field.
+belong to the picture rather than to the view. Remove one with the **✕** beside its field. Several
+saved notes open at the top of the column immediately; you do not need to move to another image
+and back to make them line up.
 
-When you close the inspector, the marks go to the chat you are looking at: a copy of the image
-with the numbers drawn into it, plus the numbered notes, each carrying its point in the image's
-own pixels. Nothing is sent while you are still marking, and nothing is sent if you made no
-marks. A session with no live chat or terminal receives nothing — there is nowhere to put it.
+Edits are saved to the session as you make them. Closing the inspector only closes it; reopen the
+image to continue editing. Press **Add to chat** when the revision is ready: chat receives a copy
+of the image with the numbers drawn into it, plus the numbered notes, each carrying its point in
+the image's own pixels. Later changes show **Update chat** instead of silently replacing something
+already sent.
 
 **The panel gives way to the window.** Showing an image opens the panel, and an open panel used
 to put a floor under how narrow the window could be made. It no longer does: drag the window's
@@ -2655,6 +2658,12 @@ year after that. Rows are also marked **Agent** or **You**; when a session has b
 **All / Agent / You** filter appears beside the count. It stays hidden while everything came from
 one side. A picture the agent shows opens this tab and selects its row, and resets that filter if it
 would have hidden it: being asked to show something outranks a filter you left set.
+
+A marked image carries a pin count in its row and a saved-annotations receipt below its preview.
+That receipt remains after the inspector closes: use **Edit** to reopen the editable document, or
+**Add to chat** / **Update chat** to publish the current flattened revision. A receipt already in
+the composer can be removed there or with the receipt's **Remove** action; sent revisions remain
+unchanged while the saved document continues to be editable.
 
 Open **Attachments** from the session `⋯` menu's **Session Options** or the panel's **+** menu.
 The tab is two panes: the list above, and the selected file's preview filling the space below —

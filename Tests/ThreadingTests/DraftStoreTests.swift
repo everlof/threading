@@ -214,6 +214,59 @@ final class DraftStoreTests: XCTestCase {
         XCTAssertNil(reloaded.conversationViewportProgress)
     }
 
+    func testImageAnnotationDocumentSurvivesReopenWithIdentityAndRevision() throws {
+        let sessionID = SessionID()
+        let source = URL(fileURLWithPath: "/tmp/layout.png")
+        let attachmentKey = ImageAnnotationAssetKey.attachment("asset-1")
+        let annotations = [
+            ImageAnnotation(point: CGPoint(x: 0.2, y: 0.3), note: "too close"),
+            ImageAnnotation(point: CGPoint(x: 0.8, y: 0.6), note: "wrong colour")
+        ]
+        let document = try XCTUnwrap(makeContinuityStore().setImageAnnotations(
+            annotations,
+            assetKeys: [ImageAnnotationAssetKey.file(source), attachmentKey],
+            sourceAttachmentID: "asset-1",
+            sourcePath: source.path,
+            title: "layout.png",
+            in: sessionID
+        ))
+
+        let reopened = try XCTUnwrap(makeContinuityStore().imageAnnotationDocument(
+            forAssetKey: attachmentKey,
+            in: sessionID
+        ))
+        XCTAssertEqual(reopened.id, document.id)
+        XCTAssertEqual(reopened.contextAttachmentID, document.contextAttachmentID)
+        XCTAssertEqual(reopened.annotations, annotations)
+        XCTAssertEqual(reopened.revision, 1)
+    }
+
+    func testAnnotationAliasesDoNotCreateAnotherDocumentOrRevision() throws {
+        let sessionID = SessionID()
+        let store = makeContinuityStore()
+        let annotations = [ImageAnnotation(point: CGPoint(x: 0.5, y: 0.5), note: "here")]
+        let first = try XCTUnwrap(store.setImageAnnotations(
+            annotations,
+            assetKeys: ["file:/tmp/source.png"],
+            sourceAttachmentID: nil,
+            sourcePath: "/tmp/source.png",
+            title: "source.png",
+            in: sessionID
+        ))
+        let aliased = try XCTUnwrap(store.setImageAnnotations(
+            annotations,
+            assetKeys: ["file:/tmp/source.png", "attachment:stable"],
+            sourceAttachmentID: "stable",
+            sourcePath: "/tmp/custody/source.png",
+            title: "source.png",
+            in: sessionID
+        ))
+
+        XCTAssertEqual(aliased.id, first.id)
+        XCTAssertEqual(aliased.revision, first.revision)
+        XCTAssertEqual(store.imageAnnotationDocuments(in: sessionID).count, 1)
+    }
+
     // MARK: - Helpers
 
     private func makeStore(fileManager: FileManager = .default) -> DraftStore {

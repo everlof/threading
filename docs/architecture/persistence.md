@@ -632,8 +632,11 @@ Its `session-continuity.json` entry is keyed by `SessionID` and writes an unsent
 immediately; viewport progress is cheaper and is coalesced. Transcript content remains in the
 provider-owned session, so this file stores only the private local draft, normalized reading
 position, follow-bottom choice, and update time. Clearing a submitted draft preserves the
-viewport. An unreadable file follows `RecoverableFileStore` quarantine rather than being replaced
-silently.
+viewport. Editable image annotation documents live here too: normalized marks, stable asset
+aliases, source custody, revision number, the stable composer-context id, and the last flattened
+revision shared. They are written on every edit because the inspector window is only one view of
+that work; closing it is not a persistence boundary and never implies publication. An unreadable
+file follows `RecoverableFileStore` quarantine rather than being replaced silently.
 
 The companion clients use the same contract with a wider key. iOS stores a versioned archive in
 its own `UserDefaults`; the dependency-free browser stores one in same-origin `localStorage`.

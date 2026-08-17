@@ -19,6 +19,8 @@ final class ConversationContextRailView: NSView {
     var onRemove: ((ConversationContextAttachment) -> Void)?
     var onReference: ((ConversationContextAttachment) -> Void)?
     var onComment: ((ConversationContextAttachment) -> Void)?
+    var isOpenable: ((ConversationContextAttachment) -> Bool)?
+    var onOpen: ((ConversationContextAttachment) -> Void)?
 
     init(mode: Mode) {
         self.mode = mode
@@ -129,6 +131,12 @@ final class ConversationContextRailView: NSView {
         switch mode {
         case .composer:
             var actions: [ThemedMenuEntry] = []
+            if isOpenable?(attachment) == true, onOpen != nil {
+                actions.append(.item(ThemedMenuItem(
+                    title: L10n.string("Edit annotations"),
+                    onChoose: { [weak self] in self?.onOpen?(attachment) }
+                )))
+            }
             if attachment.kind == .reference, onComment != nil {
                 actions.append(.item(ThemedMenuItem(
                     title: L10n.string("Comment…"),
@@ -145,6 +153,12 @@ final class ConversationContextRailView: NSView {
 
         case .transcript:
             var actions: [ThemedMenuEntry] = []
+            if isOpenable?(attachment) == true, onOpen != nil {
+                actions.append(.item(ThemedMenuItem(
+                    title: L10n.string("View annotations"),
+                    onChoose: { [weak self] in self?.onOpen?(attachment) }
+                )))
+            }
             if onReference != nil {
                 actions.append(.item(ThemedMenuItem(
                     title: L10n.string("Add to chat"),
