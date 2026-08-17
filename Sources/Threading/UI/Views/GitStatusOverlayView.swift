@@ -2139,7 +2139,10 @@ final class GitStatusOverlayView: BackdropOverlay {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        updateGitHover(at: convert(event.locationInWindow, from: nil))
+        // A position under an open dropdown is the menu's, not the card's — see
+        // `NSView.uncoveredPointerLocation(in:)`.
+        guard let point = uncoveredPointerLocation(in: event) else { return }
+        updateGitHover(at: point)
     }
 
     /// Where the pointer is *now*, rather than where an event last said it was — which is the

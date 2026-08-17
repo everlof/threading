@@ -62,13 +62,16 @@ extension NSView {
     /// covered. This only ever reports what it can see for itself, so a fixture built without a
     /// window behaves exactly as it did before.
     ///
-    /// **Asked for, never folded into `hoverIsStale`.** A dropdown's dismissing surface is a view
-    /// in this same window and covers every control under it, so a shared correction would put out
-    /// the chip that a menu is open *on* — and the overlay's handoff rule depends on that chip
-    /// staying lit and clickable (see
-    /// [`design-system.md`](../../../../docs/architecture/design-system.md)). Whether being covered
-    /// means anything is the covered view's own question: for a list under a card it is the whole
-    /// answer, and for a control under a menu it is not.
+    /// **Asked for, never folded into `hoverIsStale`.** Whether being covered means anything is
+    /// the covered view's own question, and there are two kinds of cover. A surface that takes the
+    /// whole window — a dropdown's overlay — claims `CoveredWindowPointer`, which withholds every
+    /// crossing beneath it and delivers the ones still true when it goes; a control that hovers on
+    /// `mouseEntered` needs no line of its own for that. A view under a *partial* cover that claims
+    /// nothing — a list under a toast band — asks here, and so does any hover that rides
+    /// `mouseMoved`, which no cover can hold back (the manager that computes the window's
+    /// crossings does so inside that very event; see `CoveredWindowPointer`). The chip a menu is
+    /// open *on* keeps its held look through `ThemedMenuPresentationObserving`, not through hover,
+    /// so nothing here needs to keep a covered control lit.
     func isPointerCovered(at pointInWindow: CGPoint) -> Bool {
         // `hitTest` takes its point in the *superview's* coordinates, and the content view's
         // superview is the window's frame view — whose coordinates are the window's.
@@ -78,6 +81,22 @@ extension NSView {
         // other". An ancestor answering the hit — a table view where the row declined it — is
         // this view being reached through, not something standing over it.
         return !hit.isDescendant(of: self) && !isDescendant(of: hit)
+    }
+
+    /// Where a mouse-moved event puts the pointer in this view's coordinates — or nil when
+    /// something else in the window stands between the pointer and this view there.
+    ///
+    /// **Every `mouseMoved` override that keeps a hover reads its position through this.** A
+    /// crossing (`mouseEntered`) beneath a covering surface is withheld centrally by
+    /// `CoveredWindowPointer`; a *position* cannot be, because the manager that computes the
+    /// window's crossings does so inside that very event, so the surface's own rows would go dark
+    /// with everything beneath. So the position is asked here, once, and
+    /// `scripts/check_architecture_boundaries.sh` fails the build on a `mouseMoved` override that
+    /// reads `locationInWindow` without asking — the rule was applied by hand to three views
+    /// first, and the fourth is the one that would have forgotten.
+    func uncoveredPointerLocation(in event: NSEvent) -> NSPoint? {
+        guard !isPointerCovered(at: event.locationInWindow) else { return nil }
+        return convert(event.locationInWindow, from: nil)
     }
 
     /// The same question wherever the pointer is now, for the moments when there is no event to

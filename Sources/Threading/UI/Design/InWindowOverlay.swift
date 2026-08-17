@@ -43,6 +43,7 @@ enum InWindowOverlay {
     ///
     /// A value rather than a component: it owns no drawing and no state of its own, only the
     /// fact that these two views were put in together and must come out together.
+    @MainActor
     struct Presentation {
         /// The view they were installed in — the window's content.
         let root: NSView
@@ -52,6 +53,9 @@ enum InWindowOverlay {
         func remove() {
             surface.removeFromSuperview()
             scrim.removeFromSuperview()
+            // After both are out, so an arrival the surface held back and now pays reaches a
+            // view that asks whether it is covered and is told the truth.
+            CoveredWindowPointer.release(surface)
         }
     }
 
@@ -104,6 +108,12 @@ enum InWindowOverlay {
         }
 
         root.layoutSubtreeIfNeeded()
+        // The surface stands between the pointer and everything under the wash, and a tracking
+        // area under it knows nothing about that: without this, the controls a modal dims still
+        // lit as hovered under it. The cursor stays the surface's own — its search field and
+        // handles register in the same window's list, which is why this is not `.arrow`; see
+        // `CoveredWindowPointer`.
+        CoveredWindowPointer.claim(overlay, covering: window, cursor: .surfaceOwned)
         return Presentation(root: root, surface: overlay, scrim: scrim)
     }
 

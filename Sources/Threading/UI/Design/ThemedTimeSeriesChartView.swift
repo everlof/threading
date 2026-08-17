@@ -861,7 +861,10 @@ class ThemedTimeSeriesChartView: ThemedControl {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        selectNearest(to: convert(event.locationInWindow, from: nil))
+        // A position under an open dropdown is the menu's, not the chart's — see
+        // `NSView.uncoveredPointerLocation(in:)`.
+        guard let point = uncoveredPointerLocation(in: event) else { return }
+        selectNearest(to: point)
     }
 
     override func mouseExited(with event: NSEvent) {

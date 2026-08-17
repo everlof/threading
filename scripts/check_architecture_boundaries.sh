@@ -411,6 +411,55 @@ if rg -n \
   failed=1
 fi
 
+# A hover that reads its position off `mouseMoved` cannot be shielded by a covering surface:
+# AppKit computes every crossing in the window inside that event, so `CoveredWindowPointer` can
+# withhold `mouseEntered` beneath a dropdown but never `mouseMoved`. Each such override therefore
+# asks `NSView.uncoveredPointerLocation(in:)` itself — and the rule was applied by hand to three
+# views before the other seven were found, which is what this gate exists for. A view that *is*
+# the covering surface, and one that never keeps hover, is named here with its reason rather than
+# passed by omission.
+if ! python3 - "${repository_directory}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]) / "Sources" / "Threading"
+exempt = {
+    # The dropdown's own overlay is the covering surface; nothing stands over it.
+    "UI/Design/ThemedMenu.swift",
+}
+asks = re.compile(r"uncoveredPointerLocation\(in:")
+override = re.compile(r"^(\s*)(?:open |public |internal )?override func mouseMoved\(with")
+failures = []
+for path in sorted(root.rglob("*.swift")):
+    relative = path.relative_to(root).as_posix()
+    if relative in exempt:
+        continue
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        match = override.match(line)
+        if not match:
+            continue
+        indent = match.group(1)
+        body = []
+        for candidate in lines[index + 1:]:
+            if candidate.startswith(indent + "}"):
+                break
+            body.append(candidate)
+        if not any(asks.search(candidate) for candidate in body):
+            failures.append(f"{relative}:{index + 1}")
+if failures:
+    for failure in failures:
+        print(f"  {failure}", file=sys.stderr)
+    sys.exit(1)
+PY
+then
+  echo "architecture-boundary: a mouseMoved override reads the pointer without asking" >&2
+  echo "  NSView.uncoveredPointerLocation(in:) — a position under a covering surface is not" >&2
+  echo "  this view's; ask it, or name the view as the surface in the exemption list" >&2
+  failed=1
+fi
+
 if (( failed )); then
   exit 1
 fi

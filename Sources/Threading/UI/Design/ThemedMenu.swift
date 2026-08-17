@@ -765,10 +765,11 @@ private final class ThemedMenuSession: NSObject {
         overlay.onPressBegan = { [weak self] event in self?.pressBeganOnMenu(event) }
         overlay.autoresizingMask = [.width, .height]
         root.addSubview(overlay, positioned: .above, relativeTo: nil)
-        // The overlay covers the window's content, so every cursor rectangle under it belongs to
-        // something the pointer can no longer reach — the split view's seams above all, which
-        // offered to drag a pane from inside an open menu. See `CoveredWindowCursor`.
-        CoveredWindowCursor.claim(overlay, covering: window)
+        // The overlay covers the window's content, so everything the pointer could reach under
+        // it — the split view's seams offering to drag a pane, the composer's editor offering
+        // its I-beam, every chip lighting as hovered — belongs to something a click can no
+        // longer land on. See `CoveredWindowPointer`.
+        CoveredWindowPointer.claim(overlay, covering: window, cursor: .arrow)
         // The surface is constructed before the overlay joins the source's view tree. A
         // window-local appearance (the gallery's Light/Dark preview) may therefore differ from
         // the app appearance under which its layer-backed fill first resolved. Re-resolve once
@@ -1005,10 +1006,6 @@ private final class ThemedMenuSession: NSObject {
         // `onDismiss` runs inside this call and may ask `isMenuOpen(in:)` about the window.
         withExtendedLifetime(self) {
             Self.open.remove(self)
-            // Ahead of the exit animation, with everything else observable: the pixels that
-            // outlive this call take no clicks, so the window under them is the pointer's again
-            // — cursor included.
-            CoveredWindowCursor.release(overlay)
             removeFocusRunLoopObserver()
             removeKeyEventMonitor()
             removeHeldPressMonitor()
@@ -1020,6 +1017,13 @@ private final class ThemedMenuSession: NSObject {
                 window.makeFirstResponder(source)
             }
             overlay.tearDown(exit: exit)
+            // After the teardown and ahead of the exit animation: the pixels that outlive this
+            // call take no clicks — `tearDown` has already stopped the overlay answering hit
+            // tests — so the window under them is the pointer's again, cursor and hover
+            // included. The arrivals the overlay held back are delivered here, and a control they
+            // reach may ask whether it is still covered; asked before the teardown, it would have
+            // been told yes.
+            CoveredWindowPointer.release(overlay)
             onDismiss()
         }
     }

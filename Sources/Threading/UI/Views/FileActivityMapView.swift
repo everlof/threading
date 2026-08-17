@@ -420,6 +420,9 @@ final class FileActivityMapView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        // A position under an open dropdown is the menu's, not the map's — see
+        // `NSView.uncoveredPointerLocation(in:)`.
+        guard uncoveredPointerLocation(in: event) != nil else { return }
         updateHoverIndex(with: event)
     }
 

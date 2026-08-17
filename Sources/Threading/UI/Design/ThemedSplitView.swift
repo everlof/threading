@@ -180,8 +180,9 @@ final class ThemedSplitView: NSSplitView {
     // MARK: - The Seam Under the Pointer
 
     /// The divider a press right now would attach to — under the pointer, or under the hand for
-    /// the whole of a drag — or `nil` at rest.
-    private var activeDividerIndex: Int? {
+    /// the whole of a drag — or `nil` at rest. Readable so a test can ask what the seam under a
+    /// covering surface believes without sampling a pixel.
+    private(set) var activeDividerIndex: Int? {
         didSet {
             guard oldValue != activeDividerIndex else { return }
             if let oldValue { setNeedsDisplay(dividerRect(at: oldValue)) }
@@ -280,25 +281,30 @@ final class ThemedSplitView: NSSplitView {
 
     override func mouseEntered(with event: NSEvent) {
         super.mouseEntered(with: event)
-        refreshActiveDivider(with: event)
+        refreshActiveDivider(at: uncoveredPointerLocation(in: event))
     }
 
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
-        refreshActiveDivider(with: event)
+        refreshActiveDivider(at: uncoveredPointerLocation(in: event))
     }
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
-        refreshActiveDivider(with: event)
+        refreshActiveDivider(at: uncoveredPointerLocation(in: event))
     }
 
     /// The tracking areas only say the pointer is *near* a seam; where the highlight actually
     /// lights is `attachedDividerIndex(at:)`'s answer, re-asked on every crossing and movement
     /// inside the strip so the hint and the grab agree at the edges.
-    private func refreshActiveDivider(with event: NSEvent) {
+    ///
+    /// The point is asked of the *window* first, because this hover rides `mouseMoved`, which
+    /// reaches the seam through an open dropdown — the one pointer delivery
+    /// `CoveredWindowPointer` cannot hold back. A seam nothing can grab does not light: nil is
+    /// "the pointer is not on anything of ours" — see `NSView.uncoveredPointerLocation(in:)`.
+    private func refreshActiveDivider(at point: NSPoint?) {
         guard !isDraggingDivider else { return }
-        activeDividerIndex = attachedDividerIndex(at: convert(event.locationInWindow, from: nil))
+        activeDividerIndex = point.flatMap(attachedDividerIndex(at:))
     }
 
     /// The divider a click at `point` would begin dragging, answered the way the platform

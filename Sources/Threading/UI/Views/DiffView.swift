@@ -256,7 +256,9 @@ final class GitReviewDiffTextView: ThemedTextView {
     private var heightNotificationPending = false
     private var contextMenuSession: AnyObject?
     private var lineActionTrackingArea: NSTrackingArea?
-    private var hoveredLineIndex: Int? {
+    /// The line whose action affordance is drawn, or nil. Readable so a test can ask what the
+    /// pointer under a covering surface reached without sampling a pixel.
+    private(set) var hoveredLineIndex: Int? {
         didSet {
             guard hoveredLineIndex != oldValue else { return }
             needsDisplay = true
@@ -403,7 +405,13 @@ final class GitReviewDiffTextView: ThemedTextView {
             hoveredLineIndex = nil
             return
         }
-        hoveredLineIndex = lineIndex(at: convert(event.locationInWindow, from: nil))
+        // Position rides `mouseMoved`, which reaches this view through an open dropdown — the
+        // one pointer delivery `CoveredWindowPointer` cannot hold back — so the line hover would
+        // otherwise walk the diff under the menu's rows. Left as it was: a context menu opened
+        // on a line keeps that line's action while the menu is up, and a menu opened elsewhere
+        // finds nothing here to keep. See `NSView.uncoveredPointerLocation(in:)`.
+        guard let point = uncoveredPointerLocation(in: event) else { return }
+        hoveredLineIndex = lineIndex(at: point)
     }
 
     override func mouseExited(with event: NSEvent) {

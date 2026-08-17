@@ -164,6 +164,9 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        // A position under an open dropdown is the menu's: the program in the terminal is not
+        // told about motion it cannot see — see `NSView.uncoveredPointerLocation(in:)`.
+        guard uncoveredPointerLocation(in: event) != nil else { return }
         guard shouldSuppressLocalMouseReporting else {
             if forwardsMotion { onMouseReportForwarded?() }
             super.mouseMoved(with: event)

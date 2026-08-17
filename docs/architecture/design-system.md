@@ -436,11 +436,14 @@ point the pointer was inside.
 
 **The click that dismisses a menu lands on a sibling that opens one.** The dropdown's overlay
 swallows its dismissing click the way `NSMenu` does — a click on the terminal to let a menu go
-must not also type into it — with one exception it owes to hover. Hit testing is what the overlay
-takes over; hover is driven by tracking areas, which it cannot silence, so a chip under an open
-menu keeps its hover invitation and even widens to its full label. A control that invites the
-click must honour it: with the composer's account menu open, clicking the model chip closed one
-menu and opened nothing, a dead click on a control that was actively lit. The overlay therefore
+must not also type into it — with one exception it first owed to hover. Hit testing is what the
+overlay takes over; hover is driven by tracking areas, which at the time nothing silenced, so a
+chip under an open menu kept its hover invitation and even widened to its full label, and a
+control that invites the click must honour it: with the composer's account menu open, clicking
+the model chip closed one menu and opened nothing, a dead click on a control that was actively
+lit. The invitation is gone since 08-16 — `CoveredWindowPointer` withholds hover beneath an open
+menu (see that entry) — and the handoff stays for the reason it always had underneath: sibling
+openers trade one click the way menu-bar titles do. The overlay therefore
 resolves what its dismissing click landed on, and when that is a `ThemedMenuOpening` control
 (`ChipView`, `ThemedPopUp`, a menu-presenting `ThemedIconButton`) — and not the very control whose
 menu is open, whose click stays a toggle-close — it hands the press over, drag and release
@@ -2631,3 +2634,128 @@ the two runs, which is the scope band's shape, and across a live font change),
 `PaneFooterRenderTests.testBandTextSharesOneDrawnBaseline` renders the band at 2× and requires
 the title's and the badge's most common bottom-ink rows to land on one device pixel — the
 non-circular half, proving the *reported* baseline is the *drawn* one.
+
+## 2026-08-16 — a dropdown covered the controls, but not the pointer over them
+
+Reported from a screenshot of the composer's model menu, two faults on one panel: hovering a
+menu row's *text* showed the I-beam, "as if the text were selectable", and the hover "bled back
+to the controls behind it" — the chips under the panel lit as the pointer travelled the rows
+above them. The instruction that came with it: fix it structurally, so it is not fixed again
+somewhere else. Three days earlier the same overlay had let a pane seam offer its `↔` inside the
+open menu ([above](#2026-08-13--a-dropdown-covered-the-seam-but-not-the-cursor-over-it)), and
+that fix was scoped to cursor rectangles because that was the mechanism measured. These two are
+the *other* two mechanisms, and the three are now one claim.
+
+**What was measured, and what it rules out.** A dropdown is a view over the window, and AppKit
+carries the pointer to the content beneath a view by three routes, none of which looks at
+z-order:
+
+- Cursor rectangles — the window's list, already handled.
+- Tracking areas: `mouseEntered` reaches every view whose rectangle the pointer entered,
+  whichever one a click would land on. That is the bled hover, and it is why the sidebar's rows
+  were already asking `NSView.isPointerCovered(at:)` themselves under a toast band.
+- Mouse-moved delivery. `NSTextView` installs one area with `.mouseMoved`, `.cursorUpdate` and
+  enter/exit (`options == 551`), and both `-[NSTextView mouseMoved:]` and `-[NSTextView
+  cursorUpdate:]` end in `_mouseInside:`, which sets the I-beam — `disableCursorRects` never
+  touched it. That is the I-beam.
+
+The obvious structural move — swallow the pointer at a local event monitor while the overlay
+is up — works for two of the three and is impossible for the third, and the reason is
+load-bearing: **the manager that computes every crossing in the window computes them inside the
+window's handling of `mouseMoved`**. Disassembled: `-[NSApplication sendEvent:]` routes a
+mouse-moved to `-[NSWindow sendEvent:]`, whose `_routeMouseMovedEvent` calls each mouse-moved
+listener, and `-[_NSTrackingAreaAKManager _mouseMoved:]` — a listener — runs
+`_updateActiveTrackingAreasForWindowLocation:` and delivers `mouseMoved:` to the `.mouseMoved`
+owners in one pass. Withholding that event withholds the menu's own row hover with it. Enter,
+exit and cursor-update events, by contrast, are separate queued events (`_routeEnterExitEvent:`
+routes them by their `trackingArea`), and a monitor sees each one with its area attached.
+`NSCursor.set` was disassembled too: the window-server call is deferred to the display cycle
+(`___NSCursorSetCursorFromDisplayCycle_block_invoke`), so two sets inside one dispatch coalesce
+into the last.
+
+**`CoveredWindowPointer` is the claim, and a covering surface makes exactly one.** It folds in
+`CoveredWindowCursor` (the rectangles) and adds the two halves the measurements allow:
+
+- **Arrivals beneath the surface are withheld; leavings pass.** A local monitor for
+  `mouseEntered`/`mouseExited`/`cursorUpdate` places each event's tracking-area owner against the
+  surface with the same reading `isPointerCovered(at:)` uses — neither contains the other — and
+  returns nil for an arrival beneath. An exit always goes through, for the rule `hoverIsStale`
+  states: leaving is the direction that goes wrong visibly. An area nobody's view owns (a tooltip's)
+  passes, because a menu row's tooltip has to work as much as anything else's.
+- **A withheld arrival is owed.** AppKit's book says the pointer is inside that area — it
+  generated the crossing — so it will not say so again until the pointer leaves and returns; a
+  dropped arrival is a chip that stays dark under a resting pointer after the menu closes. Each
+  claim keeps the arrivals it held back (one per area and kind), and on release delivers the ones
+  whose area the pointer is still inside — re-derived from the window, not from the event — or
+  hands them to the surface still covering that owner. AppKit's own tracking manager carries the
+  same idea by its symbol names — `installMenuTrackingObserver`,
+  `menuTrackingTrackingAreaEvent:delayedArray:` — for the menus it draws itself.
+  Release therefore comes **after** `tearDown` in the menu session: the overlay has stopped
+  answering hit tests by then, so a row asked "are you covered" on the delivered arrival is told
+  the truth.
+- **The application puts the arrow back.** Since the mouse-moved path cannot be withheld, the
+  editor beneath still sets its I-beam; `ThreadingApplication` — the app's first `NSApplication`
+  subclass, holding this one override — calls `CoveredWindowPointer.applicationDidDispatch` after
+  `super.sendEvent`, which re-asserts the arrow for a pointer event in a claimed window whose
+  location is over the surface. Over the surface only: a mouse-moved reaches the key window while
+  the pointer is over another one, and that window's cursor is its own.
+
+**The rule that follows for everyone else, and the gate that holds it.** A hover that starts
+on `mouseEntered` — every `ThemedControl`, every row — needs no line of code for a covering
+surface: the surface withholds the arrival and pays it back. A hover that reads its position off
+`mouseMoved` cannot be shielded by any cover, so it asks `NSView.uncoveredPointerLocation(in:)`
+in its own `mouseMoved` — one helper that answers the local point or nil. The rule was applied by
+hand to three views first (the seam, the diff's line action, the minimap's fisheye), and a sweep
+then found seven more overrides that read `locationInWindow` bare — the chart's crosshair, the
+git card's row hover, the file-activity map, the browser annotation probe, the extension surface's
+pointer forwarding, the element inspector, and the terminal's motion reporting. All ten ask now,
+and `scripts/check_architecture_boundaries.sh` fails the build on a `mouseMoved` override whose
+body does not, unless the file is named in the script's exemption list with its reason (the
+dropdown's own overlay is the surface). `isPointerCovered(at:)` itself stays *asked for* rather
+than folded into the shared hover, for the reason the toast band established: a partial cover
+that claims nothing (the band) still needs it. The chip a menu is open *on* keeps its held look
+through `ThemedMenuPresentationObserving`, not through hover, which is what let hover under a
+menu be silenced at all — the earlier handoff paragraph's "a chip under an open menu keeps its
+hover invitation and even widens" is no longer true; the click handoff between sibling openers
+stays, for the menu-bar reason, without the invitation.
+
+**The claim carries a cursor policy, and the modal claims too.** The crossings half is every
+covering surface's; the cursor half is the surface's to state. A dropdown claims `.arrow` — cursor
+rectangles off, arrow re-asserted. A modal on the `InWindowOverlay` scrim claims `.surfaceOwned`
+from `install` and releases from `Presentation.remove()` after both views are out: only the
+crossings beneath it are withheld, and its cursor is left to its own content, because its search
+field and drag handles register in the same window's list (the boundary recorded on 08-13, which
+is unchanged). What `.surfaceOwned` cannot do is answer a listener beneath that sets its cursor
+from `mouseMoved` — an editor under a modal can still show its I-beam through the wash — and that
+remains the open half on `CoveredWindowCursor`. Do not move the modal to `.arrow` without
+measuring cursor-rectangle precedence first.
+
+Tests: `CoveredWindowPointerTests` exercises the decision through the seam that takes a real
+`NSTrackingArea` beside a stand-in event (the events AppKit builds cannot be built with their
+area attached), the debt through the real pointer — the unshown window is moved under it — and
+the release ordering through a live `ThemedMenuPresenter` dismissal and a live
+`InWindowOverlay` removal, asserting the delivered arrival saw itself uncovered — plus the three
+position hovers under a covering view and both cursor policies, nested.
+
+## 2026-08-17 — a placeholder's rhythm is the system's, and a seam never hangs on a hideable line
+
+The scheduled empty state shipped visibly cramped, and the report ("a bit too compact,
+especially vertically") decomposed into one taste call and one bug. The taste call: two
+empty-state surfaces had each picked their own vertical rhythm — the plain placeholder a 6pt
+base with an off-scale 16 after its icon, the scheduled one a 4pt base — numbers chosen per
+surface for a structure both share, a hero glyph over an announcement over content sections.
+`Design.Placeholder` now states that rhythm once, each member restating a `Spacing` step by
+*role* (`afterIcon` 12, `line` 6, `caption` 4, `group` 20, `section` 32), and both views take
+it; the next empty state inherits a rhythm instead of re-deciding one.
+
+The bug: the scheduled surface's one major seam — announcement above, the user's brief below —
+was recorded as `setCustomSpacing(after: problemLabel)`, and the problem line is hidden in the
+ordinary case. **`NSStackView` detaches a hidden arranged view and the custom spacing recorded
+after it leaves with it**, so the 20pt seam collapsed to the 4pt base exactly when nothing was
+wrong, and the "Brief" caption read as a stray word glued to the headline. The plain
+placeholder had the same trap on its pre-button gap, hung on its hideable detail line. Both now
+group the hideable line into a cluster stack and record the seam after the *cluster*, which is
+always there — the pattern to reach for wherever a section break follows a sometimes-hidden
+member. The collapsed seam is pinned by an assertion on converted frames in
+`ScheduledSessionPlaceholderRenderTests`, in the fixture whose warning is nil, because that is
+the case that collapsed.

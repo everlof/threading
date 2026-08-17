@@ -342,6 +342,9 @@ final class InspectorOverlayView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        // A position under a surface covering this overlay is that surface's — see
+        // `NSView.uncoveredPointerLocation(in:)`.
+        guard uncoveredPointerLocation(in: event) != nil else { return }
         onPointerMoved?(event.locationInWindow)
     }
 

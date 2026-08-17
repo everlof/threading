@@ -15,7 +15,9 @@ import AppKit
 /// that has taken the window over; what it lacks is a count. Measured: two disables followed by
 /// one enable leave cursor management **on**, so one surface closing inside another would hand
 /// back rectangles the surface still covering the window had turned off. This file is that count
-/// and nothing else.
+/// and nothing else. A surface claims it through `CoveredWindowPointer`, which holds the rest of
+/// what a covering surface takes from the pointer — the crossings and the arrow — so that one
+/// call at the surface says all of it.
 ///
 /// **Only a surface that answers for every cursor beneath it may claim.** A dropdown does: it
 /// covers the whole content view, and nothing inside it wants a cursor other than the arrow. A

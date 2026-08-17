@@ -168,8 +168,10 @@ final class BrowserAnnotationOverlay: ThemedControl {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        guard isAnnotating else { return }
-        onTargetProbe?(convert(event.locationInWindow, from: nil))
+        // A position under an open dropdown is the menu's, not the page's — see
+        // `NSView.uncoveredPointerLocation(in:)`.
+        guard isAnnotating, let point = uncoveredPointerLocation(in: event) else { return }
+        onTargetProbe?(point)
     }
 
     override func mouseExited(with event: NSEvent) {

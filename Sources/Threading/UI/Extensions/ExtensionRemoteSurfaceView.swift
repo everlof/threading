@@ -164,6 +164,9 @@ final class ExtensionRemoteSurfaceView:
     }
 
     override func mouseMoved(with event: NSEvent) {
+        // A position under an open dropdown is the menu's, not the extension's — see
+        // `NSView.uncoveredPointerLocation(in:)`.
+        guard uncoveredPointerLocation(in: event) != nil else { return }
         sendPointer(event, kind: .pointerMoved)
     }
 

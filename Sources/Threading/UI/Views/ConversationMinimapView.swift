@@ -316,6 +316,11 @@ final class ConversationMinimapView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        // Position rides `mouseMoved`, which reaches the rail through an open dropdown — the one
+        // pointer delivery `CoveredWindowPointer` cannot hold back — and the fisheye and its
+        // preview must not follow a pointer that is on a menu row. See
+        // `NSView.uncoveredPointerLocation(in:)`.
+        guard uncoveredPointerLocation(in: event) != nil else { return }
         trackPointer(with: event)
     }
 
