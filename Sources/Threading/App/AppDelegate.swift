@@ -141,6 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// arrives second performs it. See `restoreSelectedSessionIfReady`.
     private var mcpServerHasStarted = false
     private var componentGalleryWindowController: ComponentGalleryWindowController?
+    private var aboutWindowController: AboutWindowController?
     private var componentCustomizationRegistry: ComponentCustomizationRegistry?
     private var workspaceNavigatorMenu: NSMenu?
     private var commandPaletteController: CommandPaletteViewController?
@@ -1637,9 +1638,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let appName = ProcessInfo.processInfo.processName
         let menu = NSMenu()
 
+        // Our own window rather than `orderFrontStandardAboutPanel`, which is the one surface the
+        // app still showed in system chrome — and the only one answering "which build is this?"
+        // with a version pair and nowhere to go from there. See `AboutWindowController`.
         menu.addItem(
             withTitle: L10n.format("About %@", appName),
-            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+            action: #selector(showAboutWindow),
             keyEquivalent: ""
         )
         menu.addItem(.separator())
@@ -2030,8 +2034,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        // Recovery first, and only for items that carry a command id. Items still owned wholly
-        // by AppKit — About and the Help entries — carry none and stay enabled by construction.
+        // Recovery first, and only for items that carry a command id. Items outside the command
+        // plane — About and the Help entries — carry none and stay enabled by construction.
         // A refused command reads as unavailable rather than beeping at an advertised chord,
         // which is the treatment a checkout-less Open In already gets below.
         if RecoveryMode.isActive,
@@ -2450,6 +2454,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// contain prompts, commands and paths and remains available separately for local diagnosis.
     @MainActor @objc private func checkForUpdates() {
         _ = hostCommandPlane.invoke(commandID: AppCommands.ID.checkForUpdates)
+    }
+
+    /// One About window, kept and raised. Reopening replays the mark's draw-in, which is the only
+    /// reason to open this window a second time.
+    @MainActor @objc private func showAboutWindow() {
+        let controller = aboutWindowController ?? AboutWindowController()
+        aboutWindowController = controller
+        controller.showWindow(nil)
     }
 
     /// Presented on the main window rather than in one of its own: the ticket is about the app

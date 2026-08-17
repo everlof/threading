@@ -689,6 +689,54 @@ clients inherit the discipline instead of re-learning it. The catalogue sweep is
 `ThemedIndicatorsTests.testEveryStockThemeKeepsItsRuleInkWithinTheBudget`, both appearances,
 asserting the cap *and* that a quiet theme is never re-inked.
 
+**The backdrop pattern is budgeted the same way, and it is the same theme caught twice
+(2026-08-17).** `backdropPattern` documents itself as "a restrained repeating treatment", but
+nothing held a theme to that word: the editing gates check that `opacity` is within 0...1,
+`spacing` within 8...64 and `lineWidth` within 0.5...6, and every one of those passed while
+Neo Brutalism stated `role: .label, opacity: 1` — its dot field in the body text's own ink, 3pt
+marks every 20pt, on the ground that body text sits on. Reported from use, against the About
+window's version pair, and visible in nothing but a picture: no assertion anywhere was wrong.
+
+A mark's weight is its size times its ink exactly as a rule's is, so the invariant has the same
+shape: `AppTheme.Material.backdropInkBudget` is 0.8pt of fully-opaque mark, and
+`Material.backdropInkCeiling` is the ceiling it implies for a given `lineWidth`. Enforcement lives
+in the one interpreter, `Design.applyThemeBackdropPattern`. Three details are load-bearing:
+
+- **Authored strength is the role's alpha *times* the stated opacity.** Both are folded into the
+  layer's opacity and the ink goes on at full alpha; capping `opacity` alone would let a
+  translucent role multiply past the cap after it was applied.
+- **Increase Contrast does not lift it**, which is where it parts company with `ruleInkCeiling`. A
+  rule is content beside content, so contrast asked for is contrast given; a pattern is *behind*
+  text, where more ink is strictly less legible.
+- **It is the loosest cap that fixes the report.** Of the six stock themes authoring a pattern it
+  attenuates one — Neo Brutalism, to 0.267, next door to the 0.325 the rule budget already derives
+  for it — and leaves the other five at exactly what they state, Bauhaus's 4pt dots at 0.20
+  included (0.80, level with the budget). 0.267 came off a rendered ladder, not a guess: the words
+  win from about 0.27 down and the dot field is still unmistakably the theme's.
+
+The sweep is `BackdropPatternRenderTests`, which holds the budget, the "quiet themes are never
+re-inked" half, the exact landing point, and the Increase Contrast rule — plus the renders that are
+how the *next* one gets noticed: body and detail text over each patterned theme's ground, which is
+the pair nobody had ever looked at.
+
+**The same sweep found a second one, and it was not an ink problem at all.** Vaporwave's
+perspective grid drew a solid accent plate across the bottom two-thirds of every ground it was on,
+and text crossing it was unreadable — worse than the dots that started this. No ink budget can
+reach that: its marks are *inside* the budget (2pt × 0.30 = 0.60), and the plate is made of
+**crowding**, not ink. Lines converging on a vanishing point have unbounded density near it, so at
+any opacity a uniform stroke stops being a grid and becomes a fill; capping it further would only
+dim the foreground while the plate stayed.
+
+So the fix is in the drawing: the family is clipped through a one-column DeviceGray ramp
+(`ThemeBackdropPatternLayer.convergenceMask`) that takes its ink to nothing as it closes on the
+vanishing point. That is also what distance does to contrast, so the grid *recedes* rather than
+ending, and Vaporwave still reads as Vaporwave. The ramp is `pow(depth, 2.2)` rather than linear
+because crowding accelerates faster than distance does — a linear falloff still filled in over the
+last stretch. Two things worth knowing if you touch it: row zero of the mask lands at the **near**
+edge in this context (the first attempt drew it upside down, fading the foreground and leaving the
+band sitting on the horizon — the render is what said so), and the ramp is cached and stretched
+into whatever field a pane gives it, since only the shape of the falloff matters.
+
 ## 2026-07-31 — the active app theme is a living workspace document
 
 **Current Theme** is an app-wide workspace surface, separate from both Settings and the

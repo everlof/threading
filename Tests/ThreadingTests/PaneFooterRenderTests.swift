@@ -264,7 +264,8 @@ final class PaneFooterRenderTests: XCTestCase {
             gear.isBordered = false
             gear.font = Design.Typography.controlRegular()
 
-            let leading = [gear, channel.flatMap(BuildChannelBadge.make(for:))].compactMap { $0 }
+            let leading = [gear, channel.flatMap { BuildChannelBadge.make(for: $0) }]
+                .compactMap { $0 }
             let trailing: [NSView] = silenced.map { isOn in
                 let gate = ThemedIconButton(
                     symbolName: SidebarDefaults.silenceSymbol,

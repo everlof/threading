@@ -209,6 +209,30 @@ footer naming the flavour — and nothing at all on a release build, because a m
 install wore would be wallpaper. The exact version deliberately stays out of the chrome; the
 badge answers "which kind of build is this screenshot", not "which build".
 
+**But hovering it asks "which build", and it now answers.** The mark's Help Tag was the spoken
+channel name and nothing else — `DEV` expanded to "Development build", a synonym for the three
+letters already on screen. Hovering a build mark is the one gesture anybody makes to ask what
+this copy of the app *is*, so the tag is now `BuildDetails.helpTag`: that sentence, then the
+version pair, the Xcode configuration, when the executable was linked, the system and the
+architecture. The same string is on `accessibilityHelp`, while `accessibilityLabel` stays the
+sentence — a mark that recited a build every time VoiceOver passed it would be unusable.
+
+`BuildDetails` is where those readings are assembled, once, for the badge and for the About
+window (`docs/architecture/window-chrome.md`). Three rules are load-bearing:
+
+- **The build date is the executable's modification time**, `BuildFingerprint`'s reason exactly:
+  an unstamped build carries `0.0.0 (0.0.0)` whatever it is, so when it was linked is the only
+  reading that separates this build from the one before it — which is what a `DEV` mark is being
+  asked. One `stat`, on a surface somebody just pointed at.
+- **A reading nobody can take is left out**, not filled in with a word meaning missing. A build
+  date the filesystem will not give up is one fewer line; "Unknown" reads like a fault.
+- **The channel is never a row.** The Help Tag opens with the sentence the mark stands for and the
+  About window sets the mark beside the version, so a Channel line would state it twice — and on a
+  release build would name the channel whose whole design is to go unmarked.
+
+`Debug`/`Release` and `arm64`/`x86_64` stay untranslated: they are the build system's own names,
+read against Xcode rather than against the reader's locale.
+
 **Nightlies get their own feed, never a channel tag on the stable one.** A nightly's
 `2026.x` outranks every `1.x` under `SUStandardVersionComparator`, so in a shared feed a
 nightly install would permanently outrank stable and stop seeing updates the moment it

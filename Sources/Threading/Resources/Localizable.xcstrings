@@ -28530,7 +28530,26 @@
     "Use compact title": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Använd kompakt rubrik"}}}},
     "Pairing code unavailable": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Parkopplingskod inte tillgänglig"}}}},
     "The connection is ready, but Threading could not build a pairing code for it. Retrying starts the connection again.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Anslutningen är redo, men Threading kunde inte skapa någon parkopplingskod för den. Ett nytt försök startar anslutningen igen."}}}},
-    "Bold Text": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Fet text"}}}}
+    "Bold Text": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Fet text"}}}},
+    " · C %d": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": " · C %d"}}}},
+    "%d observed changes": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%d observerade ändringar"}}}},
+    "%d of %d files": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%d av %d filer"}}}},
+    "Change when it starts": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ändra när den startar"}}}},
+    "Changed files only. This runtime reports no reads or edits.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Endast ändrade filer. Den här runtimen rapporterar inga läsningar eller ändringar."}}}},
+    "Editing": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Redigerar"}}}},
+    "No transcript for this session yet.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inget transkript för den här sessionen än."}}}},
+    "Nothing observed for this session yet.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inget observerat för den här sessionen än."}}}},
+    "Plain marks are files a turn changed with no tool naming them.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Enkla markeringar är filer som en tur ändrade utan att något verktyg namngav dem."}}}},
+    "Save changes": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Spara ändringar"}}}},
+    "Scheduled session opened for editing.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Schemalagd session öppnad för redigering."}}}},
+    "Show or Hide the Sidebar (⌘S)": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa eller dölj sidofältet (⌘S)"}}}},
+    "This runtime keeps no transcript Threading can read. Files a turn changes appear here once it has run in a git checkout.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här runtimen sparar inget transkript som Threading kan läsa. Filer som en tur ändrar visas här när den har körts i en git-utcheckning."}}}},
+    "changed": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ändrade"}}}},
+    "Configuration": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Konfiguration"}}}},
+    "Built": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Byggd"}}}},
+    "System": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "System"}}}},
+    "Architecture": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Arkitektur"}}}},
+    "Version": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Version"}}}}
   },
   "version": "1.0"
 }

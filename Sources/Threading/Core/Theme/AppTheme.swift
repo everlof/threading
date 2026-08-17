@@ -971,6 +971,34 @@ struct AppTheme: Codable, Equatable {
             min(1, Self.ruleInkBudget / max(1, borderWidth))
         }
 
+        /// The same discipline for the backdrop pattern, and the same theme caught twice.
+        ///
+        /// `backdropPattern` promises "a **restrained** repeating treatment", but nothing held a
+        /// theme to it: Neo Brutalism states its dot field at `role: .label, opacity: 1` — the
+        /// body text's own ink, in 3pt dots every 20pt — so every line drawn on that ground had
+        /// marks as dark as itself landing inside its glyphs. Reported from use, on the About
+        /// window's version pair.
+        ///
+        /// A mark's weight is its size times its ink, exactly as a rule's is, so this is a budget
+        /// rather than a strength: 0.8pt of fully-opaque mark. Measured off a ladder rendered
+        /// under Neo Brutalism (`BackdropPatternRenderTests`) — text wins from about 0.27 down,
+        /// and the dot field is still unmistakably the theme's; the budget puts a 3pt mark at
+        /// 0.267, next door to the 0.325 the rule budget already derives for the same theme.
+        ///
+        /// It is deliberately the loosest cap that fixes the reported bug: of the six stock
+        /// themes authoring a pattern, this leaves five untouched at exactly what they state,
+        /// including Bauhaus's 4pt dots at 0.20 (0.80, level with the budget).
+        static let backdropInkBudget: CGFloat = 0.8
+
+        /// The strongest ink this material's backdrop marks may carry.
+        ///
+        /// Unlike `ruleInkCeiling`, Increase Contrast does **not** lift this. A rule is content
+        /// beside content and contrast asked for is contrast given; a backdrop pattern is behind
+        /// text, where more ink is strictly less legible.
+        var backdropInkCeiling: CGFloat {
+            min(1, Self.backdropInkBudget / max(1, backdropPattern?.lineWidth ?? 1))
+        }
+
         /// The compact-control border after applying the backwards-compatible inheritance rule.
         var resolvedControlBorderWidth: CGFloat { controlBorderWidth ?? borderWidth }
 

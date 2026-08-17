@@ -2181,9 +2181,24 @@ private final class ThemeBackdropPatternLayer: CALayer {
             let horizonY = bounds.height * 0.62
             let vanishingX = bounds.midX
             context.saveGState()
-            context.clip(
-                to: CGRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: horizonY)
+            let field = CGRect(
+                x: bounds.minX,
+                y: bounds.minY,
+                width: bounds.width,
+                height: horizonY
             )
+            // Lines converging on a point have unbounded density near it, so a uniform stroke
+            // stops being a grid and becomes a plate — Vaporwave's drew a solid accent band
+            // across the bottom two-thirds of every ground it was on, and text crossing it was
+            // unreadable at any opacity. The ink budget cannot reach that: the marks are within
+            // it and the *crowding* is what fills in. So the family is masked by a ramp that
+            // takes it to nothing as it closes on the vanishing point, which is also what
+            // distance does to contrast — the grid recedes rather than ending.
+            if let ramp = Self.convergenceMask() {
+                context.clip(to: field, mask: ramp)
+            } else {
+                context.clip(to: field)
+            }
 
             var endpoint = bounds.minX - bounds.width
             while endpoint <= bounds.maxX + bounds.width {
@@ -2204,6 +2219,43 @@ private final class ThemeBackdropPatternLayer: CALayer {
             context.restoreGState()
         }
     }
+
+    /// The receding ramp for `perspectiveGrid`, as a one-column DeviceGray mask.
+    ///
+    /// White keeps ink and black clips it. Row zero lands at the **near** edge here — checked by
+    /// looking, because the answer depends on the context's geometry and the first guess drew the
+    /// ramp upside down: the foreground faded out and the solid band stayed sitting on the horizon.
+    ///
+    /// The curve is deliberately not linear: crowding accelerates as the lines close on the
+    /// vanishing point, so the ink has to come off faster than distance does or the last stretch
+    /// still fills in. Cached because it is resolution-independent — it is stretched into whatever
+    /// field the pane gives it, and its only job is the shape of the falloff.
+    private static let convergenceRampHeight = 256
+    private static let convergenceRampExponent: CGFloat = 2.2
+
+    private static let cachedConvergenceMask: CGImage? = {
+        let height = convergenceRampHeight
+        var bytes = [UInt8](repeating: 0, count: height)
+        for row in 0..<height {
+            // 0 at the horizon, 1 at the near edge.
+            let depth = 1 - CGFloat(row) / CGFloat(height - 1)
+            let keep = pow(depth, convergenceRampExponent)
+            bytes[row] = UInt8(max(0, min(255, (keep * 255).rounded())))
+        }
+        guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
+        return CGImage(
+            maskWidth: 1,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 8,
+            bytesPerRow: 1,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true
+        )
+    }()
+
+    private static func convergenceMask() -> CGImage? { cachedConvergenceMask }
 }
 
 /// An exterior-only companion layer for one half of a material shadow.
@@ -2476,8 +2528,20 @@ extension NSView {
         }
 
         patternLayer.kind = spec.kind
-        patternLayer.ink = AppThemePalette.current.resolved(spec.role).cgColor
-        patternLayer.opacity = Float(spec.opacity)
+        // The pattern's strength is capped, never raised — `Material.backdropInkCeiling`, the
+        // rule-ink budget's sibling. Neo Brutalism states this pattern at *full label ink*, so its
+        // dots were as dark as the words on top of them and landed inside the glyphs of any 11–13pt
+        // line drawn on the ground. Authored strength is the role's own alpha times the stated
+        // opacity, so both are folded into the layer's opacity and the ink goes on at full alpha —
+        // otherwise a translucent role multiplied past the cap after it was applied.
+        let authored = AppThemePalette.current.resolved(spec.role)
+        let ink = authored.usingColorSpace(.sRGB) ?? authored
+        let strength = min(
+            ink.alphaComponent * spec.opacity,
+            AppThemePalette.current.material.backdropInkCeiling
+        )
+        patternLayer.ink = ink.withAlphaComponent(1).cgColor
+        patternLayer.opacity = Float(strength)
         patternLayer.spacing = spec.spacing
         patternLayer.markWidth = spec.lineWidth
         patternLayer.cornerRadius = radius

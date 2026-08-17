@@ -798,6 +798,63 @@ band walked down and back lands exactly where it started, and light/dark renders
 both ends with a pinned session selected — which is where how much a narrow sidebar actually wins,
 and how the mark sits inside its own capsule, are reviewed.
 
+## The About window
+
+`AboutWindowController` replaced `orderFrontStandardAboutPanel`. That call was the last surface in
+the app drawn entirely by AppKit — the app icon, the name and a version pair, in a window belonging
+to no theme — and the only place answering "which build is this?" with two numbers and nowhere to go
+from there. On an unstamped build those two numbers are `0.0.0 (0.0.0)` twice over, so the panel
+managed to be both the app's formal self-description and completely uninformative.
+
+It wears the **same chrome pair as the main window** and for the same reason: `.fullSizeContentView`
+with `titlebarAppearsTransparent`, so the app-owned ground runs to the frame's own rounded corners
+instead of AppKit drawing a material bar above it. `TitlebarActionWindow` is *not* needed here —
+the window is deliberately not resizable and not zoomable, so there is no double-click gesture to
+lose. `window.backgroundColor` takes `Design.Surface.ground` as well as the content view, because
+the corners AppKit masks are painted by the window, not by the view inside it.
+
+Everything on it is ordinary `UI/Design/` work, subject to `ThemeBoundaryAudit` like any pane:
+a `ThemedSurfaceView` ground carrying the theme's `.backdrop` pattern, a panel-radius plate with
+the theme's glow holding a live `ThreadingMarkView`, the wordmark, the version pair with the
+sidebar's own channel mark beside it, and the readings as an `NSGridView` on a panel card, trailing
+labels against leading values. The renders in `AboutWindowTests` are where that is reviewed, and
+they are the argument for having done it: the same window comes out with Cyberpunk's grid and glow,
+Neo Brutalism's hard shadow, and Swiss's square corners, none of which a system panel could
+have shown.
+
+**The card is there because a render found the readings unreadable.** They were first drawn straight
+onto the ground under a `SeparatorView`, and Neo Brutalism's backdrop is a field of dots on a fixed
+pitch that landed *inside* the glyphs of an 11pt spec sheet — reported from the picture, invisible to
+every assertion about it. The rule the app already followed elsewhere is the fix:
+`ReportProblemViewController` and `SoundCustomizeViewController` put the pattern on the **ground**
+and their content on **panels**, so a block of small readings gets `Design.Surface.panel`, the role
+whose whole description is "a container holding content". The card then does the separating the
+hairline was doing, so the rule is gone rather than drawn against a card edge. The one reading left
+on the patterned ground is the version pair, which is `numericBody` rather than `numericDetail` for
+the same reason — and because it is the reading this window exists to state.
+`testTheReadingsSitOnAPanelRatherThanOnTheThemesBackdrop` holds both halves.
+
+Four more decisions worth keeping:
+
+- **The mark stitches itself in on every open.** `playDrawIn()` runs from `showWindow`, not from
+  `loadView`, because one window is kept and raised — and that beat is the only reason to open this
+  window twice. No particle cadence: `ThreadingMarkView`'s motions run on hover, and this mark takes
+  no pointer.
+- **The wordmark is `AppInfo.name`, not the sidebar's brand row.** A theme may rename that row to
+  whatever chrome it is imitating; this window is the one place that has to say which application a
+  bug report is about.
+- **The readings are selectable, and their labels are not.** Selecting a version to paste into a
+  report is the only reason anybody drags across one — the platform's own About panel allowed it —
+  and nothing is gained by selecting the word "System".
+- **Escape closes it**, through `cancelOperation` on the *window controller*: no control on this
+  window takes focus, so the responder chain runs from the window straight there.
+
+There is no extension seam here and nothing to register in
+[`CUSTOMIZATION_SURFACE_AUDIT.md`](../extensions/CUSTOMIZATION_SURFACE_AUDIT.md): the window carries
+no entity, contributes no node, and is not a popover with a `HostPopoverID`. The readings it draws
+come from `BuildDetails` ([`releasing.md`](releasing.md)), which is also what the sidebar's build
+mark puts on its Help Tag — one assembly, two surfaces.
+
 ## The takeover: a theme that draws the frame
 
 A theme stating a `WindowChromeStyle` (a `chrome:` block on its variant — the second and last

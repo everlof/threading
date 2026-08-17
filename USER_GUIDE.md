@@ -208,8 +208,11 @@ between them, icon and word.
 
 A build that is not a release names itself beside Settings: a quiet **NIGHTLY**, **BETA**
 or **DEV** mark, so a screenshot or a bug report always says which kind of build produced
-it. Hovering it spells the name out; a release build shows nothing there. The exact version
-stays out of the chrome — it lives in the About box.
+it. A release build shows nothing there. **Hover the mark for the whole build**: what the
+abbreviation means, then the version and build number, whether it was compiled Debug or
+Release, when it was built, the macOS version and the architecture — everything a bug report
+usually asks for, in one Help Tag. The exact version stays out of the chrome; it is here on
+hover, and on the About window.
 
 At the other end of the same band, a **speaker** is the app's silence switch: one click stops
 every sound Threading makes — notification alerts and the terminal bell alike — and a second
@@ -4080,6 +4083,17 @@ in their own stores and are left exactly where they are — so a reset does not 
 Terminal font and cursor, colour schemes, and AI provider configuration.
 
 ## Diagnostics
+
+**Threading > About Threading** is where the app describes itself: the mark, which draws itself in
+each time the window opens, the app's name, the version and build number with the build mark beside
+it, and then the readings a bug report tends to ask for — whether this copy was compiled **Debug**
+or **Release**, **when** it was built, the **macOS** version it is running on, and the
+**architecture**. Every reading can be selected and copied. The window is drawn in whichever
+appearance you have chosen rather than in the system's, and **Escape** closes it.
+
+"When it was built" is the executable's own timestamp, which matters because a build nobody released
+reports its version as `0.0.0 (0.0.0)` — the date is then the only thing that tells one such build
+from the next. A reading Threading cannot take is left off the window rather than shown as unknown.
 
 **Help > Reveal Diagnostics Log** opens the folder holding Threading's own journal, one file per
 day, kept for two weeks:
