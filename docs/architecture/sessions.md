@@ -1451,11 +1451,14 @@ provenance, confirmation, and navigation even where the surrounding row or compo
 is customizable.
 
 Targeted archive is the same delayed `SessionArchiveScheduler` operation described above, now
-authorized against the child and refused while it is working. Targeted rename still protects a
-title the user wrote. Resume is native-chat only — a dormant terminal may open on a prompt that
-requires the user, so it cannot be woken unattended. Spawn reuses `ScheduledSessionPlan`, including
-managed-workspace delivery and permission-mode caps, rather than defining another launch
-vocabulary.
+authorized against the child and refused while it is working. Because that refusal means the child
+has already settled when the request is recorded, the scheduler begins the settle grace from its
+current state; it does not wait for a future activity edge an idle child may never produce. A child
+that starts again during the grace disarms the timer and is archived only after that later turn
+ends. Targeted rename still protects a title the user wrote. Resume is native-chat only — a dormant
+terminal may open on a prompt that requires the user, so it cannot be woken unattended. Spawn
+reuses `ScheduledSessionPlan`, including managed-workspace delivery and permission-mode caps,
+rather than defining another launch vocabulary.
 
 **Continuation lineage is a durable path, not a launch-mode bit.** A side chat's `forkedFrom`
 points at a provider-native child that can resume the same transcript semantics. A cross-provider
