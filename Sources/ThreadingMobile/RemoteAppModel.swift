@@ -23,7 +23,15 @@ final class RemoteAppModel: ObservableObject {
     @Published private(set) var me: RemoteMeDTO? {
         didSet { catalogueRevision &+= 1 }
     }
-    @Published private(set) var phase: Phase = .idle
+    /// Every transition is recorded, not only the current one. A support report that says only
+    /// "offline" cannot tell a phone that never reached this Mac from one that reached it and
+    /// lost it.
+    @Published private(set) var phase: Phase = .idle {
+        didSet {
+            guard phase != oldValue else { return }
+            MobileConnectionStateLog.record(MobileDiagnostics.connectionState(phase))
+        }
+    }
     @Published private(set) var activeHostID: String?
     @Published private(set) var storageIssue: String? = nil
     @Published private(set) var notificationOpenRequest: RemoteNotificationOpenRequest?

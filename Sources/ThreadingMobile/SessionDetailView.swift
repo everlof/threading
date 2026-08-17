@@ -548,16 +548,34 @@ private struct RemoteNavigationTitle: View {
     @ObservedObject var connection: RemoteSessionConnection
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
-        if case .failed = connection.phase {
-            Button(action: connection.connect) {
+        if let failure = connection.phase.failure {
+            Button {
+                recover(from: failure)
+            } label: {
                 title
             }
             .buttonStyle(.plain)
-            .accessibilityHint("Reconnect")
+            .accessibilityHint(Text(failure.recoveryTitle))
         } else {
             title
+        }
+    }
+
+    /// The failure states that cannot be retried away get the step that actually fixes them,
+    /// in the place the person is already looking. Re-scanning a dead address is one tap from
+    /// the title that reported it, and so is the Local Network switch.
+    private func recover(from failure: RemoteConnectionFailure) {
+        switch failure.recovery {
+        case .reconnect:
+            connection.connect()
+        case .pairAgain:
+            model.isPairing = true
+        case .openLocalNetworkSettings:
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            openURL(url)
         }
     }
 
@@ -583,7 +601,7 @@ private struct RemoteNavigationTitle: View {
         case .connected:
             return model.activeHost?.name ?? MobileL10n.string("Connected")
         case .ended(let reason): return reason
-        case .failed(let reason): return reason
+        case .failed(let failure): return failure.message
         }
     }
 }

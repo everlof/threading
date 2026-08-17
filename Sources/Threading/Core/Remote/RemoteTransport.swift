@@ -106,6 +106,51 @@ protocol RemoteAccessTransport: AnyObject {
     func stop()
 }
 
+/// The public relay door, as the coordinator uses it.
+///
+/// `lastFailure` is on the protocol rather than only on `RemoteTunnel` because the coordinator
+/// reads it when a transport reports itself unavailable, and a substitute that could not answer
+/// would silently downgrade that diagnostic to a guess made from a localized sentence.
+@MainActor
+protocol RemoteRelayTransport: RemoteAccessTransport {
+    var lastFailure: RemoteRelayFailure? { get }
+}
+
+/// The tailnet door, as the coordinator uses it. Readiness advances while the state sits on
+/// `.starting`, so the settings page needs both the value and the change notification.
+@MainActor
+protocol RemoteTailnetTransport: RemoteAccessTransport {
+    var readiness: TailscaleReadiness { get }
+    var onReadinessChange: (@MainActor () -> Void)? { get set }
+}
+
+/// A door this process refuses to open.
+///
+/// The unit test bundle is hosted inside the app, so anything that reaches
+/// `RemoteAccessCoordinator.shared` gets the real composition root. Left alone, a test that
+/// enabled remote access would launch this developer's `cloudflared` and `tailscale`, publish
+/// their Mac, and leave the children behind: two such orphans were alive on this machine when
+/// the transport plan was written. Refusing at the factory is narrower than refusing at every
+/// call site, and it reports a terminal state rather than sitting in `.starting` forever.
+@MainActor
+final class RefusedRemoteTransport: RemoteRelayTransport, RemoteTailnetTransport {
+    let lastFailure: RemoteRelayFailure? = nil
+    let readiness: TailscaleReadiness = .notChecked
+    var onReadinessChange: (@MainActor () -> Void)?
+
+    func start(
+        port: UInt16,
+        onStateChange: @escaping @MainActor @Sendable (RemoteTransportState) -> Void
+    ) {
+        ThreadingLogger.remote.notice(
+            "Remote transport refused because this process is a test host"
+        )
+        onStateChange(.stopped)
+    }
+
+    func stop() {}
+}
+
 /// How the user wants another device to reach the one remote-access listener.
 ///
 /// Relay remains the compatibility default. `tailscaleAndRelay` keeps owner pairing on the

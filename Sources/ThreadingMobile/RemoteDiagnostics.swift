@@ -32,6 +32,7 @@ enum MobileDiagnosticSurface: String {
     case issueReportExport = "issue_report_export"
     case keyboardStorage = "keyboard_storage"
     case sessionAction = "session_action"
+    case sessionRefusal = "session_refusal"
     case themeSelection = "theme_selection"
 }
 
@@ -76,6 +77,19 @@ enum MobileDiagnostics {
         let digest = SHA256.hash(data: Data(value.utf8))
         let short = digest.prefix(6).map { String(format: "%02x", $0) }.joined()
         return "\(prefix)-\(short)"
+    }
+
+    /// The address this phone aimed at, as a value a report can carry.
+    ///
+    /// Two events naming the same origin match; neither one names it. A URL's fragment is where
+    /// a pairing bearer lives, so only scheme, host and port are hashed. The Mac derives the
+    /// same value for the origin it advertised, which is what lets a joined report say whether
+    /// the phone was even pointed at the right place.
+    static func originDigest(_ origin: URL) -> String {
+        let scheme = origin.scheme?.lowercased() ?? "none"
+        let host = origin.host?.lowercased() ?? "none"
+        let port = origin.port.map(String.init) ?? "default"
+        return pseudonym("\(scheme)://\(host):\(port)", prefix: "origin")
     }
 
     /// Error descriptions can contain a full request URL, whose fragment is a bearer. Reports
@@ -149,6 +163,35 @@ enum MobileDiagnostics {
         )
     }
 
+    /// A refusal the Mac named, kept structural on the way to the log.
+    ///
+    /// The code and the detail are machine tokens from the wire vocabulary, but they arrive from
+    /// another process, so both are reduced to the journal's own alphabet before they reach a
+    /// public log field rather than trusted to be well formed.
+    static func logDegraded(
+        _ surface: MobileDiagnosticSurface,
+        code: String,
+        detail: String?
+    ) {
+        let safeCode = machineToken(code)
+        let safeDetail = detail.map(machineToken) ?? "none"
+        mobileDiagnosticLogger.warning(
+            "Mobile operation degraded surface=\(surface.rawValue, privacy: .public) code=\(safeCode, privacy: .public) detail=\(safeDetail, privacy: .public)"
+        )
+    }
+
+    /// The same alphabet `RemoteDiagnosticUploadPolicy` enforces on an imported field value.
+    static func machineToken(_ value: String) -> String {
+        let filtered = value.unicodeScalars.filter { scalar in
+            CharacterSet.alphanumerics.contains(scalar)
+                || scalar == "-" || scalar == "." || scalar == ":" || scalar == "_"
+        }
+        let token = String(String.UnicodeScalarView(filtered.prefix(machineTokenLimit)))
+        return token.isEmpty ? "unknown" : token
+    }
+
+    private static let machineTokenLimit = 64
+
     static func supportReport(
         additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
     ) throws -> URL {
@@ -161,6 +204,49 @@ enum MobileDiagnostics {
             minimumProtocolVersion: RemoteProtocol.minimumSupported,
             additionalDetails: additionalDetails
         )
+    }
+}
+
+/// What the connection did, not only where it stopped.
+///
+/// The support report's header carried `connectionState` as one snapshot value, so a phone that
+/// never reached the Mac and a phone that connected and dropped produced identical reports and
+/// have opposite fixes. This is a ring rather than a log: fixed capacity, one entry per real
+/// transition, and ages rendered at read time so a long-lived process cannot grow the value.
+@MainActor
+enum MobileConnectionStateLog {
+    /// Eight transitions is the useful recent past and stays inside the report field's 160-byte
+    /// budget even at the longest state name and the widest age.
+    static let capacity = 8
+    /// Ages are clamped so one old entry cannot widen the whole value without bound.
+    static let maximumAgeSeconds = 99_999
+
+    private struct Entry {
+        let state: String
+        let at: Date
+    }
+
+    private static var entries: [Entry] = []
+
+    static func record(_ state: String, at moment: Date = Date()) {
+        guard entries.last?.state != state else { return }
+        entries.append(Entry(state: state, at: moment))
+        if entries.count > capacity {
+            entries.removeFirst(entries.count - capacity)
+        }
+    }
+
+    /// `state-secondsAgo`, oldest first, in the journal's own alphabet.
+    static func summary(now: Date = Date()) -> String? {
+        guard !entries.isEmpty else { return nil }
+        return entries.map { entry in
+            let age = max(0, Int(now.timeIntervalSince(entry.at)))
+            return "\(entry.state)-\(min(age, maximumAgeSeconds))"
+        }.joined(separator: ":")
+    }
+
+    static func reset() {
+        entries.removeAll()
     }
 }
 

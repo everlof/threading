@@ -36,6 +36,52 @@ final class RemoteDiagnosticsTests: XCTestCase {
         try super.tearDownWithError()
     }
 
+    /// The `origin` field exists so a report can say which address a client aimed at. It is a
+    /// hash by contract, and the contract is enforced here rather than trusted: an address in
+    /// this field would put a routable location of someone's machine into a shareable file.
+    func testOriginFieldAcceptsOnlyAHashAndNeverAnAddress() {
+        XCTAssertTrue(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(fields: [
+            .origin: "origin-a1b2c3d4e5f6",
+            .transport: "relay",
+        ])))
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(fields: [
+            .origin: "192.168.1.42:8760",
+        ])))
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(fields: [
+            .origin: "mac.ts.net",
+        ])))
+    }
+
+    /// `detail` carries the values behind a refusal, and stays inside the same machine alphabet
+    /// every other field is held to.
+    func testDetailFieldStaysAMachineToken() {
+        XCTAssertTrue(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(fields: [
+            .code: "invalidViewport",
+            .reason: RemoteViewportRefusal.columnsOutOfRange.rawValue,
+            .detail: "300x40",
+        ])))
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(fields: [
+            .detail: "the agent said hello",
+        ])))
+    }
+
+    private func uploadRequest(
+        fields: [RemoteDiagnosticField: String]
+    ) -> RemoteDiagnosticUploadRequestDTO {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return RemoteDiagnosticUploadRequestDTO(
+            source: .iOSClient,
+            records: [RemoteDiagnosticRecord(
+                timestamp: formatter.string(from: Date()),
+                source: .iOSClient,
+                level: .error,
+                event: .socketFailed,
+                fields: Dictionary(uniqueKeysWithValues: fields.map { ($0.key.rawValue, $0.value) })
+            )]
+        )
+    }
+
     func testJournalRoundTripsTypedRecordsInOrder() {
         let journal = RemoteDiagnosticJournal(directory: directory, source: .iOSClient)
         journal.record(.socketConnecting, fields: [.session: "session-a"])

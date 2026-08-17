@@ -85,6 +85,16 @@ public enum RemoteDiagnosticField: String, CaseIterable, Sendable {
     case enabledKindCount
     case recordCount
     case reason
+    /// A truncated hash of the address a client aimed at, or that a host advertised.
+    ///
+    /// It exists so "wrong address" and "right address, host down" stop looking identical in a
+    /// support report, and it is a hash because the address itself is a routable location of
+    /// someone's machine. Both hosts pseudonymise it the way they pseudonymise a session id,
+    /// under the `origin-` prefix this file's value check requires.
+    case origin
+    /// A bounded machine token qualifying `code` or `reason`, such as the values a refused
+    /// request carried. Never prose, a path, or anything a person or an agent wrote.
+    case detail
 }
 
 /// Optional device/app context that a reporter explicitly consents to include.
@@ -105,6 +115,11 @@ public enum RemoteDiagnosticExtraField: String, CaseIterable, Sendable {
     case displayScale
     case applicationState
     case connectionState
+    /// The bounded ring of connection-state transitions behind `connectionState`.
+    ///
+    /// One snapshot value cannot tell a client that never connected from one that connected and
+    /// dropped, which are the two failures a remote support report exists to separate.
+    case connectionStateHistory
     case pairedHostCount
     case visibleSessionCount
     case activeScope
@@ -276,6 +291,10 @@ public enum RemoteDiagnosticUploadPolicy {
             return value.hasPrefix("peer-") || value.hasPrefix("device-")
         case .session:
             return value.hasPrefix("session-")
+        // The prefix is what makes an address unrepresentable here: a client cannot pass a host
+        // name or an IP through this field without first hashing it into the agreed shape.
+        case .origin:
+            return value.hasPrefix("origin-")
         case .none:
             return false
         default:

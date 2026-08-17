@@ -180,6 +180,16 @@
     "Images, documents, and HTML from this session will appear here.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bilder, dokument och HTML från den här sessionen visas här." } } }
     },
+    "Open Settings": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna Inställningar"
+          }
+        }
+      }
+    },
     "Opening attachment…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppnar bilaga…" } } }
     },
@@ -2688,6 +2698,16 @@
         }
       }
     },
+    "Scan the QR code again": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skanna QR-koden igen"
+          }
+        }
+      }
+    },
     "Screenshot that will be shared": {
       "localizations": {
         "sv": {
@@ -2914,6 +2934,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Threading på Mac"
+          }
+        }
+      }
+    },
+    "Threading needs Local Network access to reach this Mac on Wi-Fi. Turn it on in Settings.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading behöver åtkomst till lokalt nätverk för att nå den här Mac-datorn via Wi-Fi. Aktivera det i Inställningar."
           }
         }
       }
@@ -3168,6 +3198,16 @@
         }
       }
     },
+    "This Mac accepted the connection but never answered.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den här Mac-datorn tog emot anslutningen men svarade aldrig."
+          }
+        }
+      }
+    },
     "This Mac can currently deliver while the live connection is open, but APNs provider delivery is not configured.": {
       "localizations": {
         "sv": {
@@ -3184,6 +3224,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Filen har ingen textförhandsvisning."
+          }
+        }
+      }
+    },
+    "This Mac’s address has changed. Scan its QR code again.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac-datorns adress har ändrats. Skanna dess QR-kod igen."
           }
         }
       }
