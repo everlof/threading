@@ -19,11 +19,15 @@ final class GeneralSettingsRenderTests: XCTestCase {
         /// rows carry the longest second lines on the page, so they wrap first.
         static let widths: [CGFloat] = [420, SettingsUIDefaults.pageWidth]
 
-        /// The page is a scroll view, so it has no height of its own to be sized to. Tall
-        /// enough that the whole page is in the image rather than only what a window shows —
-        /// the point is to review cards that sit well down the list, and the Confirmations
-        /// card turned one row into six.
+        /// The page is a scroll view, so it has no height of its own to be sized to. This tall
+        /// overview keeps the upper and middle cards together — especially Confirmations,
+        /// which turned one row into six — while the focused viewport below covers the end.
         static let height: CGFloat = 3600
+
+        /// A second, ordinary-height viewport is pinned to the bottom of the real settings
+        /// scroll view. General has outgrown even the tall overview at constrained widths, and
+        /// settings added near the end of the page otherwise have no rendered evidence at all.
+        static let bottomHeight: CGFloat = 1600
 
         static var directory: URL {
             if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
@@ -248,6 +252,33 @@ final class GeneralSettingsRenderTests: XCTestCase {
         }
     }
 
+    /// The power setting states its exact boundary on the page: this is idle sleep only, not a
+    /// promise that Threading can override a MacBook lid closure or keep the display lit.
+    @MainActor
+    func testPowerSettingIsReachableAndExplainsTheLidBoundary() throws {
+        let controller = GeneralPreferencesViewController()
+        laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
+
+        let toggle = try XCTUnwrap(
+            Self.view(
+                in: controller.view,
+                identifiedBy: "settings.general.prevent-idle-system-sleep"
+            ) as? ThemedToggle
+        )
+        XCTAssertEqual(
+            toggle.state == .on,
+            AppSettings.shared.preventsIdleSystemSleepWhileAgentsWork
+        )
+
+        let labels = Self.labels(in: controller.view)
+        XCTAssertTrue(labels.contains(L10n.string("Keep this Mac awake while agents work")))
+        XCTAssertTrue(
+            labels.contains { $0.contains("MacBook") },
+            "the setting must not imply that an idle-sleep assertion overrides lid closure"
+        )
+    }
+
+    @MainActor
     private static func labels(in view: NSView) -> Set<String> {
         var found: Set<String> = []
         if let field = view as? NSTextField { found.insert(field.stringValue) }
@@ -257,6 +288,7 @@ final class GeneralSettingsRenderTests: XCTestCase {
         return found
     }
 
+    @MainActor
     private static func view(in root: NSView, identifiedBy identifier: String) -> NSView? {
         if root.accessibilityIdentifier() == identifier { return root }
         for subview in root.subviews {
@@ -278,37 +310,77 @@ final class GeneralSettingsRenderTests: XCTestCase {
             for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
                 let url = directory.appendingPathComponent("general-\(Int(width))-\(name).png")
                 let data = try XCTUnwrap(
-                    pageImage(width: width, appearance: appearance),
+                    pageImage(width: width, height: Render.height, appearance: appearance),
                     "Failed to render the general page at \(width)pt in \(name)"
                 )
                 try data.write(to: url)
                 written.append(url.lastPathComponent)
+
+                let bottomURL = directory.appendingPathComponent(
+                    "general-bottom-\(Int(width))-\(name).png"
+                )
+                let bottomData = try XCTUnwrap(
+                    pageImage(
+                        width: width,
+                        height: Render.bottomHeight,
+                        appearance: appearance,
+                        scrollToBottom: true
+                    ),
+                    "Failed to render the bottom of General at \(width)pt in \(name)"
+                )
+                try bottomData.write(to: bottomURL)
+                written.append(bottomURL.lastPathComponent)
             }
         }
 
         print("Rendered \(written.count) general pages to \(directory.path)")
-        XCTAssertEqual(written.count, Render.widths.count * 2)
+        XCTAssertEqual(written.count, Render.widths.count * 4)
     }
 
     // MARK: - Helpers
 
     @MainActor
-    private func pageImage(width: CGFloat, appearance name: NSAppearance.Name) -> Data? {
+    private func pageImage(
+        width: CGFloat,
+        height: CGFloat,
+        appearance name: NSAppearance.Name,
+        scrollToBottom: Bool = false
+    ) -> Data? {
         let appearance = NSAppearance(named: name)
 
         var data: Data?
         let render = {
             let controller = GeneralPreferencesViewController()
-            let host = self.laidOut(controller.view, width: width, height: Render.height)
+            let host = self.laidOut(controller.view, width: width, height: height)
             host.appearance = appearance
             controller.view.appearance = appearance
             AppThemeRefresh.repaint(host)
             host.layoutSubtreeIfNeeded()
+            if scrollToBottom,
+               let scrollView = Self.scrollView(in: controller.view),
+               let document = scrollView.documentView {
+                let bottom = max(
+                    document.bounds.minY,
+                    document.bounds.maxY - scrollView.contentView.bounds.height
+                )
+                scrollView.contentView.scroll(to: NSPoint(x: document.bounds.minX, y: bottom))
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+                host.layoutSubtreeIfNeeded()
+            }
             data = self.png(of: host)
         }
 
         appearance?.performAsCurrentDrawingAppearance(render)
         return data
+    }
+
+    @MainActor
+    private static func scrollView(in root: NSView) -> NSScrollView? {
+        if let scrollView = root as? NSScrollView { return scrollView }
+        for subview in root.subviews {
+            if let found = scrollView(in: subview) { return found }
+        }
+        return nil
     }
 
     /// The page is a scroll view and has no fitting height, so the host states one and the

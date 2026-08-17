@@ -212,6 +212,10 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "automaticUpdateChecksEnabled",
                 valueType: .boolean
             ),
+            .preventsIdleSystemSleepWhileAgentsWork: .init(
+                key: "preventsIdleSystemSleepWhileAgentsWork",
+                valueType: .boolean
+            ),
             .workingOrbStyle: .init(key: "workingOrbStyle", valueType: .string),
             .chatNameMorphStyle: .init(key: "chatNameMorphStyle", valueType: .string),
             .chromeFontFamily: .init(key: "chromeFontFamily", valueType: .string),
@@ -319,6 +323,7 @@ final class AppSettingDefinitionTests: XCTestCase {
         let defaults = AppSettingDefinitions.registeredDefaults
         XCTAssertEqual(defaults["restoresLastSession"] as? Bool, true)
         XCTAssertEqual(defaults["remoteAccessKeepsRelayReady"] as? Bool, false)
+        XCTAssertEqual(defaults["preventsIdleSystemSleepWhileAgentsWork"] as? Bool, false)
         XCTAssertEqual(defaults["appTextSize"] as? String, AppTextSize.standard.rawValue)
 
         XCTAssertNil(defaults["sessionRestorePolicy"])
@@ -330,7 +335,7 @@ final class AppSettingDefinitionTests: XCTestCase {
     @MainActor
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
-        XCTAssertEqual(authoredRows.count, 73)
+        XCTAssertEqual(authoredRows.count, 74)
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
             authoredRows.count
@@ -367,7 +372,8 @@ final class AppSettingDefinitionTests: XCTestCase {
             "New sessions start in", "Remote Control for new Claude sessions",
             "Report Claude turn and subagent activity",
             "Hide Claude's status line in Threading terminals", "Report Codex turn boundaries",
-            "Skip Codex hook review", "Check for updates automatically"
+            "Skip Codex hook review", "Check for updates automatically",
+            "Keep this Mac awake while agents work"
         ])
         XCTAssertEqual(actual["keyboard"], [
             "When writing a prompt, press Return to", "Reset Shortcuts"

@@ -621,11 +621,24 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 #if DEBUG
         fixtureLaunchPlanProviders.removeValue(forKey: sessionID)
 #endif
+        var discardedRuntime = false
+        defer {
+            if discardedRuntime {
+                // Both renderers have left the runtime maps, so the common activity projection
+                // now answers dormant. Consumers must receive that edge even for a native chat,
+                // which has no TerminalSessionDidEnd callback of its own.
+                NotificationCenter.default.post(
+                    SessionActivityDidChange(sessionID: sessionID)
+                )
+            }
+        }
+
         // No notification exists for a discarded controller, so the mirror is told explicitly:
         // a remote watcher must learn the session ended rather than wait on a dead socket.
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
 
         if let conversation = conversations.removeValue(forKey: sessionID) {
+            discardedRuntime = true
             conversation.terminate(preservingViewport: preservingViewport)
             subagentStates[sessionID]?.stopWorking(
                 message: "Stopped when the session process ended."
@@ -634,6 +647,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         }
 
         guard let controller = controllers[sessionID] else { return }
+        discardedRuntime = true
         controller.terminate()
         subagentStates[sessionID]?.stopWorking(
             message: "Stopped when the session process ended."

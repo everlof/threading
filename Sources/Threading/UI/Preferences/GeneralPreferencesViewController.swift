@@ -29,6 +29,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private let restoreLimitPopUp = ThemedPopUp()
     private let attentionNotificationToggle = ThemedToggle()
     private let automaticUpdateToggle = ThemedToggle()
+    private let preventIdleSleepToggle = ThemedToggle()
 
     /// One toggle per suppressible prompt, built from the register rather than declared one by
     /// one, so a prompt that can be switched off cannot arrive without the switch that turns it
@@ -177,6 +178,14 @@ final class GeneralPreferencesViewController: NSViewController {
         configure(automaticUpdateToggle,
                   isOn: AppSettings.shared.automaticUpdateChecksEnabled,
                   action: #selector(automaticUpdateChecksChanged))
+        configure(
+            preventIdleSleepToggle,
+            isOn: AppSettings.shared.preventsIdleSystemSleepWhileAgentsWork,
+            action: #selector(preventIdleSleepChanged)
+        )
+        preventIdleSleepToggle.setAccessibilityIdentifier(
+            "settings.general.prevent-idle-system-sleep"
+        )
         for (alert, toggle) in alertToggles {
             configure(toggle,
                       isOn: AppSettings.shared.notifies(on: alert),
@@ -488,6 +497,15 @@ final class GeneralPreferencesViewController: NSViewController {
             SettingsUI.section("Claude Hooks", claudeHooksCard()),
             SettingsUI.section("Codex Hooks", codexHooksCard()),
             SettingsUI.section("Software Updates", updatesCard()),
+            SettingsUI.section("Power", SettingsCard(rows: [
+                SettingsUI.row(
+                    title: "Keep this Mac awake while agents work",
+                    subtitle: "Prevents idle system sleep while an agent turn is active or "
+                        + "waiting for your answer. The display may turn off, and closing a "
+                        + "MacBook’s lid can still put it to sleep.",
+                    control: preventIdleSleepToggle
+                )
+            ])),
             SettingsUI.section("Shell", shell),
             SettingsUI.note("Shell path is used by shell sessions. Agent sessions launch through your login shell regardless.")
         ], hostPage: .general)
@@ -1194,6 +1212,11 @@ final class GeneralPreferencesViewController: NSViewController {
         // The setter posts the settings notification `AppUpdater` observes, which is what stops
         // the scheduled check rather than anything here reaching into Sparkle.
         AppSettings.shared.automaticUpdateChecksEnabled = automaticUpdateToggle.state == .on
+    }
+
+    @objc private func preventIdleSleepChanged() {
+        AppSettings.shared.preventsIdleSystemSleepWhileAgentsWork =
+            preventIdleSleepToggle.state == .on
     }
 
     @objc private func attentionNotificationChanged() {

@@ -59,6 +59,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case remoteAccessKeepsRelayReady
     case remoteInputControlDefault
     case automaticUpdateChecksEnabled
+    case preventsIdleSystemSleepWhileAgentsWork
     case workingOrbStyle
     case chatNameMorphStyle
     case chromeFontFamily
@@ -1012,6 +1013,15 @@ enum AppSettingDefinitions {
         presentations: [row("general", 29, "Software Updates",
                             "Check for updates automatically", ["updates", "Sparkle"])]
     )
+    static let preventsIdleSystemSleepWhileAgentsWork = AppSettingDescriptor<Bool>(
+        identity: .preventsIdleSystemSleepWhileAgentsWork,
+        persistenceKey: "preventsIdleSystemSleepWhileAgentsWork",
+        absence: .registered(false),
+        presentations: [row(
+            "general", 30, "Power", "Keep this Mac awake while agents work",
+            ["sleep", "awake", "lid", "battery", "energy", "active turn"]
+        )]
+    )
     static let workingOrbStyle = AppSettingDescriptor<String>(
         identity: .workingOrbStyle,
         persistenceKey: "workingOrbStyle",
@@ -1083,7 +1093,8 @@ enum AppSettingDefinitions {
         .init(defaultPermissionMode), .init(remoteAccessEnabled),
         .init(remoteAccessConnectionMode), .init(remoteAccessAllowsOwnerRelayFallback),
         .init(remoteAccessKeepsRelayReady), .init(remoteInputControlDefault),
-        .init(automaticUpdateChecksEnabled), .init(workingOrbStyle),
+        .init(automaticUpdateChecksEnabled), .init(preventsIdleSystemSleepWhileAgentsWork),
+        .init(workingOrbStyle),
         .init(chatNameMorphStyle), .init(chromeFontFamily), .init(conversationFontFamily),
         .init(appTextSize)
     ]

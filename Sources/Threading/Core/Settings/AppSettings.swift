@@ -1075,6 +1075,24 @@ final class AppSettings {
         }
     }
 
+    /// Whether an unfinished agent turn may prevent idle system sleep.
+    ///
+    /// Off by default because this changes the Mac's power use. The runtime holds no assertion
+    /// merely because an agent process is alive at its prompt: only `.working` and
+    /// `.awaitingUser` are unfinished turns. Display sleep and lid-closed sleep remain macOS's.
+    var preventsIdleSystemSleepWhileAgentsWork: Bool {
+        get {
+            AppSettingDefinitions.preventsIdleSystemSleepWhileAgentsWork.read(from: defaults)
+                ?? false
+        }
+        set {
+            AppSettingDefinitions.preventsIdleSystemSleepWhileAgentsWork.write(
+                newValue,
+                to: defaults
+            )
+        }
+    }
+
     // MARK: - MCP Tool Groups
 
     /// The tool groups the user has switched *off* on the Tools page. Stored as the disabled set,

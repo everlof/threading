@@ -1,6 +1,9 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Keep this Mac awake while agents work": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Håll Mac-datorn vaken medan agenter arbetar"}}}},
+    "Power": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ström"}}}},
+    "Prevents idle system sleep while an agent turn is active or waiting for your answer. The display may turn off, and closing a MacBook’s lid can still put it to sleep.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Förhindrar automatisk systemvila medan en agenttur är aktiv eller väntar på ditt svar. Skärmen kan släckas, och datorn kan fortfarande försättas i vila om du stänger locket på en MacBook."}}}},
     "Rain-blue chrome for long sessions.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Regnblått gränssnitt för långa sessioner."}}}},
     "The first-party extension catalogue contains more than %lld entries.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Katalogen över förstapartstillägg innehåller fler än %lld poster."}}}},
     "The first-party extension catalogue has an invalid identifier: %@.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Katalogen över förstapartstillägg har en ogiltig identifierare: %@."}}}},

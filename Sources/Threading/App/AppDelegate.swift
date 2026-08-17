@@ -132,6 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var mainWindowController: MainWindowController?
     private let issueReportEvents = AppEventObservations()
     private let remoteSessionEvents = AppEventObservations()
+    private var activeTurnSleepInhibitor: ActiveTurnSleepInhibitor?
     private var onboardingWindowController: OnboardingWindowController?
     /// True while first-launch onboarding is deferring the main window. Gates session restore
     /// and routes Dock-click reopens to the onboarding window instead of the hidden main one.
@@ -524,6 +525,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             SessionSnoozeCenter.shared.start()
             AttentionAlertCenter.shared.start()
             AgentWorkloadMonitor.shared.start()
+
+            let runtime = environment.agentRuntime
+            let settings = environment.settings
+            let inhibitor = ActiveTurnSleepInhibitor(
+                currentInFlightSessionIDs: {
+                    Set(runtime.runningSessionIDs.filter {
+                        runtime.activity(sessionID: $0).hasTurnInFlight
+                    })
+                },
+                activity: { runtime.activity(sessionID: $0) },
+                isEnabled: { settings.preventsIdleSystemSleepWhileAgentsWork }
+            )
+            inhibitor.start()
+            activeTurnSleepInhibitor = inhibitor
         }
 
         if plan.startsExtensions {
@@ -774,6 +789,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 preservedRunningSessionRecord = true
             }
         }
+        activeTurnSleepInhibitor?.stop()
+        activeTurnSleepInhibitor = nil
         AgentRuntime.shared.terminateAll()
         ExtensionManager.shared.terminateAll()
         // Stops the tunnel child and closes remote sockets before the listeners go, so nothing

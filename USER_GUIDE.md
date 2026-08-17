@@ -3748,6 +3748,12 @@ projects. Switch it off under **Settings ▸ General ▸ Software Updates**; **H
 Updates…** still works when it is off, so turning off background traffic never means losing the
 ability to look.
 
+**Keeping the Mac awake.** **Settings ▸ General ▸ Power ▸ Keep this Mac awake while agents work**
+prevents automatic system sleep while at least one agent turn is working or waiting for your
+answer. It is off by default and does nothing merely because an agent is open at its prompt. The
+display may still turn off, and closing a MacBook's lid can still put it to sleep; the switch does
+not override either of those macOS behaviours.
+
 When an update is found, the offer appears as a sheet in Threading's own style: the new
 version, what you are on, the release notes rendered right there, and three answers —
 **Install Update**, **Remind Me Later** (also what Escape means), and **Skip This Version**.

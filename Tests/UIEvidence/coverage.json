@@ -160,8 +160,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "General settings",
-      "description": "The complete General settings page at both supported review widths, including its alert, confirmation and provider configuration rows.",
-      "states": ["Complete settings form"],
+      "description": "The General settings page at both supported review widths, with a tall overview plus a bottom-positioned viewport that keeps its final Power and Shell rows reviewable.",
+      "states": ["Settings overview", "Scrolled to Power and Shell"],
       "matrix": {
         "themes": ["System"],
         "appearances": ["Light", "Dark"],

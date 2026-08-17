@@ -386,6 +386,22 @@ sessions where the user is the reason nothing is happening. The drawing side is
 `AgentActivityBeamView`; see [`design-system.md`](design-system.md) and
 [`dependencies.md`](dependencies.md).
 
+**An unfinished turn may also hold one process-wide idle-sleep assertion.**
+`ActiveTurnSleepInhibitor` is started with the other real-app activity consumers and follows
+`hasTurnInFlight`, not `.working`: a permission or question inside a turn is still unfinished,
+so sleeping there can lose exactly the response the user is being asked to give. An agent process
+alive at its prompt holds nothing. The General-page switch is off by default, and changing it
+acquires or releases immediately.
+
+The service keeps a set of in-flight session ids. One initial scan admits work that predates its
+observer; each later `SessionActivityDidChange` updates one set entry, and the last edge out of
+flight releases the single `kIOPMAssertPreventUserIdleSystemSleep` assertion. This is deliberately
+idle **system** sleep only: display sleep and forced sleep such as closing a MacBook lid remain
+macOS's. `TerminalSessionDidEnd` clears a terminal that disappears without another activity edge.
+`AgentRuntime.discard` also posts the common activity event after either renderer has left its
+runtime map, so a discarded native conversation projects `.dormant` even though it has no
+terminal-end callback. The quit path stops the service before tearing runtimes down.
+
 **The activity states also feed macOS notifications** (`AttentionAlerts.swift`), and the
 split above is what makes them worth having: `awaitingUser` posts with sound (a turn stopped
 dead), `needsAttention` posts silently (unread), and the *visible* session finishing while the
