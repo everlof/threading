@@ -575,11 +575,41 @@ public struct RemoteNewSessionCatalogDTO: Codable, Equatable, Sendable {
     }
 }
 
+/// The `RemoteHostEndpointDTO.kind` vocabulary both products know today.
+///
+/// These are constants rather than an enum on purpose. `kind` is a `String` on the wire so a
+/// newer Mac can advertise a route an installed phone has never heard of and that phone still
+/// decodes the host instead of failing the whole payload — an enum with a synthesized `Codable`
+/// would take that leniency away. The constants exist so the two products stop spelling the same
+/// words in a dozen places, and so a reader can see the whole vocabulary at once.
+///
+/// What each one means, and who can see the traffic on it, is the table in
+/// `docs/REMOTE_ACCESS.md` under the security model.
+public enum RemoteHostEndpointKind {
+    /// `127.0.0.1`. Reachable from the Mac itself only, and never advertised to another device.
+    public static let loopback = "loopback"
+    /// A routable address on a network the Mac is attached to, plus its `.local` name.
+    public static let lan = "lan"
+    /// The address the Mac holds on a VPN tunnel it did not set up.
+    public static let vpn = "vpn"
+    /// The Mac's tailnet address or `*.ts.net` name.
+    public static let tailscale = "tailscale"
+    /// A rendezvous route through the hosted service. No address of the Mac's own.
+    public static let hosted = "hosted"
+    /// A public tunnel origin operated by a third party.
+    public static let relay = "relay"
+
+    /// Every kind this build understands. A client uses it to notice an unknown kind rather
+    /// than to reject one: an endpoint it cannot classify is ignored, not fatal.
+    public static let known: Set<String> = [loopback, lan, vpn, tailscale, hosted, relay]
+}
+
 /// One currently usable route to the Mac's single authenticated remote-access server.
 ///
 /// Endpoints carry no bearer and grant nothing by themselves. A paired client combines one with
 /// its device credential only after applying the host's connection policy. `kind` stays a string
-/// so an older client can ignore a future transport without failing to decode the whole host.
+/// so an older client can ignore a future transport without failing to decode the whole host;
+/// `RemoteHostEndpointKind` names the values this build produces.
 public struct RemoteHostEndpointDTO: Codable, Equatable, Hashable, Sendable {
     public let kind: String
     public let baseURL: URL
@@ -625,11 +655,14 @@ public enum RemoteHostEndpointSelection {
         let allowed: [RemoteHostEndpointDTO]
         switch policy {
         case .privateOnly:
-            allowed = valid.filter { $0.kind == "tailscale" }
+            allowed = valid.filter { $0.kind == RemoteHostEndpointKind.tailscale }
         case .relayOnly:
-            allowed = valid.filter { $0.kind == "relay" }
+            allowed = valid.filter { $0.kind == RemoteHostEndpointKind.relay }
         case .preferPrivate:
-            allowed = valid.filter { $0.kind == "tailscale" || $0.kind == "relay" }
+            allowed = valid.filter {
+                $0.kind == RemoteHostEndpointKind.tailscale
+                    || $0.kind == RemoteHostEndpointKind.relay
+            }
         }
 
         return allowed.sorted { lhs, rhs in
@@ -640,7 +673,7 @@ public enum RemoteHostEndpointSelection {
                     // address without asking the user to pair the same Mac again.
                     return endpoint.isStable ? 0 : (endpoint.baseURL == currentBaseURL ? 1 : 2)
                 case .preferPrivate:
-                    if endpoint.kind == "tailscale" { return 0 }
+                    if endpoint.kind == RemoteHostEndpointKind.tailscale { return 0 }
                     if endpoint.isStable { return 1 }
                     if endpoint.baseURL == currentBaseURL { return 2 }
                     return 3

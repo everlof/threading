@@ -109,6 +109,18 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
     }
 
+    /// What each door is doing, as the settings screen will render it.
+    ///
+    /// Separate from `status`, which answers "is the one server up". A door can be unreachable
+    /// while the server is perfectly healthy, and reporting that as a server failure is how the
+    /// tailnet privacy promise would get quietly broken.
+    private(set) var listenerStatus: RemoteListenerStatus = .idle {
+        didSet {
+            guard listenerStatus != oldValue else { return }
+            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+        }
+    }
+
     private(set) var relayStatus: RemoteTransportState = .stopped {
         didSet {
             guard relayStatus != oldValue else { return }
@@ -187,6 +199,11 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         server.authorizer = authority
         server.invitationRedeemer = self
         server.hostCommands = self
+        // Doors come and go with the interfaces under them, so the status the settings page
+        // renders is pushed rather than polled. The callback arrives on the server queue.
+        server.onListenerStatusChange = { [weak self] status in
+            Task { @MainActor in self?.applyListenerStatus(status) }
+        }
         self.hostedService.onStateChange = { [weak self] in
             self?.refreshHostedPairingLink()
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
@@ -379,7 +396,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         guard authorization.canManageHost else { return identity }
 
         let mode = appSettings.remoteAccessConnectionMode
-        var endpoints: [RemoteHostEndpointDTO] = []
+        var endpoints: [RemoteHostEndpointDTO] = Self.doorEndpoints(
+            listenerStatus,
+            advertisedHostname: appSettings.remoteAccessAdvertisedHostname
+        )
         if mode.usesTailscale, case .connected(let origin) = tailscaleStatus {
             endpoints.append(RemoteHostEndpointDTO(
                 kind: RemoteTransportKind.tailscale.rawValue,
@@ -416,6 +436,57 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             endpoints: endpoints,
             connectionPolicy: policy
         )
+    }
+
+    /// The routes a routable door is currently answering on.
+    ///
+    /// Every entry is stable: the port is sticky and the addresses come from interfaces the Mac
+    /// holds, so a phone that learns one can use it again tomorrow. The scheme is `http` until
+    /// the listener presents a TLS identity, which means an installed phone drops these
+    /// candidates today — `RemoteHostEndpointSelection.ordered` keeps only `https`. That is the
+    /// intended fail-closed behaviour and the reason the door is not offered in the UI yet.
+    ///
+    /// Loopback is never advertised. It reaches this Mac only, so an entry for it would be a
+    /// route no other device can take.
+    nonisolated static func doorEndpoints(
+        _ status: RemoteListenerStatus,
+        advertisedHostname: String,
+        localHostname: String? = ProcessInfo.processInfo.hostName
+    ) -> [RemoteHostEndpointDTO] {
+        var endpoints: [RemoteHostEndpointDTO] = []
+        var seen: Set<URL> = []
+
+        func append(_ url: URL?, kind: String) {
+            guard let url, seen.insert(url).inserted else { return }
+            endpoints.append(RemoteHostEndpointDTO(kind: kind, baseURL: url, isStable: true))
+        }
+
+        for door in RemoteAccessDoor.selectable {
+            let bindings = status.state(of: door).bindings
+            for binding in bindings {
+                append(binding.origin, kind: door.endpointKind)
+            }
+            // The `.local` name and the override are LAN-shaped answers to the same question the
+            // LAN addresses answer, so they ride with that door and appear only when it is up.
+            guard door == .lan, let port = bindings.first?.port else { continue }
+            if let localHostname, localHostname.hasSuffix(RemoteAccessDefaults.localHostnameSuffix) {
+                append(Self.origin(host: localHostname, port: port), kind: door.endpointKind)
+            }
+            if !advertisedHostname.isEmpty {
+                append(Self.origin(host: advertisedHostname, port: port), kind: door.endpointKind)
+            }
+        }
+        return endpoints
+    }
+
+    private nonisolated static func origin(host: String, port: UInt16) -> URL? {
+        var components = URLComponents()
+        components.scheme = RemoteAccessDefaults.cleartextScheme
+        components.host = host
+        components.port = Int(port)
+        components.path = "/"
+        guard let url = components.url, url.host?.isEmpty == false else { return nil }
+        return url
     }
 
     struct PairedOwnerDevice: Equatable, Identifiable {
@@ -1193,6 +1264,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         failPendingShares(.remoteAccessUnavailable)
         stopTransports()
         server.stop()
+        listenerStatus = .idle
         mirrors.remoteAccessStopped()
         RemoteNotificationService.shared.reset()
         authority.removeAll()
@@ -1244,37 +1316,71 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             }
         }
 
-        server.start { [weak self] port in
+        server.start(configuration: listenerConfiguration()) { [weak self] outcome in
             guard let self else { return }
             guard self.lifecycleGeneration == generation,
                   appSettings.remoteAccessEnabled else {
                 return
             }
-            if let port {
+            switch outcome {
+            case .listening(let port):
                 self.status = .listening(port: port)
+                self.applyListenerStatus(self.server.listenerStatus)
                 self.mirrors.remoteAccessStarted()
                 self.startTransports(port: port)
                 ThreadingLogger.remote.info(
                     "Remote access listener ready port=\(port, privacy: .public)"
                 )
+                // The port is the whole point of the journal line: it is the sticky value a
+                // paired phone remembers. Routable addresses stay out of `EventLog`; the
+                // share-safe journal carries a hash of them instead.
                 EventLog.shared.record(.remote, "Remote access started", ["port": String(port)])
                 MacRemoteDiagnostics.record(.hostListenerStarted, fields: [
-                    .transport: "loopback",
+                    .transport: RemoteAccessDoor.loopback.rawValue,
                 ])
-            } else {
+            case .failed(let failure):
                 self.stopTransports()
                 self.authority.removeAll()
                 self.pairingBootstrapToken = nil
                 self.pairingRedemptions.removeAll()
-                self.status = .failed(reason: "listener")
-                EventLog.shared.record(.remote, "Remote access failed to start")
+                self.listenerStatus = .idle
+                self.status = .failed(reason: failure.rawValue)
+                EventLog.shared.record(
+                    .remote,
+                    "Remote access failed to start",
+                    ["reason": failure.rawValue]
+                )
                 MacRemoteDiagnostics.record(
                     .hostListenerFailed,
                     level: .error,
-                    fields: [.reason: "listener"]
+                    fields: [.reason: failure.rawValue]
                 )
             }
         }
+    }
+
+    /// What the listener is asked to bind: the sticky port, and the routable doors the user
+    /// selected. Loopback is not in the set because it is not a choice.
+    private func listenerConfiguration() -> RemoteListenerConfiguration {
+        RemoteListenerConfiguration(
+            preferredPort: appSettings.remoteAccessListenerPort,
+            doors: appSettings.remoteAccessDoors
+        )
+    }
+
+    /// Selects the routable doors and rebuilds only their listeners. Loopback and the doors that
+    /// did not change keep the listeners they already have.
+    func setDoors(_ doors: Set<RemoteAccessDoor>) {
+        let selected = doors.intersection(RemoteAccessDoor.selectable)
+        guard appSettings.remoteAccessDoors != selected else { return }
+        appSettings.remoteAccessDoors = selected
+        server.updateDoors(selected)
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+    }
+
+    private func applyListenerStatus(_ status: RemoteListenerStatus) {
+        guard case .listening = self.status else { return }
+        listenerStatus = status
     }
 
     // MARK: - Transports

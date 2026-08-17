@@ -16,6 +16,10 @@ public enum RemoteDiagnosticEvent: String, Codable, Sendable {
     case hostRefreshFailed
     case hostListenerStarted
     case hostListenerFailed
+    /// One door of the host's listener set started answering on its addresses.
+    case hostDoorBound
+    /// One enabled door has nothing listening for it right now. The `reason` field says why.
+    case hostDoorUnreachable
     case relayConnected
     case relayFailed
     case authenticationRefused
@@ -85,6 +89,10 @@ public enum RemoteDiagnosticField: String, CaseIterable, Sendable {
     case enabledKindCount
     case recordCount
     case reason
+    /// A truncated hash of an advertised origin, never the origin itself. A support report says
+    /// that two events concern the same door at the same address; it does not say which address
+    /// that is, because a routable address is where the Mac lives.
+    case origin
 }
 
 /// Optional device/app context that a reporter explicitly consents to include.

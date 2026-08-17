@@ -57,6 +57,9 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case remoteAccessConnectionMode
     case remoteAccessAllowsOwnerRelayFallback
     case remoteAccessKeepsRelayReady
+    case remoteAccessListenerPort
+    case remoteAccessDoors
+    case remoteAccessAdvertisedHostname
     case remoteInputControlDefault
     case phoneReportWorkspace
     case automaticUpdateChecksEnabled
@@ -403,6 +406,18 @@ extension TypedAppSettingValidation where Value == Int {
         Self(erased: .integerRange(range)) { value, absenceValue in
             if value <= 0 { return absenceValue }
             return min(max(value, range.lowerBound), range.upperBound)
+        }
+    }
+
+    /// A range that refuses rather than clamps.
+    ///
+    /// Clamping is right for a choice out of a list, where the nearest allowed value is what the
+    /// person meant. It is wrong where the number *is* the meaning: `80` clamped to `1024` is a
+    /// listener on a port nobody asked for, and the answer to a privileged port is to refuse it
+    /// and keep the value that was already working.
+    static func refusingRange(_ range: ClosedRange<Int>) -> Self {
+        Self(erased: .integerRange(range)) { value, _ in
+            range.contains(value) ? value : nil
         }
     }
 }
@@ -997,6 +1012,46 @@ enum AppSettingDefinitions {
         presentations: [row("remote-access", 4, "Connection", "Keep Sharing Relay Ready",
                             ["relay", "share links"])]
     )
+    /// The port the listener tries first.
+    ///
+    /// Editable because the port is now sticky: a sticky port that collides with something else
+    /// on this Mac has to be movable, or the collision is permanent. The range refuses rather
+    /// than clamps, so a privileged port typed into `defaults write` leaves the working value in
+    /// place instead of quietly becoming 1024.
+    static let remoteAccessListenerPort = AppSettingDescriptor<Int>(
+        identity: .remoteAccessListenerPort,
+        persistenceKey: "remoteAccessListenerPort",
+        absence: .registered(Int(RemoteAccessDefaults.defaultListenerPort)),
+        validation: .refusingRange(
+            RemoteAccessDefaults.minimumListenerPort...RemoteAccessDefaults.maximumListenerPort
+        )
+    )
+    /// Which routable doors get a listener.
+    ///
+    /// Empty by default, which is the shipped exposure today: loopback only, exactly as before
+    /// this setting existed. **The `lan` door is deliberately not offered in the UI until the
+    /// listener presents a TLS identity.** A LAN door over plain HTTP puts a bearer token on
+    /// whatever Wi-Fi the Mac has joined, so Phase 1 and Phase 2 of the transport plan are one
+    /// shipped unit even though they are separate commits. Until then this is reachable only by
+    /// writing the defaults key, which is how the tests and a manual check use it.
+    static let remoteAccessDoors = AppSettingDescriptor<[String]>(
+        identity: .remoteAccessDoors,
+        persistenceKey: "remoteAccessDoors",
+        absence: .emptyCollection,
+        encoding: .removeEmpty
+    )
+    /// An address to advertise beside the ones enumerated from the interfaces.
+    ///
+    /// Empty means "advertise what this Mac actually has". It exists for the two cases
+    /// enumeration cannot see: a static DNS name pointing at this Mac, and a fixed address on
+    /// the far side of a VPN whose interface the Mac does not hold.
+    static let remoteAccessAdvertisedHostname = AppSettingDescriptor<String>(
+        identity: .remoteAccessAdvertisedHostname,
+        persistenceKey: "remoteAccessAdvertisedHostname",
+        absence: .emptyString,
+        validation: .maximumBytes(RemoteAccessDefaults.maximumAdvertisedHostnameBytes),
+        encoding: .removeEmpty
+    )
     static let phoneReportWorkspace = AppSettingDescriptor<String>(
         identity: .phoneReportWorkspace,
         persistenceKey: "phoneReportWorkspace",
@@ -1101,7 +1156,9 @@ enum AppSettingDefinitions {
         .init(claudeRemoteControl), .init(claudeStartupSpeed), .init(codexStartupSpeed),
         .init(defaultPermissionMode), .init(remoteAccessEnabled),
         .init(remoteAccessConnectionMode), .init(remoteAccessAllowsOwnerRelayFallback),
-        .init(remoteAccessKeepsRelayReady), .init(remoteInputControlDefault),
+        .init(remoteAccessKeepsRelayReady), .init(remoteAccessListenerPort),
+        .init(remoteAccessDoors), .init(remoteAccessAdvertisedHostname),
+        .init(remoteInputControlDefault),
         .init(phoneReportWorkspace),
         .init(automaticUpdateChecksEnabled), .init(preventsIdleSystemSleepWhileAgentsWork),
         .init(workingOrbStyle),
