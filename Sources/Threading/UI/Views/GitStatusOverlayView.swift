@@ -363,7 +363,9 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// Fast mode, drawn rather than spelled: a bolt after the agent line's words is what the
     /// state *looks* like everywhere else in the app, and the word "Fast" spent a sixth of a
     /// capped row saying what the symbol says at a glance. It is the same `bolt.fill` the
-    /// composer's speed chip carries, so one fact keeps one mark.
+    /// composer's speed chip carries **while it says Fast** — see
+    /// `ConversationSpeedPresentation.fastSymbol` — so one fact keeps one mark, and the mark
+    /// means the same thing on both surfaces.
     ///
     /// It appears **only when fast mode is on**. Off has no mark, exactly as it has no word: a
     /// dimmed or crossed-out bolt would be a second thing to learn about a state that is simply

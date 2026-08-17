@@ -1266,7 +1266,13 @@ final class ComponentGalleryViewController: NSViewController {
         galleryModelChip.configure(symbolName: "cpu", title: L10n.string("Opus · 1M"))
         galleryModelChip.itemsProvider = { [] }
         let gallerySpeedChip = ChipView()
-        gallerySpeedChip.configure(symbolName: "bolt.fill", title: L10n.string("Standard"))
+        // The pairing, not a pairing: this story showed a bolt over the word "Standard" for as
+        // long as the chip did, which is how a mark that means Fast went unnoticed on the state
+        // that is not.
+        gallerySpeedChip.configure(
+            symbolName: ConversationSpeedPresentation.ordinarySymbol,
+            title: ConversationSpeedPresentation.standardTitle
+        )
         gallerySpeedChip.itemsProvider = { [] }
         let galleryContextMeter = NSTextField(labelWithString: L10n.string("37% context"))
         galleryContextMeter.applyFont(.subheading)

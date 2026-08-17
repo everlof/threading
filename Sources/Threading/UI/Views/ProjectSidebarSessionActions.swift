@@ -274,7 +274,19 @@ enum ConversationSpeedChoice: CaseIterable, Equatable {
 
 /// One vocabulary and one set of rows for speed before and after a conversation exists.
 enum ConversationSpeedPresentation {
-    static let symbol = "bolt.fill"
+    /// A bolt is the **value**, not the category it belongs to. The session pane's corner card
+    /// draws this same `bolt.fill` only while fast mode is on, so a chip that wears it beside
+    /// the word "Standard" says the opposite of what it means — and contradicts the card in the
+    /// same window, which shows no mark for exactly that state.
+    static let fastSymbol = "bolt.fill"
+
+    /// Everything that is not Fast takes the dial, which names the choice rather than one of its
+    /// answers — the job `brain` does for effort and `hand.raised` for permission mode, neither
+    /// of which is also one of its own rows. Deliberately not a dimmed or struck-through bolt:
+    /// Standard is the ordinary state, and a crossed-out mark is a second thing to learn about
+    /// it rather than a plainer way to say it. `gauge` rather than a second dial of our own:
+    /// it is what the phone's speed menu has always drawn beside Standard.
+    static let ordinarySymbol = "gauge"
 
     static var followGeneralTitle: String { L10n.string("Follow General Setting") }
     static var followGeneralDetail: String {
@@ -291,6 +303,14 @@ enum ConversationSpeedPresentation {
         case whileRunning
     }
 
+    /// The mark and the words the chip shows, from one resolution rather than two that agree by
+    /// inspection. The symbol is a fact about the value here, so a caller that could ask for
+    /// them separately is a caller that could pair a bolt with "Standard" again.
+    struct ChipContent: Equatable {
+        let symbolName: String
+        let title: String
+    }
+
     /// What the chip says the session will use.
     ///
     /// The same four sources, in the same order, as `AgentModels.effectiveFastMode` — and it
@@ -301,15 +321,16 @@ enum ConversationSpeedPresentation {
     ///
     /// Nil survives only for a service tier this app cannot read — a Codex account whose
     /// `config.toml` names a tier that is neither Fast nor Standard — where naming either would
-    /// be wrong.
+    /// be wrong. It takes the ordinary mark for the same reason it takes a place for a title:
+    /// an unknown tier is not a claim that the session runs fast.
     @MainActor
-    static func chipTitle(
+    static func chip(
         selected: Bool?,
         kind: AgentKind,
         model: String?,
         account: AgentAccount?,
         projectDirectory: String? = nil
-    ) -> String {
+    ) -> ChipContent {
         let effective = AgentModels.effectiveFastMode(
             selected: selected,
             kind: kind,
@@ -319,10 +340,31 @@ enum ConversationSpeedPresentation {
             startupSpeed: AppSettings.shared.startupSpeed(for: kind)
         )
         switch effective {
-        case true: return fastTitle
-        case false: return standardTitle
-        case nil: return L10n.string("Agent's Setting")
+        case true: return ChipContent(symbolName: fastSymbol, title: fastTitle)
+        case false: return ChipContent(symbolName: ordinarySymbol, title: standardTitle)
+        case nil: return ChipContent(
+            symbolName: ordinarySymbol,
+            title: L10n.string("Agent's Setting")
+        )
         }
+    }
+
+    /// The words alone, for callers that are not configuring the chip.
+    @MainActor
+    static func chipTitle(
+        selected: Bool?,
+        kind: AgentKind,
+        model: String?,
+        account: AgentAccount?,
+        projectDirectory: String? = nil
+    ) -> String {
+        chip(
+            selected: selected,
+            kind: kind,
+            model: model,
+            account: account,
+            projectDirectory: projectDirectory
+        ).title
     }
 
     /// Three rows because all three answers remain meaningfully different even when General

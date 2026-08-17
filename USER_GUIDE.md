@@ -1229,6 +1229,10 @@ effect the next time it starts because there is no generic live command that res
 provider-owned setting. For Claude, a known non-Opus model stays Standard even when the app
 default is Fast, because a speed preference must not silently replace an explicit model choice.
 
+**The chip wears a bolt only while it says Fast.** Standard shows a dial instead — the same rule
+the status card follows, where a bolt appears in Fast mode and nothing marks Standard. A bolt
+means one speed everywhere in the app rather than naming the setting it belongs to.
+
 ### Claude's Remote Control
 Claude Code can hand a session to claude.ai and the Claude mobile app so you can check on it
 or reply from your phone. That is Claude's own feature, not Threading's Remote Access below —

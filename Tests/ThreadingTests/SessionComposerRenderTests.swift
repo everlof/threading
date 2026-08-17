@@ -125,7 +125,10 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         model.configure(symbolName: "cpu", title: "Fable 5 · 1M")
         mode.configure(symbolName: "hand.raised", title: "Ask")
         effort.configure(symbolName: "brain", title: "Extra High")
-        speed.configure(symbolName: "bolt.fill", title: "Standard")
+        speed.configure(
+            symbolName: ConversationSpeedPresentation.ordinarySymbol,
+            title: ConversationSpeedPresentation.standardTitle
+        )
         speed.isHidden = false
         surface.configure(symbolName: "bubble.left.and.text.bubble.right", title: "Terminal")
         usage.readings = [reading("5h", "43%"), reading("7d", "73%")]
@@ -924,7 +927,10 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         model.configure(symbolName: "cpu", title: "Opus · 1M")
         mode.configure(symbolName: "hand.raised", title: "Manual")
         effort.configure(symbolName: "brain", title: "Extra High")
-        speed.configure(symbolName: "bolt.fill", title: "Standard")
+        speed.configure(
+            symbolName: ConversationSpeedPresentation.ordinarySymbol,
+            title: ConversationSpeedPresentation.standardTitle
+        )
         surface.configure(symbolName: "bubble.left.and.text.bubble.right", title: "Native (Experimental)")
         for chip in [model, mode, effort, speed, surface] { chip.isHidden = false }
         usage.readings = [reading("5h", "86%"), reading("7d", "41%")]

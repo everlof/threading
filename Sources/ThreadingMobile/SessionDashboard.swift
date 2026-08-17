@@ -1677,8 +1677,11 @@ struct NewRemoteSessionView: View {
                 Label("Fast", systemImage: speedID == "fast" ? "checkmark" : "bolt.fill")
             }
         } label: {
+            // The bolt belongs to Fast, not to the control: the menu above already draws it on
+            // that one row and a dial on Standard, and a label wearing it whatever is chosen
+            // says Fast while the value under it says otherwise.
             LaunchChoiceLabel(
-                symbol: "bolt.fill",
+                symbol: speedID == "fast" ? "bolt.fill" : "gauge",
                 caption: "Speed",
                 value: speedID.isEmpty ? MobileL10n.string("Inherit") : speedID.capitalized
             )

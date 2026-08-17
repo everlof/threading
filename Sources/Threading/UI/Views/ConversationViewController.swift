@@ -2978,17 +2978,14 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         )
         speedChip.isEnabled = canConfigure && !isChangingConversationConfiguration
 
-        let speedTitle = ConversationSpeedPresentation.chipTitle(
+        let speed = ConversationSpeedPresentation.chip(
             selected: session.fastMode,
             kind: session.kind,
             model: model,
             account: account,
             projectDirectory: session.workingDirectory(in: project)
         )
-        speedChip.configure(
-            symbolName: ConversationSpeedPresentation.symbol,
-            title: speedTitle
-        )
+        speedChip.configure(symbolName: speed.symbolName, title: speed.title)
     }
 
     func refreshInputControl() {

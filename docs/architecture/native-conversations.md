@@ -1301,7 +1301,11 @@ speed chips used to take this one with it.
 
 **Speed has one presentation on both composers.** `ConversationSpeedPresentation` owns the
 **Follow General Setting**, **Standard**, and **Fast** rows, including their selected state and the
-chip's resolved title. Native stores the same optional `AgentSession.fastMode` the opening draft
+chip's resolved title. It owns the chip's *mark* too, from the same resolution: `chip(…)` returns
+the symbol beside the words, because the bolt is one of the values rather than the name of the
+control. Both composers drew `bolt.fill` whatever the chip said, so "Standard" arrived under the
+mark that means Fast — and under the mark the status card shows only while fast mode is on. Fast
+keeps the bolt; Standard and Agent's Setting take `gauge`. Native stores the same optional `AgentSession.fastMode` the opening draft
 hands to session creation. Claude applies a resolved Standard/Fast choice over its live control
 channel; Codex reads it into the next `turn/start`. Following a General setting of Agent's Setting
 cannot reconstruct the provider's original value in a running process, so that case records the

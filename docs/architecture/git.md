@@ -771,7 +771,9 @@ place wherever it is shown. It reuses the `cpu` mark the composer and the conver
 already give the model chip, so one fact keeps one mark too.
 
 **Fast mode is a bolt, not a word, and only when it is on.** The row ends on `speedMark` — the same
-`bolt.fill` the composer's speed chip carries — set in the qualifiers' `tertiary` weight so it does
+`bolt.fill` the composer's speed chip carries *while it says Fast*
+(`ConversationSpeedPresentation.fastSymbol`; Standard and Agent's Setting take the dial, so the two
+surfaces agree about what the mark means) — set in the qualifiers' `tertiary` weight so it does
 not read as a warning. The word "Fast" spent a sixth of a 360-point row saying what the symbol says
 at a glance; standard speed draws nothing at all, because it is what every session runs at unless
 something says otherwise and a dimmed or crossed-out bolt would be a second state to learn. The

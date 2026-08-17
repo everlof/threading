@@ -1009,16 +1009,14 @@ final class SessionComposerViewController: NSViewController {
             model: model,
             account: account
         )
-        speedChip.configure(
-            symbolName: ConversationSpeedPresentation.symbol,
-            title: ConversationSpeedPresentation.chipTitle(
-                selected: selectedFastMode,
-                kind: selectedAgent,
-                model: model,
-                account: account,
-                projectDirectory: executionDirectory(of: project)
-            )
+        let speed = ConversationSpeedPresentation.chip(
+            selected: selectedFastMode,
+            kind: selectedAgent,
+            model: model,
+            account: account,
+            projectDirectory: executionDirectory(of: project)
         )
+        speedChip.configure(symbolName: speed.symbolName, title: speed.title)
 
         // Names the mode that will actually apply, not only the one chosen here. Nothing runs
         // while the composer is open, so the observed source cannot answer — but the app-wide

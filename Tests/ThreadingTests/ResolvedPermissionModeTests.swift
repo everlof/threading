@@ -452,6 +452,51 @@ final class ResolvedPermissionModeTests: XCTestCase {
         }
     }
 
+    /// The chip drew a bolt whatever it said. A bolt is what Fast *looks* like everywhere in this
+    /// app — the status card's `speedMark` appears only while fast mode is on — so a chip reading
+    /// "Standard" under one said the opposite of its own words, and contradicted the card in the
+    /// same window.
+    @MainActor
+    func testTheChipWearsTheBoltOnlyWhileItSaysFast() {
+        for selected in [nil, true, false] as [Bool?] {
+            let chip = ConversationSpeedPresentation.chip(
+                selected: selected,
+                kind: .claude,
+                model: "opus",
+                account: nil
+            )
+            if chip.title == ConversationSpeedPresentation.fastTitle {
+                XCTAssertEqual(
+                    chip.symbolName,
+                    ConversationSpeedPresentation.fastSymbol,
+                    "Fast lost the mark that means it"
+                )
+            } else {
+                XCTAssertEqual(
+                    chip.symbolName,
+                    ConversationSpeedPresentation.ordinarySymbol,
+                    "“\(chip.title)” was marked with the bolt that means Fast"
+                )
+            }
+        }
+    }
+
+    /// Both marks have to exist as images, or a chip that resolves correctly still draws nothing:
+    /// `ChipView.configure(symbolName:title:)` silently keeps no icon for a name AppKit cannot
+    /// resolve on this OS.
+    @MainActor
+    func testBothSpeedMarksResolveOnThisSystem() {
+        for name in [
+            ConversationSpeedPresentation.fastSymbol,
+            ConversationSpeedPresentation.ordinarySymbol
+        ] {
+            XCTAssertNotNil(
+                NSImage(systemSymbolName: name, accessibilityDescription: nil),
+                "“\(name)” is not a symbol this system can draw"
+            )
+        }
+    }
+
     // MARK: - Fixtures
 
     /// Written out rather than derived: `Source` is not `CaseIterable`, and a fifth source added
