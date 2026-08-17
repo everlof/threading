@@ -139,6 +139,7 @@ final class ComponentGalleryViewController: NSViewController {
         "SidebarBrandView",
         "SplitButtonView",
         "SplitIconButtonView",
+        "StorageProposalOutlineView",
         "SubagentSummaryView",
         "SupervisionRowView",
         "SubmissionStatusView",
@@ -1446,7 +1447,6 @@ final class ComponentGalleryViewController: NSViewController {
         let scheduledSessionPlaceholder = ScheduledSessionPlaceholderView()
         scheduledSessionPlaceholder.configure(
             ScheduledSessionPlaceholderView.Model(
-                title: "Run the release readiness pass",
                 trigger: "Starts tomorrow at 09:00",
                 problem: "Waiting for the selected account's weekly window to reset",
                 brief: "Run the full test suite, fix any failures at their source, and leave "
@@ -1456,6 +1456,9 @@ final class ComponentGalleryViewController: NSViewController {
         )
         scheduledSessionPlaceholder.onStartNow = { [weak self] in
             self?.showReceipt(L10n.string("Scheduled session started now."))
+        }
+        scheduledSessionPlaceholder.onEdit = { [weak self] in
+            self?.showReceipt(L10n.string("Scheduled session opened for editing."))
         }
         scheduledSessionPlaceholder.onCancel = { [weak self] in
             self?.showReceipt(L10n.string("Scheduled session cancelled."))
@@ -1512,6 +1515,64 @@ final class ComponentGalleryViewController: NSViewController {
         limitEscapeStrips.orientation = .vertical
         limitEscapeStrips.alignment = .leading
         limitEscapeStrips.spacing = Design.Spacing.small
+
+        // Both scopes and both notes, because the outline's whole job is to stay legible when a
+        // proposal names more than a couple of directories: a project checkout whose rows share a
+        // prefix, and a temporary cache whose heading is the reason it is safe.
+        let storageProposalOutline = StorageProposalOutlineView(
+            outline: StorageCleanupOutline(sections: [
+                StorageCleanupOutline.Section(
+                    heading: "Threading · main checkout",
+                    subheading: "~/repo/AnotherTerminal",
+                    byteCount: 41_000_000_000,
+                    rows: [
+                        StorageCleanupOutline.Row(
+                            depth: 0,
+                            label: "web",
+                            byteCount: 3_400_000_000,
+                            note: nil,
+                            isDirectory: false
+                        ),
+                        StorageCleanupOutline.Row(
+                            depth: 1,
+                            label: "node_modules",
+                            byteCount: 3_400_000_000,
+                            note: nil,
+                            isDirectory: true
+                        ),
+                        StorageCleanupOutline.Row(
+                            depth: 0,
+                            label: ".build",
+                            byteCount: 37_600_000_000,
+                            note: "written 2 minutes ago",
+                            isDirectory: true
+                        ),
+                    ]
+                ),
+                StorageCleanupOutline.Section(
+                    heading: "Left over from deleted workspaces",
+                    subheading: "/private/tmp",
+                    byteCount: 13_400_000_000,
+                    rows: [
+                        StorageCleanupOutline.Row(
+                            depth: 0,
+                            label: "verify-dd",
+                            byteCount: 9_100_000_000,
+                            note: "built for App.xcodeproj, which no longer exists",
+                            isDirectory: true
+                        ),
+                        StorageCleanupOutline.Row(
+                            depth: 0,
+                            label: "dd-snap",
+                            byteCount: 4_300_000_000,
+                            note: "built for Old.xcodeproj, which no longer exists",
+                            isDirectory: true
+                        ),
+                    ]
+                ),
+            ]),
+            accessibilityLabel: "Proposed cleanup"
+        )
 
         let outboxRail = ConversationOutboxRailView()
         var outboxRows: [ConversationOutboxRailView.Row] = [
@@ -1654,6 +1715,17 @@ final class ComponentGalleryViewController: NSViewController {
                     "The frozen brief and launch decisions for a conversation waiting on its "
                         + "trigger. Start now and Cancel schedule exercise the two exits.",
                     scheduledSessionPlaceholder
+                ),
+                story(
+                    "StorageProposalOutlineView",
+                    "What a cleanup proposal actually says, folded twice: by the heading a "
+                        + "directory belongs to, then by the path segments its rows share. A "
+                        + "level naming one thing is an indent rather than a line of its own, "
+                        + "and a branch carries the total underneath it without being counted "
+                        + "as a directory. The two notes that change the decision — something "
+                        + "writing there now, and the workspace a cache was built for — sit "
+                        + "beside the rows that carry them.",
+                    storageProposalOutline
                 ),
                 story(
                     "LimitEscapeStripView",
@@ -5033,6 +5105,12 @@ final class ComponentGalleryViewController: NSViewController {
             let themeBand = WindowTitleBandView()
             themeBand.fixtureStyle = resolved
             themeBand.setTitle(Self.chromeStoryTitle(for: theme))
+            // A theme that seats the window's commands in its caption has no second row, so a
+            // band previewed without them is not that theme's caption — it is the empty half
+            // of one. Same reasoning as the list itself: the story follows what the model says.
+            if resolved.commands == .inTitleBar {
+                themeBand.setLeadingControls(Self.chromeStoryCommands())
+            }
             NSLayoutConstraint.activate([
                 themeBand.widthAnchor.constraint(equalToConstant: 420),
                 themeBand.heightAnchor.constraint(equalToConstant: resolved.bandHeight)
@@ -5119,6 +5197,22 @@ final class ComponentGalleryViewController: NSViewController {
                 )
             ]
         )
+    }
+
+    /// The window's own commands as a merged caption carries them — the same three the takeover
+    /// hands its band, built here so the story shows the real row rather than a mock of it.
+    private static func chromeStoryCommands() -> [NSView] {
+        [
+            ("sidebar.leading", L10n.string("Show or hide sidebar")),
+            ("chevron.left", L10n.string("Go back")),
+            ("chevron.right", L10n.string("Go forward"))
+        ].map { symbol, accessibility in
+            ThemedIconButton(
+                symbolName: symbol,
+                accessibility: accessibility,
+                inkSource: .chrome
+            )
+        }
     }
 
     /// Demo titles are presentation, not vocabulary. Workbench titled its windows with disk

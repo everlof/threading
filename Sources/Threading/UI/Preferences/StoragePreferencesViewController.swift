@@ -26,92 +26,11 @@ final class StoragePreferencesViewController: NSViewController {
 
     // MARK: - Types
 
-    /// What one group's findings belong to, and therefore what the page may do with them.
-    ///
-    /// A checkout is a project's own scan: forgotten per project and re-measured after a
-    /// removal. The three scratch cases are the read-time attribution of findings that belong to
-    /// no checkout at all.
-    ///
-    /// Four cases rather than one optional project, because "no project" is two different facts.
-    /// A workspace that is gone is the safest thing this page will ever offer — nothing can
-    /// rebuild into that tree and nothing will read it again. A workspace that is alive and
-    /// simply not ours is usually another agent session's copy of a tree, and filing it under
-    /// the orphan heading would tell the user a directory somebody may be building in right now
-    /// was left over from a deletion.
-    enum GroupAttribution {
-
-        /// One checkout of a project: its own folder, or one of its worktrees.
-        case checkout(Project)
-
-        /// Scratch findings built for a workspace inside this project's folder.
-        case scratchProject(Project)
-
-        /// Scratch findings whose workspace no longer exists.
-        case scratchOrphan
-
-        /// Scratch findings whose workspace exists and belongs to no project Threading knows.
-        case scratchOther
-
-        /// The project whose running sessions the confirmation warns about, when there is one.
-        var project: Project? {
-            switch self {
-            case .checkout(let project), .scratchProject(let project): return project
-            case .scratchOrphan, .scratchOther: return nil
-            }
-        }
-
-        /// Whether a removal here corrects the scratch reading rather than a project's.
-        var isScratch: Bool {
-            switch self {
-            case .checkout: return false
-            case .scratchProject, .scratchOrphan, .scratchOther: return true
-            }
-        }
-
-        /// Whether the group trails the page instead of sorting into it by size. A heading that
-        /// names no project reads as a mistake in the middle of a list of projects.
-        var trailsThePage: Bool {
-            switch self {
-            case .checkout, .scratchProject: return false
-            case .scratchOrphan, .scratchOther: return true
-            }
-        }
-
-        /// Whether the workspace these findings name is gone, which changes what a row's caption
-        /// says about it.
-        var namesADeletedWorkspace: Bool {
-            switch self {
-            case .scratchOrphan: return true
-            case .checkout, .scratchProject, .scratchOther: return false
-            }
-        }
-    }
-
-    /// One group's findings — a checkout's, or one tier of the scratch scope's.
-    ///
-    /// The **checkout** is the grouping rather than the project, because a project's build
-    /// output is spread across every worktree it has and the path alone does not say which:
-    /// six of these checkouts hold a `web/node_modules`, and a row reading `web/node_modules`
-    /// under a heading reading `sonda` names none of them.
-    struct FindingsGroup {
-        let attribution: GroupAttribution
-
-        /// The card's first line: the project and its checkout, or the scratch tier's heading.
-        let title: String
-
-        /// The line beneath it, which is always where on disk. A worktree name does not say
-        /// where it lives, and neither does a tier's name — and that is what somebody about to
-        /// delete gigabytes wants to confirm.
-        let subtitle: String
-
-        /// What the fold state is keyed by. A checkout's path for a checkout; a stated key for
-        /// a scratch tier, which spans roots and so has no one path to be named after.
-        let identity: String
-
-        let artifacts: [ReclaimableArtifact]
-
-        var byteCount: Int64 { artifacts.reduce(0) { $0 + $1.byteCount } }
-    }
+    /// The grouping model, which lives in `ReclaimableFindings` because the agent proposal sheet
+    /// draws the same content and the two must not disagree about what a directory belongs to.
+    /// Named here as well so the page — and the tests that read its cards — keep their vocabulary.
+    typealias GroupAttribution = ReclaimableFindings.Attribution
+    typealias FindingsGroup = ReclaimableFindings.Group
 
     // MARK: - Properties
 
@@ -183,158 +102,21 @@ final class StoragePreferencesViewController: NSViewController {
     /// was removed.
     private func reload() {
         let projects = ProjectStore.shared.projects
-        var sortable = projects.flatMap { project in
-            Self.group(ArtifactScanService.shared.artifacts(for: project.id), of: project)
-        }
-
-        let scratch = Self.scratchGroups(
-            ArtifactScanService.shared.scratchArtifacts(),
-            among: projects
-        )
-        sortable += scratch.filter { !$0.attribution.trailsThePage }
 
         // A project's build cache in a temporary location is that project's line item, so it
         // sorts among the checkouts by size. The two tiers that name no project trail the page
         // instead, in the order they are worth reading: the orphans first, since they are the
-        // only findings on this page nothing can ever want back.
-        groups = sortable.sorted { $0.byteCount > $1.byteCount }
-            + scratch.filter(\.attribution.trailsThePage)
+        // only findings on this page nothing can ever want back. That order is the grouping
+        // model's, so the proposal sheet reads them the same way.
+        groups = ReclaimableFindings.groups(
+            checkoutArtifacts: projects.map {
+                ($0, ArtifactScanService.shared.artifacts(for: $0.id))
+            },
+            scratchArtifacts: ArtifactScanService.shared.scratchArtifacts(),
+            among: projects
+        )
 
         rebuild()
-    }
-
-    /// Splits a project's findings by the checkout each belongs to, and names each one.
-    ///
-    /// The name is the worktree's, else the branch the checkout stands on — a worktree is
-    /// recognisable by its name, while the project's own folder is best identified by what it
-    /// has checked out. Runs off the main queue with the scan, since both read git.
-    private static func group(
-        _ artifacts: [ReclaimableArtifact],
-        of project: Project
-    ) -> [FindingsGroup] {
-        Dictionary(grouping: artifacts, by: \.checkoutPath)
-            .map { path, artifacts in
-                let label = GitInfo.worktreeName(for: path)
-                    ?? GitInfo.currentBranch(for: path)
-                    ?? URL(fileURLWithPath: path).lastPathComponent
-                return FindingsGroup(
-                    attribution: .checkout(project),
-                    title: "\(project.name) · \(label)",
-                    subtitle: abbreviate(path),
-                    identity: path,
-                    artifacts: artifacts.sorted { $0.byteCount > $1.byteCount }
-                )
-            }
-            .sorted { $0.byteCount > $1.byteCount }
-    }
-
-    /// Splits the scratch scope's findings three ways by the workspace each was built for.
-    ///
-    /// **Pure, and free of git by contract.** The per-checkout `group(_:of:)` above shells out
-    /// once per checkout to name it; this path must not, because the trees it groups have no
-    /// repository to ask — that absence is the whole reason the manifest gate exists — and
-    /// because there can be one group here per project and two more besides.
-    ///
-    /// - A workspace that still exists inside a known project's folder groups under that
-    ///   project, exactly as a nested worktree does.
-    /// - A workspace that no longer exists is an orphan. Nothing can rebuild into that tree and
-    ///   nothing will read it again, which makes it the safest thing this page offers.
-    /// - Anything else is a workspace that is alive and is not ours, most often another agent
-    ///   session's copy of a tree. It is offered, but under its own heading: it is not an
-    ///   orphan, and saying so would be a claim about somebody else's live directory.
-    ///
-    /// Paths are compared with symlinks resolved, because `/tmp` is a symlink to `/private/tmp`
-    /// and two spellings of one directory must not read as two places. The most specific project
-    /// wins, so a project checked out inside another takes its own build caches with it.
-    ///
-    /// `workspaceExists` is stated for tests, which have no deleted workspace to point at.
-    static func scratchGroups(
-        _ artifacts: [ReclaimableArtifact],
-        among projects: [Project],
-        workspaceExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
-    ) -> [FindingsGroup] {
-        let folders = projects
-            .map { (project: $0, folder: normalized($0.folderPath)) }
-            .sorted { $0.folder.count > $1.folder.count }
-
-        var attributed: [ProjectID: [ReclaimableArtifact]] = [:]
-        var byID: [ProjectID: Project] = [:]
-        var orphaned: [ReclaimableArtifact] = []
-        var other: [ReclaimableArtifact] = []
-
-        for artifact in artifacts {
-            guard let workspace = artifact.workspacePath else {
-                // Every scratch finding the scanner produces names a workspace. One that does
-                // not is still not an orphan: nothing said a workspace was deleted.
-                other.append(artifact)
-                continue
-            }
-
-            guard workspaceExists(workspace) else {
-                orphaned.append(artifact)
-                continue
-            }
-
-            let path = normalized(workspace)
-            let owner = folders.first { path == $0.folder || path.hasPrefix($0.folder + "/") }
-            guard let owner else {
-                other.append(artifact)
-                continue
-            }
-
-            attributed[owner.project.id, default: []].append(artifact)
-            byID[owner.project.id] = owner.project
-        }
-
-        var groups: [FindingsGroup] = attributed.compactMap { id, artifacts in
-            guard let project = byID[id] else { return nil }
-            return FindingsGroup(
-                attribution: .scratchProject(project),
-                title: "\(project.name) · \(StorageStrings.buildCacheInTemporary)",
-                subtitle: rootsLabel(of: artifacts),
-                identity: ScratchGroupKey.project(id),
-                artifacts: artifacts.sorted { $0.byteCount > $1.byteCount }
-            )
-        }
-        .sorted { $0.byteCount > $1.byteCount }
-
-        if !orphaned.isEmpty {
-            groups.append(FindingsGroup(
-                attribution: .scratchOrphan,
-                title: StorageStrings.deletedWorkspaces,
-                subtitle: rootsLabel(of: orphaned),
-                identity: ScratchGroupKey.orphaned,
-                artifacts: orphaned.sorted { $0.byteCount > $1.byteCount }
-            ))
-        }
-
-        if !other.isEmpty {
-            groups.append(FindingsGroup(
-                attribution: .scratchOther,
-                title: StorageStrings.otherTemporaryCaches,
-                subtitle: rootsLabel(of: other),
-                identity: ScratchGroupKey.other,
-                artifacts: other.sorted { $0.byteCount > $1.byteCount }
-            ))
-        }
-
-        return groups
-    }
-
-    /// Where a scratch group's findings sit, which is what a checkout card says with its path.
-    /// A tier's heading names what the findings are, not where they are, and the second question
-    /// is the one asked before deleting gigabytes.
-    private static func rootsLabel(of artifacts: [ReclaimableArtifact]) -> String {
-        Set(artifacts.map(\.checkoutPath))
-            .sorted()
-            .map(abbreviate)
-            .joined(separator: " · ")
-    }
-
-    /// One spelling for one directory, so `/tmp` and `/private/tmp` cannot disagree about being
-    /// the same place. Resolution happens on both sides of every comparison.
-    private static func normalized(_ path: String) -> String {
-        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
     }
 
     // MARK: - Build
@@ -524,21 +306,6 @@ final class StoragePreferencesViewController: NSViewController {
         )
     }
 
-    /// Replaces the home directory with `~`, so a path is read for its shape rather than its
-    /// first forty identical characters.
-    private static func abbreviate(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
-    }
-
-    /// A finding's path, read for its shape: relative to the checkout or scratch root it was
-    /// found under, which every row under one heading shares.
-    private static func rowTitle(for artifact: ReclaimableArtifact) -> String {
-        let root = artifact.checkoutPath + "/"
-        let path = artifact.url.path
-        return path.hasPrefix(root) ? String(path.dropFirst(root.count)) : abbreviate(path)
-    }
-
     /// One artifact: what it is, where it is, what it costs to bring back, and how stale it is.
     private func row(for artifact: ReclaimableArtifact, in group: FindingsGroup, tag: Int) -> NSView {
         let button = SettingsUI.button(
@@ -559,7 +326,7 @@ final class StoragePreferencesViewController: NSViewController {
         let trailing = SettingsUI.controlGroup([size, button])
 
         return SettingsUI.row(
-            title: Self.rowTitle(for: artifact),
+            title: ReclaimableFindings.rowTitle(for: artifact),
             subtitle: caption(for: artifact, in: group),
             control: trailing
         )
@@ -569,7 +336,11 @@ final class StoragePreferencesViewController: NSViewController {
         var parts = [artifact.kind.displayName, artifact.kind.rebuildHint]
         if let modifiedAt = artifact.modifiedAt {
             let age = Self.relativeDate.localizedString(for: modifiedAt, relativeTo: Date())
-            parts.append(artifact.isInUse() ? StorageStrings.inUse(age) : StorageStrings.built(age))
+            parts.append(
+                artifact.isInUse()
+                    ? ReclaimableFindings.Strings.inUse(age)
+                    : ReclaimableFindings.Strings.lastWritten(age)
+            )
         }
 
         // The tree it was built for. Two rows in one temporary directory can be caches of two
@@ -577,11 +348,11 @@ final class StoragePreferencesViewController: NSViewController {
         // which — while under the orphan heading this is the whole story of why removing it is
         // safe.
         if let workspace = artifact.workspacePath {
-            let readable = Self.abbreviate(workspace)
+            let readable = ReclaimableFindings.abbreviate(workspace)
             parts.append(
                 group.attribution.namesADeletedWorkspace
-                    ? StorageStrings.builtForMissing(readable)
-                    : StorageStrings.builtFor(readable)
+                    ? ReclaimableFindings.Strings.builtForMissing(readable)
+                    : ReclaimableFindings.Strings.builtFor(readable)
             )
         }
 
@@ -736,21 +507,6 @@ private enum StorageDefaults {
     static let collapseThreshold: Int64 = 1_000_000_000
 }
 
-// MARK: - Scratch Group Key
-
-/// What a scratch group's fold state is keyed by.
-///
-/// A checkout is named by its path; a scratch tier spans every root the walk covers and has no
-/// one path to be named after, so it states a key instead. The same set holds both, and these
-/// cannot collide with a checkout: a checkout identity is an absolute path and begins with `/`.
-private enum ScratchGroupKey {
-    static let prefix = "scratch"
-
-    static func project(_ id: ProjectID) -> String { "\(prefix).project.\(id.uuidString)" }
-    static let orphaned = "\(prefix).orphaned"
-    static let other = "\(prefix).other"
-}
-
 // MARK: - Storage Strings
 
 private enum StorageStrings {
@@ -784,30 +540,6 @@ private enum StorageStrings {
     static var cancel: String { L10n.string("Cancel") }
     static var removeEverything: String { L10n.string("Remove All…") }
 
-    /// What a project's findings outside its own folder are called, after its name: the same
-    /// `<project> · <where>` shape a checkout heading has.
-    static var buildCacheInTemporary: String { L10n.string("build cache in /tmp") }
-
-    /// The orphan tier's heading, which names what the findings are rather than where they live
-    /// — there is no project left to name, and that absence is the point.
-    static var deletedWorkspaces: String { L10n.string("Left over from deleted workspaces") }
-
-    /// The tier for a workspace that is alive and is not ours. Deliberately not the orphan
-    /// heading: somebody may be building in it right now.
-    static var otherTemporaryCaches: String {
-        L10n.string("Other build caches in temporary locations")
-    }
-
-    /// The tree a cache was built for, which is the only thing that says which checkout fed it.
-    static func builtFor(_ workspace: String) -> String {
-        L10n.format("built for %@", workspace)
-    }
-
-    /// The same, when that tree is gone. On the orphan tier this is the whole reason the row is
-    /// safe to remove.
-    static func builtForMissing(_ workspace: String) -> String {
-        L10n.format("built for %@, which no longer exists", workspace)
-    }
 
     /// The header's opening clause: the size and the count, one fact.
     static func total(_ size: String, directories count: Int) -> String {
@@ -840,14 +572,6 @@ private enum StorageStrings {
             : L10n.format("%@ free", size)
     }
 
-    static func built(_ relative: String) -> String {
-        L10n.format("last written %@", relative)
-    }
-
-    /// Written moments ago, which almost always means a build is running in it.
-    static func inUse(_ relative: String) -> String {
-        L10n.format("in use — written %@", relative)
-    }
 
     static func confirmInUse(count: Int) -> String {
         count == 1

@@ -28530,10 +28530,10 @@
     "Use compact title": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Använd kompakt rubrik"}}}},
     "Pairing code unavailable": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Parkopplingskod inte tillgänglig"}}}},
     "The connection is ready, but Threading could not build a pairing code for it. Retrying starts the connection again.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Anslutningen är redo, men Threading kunde inte skapa någon parkopplingskod för den. Ett nytt försök startar anslutningen igen."}}}},
-    "Bold Text": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Fet text"}}}},
     " · C %d": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": " · C %d"}}}},
     "%d observed changes": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%d observerade ändringar"}}}},
     "%d of %d files": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%d av %d filer"}}}},
+    "Bold Text": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Fet text"}}}},
     "Change when it starts": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ändra när den startar"}}}},
     "Changed files only. This runtime reports no reads or edits.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Endast ändrade filer. Den här runtimen rapporterar inga läsningar eller ändringar."}}}},
     "Editing": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Redigerar"}}}},
@@ -28549,7 +28549,12 @@
     "Built": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Byggd"}}}},
     "System": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "System"}}}},
     "Architecture": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Arkitektur"}}}},
-    "Version": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Version"}}}}
+    "Version": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Version"}}}},
+    "Agent session scratchpad": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Agentsessionens skrivyta"}}}},
+    "not rebuilt — the session has ended": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "byggs inte om — sessionen har avslutats"}}}},
+    "Let agents see reclaimable build output, suggest more of it, and propose removing some.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Låt agenter se återvinningsbar byggdata, föreslå mer av den och föreslå att ta bort delar av den."}}}},
+    "StorageProposalOutlineView": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "StorageProposalOutlineView"}}}},
+    "What a cleanup proposal actually says, folded twice: by the heading a directory belongs to, then by the path segments its rows share. A level naming one thing is an indent rather than a line of its own, and a branch carries the total underneath it without being counted as a directory. The two notes that change the decision — something writing there now, and the workspace a cache was built for — sit beside the rows that carry them.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Vad ett städförslag faktiskt säger, vikt två gånger: efter rubriken en katalog hör till, sedan efter de sökvägssegment dess rader delar. En nivå som namnger en enda sak är ett indrag snarare än en egen rad, och en gren bär summan under sig utan att räknas som en katalog. De två noteringarna som ändrar beslutet — att något skriver där just nu, och vilket arbetsområde en cache byggdes för — står intill raderna som bär dem."}}}}
   },
   "version": "1.0"
 }

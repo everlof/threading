@@ -463,7 +463,9 @@ enum MCPToolCatalog {
     id: "storage",
     family: .storage,
     title: "Disk space",
-    summary: "Let agents see reclaimable build output and propose removing some of it.",
+    summary: """
+      Let agents see reclaimable build output, suggest more of it, and propose removing some.
+      """,
     symbol: "internaldrive",
     tools: [],
     instruction: """
@@ -475,6 +477,13 @@ enum MCPToolCatalog {
       locations agents build in, /private/tmp and the per-user temp directory, where build \
       caches left by earlier sessions outlive the work they were for. Also reach for it \
       when they ask what is taking up space.
+
+      That listing is measured on a timer, so something you just found or just built may not \
+      be in it yet. If you believe a directory is reclaimable and it is not listed, call \
+      suggest_reclaimable_location with its path rather than deleting it or giving up. \
+      Threading checks it against the same rules it applies to everything it finds itself — \
+      your say-so is not evidence — and either adds it to the listing or tells you which \
+      proof was missing.
 
       To act on any of it, call propose_storage_cleanup with paths taken from that listing \
       and a sentence saying what it buys and what has to be rebuilt. Lead with anything the \

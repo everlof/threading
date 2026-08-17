@@ -194,8 +194,12 @@ protocol MCPBuiltInToolExecuting: AnyObject {
     _ arguments: SubscribeToChildrenArguments, for sessionID: SessionID
   ) -> MCPToolResult
   func listReclaimableStorage() -> MCPToolResult
+  func suggestReclaimableLocation(
+    _ arguments: SuggestReclaimableLocationArguments
+  ) -> MCPToolResult
   func proposeStorageCleanup(
     _ arguments: StorageCleanupArguments,
+    for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
   func listSettings() -> MCPToolResult

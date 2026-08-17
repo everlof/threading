@@ -1132,6 +1132,7 @@ struct AppThemeChromeTitleBarArguments: Codable, Sendable {
   let buttonGlyphStyle: String?
   let buttonPlacement: String?
   let showsAppIcon: Bool?
+  let commands: String?
   let activeTexture: AppThemeChromeTextureArguments?
   let removeActiveTexture: Bool?
   let inactiveTexture: AppThemeChromeTextureArguments?
@@ -1157,6 +1158,7 @@ struct AppThemeChromeTitleBarArguments: Codable, Sendable {
     buttonGlyphStyle: String? = nil,
     buttonPlacement: String? = nil,
     showsAppIcon: Bool? = nil,
+    commands: String? = nil,
     activeTexture: AppThemeChromeTextureArguments? = nil,
     removeActiveTexture: Bool? = nil,
     inactiveTexture: AppThemeChromeTextureArguments? = nil,
@@ -1181,6 +1183,7 @@ struct AppThemeChromeTitleBarArguments: Codable, Sendable {
     self.buttonGlyphStyle = buttonGlyphStyle
     self.buttonPlacement = buttonPlacement
     self.showsAppIcon = showsAppIcon
+    self.commands = commands
     self.activeTexture = activeTexture
     self.removeActiveTexture = removeActiveTexture
     self.inactiveTexture = inactiveTexture
@@ -1207,6 +1210,7 @@ struct AppThemeChromeTitleBarArguments: Codable, Sendable {
     case buttonGlyphStyle = "button_glyph_style"
     case buttonPlacement = "button_placement"
     case showsAppIcon = "shows_app_icon"
+    case commands
     case activeTexture = "active_texture"
     case removeActiveTexture = "remove_active_texture"
     case inactiveTexture = "inactive_texture"
@@ -1376,6 +1380,16 @@ struct UpdateAppThemeArguments: Codable, Sendable {
 /// array type. Whatever arrives is only ever *matched against* the current findings — see
 /// `MainWindowController.proposeStorageCleanup`.
 struct StorageCleanupArguments: Codable, Sendable {
+  let paths: String?
+  let reason: String?
+}
+
+/// Paths an agent believes are reclaimable, for Threading to check rather than take on trust.
+///
+/// Same line-per-path shape as `StorageCleanupArguments`, and deliberately so: an agent that
+/// gets a path vetted quotes the identical string back to `propose_storage_cleanup`, and a
+/// second spelling would be a second chance to get it wrong.
+struct SuggestReclaimableLocationArguments: Codable, Sendable {
   let paths: String?
   let reason: String?
 }
@@ -5919,6 +5933,55 @@ enum MCPTools {
       inputSchema: MCPInputSchema(properties: [:], required: [])
     ),
     MCPToolDefinition(
+      tool: .suggestReclaimableLocation,
+      name: "suggest_reclaimable_location",
+      groupID: "storage",
+      family: .storage,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Suggest a location",
+      detail: "Ask whether a directory you found is safe to reclaim. Deletes nothing.",
+      symbol: "questionmark.folder",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SuggestReclaimableLocationArguments.self, forKey: .arguments)
+          ?? SuggestReclaimableLocationArguments(paths: nil, reason: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.suggestReclaimableLocation(arguments))
+      },
+      description: """
+        Ask Threading to check directories you believe are reclaimable but that \
+        list_reclaimable_storage did not mention — it scans on a timer, so something you \
+        just found or just built may not be in its listing yet. Threading checks each path \
+        against the same rules it applies to everything it finds on its own: it does not \
+        take your word for it. A path that passes is measured, added to the listing, and can \
+        then be named in propose_storage_cleanup. A path that fails is reported with the \
+        reason, and stays unreclaimable. This deletes nothing and approves nothing — the user \
+        still decides, through propose_storage_cleanup.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "paths": MCPPropertySchema(
+            type: .string,
+            description: "The directories to check, one absolute path per line."
+          ),
+          "reason": MCPPropertySchema(
+            type: .string,
+            description: """
+              Optional. Why you think these are reclaimable — recorded with the \
+              finding, and shown to the user if you go on to propose it.
+              """
+          ),
+        ],
+        required: ["paths"]
+      )
+    ),
+    MCPToolDefinition(
       tool: .proposeStorageCleanup,
       name: "propose_storage_cleanup",
       groupID: "storage",
@@ -5938,7 +6001,7 @@ enum MCPTools {
       },
       observesPanel: false,
       executeArguments: { handler, arguments, sessionID, completion in
-        handler.proposeStorageCleanup(arguments, completion: completion)
+        handler.proposeStorageCleanup(arguments, for: sessionID, completion: completion)
       },
       description: """
         Propose deleting some of what list_reclaimable_storage returned. This does not \
@@ -7649,6 +7712,16 @@ enum MCPTools {
           "shows_app_icon": MCPPropertySchema(
             type: .boolean,
             description: "Whether the application icon occupies the leading identity slot."
+          ),
+          "commands": MCPPropertySchema(
+            type: .string,
+            description: "Where the window's own commands — the sidebar toggle and the "
+              + "history pair — sit. \"own_row\" (the default) gives them a button row "
+              + "under the caption, which is how every desktop system this vocabulary "
+              + "reproduces is built. \"in_title_bar\" puts them in the caption row "
+              + "itself, ahead of the title, for one row instead of two; it needs a band "
+              + "of at least 32 points, since a toolbar control is 28 and will not "
+              + "compress."
           ),
           "active_texture": texture,
           "remove_active_texture": MCPPropertySchema(

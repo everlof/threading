@@ -66,6 +66,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case releaseSession
   case subscribeToChildren
   case listReclaimableStorage
+  case suggestReclaimableLocation
   case proposeStorageCleanup
   case listSettings
   case notifyUser

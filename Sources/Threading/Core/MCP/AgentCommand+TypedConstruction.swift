@@ -153,6 +153,10 @@ extension AgentCommand {
   static func listReclaimableStorage(_ value: EmptyToolArguments) -> Self {
     builtIn(.listReclaimableStorage, value)
   }
+  static func suggestReclaimableLocation(_ value: SuggestReclaimableLocationArguments) -> Self {
+    builtIn(.suggestReclaimableLocation, value)
+  }
+
   static func proposeStorageCleanup(_ value: StorageCleanupArguments) -> Self {
     builtIn(.proposeStorageCleanup, value)
   }

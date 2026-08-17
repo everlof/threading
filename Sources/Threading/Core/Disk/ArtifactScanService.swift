@@ -278,13 +278,20 @@ final class ArtifactScanService {
         notifyChanged()
 
         let roots = scratchRoots
+        // Taken here rather than inside the walk: session state lives on the main actor, and the
+        // census is a fact about the moment the scan starts, not something to sample repeatedly
+        // from a background queue while directories are being measured.
+        let dormantSessionIDs = DormantSessionCensus.dormant(in: projectsProvider())
         let startedAt = Date()
         ThreadingLogger.storage.debug(
-            "Scratch scan started roots=\(roots.count, privacy: .public) forced=\(force, privacy: .public)"
+            "Scratch scan started roots=\(roots.count, privacy: .public) dormant_sessions=\(dormantSessionIDs.count, privacy: .public) forced=\(force, privacy: .public)"
         )
 
         queue.async { [weak self] in
-            let artifacts = ArtifactScanner.scanScratch(roots: roots)
+            let artifacts = ArtifactScanner.scanScratch(
+                roots: roots,
+                dormantSessionIDs: dormantSessionIDs
+            )
             let scannedAt = Date()
 
             Task { @MainActor in
@@ -300,6 +307,49 @@ final class ArtifactScanService {
                 )
             }
         }
+    }
+
+    /// Files one vetted finding into the cache the listing and the proposal gate both read.
+    ///
+    /// This is what makes an agent's suggestion actionable. `StorageCleanupGate` refuses any path
+    /// that is not already in the findings, and that rule is not relaxed — so a nominated
+    /// directory becomes proposable by *entering the findings*, through the same gates a walk
+    /// applies, rather than by being waved past the one that guards deletion.
+    ///
+    /// It goes to the scope it belongs to. A finding inside a scratch root joins the scratch
+    /// reading; one inside a project joins that project's. A finding in neither is refused: the
+    /// page groups by checkout and by scratch root, and a row belonging to nothing would have
+    /// nowhere to draw and no heading to sit under.
+    @discardableResult
+    func adopt(_ artifact: ReclaimableArtifact) -> Bool {
+        let path = artifact.url.standardizedFileURL.path
+
+        if ArtifactScanner.isWithinScratchRoots(artifact.url, roots: scratchRoots) {
+            var scan = scratchScan ?? ProjectScan(scannedAt: Date(), artifacts: [])
+            guard !scan.artifacts.contains(where: { $0.url.standardizedFileURL.path == path }) else {
+                return true
+            }
+            scan.artifacts.append(artifact)
+            scratchScan = scan
+            saveScratch()
+            notifyChanged()
+            return true
+        }
+
+        let owner = projectsProvider().first {
+            path == $0.folderPath || path.hasPrefix($0.folderPath + "/")
+        }
+        guard let owner else { return false }
+
+        var scan = scans[owner.id] ?? ProjectScan(scannedAt: Date(), artifacts: [])
+        guard !scan.artifacts.contains(where: { $0.url.standardizedFileURL.path == path }) else {
+            return true
+        }
+        scan.artifacts.append(artifact)
+        scans[owner.id] = scan
+        save()
+        notifyChanged()
+        return true
     }
 
     /// Drops what was removed from the cached reading without re-walking anything, so the page

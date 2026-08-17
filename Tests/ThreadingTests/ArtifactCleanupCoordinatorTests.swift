@@ -15,7 +15,7 @@ final class ArtifactCleanupCoordinatorTests: XCTestCase {
         let first = artifact(named: "first", bytes: 3_000)
         let second = artifact(named: "second", bytes: 7_000)
         let coordinator = ArtifactCleanupCoordinator(
-            removeArtifact: { artifact in
+            removeArtifact: { artifact, _ in
                 artifact.url.lastPathComponent == "first" ? .removed : .refused
             },
             recoverPersistence: { .restored },
@@ -52,7 +52,7 @@ final class ArtifactCleanupCoordinatorTests: XCTestCase {
     func testDuplicatePathsAreRemovedOnce() async {
         let artifact = artifact(named: "same", bytes: 5)
         let coordinator = ArtifactCleanupCoordinator(
-            removeArtifact: { _ in .removed },
+            removeArtifact: { _, _ in .removed },
             recoverPersistence: { .notNeeded }
         )
         let completed = expectation(description: "cleanup completed")

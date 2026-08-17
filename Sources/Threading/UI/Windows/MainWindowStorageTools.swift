@@ -22,7 +22,6 @@ import AppKit
 /// ENOSPC path already points here: an agent that has just failed a write should get one answer
 /// covering both, with the same proposal sheet and the same user decision behind it.
 extension AgentToolCoordinator {
-
     // MARK: - Listing
 
     /// What can be reclaimed, from the cache the scan service keeps.
@@ -139,6 +138,86 @@ extension AgentToolCoordinator {
         return [artifact.isInUse(at: now) ? StorageToolStrings.inUse(age) : StorageToolStrings.lastWritten(age)]
     }
 
+    // MARK: - Suggesting
+
+    /// Checks paths an agent nominated, and files the ones that pass into the listing.
+    ///
+    /// **This is how something becomes proposable, not a way around the gate that guards
+    /// deletion.** `StorageCleanupGate` still refuses any path outside the findings; what this
+    /// changes is that a directory can enter the findings on demand instead of only when the
+    /// passive walk happens to reach it. The scan runs on a timer over roots it already knows,
+    /// which is the right economy for a chore nobody is waiting on and the wrong one for an agent
+    /// that has just failed a write.
+    ///
+    /// Every path goes through `ArtifactScanner.vet`, which runs the same three gates a walk
+    /// runs. Nothing is taken on the agent's word — the `reason` is recorded for the user to
+    /// read, never treated as evidence — and a refusal names the gate that said no, because an
+    /// agent told *which* proof was missing can often supply it.
+    func suggestReclaimableLocation(
+        _ arguments: SuggestReclaimableLocationArguments
+    ) -> MCPToolResult {
+        let paths = (arguments.paths ?? "")
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        guard !paths.isEmpty else { return .failure(StorageToolStrings.noPaths) }
+
+        // One census for the whole call, on the main actor, the way the scan and the cleanup
+        // take theirs — so a session that ends mid-call cannot make two paths disagree.
+        let dormantSessionIDs = DormantSessionCensus.dormant()
+
+        var accepted = 0
+        var refused = 0
+        var lines: [String] = []
+
+        for path in Set(paths).sorted() {
+            switch ArtifactScanner.vet(
+                URL(fileURLWithPath: path),
+                dormantSessionIDs: dormantSessionIDs
+            ) {
+            case .vetted(let artifact):
+                guard ArtifactScanService.shared.adopt(artifact) else {
+                    refused += 1
+                    lines.append(StorageToolStrings.vetOutOfScope(path))
+                    continue
+                }
+                accepted += 1
+                lines.append(StorageToolStrings.vetAccepted(
+                    path,
+                    kind: artifact.kind.displayName,
+                    size: Self.storageSize.string(fromByteCount: artifact.byteCount)
+                ))
+
+            case .refused(let refusal):
+                refused += 1
+                lines.append(Self.describe(refusal, at: path))
+            }
+        }
+
+        return .success(
+            StorageToolStrings.vetSummary(accepted: accepted, refused: refused)
+            + "\n" + lines.joined(separator: "\n")
+            + "\n\n" + StorageToolStrings.vetFooter
+        )
+    }
+
+    private static func describe(
+        _ refusal: ArtifactScanner.VetRefusal,
+        at path: String
+    ) -> String {
+        switch refusal {
+        case .missing:
+            return StorageToolStrings.vetMissing(path)
+        case .sessionNotDormant:
+            return StorageToolStrings.vetSessionNotDormant(path)
+        case .notIgnoredByGit(let kind):
+            return StorageToolStrings.vetNotIgnoredByGit(path, kind: kind.displayName)
+        case .unrecognised:
+            return StorageToolStrings.vetUnrecognised(path)
+        }
+    }
+
     // MARK: - Proposing
 
     /// Puts an agent's proposal to the user, and removes what they approve.
@@ -146,101 +225,65 @@ extension AgentToolCoordinator {
     /// Answers only once the user has decided, so the agent's next turn knows the outcome
     /// rather than guessing at it. The sheet is presented on the window rather than run modally,
     /// so the app stays usable — including the session that asked.
+    ///
+    /// **It does not necessarily ask.** Everything between the gate and the sheet goes through
+    /// `StorageCleanupLedger`, because the disk is one disk: when it fills, every session hits
+    /// ENOSPC in the same minute and reads the same listing, and the user was being asked the
+    /// same question once per agent. A path already on screen, already removed on their word, or
+    /// already declined is answered from what they decided rather than put to them again.
     func proposeStorageCleanup(
         _ arguments: StorageCleanupArguments,
+        for sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
         // Both scopes, one vetted list. The gate's rule does not change with the scope — a
         // proposal may only name a path already in the findings — so widening what the listing
         // covers widens what can be proposed, and nothing else.
-        let vetted = ProjectStore.shared.projects.flatMap {
-            ArtifactScanService.shared.artifacts(for: $0.id)
-        } + ArtifactScanService.shared.scratchArtifacts()
+        let projects = ProjectStore.shared.projects
+        let byProject = projects.map {
+            (project: $0, artifacts: ArtifactScanService.shared.artifacts(for: $0.id))
+        }
+        let scratch = ArtifactScanService.shared.scratchArtifacts()
 
-        let resolution = StorageCleanupGate.resolve(arguments.paths, against: vetted)
+        let resolution = StorageCleanupGate.resolve(
+            arguments.paths,
+            against: byProject.flatMap(\.artifacts) + scratch
+        )
 
         guard !resolution.isEmptyRequest else {
             completion(.failure(StorageToolStrings.noPaths))
             return
         }
 
-        guard !resolution.matched.isEmpty else {
-            completion(.failure(StorageToolStrings.unknownPaths(resolution.unknown)))
-            return
+        // Which checkout each finding belongs to, captured now. A batch can be presented after
+        // the sheet in front of it deleted something, and asking the caches again at that point
+        // would group this proposal by what is left rather than by what was proposed.
+        var owners: [String: Project] = [:]
+        for entry in byProject {
+            for artifact in entry.artifacts { owners[artifact.url.path] = entry.project }
         }
 
-        presentCleanupProposal(
-            resolution.matched,
+        StorageCleanupLedger.shared.submit(
+            resolution,
             reason: arguments.reason,
-            unknown: resolution.unknown,
-            completion: completion
-        )
-    }
-
-    private func presentCleanupProposal(
-        _ artifacts: [ReclaimableArtifact],
-        reason: String?,
-        unknown: [String],
-        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
-    ) {
-        let bytes = artifacts.reduce(0) { $0 + $1.byteCount }
-
-        var body: [String] = []
-        if let reason, !reason.trimmingCharacters(in: .whitespaces).isEmpty {
-            body.append(reason)
-        }
-        body.append(artifacts.map { "• \($0.url.path)  —  \(Self.storageSize.string(fromByteCount: $0.byteCount))" }
-            .joined(separator: "\n"))
-        if artifacts.contains(where: { $0.isInUse() }) {
-            body.append(StorageToolStrings.proposalInUse)
-        }
-        body.append(StorageToolStrings.proposalFooter)
-
-        let request = ConfirmationRequest(
-            prompt: .approveAgentStorageCleanup,
-            title: StorageToolStrings.proposalTitle(
-                count: artifacts.count,
-                size: Self.storageSize.string(fromByteCount: bytes)
-            ),
-            message: body.joined(separator: "\n\n"),
-            confirmTitle: StorageToolStrings.approve,
-            cancelTitle: StorageToolStrings.decline
-        )
-
-        guard let window = presentationWindow else {
-            completion(.failure(StorageToolStrings.noWindow))
-            return
-        }
-
-        ConfirmationAlert.ask(request, in: window) { approved in
-            guard approved else {
-                completion(.success(StorageToolStrings.declined))
-                return
-            }
-
-            let started = ArtifactCleanupCoordinator.shared.remove(artifacts) { outcome in
-                let removed = outcome.removed
-
-                for project in ProjectStore.shared.projects {
-                    ArtifactScanService.shared.forget(removed, in: project.id)
+            asker: ProjectStore.shared.session(withID: sessionID)?.displayTitle,
+            present: { [weak self] batch, respond in
+                guard let window = self?.presentationWindow else {
+                    respond(.unavailable(StorageToolStrings.noWindow))
+                    return
                 }
-                // The scratch reading keeps its own cache, and re-walking `/private/tmp` to learn
-                // what this delete just did to it would be the most expensive way to find out.
-                ArtifactScanService.shared.forgetScratch(removed)
-
-                ThreadingLogger.agent.info(
-                    "Agent cleanup approved: removed \(removed.count, privacy: .public) directories"
+                StorageCleanupProposalSheet.present(
+                    batch,
+                    in: window,
+                    owners: owners,
+                    among: projects,
+                    respond: respond
                 )
-
-                completion(.success(StorageToolStrings.approved(
-                    count: removed.count,
-                    size: Self.storageSize.string(fromByteCount: outcome.reclaimedBytes),
-                    refused: outcome.refusedCount + outcome.failedCount,
-                    unknown: unknown
-                )))
+            },
+            completion: { answer in
+                completion(StorageToolStrings.result(of: answer))
             }
-            guard started else { return completion(.failure(StorageToolStrings.cleanupAlreadyRunning)) }
-        }
+        )
     }
 
     // MARK: - Formatters
@@ -256,110 +299,4 @@ extension AgentToolCoordinator {
         formatter.unitsStyle = .abbreviated
         return formatter
     }()
-}
-
-// MARK: - Storage Tool Strings
-
-enum StorageToolStrings {
-    static let mainCheckout = "main checkout"
-
-    static let scanning = """
-        Threading is still measuring build output, in the user's projects and in the temporary \
-        locations agents build in. Ask again shortly.
-        """
-
-    /// Names both scopes, because the answer covers both: "nothing in your projects" would be a
-    /// narrower claim than the one that was actually checked.
-    static let nothingFound = """
-        No reclaimable build output was found, either in the user's projects or in the temporary \
-        locations agents build in.
-        """
-
-    /// The two gates, stated as the alternatives they are. A finding inside a project is offered
-    /// because git ignores it; one in a temporary location has no repository to ask, and is
-    /// offered because Xcode's own manifest says what wrote it. Claiming git for both would be
-    /// false about every scratch line.
-    static let listingFooter = """
-        Everything above is either ignored by git or identified as a build cache by Xcode's own \
-        manifest, and is rebuildable by the command shown. To act on any of it, call \
-        propose_storage_cleanup with the exact paths — that asks the user, who decides. Nothing \
-        is removed without their approval.
-        """
-
-    static let noPaths = "No paths were given. Pass one absolute path per line in `paths`."
-    static let noWindow = "There is no window to ask the user in."
-    static let declined = "The user declined. Nothing was removed."
-    static let cleanupAlreadyRunning = "Another approved storage cleanup is already running."
-
-    static let approve = "Remove"
-    static let decline = "Keep"
-
-    static let proposalInUse = """
-        One of these was written in the last few minutes, so a build may be running in it right \
-        now.
-        """
-
-    static let proposalFooter = """
-        Each is rebuilt by its own tool the next time it is needed. They are deleted \
-        immediately rather than moved to the Trash.
-        """
-
-    static func measured(_ relative: String) -> String {
-        " · measured \(relative)"
-    }
-
-    static func inUse(_ relative: String) -> String {
-        "IN USE — written \(relative)"
-    }
-
-    static func lastWritten(_ relative: String) -> String {
-        "last written \(relative)"
-    }
-
-    static func rebuild(_ hint: String) -> String {
-        "rebuild: \(hint)"
-    }
-
-    /// The tree a scratch finding's own tool declared it was built for. Its path says nothing
-    /// about which checkout fed it; two caches in one temporary directory can belong to two
-    /// checkouts of the same project.
-    static func builtFor(_ workspace: String) -> String {
-        "built for \(workspace)"
-    }
-
-    /// The same when that tree is gone, marked in the shape `inUse(_:)` uses so the two states
-    /// that change what a line is worth read alike. This is the tier to propose first: nothing
-    /// can rebuild into it and nothing will ever read it again.
-    static func orphaned(_ workspace: String) -> String {
-        "ORPHANED — built for \(workspace), which no longer exists"
-    }
-
-    static func header(total: String, count: Int, measured: String) -> String {
-        "\(total) reclaimable across \(count) directories\(measured):"
-    }
-
-    static func unknownPaths(_ paths: [String]) -> String {
-        """
-        None of these paths are in the current listing, so none can be proposed: \
-        \(paths.joined(separator: ", ")). Call list_reclaimable_storage and quote its paths \
-        exactly. Only build output Threading has already vetted can be proposed.
-        """
-    }
-
-    static func proposalTitle(count: Int, size: String) -> String {
-        count == 1
-            ? "An agent suggests removing a build directory to reclaim \(size)."
-            : "An agent suggests removing \(count) build directories to reclaim \(size)."
-    }
-
-    static func approved(count: Int, size: String, refused: Int, unknown: [String]) -> String {
-        var text = "The user approved. Removed \(count) directories, reclaiming \(size)."
-        if refused > 0 {
-            text += " \(refused) were left alone: they no longer looked safe to remove when checked again."
-        }
-        if !unknown.isEmpty {
-            text += " Not in the listing and therefore ignored: \(unknown.joined(separator: ", "))."
-        }
-        return text
-    }
 }

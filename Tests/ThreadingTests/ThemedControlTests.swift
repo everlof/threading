@@ -678,6 +678,53 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: window), [])
     }
 
+    /// A menu is an active state of the control and the container it opened from, even though
+    /// the presenter's full-window overlay lives elsewhere in the hierarchy. The source chain is
+    /// notified in one place so a new menu opener cannot forget the held treatment.
+    func testMenuPresentationStateReachesItsSourceAndAncestorUntilDismissal() throws {
+        let root = MenuPresentationObserverSpy(
+            frame: NSRect(x: 0, y: 0, width: 420, height: 260)
+        )
+        let source = ThemedIconButton(
+            symbolName: "plus",
+            accessibility: "Add",
+            target: .inline
+        )
+        source.frame = NSRect(x: 24, y: 180, width: 20, height: 20)
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [.item(ThemedMenuItem(title: "New Chat…"))],
+                minimumWidth: 160
+            ),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        ))
+
+        XCTAssertTrue(source.isPresentingMenu)
+        XCTAssertTrue(source.isRaised, "the source button dropped its held treatment")
+        XCTAssertEqual(root.presentationStates, [true])
+
+        ThemedMenuPresenter.dismiss(token)
+
+        XCTAssertFalse(source.isPresentingMenu)
+        XCTAssertFalse(source.isRaised)
+        XCTAssertEqual(root.presentationStates, [true, false])
+    }
+
     /// A secondary-click route can ask the presenter for a menu without first passing through
     /// the open dropdown's outside-click overlay. The pane Context menu followed by a sidebar
     /// row's context menu did exactly that: the owner retained only the new token, the first
@@ -7194,6 +7241,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "SidebarBrandView",
                 "SplitButtonView",
                 "SplitIconButtonView",
+                "StorageProposalOutlineView",
                 "SubagentSummaryView",
                 "SupervisionRowView",
                 "SubmissionStatusView",
@@ -7808,6 +7856,15 @@ final class ThemedControlTests: HostedStoreTestCase {
 private final class ActionSpy: NSObject {
     private(set) var count = 0
     @objc func fire() { count += 1 }
+}
+
+@MainActor
+private final class MenuPresentationObserverSpy: NSView, ThemedMenuPresentationObserving {
+    private(set) var presentationStates: [Bool] = []
+
+    func themedMenuPresentationDidChange(isPresented: Bool) {
+        presentationStates.append(isPresented)
+    }
 }
 
 private final class ScrollWheelSpy: ThemedScrollView {

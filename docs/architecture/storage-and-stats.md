@@ -58,6 +58,52 @@ included: a `node_modules` beside a real `package.json` in an agent's working co
 *sufficient* gate and is still refused, because a wrong answer there destroys the only copy of
 work in progress. That leaves about 38 GiB of the 76 GB recoverable, and makes the rest safe.
 
+**The session directory itself is the fourth answer, and it needed a third kind of evidence.**
+Declining everything else in a scratch root left the unit that actually grows unnamed. Measured on
+2026-08-17: `/private/tmp/claude-501` held **97 GB across 3,873 session directories, 3,861 of them
+belonging to sessions that no longer existed** — and the scan reported only the Xcode caches
+*inside* them, a fraction of that. Neither existing gate can answer here. There is no repository
+to ask, and no manifest: the directory is named for a session id and holds whatever that session
+was doing.
+
+So `ArtifactKind.gating` replaced `isManifestGated`, because a Bool had started to mean "ask git"
+by default and that is the wrong question for a directory with no repository. The third gate is
+`DormantSessionCensus`: **the session state Threading already tracks**, where
+`SessionActivity.dormant` means *no terminal allocated*, which is exactly "no process is writing
+here". Idle does not count — an idle agent is one keystroke from building in the directory.
+
+**The census is a set of the sessions known to be dormant, never a set of the live ones.** The
+inverted shape fails catastrophically at the worst moment: an empty answer — from a bug, a store
+that has not loaded, a census taken before restoration finished — would mean *every session
+directory on the disk is deletable*. Stated positively, empty offers nothing, and
+`scanScratch`/`isSafeToRemove` default to an empty census so every caller that predates one is
+refused rather than trusted.
+
+That also settles a case no filesystem check can. `/private/tmp/claude-501/…` is minted by **Claude
+Code, not by Threading** — Threading only assigns the session id that names the leaf — so a
+`claude` started by hand in a terminal leaves a directory of identical shape belonging to a session
+this app has never heard of. Such an id is absent from the census and is therefore **refused rather
+than assumed dead**. Reclaiming it would need proof Threading does not have.
+
+**Filesystem evidence was tried first and is not usable.** `lsof` saw an open handle for only **2
+of the 14 sessions that were running**, because a session that is alive but idle holds nothing open
+in its own scratchpad. Anything keying on "is a process using this directory" deletes live sessions'
+work. Session state is the only reading that answers, and it is free.
+
+`SessionScratchLayout` recognises the directory by shape — exactly three components below a scratch
+root, a `claude-<uid>` namespace, and a leaf that parses as a session id — and deliberately answers
+*only* which session owns it. Liveness stays the caller's to supply, so the recognizer never becomes
+a delete gate with a filesystem walk inside it. A dormant session's directory is one finding and the
+walk stops at the top of it; a live or unvouched-for one is walked exactly as before, so its build
+caches are still offered while its work is not.
+
+One measurement is pinned by a test rather than a comment: `resolvingSymlinksInPath()` drops a
+leading `/private` **only when the shorter path still resolves on disk**, so the same directory
+normalised to a different component count depending on whether it existed. The first version of the
+recognizer passed its own well-formed case for the wrong reason — that path named a real session
+directory — while refusing an identical fabricated one. A scratch root is the most volatile place
+this code looks, so the alias is now collapsed unconditionally on both sides of every comparison.
+
 **The walk's bounds are measurements.** The roots are `/private/tmp` (not `/tmp`, a symlink to it
 — naming both walks 76 GB twice) and the per-user temporary directory, 8.1 GB here and cleaned by
 macOS on a schedule nothing applies to `/private/tmp`. Depth is 7, separate from the project
@@ -103,6 +149,64 @@ that keeps this from being an arbitrary-delete primitive is that **a proposal ca
 already in the findings** — everything there has passed the pair of gates its kind answers to, and
 is asked again at the moment of deletion. The tool answers only once the user has decided, so the
 agent's next turn knows the outcome rather than assuming it.
+
+**An agent can also nominate a path, and nominating is not vouching.** The listing is measured on
+a passive timer over roots the app already knows — the right economy for a chore nobody is waiting
+on, and the wrong one for an agent that has just failed a write and can see the 20 GB that caused
+it. `suggest_reclaimable_location` closes that gap without moving the boundary:
+`ArtifactScanner.vet` runs **the same three gates a walk runs** and answers exactly what a walk
+would have answered on reaching that directory. What the tool widens is *when* a path can be found,
+never *what* counts as safe. The agent's `reason` is recorded for the user to read and is never
+treated as evidence.
+
+`StorageCleanupGate`'s rule is therefore untouched: a proposal may still only name paths already in
+the findings. A nominated directory becomes proposable by **entering the findings**, through
+`ArtifactScanService.adopt`, rather than by being waved past the gate that guards deletion. Adoption
+files it into the scope it belongs to — the scratch reading or the owning project's — and a finding
+in neither is refused, because the page groups by checkout and by scratch root and a row belonging
+to nothing has no heading to sit under.
+
+Refusals name the gate that said no — the session is still running, git tracks something inside,
+the marker is missing, nothing recognises it — because an agent told *which* proof was missing can
+often supply it, where a bare "no" sends it round the same loop. The gate order is the strength of
+the evidence, and the first recognizer to match owns the answer: a session directory is never
+re-examined as a manifest tree, and neither is asked a question git cannot answer.
+
+**The disk is one disk, so the same proposal arrives several times.** When it fills, every session
+hits ENOSPC inside the same minute, each calls `list_reclaimable_storage`, and each reads the same
+stale gigabytes — and the app put every one of those to the user as its own sheet. Measured here on
+2026-08-16: two approved removals ran concurrently and deleted one DerivedData tree **twice**, from
+two threads, in the same millisecond. The later sheets were worse than redundant. Each had resolved
+its artifacts before the one in front of it deleted anything, so it named directories that were
+already gone and then removed nothing; and a proposal arriving *after* the delete was refused with
+"none of these paths are in the current listing", which describes a stale quote rather than an
+answer and sends the agent round the loop again.
+
+`StorageCleanupLedger` sits between the gate and the sheet and remembers what was decided. One
+sheet is up at a time; a path already on it does not go into a second one, and the proposal that
+named it attaches to that sheet's outcome. An approved path answers later proposals with *already
+removed*, and how much it freed. A decline holds for the rest of the run, and the refusal tells the
+agent to say so rather than ask again. Two rules keep it from silencing a real question: a
+directory that was removed and has been **rebuilt** is in the findings again, so its old outcome is
+dropped rather than replayed; and the delete gate **refusing** at removal time is not a decision by
+the user, so it never folds anything. Nothing is persisted — a remembered "no" that outlives a
+restart is a policy nobody can find — and `approveAgentStorageCleanup` stays
+`alwaysAsks(.irreversible)`. This removes the repeated question, not the question. The removal
+itself is serialised separately by `ArtifactCleanupCoordinator`, and a proposal that finds that
+lane busy is told so without a decision being recorded.
+
+**The sheet's paths are an outline, not a bulleted list.** It used to carry one absolute path per
+line in the message; six of them sharing `/Users/david/repo/AnotherTerminal/` share their first
+thirty-four characters, so the part that says which directory is going started wherever the eye
+finally got to, and a proposal naming 24 trees under `/private/tmp` read as a wall.
+`StorageCleanupOutline` folds a proposal twice — by the headings this page already uses (extracted
+into `ReclaimableFindings`, so the two surfaces cannot disagree about what a directory belongs to),
+then by the path segments the rows under one heading share, with each branch carrying the total
+underneath it. `StorageProposalOutlineView` draws it rather than stacking a view per row, since the
+scratch scope alone found 170 candidate directories; the accessory is bounded and scrolls, and
+drops nothing — a sheet that summarises away part of a delete is worse than the wall it replaced.
+The title names the session that asked, because being asked by several agents and being asked twice
+by one look identical when every sheet opens with "An agent".
 
 **All approved removals share one operation.** `ArtifactCleanupCoordinator` is the single-flight
 owner for both the agent proposal and Storage settings; a second request is refused while the

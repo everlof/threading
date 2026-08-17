@@ -26,6 +26,12 @@ enum ArtifactKind: String, CaseIterable, Codable, Sendable {
     /// name to match on. See `DerivedDataManifest`.
     case xcodeDerivedData
 
+    /// A whole agent session scratch directory, recognised by neither a name nor a manifest but
+    /// by the session id its path ends in — see `SessionScratchLayout`. It is the unit that
+    /// actually grows in a scratch root: 97 GB across 3,873 of them on 2026-08-17, where the
+    /// Xcode caches *inside* them accounted for a fraction.
+    case agentSessionScratch
+
     /// The directory this kind occupies, or nil for a kind with no fixed name at all.
     var directoryName: String? {
         switch self {
@@ -39,7 +45,9 @@ enum ArtifactKind: String, CaseIterable, Codable, Sendable {
         case .pythonCache: return "__pycache__"
         case .gradle: return "build"
         case .coverage: return "coverage"
-        case .xcodeDerivedData: return nil
+        // Both are recognised by shape rather than name: DerivedData's trees are called `dd`,
+        // `verify-dd` and half a dozen other things, and a session directory is named for a UUID.
+        case .xcodeDerivedData, .agentSessionScratch: return nil
         }
     }
 
@@ -54,26 +62,43 @@ enum ArtifactKind: String, CaseIterable, Codable, Sendable {
         case .cocoaPods: return ["Podfile"]
         case .pythonVenv: return ["pyproject.toml", "requirements.txt", "setup.py", "setup.cfg"]
         case .gradle: return ["build.gradle", "build.gradle.kts", "pom.xml", "settings.gradle"]
-        case .pythonCache, .xcodeDerivedData: return []
+        case .pythonCache, .xcodeDerivedData, .agentSessionScratch: return []
         }
     }
 
-    /// Whether the kind is proved by a manifest its own tool wrote rather than by a name and a
-    /// marker beside it.
+    /// What proves a directory of this kind is safe to offer — the *necessary* gate, and the one
+    /// thing that decides how `isSafeToRemove` routes.
     ///
-    /// This is what decides which safety gate applies. A name-gated kind is only ever offered
-    /// inside a repository that calls it disposable; a manifest-gated kind carries its own
-    /// proof and is the only thing offered outside one.
-    var isManifestGated: Bool {
+    /// Three, because three different kinds of evidence exist and none substitutes for another.
+    /// Collapsing them into a Bool was fine while there were two; a third would have made
+    /// `isManifestGated == false` quietly mean "ask git", which is wrong for a session directory
+    /// that has no repository to ask.
+    enum Gating {
+        /// Git calls the path disposable, and a name plus an ecosystem marker say what it is.
+        /// Only ever offered inside a repository.
+        case name
+
+        /// A manifest the producing tool wrote, plus containment in a scratch root. The only
+        /// evidence that answers outside a repository.
+        case manifest
+
+        /// The session id in the path names a session Threading knows to be dormant. Stronger
+        /// than a manifest — it is a fact about a process rather than an inference from a file —
+        /// but it is knowledge only this app has, so it covers only sessions this app launched.
+        case session
+    }
+
+    var gating: Gating {
         switch self {
-        case .xcodeDerivedData: return true
+        case .xcodeDerivedData: return .manifest
+        case .agentSessionScratch: return .session
         case .rust, .node, .swiftPackage, .cocoaPods, .next, .turbo, .pythonVenv, .pythonCache,
-             .gradle, .coverage: return false
+             .gradle, .coverage: return .name
         }
     }
 
     /// Every kind recognised by name, which is every kind `kind(for:)` can answer.
-    static var nameGated: [ArtifactKind] { allCases.filter { !$0.isManifestGated } }
+    static var nameGated: [ArtifactKind] { allCases.filter { $0.gating == .name } }
 
     /// The names those kinds occupy, as one set: the scratch walk prunes on this rather than
     /// asking each kind in turn, once per directory it visits.
@@ -93,6 +118,7 @@ enum ArtifactKind: String, CaseIterable, Codable, Sendable {
         case .gradle: return L10n.string("Gradle build output")
         case .coverage: return L10n.string("Coverage output")
         case .xcodeDerivedData: return L10n.string("Xcode derived data")
+        case .agentSessionScratch: return L10n.string("Agent session scratchpad")
         }
     }
 
@@ -110,6 +136,9 @@ enum ArtifactKind: String, CaseIterable, Codable, Sendable {
         case .gradle: return "gradle build"
         case .coverage: return L10n.string("re-run the tests")
         case .xcodeDerivedData: return "xcodebuild"
+        // Nothing rebuilds it, and that is the whole reason the row is safe rather than a
+        // shortcoming — the same thing an orphaned DerivedData's "which no longer exists" says.
+        case .agentSessionScratch: return L10n.string("not rebuilt — the session has ended")
         }
     }
 
@@ -379,7 +408,16 @@ enum ArtifactScanner {
     ///
     /// No git subprocess runs on this path. The trees worth finding have no repository to ask,
     /// which is the entire reason the manifest gate exists.
-    static func scanScratch(roots: [URL] = ScratchDefaults.roots) -> [ReclaimableArtifact] {
+    /// - Parameter dormantSessionIDs: The sessions Threading knows have no process behind them,
+    ///   from `DormantSessionCensus`. **The default offers no session directory at all**, and
+    ///   that direction is deliberate: a caller that cannot say which sessions are finished has
+    ///   not proved any of them are, and an empty census must mean "nothing" rather than
+    ///   "everything". A session id absent from the set — including one belonging to a `claude`
+    ///   started outside Threading — is refused, never assumed dead.
+    static func scanScratch(
+        roots: [URL] = ScratchDefaults.roots,
+        dormantSessionIDs: Set<SessionID> = []
+    ) -> [ReclaimableArtifact] {
         var found: [ReclaimableArtifact] = []
         let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey]
 
@@ -408,6 +446,30 @@ enum ArtifactScanner {
 
                 if walker.level > ScratchDefaults.maximumDepth {
                     walker.skipDescendants()
+                    continue
+                }
+
+                // A session's own directory, asked first and only at the one depth it can sit at,
+                // so the layout read — which resolves symlinks — costs nothing anywhere else.
+                //
+                // A **dormant** session's directory is the whole answer and the walk stops here:
+                // the DerivedData inside it is not a separate finding when the tree containing it
+                // is going. A session that is live, or one this app cannot vouch for, is walked
+                // exactly as before, so its build caches are still offered while its work is not.
+                if walker.level == ScratchDefaults.sessionScratchDepth,
+                   let layout = SessionScratchLayout.read(url, roots: roots) {
+                    guard dormantSessionIDs.contains(layout.sessionID) else { continue }
+
+                    walker.skipDescendants()
+
+                    let measured = measure(url)
+                    found.append(ReclaimableArtifact(
+                        url: url,
+                        kind: .agentSessionScratch,
+                        byteCount: measured.bytes,
+                        modifiedAt: measured.modifiedAt,
+                        checkoutPath: root.path
+                    ))
                     continue
                 }
 
@@ -514,6 +576,13 @@ enum ArtifactScanner {
         return isContained(url, in: roots)
     }
 
+    /// Whether `url` sits inside one of the scratch roots — the question that decides which
+    /// scope a finding belongs to. Exposed rather than reimplemented at the call site, so one
+    /// normalisation answers it everywhere; see `ArtifactScanService.adopt`.
+    static func isWithinScratchRoots(_ url: URL, roots: [URL] = ScratchDefaults.roots) -> Bool {
+        isContained(url, in: roots)
+    }
+
     /// Whether `url` sits inside one of `roots`, both normalised the same way so that `/tmp`
     /// and `/private/tmp` cannot disagree about being the same directory.
     private static func isContained(_ url: URL, in roots: [URL]) -> Bool {
@@ -528,25 +597,153 @@ enum ArtifactScanner {
         url.resolvingSymlinksInPath().standardizedFileURL.path
     }
 
+    /// Whether a session scratch directory is disposable — the third necessary gate, and the only
+    /// one that rests on a fact about a process rather than on a file.
+    ///
+    /// Three questions, and none is redundant. The **layout** is re-read, because a path stops
+    /// being a session's directory the moment it is not shaped like one, and because the read is
+    /// what recovers the session id rather than trusting one carried on the record. The
+    /// **census** is asked again, because the session that owned this directory may have been
+    /// resumed while the listing sat on screen — the failure this exists to prevent is deleting
+    /// the working directory of an agent that woke up thirty seconds ago. And containment in a
+    /// scratch root is `read`'s own precondition, so a correctly shaped path somewhere else never
+    /// reaches the census at all.
+    static func isDisposableSessionScratch(
+        _ url: URL,
+        dormantSessionIDs: Set<SessionID>,
+        roots: [URL] = ScratchDefaults.roots
+    ) -> Bool {
+        guard let layout = SessionScratchLayout.read(url, roots: roots) else { return false }
+        return dormantSessionIDs.contains(layout.sessionID)
+    }
+
     /// Both gates again, immediately before a delete.
     ///
     /// Re-checked rather than trusted from the scan: a listing the user is reading is a listing
     /// going stale, and the cost of being wrong here is somebody's directory. Which pair of
     /// gates applies is decided by the kind, so a name-gated finding can never be waved through
     /// on a manifest and a manifest-gated one is never asked a question git cannot answer.
-    static func isSafeToRemove(_ artifact: ReclaimableArtifact) -> Bool {
+    ///
+    /// - Parameter dormantSessionIDs: as `scanScratch`. Defaulting to empty means a caller that
+    ///   does not pass a census **cannot delete a session directory**, which is the right answer
+    ///   for every caller that predates one.
+    static func isSafeToRemove(
+        _ artifact: ReclaimableArtifact,
+        dormantSessionIDs: Set<SessionID> = [],
+        roots: [URL] = ScratchDefaults.roots
+    ) -> Bool {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: artifact.url.path, isDirectory: &isDirectory),
               isDirectory.boolValue else { return false }
 
-        guard !artifact.kind.isManifestGated else {
-            return isDisposableScratch(artifact.url, kind: artifact.kind)
+        switch artifact.kind.gating {
+        case .manifest:
+            return isDisposableScratch(artifact.url, kind: artifact.kind, roots: roots)
+
+        case .session:
+            return isDisposableSessionScratch(
+                artifact.url,
+                dormantSessionIDs: dormantSessionIDs,
+                roots: roots
+            )
+
+        case .name:
+            return ArtifactKind.kind(for: artifact.url) == artifact.kind
+                && isDisposable(artifact.url)
+        }
+    }
+
+    // MARK: - Vetting One Nominated Path
+
+    /// Why a nominated path is not reclaimable. Each case names the gate that refused, because an
+    /// agent that is told *which* proof was missing can often supply it — run the build, look
+    /// somewhere else — where "no" alone sends it round the same loop.
+    enum VetRefusal: Equatable {
+        /// Nothing is there, or what is there is not a directory.
+        case missing
+
+        /// Shaped like a session scratch directory, but the session is not one Threading knows
+        /// to be dormant — it is running, or it belongs to an agent this app never launched.
+        case sessionNotDormant
+
+        /// A known build-output name, inside a repository that does not call it disposable —
+        /// git tracks something in it, or does not ignore it.
+        case notIgnoredByGit(ArtifactKind)
+
+        /// Matches no gate at all. The common case, and the safe one.
+        case unrecognised
+    }
+
+    enum VetOutcome: Equatable {
+        case vetted(ReclaimableArtifact)
+        case refused(VetRefusal)
+    }
+
+    /// Whether one path an agent nominated is reclaimable, measured and attributed if so.
+    ///
+    /// **This adds no authority.** It runs exactly the gates a scan runs and answers only what a
+    /// scan would have answered on reaching that directory — the difference is that a scan
+    /// reaches it on a passive timer, over roots it already knows, and an agent that has just
+    /// filled the disk cannot wait for that. So the tool built on this widens *when* a path can
+    /// be found, never *what* counts as safe.
+    ///
+    /// The gates are tried in order of the strength of their evidence, and the first one that
+    /// recognises the shape owns the answer: a session directory is never re-examined as a
+    /// manifest tree, and neither is ever asked a question git cannot answer.
+    static func vet(
+        _ url: URL,
+        dormantSessionIDs: Set<SessionID> = [],
+        roots: [URL] = ScratchDefaults.roots
+    ) -> VetOutcome {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return .refused(.missing) }
+
+        if let layout = SessionScratchLayout.read(url, roots: roots) {
+            guard dormantSessionIDs.contains(layout.sessionID) else {
+                return .refused(.sessionNotDormant)
+            }
+            return .vetted(artifact(at: url, kind: .agentSessionScratch, checkoutPath: url.path))
         }
 
-        guard ArtifactKind.kind(for: artifact.url) == artifact.kind,
-              isDisposable(artifact.url) else { return false }
+        if isDisposableScratch(url, kind: .xcodeDerivedData, roots: roots) {
+            let manifest = DerivedDataManifest.read(inDirectory: url)
+            return .vetted(artifact(
+                at: url,
+                kind: .xcodeDerivedData,
+                checkoutPath: url.deletingLastPathComponent().path,
+                workspacePath: manifest?.workspacePath
+            ))
+        }
 
-        return true
+        if let kind = ArtifactKind.kind(for: url) {
+            guard isDisposable(url) else { return .refused(.notIgnoredByGit(kind)) }
+            return .vetted(artifact(
+                at: url,
+                kind: kind,
+                checkoutPath: GitInfo.repositoryRoot(for: url.deletingLastPathComponent().path)?.path
+                    ?? url.deletingLastPathComponent().path
+            ))
+        }
+
+        return .refused(.unrecognised)
+    }
+
+    private static func artifact(
+        at url: URL,
+        kind: ArtifactKind,
+        checkoutPath: String,
+        workspacePath: String? = nil
+    ) -> ReclaimableArtifact {
+        let measured = measure(url)
+        return ReclaimableArtifact(
+            url: url,
+            kind: kind,
+            byteCount: measured.bytes,
+            modifiedAt: measured.modifiedAt,
+            checkoutPath: checkoutPath,
+            workspacePath: workspacePath
+        )
     }
 
     // MARK: - Removal
@@ -558,15 +755,31 @@ enum ArtifactScanner {
     /// the Trash has not been reclaimed. What makes that acceptable is the gates — nothing is
     /// offered that a documented command cannot rebuild.
     @discardableResult
-    static func remove(_ artifact: ReclaimableArtifact) -> Bool {
-        removeWithOutcome(artifact) == .removed
+    static func remove(
+        _ artifact: ReclaimableArtifact,
+        dormantSessionIDs: Set<SessionID> = [],
+        roots: [URL] = ScratchDefaults.roots
+    ) -> Bool {
+        removeWithOutcome(
+            artifact,
+            dormantSessionIDs: dormantSessionIDs,
+            roots: roots
+        ) == .removed
     }
 
     /// The typed result used by the cleanup coordinator. A refusal means the safety gates no
     /// longer pass; a failure means the same vetted directory was still eligible but could not
     /// be removed. Keeping those apart makes the final progress receipt honest.
-    static func removeWithOutcome(_ artifact: ReclaimableArtifact) -> ArtifactRemovalOutcome {
-        guard isSafeToRemove(artifact) else {
+    static func removeWithOutcome(
+        _ artifact: ReclaimableArtifact,
+        dormantSessionIDs: Set<SessionID> = [],
+        roots: [URL] = ScratchDefaults.roots
+    ) -> ArtifactRemovalOutcome {
+        guard isSafeToRemove(
+            artifact,
+            dormantSessionIDs: dormantSessionIDs,
+            roots: roots
+        ) else {
             ThreadingLogger.storage.error(
                 "Refused to remove \(artifact.url.path, privacy: .private(mask: .hash)): no longer disposable"
             )
@@ -707,4 +920,22 @@ enum ScratchDefaults {
 
     /// A ceiling on the manifest read. Xcode's own is a few hundred bytes.
     static let maximumManifestBytes = 64 * 1024
+
+    /// How many whole path components a session scratch directory sits below a scratch root:
+    /// `claude-501/<project-slug>/<session-uuid>`. Exact rather than a maximum — anything deeper
+    /// is *inside* a session's scratchpad, which `SessionScratchLayout` does not answer about.
+    static let sessionScratchDepth = 3
+
+    /// The namespace Claude Code mints from the user's uid, one component below a scratch root.
+    /// The uid digits that follow are required; see `SessionScratchLayout.isAgentNamespace`.
+    static let sessionScratchNamespacePrefix = "claude-"
+
+    /// The directory `/tmp`, `/var` and `/etc` are symlinks into. Collapsed out of a path so two
+    /// spellings of one directory compare equal whether or not it exists — see
+    /// `SessionScratchLayout.normalizedComponents`.
+    static let privateAliasComponent = "private"
+
+    /// A path must have a component after `/private` for the alias to mean anything, so `/` and
+    /// `/private` itself are left alone.
+    static let privateAliasMinimumComponents = 2
 }

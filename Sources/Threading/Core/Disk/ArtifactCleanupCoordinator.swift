@@ -50,7 +50,12 @@ final class ArtifactCleanupCoordinator {
 
     static let shared = ArtifactCleanupCoordinator()
 
-    private let removeArtifact: @Sendable (ReclaimableArtifact) -> ArtifactRemovalOutcome
+    /// Takes the census alongside the artifact rather than reading one itself: the removal runs
+    /// off the main actor, and session state is main-actor state. See `remove(_:completion:)`.
+    private let removeArtifact: @Sendable (
+        ReclaimableArtifact,
+        Set<SessionID>
+    ) -> ArtifactRemovalOutcome
     private let recoverPersistence: @MainActor () -> ArtifactPersistenceRecovery
     private let notificationCenter: NotificationCenter
     private var operation: Task<Void, Never>?
@@ -58,8 +63,11 @@ final class ArtifactCleanupCoordinator {
     var isRunning: Bool { operation != nil }
 
     init(
-        removeArtifact: @escaping @Sendable (ReclaimableArtifact) -> ArtifactRemovalOutcome = {
-            ArtifactScanner.removeWithOutcome($0)
+        removeArtifact: @escaping @Sendable (
+            ReclaimableArtifact,
+            Set<SessionID>
+        ) -> ArtifactRemovalOutcome = {
+            ArtifactScanner.removeWithOutcome($0, dormantSessionIDs: $1)
         },
         recoverPersistence: @escaping @MainActor () -> ArtifactPersistenceRecovery = {
             guard ProjectStore.shared.persistenceBlockReason == .storageExhausted else {
@@ -111,6 +119,12 @@ final class ArtifactCleanupCoordinator {
             persistenceRecovery: .notNeeded
         ))
 
+        // Taken once, on the main actor, before any directory is touched. Re-reading it per
+        // artifact would be no safer — a session resumed halfway through a pass would then be
+        // protected only for the directories not yet reached — and this way the whole operation
+        // acts on one coherent answer, the same one the sheet was approved against.
+        let dormantSessionIDs = DormantSessionCensus.dormant()
+
         operation = Task { [weak self] in
             guard let self else { return }
 
@@ -122,7 +136,7 @@ final class ArtifactCleanupCoordinator {
             for (index, artifact) in unique.enumerated() {
                 let removeArtifact = self.removeArtifact
                 let result = await Task.detached(priority: .userInitiated) {
-                    removeArtifact(artifact)
+                    removeArtifact(artifact, dormantSessionIDs)
                 }.value
 
                 switch result {
